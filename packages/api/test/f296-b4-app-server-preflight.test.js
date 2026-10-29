@@ -118,6 +118,9 @@ class PreflightWire {
         });
       }
     }
+    if (message.method === 'thread/turns/list') {
+      this.inbox.push({ id: message.id, result: { data: [], nextCursor: null } });
+    }
     if (message.method === 'turn/start') {
       if (this.rejectTurnStart) {
         this.inbox.push({ id: message.id, error: { code: -32000, message: 'turn rejected by provider' } });

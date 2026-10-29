@@ -13,6 +13,8 @@ export const SessionChainKeys = {
   chain: (catId: string, threadId: string) => `session-chain:${catId}:${threadId}`,
   /** Set: thread → cat+thread chain keys (fast cross-cat lookup) */
   byThread: (threadId: string) => `session-chain-by-thread:${threadId}`,
+  /** Written only after the complete legacy backfill; CREATE_LUA maintains every later chain. */
+  threadIndexComplete: () => 'session-chain-index:by-thread:v1',
   /** String: cat+thread → active session ID (fast lookup) */
   active: (catId: string, threadId: string) => `session-active:${catId}:${threadId}`,
   /** String: user+cat+thread → active session ID (#1329 managed ownership). */

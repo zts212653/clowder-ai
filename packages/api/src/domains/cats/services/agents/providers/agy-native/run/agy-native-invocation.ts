@@ -135,10 +135,7 @@ export async function* runAgyNativeInvocation(input: {
           await runInput.result(runOutput.successful);
           if (!runOutput.successful) {
             processLifetime.abort();
-            observed = {
-              ...observation.observed,
-              transportError: observation.observed.transportError ?? 'AGY native internal turn did not succeed',
-            };
+            observed = observation.observed;
             yield* messages;
             break;
           }

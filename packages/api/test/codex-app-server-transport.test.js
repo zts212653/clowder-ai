@@ -109,6 +109,13 @@ class ProtocolWire {
   }
 
   respondThread(message, threadId) {
+    if (message.method === 'thread/resume' && message.params.initialTurnsPage && !this.experimentalApiEnabled) {
+      this.inbox.push({
+        id: message.id,
+        error: { code: -32600, message: 'thread/resume.initialTurnsPage requires experimentalApi capability' },
+      });
+      return;
+    }
     if (this.rejectApprovalsReviewer && message.params.approvalsReviewer) {
       this.inbox.push({
         id: message.id,
@@ -152,6 +159,9 @@ class ProtocolWire {
         break;
       case 'thread/resume':
         this.respondThread(message, message.params.threadId);
+        break;
+      case 'thread/turns/list':
+        this.inbox.push({ id: message.id, result: { data: [], nextCursor: null } });
         break;
       case 'turn/start':
         this.respondTurn(message);
@@ -933,6 +943,32 @@ test('authoritative terminal result survives a cleanup failure', async () => {
   assert.equal(lifecycle.at(-1).cleanupError, 'cleanup exploded');
 });
 
+test('ordinary resume loads its turn baseline without requiring experimental capabilities', async () => {
+  const wire = new ProtocolWire();
+  const write = wire.write.bind(wire);
+  wire.write = async (message) => {
+    await write(message);
+    if (message.method === 'turn/start')
+      wire.inbox.push({
+        method: 'turn/completed',
+        params: { threadId: 'thread-existing', turn: { id: 'turn-1', status: 'completed' } },
+      });
+  };
+  const { error } = await collectFailure(
+    new CodexAppServerClient({ wire }).run({
+      prompt: frozenPrompt('continue ordinary work'),
+      thread: { kind: 'resume', threadId: 'thread-existing' },
+    }),
+  );
+  assert.equal(error, null);
+  assert.equal(wire.experimentalApiEnabled, false, 'ordinary resume must not broaden the session capability set');
+  const resume = wire.writes.find((message) => message.method === 'thread/resume');
+  assert.equal(resume.params.excludeTurns, true);
+  const baseline = wire.writes.findIndex((message) => message.method === 'thread/turns/list');
+  assert.ok(baseline >= 0 && baseline < wire.writes.findIndex((message) => message.method === 'turn/start'));
+  assert.equal(wire.writes[baseline].params.itemsView, 'notLoaded');
+});
+
 test('F291 app-server preserves Fast and explicit Standard on thread start/resume', async () => {
   for (const testCase of [
     { thread: { kind: 'start' }, serviceTier: 'fast', expected: 'fast', method: 'thread/start' },
@@ -1089,6 +1125,15 @@ test('exact active-writer resume failure retires the conflicting host and preser
   first.reusedSessionHost = true;
   const firstWrite = first.write.bind(first);
   first.write = async (message) => {
+    if (message.method === 'thread/turns/list') {
+      assert.equal(message.params.itemsView, 'notLoaded');
+      first.writes.push(message);
+      first.inbox.push({
+        id: message.id,
+        result: { data: [{ id: 'turn-existing', status: 'inProgress', startedAt: 1_786_630_000 }], nextCursor: null },
+      });
+      return;
+    }
     if (message.method === 'thread/resume') {
       first.writes.push(message);
       first.inbox.push({
@@ -1184,6 +1229,15 @@ test('active-writer diagnostics do not mistake a reused warm affinity host for a
   first.reusedSessionHost = true;
   const firstWrite = first.write.bind(first);
   first.write = async (message) => {
+    if (message.method === 'thread/turns/list') {
+      assert.equal(message.params.itemsView, 'notLoaded');
+      first.writes.push(message);
+      first.inbox.push({
+        id: message.id,
+        result: { data: [{ id: 'turn-local', status: 'inProgress', startedAt: 100 }], nextCursor: null },
+      });
+      return;
+    }
     if (message.method === 'thread/resume') {
       first.writes.push(message);
       first.inbox.push({

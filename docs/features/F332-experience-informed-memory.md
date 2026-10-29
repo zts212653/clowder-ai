@@ -4,6 +4,7 @@ related_features: [F152, F200, F221, F227, F231, F243, F256, F260, F263, F271, F
 topics: [memory, experience, generalization, continuity]
 doc_kind: spec
 created: 2026-10-23
+updated: 2026-10-29
 tips_exempt: "Renewed 2026-10-25 for KD-4 through KD-8, OQ-3, delivery roadmap v1 and status records: this documentation records capsule approval before opening delivery, a pluggable per-user capsule that every owner can see and edit through one shared entry, stable-persona relationships versus model-specific capabilities, owner-controlled per-thread watcher design and trials, and delivery sequencing. These decisions extend the architecture discussion without delivering or enabling a new user entry, memory injection or watcher configuration; the existing F321/Luna obligations remain."
 description: 让共同经历在未见情境中帮助猫自主联想、核证与修正判断，并让人看见和纠正记忆。
 description_source: human
@@ -13,7 +14,7 @@ description_updated_at: 2026-10-24T00:01:00Z
 
 # F332: 经历参与判断 — 从共同经历到新情境的记忆
 
-> **Status**: in-progress (A1/A2/A3 读源修复已合入并通过 Alpha；其余设计/继承工作按原范围) | **Owner**: 小星星·Maine Coon (@codex-astra) | **Priority**: P1
+> **Status**: in-progress（读源修复、第2步目录及第1步画像主要路径已交；原1387的统计、三处文案和验证缺口转独立执行线程继续） | **Owner**: 小星星·Maine Coon (@codex-astra) | **Priority**: P1
 
 Architecture cell: `memory`
 Map delta: none
@@ -28,6 +29,52 @@ You 要的，是共同经历能帮助猫理解新的处境、接住关系、减�
 立项与旧项目收拢来源：`[thread-id]#private-source-id`。
 人类记忆与猫的优势结合的补充：`private-source-id`。
 用户明确要求另建 Feature、关闭旧项目并保留有价值结果；这不等于新机制已验证，也不结算未完成 Task。
+
+## 本次实施范围：第1步剩余交付（2026-10-29）
+
+You 在 `[thread-id]#private-source-id` 明确：
+本现场原为 F312/F321 设计讨论，先把要做的写进 F332，再新建执行 thread；困难任务给小星星，
+简单任务给 Sol6.1，review 可找 Sol5.6。本节落实这次分工，沿原 Task
+`private-source-id`（下称1387）续做，不新立项、不重置原验收责任。
+
+### 已经交付，作为本轮起点
+
+已批准的「关于你」已启用；画像查看/更正与原审批回源已验。#6209/#6229/#6238 的递送和页面证据保留，
+#6284 整卡修复已在正式 boot59 完成六卡28落点、编辑/返回、选字与草稿保护验证，画像原文未改。
+第2步近期目录与 roadmap 入口由 Sol6.1 独立交付；守望猫4b离线比较已按证据范围收口。
+
+### 这次要做什么
+
+| 单元 | 用户实际得到什么 | 执行与验收边界 |
+|---|---|---|
+| 逐画像使用次数 | 在同一画像详情看清「新对话带上 N 次」「被猫翻到 N 次」，能区分统计起点与历史未知 | 先核原递送/读取记录，按 owner、画像身份与 revision 对齐；重试去重、不同用户不串账。主人打开网页不算猫读取，呈现/读取不冒充实际采用；缺历史记录不能填0或伪称全历史总数。更正前后版本、降级/遗忘后的展示沿原生命周期处理 |
+| 三处文字同轮修正 | 同屏型号、摘要和标签一致 | 历史能力只认原记录型号，若登记表有对应显示名则用其写法，不能换成成员当前型号；「关于你」卡摘要按既有中西文规则处理换行/空格；小标签写「每场新对话自动带上」。依据 Opus1361，不另请设计者逐轮对稿 |
+| 原递送与成本盘点缺口 | 一份能说明各通道实际带了什么、有哪些真实记录、还有哪些未知的盘点 | 消费已有自然样本，继续核 Kimi/AGY 等原生载体与历史能力片段；区分原生请求/递送记录、模型实际采用和完整首条输入成本。没有样本时记录原缺口及原责任，不为验收额外启动模型，不拿预览token或全站监控数代填 |
+
+现有代码证据：`callback-read-profile-routes.ts` 的直接画像读取只递增按层监控；
+`MemoryProfileSource.tsx` 仍显示「使用次数尚未汇总」。开场已有 `memory_cue_events` 可追溯记录，
+不意味着直接读取已有完整持久历史。执行猫先核这些来源的适用范围，再在既有权威/记录体系内补齐，
+不另造平行记忆库；新增记录的隐私、持久化、去重及读面契约按风险独立审查。
+
+### 谁做、在哪里做
+
+- **设计讨论**：本 thread `[thread-id]` 保留范围确认、设计与最终结果接收；本包代码、测试、review和运行后续验移到获批的新执行现场。
+- **执行**：小星星 `codex-astra`。本包涉及持久使用记录、历史缺口、原生递送和 owner 读面，判断为复杂；三处文字与同一画像页面一起交，不拆第二个 writer。新线程是同一身份的独立上下文，不与本现场同时实现。
+- **独立审查**：优先 Sol5.6 `codex-sol`，按 You 本次指定候选在实际发审时核路由；作者不自审。只给需要审查的实际代码包，不预先叫醒 reviewer。
+- **原任务**：1387 的身份、最初批准、已验事实与剩余责任保留；提案绑定同一 Task，批准后沿正式 delegation / development-return 接执行与最终回报，不在子线程复制或搬走父 Task。
+- **全线指挥**：仍由 `[thread-id]` 的 Sol6.1 / Task1432 维护跨线排序与完整验收；本次不接管其余施工线。
+- **执行承接**：提案 `proposal_mvtcz6u20hcmni4u` 经 You 批准（原现场 `private-source-id`），创建 `[thread-id]`。最初 seed 只启动了只读核验，回流登记也不授予实施权；原owner已补发绑定1387的 `single implement` 正式交接，唯一消息为执行现场 `private-source-id`，服务端已将它纳入该现场当前 invocation 的 sources。原 Task 的身份、scope 与责任不迁移；最终结果沿既有 `development-return-a8a74b00242fcc31b2295d12b76adbc6` 接回，不重复派发。
+
+### 这次怎样才算完成
+
+1. 六类情形有可复核证据：真实开场、直接成功读取、重试、跨用户、画像版本更正、缺失历史；数值对应原记录，未知/不适用与已记录的0明确区分。
+2. 从默认记忆入口进入画像详情看到统计及三处文案；需要时打开原使用记录/来源；更正、重进与下一消费者读取新版的原路径仍通。改动面用可信 RED→GREEN 保护，合入后在 Alpha 走真实旅程。
+3. 独立 review 覆盖最终实质内容；交付明确列出已合入、实际加载、真实使用已验三种证据。正式尚未加载时沿原Task挂确切到版条件，执行现场继续验，不把 merge 当整项完成。
+4. 开场材料成本盘点及各通道证据/未知逐项回原报告；缺少自然样本的验证仍保留原未满足项。不能因为列了 unknown 就把原1387的承诺全部勾完。
+5. 子线程按 final-only 回完整结果；普通实现、修review和门禁留在子线程，真实越界阻塞才提前升级。原owner据原1387闭合条件结算；不代关整个F332。
+
+**不在本包**：第3步人物/品味/事件统一纠错的新实现、守望猫选猫或上线、Luna启用、其他搜索/组合验收、
+新榜单及新试验、生产画像内容迁移或正式重启。各项继续原Task与原授权；这次分线程不扩权限。
 
 ## Current State / 现状基线
 
@@ -263,6 +310,7 @@ dot 本轮只是带题面提示、不额外搜索的一次回答；Q1–3 为“
 | KD-5 | 关系与能力分开记：陪伴、称呼、共同经历随稳定角色继承（Ragdoll、Maine Coon、Siamese换型号也接得上）；“能不能写代码”这类能力事实按具体模型记，不随角色继承 | You 同上：“有的陪伴的是要继承的……但是比如说Siamese不能写代码这种我们不能记录，得记录类似于Siamese（gemini2.5pro 3pro 或者什么 flash 不能写代码）” | 2026-10-24 |
 | KD-6 | 守望猫（伴随猫）不做静默实验：You 参与，按线程由他决定开关，要有配置和 UI/UX 设计；提示经猫猫球（F229）或小信箱递给他是首选候选。守望猫须服从性好、有自己的思考、幻觉低；候选先比Maine Coon（OpenAI 原生，可直接用现有整理猫位）与 Sonnet | You 同上：“让我参与，我来选什么时候开什么时候关，按照thread来，得有配置……联动猫猫球……或者在我们的小信箱里”；“守望🐈必须是一只遵从性好，有自己思考 幻觉低的猫” | 2026-10-24 |
 | KD-8 | 胶囊可插拔、人人看得见：内容按用户存在各自的私有数据区，不进仓库、不随开源发布；产品里给每位用户一个能看、能改自己胶囊的地方，猫可以起草，本人确认后生效；家里和开源用户走同一个入口，不设家里专用通道。家里 v1 已获批；写入开场的时机按交付路线原则 3，随看得见、能改的入口同批 | You `private-source-id`：“胶囊的稿子我觉得是OK的”；“这个可不合适丢到开源社区，只应该是家里的，开源社区的小伙伴的稿子应该有个地方他们能看见能改，猫猫能去形成”；“我们自己的胶囊也应该是能看见，反正开源社区的小伙伴能怎么看见，我们也应该能怎么看见” | 2026-10-25 |
+| KD-9 | 原F312/F321现场保留设计讨论；第1步剩余先写清F332范围，再新建执行thread，按难度选小星星或Sol6.1，review可找Sol5.6 | You `private-source-id`；本包跨持久记录/原生递送/画像读面，判复杂交小星星，复用原1387、不扩新阶段 | 2026-10-29 |
 
 ## Design Gate
 

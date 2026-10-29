@@ -61,6 +61,8 @@ export function designFixture(
   const capabilities = detail?.capabilities ?? plugin.capabilitySummary;
   return {
     id: plugin.pluginId,
+    pluginInstanceId: plugin.pluginInstanceId,
+    packageDigest: plugin.packageDigest,
     // The current built-in surface is distinct from the immutable installed release name.
     displayName: plugin.pluginId === 'official.chatgpt-dot' ? CHATGPT_CLOUD_ENTRY_LABEL : plugin.displayName,
     description: plugin.description ?? plugin.displayName,

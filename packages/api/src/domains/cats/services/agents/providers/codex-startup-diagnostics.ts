@@ -32,11 +32,20 @@ function classifyAccountCheck(
   )
     return 'configuration_conflict';
   if (requestMethod !== 'account/read') return 'unknown';
+  const nativeMessage = message.trim();
+  if (nativeMessage === 'workspace routing discovery unauthorized (401)') return 'auth_rejected';
   if (httpStatus === 429) return 'rate_limited';
   if (httpStatus && httpStatus >= 500) return 'upstream_error';
-  if (httpStatus === 408 || /workspace routing discovery timeout/.test(message)) return 'discovery_timeout';
+  // Codex DiscoveryTimeout says "timed out"; retain the older noun spelling too.
+  if (httpStatus === 408 || /^workspace routing discovery (?:timed out|timeout)[.!]?$/i.test(nativeMessage))
+    return 'discovery_timeout';
   if (causeCode && NETWORK_CODES.has(causeCode)) return 'network_error';
-  if (/^workspace routing discovery failed[.!]?$/.test(message.trim())) return 'discovery_failed';
+  // The native race verdict asks for a fresh read; the next connection still validates the pinned launch.
+  if (
+    nativeMessage === 'configuration changed during workspace routing discovery; retry account/read' ||
+    /^workspace routing discovery failed[.!]?$/.test(nativeMessage)
+  )
+    return 'discovery_failed';
   return 'unknown';
 }
 

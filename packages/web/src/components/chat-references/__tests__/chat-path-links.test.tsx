@@ -156,7 +156,6 @@ it('keeps the file action menu inside a 390px viewport and closes it with Escape
   await act(async () =>
     root.render(
       <ChatFileActions
-        visible
         target={{
           kind: 'file',
           entryType: 'file',
@@ -171,6 +170,7 @@ it('keeps the file action menu inside a 390px viewport and closes it with Escape
       />,
     ),
   );
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')?.click());
   const menu = document.body.querySelector<HTMLElement>('[role=menu]');
   expect(menu).not.toBeNull();
   expect(menu?.style.position).toBe('fixed');

@@ -54,6 +54,7 @@ import {
   CodexAppServerRpcError,
   CodexAppServerTurnStartTimeoutError,
 } from './codex-app-server-rpc-error.js';
+import { inspectCodexInput, readCodexTurnMetadata } from './codex-history-reader.js';
 
 export type {
   CodexAppServerLifecycleEvent,
@@ -217,6 +218,7 @@ export function continuityEvidenceFromVerdict(verdict: CodexAppServerThreadVerdi
 export class CodexAppServerClient {
   private readonly pending = new Map<RequestId, PendingRequest>();
   private readonly observedTurnIds = new Map<string, Set<string>>();
+  private readonly completeTurnBaselines = new Set<string>();
   private readonly notifications = new CodexAppServerNotificationQueue();
   private nextRequestId = 1;
   private pumpPromise: Promise<void> | null = null;
@@ -387,11 +389,12 @@ export class CodexAppServerClient {
         };
       }
 
+      if (input.thread.kind === 'resume') this.completeTurnBaselines.delete(input.thread.threadId);
       const verdict = await resolveCodexAppServerThread({
         thread: input.thread,
         params: buildCodexAppServerThreadParams(
           input,
-          input.thread.kind === 'resume' ? { threadId: input.thread.threadId } : undefined,
+          input.thread.kind === 'resume' ? { threadId: input.thread.threadId, excludeTurns: true } : undefined,
         ),
         startParams: buildCodexAppServerThreadParams(input),
         requireExactResume: input.requireExactResume || Boolean(recoveryInstruction),
@@ -402,8 +405,17 @@ export class CodexAppServerClient {
         localLiveLease: false,
         request: (method, params) => this.request(method, params),
         now: this.deps.now ?? Date.now,
+        onResumeMetadata: async (threadId) => {
+          // The standalone pagination RPC is non-experimental. A resume's
+          // initialTurnsPage would require broadening the session capability set.
+          for await (const turn of readCodexTurnMetadata((method, params) => this.request(method, params), threadId)) {
+            this.rememberTurn(threadId, turn.id);
+          }
+          this.completeTurnBaselines.add(threadId);
+        },
       });
       const threadId = verdict.threadId;
+      if (verdict.kind === 'started' || verdict.kind === 'replaced') this.completeTurnBaselines.add(threadId);
       activeThreadId = threadId;
       if (input.collaborationMode) {
         const adopted = asCodexAppServerRecord(verdict.raw);
@@ -626,19 +638,8 @@ export class CodexAppServerClient {
               };
             }
           },
-          inspectInput: async (deliveryId) => {
-            const result = asCodexAppServerRecord(await this.request('thread/read', { threadId, includeTurns: true }));
-            const thread = asCodexAppServerRecord(result?.thread);
-            if (thread?.id !== threadId || !Array.isArray(thread.turns)) return 'unknown';
-            const turn = thread.turns.map(asCodexAppServerRecord).find((candidate) => candidate?.id === handle.turnId);
-            if (!Array.isArray(turn?.items)) return 'unknown';
-            return turn.items.some((value) => {
-              const item = asCodexAppServerRecord(value);
-              return item?.type === 'userMessage' && item.clientId === deliveryId;
-            })
-              ? 'accepted'
-              : 'unknown';
-          },
+          inspectInput: (deliveryId) =>
+            inspectCodexInput((method, params) => this.request(method, params), threadId, handle.turnId, deliveryId),
         });
         if (typeof release === 'function') releaseActiveRunDispatch = release;
       }
@@ -942,7 +943,7 @@ export class CodexAppServerClient {
     if (typeof params?.threadId !== 'string' || typeof turn?.id !== 'string' || !turn.id) return;
     const alreadyObserved = this.observedTurnIds.get(params.threadId)?.has(turn.id);
     this.rememberTurn(params.threadId, turn.id);
-    if (alreadyObserved || turn.status !== 'inProgress') return;
+    if (alreadyObserved || turn.status !== 'inProgress' || !this.completeTurnBaselines.has(params.threadId)) return;
     const candidates = [...this.pending.values()].filter(
       (pending) => pending.method === 'turn/start' && pending.sent && pending.params.threadId === params.threadId,
     );

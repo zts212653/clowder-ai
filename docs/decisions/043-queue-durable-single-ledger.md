@@ -196,7 +196,9 @@ payload 写一次、起跑读一次，并由对应 store 重建；这些字段�
 
 ### D7 — Queue 没有 terminal row；重做是新的用户意图
 
-目标一旦实际 dispatch，就从 pending `targets[]` 离开。`handled / failed / interrupted / canceled` 属于 response lifecycle，不回写 Queue；source withdrawal 则在 source lifecycle 写成 canceled 后删除尚待投递的整条 Queue Entry。
+目标一旦实际 dispatch，就从 pending `targets[]` 离开。`handled / failed / interrupted / canceled` 属于 response lifecycle，不回写 Queue。Queue 的「停止后续处理」删除尚待投递的整条 Queue Entry；只有未公开且没有实际 dispatch 的 source 才将其可见性投影置为 canceled。已公开的猫消息、原 dispatchRef、response membership 与未知送达记录保留，不因停止未来工作而撤回历史正文。
+
+原生 Append 仍在交接或等待原生内部 turn 完成时，短 claim 与 pending handoff 继续保护原 Queue。一次交接已返回但送达结果仍 unknown 时，禁止自动重发，不禁止主人停止其后续处理；迟到回执仍更新原 History，不重建已撤出的 Queue。批量 Clear 若还有在途条目，返回明确的未完成/部分完成及剩余队列，不把空操作报成全部清空。
 
 用户若要重做失败事项，应发送新消息或执行明确的新动作，由生产者产生新的 source/attempt。旧 response、dispatchRef 与 wait carrier 只保留原 attempt 的终态证据，不能充当 retry token。
 

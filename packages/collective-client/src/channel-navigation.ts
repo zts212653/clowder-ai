@@ -1,4 +1,4 @@
-import type { CollectiveEventEnvelope, CollectiveParticipant } from './client-types.js';
+import type { CollectiveChannelProjection, CollectiveEventEnvelope, CollectiveParticipant } from './client-types.js';
 
 export function eventChannelId(event: CollectiveEventEnvelope): string | undefined {
   return event.location?.channelId ?? (event.target.kind === 'channel' ? event.target.channelId : undefined);
@@ -7,9 +7,11 @@ export function eventChannelId(event: CollectiveEventEnvelope): string | undefin
 export function channelDestinations(
   events: readonly CollectiveEventEnvelope[],
   participants: readonly CollectiveParticipant[],
+  channels: readonly CollectiveChannelProjection[] = [],
 ) {
   const ids = new Set([
     'general',
+    ...channels.map((channel) => channel.channelId),
     ...events.flatMap((event) => eventChannelId(event) ?? []),
     ...participants.flatMap((member) => member.channelIds),
   ]);

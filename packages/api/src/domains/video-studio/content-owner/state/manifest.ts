@@ -30,7 +30,11 @@ export interface ProjectContentStateV1 {
 }
 
 export function parseProjectContentState(raw: string, expectedContentRef: string): ProjectContentStateV1 {
-  const parsed: unknown = JSON.parse(raw);
+  return validateProjectContentState(JSON.parse(raw), expectedContentRef);
+}
+
+/** Validate the entire freshly decoded graph, including scopes, receipts and every revision. */
+export function validateProjectContentState(parsed: unknown, expectedContentRef: string): ProjectContentStateV1 {
   if (!isRecord(parsed) || parsed.schemaVersion !== 1 || parsed.contentRef !== expectedContentRef) {
     throw invalidState(expectedContentRef);
   }

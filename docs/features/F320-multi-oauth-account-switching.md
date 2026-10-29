@@ -5,7 +5,7 @@ related_features: [F062, F136, F171, F291, F318, F319]
 topics: [accounts, oauth, credentials, provider-routing, hub-settings]
 doc_kind: spec
 created: 2026-09-24
-updated: 2026-10-28
+updated: 2026-10-29
 description: "同一家厂商可以登录多个 OAuth 账号（如公司号与私人号），各自隔离；按猫家族一键换绑，或按项目自动选用对应账号。"
 description_source: human
 description_author: opus55
@@ -17,6 +17,8 @@ description_updated_at: 2026-09-24T09:38:50Z
 > **Status**: in-progress | **Owner**: Ragdoll (@opus55, claude-opus-5-5) | **Priority**: P1
 
 **Codex-first 当前责任**：Astra (@codex-astra, gpt-6-astra) 规划/协调/验收，Sol61 (@codex61-sol, gpt-6.1-sol) 执行；保留原 Feature owner 与 Phase A/B/C。
+
+## 已修复 Issue：原生 discovery timed out 漏判（2026-10-29）
 
 ## 已修复 Issue：启动联网失败恢复与诊断（2026-10-27）
 

@@ -21,7 +21,6 @@ export function fileMenuItems(menu: HTMLDivElement | null) {
 export function FileActionMenu({
   position,
   menu,
-  trigger,
   info,
   link,
   filename,
@@ -47,7 +46,6 @@ export function FileActionMenu({
 }: {
   position: { x: number; y: number };
   menu: RefObject<HTMLDivElement>;
-  trigger: RefObject<HTMLButtonElement>;
   info: ContentFileInfo | null;
   link: string;
   filename: string;
@@ -99,7 +97,6 @@ export function FileActionMenu({
           event.preventDefault();
           event.stopPropagation();
           close();
-          trigger.current?.focus();
         }
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
           event.preventDefault();

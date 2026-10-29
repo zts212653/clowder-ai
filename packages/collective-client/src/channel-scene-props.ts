@@ -4,6 +4,7 @@ import type {
   ClientTarget,
   CollectiveBindingVoteChoice,
   CollectiveBindingVoteProjection,
+  CollectiveChannelProjection,
   CollectiveCollaborationProjection,
   CollectiveEventEnvelope,
   CollectiveMemberDirectory,
@@ -29,6 +30,7 @@ export interface ChannelSceneProps {
   readonly humanId: string;
   readonly humanName: string;
   readonly channelId: string;
+  readonly channel?: CollectiveChannelProjection;
   readonly content: ChannelContent;
   readonly onSelectContent: (content: ChannelContent) => void;
   readonly focusEventId?: string;

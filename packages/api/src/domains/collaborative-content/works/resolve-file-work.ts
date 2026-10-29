@@ -17,8 +17,7 @@ export async function resolveFileWork(
   principal: WorkPrincipal,
 ) {
   await deps.authorize({ principal, permission: 'read' });
-  const inspected = await deps.source.inspect({ locator, principal });
-  const opened = await deps.source.open({ source: inspected.source, principal, threadId: principal.threadId });
+  const opened = await deps.source.openCurrent({ locator, principal, threadId: principal.threadId });
   opened.stream.destroy();
   await opened.revalidate();
   const source = opened.publication;

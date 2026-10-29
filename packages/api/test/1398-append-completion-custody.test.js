@@ -49,8 +49,10 @@ for (const operation of ['withdraw', 'clear', 'message-withdraw']) {
       assert.equal(response.statusCode, 409, response.body);
     } else {
       const response = await request('DELETE', 'queue');
-      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(response.statusCode, 409, response.body);
+      assert.equal(response.json().code, 'QUEUE_WITHDRAWAL_FAILED');
       assert.equal(response.json().cleared.length, 0);
+      assert.equal(response.json().queue[0].id, f.admission.entry.id);
     }
     assert.ok(await f.queue.getDurableEntry('thread', f.admission.entry.id));
     await f.input().onInputCompleted(false);

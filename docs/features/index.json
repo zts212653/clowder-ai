@@ -1821,7 +1821,7 @@
     {
       "id": "F309",
       "name": "产物协作 — Artifact Collaboration / Collaborative Content Plane",
-      "status": "in-progress / Phase R、Studio 297 历史有界交付保留；Phase U 归一四项补漏、#6264 prepared、#6275 卡片与 #6277 raw缩略/目录阅读器均已过父 Alpha；Human829工具栏修复#6292已过父Alpha与正式boot59五宽度；原讨论稿Chat/Works/Home全部路径正式往返通过，共同Markdown卡片YAML问题已由#6296审合并过父Alpha三入口，原Task414同一到版链g22待正式6e0c5e13，完整正式体验、Phase U、Office/video Admission Gate与未勾AC仍开放",
+      "status": "in-progress / Phase R、Studio 297 历史有界交付保留；Phase U 归一四项补漏、#6264 prepared、#6275 卡片与 #6277 raw缩略/目录阅读器均已过父 Alpha；Human829工具栏修复#6292已过父Alpha与正式boot59五宽度；原讨论稿Chat/Works/Home全部路径正式往返通过，共同Markdown卡片YAML问题已由#6296审合并过父Alpha及正式boot60三入口，原Task414/g22这处正式验收闭合，完整正式体验、Phase U、Office/video Admission Gate与未勾AC仍开放",
       "file": "F309-collaborative-content-plane.md"
     },
     {
@@ -1947,13 +1947,13 @@
     {
       "id": "F332",
       "name": "经历参与判断 — 从共同经历到新情境的记忆",
-      "status": "in-progress (A1/A2/A3 读源修复已合入并通过 Alpha；其余设计/继承工作按原范围) | **Owner**: 小星星·Maine Coon (@codex-astra) | **Priority**: P1",
+      "status": "in-progress（读源修复、第2步目录及第1步画像主要路径已交；原1387的统计、三处文案和验证缺口转独立执行线程继续） | **Owner**: 小星星·Maine Coon (@codex-astra) | **Priority**: P1",
       "file": "F332-experience-informed-memory.md"
     },
     {
       "id": "F333",
       "name": "Shared MCP Process Lifecycle｜多猫共用 MCP 运行资源",
-      "status": "in-progress | **Owner**: 小星星·Maine Coon (@codex-astra, gpt-6-astra；整体与验收)；实现：Sol6.1；审核：Sonnet | **Priority**: P1",
+      "status": "in-progress | **Owner**: 小星星·Maine Coon (@codex-astra, gpt-6-astra；整体与验收)；Phase B 实现：Sol6.1；审核：Sol5.6（Phase A 历史审核：Sonnet） | **Priority**: P1",
       "file": "F333-shared-mcp-process-lifecycle.md"
     },
     {

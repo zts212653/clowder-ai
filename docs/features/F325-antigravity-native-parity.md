@@ -127,6 +127,41 @@ ACP 原生 L0 缺口已证；You 已选择保留个人 OAuth 与原生 L0，继�
 
 - 状态：open，底层工具未返回的直接原因未知；Native 漏传 livenessProbe、观察器丢弃 warning 的呈现缺口已修复并加载。
 
+#### 2026-10-29 印印自然使用验收发现的 open issues
+
+来源：You 验收请求 `private-source-id`、记入 F325 交Maine Coon逐个处理 `private-source-id`；印印（@agy-opus55，AGY 1.4.10，正式 boot62 / `a72e0ca0`）以本人真实调用为样本，报告见 `private-source-id`。未追加专门模型调用；下列为当轮实测证据，根因或修法未定的如实标注。建议处理顺序按编号。
+
+##### Open issue 1：Native 命令默认工作目录是 profile 沙盒，不是工作区 {#native-spawn-cwd}
+
+- 现象：同一轮两次 `run_command` 的 `pwd` 均返回 `~/.cat-cafe/agy-profiles/agy-opus55-native/cwd/230809973b9c83ac`；AGY 宿主提示的 Command Working Directory 与 Active Workspaces 第一项也是该沙盒。会话绑定 `workspaceRoot` 实为 cat-cafe 仓库。
+- 与现有依据冲突：[`resolveAgySpawnCwd`](../../packages/api/src/domains/cats/services/agents/providers/agy-profile-manager.ts) 注释引用 2026-06-03 旧版实测「`--add-dir` 后 AGY 工具 `pwd` 回工作区」，当前 1.4.10 不成立。
+- 影响：不带 `cd` 的 `git status` / `pnpm test` 在空目录执行；相对路径写入可能落进沙盒。Claude / Codex 猫启动即在项目目录，属平权缺口。
+- 期望：普通工具默认 cwd 为本轮工作区，同时保留 AGY cwd-relative cache 落沙盒的原隔离目的；先以零模型探针确认 1.4.10 的 cwd 与 cache 归属再选修法。状态：open，未指派前无人持有。
+
+##### Open issue 2：仓库根 AGENTS.md / GEMINI.md 被 AGY 以最高优先级 user rules 注入 {#native-workspace-rules-injection}
+
+- 现象：AGY 1.4.10 自动读取工作区 `AGENTS.md` 与 `GEMINI.md`，包装为「MUST ALWAYS FOLLOW … take precedence over any other instructions」交给模型；印印当轮上下文实见两份。宿主 Native 接线未排除它们。
+- 风险：`AGENTS.md` 是 Codex harness，含「接球后默认静默执行」，与 L0 途中说明进度冲突，同形规则曾是 human136 四分钟空白的怀疑因素之一。文件头自声明「非 `@codex` 勿采纳」，印印未被带偏，但依赖模型在「必须遵守」包装内自行识别例外；目前**无证据**证明它是近期沉默原因。另有每轮额外 token。
+- 文档差距：上文仅记录官方 ACP「Rules/AGENTS.md 未送进模型」，Native CLI 实际会送达未登记。
+- 期望：确定 AGY Native 是否应读取仓库根 workspace rules（身份与家规已由原生 L0 承载）；若不应，用受支持方式关闭或隔离，并补注入负例。状态：open，涉及边界选择，修法待定。
+
+##### Open issue 3：共享 L0 指示使用 AGY 不存在的 `tool_search` {#native-l0-tool-search}
+
+- 现象：[`l5-mcp-tools-index.md`](../../assets/prompt-templates/l5-mcp-tools-index.md) 与 [`l6-capability-wakeup.md`](../../assets/prompt-templates/l6-capability-wakeup.md) 要求「未暴露工具先 `tool_search`」，`compile-system-prompt-l0.mjs` 未按载体替换；AGY Native 无此工具，实际路径是读 `mcp/<server>/<tool>.json` schema 后 `call_mcp_tool`。
+- 影响：强模型可自行转换，弱模型（如 Flash）可能尝试不存在的工具或放弃 lazy MCP。
+- 期望：按载体给出真实可用的工具发现说明，不破坏 F203 单源。状态：open。
+
+##### Open issue 4：上游 EOF 已在轮内恢复、最终回复完整，仍判 Didn't finish {#native-anonymous-retry-delivery}
+
+- 现象：印印同一轮 step45 `API error (attempt 1) … EOF` 后 step46 继续，step49 完整最终回复 DONE，宿主仍判失败并把旧错误追加在正文末尾（You 截图 `private-source-id`）。
+- 定位（Sol6.1 `private-source-id`）：分段正文与最终正文逐字一致、后台命令已 DONE；拦截点是 step47 匿名 `unknown/DONE` 与先前 EOF 共存，属 #6309 两种已有情形的组合。
+- 状态：in-progress，Sol6.1 已以新 Task244 接责，修复须保留「步骤身份未确认」、不冒认工具成功或触发认证恢复；旧 Task169 完成记录不变。
+
+##### Open issue 5：小毛刺（低优先） {#native-acceptance-housekeeping}
+
+- Native guard 拒绝 shell 访问 `antigravity-cli/mcp/`（保护合理），但读文件工具可读同一 schema；拒绝提示可指向正确路径。
+- `~/.gemini/skills`（2026-06 的旧 symlink，含已退役 `community-pr`、`enterprise-workflow`、`harness-diagnosis`）仍列于 Active Workspaces；未进入实际 skill 清单，仅为可读工作区，清理或说明来源即可。
+
 #### 工作单元：Native CLI 同进程续轮（Claude SDK 档）{#native-same-process-followup}
 
 - **来源 / 分工**：You source1329（`private-source-id`）。Sol6.1（@codex61-sol）写代码，Argon（@gemini-argon）独立审查，印印（@agy-opus55）指挥并在合入后最终验收。官方 ACP 的插话下一轮再做，本单不碰。

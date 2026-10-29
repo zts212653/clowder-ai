@@ -4,6 +4,7 @@ import { roadmapActionsFor } from './channel-collaboration.js';
 import { eventChannelId, eventDayLabel } from './channel-navigation.js';
 import type {
   ChannelThread,
+  CollectiveChannelProjection,
   CollectiveEventEnvelope,
   CollectiveParticipant,
   CollectiveReactionSummary,
@@ -22,6 +23,8 @@ export function ChannelConversationFlow({
   legacy,
   search,
   humanName,
+  channel,
+  collectiveName,
   channelWorks,
   channelVotes,
   channelReactions,
@@ -40,6 +43,8 @@ export function ChannelConversationFlow({
   readonly legacy: readonly CollectiveEventEnvelope[];
   readonly search: boolean;
   readonly humanName: string;
+  readonly channel?: CollectiveChannelProjection;
+  readonly collectiveName?: string;
   readonly channelWorks: readonly CollectiveWorkProjection[];
   readonly channelVotes: readonly CollectiveVoteProjection[];
   readonly channelReactions: readonly CollectiveReactionSummary[];
@@ -60,13 +65,17 @@ export function ChannelConversationFlow({
     <div ref={flowRef} className="channel-flow" aria-live="polite">
       {threads.length === 0 && !children ? (
         <div className="channel-empty">
-          <h2>{t(search ? '没有找到相关讨论' : '这里还很安静')}</h2>
+          <h2>{t(search ? '没有找到相关讨论' : channel ? '这是这个频道的开头。' : '这里还很安静')}</h2>
           <p>
             {search
               ? t('换一个关键词，或者从左边进入频道。')
-              : language === 'en'
-                ? `${humanName}, start with a message.`
-                : `${humanName}，从一句话开始吧。`}
+              : channel
+                ? language === 'en'
+                  ? `${channel.createdBy.displayName} created it on ${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(channel.createdAt))}. Everyone in ${collectiveName ?? 'this Collective'} can see it.`
+                  : `${channel.createdBy.displayName} ${new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric' }).format(new Date(channel.createdAt))}新建，${collectiveName ?? '共同体'}的成员都能看到。`
+                : language === 'en'
+                  ? `${humanName}, start with a message.`
+                  : `${humanName}，从一句话开始吧。`}
           </p>
         </div>
       ) : (

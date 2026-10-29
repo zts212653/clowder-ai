@@ -5,17 +5,17 @@ related_decisions: [ADR-039, ADR-044]
 topics: [mcp, process-lifecycle, host-capacity, invocation-context, streamable-http, resource-reclamation]
 doc_kind: spec
 created: 2026-10-25
-updated: 2026-10-28
+updated: 2026-10-29
 description: "让多只猫并行工作时复用 MCP 的重复运行开销，保留每次调用的身份、权限、工作区和故障隔离，并用完整资源账证明收益。"
 description_source: model
 description_author: codex-astra
 description_updated_at: 2026-10-26T04:44:27Z
-tips_exempt: "2026-10-28 验收：本切面撤除 MCP 外层代理并迁移受管旧配置，仍使用现有聊天、工具与配置入口，没有新增需要用户学习的操作；线上撤层已验，OpenCode 暂缓与 Phase B 全量目标不计已交付。"
+tips_exempt: "2026-10-29 续订：本次增量仅记录 Phase B 方案、开工授权、执行与审核分工、Task/回流及文档链接，没有新增已实现的用户入口或操作步骤，继续沿用现有聊天、工具与配置入口。Phase A 既有验收结论保留；本次记录不表示 Phase B 实现或全量资源验收完成，OpenCode 仍暂缓未验。"
 ---
 
 # F333: Shared MCP Process Lifecycle｜多猫共用 MCP 运行资源
 
-> **Status**: in-progress | **Owner**: 小星星·Maine Coon (@codex-astra, gpt-6-astra；整体与验收)；实现：Sol6.1；审核：Sonnet | **Priority**: P1
+> **Status**: in-progress | **Owner**: 小星星·Maine Coon (@codex-astra, gpt-6-astra；整体与验收)；Phase B 实现：Sol6.1；审核：Sol5.6（Phase A 历史审核：Sonnet） | **Priority**: P1
 >
 > **立项授权**：You 于 2026-10-25 PDT（10-26 UTC）要求：「怎么样？你看看？Siamese说的有什么有道理的？然后你直接立项一下？」来源 `[thread-id]#private-source-id`。
 >
@@ -127,6 +127,17 @@ CLI 的单独新指令，也不声称已证明所有私人 CLI 都无人使用�
 **独立性**：即使 Phase B 尚未开始，A 的自家 MCP 也应完整可用并产生可测收益；不依赖第三方改造来补齐自身鉴权、回收或回滚。
 
 ### Phase B: 第三方 MCP 减重与全量验收（一笔完整实现 PR）
+
+**2026-10-29 规划完成并获准开工**：You在原线程 `#private-source-id` 委托Astra做plan、
+与Argon及Opus55讨论后交最终方案；责任Task为 `private-source-id`。
+五个纯转发贡献复用请求级工厂和Host HTTP；Tripo保留有证据的状态隔离。遵循现行Contract0.3，不恢复
+方法白名单；Music沿原private批准归档。包、Host接线、旧配置回退与全量资源账组成同一可用交付。
+随后You在 `#private-source-id` 明确要求新建thread由Sol6.1执行、Sol5.6 review；
+原Phase B责任Task `private-source-id` 由Astra持有，规划Task已完成且不重开。
+提议 `proposal_mvtcmyi29rolici4` 已获批准；执行现场 `[thread-id]` 已实际派发Sol6.1。
+独立review使用 `codex-sol`（Sol5.6），不改派已退役的 `codex6-sol`；Astra继续整体范围和最终验收。
+final-only回流已登记 `development-return-71ac175f260e01beabdc99c7c1fb5c2c`，原Task不会移入子线程。
+原AC-B1/B2和全量目标不变；本轮实施授权不自动包含公开发布、生产升级/重启或Feature close。
 
 **交付结果**：在 A 已可用的设施上，把盘点确认可共享的第三方 MCP 完整接通；必须隔离的浏览器/桌面/账户状态保留必要实例，空闲资源按原 owner 回收。正常工具功能、插件启停与撤权保持可用，并完成全量资源账。
 

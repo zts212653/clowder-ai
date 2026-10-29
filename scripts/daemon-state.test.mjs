@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
@@ -351,3 +352,81 @@ test('legacy migration CLI warns but exits successfully for a foreign owner', as
   assert.match(cli.stderr, /WARNING \[legacy-owner-mismatch\]/);
   assert.equal(child.exitCode, null);
 });
+
+test('daemon status reports degraded when the verified launcher survives but its API is gone', async () => {
+  const { homeDir, runtimeRoot } = createFixture();
+  const token = 'status-with-dead-api';
+  const child = await spawnFakeDaemon(runtimeRoot, token);
+  const server = createServer();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const api = server.address().port;
+  await new Promise((resolve) => server.close(resolve));
+  const paths = daemonStatePaths({ homeDir, projectRoot: runtimeRoot, deploymentId: 'runtime' });
+  writeDaemonState({
+    paths,
+    pid: child.pid,
+    projectRoot: runtimeRoot,
+    deploymentId: 'runtime',
+    launchToken: token,
+    logFile: join(runtimeRoot, 'daemon.log'),
+    ports: { api },
+  });
+  const cli = spawnSync(
+    process.execPath,
+    [
+      join(import.meta.dirname, 'daemon-state.mjs'),
+      'status',
+      '--home',
+      homeDir,
+      '--project-root',
+      runtimeRoot,
+      '--deployment-id',
+      'runtime',
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.notEqual(cli.status, 0, 'a live launcher is not an available API');
+  assert.match(cli.stdout, /API: (unavailable|unknown).*degraded/);
+  assert.equal(child.exitCode, null, 'a status check does not stop or restart anything');
+});
+
+for (const mode of ['direct', 'runtime']) {
+  test(`${mode} status wrapper keeps recovery hints and nonzero status when its API is gone`, async () => {
+    const { homeDir, runtimeRoot } = createFixture();
+    const repoRoot = resolve(import.meta.dirname, '..');
+    const token = `wrapper-dead-api-${mode}`;
+    const child = await spawnFakeDaemon(repoRoot, token);
+    const server = createServer();
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const api = server.address().port;
+    await new Promise((resolve) => server.close(resolve));
+    const deploymentId = mode === 'runtime' ? 'runtime' : 'worktree';
+    const paths = daemonStatePaths({ homeDir, projectRoot: repoRoot, deploymentId });
+    writeDaemonState({
+      paths,
+      pid: child.pid,
+      projectRoot: repoRoot,
+      deploymentId,
+      launchToken: token,
+      logFile: join(runtimeRoot, 'status.log'),
+      ports: { api },
+    });
+    const args =
+      mode === 'runtime'
+        ? [join(repoRoot, 'scripts/runtime-worktree.sh'), 'daemon-status', '--dir', repoRoot]
+        : [join(repoRoot, 'scripts/start-dev.sh'), '--status'];
+    const cli = spawnSync('bash', args, {
+      cwd: repoRoot,
+      env: { ...process.env, HOME: homeDir, CAT_CAFE_DEPLOYMENT_ID: deploymentId },
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+    assert.equal(cli.error, undefined);
+    assert.equal(cli.status, 1, `${cli.stdout}\n${cli.stderr}`);
+    assert.match(cli.stdout, /API: (unavailable|unknown).*degraded/);
+    assert.match(cli.stdout, mode === 'runtime' ? /stop: pnpm runtime:stop/ : /停止: pnpm dev:stop/);
+    if (mode === 'direct') assert.match(cli.stdout, /查看日志: tail -f /);
+    assert.equal(child.exitCode, null, 'status must leave the owned launcher alive');
+    assert.equal(existsSync(paths.stateFile), true);
+  });
+}

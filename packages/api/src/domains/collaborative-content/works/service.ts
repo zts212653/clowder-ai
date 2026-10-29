@@ -43,6 +43,12 @@ export interface OpenWorkSource extends ContentStream {
 }
 export interface WorkSourcePort {
   open(input: { source: WorkWorkspaceSource; principal: WorkPrincipal; threadId: string }): Promise<OpenWorkSource>;
+  /** Locate a current source and freeze it once; submission still requires an explicit expected revision. */
+  openCurrent(input: {
+    locator: Omit<WorkWorkspaceSource, 'expectedSourceRevision'>;
+    principal: WorkPrincipal;
+    threadId: string;
+  }): Promise<OpenWorkSource>;
   inspect(input: { locator: Omit<WorkWorkspaceSource, 'expectedSourceRevision'>; principal: WorkPrincipal }): Promise<{
     source: WorkWorkspaceSource;
     mediaType: string;

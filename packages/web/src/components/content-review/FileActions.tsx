@@ -128,7 +128,6 @@ export function FileActions(props: FileActionsProps) {
         <FileActionMenu
           position={position}
           menu={menu}
-          trigger={trigger}
           info={info}
           link={link}
           filename={filename}

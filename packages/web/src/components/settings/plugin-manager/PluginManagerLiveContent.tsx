@@ -16,6 +16,7 @@ import {
 } from './plugin-manager-live-api';
 import type { PluginManagerLiveContentProps } from './plugin-manager-live-types';
 import { INSTALL_TIMEOUT_MS, mutationRequestOptions } from './plugin-manager-mutation-options';
+import { usePluginCatalogCheck } from './usePluginCatalogCheck';
 import { usePluginConfigurationSave } from './usePluginConfigurationSave';
 
 const EMPTY_COMPATIBILITY: readonly PluginManagerDesignFixture[] = [];
@@ -115,7 +116,21 @@ export function PluginManagerLiveContent({
     ): Promise<boolean> => {
       if (!mounted.current || generation !== listGeneration.current) return false;
       if (localInventory) localPluginIds.current = new Set(localInventory.plugins.map((plugin) => plugin.pluginId));
-      setSnapshot(value);
+      setSnapshot((previous) =>
+        (local || value.catalog.status === 'unavailable') && presentation === 'v2' && previous
+          ? {
+              ...value,
+              // Inventory-only reads and unavailable catalog responses retain the last discovered candidates.
+              plugins: [
+                ...value.plugins,
+                ...previous.plugins.filter(
+                  (p) => p.artifact === 'absent' && !value.plugins.some((item) => item.pluginId === p.pluginId),
+                ),
+              ],
+              catalog: local ? previous.catalog : value.catalog,
+            }
+          : value,
+      );
       const requested = initialSelection.current;
       if (requested && value.plugins.some((plugin) => plugin.pluginId === requested)) {
         initialSelection.current = null;
@@ -130,8 +145,17 @@ export function PluginManagerLiveContent({
       }
       return true;
     },
-    [loadCurrentDetail, selectPlugin],
+    [loadCurrentDetail, selectPlugin, presentation],
   );
+
+  const commitCheckedCatalog = useCallback(
+    async (value: PluginManagerListResponse) => {
+      const generation = ++listGeneration.current;
+      await commitListSnapshot(value, generation, true, false);
+    },
+    [commitListSnapshot],
+  );
+  const catalogCheck = usePluginCatalogCheck(commitCheckedCatalog);
 
   const hydrateRemoteList = useCallback(
     async (search: string, generation: number, afterMutation: boolean, localCommitted: boolean) => {
@@ -188,11 +212,13 @@ export function PluginManagerLiveContent({
   useEffect(() => {
     mounted.current = true;
     initialSelection.current = new URLSearchParams(window.location.search).get('plugin');
-    void loadList('');
+    void loadList('').then(() => {
+      if (presentation === 'v2' && mounted.current) void catalogCheck.check();
+    });
     return () => {
       mounted.current = false;
     };
-  }, [loadList]);
+  }, [loadList, presentation, catalogCheck.check]);
 
   const refresh = useCallback(async () => {
     await loadList(query.current, true);
@@ -321,9 +347,12 @@ export function PluginManagerLiveContent({
       renderCompatibilityDetail={renderCompatibilityDetail}
       onStateChanged={refresh}
       onRequestEnable={requestEnable}
-      catalogStatus={snapshot?.catalog.status ?? 'fresh'}
+      catalogCheck={presentation === 'v2' ? catalogCheck.state : undefined}
+      onCheckCatalog={() => void catalogCheck.check()}
+      catalogStatus={catalogCheck.state.unavailable ? 'unavailable' : (snapshot?.catalog.status ?? 'fresh')}
       catalogMessage={snapshot?.catalog.message}
       loading={snapshot === null && error === null}
+      inventoryKnown={snapshot !== null}
       error={error}
       warning={warning}
       busyPluginId={busyPluginId}
@@ -332,7 +361,7 @@ export function PluginManagerLiveContent({
       onPluginSelect={selectPlugin}
       onSearchChange={(value) => {
         query.current = value;
-        void loadList(value);
+        if (presentation !== 'v2') void loadList(value);
       }}
       onInstall={(pluginId) => {
         const plugin = plugins.find((candidate) => candidate.pluginId === pluginId);
@@ -364,7 +393,7 @@ export function PluginManagerLiveContent({
           expectedDigest: plugin.packageDigest,
         });
       }}
-      onMarketplaceChange={refresh}
+      onMarketplaceChange={presentation === 'v2' ? catalogCheck.check : refresh}
       onDirectoryInstall={installFromDirectory}
       onRepair={(pluginId) => {
         const plugin = plugins.find((candidate) => candidate.pluginId === pluginId);

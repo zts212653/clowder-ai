@@ -938,10 +938,10 @@ stop_runtime_daemon() {
 }
 
 status_runtime_daemon() {
-  local root
+  local root status_rc=0
   export CAT_CAFE_DEPLOYMENT_ID=runtime
   migrate_legacy_runtime_daemon_state
-  runtime_daemon_state status
+  runtime_daemon_state status || status_rc=$?
   root="$(runtime_daemon_root)"
   if [ -f "$root/scripts/f247-cloud-services.mjs" ]; then
     if node "$root/scripts/f247-cloud-services.mjs" status --summary >/dev/null 2>&1; then
@@ -951,6 +951,7 @@ status_runtime_daemon() {
     fi
   fi
   echo "  stop: pnpm runtime:stop"
+  return "$status_rc"
 }
 
 start_runtime_worktree() {

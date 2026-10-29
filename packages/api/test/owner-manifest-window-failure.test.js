@@ -12,6 +12,14 @@ const faults = {
     mutate: (path) => fs.writeFile(path, '{"contentRef":"another"}'),
     error: /Invalid content owner manifest identity/,
   },
+  revisionChain: {
+    mutate: async (path, originalBytes) => {
+      const state = JSON.parse(originalBytes);
+      state.receipts[0].blobDigest = `sha256:${'f'.repeat(64)}`;
+      await fs.writeFile(path, JSON.stringify(state));
+    },
+    error: /Corrupt content owner state/,
+  },
   unreadable: {
     mutate: async (path) => {
       await fs.rm(path);
@@ -38,7 +46,7 @@ for (const [name, fault] of Object.entries(faults)) {
       if (index === 1) {
         failedPath = path;
         originalBytes = await original(path, ...args);
-        await fault.mutate(path);
+        await fault.mutate(path, originalBytes);
         admitted();
       } else await gate;
       return original(path, ...args);

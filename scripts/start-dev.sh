@@ -2018,11 +2018,12 @@ fi
 
 if [[ "${1:-}" == "--status" ]] || [[ "${1:-}" == "status" ]]; then
     maybe_migrate_legacy_daemon_state
-    daemon_state status
+    status_rc=0
+    daemon_state status || status_rc=$?
     print_f247_cloud_status_summary
     echo "  停止: $(daemon_stop_hint)"
     echo "  查看日志: tail -f $DAEMON_LOG_FILE"
-    exit 0
+    exit "$status_rc"
 fi
 
 if [ "$DAEMON_MODE" = true ]; then

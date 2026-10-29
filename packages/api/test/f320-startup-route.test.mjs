@@ -55,6 +55,8 @@ for (const mode of ['serial', 'parallel'])
     assert.equal(result.extra.startupRecovery.stage, 'failed');
     assert.equal(result.extra.startupRecovery.attempt, 6);
     assert.equal(result.metadata.cliDiagnostics.accountCheck.rpcCode, -32603);
+    assert.equal(result.metadata.cliDiagnostics.accountCheck.category, 'discovery_timeout');
+    assert.equal(result.metadata.cliDiagnostics.safeExcerpt, 'workspace routing discovery timed out');
     assert.match(result.content, /本次任务尚未开始/);
     assert.equal((await h.store.getByThread('startup-chat')).filter((m) => m.lifecycle?.kind === 'response').length, 1);
     assert.equal(

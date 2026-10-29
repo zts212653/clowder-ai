@@ -1,28 +1,56 @@
 [
   {
+    "id": "feature-f322-plugin-maintenance",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F322-everyday-work-experience.md",
+      "anchor": "插件维护：检查更新与一起处理"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/settings/plugin-manager/PluginBrowserPanel.tsx",
+      "anchor": "PluginBrowserPanel"
+    },
+    "bodySource": {
+      "path": "docs/features/F322-everyday-work-experience.md",
+      "anchor": "插件维护：检查更新与一起处理"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "在「设置与管理 → 连接与扩展 → 插件集成」，用搜索框旁的下拉查看所有可以安装的插件；点「检查更新」只查目录，不会替你更新。需要处理多个插件时，在「需要处理」组头点「一起处理…」，先核对每项动作再开始；离开页面会停止后续项，回到列表按实际状态确认结果。",
+    "action": {
+      "type": "open_source",
+      "label": "查看插件检查和一起处理的用法",
+      "sourceRef": {
+        "path": "docs/features/F322-everyday-work-experience.md",
+        "anchor": "插件维护：检查更新与一起处理"
+      }
+    },
+    "owner": "codex61-sol"
+  },
+  {
     "id": "feature-f327-generate-music",
     "kind": "feature",
     "sourceRef": {
-      "path": "docs/architecture/f327-music-generation.md",
-      "anchor": "给片子和游戏配乐"
+      "path": "docs/features/F327-google-family-suite.md",
+      "anchor": "音乐插件：先检查，再生成"
     },
     "structureSource": {
       "path": "packages/api/src/domains/plugin/outputs/project-output-actions.ts",
       "anchor": "PluginProjectOutputs"
     },
     "bodySource": {
-      "path": "docs/architecture/f327-music-generation.md",
-      "anchor": "给片子和游戏配乐"
+      "path": "docs/features/F327-google-family-suite.md",
+      "anchor": "音乐插件：先检查，再生成"
     },
     "contexts": ["concierge_open", "feature_dev"],
     "audience": ["cvo", "developer"],
-    "body": "Google Cloud 配乐插件候选正在完善：在 Plugin Manager 配置已有授权和 Cloud 项目、明确启用后，由猫生成 MP3 并交付来源回执。完整插件真实生成尚待验收，实际扣费及赠金抵扣仍须核实。",
+    "body": "需要配乐时，先查当前 Host 的 Google Cloud 音乐插件是否已安装、配置就绪、启用且运行正常，再让获准的猫用 generate_music，交付项目 MP3 和来源回执。未就绪按插件页提示处理；已有状态无需逐线程重装或重登。扣费与赠金抵扣仍须核实。",
     "action": {
       "type": "open_source",
-      "label": "查看配乐用法与账户条件",
+      "label": "查看音乐插件使用流程",
       "sourceRef": {
-        "path": "docs/architecture/f327-music-generation.md",
-        "anchor": "给片子和游戏配乐"
+        "path": "docs/features/F327-google-family-suite.md",
+        "anchor": "音乐插件：先检查，再生成"
       }
     },
     "owner": "codex61-sol"

@@ -2,6 +2,7 @@ import type {
   CollectiveAttentionRequest,
   CollectiveBindingVoteChoice,
   CollectiveBindingVoteProjection,
+  CollectiveChannelProjection,
   CollectiveCollaborationProjection,
   CollectiveDecisionRecord,
   CollectiveEventEnvelope,
@@ -25,6 +26,10 @@ export interface CollectiveMeta {
   readonly bootstrapNeeded: boolean;
   readonly onboardingComplete: boolean;
   readonly clientBuildId: string;
+  readonly capabilities?: {
+    readonly workResultFiles?: 1;
+    readonly channels?: 1;
+  };
 }
 
 export interface CollectiveHuman {
@@ -115,6 +120,7 @@ export interface ClientSnapshot {
   readonly collective?: CollectiveMembership;
   readonly providers: readonly HumanAuthProviderStatus[];
   readonly events: readonly CollectiveEventEnvelope[];
+  readonly channels?: readonly CollectiveChannelProjection[];
   readonly collaboration?: CollectiveCollaborationProjection;
   readonly participants?: readonly CollectiveParticipant[];
   readonly members?: CollectiveMemberDirectory;
@@ -129,6 +135,7 @@ export type {
   CollectiveAttentionRequest,
   CollectiveBindingVoteChoice,
   CollectiveBindingVoteProjection,
+  CollectiveChannelProjection,
   CollectiveCollaborationProjection,
   CollectiveDecisionRecord,
   CollectiveEventEnvelope,

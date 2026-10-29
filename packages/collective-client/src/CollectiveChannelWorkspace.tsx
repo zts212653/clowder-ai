@@ -76,6 +76,7 @@ export function CollectiveChannelWorkspace({
           humanId={snapshot.me.human.humanId}
           humanName={snapshot.me.human.displayName}
           channelId={channelId}
+          channel={snapshot.channels?.find((channel) => channel.channelId === channelId)}
           content={content}
           onSelectContent={onContent}
           onOpenLibrary={onLibrary}

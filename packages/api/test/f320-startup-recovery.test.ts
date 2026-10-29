@@ -4,11 +4,21 @@ import { test } from 'node:test';
 import { validateCodexNativeAccount } from '../src/config/codex-account-native-validation.js';
 import { runCodexAppServerWithRecovery } from '../src/domains/cats/services/agents/providers/CodexAppServerRunner.js';
 import { CodexAppServerRpcError } from '../src/domains/cats/services/agents/providers/codex-app-server-rpc-error.js';
-import { buildCodexStartupDiagnostics } from '../src/domains/cats/services/agents/providers/codex-startup-diagnostics.js';
+import {
+  buildCodexStartupDiagnostics,
+  codexStartupEvidence,
+  isRetryableCodexStartupError,
+} from '../src/domains/cats/services/agents/providers/codex-startup-diagnostics.js';
 import { CodexStartupRecoveryBudget } from '../src/domains/cats/services/agents/providers/codex-startup-recovery.js';
 import { CodexStartupWire } from './helpers/codex-startup-wire.js';
 
 const discovery = { code: -32603, message: 'workspace routing discovery failed' };
+// Codex 0.164.0 DiscoveryTimeout, observed on account/read in invocation dec7a015.
+const timedOut = { code: -32603, message: 'workspace routing discovery timed out' };
+const configurationChanged = {
+  code: -32603,
+  message: 'configuration changed during workspace routing discovery; retry account/read',
+};
 const runInput = {
   thread: { kind: 'start' as const },
   prompt: { kind: 'frozen' as const, prompt: 'original task' },
@@ -44,35 +54,45 @@ async function execute(
   return { events, failure, calls };
 }
 
-test('F320: two failed account probes recover the original task exactly once', async () => {
-  const wires = [new CodexStartupWire(discovery), new CodexStartupWire(discovery), new CodexStartupWire()];
-  const result = await execute(wires);
-  assert.equal(result.failure, undefined, 'transient account discovery must recover beyond the legacy one retry');
-  assert.equal(result.calls, 3);
-  assert.deepEqual(
-    wires.map((w) => w.writes.filter((m) => m.method === 'turn/start').length),
-    [0, 0, 1],
-  );
-  const ready = result.events.find(
-    (e: unknown) => (e as { startupRecovery?: { stage?: string } }).startupRecovery?.stage === 'ready',
-  );
-  assert.equal((ready as { startupRecovery: { attempt: number } })?.startupRecovery.attempt, 3);
-});
+for (const [error, category] of [
+  [discovery, 'discovery_failed'],
+  [{ ...timedOut, message: 'workspace routing discovery timeout' }, 'discovery_timeout'],
+  [timedOut, 'discovery_timeout'],
+  [configurationChanged, 'discovery_failed'],
+] as const)
+  test(`F320: two account probes recover the original task exactly once (${error.message})`, async () => {
+    const wires = [new CodexStartupWire(error), new CodexStartupWire(error), new CodexStartupWire()];
+    const result = await execute(wires);
+    assert.equal(result.failure, undefined, 'transient account discovery must recover beyond the legacy one retry');
+    assert.equal(result.calls, 3);
+    assert.deepEqual(
+      wires.map((w) => w.writes.filter((m) => m.method === 'turn/start').length),
+      [0, 0, 1],
+    );
+    const ready = result.events.find(
+      (e: unknown) => (e as { startupRecovery?: { stage?: string } }).startupRecovery?.stage === 'ready',
+    );
+    assert.equal((ready as { startupRecovery: { attempt: number } })?.startupRecovery.attempt, 3);
+    assert.equal(
+      codexStartupEvidence(new CodexAppServerRpcError({ ...error, method: 'account/read' })).category,
+      category,
+    );
+  });
 
 test('F320: sustained discovery failure stops at six attempts with one final diagnostic', async () => {
-  const result = await execute(Array.from({ length: 6 }, () => new CodexStartupWire(discovery)));
+  const result = await execute(Array.from({ length: 6 }, () => new CodexStartupWire(timedOut)));
   assert.equal(result.calls, 6);
   const failed = result.events.filter(
     (e: unknown) => (e as { startupRecovery?: { stage?: string } }).startupRecovery?.stage === 'failed',
   );
   assert.equal(failed.length, 1);
-  assert.match(String(result.failure), /discovery failed/);
+  assert.match(String(result.failure), /discovery timed out/);
 });
 
 test('F320: owner stop during retry wait cannot open another connection', async () => {
   const controller = new AbortController();
   const result = await execute(
-    [new CodexStartupWire(discovery)],
+    [new CodexStartupWire(timedOut)],
     (event) => {
       if ((event as { startupRecovery?: { stage?: string } }).startupRecovery?.stage === 'retry_wait')
         controller.abort();
@@ -86,8 +106,10 @@ test('F320: owner stop during retry wait cannot open another connection', async 
 });
 
 for (const error of [
-  { ...discovery, data: { http_status: 401 } },
-  { ...discovery, data: { http_status: 403 } },
+  { ...timedOut, data: { http_status: 401 } },
+  { ...timedOut, data: { http_status: 403 } },
+  { ...configurationChanged, data: { http_status: 401 } },
+  { ...configurationChanged, data: { http_status: 403 } },
   { code: -32603, message: 'invalid workspace routing configuration' },
   { code: -32603, message: 'unclassified provider refusal' },
 ])
@@ -96,6 +118,60 @@ for (const error of [
     assert.equal(result.calls, 1);
     assert.ok(result.failure);
   });
+
+for (const message of [
+  'workspace routing discovery cancelled',
+  'workspace routing discovery cancelled during shutdown',
+  'workspace routing discovery unauthorized (401)',
+  'workspace routing discovery timed out; provider policy rejected the request',
+  'not a workspace routing discovery timeout',
+])
+  test(`F320: other native routing verdicts are not admitted as discovery timeouts (${message})`, () => {
+    const error = new CodexAppServerRpcError({ method: 'account/read', code: -32603, message });
+    assert.equal(isRetryableCodexStartupError(error), false);
+  });
+
+test('F320: native routing text cannot establish another RPC or untyped failure ownership', () => {
+  for (const verdict of [
+    timedOut,
+    configurationChanged,
+    { code: -32603, message: 'workspace routing discovery unauthorized (401)' },
+  ])
+    for (const error of [
+      new Error(verdict.message),
+      new CodexAppServerRpcError({ ...verdict, method: 'initialize' }),
+    ]) {
+      assert.equal(codexStartupEvidence(error).category, 'unknown');
+      assert.equal(isRetryableCodexStartupError(error), false);
+    }
+});
+
+test('F320: configuration race recovery still rejects a changed pinned launch configuration', async () => {
+  const wires = [
+    new CodexStartupWire(configurationChanged),
+    new CodexStartupWire(undefined, { sqlite_home: '/tmp/different-account-sqlite' }),
+  ];
+  const result = await execute(wires);
+  assert.equal(result.calls, 2);
+  assert.match(String(result.failure), /codex_native_account_configuration_conflict:sqlite_home/);
+  assert.equal(wires.flatMap((wire) => wire.writes).filter((message) => message.method === 'turn/start').length, 0);
+});
+
+test('F320: native unauthorized verdict gives account guidance without inventing an HTTP field', () => {
+  const error = new CodexAppServerRpcError({
+    method: 'account/read',
+    code: -32603,
+    message: 'workspace routing discovery unauthorized (401)',
+  });
+  const diagnostics = buildCodexStartupDiagnostics(error, 'auth-native', 1, 15);
+  assert.equal(diagnostics.accountCheck?.category, 'auth_rejected');
+  assert.equal(diagnostics.reasonCode, 'auth_failed');
+  assert.match(diagnostics.publicSummary, /登录验证未通过/);
+  assert.match(diagnostics.publicHint, /账户与登录/);
+  assert.equal(diagnostics.accountCheck?.rpcCode, -32603);
+  assert.equal(diagnostics.accountCheck?.httpStatus, undefined);
+  assert.equal(isRetryableCodexStartupError(error), false);
+});
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -175,33 +251,34 @@ test('F320: actual backoff timers use 2/5/10/20/30 seconds and never a seventh a
   assert.equal(completed.calls, 6);
 });
 
-test('F320: capacity recovery never reopens startup replay eligibility after client lifecycle resets', async () => {
-  const first = new CodexStartupWire(undefined, {}, 'Selected model is at capacity. Please try a different model.');
-  const second = new CodexStartupWire(discovery);
-  const third = new CodexStartupWire(discovery);
-  let calls = 0;
-  const events: unknown[] = [];
-  await assert.rejects(async () => {
-    for await (const e of runCodexAppServerWithRecovery({
-      sessionFactory: async () => [first, second, third][calls++],
-      sessionOptions: { command: 'fixture', args: [], invocationId: 'same-invocation' },
-      runInput,
-      modelCapacityRetryDelaysMs: [0],
-      recoveryAnchor: { invocationId: 'same-invocation', threadId: 'same-chat', promptMessageIds: ['same-source'] },
-      startupRecovery: { retryDelaysMs: [0, 0, 0, 0, 0] },
-    }))
-      events.push(e);
-  }, /workspace routing discovery failed/);
-  assert.equal(calls, 3, 'the existing one transport retry is separate from first-startup recovery');
-  assert.equal(
-    events.some((e) => (e as { startupRecovery?: { stage?: string } }).startupRecovery?.stage === 'retry_wait'),
-    false,
-  );
-  assert.equal(
-    [second, third].some((wire) => wire.writes.some((m) => m.method === 'turn/start')),
-    false,
-  );
-});
+for (const error of [discovery, timedOut, configurationChanged])
+  test(`F320: capacity recovery never reopens startup replay eligibility after client lifecycle resets (${error.message})`, async () => {
+    const first = new CodexStartupWire(undefined, {}, 'Selected model is at capacity. Please try a different model.');
+    const second = new CodexStartupWire(error);
+    const third = new CodexStartupWire(error);
+    let calls = 0;
+    const events: unknown[] = [];
+    await assert.rejects(async () => {
+      for await (const e of runCodexAppServerWithRecovery({
+        sessionFactory: async () => [first, second, third][calls++],
+        sessionOptions: { command: 'fixture', args: [], invocationId: 'same-invocation' },
+        runInput,
+        modelCapacityRetryDelaysMs: [0],
+        recoveryAnchor: { invocationId: 'same-invocation', threadId: 'same-chat', promptMessageIds: ['same-source'] },
+        startupRecovery: { retryDelaysMs: [0, 0, 0, 0, 0] },
+      }))
+        events.push(e);
+    }, new RegExp(error.message));
+    assert.equal(calls, 3, 'the existing one transport retry is separate from first-startup recovery');
+    assert.equal(
+      events.some((e) => (e as { startupRecovery?: { stage?: string } }).startupRecovery?.stage === 'retry_wait'),
+      false,
+    );
+    assert.equal(
+      [second, third].some((wire) => wire.writes.some((m) => m.method === 'turn/start')),
+      false,
+    );
+  });
 
 for (const method of ['config/read', 'configRequirements/read', 'account/read', 'initialize'])
   test(`F320: transport loss during ${method} stays in the admitted startup budget`, async () => {

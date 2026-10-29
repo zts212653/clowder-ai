@@ -1,21 +1,41 @@
-import { collectiveCollaborationProjectionSchema, collectiveMemberDirectorySchema } from '@cat-cafe/shared';
+import {
+  collectiveChannelListSchema,
+  collectiveCollaborationProjectionSchema,
+  collectiveMemberDirectorySchema,
+} from '@cat-cafe/shared';
 import { type Dispatch, type MutableRefObject, type SetStateAction, useCallback, useEffect, useRef } from 'react';
 import { type ClientRequest, CollectiveClientRequestError, collectiveClientErrorMessage } from './client-request.js';
 import type { ClientSnapshot, CollectiveEventEnvelope, CollectiveMe, CollectiveParticipant } from './client-types.js';
 import { closeCollectiveScope, currentCollectiveScope } from './collective-scope-recovery.js';
 import { phaseForHuman } from './human-auth-flow.js';
 
-async function readCollectiveProjection(request: ClientRequest, collectiveId: string, signal: AbortSignal) {
+async function readCollectiveProjection(
+  request: ClientRequest,
+  collectiveId: string,
+  signal: AbortSignal,
+  channelsSupported: boolean,
+) {
   const query = `?collectiveId=${encodeURIComponent(collectiveId)}`;
-  const [result, declared, members, collaboration] = await Promise.all([
+  const [result, declared, members, collaboration, channels] = await Promise.all([
     request<{ events: readonly CollectiveEventEnvelope[] }>(`/api/events/human${query}`, { signal }),
     request<{ participants: readonly CollectiveParticipant[] }>(`/api/participants${query}`, { signal }),
     request<unknown>(`/api/members${query}`, { signal }).then((value) => collectiveMemberDirectorySchema.parse(value)),
     request<unknown>(`/api/collaboration${query}`, { signal }).then((value) =>
       collectiveCollaborationProjectionSchema.parse(value),
     ),
+    channelsSupported
+      ? request<unknown>(`/api/channels${query}`, { signal }).then(
+          (value) => collectiveChannelListSchema.parse(value).channels,
+        )
+      : Promise.resolve(undefined),
   ]);
-  return { events: result.events, participants: declared.participants, members, collaboration };
+  return {
+    events: result.events,
+    participants: declared.participants,
+    members,
+    collaboration,
+    ...(channels ? { channels } : {}),
+  };
 }
 
 async function reconcileDeniedScope(
@@ -78,7 +98,12 @@ export function useCollectiveRefresh(
           if (!me.collectives.some((item) => item.collectiveId === target.collectiveId))
             return close('membership_lost', me);
         }
-        const projection = await readCollectiveProjection(request, target.collectiveId, abort.signal);
+        const projection = await readCollectiveProjection(
+          request,
+          target.collectiveId,
+          abort.signal,
+          latest.current.meta?.capabilities?.channels === 1,
+        );
         if (!fresh()) return;
         setSnapshot((current) => ({
           ...current,

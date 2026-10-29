@@ -8,6 +8,7 @@ export class CollectiveClientRequestError extends Error {
   constructor(
     readonly status: number,
     detail: string,
+    readonly code?: string,
   ) {
     super(detail);
   }

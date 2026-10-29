@@ -12,6 +12,7 @@ import {
   fileSourceUrl,
 } from './file-action-client';
 import type { FileActionsProps } from './file-actions-contract';
+import { useFileMenuHover } from './useFileMenuHover';
 
 type FileNotice = 'failed' | 'copiedFrame' | 'copiedImage' | 'copiedPath' | 'copiedLink' | 'copiedContent';
 
@@ -27,8 +28,7 @@ export function useFileActionController({
   target,
   visible = true,
   text,
-  initiallyOpen = false,
-  onOpenChange,
+  openOnHover = false,
   appearance = 'menu',
 }: FileActionsProps) {
   const originalUrl = fileSourceUrl(source);
@@ -43,6 +43,7 @@ export function useFileActionController({
   const timer = useRef<ReturnType<typeof setTimeout>>();
   const generation = useRef(0);
   const initialFocus = useRef<HTMLElement | null>(null);
+  const focusOnOpen = useRef(true);
   useLayoutEffect(() => {
     const slot = target;
     return () => {
@@ -79,7 +80,10 @@ export function useFileActionController({
     if (!visible) setPosition(null);
   }, [visible]);
   const closeMenu = () => {
-    if (menu.current?.contains(document.activeElement)) trigger.current?.focus();
+    if (menu.current?.contains(document.activeElement)) {
+      const origin = trigger.current ?? contextRef?.current?.querySelector<HTMLButtonElement>('button');
+      origin?.focus({ preventScroll: true });
+    }
     setPosition(null);
   };
   const perform = async (action: () => Promise<void | FileNotice>, message?: FileNotice) => {
@@ -121,8 +125,9 @@ export function useFileActionController({
   useEffect(() => {
     if (appearance === 'classic' && visible && link) void refreshInfo();
   }, [appearance, visible, link]);
-  const openMenu = (x: number, y: number) => {
+  const openMenu = (x: number, y: number, focus = true) => {
     initialFocus.current = null;
+    focusOnOpen.current = focus;
     setInfo(null);
     setPosition({
       x: Math.max(8, Math.min(x, window.innerWidth - 308)),
@@ -130,6 +135,16 @@ export function useFileActionController({
     });
     void refreshInfo();
   };
+  useFileMenuHover(
+    contextRef,
+    menu,
+    visible && !!link && openOnHover,
+    (owner) => {
+      const rect = owner.getBoundingClientRect();
+      openMenu(rect.right, rect.bottom, false);
+    },
+    () => setPosition(null),
+  );
   useEffect(() => {
     if (!visible || !link) return;
     const element = contextRef?.current;
@@ -138,6 +153,18 @@ export function useFileActionController({
       event.preventDefault();
       event.stopPropagation();
       openMenu(event.clientX, event.clientY);
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && menu.current) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeMenu();
+      } else if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = element.getBoundingClientRect();
+        openMenu(rect.right, rect.bottom);
+      }
     };
     const copy = (event: KeyboardEvent) => {
       const target = event.target;
@@ -159,14 +186,16 @@ export function useFileActionController({
       void copyPixels();
     };
     element.addEventListener('contextmenu', context);
+    element.addEventListener('keydown', key);
     document.addEventListener('keydown', copy);
     return () => {
       element.removeEventListener('contextmenu', context);
+      element.removeEventListener('keydown', key);
       document.removeEventListener('keydown', copy);
     };
   });
   useEffect(() => {
-    if (!position) return;
+    if (!position || !focusOnOpen.current) return;
     // A delayed local file-info inserts Finder before the temporary first enabled item.
     // Keep the default at the first item, but never steal focus after the reader navigated.
     const first = fileMenuItems(menu.current)[0];
@@ -188,13 +217,6 @@ export function useFileActionController({
     document.addEventListener('pointerdown', outside);
     return () => document.removeEventListener('pointerdown', outside);
   }, [position]);
-  useEffect(() => {
-    if (initiallyOpen) {
-      const rect = (contextRef?.current ?? trigger.current)?.getBoundingClientRect();
-      openMenu(rect?.right ?? 8, rect?.bottom ?? 8);
-    } else setPosition(null);
-  }, [initiallyOpen]);
-  useEffect(() => onOpenChange?.(!!position), [!!position, onOpenChange]);
   const canCopyContent = text !== undefined || ['markdown', 'html', 'jsx', 'text'].includes(kind);
   const copyContent = () => perform(() => copyContentText(source, text), 'copiedContent');
   return {

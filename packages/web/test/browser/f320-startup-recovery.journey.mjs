@@ -92,11 +92,11 @@ export function registerCodexStartupJourney({ preview, browser }) {
         await page.goto(`${p.url}/thread/${p.threadId}?shell=v2`, { waitUntil: 'domcontentloaded' });
         const failure = page.locator(`[data-message-id="${final.response.id}"]`);
         await failure.getByText(/已尝试 6 次.*本次任务尚未开始/).waitFor();
-        assert.equal(await failure.getByText('workspace routing discovery failed', { exact: true }).count(), 0);
+        assert.equal(await failure.getByText('workspace routing discovery timed out', { exact: true }).count(), 0);
         await failure.getByTestId('cli-diagnostics-toggle').click();
         await failure
           .getByTestId('cli-diagnostics-excerpt')
-          .getByText('workspace routing discovery failed', { exact: true })
+          .getByText('workspace routing discovery timed out', { exact: true })
           .waitFor();
         assert.match(await failure.innerText(), /JSON-RPC code: -32603/);
         assert.doesNotMatch(await failure.innerText(), /HTTP status: -32603/);

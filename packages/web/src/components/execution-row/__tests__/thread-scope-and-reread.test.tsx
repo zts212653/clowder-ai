@@ -76,6 +76,18 @@ function seedCurrent(queue: QueueEntry[], others: Record<string, unknown> = {}) 
   } as never);
 }
 
+function seedUnverifiedExecution() {
+  seedCurrent([entry('a', A)]);
+  useChatStore.setState({
+    activeInvocations: { 'parent-opus': { catId: 'opus', mode: 'execute', startedAt: 1 } },
+    hasActiveInvocation: true,
+  });
+  // Initial hydration deliberately waits before exposing reset. These cases
+  // exercise a confirmed failed read, not that separate loading grace period.
+  const version = useActiveExecutionStore.getState().beginHydration(A, '/project/cafe');
+  useActiveExecutionStore.getState().failHydration(A, version, new Error('projection unavailable'));
+}
+
 let commands: ReturnType<typeof useQueueCommands> | null = null;
 let view: ReturnType<typeof useQueueView> | null = null;
 function Harness({ threadId }: { threadId: string }) {
@@ -122,6 +134,41 @@ describe('the row operates the thread it shows', () => {
   const renderRow = (threadId: string) => act(async () => root.render(<ExecutionRow threadId={threadId} />));
 
   describe('P1-1 pending Queue comes from the row’s own thread', () => {
+    it('Clear adopts the acknowledged queue for its own thread without needing a socket event', async () => {
+      seedCurrent([entry('a-only', A)], { [B]: threadState([entry('b-one', B)]) });
+      mocks.apiFetch.mockImplementation(async () => json({ cleared: [entry('b-one', B)], queue: [] }));
+      await act(async () => root.render(<Harness threadId={B} />));
+      await act(async () => {
+        await commands?.handleClear();
+      });
+      expect(useChatStore.getState().threadStates[B]?.queue).toEqual([]);
+      expect(useChatStore.getState().queue.map((item) => item.id)).toEqual(['a-only']);
+      expect(toastTitles()).toEqual(['已全部停止后续处理']);
+    });
+
+    it('Clear keeps the server-reported remainder and shows partial completion', async () => {
+      const busy = entry('busy', B);
+      seedCurrent([entry('a-only', A)], { [B]: threadState([entry('b-one', B), busy]) });
+      mocks.apiFetch.mockImplementation(async () =>
+        json(
+          {
+            code: 'QUEUE_WITHDRAWAL_PARTIAL',
+            error: '仍有消息保留在待处理队列中',
+            cleared: [entry('b-one', B)],
+            queue: [busy],
+          },
+          409,
+        ),
+      );
+      await act(async () => root.render(<Harness threadId={B} />));
+      await act(async () => {
+        await commands?.handleClear();
+      });
+      expect(useChatStore.getState().threadStates[B]?.queue).toEqual([busy]);
+      expect(useChatStore.getState().queue.map((item) => item.id)).toEqual(['a-only']);
+      expect(toastTitles()).toEqual(['已停止部分消息']);
+    });
+
     it('a row for thread B shows B’s Queue, and its clear is sent to B', async () => {
       seedCurrent([entry('a-only', A)], {
         [B]: threadState([entry('b-one', B), entry('b-two', B)]),
@@ -173,11 +220,7 @@ describe('the row operates the thread it shows', () => {
         if (path.endsWith('/queue') && !init?.method) throw new Error('reread offline');
         return json({ ok: true });
       });
-      seedCurrent([entry('a', A)]);
-      useChatStore.setState({
-        activeInvocations: { 'parent-opus': { catId: 'opus', mode: 'execute', startedAt: 1 } },
-        hasActiveInvocation: true,
-      });
+      seedUnverifiedExecution();
       await renderRow(A);
       await click($('execution-row-force-reset'));
       await click(dialogConfirm() ?? null);
@@ -190,11 +233,7 @@ describe('the row operates the thread it shows', () => {
       mocks.apiFetch.mockImplementation(async (path: string) =>
         path.endsWith('/force-reset') ? json({ error: 'PRESTART_STATE_CHANGED' }, 409) : json({ ok: true }),
       );
-      seedCurrent([entry('a', A)]);
-      useChatStore.setState({
-        activeInvocations: { 'parent-opus': { catId: 'opus', mode: 'execute', startedAt: 1 } },
-        hasActiveInvocation: true,
-      });
+      seedUnverifiedExecution();
       await renderRow(A);
       await click($('execution-row-force-reset'));
       await click(dialogConfirm() ?? null);
@@ -207,11 +246,7 @@ describe('the row operates the thread it shows', () => {
         if (path.endsWith('/force-reset')) throw new Error('network down');
         return json({ ok: true });
       });
-      seedCurrent([entry('a', A)]);
-      useChatStore.setState({
-        activeInvocations: { 'parent-opus': { catId: 'opus', mode: 'execute', startedAt: 1 } },
-        hasActiveInvocation: true,
-      });
+      seedUnverifiedExecution();
       await renderRow(A);
       await click($('execution-row-force-reset'));
       await click(dialogConfirm() ?? null);

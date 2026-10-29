@@ -142,6 +142,12 @@ export async function prepareClaudeSdkLaunch(input: {
     for (const key of SUBSCRIPTION_MODE_DENY_KEYS) overrides[key] = null;
   applyClaudeTokenAccountEnv(overrides, options?.claudeTokenAccount);
   const env = buildChildEnv(overrides, { workingDirectory: options?.workingDirectory });
+  // Opt in after account/env assembly so inherited SDK labels cannot overwrite the app label.
+  // The native CLI also branches on this label; it is not a telemetry-only setting.
+  const entrypoint = process.env.CAT_CAFE_CLAUDE_SDK_ENTRYPOINT?.trim();
+  if (entrypoint && entrypoint !== 'cat-cafe' && entrypoint !== 'sdk-ts')
+    throw new Error('claude_sdk_entrypoint_invalid: use cat-cafe or sdk-ts');
+  if (entrypoint) env.CLAUDE_CODE_ENTRYPOINT = entrypoint;
   // SDK 0.3.285 otherwise hides session_state_changed as sdk_host_only. Native
   // idle is the drain receipt for background agents AND their report turns.
   env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS = '1';

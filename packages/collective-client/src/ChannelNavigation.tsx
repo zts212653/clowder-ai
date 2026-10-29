@@ -10,6 +10,7 @@ export function ChannelNavigation({
   query,
   onQuery,
   onSelect,
+  onCreateChannel,
   onMembers,
   onLibrary,
   libraryActive,
@@ -23,6 +24,7 @@ export function ChannelNavigation({
   readonly query: string;
   readonly onQuery: (value: string) => void;
   readonly onSelect: (id: string) => void;
+  readonly onCreateChannel?: () => void;
   readonly onMembers: () => void;
   readonly onLibrary?: () => void;
   readonly libraryActive?: boolean;
@@ -128,9 +130,18 @@ export function ChannelNavigation({
           </nav>
         </div>
         <nav className="destination-list" aria-label={t('频道')}>
-          <p>
-            {t('频道')} {channels.length}
-          </p>
+          <div className="destination-list-heading">
+            <p>
+              {t('频道')} {channels.length}
+            </p>
+            {onCreateChannel && (
+              <AppTooltip label={t('新建频道')}>
+                <button type="button" aria-label={t('新建频道')} onClick={onCreateChannel}>
+                  <ShellGlyph name="plus" />
+                </button>
+              </AppTooltip>
+            )}
+          </div>
           {(query ? visible : channels).map((channel) => (
             <button
               key={channel.id}

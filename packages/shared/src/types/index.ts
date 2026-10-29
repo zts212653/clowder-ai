@@ -337,6 +337,7 @@ export {
 } from './cloud-bridge-outbound-receipt.js';
 export { type CloudBridgeReturnV1, isCloudBridgeReturnV1 } from './cloud-bridge-return.js';
 export * from './collective.js';
+export * from './collective-channel.js';
 export * from './collective-collaboration.js';
 export * from './collective-decision-vote.js';
 export * from './collective-reaction.js';

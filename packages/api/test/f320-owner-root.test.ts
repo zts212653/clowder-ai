@@ -1,7 +1,7 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { finalizeCodexAccountEnvironment } from '../src/config/codex-account-environment.js';
@@ -36,6 +36,10 @@ test('final managed environment reads the canonical owner, not an external cwd w
 test('actual external-thread invocation consumes managed B from the runtime catalog', async () => {
   const f = ownedManagedFixture();
   try {
+    // This invocation declares a persistent capability owner; absence is an
+    // unreadable source, not an empty MCP policy. Give the account fixture one.
+    mkdirSync(join(f.owner, '.cat-cafe'), { recursive: true });
+    writeFileSync(join(f.owner, '.cat-cafe/capabilities.json'), JSON.stringify({ version: 2, capabilities: [] }));
     const wires: F320AccountWire[] = [];
     const native = new CodexAgentService({
       catId: 'codex-sol',

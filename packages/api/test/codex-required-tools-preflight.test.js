@@ -112,6 +112,10 @@ class ToolInventoryWire {
       this.inbox.push({ id: message.id, result: { thread: { id: threadId, turns: [] } } });
       return;
     }
+    if (message.method === 'thread/turns/list') {
+      this.inbox.push({ id: message.id, result: { data: [], nextCursor: null } });
+      return;
+    }
     if (message.method === 'mcpServerStatus/list') {
       if (this.neverResolveStatus) return new Promise(() => {});
       const runtimeStatus =

@@ -49,7 +49,7 @@ import { queueEntryId } from '../domains/cats/services/agents/invocation/queue-l
 import { settleResponseFromDraft } from '../domains/cats/services/agents/invocation/response-draft-settlement.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
-import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { type IMessageStore, isTimelinePublished } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { ITurnExecutionStore } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
@@ -354,6 +354,14 @@ function projectQueueStartResult(result: { started: boolean; entry?: QueueEntry 
   return result.entry && isPublicQueueEntry(result.entry)
     ? { ...result, entry: projectPublicQueueEntry(result.entry) }
     : { started: result.started };
+}
+
+async function cancelUnpublishedQueueSource(messageStore: IMessageStore | undefined, messageId: string): Promise<void> {
+  const source = await messageStore?.getById(messageId);
+  // Queue owns only future work. Published speech and existing delivery refs
+  // remain History even when the owner withdraws its remaining Queue target.
+  if (source && (isTimelinePublished(source) || source.lifecycle?.dispatchRefs?.length)) return;
+  await messageStore?.markCanceled(messageId);
 }
 
 /**
@@ -1156,7 +1164,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         const remaining = invocationQueue.list(threadId, guard.userId).filter((candidate) => candidate.id !== entryId);
         for (const messageId of messageIds) {
           const hasSibling = remaining.some((candidate) => queueEntryMessageIds(candidate).includes(messageId));
-          if (!hasSibling) await messageStore?.markCanceled(messageId);
+          if (!hasSibling) await cancelUnpublishedQueueSource(messageStore, messageId);
         }
         removed = await invocationQueue.commitClaimedWithdrawal(threadId, entryId);
         if (!removed) throw new Error('Queue withdrawal claim changed before commit');
@@ -1890,7 +1898,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         const remaining = invocationQueue.list(threadId, guard.userId).filter((entry) => entry.id !== claimed.id);
         for (const messageId of messageIds) {
           const hasSibling = remaining.some((entry) => queueEntryMessageIds(entry).includes(messageId));
-          if (!hasSibling) await messageStore?.markCanceled(messageId);
+          if (!hasSibling) await cancelUnpublishedQueueSource(messageStore, messageId);
         }
         const removed = await invocationQueue.commitClaimedWithdrawal(threadId, claimed.id);
         if (!removed) throw new Error('Queue clear claim changed before commit');
@@ -1928,15 +1936,25 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       queueProcessor.unregisterEntryCompleteHook?.(claimed.id);
       cleared.push(claimed);
     }
+    const remaining = invocationQueue.list(threadId, guard.userId);
+    const queue = await enrichQueueEntries(remaining, messageStore);
     await emitQueueUpdated(
       socketManager,
       guard.userId,
       threadId,
-      invocationQueue.list(threadId, guard.userId),
-      'cleared',
+      remaining,
+      queue.length ? 'withdraw_failed' : 'cleared',
     );
-
-    return { cleared: cleared.map(projectPublicQueueEntry) };
+    const result = { cleared: cleared.map(projectPublicQueueEntry), queue };
+    if (queue.length) {
+      reply.status(409);
+      return {
+        ...result,
+        code: cleared.length ? 'QUEUE_WITHDRAWAL_PARTIAL' : 'QUEUE_WITHDRAWAL_FAILED',
+        error: cleared.length ? '已停止部分消息；其余消息仍保留在待处理队列中' : '尚未停止，消息仍保留在待处理队列中',
+      };
+    }
+    return result;
   });
 
   // POST /api/threads/:threadId/cancel/:catId — F122B AC-B9: Per-cat cancel

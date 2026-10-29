@@ -438,6 +438,8 @@ export function summarizeAgyStreamJsonTurn(lines: Iterable<string>): AgyStreamJs
   const inputs = steps.filter(([, step]) => step.type === 'user_input' && step.state === 'DONE');
   const inputIndex = inputs.length === 1 ? inputs[0]?.[0] : undefined;
   const finalStep = lastStepIndex === null ? undefined : state.steps.get(lastStepIndex);
+  // Revisiting a lower index must not erase a later observed operation.
+  const finalStepIsLatest = lastStepIndex !== null && steps.every(([index]) => index <= lastStepIndex);
   // CLI result can retain a prior-turn error or an earlier failed attempt in
   // this turn. A completed error message is superseded only by a later proven
   // final response/checkpoint; a terminal or unfinished error still blocks it.
@@ -445,6 +447,7 @@ export function summarizeAgyStreamJsonTurn(lines: Iterable<string>): AgyStreamJs
     inputIndex !== undefined &&
     lastStepIndex !== null &&
     lastStepIndex > inputIndex &&
+    finalStepIsLatest &&
     finalStep?.state === 'DONE' &&
     steps.every(([index, step]) =>
       step.type === 'error_message'
@@ -452,11 +455,22 @@ export function summarizeAgyStreamJsonTurn(lines: Iterable<string>): AgyStreamJs
         : ['user_input', 'system_message', 'agent_response', 'tool', 'checkpoint'].includes(step.type) &&
           (step.type === 'tool' || step.state !== 'ERROR'),
     );
+  // A tool can split one reply into several response steps. Qualify the whole
+  // current reply, and never use an unfinished or out-of-order segment as proof.
+  const responseSteps = steps.filter(([, step]) => step.type === 'agent_response');
+  const completedResponseText =
+    responseSteps.at(-1)?.[0] === lastStepIndex &&
+    responseSteps.every(
+      ([index, step], n) =>
+        step.state === 'DONE' && index > (responseSteps[n - 1]?.[0] ?? inputIndex ?? Number.POSITIVE_INFINITY),
+    )
+      ? responseSteps.map(([, step]) => step.text).join('')
+      : null;
   const completedResponseStep =
     completedCurrentStep &&
     finalStep?.type === 'agent_response' &&
     finalStep.text.trim().length > 0 &&
-    finalStep.text.trim() === finalText.trim()
+    completedResponseText?.trim() === finalText.trim()
       ? lastStepIndex
       : null;
   const completedCompactionStep = completedCurrentStep && finalStep?.type === 'checkpoint' ? lastStepIndex : null;
@@ -467,6 +481,7 @@ export function summarizeAgyStreamJsonTurn(lines: Iterable<string>): AgyStreamJs
       inputIndex !== undefined &&
       lastStepIndex !== null &&
       lastStepIndex > inputIndex &&
+      finalStepIsLatest &&
       unconfirmedStepIndices.every((index) => index > inputIndex && index < lastStepIndex) &&
       finalStep?.type === 'agent_response' &&
       finalStep.state === 'DONE' &&

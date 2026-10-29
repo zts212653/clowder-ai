@@ -1,6 +1,11 @@
 import { type RefObject, useLayoutEffect, useState } from 'react';
 import type { ChatMessage } from '@/stores/chat-types';
-import { type PianoGeometry, type PianoRowMeasurement, projectPianoGeometry } from './piano-geometry';
+import {
+  type PianoGeometry,
+  type PianoRowMeasurement,
+  projectPianoGeometry,
+  scrollPianoGeometry,
+} from './piano-geometry';
 
 function measureRows(viewport: HTMLElement, ids: ReadonlySet<string>): PianoRowMeasurement[] {
   const viewportTop = viewport.getBoundingClientRect().top;
@@ -47,22 +52,34 @@ export function usePianoGeometry(
     if (!viewport || !track) return;
     let active = true;
     let frame: number | null = null;
+    let layoutChanged = true;
+    let geometry: PianoGeometry | null = null;
     const ids = new Set(JSON.parse(messageIds) as string[]);
     const measure = () => {
       frame = null;
       if (!active) return;
-      const next = projectPianoGeometry(
-        measureRows(viewport, ids),
-        viewport.scrollHeight,
-        viewport.clientHeight,
-        viewport.scrollTop,
-        track.getBoundingClientRect().height,
-      );
+      const contentHeight = viewport.scrollHeight;
+      const viewportHeight = viewport.clientHeight;
+      geometry =
+        layoutChanged ||
+        !geometry ||
+        geometry.contentHeight !== contentHeight ||
+        geometry.viewportHeight !== viewportHeight
+          ? projectPianoGeometry(
+              measureRows(viewport, ids),
+              contentHeight,
+              viewportHeight,
+              viewport.scrollTop,
+              track.getBoundingClientRect().height,
+            )
+          : scrollPianoGeometry(geometry, viewport.scrollTop);
+      layoutChanged = false;
+      const next = geometry;
       setMeasurement((previous) =>
         previous !== null &&
         previous.ownerKey === observerKey &&
         previous.ids === messageIds &&
-        JSON.stringify(previous.geometry) === JSON.stringify(next)
+        previous.geometry === next
           ? previous
           : { ownerKey: observerKey, ids: messageIds, geometry: next },
       );
@@ -70,7 +87,11 @@ export function usePianoGeometry(
     const schedule = () => {
       if (active && frame === null) frame = requestAnimationFrame(measure);
     };
-    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
+    const scheduleLayout = () => {
+      layoutChanged = true;
+      schedule();
+    };
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(scheduleLayout);
     const observeRows = () => {
       resize?.disconnect();
       resize?.observe(viewport);
@@ -93,7 +114,7 @@ export function usePianoGeometry(
         )
       )
         observeRows();
-      schedule();
+      scheduleLayout();
     });
     mutation.observe(viewport, {
       subtree: true,
@@ -109,8 +130,8 @@ export function usePianoGeometry(
       ],
     });
     viewport.addEventListener('scroll', schedule, { passive: true });
-    viewport.addEventListener('load', schedule, true);
-    window.addEventListener('resize', schedule);
+    viewport.addEventListener('load', scheduleLayout, true);
+    window.addEventListener('resize', scheduleLayout);
     observeRows();
     measure();
     return () => {
@@ -119,8 +140,8 @@ export function usePianoGeometry(
       mutation.disconnect();
       resize?.disconnect();
       viewport.removeEventListener('scroll', schedule);
-      viewport.removeEventListener('load', schedule, true);
-      window.removeEventListener('resize', schedule);
+      viewport.removeEventListener('load', scheduleLayout, true);
+      window.removeEventListener('resize', scheduleLayout);
     };
   }, [messageIds, observerKey, trackRef, viewportRef]);
   return measurement && measurement.ownerKey === observerKey && measurement.ids === messageIds

@@ -1,14 +1,64 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
+import Fastify from 'fastify';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { RedisQueueLedgerStore } from '../dist/domains/cats/services/agents/invocation/queue-ledger/RedisQueueLedgerStore.js';
 import { repeatUncertainAppend } from '../dist/domains/cats/services/agents/invocation/repeat-uncertain-append.js';
 import { RedisMessageStore } from '../dist/domains/cats/services/stores/redis/RedisMessageStore.js';
+import { queueRoutes } from '../dist/routes/queue.js';
 import { appendRecoveryFixture, recoveryProcessor } from './helpers/append-recovery-fixture.js';
 import { ownedRedisFixture } from './helpers/owned-redis-fixture.js';
 
 const owned = ownedRedisFixture('append-recovery');
+
+test('an uncertain cat wake can be stopped after restart; History and late receipts survive, Queue does not return', async (t) => {
+  const client = owned.client(`withdraw:${randomUUID()}:`);
+  const store = new RedisMessageStore(client, { ttlSeconds: 0 });
+  let inputRead;
+  let dispatches = 0;
+  const f = await appendRecoveryFixture(
+    async (input) => {
+      dispatches++;
+      inputRead = input.onInputRead;
+      return { accepted: false, reason: 'provider_rejected', acceptance: 'unknown' };
+    },
+    { messageStore: store, ledgerStore: new RedisQueueLedgerStore(client), from: { kind: 'agent', catId: 'codex' } },
+  );
+  await f.append();
+  await f.processor.reconcileAppendDeliveries('thread');
+  const source = await store.getById(f.admission.message.id);
+  const reopened = new RedisMessageStore(client, { ttlSeconds: 0 });
+  const queue = new InvocationQueue(new RedisQueueLedgerStore(client));
+  await queue.hydrateFromLedger(reopened);
+  const processor = recoveryProcessor({ queue, messageStore: reopened });
+  const app = Fastify();
+  t.after(() => app.close());
+  await app.register(queueRoutes, {
+    threadStore: { get: async () => ({ id: 'thread', createdBy: 'owner' }) },
+    invocationQueue: queue,
+    queueProcessor: processor,
+    invocationTracker: processor.deps.invocationTracker,
+    messageStore: reopened,
+    socketManager: { emitToUser() {}, broadcastAgentMessage() {}, getActiveInvocations: () => [] },
+  });
+  const stopped = await app.inject({
+    method: 'DELETE',
+    url: '/api/threads/thread/queue',
+    headers: { 'x-cat-cafe-user': 'owner' },
+  });
+  assert.equal(stopped.statusCode, 200, stopped.body);
+  assert.deepEqual(stopped.json().queue, []);
+  assert.deepEqual((await reopened.getById(source.id)).lifecycle, source.lifecycle);
+  assert.equal((await reopened.getById(source.id)).content, source.content);
+  await inputRead();
+  assert.equal((await reopened.getById(source.id)).lifecycle.dispatchRefs[0].inputRead.status, 'read');
+  await queue.hydrateFromLedger(reopened);
+  await processor.requestDrain('thread');
+  assert.equal(await queue.getDurableEntry('thread', f.admission.entry.id), null);
+  assert.equal(dispatches, 1);
+  assert.equal(await client.ttl(`msg:${source.id}`), -1);
+});
 
 test('Redis first handoff remains recoverable after failed compensation and a host restart', async () => {
   const client = owned.client(`case:${randomUUID()}:`);

@@ -254,7 +254,7 @@ describe('F322 B segment 1 — cat nameplate, no outer bubble', () => {
       expect(bubble().className).toContain('px-4 py-3');
     });
 
-    it('falls back to the old bubble where the cat is not known to the registry', () => {
+    it('does not invent a nameplate for an author absent from the registry', () => {
       registry.cats = [];
       render(catMessage({ catId: 'ghost' }));
 

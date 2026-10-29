@@ -60,7 +60,7 @@ mcp_admission_claims:
 （2026-10-20：“应该是产物……视频 图片 文档”）。本次修正描述与检索入口；具体能力仍按下列
 阶段和原验收证据交付，不把网页作品版本化或 Office 完整共编记成已经完成。
 
-> **Status**: in-progress / Phase R、Studio 297 历史有界交付保留；Phase U 归一四项补漏、#6264 prepared、#6275 卡片与 #6277 raw缩略/目录阅读器均已过父 Alpha；Human829工具栏修复#6292已过父Alpha与正式boot59五宽度；原讨论稿Chat/Works/Home全部路径正式往返通过，共同Markdown卡片YAML问题已由#6296审合并过父Alpha三入口，原Task414同一到版链g22待正式6e0c5e13，完整正式体验、Phase U、Office/video Admission Gate与未勾AC仍开放
+> **Status**: in-progress / Phase R、Studio 297 历史有界交付保留；Phase U 归一四项补漏、#6264 prepared、#6275 卡片与 #6277 raw缩略/目录阅读器均已过父 Alpha；Human829工具栏修复#6292已过父Alpha与正式boot59五宽度；原讨论稿Chat/Works/Home全部路径正式往返通过，共同Markdown卡片YAML问题已由#6296审合并过父Alpha及正式boot60三入口，原Task414/g22这处正式验收闭合，完整正式体验、Phase U、Office/video Admission Gate与未勾AC仍开放
 > **Owner**: 小星星·Maine Coon (@codex-astra, GPT-6 Astra)，F309 统筹与最终交付
 > **Priority**: P1
 > **Source thread**: `[thread-id]` — F309「指挥」

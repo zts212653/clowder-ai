@@ -28,6 +28,9 @@ test('complete independent Works reads canonical manifests at most twice, with f
       if (scope) assert.equal(scope.ownerUserId, principal.userId);
     },
     source: {
+      openCurrent: async () => {
+        throw new Error('catalogue must not open current workspace files');
+      },
       open: async () => ({
         stream: Readable.from([bytes]),
         byteLength: bytes.length,

@@ -111,6 +111,7 @@ async function initializeHumanSession(context: AuthBootContext): Promise<void> {
     restrictedScope: me ? missingMembershipScope(meta.serviceInstanceId, me) : undefined,
     phase: me ? phaseForHuman(me) : 'entry',
     events: [],
+    channels: undefined,
     collaboration: undefined,
     participants: undefined,
     members: undefined,
@@ -152,10 +153,11 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
       throw new Error('身份已变化');
     }
     if (!response.ok) {
-      const result = (await response.json()) as { error?: { message?: string } };
+      const result = (await response.json()) as { error?: { code?: string; message?: string } };
       throw new CollectiveClientRequestError(
         response.status,
         result.error?.message ?? `请求失败（${response.status}）`,
+        result.error?.code,
       );
     }
     return response;
@@ -176,12 +178,13 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
       options.signal?.throwIfAborted();
       if (generation !== sessionGeneration.current) throw new Error('身份已变化');
       const response = await fetch(path, options);
-      const payload = (await response.json()) as Result & { error?: { message?: string } };
+      const payload = (await response.json()) as Result & { error?: { code?: string; message?: string } };
       if (generation !== sessionGeneration.current) throw new Error('身份已变化');
       if (!response.ok) {
         throw new CollectiveClientRequestError(
           response.status,
           payload.error?.message ?? `请求失败（${response.status}）`,
+          payload.error?.code,
         );
       }
       return payload;
@@ -212,6 +215,7 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
             me: undefined,
             collective: undefined,
             events: [],
+            channels: undefined,
             collaboration: undefined,
             participants: undefined,
             members: undefined,
@@ -240,6 +244,7 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
         collective: selectedCollective(me),
         restrictedScope: current.meta ? missingMembershipScope(current.meta.serviceInstanceId, me) : undefined,
         events: [],
+        channels: undefined,
         collaboration: undefined,
         participants: undefined,
         members: undefined,
@@ -364,6 +369,7 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
       collective: undefined,
       restrictedScope: undefined,
       events: [],
+      channels: undefined,
       collaboration: undefined,
       participants: undefined,
       members: undefined,

@@ -76,7 +76,18 @@ test('all three complete readers retain owner/type/source filters and ignore non
   await mkdir(join(f.manifestRoot, '.in-progress'));
   await writeFile(join(f.manifestRoot, 'a'.repeat(64)), 'not a directory');
   await symlink(join(f.manifestRoot, '.in-progress'), join(f.manifestRoot, 'b'.repeat(64)));
-  const counter = interceptManifestReads(t, f, ({ path, args, original }) => original(path, ...args));
+  const manifestBytes = new Set();
+  let decodes = 0;
+  const parse = JSON.parse;
+  t.mock.method(JSON, 'parse', (raw, ...args) => {
+    if (manifestBytes.has(raw)) decodes++;
+    return parse(raw, ...args);
+  });
+  const counter = interceptManifestReads(t, f, async ({ path, args, original }) => {
+    const raw = await original(path, ...args);
+    manifestBytes.add(raw);
+    return raw;
+  });
   assert.deepEqual((await readers.retained(f)).map((head) => head.contentRef).sort(), [...f.refs].sort());
   assert.deepEqual(await readers.projects(f), [
     {
@@ -90,4 +101,9 @@ test('all three complete readers retain owner/type/source filters and ignore non
     [...f.refs].sort((a, b) => a.localeCompare(b)),
   );
   assert.equal(counter.stats().paths.length, 3 * 12, 'every valid manifest is freshly read by each consumer');
+  assert.equal(
+    decodes,
+    counter.stats().paths.length,
+    'each fresh canonical manifest is decoded once, then fully validated',
+  );
 });

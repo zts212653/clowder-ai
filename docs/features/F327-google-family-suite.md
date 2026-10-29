@@ -4,7 +4,7 @@ related_features: [F202, F205, F247, F325, F290, F314]
 topics: [google, gemini, lyria, veo, flow, flow-music, chrome-extension, plugin, media-generation]
 doc_kind: spec
 created: 2026-10-14
-updated: 2026-10-27
+updated: 2026-10-29
 tips_exempt: "2026-10-27: PR6159 carries the music tip. Paired previews and follow-up fixes are merged; real Alpha Manager/native generation and project delivery passed. Billing/Ultra-credit verification remains open. Phase B/C have no shipped entry."
 description: "把 You 的 Google AI 订阅里家里用得上的能力（音乐、视频、Gemini 网页等）接进 Clowder AI，让猫自己用，不靠人在网页上手点转发。"
 description_source: human
@@ -69,6 +69,16 @@ Claim guard: `f327-plugin-package-journey.test.ts` 用实际归档/native 进程
 Gemini 网页里的 Argon 做成能在 thread 里说话的云端猫（像 gpt-pro）、NotebookLM、Project Genie 等。由第一个真实消费者（脑洞大会 thread 的游戏）提出需要后，再补具体范围和 AC。
 
 ## User Journey
+
+### 音乐插件：先检查，再生成
+
+此流程需要当前 Host 已取得兼容音乐插件，并由有权限的人完成必要的配置、授权和启用。更新公开源代码不会自动安装插件，也不证明当前实例已就绪；未获得兼容安装来源时，不应把别的实例的安装记录当作可用凭据。
+
+先在「设置与管理 → 连接与扩展 → 插件集成」检查当前状态。已安装、配置就绪、明确启用且运行正常时，可让同一 Host 下其他获准的线程使用；调用仍受当前成员与项目政策约束，不需要每条线程重装或重复登录。未就绪时由有权限的人沿插件页提示完成对应步骤，沿用已有有效授权。
+
+告诉猫音乐风格、情绪、配器和线程所属项目的目标路径。猫从当前实际工具列表发现 `generate_music`，为这次有意生成保留稳定的 `requestId`，成功后交付可播放的 MP3 和来源回执。重查同一次请求应沿用原编号；未知的付费执行结果不能靠换编号自动重试。
+
+实际扣费与赠金额度抵扣需有真实账单证据，未知时仍记未知。来源回执及音频交付成功不能代替费用核验；本流程不代表网页视频通道已经交付。
 
 ### Primary Journey: 猫自己出一段配乐或一个镜头
 - **Scope unit**: thread

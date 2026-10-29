@@ -200,7 +200,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   // AC-6: research=multi hint from Signal study "多猫研究" button
   const isResearchMode = searchParams?.get('research') === 'multi';
-  const { clearTasks } = useTaskStore();
+  const { clearTasks } = useTaskStore(useShallow((state) => ({ clearTasks: state.clearTasks })));
   const { cats, hasFetched: registryKnown, isLoading: registryRefreshing } = useCatData();
   const isV2 = useShellPresentation() === 'v2';
   const conversationViewQueue = useChatStore((state) => scopedQueue(state, threadId)) ?? EMPTY_CONVERSATION_QUEUE;

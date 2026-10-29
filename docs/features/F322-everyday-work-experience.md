@@ -4,7 +4,7 @@ related_features: [F056, F083, F147, F229, F232, F269, F277, F283, F284, F290, F
 topics: [frontend, ux, discoverability, navigation, continuity, accessibility]
 doc_kind: spec
 created: 2026-09-27
-updated: 2026-10-28
+updated: 2026-10-29
 description: "把日常主屏与跨面板操作整理成看得懂、找得到、能继续的工作体验，并逐项结算已有前端承诺。"
 description_source: model
 description_author: codex-astra
@@ -681,6 +681,14 @@ F315 原三页最新实现核验与方案修订同 A 启动，不等全量 censu
 | J3 | navigation | 猫静音、审批待处理或 Needs Me 有事时，稳定入口仍可主动召回 | 对应可发现性、命名和恢复旅程；不靠 hover 独占 |
 | J4 | world + human + workspace | Café 带草稿 → Collective A → B → A → 原 Café 对话；世界、身份、目的地和草稿不串 | F290 AC-A2 / OQ1、真实 membership 与权限、可 back/refresh 的导航、direct/embedded、390px；不以配对列表 fixture 代替 |
 | J5 | current thread / authorized global + historical messages + reading position | 问任意猫或用顶栏搜索，在当前对话/全局找回多处旧消息；核对来源后由人点击，在结果间移动并回到刚才位置 | operator源197/213/295/301与fd1–fd3；检索范围、时间/相关排序、问句排除和权限在猫人两入口一致，真实长历史/未加载目标/往返与刷新实测，不以静态稿代交 |
+
+### 插件维护：检查更新与一起处理
+
+进入「设置与管理 → 连接与扩展 → 插件集成」。搜索框旁的下拉可查看全部、需要处理、已安装和可以安装；搜索会查全部插件。
+
+「检查更新」只刷新仓库与目录，不会替你更新插件。需要处理多项时，在「需要处理」组头点「一起处理…」，核对每项将执行的动作，取消不想处理的项目后再开始。需要补配置或授权、暂不兼容、目录不可用的项目会单独说明，按页面提示处理。
+
+批次逐项执行已有的更新或修复入口。离开页面会停止后续项目；已经开始的操作仍由服务端处理。回到列表后以实际插件状态确认结果：更新完成不等于已经启用，启动失败或结果待确认也不会冒充运行正常。
 
 ## 需求点 Checklist
 

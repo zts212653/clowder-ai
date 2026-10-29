@@ -85,8 +85,14 @@ test('F271 aborts a production Redis session-chain scan stream before starting a
   let streamActive = 0;
   let streamDestroyed = false;
   let scanStarts = 0;
+  let indexComplete = null;
   const redis = {
     options: { keyPrefix: '' },
+    get: async () => indexComplete,
+    set: async (_key, value) => {
+      indexComplete = value;
+      return 'OK';
+    },
     scanStream: () => {
       scanStarts += 1;
       const stream = new EventEmitter();
@@ -135,11 +141,15 @@ test('F271 aborts a production Redis session-chain scan stream before starting a
   assert.equal(sessionChainStore.activeReads, 0);
   assert.equal(streamActive, 0);
   assert.equal(streamDestroyed, true);
+  assert.equal(indexComplete, null, 'an aborted scan cannot certify a partial durable index');
   assert.deepEqual(startedThreads, ['thread-a']);
 
   const retry = await sessionChainStore.getChainByThread('thread-retry');
   assert.deepEqual(retry, []);
   assert.equal(scanStarts, 2, 'an aborted legacy backfill must retry instead of trusting a partial index');
+  assert.equal(indexComplete, '1');
+  assert.deepEqual(await new RedisSessionChainStore(redis).getChainByThread('thread-restarted'), []);
+  assert.equal(scanStarts, 2, 'a successful retry remains complete across store replacement');
 });
 
 test('concurrent cold reads keep one Redis scan alive when only one reader cancels', async () => {
@@ -147,6 +157,8 @@ test('concurrent cold reads keep one Redis scan alive when only one reader cance
   let destroyed = false;
   const redis = {
     options: { keyPrefix: '' },
+    get: async () => null,
+    set: async () => 'OK',
     scanStream: () => {
       scans += 1;
       const stream = new EventEmitter();

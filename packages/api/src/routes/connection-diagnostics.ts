@@ -7,6 +7,7 @@ import {
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { resolveSessionUserId } from '../utils/request-identity.js';
 import { authorizeOwnerBrowserAction } from './owner-memory-browser-auth.js';
+import { snapshotSessionListRead } from './session-list-read-diagnostics.js';
 
 /** Request-local timing only. These caller-supplied coordinates never become admission or idempotency identities. */
 export function registerConnectionDiagnostics(app: FastifyInstance, slowIntervalMs = 5_000): void {
@@ -72,6 +73,7 @@ export function registerConnectionDiagnostics(app: FastifyInstance, slowInterval
             processCpuUserMs: Math.round(processCpu.user / 1_000),
             processCpuSystemMs: Math.round(processCpu.system / 1_000),
             processRssBytes: process.memoryUsage.rss(),
+            sessionRead: snapshotSessionListRead(request),
           },
           'Connection diagnostic',
         );

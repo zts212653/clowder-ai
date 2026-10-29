@@ -1,6 +1,6 @@
 'use client';
 import type { ChatFileReference } from '@cat-cafe/shared';
-import { type ReactNode, type RefObject, useEffect, useRef, useState } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { API_URL } from '@/utils/api-client';
 import { AuthenticatedMediaImage } from '../AuthenticatedMediaImage';
 import { useShellCopy } from '../shell/shell-copy';
@@ -34,17 +34,6 @@ export function ChatFileReferenceView({
 }) {
   const t = useShellCopy(chatReferenceCopy),
     language = useShellLanguage();
-  const [hovered, setHovered] = useState(false);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(closeTimer.current), []);
-  const enter = () => {
-    clearTimeout(closeTimer.current);
-    setHovered(true);
-  };
-  const leave = () => {
-    clearTimeout(closeTimer.current);
-    closeTimer.current = setTimeout(() => setHovered(false), 150);
-  };
   const card = layout === 'card',
     image = target.mime.startsWith('image/');
   const absolutePath = target.absolutePath.replace(/\/+$/, '') || '/';
@@ -72,22 +61,6 @@ export function ChatFileReferenceView({
       data-chat-reference-layout={layout}
       className={`${styles.reference} ${styles.interactive} ${card ? styles.card : styles.chip} ${card && image ? styles.imageCard : ''}`}
       title={target.absolutePath}
-      onMouseEnter={enter}
-      onMouseLeave={leave}
-      onFocus={enter}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) leave();
-      }}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        enter();
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
-          event.preventDefault();
-          enter();
-        }
-      }}
     >
       <button
         type="button"
@@ -129,13 +102,7 @@ export function ChatFileReferenceView({
           </>
         )}
       </button>
-      <ChatFileActions
-        target={target}
-        visible={hovered}
-        hideTrigger
-        anchorRef={anchor}
-        onInteract={(inside) => (inside ? enter() : leave())}
-      />
+      <ChatFileActions target={target} hideTrigger anchorRef={anchor} />
       {error ? <span role="alert">{error}</span> : null}
       {lightbox}
     </span>

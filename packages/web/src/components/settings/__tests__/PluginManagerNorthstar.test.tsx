@@ -73,7 +73,7 @@ describe('accepted plugin north star', () => {
     ]);
     expect(groups.map((node) => node.querySelector('h3')?.textContent)).toEqual([
       '需要处理 · 2',
-      '已安装 · 1',
+      '其他已安装 · 1',
       '可以安装 · 2',
     ]);
     expect(container.querySelectorAll('[data-plugin-list-row]')).toHaveLength(5);

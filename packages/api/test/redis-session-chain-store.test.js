@@ -26,6 +26,7 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     'session:*',
     'session-chain:*',
     'session-chain-by-thread:*',
+    'session-chain-index:*',
     'session-active:*',
     'session-cli:*',
     'session-by-chainkey:*',

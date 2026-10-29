@@ -11,6 +11,7 @@ import { assertCodexManagedCarrierSupport } from '../../../../../config/codex-ma
 import { assertCodexSharedStateCarrier } from '../../../../../config/codex-shared-state.js';
 import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
 import { buildUnixSupervisedSpawnPlan } from '../../../../../utils/cli-supervised-process.js';
+import { DEFAULT_MAX_NDJSON_RECORD_BYTES, NdjsonRecordTooLargeError } from '../../../../../utils/ndjson-parser.js';
 import { excerptSanitizedStderr, sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import { createStderrTail, type StderrTail } from '../../../../../utils/stderr-tail.js';
 import type { AgentCarrierSession, AgentCarrierSessionOptions } from '../../types.js';
@@ -147,7 +148,13 @@ class CodexUnixWebSocketSession implements AgentCarrierSession {
         this.inbox.end(error instanceof Error ? error : new Error(String(error)));
       }
     });
-    socket.once('error', (error) => this.inbox.end(error));
+    socket.once('error', (error: Error & { code?: string }) =>
+      this.inbox.end(
+        error.code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH'
+          ? new NdjsonRecordTooLargeError(undefined, DEFAULT_MAX_NDJSON_RECORD_BYTES)
+          : error,
+      ),
+    );
     socket.once('close', (_code, reason) => {
       const diagnostic = sanitizeCliStderr(reason.toString('utf8').trim()).slice(0, MAX_TERMINAL_DIAGNOSTIC_LENGTH);
       this.inbox.end(diagnostic ? new Error(diagnostic) : undefined);
@@ -263,10 +270,14 @@ export async function spawnCodexAppServerHost(launch: CodexAppServerHostLaunch):
 
 export async function connectCodexAppServerHost(host: CodexAppServerHostProcess): Promise<AgentCarrierSession> {
   const socket = new WebSocket('ws://localhost/', {
+    maxPayload: DEFAULT_MAX_NDJSON_RECORD_BYTES,
     handshakeTimeout: 3_000,
     perMessageDeflate: false,
     createConnection: () => connect({ path: host.socketPath }),
   });
+  // The peer can send its first frame in the same packet as the handshake.
+  // Install read/error observers before yielding to the open event.
+  const session = new CodexUnixWebSocketSession(socket);
   await new Promise<void>((resolve, reject) => {
     const onOpen = () => {
       socket.off('error', onError);
@@ -279,7 +290,7 @@ export async function connectCodexAppServerHost(host: CodexAppServerHostProcess)
     socket.once('open', onOpen);
     socket.once('error', onError);
   });
-  return new CodexUnixWebSocketSession(socket);
+  return session;
 }
 
 function waitForWebSocketClose(socket: WebSocket, timeoutMs: number): Promise<boolean> {

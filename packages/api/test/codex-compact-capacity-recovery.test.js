@@ -59,6 +59,8 @@ class CapacityWire {
       this.inbox.push({ id: message.id, result: { requirements: null } });
     if (message.method === 'account/read')
       this.inbox.push({ id: message.id, result: { account: { type: 'chatgpt' } } });
+    if (message.method === 'thread/turns/list')
+      this.inbox.push({ id: message.id, result: { data: [], nextCursor: null } });
     if (message.method === 'thread/resume' && this.resumeRejection) {
       if (this.resumeRejection === 'carrier') this.inbox.destroy(new Error('Max payload size exceeded'));
       else

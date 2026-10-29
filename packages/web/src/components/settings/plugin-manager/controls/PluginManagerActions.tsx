@@ -116,8 +116,10 @@ export function PluginToggle({
 
 export function PluginRowActions({
   plugin,
+  onConfigure,
   locale,
   busy,
+  locked = false,
   onInstall,
   onRepair,
   onSetEnabled,
@@ -126,8 +128,10 @@ export function PluginRowActions({
   allowOverflow = true,
 }: {
   plugin: PluginManagerDesignFixture;
+  onConfigure?: () => void;
   locale: string;
   busy: boolean;
+  locked?: boolean;
   onInstall?: (() => void) | undefined;
   onRepair?: (() => void) | undefined;
   onSetEnabled?: ((enabled: boolean) => void) | undefined;
@@ -136,8 +140,12 @@ export function PluginRowActions({
   allowOverflow?: boolean;
 }) {
   const t = pluginManagerText(locale);
+  const disabled = busy || locked;
   const installed = plugin.artifact === 'installed';
-  const action = pluginMainAction(plugin, locale, onInstall, onRepair);
+  const action =
+    installed && plugin.config !== 'ready' && onConfigure
+      ? { kind: 'configure', label: locale.startsWith('en') ? 'Configure' : '去填写', onClick: onConfigure }
+      : pluginMainAction(plugin, locale, onInstall, onRepair);
   const canUninstall = plugin.actions?.uninstall ?? installed;
   const secondaryUpdate = action?.kind === 'repair' && plugin.actions?.install && onInstall;
   const subject = plugin.id === 'official.chatgpt-dot' && !locale.startsWith('en') ? 'dot协作' : plugin.displayName;
@@ -147,7 +155,7 @@ export function PluginRowActions({
         <button
           type="button"
           data-plugin-primary-action={action.kind}
-          disabled={busy}
+          disabled={disabled}
           onClick={action.onClick}
           className={`console-button-secondary h-8 shrink-0 !font-medium ${
             allowOverflow
@@ -161,7 +169,7 @@ export function PluginRowActions({
       <PluginToggle
         plugin={plugin}
         locale={locale}
-        busy={busy}
+        busy={disabled}
         onSetEnabled={onSetEnabled}
         onBlockedToggle={onBlockedToggle}
         className={
@@ -172,12 +180,12 @@ export function PluginRowActions({
       />
       {allowOverflow && (canUninstall || secondaryUpdate) && (
         <span className="shrink-0 [@container(max-width:23rem)]:col-start-2 [@container(max-width:23rem)]:row-start-2">
-          <PluginManagerMenu label={t.more(subject)} busy={busy}>
+          <PluginManagerMenu label={t.more(subject)} busy={disabled}>
             {secondaryUpdate && (
               <button
                 type="button"
                 className="console-button-ghost h-8 !font-medium"
-                disabled={busy}
+                disabled={disabled}
                 onClick={(event) => {
                   closePluginMenu(event.currentTarget);
                   onInstall?.();
@@ -191,7 +199,7 @@ export function PluginRowActions({
                 type="button"
                 data-plugin-uninstall
                 className="console-button-ghost h-8 !font-medium"
-                disabled={busy}
+                disabled={disabled}
                 aria-label={plugin.artifact === 'quarantined' ? t.remove(subject) : t.uninstall(subject)}
                 onClick={(event) => {
                   closePluginMenu(event.currentTarget);

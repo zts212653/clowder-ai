@@ -1,3 +1,8 @@
+import {
+  type CollectiveChannelCreateResponse,
+  collectiveChannelCreateResponseSchema,
+  normalizeCollectiveChannelName,
+} from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { readSavedChannelPosition } from './channel-navigation.js';
 import type { ClientSnapshot, InviteResult, PairingIntentResult } from './client-types.js';
@@ -30,8 +35,11 @@ export function useCollectiveClient() {
   const activeCollectiveId = snapshot.collective?.collectiveId;
   const activeCollectiveName = snapshot.collective?.name;
   const activeCollectiveRole = snapshot.collective?.role;
+  const activeNamespace = collectiveClientNamespace(snapshot);
+  const activeServiceInstanceId = snapshot.meta?.serviceInstanceId;
+  const channelCapability = snapshot.meta?.capabilities?.channels;
   const currentNamespace = useRef<string>();
-  currentNamespace.current = collectiveClientNamespace(snapshot);
+  currentNamespace.current = activeNamespace;
   const {
     token,
     request,
@@ -76,6 +84,7 @@ export function useCollectiveClient() {
         collective,
         restrictedScope: undefined,
         events: [],
+        channels: undefined,
         collaboration: undefined,
         participants: undefined,
         members: undefined,
@@ -85,6 +94,50 @@ export function useCollectiveClient() {
   );
 
   const sendMessage = useCollectiveSend({ snapshot, setSnapshot, currentNamespace, request, refresh: refreshEvents });
+
+  const createChannel = useCallback(
+    async (name: string, clientOperationId: string) => {
+      if (
+        !activeCollectiveId ||
+        !activeServiceInstanceId ||
+        !activeNamespace ||
+        activeNamespace !== currentNamespace.current ||
+        channelCapability !== 1
+      ) {
+        throw new Error('当前 Service 还不能新建频道');
+      }
+      const result = collectiveChannelCreateResponseSchema.parse(
+        await request<CollectiveChannelCreateResponse>('/api/channels', {
+          method: 'POST',
+          body: JSON.stringify({
+            collectiveId: activeCollectiveId,
+            name: normalizeCollectiveChannelName(name),
+            clientOperationId,
+          }),
+        }),
+      );
+      if (
+        result.channel.serviceInstanceId !== activeServiceInstanceId ||
+        result.channel.collectiveId !== activeCollectiveId
+      ) {
+        throw new Error('Service 返回了不属于当前 Collective 的频道');
+      }
+      if (activeNamespace !== currentNamespace.current) return undefined;
+      setSnapshot((current) =>
+        collectiveClientNamespace(current) === activeNamespace
+          ? {
+              ...current,
+              channels: [
+                ...(current.channels ?? []).filter((channel) => channel.channelId !== result.channel.channelId),
+                result.channel,
+              ],
+            }
+          : current,
+      );
+      return result;
+    },
+    [activeCollectiveId, activeNamespace, activeServiceInstanceId, channelCapability, request],
+  );
 
   const createInvite = useCallback(async () => {
     if (!snapshot.collective) return;
@@ -133,6 +186,7 @@ export function useCollectiveClient() {
         collective,
         restrictedScope: undefined,
         events: [],
+        channels: undefined,
         collaboration: undefined,
         participants: undefined,
         members: undefined,
@@ -251,6 +305,7 @@ export function useCollectiveClient() {
     configureProvider,
     switchAccount,
     createCollective,
+    createChannel,
     sendMessage,
     createInvite,
     readLeaveReadiness,
