@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import * as vec from 'sqlite-vec';
-import { prepareFileVectorReadWindow } from '../../src/domains/memory/file-vector-read-window.ts';
-import { PassageVectorStore } from '../../src/domains/memory/PassageVectorStore.ts';
+import { prepareFileVectorReadWindow } from '../../dist/domains/memory/file-vector-read-window.js';
+import { PassageVectorStore } from '../../dist/domains/memory/PassageVectorStore.js';
 
 const [file, library, ready, release] = process.argv.slice(2);
 const db = new Database(file, { readonly: true });

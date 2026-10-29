@@ -7,7 +7,7 @@ import { after, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
 import { nativeHookPrograms, nativeHookTestEnv } from './helpers/native-hook-programs.js';
-import { systemSshRunnerInputs } from './helpers/system-ssh-runner-inputs.js';
+import { reportSystemSshRunnerInputs } from './helpers/system-ssh-runner-inputs.js';
 
 const root = mkdtempSync(join(tmpdir(), 'f306-ssh-scope-'));
 const main = join(root, 'cat-cafe');
@@ -159,8 +159,7 @@ test('SSH configuration cannot hide a local executor or change the target to loo
 });
 
 test('both real hook CLIs use remote attribution and keep denial audit in a private HOME', (t) => {
-  if (process.platform === 'linux' && process.env.GITHUB_ACTIONS === 'true')
-    t.diagnostic(JSON.stringify({ kind: 'system_ssh_runner_inputs', ...systemSshRunnerInputs() }));
+  reportSystemSshRunnerInputs(t);
   for (const [program, hook, provider] of nativeHookPrograms()) {
     const env = nativeHookTestEnv({ ...process.env, CAT_CAFE_DEPLOYMENT_ID: 'runtime' });
     for (const [command, denied] of [

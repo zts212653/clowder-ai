@@ -3,6 +3,30 @@ import { join, resolve } from 'node:path';
 import { sshConfigurationScope } from '../../../../scripts/lib/ssh-configuration-scope.mjs';
 import { shellWords, stripShellComments } from '../../../../scripts/native-effect-shell-tokenizer.mjs';
 
+export function reportSystemSshRunnerInputs(
+  t,
+  { platform = process.platform, env = process.env, directory = '/etc/ssh' } = {},
+) {
+  const githubActions = env.GITHUB_ACTIONS === 'true';
+  const resourceScope = env.CAT_CAFE_PUBLIC_TEST_RESOURCE_SCOPE;
+  const publicShard = resourceScope === 'distributable' || resourceScope === 'shared';
+  if (platform !== 'linux' || (!githubActions && !publicShard)) return;
+  // This marker requests bounded diagnostics, never proves OS isolation or
+  // authorizes an operation. The shard runner owns those separate checks.
+  t.diagnostic(
+    JSON.stringify({
+      kind: 'system_ssh_runner_inputs',
+      context: {
+        platform,
+        githubActions,
+        resourceScope: publicShard ? resourceScope : null,
+        inputKind: directory === '/etc/ssh' ? 'runner_system' : 'test_fixture',
+      },
+      ...systemSshRunnerInputs(directory),
+    }),
+  );
+}
+
 // Diagnostic inputs only, never an alternate admission decision. No HOME,
 // identity files, environment dump or SSH process is part of this observation.
 export function systemSshRunnerInputs(directory = '/etc/ssh') {

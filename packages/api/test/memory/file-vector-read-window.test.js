@@ -7,9 +7,9 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import Database from 'better-sqlite3';
 import * as vec from 'sqlite-vec';
+import { prepareFileVectorReadWindow } from '../../dist/domains/memory/file-vector-read-window.js';
+import { PassageVectorStore } from '../../dist/domains/memory/PassageVectorStore.js';
 import { buildMemoryReadWindow } from '../../scripts/build-memory-read-window.mjs';
-import { prepareFileVectorReadWindow } from '../../src/domains/memory/file-vector-read-window.ts';
-import { PassageVectorStore } from '../../src/domains/memory/PassageVectorStore.ts';
 
 const supported = process.platform === 'darwin';
 const root = mkdtempSync(path.join(tmpdir(), 'memory-read-window-'));
@@ -265,7 +265,7 @@ async function mappedChild() {
     new URL('../helpers/memory-read-window-child.mjs', import.meta.url),
     [file, library, ready, release],
     {
-      execArgv: ['--import', 'tsx'],
+      execArgv: [],
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     },
   );
