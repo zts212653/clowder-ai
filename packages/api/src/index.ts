@@ -1,4 +1,5 @@
 import { reportAcpHostPolicy, resolveAcpHostPolicy } from './config/acp-host-policy.js';
+import { resolveInitialBuildRevision } from './config/runtime-deployment-revision.js';
 import { AgentServiceUnavailableError } from './domains/cats/services/agents/registry/AgentServiceUnavailableError.js';
 import { hasRecentWorkPublication } from './domains/cats/services/agents/routing/recent-global-work-reader.js';
 import { createRefreshingAcpSessionProvider } from './domains/cats/services/agents/session-contract/acp-session-provider.js';
@@ -659,7 +660,14 @@ async function main(): Promise<void> {
   const privateUserId = (process.env.CAT_CAFE_USER_ID ?? 'default-user').trim();
   let approvalDecisionReceipts: ApprovalDecisionReceiptService;
   installApprovalDecisionReceiptHooks(app, () => approvalDecisionReceipts);
-  let runtimeDeploymentRevision: string | null = null;
+  const declaredRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+  const declaredDeploymentId = process.env.CAT_CAFE_DEPLOYMENT_ID;
+  const runtimeEntrypointRoot = findMonorepoRoot(dirname(fileURLToPath(import.meta.url)));
+  let runtimeDeploymentRevision = resolveInitialBuildRevision({
+    entrypointRoot: runtimeEntrypointRoot,
+    declaredRuntimeRoot,
+    declaredDeploymentId,
+  });
   let runtimeDeploymentContext: RuntimeDeploymentProcessContext | undefined;
   const deploymentWaitLifecycleHolder: {
     current?: import('./domains/runtime-deployment/DeploymentWaitLifecycleService.js').DeploymentWaitLifecycleService;
@@ -669,9 +677,6 @@ async function main(): Promise<void> {
     | import('./domains/runtime-deployment/DeploymentWaitRecoverySweep.js').DeploymentWaitRecoverySweep
     | undefined;
   app.addHook('onClose', () => deploymentWaitRecoveryLoop?.stopPeriodic());
-  const declaredRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
-  const declaredDeploymentId = process.env.CAT_CAFE_DEPLOYMENT_ID;
-  const runtimeEntrypointRoot = findMonorepoRoot(dirname(fileURLToPath(import.meta.url)));
   if (!privateUserId) throw new Error('[api] CAT_CAFE_USER_ID must not be blank');
 
   if (isDebugMode) {

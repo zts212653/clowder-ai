@@ -15,8 +15,8 @@ describe('runtime health routes', () => {
     assert.match(src, /app\.get\('\/api\/ready',\s*readyHandler\)/);
   });
 
-  it('publishes only the owned boot revision for stale-page detection', () => {
-    assert.match(src, /let runtimeDeploymentRevision:\s*string\s*\|\s*null\s*=\s*null;/);
+  it('publishes the captured process revision while managed boots retain their ownership check', () => {
+    assert.match(src, /let runtimeDeploymentRevision = resolveInitialBuildRevision\(/);
     assert.match(src, /const context = await beginOwnedRuntimeDeployment\(/);
     assert.match(
       src,
