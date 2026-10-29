@@ -1,6 +1,6 @@
 import type { CatInvocationInfo, ThreadState } from '@/stores/chat-types';
 import { type ChatState, useChatStore } from '@/stores/chatStore';
-import type { BackgroundAgentMessage, HandleBackgroundMessageOptions } from './types';
+import type { AgentEventFields, BackgroundAgentMessage, HandleBackgroundMessageOptions } from './types';
 
 /**
  * Invocation slots (F108) are liveness truth: which cat is executing which invocation. Slot and
@@ -213,4 +213,20 @@ export function markThreadInvocationComplete(
   if (slotsBefore > 0 && Object.keys(store.getThreadState(msg.threadId).activeInvocations ?? {}).length === 0) {
     store.replaceThreadTargetCats(msg.threadId, []);
   }
+}
+
+/** An anonymous cleanup cannot prove ownership of a real execution. Hydrated orphans may retire. */
+export function isUnownedCancellation(
+  msg: AgentEventFields,
+  slots: ActiveInvocationSlots | undefined,
+  direct: CatInvocations,
+): boolean {
+  if (msg.errorCode !== 'INVOCATION_CANCELLED' || msg.invocationId) return false;
+  const owner = direct?.[msg.catId]?.invocationId;
+  return Boolean(latestRealSlotKey(slots, msg.catId) || (owner && !owner.startsWith('hydrated-')));
+}
+
+/** Prefer the response identity so cleanup and routed terminal stamps share a receipt. */
+export function terminalEventKey(msg: AgentEventFields): string | undefined {
+  return msg.messageId ?? msg.turnInvocationId ?? msg.invocationId;
 }

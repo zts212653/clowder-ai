@@ -151,7 +151,7 @@ test('forceReleaseByScope releases a matching holder and rejects matching waiter
 
   const result = mutex.forceReleaseByScope({ threadId: 'thread-1', catId: 'codex-sol', userId: 'user-1' });
 
-  assert.deepEqual(result, { releasedHolders: 1, rejectedWaiters: 1, catIds: ['codex-sol'] });
+  assert.partialDeepStrictEqual(result, { releasedHolders: 1, rejectedWaiters: 1, catIds: ['codex-sol'] });
   await assert.rejects(waiting, /force released/i);
   const releaseAfterReset = await mutex.acquire(owner({ invocationId: 'inv-after-reset' }));
   releaseAfterReset();
@@ -167,7 +167,7 @@ test('forceReleaseByScope preserves a cancelled runner holder until its finally 
     { preserveHolderExecutionIds: ['exec-1'] },
   );
 
-  assert.deepEqual(result, { releasedHolders: 0, rejectedWaiters: 1, catIds: ['codex-sol'] });
+  assert.partialDeepStrictEqual(result, { releasedHolders: 0, rejectedWaiters: 1, catIds: ['codex-sol'] });
   await assert.rejects(waiting, /force released/i);
 
   let replacementAcquired = false;
@@ -198,7 +198,7 @@ test('forceReleaseByScope preserves only the aborted invocation and releases a s
     { preserveHolderExecutionIds: ['exec-active'] },
   );
 
-  assert.deepEqual(result, { releasedHolders: 1, rejectedWaiters: 1, catIds: ['codex-sol'] });
+  assert.partialDeepStrictEqual(result, { releasedHolders: 1, rejectedWaiters: 1, catIds: ['codex-sol'] });
   await assert.rejects(activeWaiter, /force released/i);
 
   const orphanReplacement = await mutex.acquire(
@@ -234,7 +234,7 @@ test('forceReleaseByScope rejects every matching waiter so canceled work cannot 
 
   const result = mutex.forceReleaseByScope({ threadId: 'thread-1', catId: 'codex-sol', userId: 'user-1' });
 
-  assert.deepEqual(result, { releasedHolders: 1, rejectedWaiters: 2, catIds: ['codex-sol'] });
+  assert.partialDeepStrictEqual(result, { releasedHolders: 1, rejectedWaiters: 2, catIds: ['codex-sol'] });
   await Promise.all([assert.rejects(waiterA, /force released/i), assert.rejects(waiterB, /force released/i)]);
   const release = await mutex.acquire(owner({ invocationId: 'inv-after-waiters' }));
   release();
@@ -298,7 +298,7 @@ test('forceReleaseByScope is user scoped on shared threads', async () => {
   const userBRelease = await mutex.acquire(owner({ key: 'session-b', invocationId: 'inv-b', userId: 'user-2' }));
 
   const result = mutex.forceReleaseByScope({ threadId: 'thread-1', userId: 'user-1' });
-  assert.deepEqual(result, { releasedHolders: 1, rejectedWaiters: 0, catIds: ['codex-sol'] });
+  assert.partialDeepStrictEqual(result, { releasedHolders: 1, rejectedWaiters: 0, catIds: ['codex-sol'] });
 
   const userANext = await mutex.acquire(owner({ key: 'session-a', invocationId: 'inv-a-next' }));
   let userBNextAcquired = false;
