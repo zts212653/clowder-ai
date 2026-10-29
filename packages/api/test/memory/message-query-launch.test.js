@@ -43,7 +43,7 @@ function launch(t) {
     stdinInput: JSON.stringify({ query: 'PRIVATE-QUERY', rows: [{ body: 'PRIVATE-BODY' }] }),
     cwd: root,
     signal: new AbortController().signal,
-    env: { CAT_CAFE_READONLY: 'true', CLAUDE_CODE_SAFE_MODE: '0' },
+    env: { CAT_CAFE_READONLY: 'true', CLAUDE_CODE_SAFE_MODE: '0', CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '0' },
   };
 }
 const value = (args, flag) => args[args.indexOf(flag) + 1];
@@ -63,6 +63,8 @@ test('qualification removes plan workflow while preserving full instructions, wh
   assert.equal(prepared.cwd, original.cwd);
   assert.equal(prepared.env.CAT_CAFE_READONLY, 'true');
   assert.equal(prepared.env.CLAUDE_CODE_SAFE_MODE, '1');
+  assert.equal(prepared.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE, '1');
+  assert.equal(original.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE, '0', 'the shared carrier environment is not mutated');
   assert.equal(prepared.bindExecutionOwner, false);
   assert.equal(value(prepared.args, '--tools'), '');
   assert.equal(value(prepared.args, '--effort'), 'low');

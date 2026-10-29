@@ -57,9 +57,9 @@ function descendantsOf(rootPid, processes) {
 function isIdleProbeHelper(command) {
   return (
     command === '<defunct>' ||
-    command === 'npm exec @playwright/mcp@latest' ||
+    /^npm exec @playwright\/mcp@latest(?: --headless)?$/.test(command) ||
     /^\/Applications\/(?:Pencil|ChatGPT)\.app\/\S+\/(?:mcp-server-darwin-arm64|node_repl)$/.test(command) ||
-    /^node \/\S+\/node_modules\/\.bin\/playwright-mcp$/.test(command)
+    /^node \/\S+\/node_modules\/\.bin\/playwright-mcp(?: --headless)?$/.test(command)
   );
 }
 

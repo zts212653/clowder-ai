@@ -23,6 +23,7 @@ import {
   listedCopiesAligned,
 } from './read-evidence';
 import type { SettledLookupInput } from './settled-lookup';
+import { mailboxSourcesReadable } from './source-read-eligibility';
 
 /**
  * Follows original producer attempts and judges only owner-matching reads started after each write ended.
@@ -261,7 +262,7 @@ export function createApprovalSessions(deps: SessionsDeps): ApprovalSessions {
       deps.storeAvailable?.() !== false &&
       generation !== null &&
       generation === deps.readsStarted() &&
-      result.read.sources.approvals.status === 'available' &&
+      mailboxSourcesReadable(result.read, 'approvals') &&
       result.read.identity.ownerUserId === session.ownerUserId &&
       listedCopiesAligned(result.read, session.address, deps.storeItems(), deps.now());
     return current ? generation : null;
@@ -382,13 +383,22 @@ export function createApprovalSessions(deps: SessionsDeps): ApprovalSessions {
         result.kind !== 'ok' ||
         generation === null ||
         generation !== deps.readsStarted() ||
-        result.read.identity.ownerUserId !== ownerUserId ||
-        result.read.consistency.state !== 'verified' ||
-        result.read.sources.needsMe.status !== 'available'
+        result.read.identity.ownerUserId !== ownerUserId
       )
         return null;
       const items = result.read.items.filter((item) => item.decisionRef === decisionRef);
-      return items.length === 1 ? items[0] : null;
+      if (items.length !== 1) return null;
+      const item = items[0];
+      if (
+        item.approval &&
+        result.read.items.some((other) => other !== item && other.approval?.proposalId === item.approval?.proposalId)
+      )
+        return null;
+
+      // Runtime projection is its own source even when the Host coalesced an exact approval alias.
+      const source =
+        item.runtimeInteraction || item.choiceRequest ? 'structuredChoices' : item.approval ? 'approvals' : 'needsMe';
+      return mailboxSourcesReadable(result.read, source) ? item : null;
     },
 
     authorize(key, options) {

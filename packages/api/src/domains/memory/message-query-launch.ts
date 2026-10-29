@@ -63,7 +63,9 @@ export function prepareQualificationLaunch(
   return {
     ...original,
     args: [...args, '--safe-mode'],
-    env: { ...original.env, CLAUDE_CODE_SAFE_MODE: '1' },
+    // This closed JSON judgment has no human terminal title. The CLI's title
+    // generator would add unrelated background inference to the bounded call.
+    env: { ...original.env, CLAUDE_CODE_SAFE_MODE: '1', CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' },
     bindExecutionOwner: false,
   };
 }

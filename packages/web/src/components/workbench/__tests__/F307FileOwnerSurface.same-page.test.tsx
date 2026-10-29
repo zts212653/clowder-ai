@@ -226,6 +226,7 @@ it('the file toolbar uses that exact file/version in the existing Chat without o
     comment: 'keep this place',
     source: { kind: 'workspace_file', worktreeId: 'worktree-a', path: 'notes.md', revision },
   });
+  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click());
   const requestsBefore = mocks.apiFetch.mock.calls.length;
   try {
     await click('请猫修改');

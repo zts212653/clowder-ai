@@ -10,33 +10,26 @@
 }
 
 /* The file's own width decides which secondary actions move into More. */
-.v2-file-chrome {
+.content-file-toolbar {
   container-type: inline-size;
 }
-.v2-file-menu-listen,
-.v2-file-menu-view,
-.v2-html-menu-secondary {
+.file-toolbar-menu-listen,
+.file-toolbar-menu-view {
   display: none;
 }
 @container (max-width: 520px) {
-  .v2-file-listen {
+  .file-toolbar-listen {
     display: none;
   }
-  .v2-file-menu-listen {
+  .file-toolbar-menu-listen {
     display: block;
   }
 }
 @container (max-width: 420px) {
-  .v2-html-secondary {
+  .file-toolbar-view {
     display: none;
   }
-  .v2-html-menu-secondary {
-    display: flex;
-  }
-  .v2-file-view-toggle {
-    display: none;
-  }
-  .v2-file-menu-view {
+  .file-toolbar-menu-view {
     display: block;
   }
 }

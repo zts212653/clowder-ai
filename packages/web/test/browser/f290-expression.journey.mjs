@@ -75,38 +75,59 @@ test(
       transfer.items.add(new File([bytes], 'second.png', { type: 'image/png' }));
       input.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }));
     }, png.toString('base64'));
-    await a.page.locator('.cafe-attachment-preview[data-status="ready"]').nth(1).waitFor();
+    const secondPreview = a.page.locator('.cafe-attachment-preview[data-status="ready"]').nth(1);
+    await secondPreview.waitFor();
     step('two uploads ready');
-    await a.page
-      .getByRole('button', { name: '移除 second.png', exact: true })
-      .click()
-      .catch(async (error) => {
-        await a.page.screenshot({
-          path: join(process.env.F290_EXPRESSION_EVIDENCE_DIR ?? fixture.directory, 'composer-failure.png'),
-          fullPage: true,
-        });
-        const diagnostic = await a.page.evaluate(() =>
-          [
-            ...document.querySelectorAll(
-              '.composer-box, .cafe-attachment-previews, .cafe-attachment-preview, .cafe-attachment-remove',
-            ),
-          ].map((node) => {
-            const box = node.getBoundingClientRect(),
-              style = getComputedStyle(node);
-            return {
-              class: node.className,
-              position: style.position,
-              display: style.display,
-              width: box.width,
-              height: box.height,
-              x: box.x,
-              y: box.y,
-              hit: document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)?.className,
-            };
-          }),
-        );
-        throw new Error(`${error.message}\n${JSON.stringify(diagnostic)}`);
+    const removeSecond = a.page.getByRole('button', { name: '移除 second.png', exact: true });
+    const attachmentGeometry = await secondPreview.evaluate((preview) => {
+      const card = preview.getBoundingClientRect();
+      const remove = preview.querySelector('.cafe-attachment-remove');
+      if (!(remove instanceof HTMLElement)) throw new Error('Attachment remove control is missing');
+      const button = remove.getBoundingClientRect();
+      const hit = document.elementFromPoint(button.x + button.width / 2, button.y + button.height / 2);
+      return {
+        card: { width: card.width, height: card.height },
+        button: { width: button.width, height: button.height },
+        centerHitsRemove: hit === remove || remove.contains(hit),
+        centerHit: hit instanceof HTMLElement ? `${hit.tagName}.${hit.className}` : null,
+      };
+    });
+    assert.ok(
+      attachmentGeometry.card.width >= 72 && attachmentGeometry.card.height >= 64,
+      `Ready attachment must retain card geometry instead of status-dot geometry: ${JSON.stringify(attachmentGeometry)}`,
+    );
+    assert.equal(
+      attachmentGeometry.centerHitsRemove,
+      true,
+      `Ordinary pointer removal must hit the remove control: ${JSON.stringify(attachmentGeometry)}`,
+    );
+    await removeSecond.click().catch(async (error) => {
+      await a.page.screenshot({
+        path: join(process.env.F290_EXPRESSION_EVIDENCE_DIR ?? fixture.directory, 'composer-failure.png'),
+        fullPage: true,
       });
+      const diagnostic = await a.page.evaluate(() =>
+        [
+          ...document.querySelectorAll(
+            '.composer-box, .cafe-attachment-previews, .cafe-attachment-preview, .cafe-attachment-remove',
+          ),
+        ].map((node) => {
+          const box = node.getBoundingClientRect(),
+            style = getComputedStyle(node);
+          return {
+            class: node.className,
+            position: style.position,
+            display: style.display,
+            width: box.width,
+            height: box.height,
+            x: box.x,
+            y: box.y,
+            hit: document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)?.className,
+          };
+        }),
+      );
+      throw new Error(`${error.message}\n${JSON.stringify(diagnostic)}`);
+    });
     assert.equal(await a.page.locator('.cafe-attachment-preview').count(), 1);
     await a.page.locator('.composer textarea').fill('只发这一张 · ordinary image');
     await a.page.reload({ waitUntil: 'networkidle' });

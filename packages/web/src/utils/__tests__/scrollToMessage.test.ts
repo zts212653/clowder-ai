@@ -4,6 +4,7 @@ import {
   captureMessageScrollAnchor,
   captureMessageScrollAnchorForElement,
   highlightMessage,
+  matchesMessageScrollAnchor,
   restoreMessageScrollAnchor,
   restoreTimelineScrollAnchor,
   scrollToMessage,
@@ -71,7 +72,8 @@ describe('scrollToMessage', () => {
     container.getBoundingClientRect = () => ({ top: 100, bottom: 700 }) as DOMRect;
     const boundary = document.createElement('div');
     boundary.dataset.messageViewportId = 'long';
-    boundary.getBoundingClientRect = () => ({ top: -900, bottom: 950 }) as DOMRect;
+    boundary.getBoundingClientRect = () =>
+      ({ top: -900 + 500 - container.scrollTop, bottom: 1450 - container.scrollTop }) as DOMRect;
     const target = document.createElement('div');
     target.dataset.messageId = 'long';
     const above = document.createElement('p');
@@ -99,6 +101,9 @@ describe('scrollToMessage', () => {
     if (!anchor) throw new Error('expected a visible paragraph anchor');
     expect(restoreMessageScrollAnchor(container, anchor)).toBe(true);
     expect(container.scrollTop).toBe(580);
+    expect(matchesMessageScrollAnchor(container, anchor)).toBe(true);
+    readingTop += 4;
+    expect(matchesMessageScrollAnchor(container, anchor)).toBe(false);
   });
 
   it('finds the same paragraph when earlier reading blocks are folded away', () => {

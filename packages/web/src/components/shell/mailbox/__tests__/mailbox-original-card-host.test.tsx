@@ -10,6 +10,7 @@ import { writeShellLanguage } from '../../shell-language';
 import { writeShellPresentation } from '../../shell-presentation';
 import { createApprovalSessions } from '../approval-sessions';
 import { MailboxRow } from '../MailboxRow';
+import { collectiveFailure } from './collective-failure.fixture';
 import { approvalRow, okRead, storeItem } from './mailbox-fixtures';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -66,14 +67,25 @@ afterEach(() => {
   writeShellLanguage('zh');
   vi.unstubAllGlobals();
 });
-async function render(item: UnifiedAttentionItemV1, current = true, readOwner = 'owner-1', hasReader = true) {
+async function render(
+  item: UnifiedAttentionItemV1,
+  current = true,
+  readOwner = 'owner-1',
+  hasReader = true,
+  outage = false,
+) {
   const sessions = createApprovalSessions({
     readsStarted: () => starts,
     refetch: () => {},
     refreshStore: async () => {},
     storeItems: () => [],
     attempts: () => ({}),
-    latestRead: () => ({ result: okRead([item], { identity: { ownerUserId: readOwner } }), generation: 1 }),
+    latestRead: () => ({
+      result: outage
+        ? collectiveFailure(okRead([item], { identity: { ownerUserId: readOwner } }), true)
+        : okRead([item], { identity: { ownerUserId: readOwner } }),
+      generation: 1,
+    }),
     now: Date.now,
   });
   if (!hasReader) delete sessions.currentItem;
@@ -229,4 +241,17 @@ it.each([
   expect(button?.style.background).toBe('var(--shell-primary)');
   await act(async () => button?.click());
   expect(vi.mocked(apiFetch).mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
+});
+
+it.each([
+  'F225',
+  'F231',
+] as const)('submits the original %s writer under a dual Collective failure with its original payload', async (kind) => {
+  const item = source(kind);
+  await render(item, true, 'owner-1', true, true);
+  await act(async () => primary(kind)?.click());
+  const posts = vi.mocked(apiFetch).mock.calls.filter(([, options]) => options?.method === 'POST');
+  expect(posts).toHaveLength(1);
+  expect(posts[0][0]).toBe(`/api/${kind === 'F225' ? 'session-handoff' : 'profile-updates'}/original-p/approve`);
+  expect(posts[0][1]?.body && JSON.parse(String(posts[0][1].body))).toBeDefined();
 });

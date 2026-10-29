@@ -1,7 +1,7 @@
 'use client';
 
 import { isCloudBridgeReturnV1 } from '@cat-cafe/shared';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
@@ -11,6 +11,7 @@ import {
   cloudReplyCandidates,
   projectCloudReply,
 } from './cloud-reply-state';
+import { readDotCloudReply } from './read-dot-cloud-reply';
 
 const EMPTY: readonly ChatMessage[] = [];
 /** A bounded owner read restores reply provenance outside the currently loaded history page. */
@@ -18,14 +19,18 @@ export function useCloudReply(
   identity: CloudReplyIdentity | undefined,
   threadId?: string,
   messages = EMPTY,
+  { readDotEvent = false }: { readDotEvent?: boolean } = {},
 ): CloudReplyState {
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   const local =
     identity && threadId ? projectCloudReply(identity, threadId, messages) : { state: 'unverified' as const };
   const candidates = identity ? cloudReplyCandidates(identity, messages) : [];
-  const owner = getUserId();
+  const owner = identity ? getUserId() : undefined;
   const sourceMessageId = identity?.sourceMessageId;
   const targetCatId = identity?.targetCatId;
   const dispatchInvocationId = identity?.dispatchInvocationId;
+  const hostMessageId = identity?.hostMessageId;
   const source = messages.find((m) => m.id === identity?.sourceMessageId);
   const sourceHidden = Boolean(source?.extra?.recall || source?.visibility === 'whisper');
   const knownReplyId = local.state === 'source_replied' ? local.replyMessageId : undefined;
@@ -35,6 +40,8 @@ export function useCloudReply(
     sourceMessageId,
     targetCatId,
     dispatchInvocationId,
+    hostMessageId,
+    readDotEvent,
     sourceHidden,
     candidates.map((m) => [
       m.id,
@@ -53,12 +60,36 @@ export function useCloudReply(
       !targetCatId ||
       !dispatchInvocationId ||
       !threadId ||
-      targetCatId === 'gpt-dot' ||
+      (targetCatId === 'gpt-dot' && !readDotEvent) ||
       local.state === 'replied' ||
       sourceHidden
     )
       return;
     const controller = new AbortController();
+    if (targetCatId === 'gpt-dot') {
+      if (!hostMessageId || !/^dot_evt_[a-f0-9]{64}$/.test(hostMessageId)) return;
+      const read = async () => {
+        try {
+          const result = await readDotCloudReply(
+            { sourceMessageId, targetCatId, dispatchInvocationId, hostMessageId },
+            threadId,
+            messagesRef.current,
+            controller.signal,
+          );
+          if (controller.signal.aborted || owner !== getUserId()) return;
+          setRemote({ key, result });
+          if (result.state === 'replied') clearInterval(timer);
+        } catch {
+          /* An unavailable read never proves no reply. */
+        }
+      };
+      const timer = setInterval(() => void read(), 5000);
+      void read();
+      return () => {
+        controller.abort();
+        clearInterval(timer);
+      };
+    }
     const query = new URLSearchParams({ targetCatId, dispatchInvocationId });
     if (knownReplyId) query.set('replyMessageId', knownReplyId);
     void apiFetch(
@@ -104,6 +135,8 @@ export function useCloudReply(
     sourceMessageId,
     targetCatId,
     dispatchInvocationId,
+    hostMessageId,
+    readDotEvent,
     threadId,
     owner,
     sourceHidden,

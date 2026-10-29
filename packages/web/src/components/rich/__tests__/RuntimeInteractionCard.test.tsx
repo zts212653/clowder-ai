@@ -40,7 +40,7 @@ describe('RuntimeInteractionCard', () => {
         <RuntimeInteractionCard
           block={block}
           messageId={messageId}
-          host={{ ownerUserId, revision, cardRef, readCurrent: true }}
+          host={{ ownerUserId, revision, cardRef, readCurrent: true, verifyCurrentRead: () => true }}
         />,
       ),
     );
@@ -55,7 +55,7 @@ describe('RuntimeInteractionCard', () => {
         <RuntimeInteractionCard
           block={block}
           messageId={messageId}
-          host={{ ownerUserId: 'user-1', revision: 2000, cardRef, readCurrent: true }}
+          host={{ ownerUserId: 'user-1', revision: 2000, cardRef, readCurrent: true, verifyCurrentRead: () => true }}
         />,
       ),
     );
@@ -65,7 +65,7 @@ describe('RuntimeInteractionCard', () => {
         <RuntimeInteractionCard
           block={block}
           messageId={messageId}
-          host={{ ownerUserId: 'user-1', revision: 2000, cardRef, readCurrent: false }}
+          host={{ ownerUserId: 'user-1', revision: 2000, cardRef, readCurrent: false, verifyCurrentRead: () => true }}
         />,
       ),
     );
@@ -79,13 +79,32 @@ describe('RuntimeInteractionCard', () => {
         <RuntimeInteractionCard
           block={block}
           messageId={messageId}
-          host={{ ownerUserId: 'user-1', revision: 2000, cardRef, readCurrent: true }}
+          host={{ ownerUserId: 'user-1', revision: 2000, cardRef, readCurrent: true, verifyCurrentRead: () => true }}
           presentation="mailbox"
         />,
       ),
     );
     expect([...container.querySelectorAll('h3')].map((heading) => heading.textContent)).toEqual(['Run tests?']);
     expect([...container.querySelectorAll('button')].some((button) => !button.disabled)).toBe(true);
+  });
+
+  it('checks the latest host generation at press time before React rerenders', async () => {
+    let current = true;
+    vi.mocked(apiFetch).mockResolvedValue(okJson({ interaction: record(approvalRequest()) }));
+    await act(async () =>
+      root.render(
+        <RuntimeInteractionCard
+          block={block}
+          messageId={messageId}
+          host={{ ownerUserId: 'user-1', revision: 2000, cardRef, readCurrent: true, verifyCurrentRead: () => current }}
+        />,
+      ),
+    );
+    const button = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Allow once');
+    expect(button?.disabled).toBe(false);
+    current = false;
+    await act(async () => button?.click());
+    expect(vi.mocked(apiFetch).mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
   });
 
   it('hydrates exact approval decisions and submits through the canonical card ref', async () => {

@@ -82,11 +82,6 @@ export function V2WorkspaceFileChrome({
           {p.annotationCount != null ? ` ${p.annotationCount}` : ''}
         </Button>
       )}
-      {!p.isMarkdown && p.canEdit && (
-        <Button onClick={p.onToggleEdit} active={p.editMode} title={t.editTitle}>
-          {p.editMode ? t.editing : t.edit}
-        </Button>
-      )}
     </>
   );
   return (
@@ -153,27 +148,35 @@ export function V2WorkspaceFileChrome({
               </Button>
             ) : undefined
           }
+          location={
+            <button
+              type="button"
+              data-testid="v2-file-directory"
+              onClick={p.onRevealInTree}
+              disabled={!p.onRevealInTree}
+              title={t.reveal}
+              className="block w-full truncate rounded px-1 py-1 text-left text-xs hover:bg-cafe-surface-sunken disabled:cursor-default"
+            >
+              {directory}
+            </button>
+          }
           controls={
             <>
-              <button
-                type="button"
-                data-testid="v2-file-directory"
-                onClick={p.onRevealInTree}
-                disabled={!p.onRevealInTree}
-                title={t.reveal}
-                className="shrink-0 rounded border border-cafe px-2 py-1 text-xs"
-              >
-                {directory}
-              </button>
-              {toggle}
-              {secondaryActions}
-              {listen}
-              {cache}
-              {p.isMarkdown && p.canEdit && (
+              <span className="file-toolbar-view shrink-0">{toggle}</span>
+              {p.canEdit && (
                 <Button onClick={p.onToggleEdit} active={p.editMode} title={t.editTitle}>
                   {p.editMode ? t.editing : t.edit}
                 </Button>
               )}
+              <span className="file-toolbar-listen shrink-0">{listen}</span>
+            </>
+          }
+          overflowControls={
+            <>
+              <div className="file-toolbar-menu-view">{toggle}</div>
+              <div className="file-toolbar-menu-listen">{listen}</div>
+              {secondaryActions}
+              {cache}
             </>
           }
         />

@@ -30,7 +30,7 @@ afterEach(async () => {
   container.remove();
 });
 function Probe({ scope, messages = [source] }: { scope: CloudReplyIdentity; messages?: readonly ChatMessage[] }) {
-  current = useCloudReply(scope, 'thread-pro', messages);
+  current = useCloudReply(scope, 'thread-pro', messages, { readDotEvent: scope.targetCatId === 'gpt-dot' });
   return <span>{current.state}</span>;
 }
 
@@ -47,6 +47,45 @@ it('restores a reply outside the current page through an exact read-only owner l
   expect(url).toContain('/messages/source119/cloud-return?');
   expect(url).toContain('dispatchInvocationId=attempt119');
   expect(init?.method).toBeUndefined();
+});
+
+it.each([
+  'current',
+  'stale',
+  'other-thread',
+  'hidden',
+  'missing',
+])('uses the existing exact dot event receipt (%s) without borrowing another reply', async (variant) => {
+  const dotIdentity = { ...identity, targetCatId: 'gpt-dot', hostMessageId: `dot_evt_${'a'.repeat(64)}` };
+  const answer: ChatMessage = {
+    id: 'dot-answer',
+    type: 'assistant',
+    from: { kind: 'agent', catId: 'gpt-dot' },
+    catId: 'gpt-dot',
+    content: 'dot 带回了图片',
+    timestamp: 2,
+    replyTo: source.id,
+  };
+  if (variant === 'hidden') answer.visibility = 'whisper';
+  vi.mocked(apiFetch).mockImplementation(
+    async () =>
+      new Response(
+        JSON.stringify({
+          threadId: variant === 'other-thread' ? 'other-thread' : 'thread-pro',
+          stale: variant === 'stale',
+          replyMessageId: 'dot-answer',
+          receivedAt: 1,
+          readAt: 2,
+        }),
+      ),
+  );
+  await act(async () =>
+    root.render(<Probe scope={dotIdentity} messages={variant === 'missing' ? [source] : [source, answer]} />),
+  );
+  expect(current).toEqual(
+    variant === 'current' ? { state: 'replied', replyMessageId: 'dot-answer' } : { state: 'unverified' },
+  );
+  expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe(`/api/plugins/chatgpt-dot/delivery/${dotIdentity.hostMessageId}`);
 });
 
 it('keeps an old-attempt read unverified instead of promoting it', async () => {

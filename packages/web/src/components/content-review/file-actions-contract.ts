@@ -21,7 +21,7 @@ export type FileActionsProps = {
   initiallyOpen?: boolean;
   hideTrigger?: boolean;
   onOpenChange?: (open: boolean) => void;
-  appearance?: 'menu' | 'classic' | 'copy';
+  appearance?: 'menu' | 'classic' | 'copy' | 'toolbar';
   viewport?: Pick<ReturnType<typeof useArtworkViewport>, 'renderedScale' | 'fit' | 'actual'>;
   wholeWorkAction?: ReactNode;
   onHistory?: (() => void) | null;

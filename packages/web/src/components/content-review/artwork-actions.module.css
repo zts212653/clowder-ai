@@ -42,6 +42,23 @@
   font-size: 12px;
   white-space: nowrap;
 }
+.toolbarTrigger {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cafe-text-secondary);
+  font-size: 18px;
+  line-height: 1;
+}
+.toolbarTrigger:hover {
+  background: var(--cafe-surface-elevated);
+}
+.toolbarTrigger:focus-visible {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 2px;
+}
 .menu {
   position: fixed;
   margin: 0;

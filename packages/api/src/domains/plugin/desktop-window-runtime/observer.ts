@@ -29,6 +29,7 @@ export class DesktopWindowObserver {
   private attempt?: ObservationAttempt;
   private inFlight?: Promise<void>;
   private timer?: ReturnType<typeof setTimeout>;
+  private nextPollAtMonotonicMs?: number;
 
   constructor(private readonly options: Options) {}
 
@@ -62,6 +63,7 @@ export class DesktopWindowObserver {
       diagnostics: new ObservationDiagnostics(),
     };
     this.attempt = attempt;
+    this.nextPollAtMonotonicMs = attempt.startedMonotonicMs + deadlineMs;
     let sample = await this.poll(attempt);
     // Only a fresh native reply may renew a still-current Broker binding.
     // Expired bindings fail here; renewal never revives old feature authority.
@@ -134,21 +136,26 @@ export class DesktopWindowObserver {
   }
 
   start(onFailure: (error: unknown) => void): void {
-    this.timer = setTimeout(
-      () => {
-        this.timer = undefined;
-        void this.observe().then(() => {
-          if (this.options.isCurrent()) this.start(onFailure);
-        }, onFailure);
-      },
-      Math.max(1, Math.floor(this.options.freshnessMs / 3)),
-    );
+    const intervalMs = Math.max(1, Math.floor(this.options.freshnessMs / 3));
+    // Host preparation already counts toward the heartbeat interval. Sleeping
+    // another full interval after slow work can exhaust a still-live lease.
+    const delayMs =
+      this.nextPollAtMonotonicMs === undefined
+        ? intervalMs
+        : Math.max(1, Math.min(intervalMs, Math.ceil(this.nextPollAtMonotonicMs - performance.now())));
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      void this.observe().then(() => {
+        if (this.options.isCurrent()) this.start(onFailure);
+      }, onFailure);
+    }, delayMs);
     this.timer.unref();
   }
 
   stop(): void {
     clearTimeout(this.timer);
     this.attempt = undefined;
+    this.nextPollAtMonotonicMs = undefined;
   }
 
   diagnostic(error?: unknown): DesktopWindowFailure['observation'] {

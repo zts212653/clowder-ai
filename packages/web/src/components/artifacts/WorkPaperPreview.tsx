@@ -1,6 +1,7 @@
 'use client';
 import { projectFileContent, type ThreadArtifactDTO } from '@cat-cafe/shared';
 import { useArtifactContent } from '@/hooks/useArtifactContent';
+import { maskLeadingMarkdownFrontmatter } from '@/lib/markdown-frontmatter';
 import { classifyArtifactView } from './artifact-view';
 import { useNearWorkViewport } from './useNearWorkViewport';
 
@@ -24,7 +25,9 @@ function PaperContent({ artifact }: { artifact: ThreadArtifactDTO }) {
   const text =
     kind === 'markdown' || kind === 'text' || (artifact.type === 'code' && classifyArtifactView(artifact) === 'text');
   const body = useArtifactContent(artifact, null, near && text && !!artifact.url);
-  const lines = body.content?.trim().split('\n');
+  const preview =
+    kind === 'markdown' && body.content ? maskLeadingMarkdownFrontmatter(body.content).trim() : body.content?.trim();
+  const lines = preview ? preview.split('\n') : null;
   const plain = (line: string) => (artifact.type === 'code' ? line : line.replace(/^#+\s*/, ''));
   const pr = artifact.type === 'pr' ? /^([^/]+\/[^#]+)#(\d+)$/.exec(artifact.ref?.trim() ?? '') : null;
   return (

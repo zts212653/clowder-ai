@@ -4,7 +4,7 @@ import type { ChatMessage } from '@/stores/chat-types';
 export type CloudReplyIdentity = Pick<
   CloudBridgeOutboundReceiptV1,
   'sourceMessageId' | 'targetCatId' | 'dispatchInvocationId'
->;
+> & { hostMessageId?: string };
 export type CloudReplyState = { state: 'unverified' } | { state: 'replied' | 'source_replied'; replyMessageId: string };
 
 export function cloudReplyCandidates(identity: CloudReplyIdentity, messages: readonly ChatMessage[]) {
@@ -13,7 +13,7 @@ export function cloudReplyCandidates(identity: CloudReplyIdentity, messages: rea
   );
 }
 
-function isCompletedReply(answer: ChatMessage, targetCatId: string): boolean {
+export function isCompletedCloudReply(answer: ChatMessage, targetCatId: string): boolean {
   return (
     answer.type === 'assistant' &&
     answer.from?.kind === 'agent' &&
@@ -36,7 +36,7 @@ export function projectCloudReply(
     return { state: 'unverified' };
   let sourceReply: string | undefined;
   for (const answer of cloudReplyCandidates(identity, messages)) {
-    if (!isCompletedReply(answer, identity.targetCatId)) continue;
+    if (!isCompletedCloudReply(answer, identity.targetCatId)) continue;
     const proof = answer.extra?.cloudBridgeReturn;
     if (isCloudBridgeReturnV1(proof)) {
       if (

@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { test } from 'node:test';
+import { pathToFileURL } from 'node:url';
+import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import {
   prepareDshSecretPatch,
   verifyDshSecretPatch,
@@ -33,6 +36,53 @@ test('DSH launch admits only its exact managed patch and immutable plugin conten
       `- insert:\n    - id: cat-cafe-secret-content\n      name: ${JSON.stringify(changedPlugin)}\n`,
     );
     assert.equal(verifyDshSecretPatch(forged), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('DSH launch versions its managed patch without overwriting a retired template', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'secret-dsh-patch-version-'));
+  try {
+    const directory = join(root, '.cat-cafe', 'native-guards');
+    await mkdir(directory, { recursive: true });
+    const retiredPlugin = join(root, 'scripts', 'secret-dsh-plugin.mjs');
+    await mkdir(join(root, 'scripts'));
+    await copyFile(secretRuntimeScript('secret-dsh-plugin.mjs'), retiredPlugin);
+    const retiredPatch = join(directory, 'secret-dsh.patch.yml');
+    const retiredContent = `- insert:\n    - id: cat-cafe-secret-content\n      name: ${JSON.stringify(pathToFileURL(retiredPlugin).href)}\n- id: acp\n  inject: [acpAppStartup, catCafeSecretContent]\n`;
+    await writeFile(retiredPatch, retiredContent, { mode: 0o600 });
+    assert.equal(verifyDshSecretPatch(retiredPatch), false);
+
+    const args = await prepareDshSecretPatch('/fixture/dsh', ['--profile', 'acp'], root);
+    const patch = args.at(-1);
+    assert.ok(patch);
+    assert.notEqual(patch, retiredPatch);
+    assert.equal(await readFile(retiredPatch, 'utf8'), retiredContent);
+
+    const currentContent = await readFile(patch, 'utf8');
+    const revision = createHash('sha256').update(currentContent).digest('hex');
+    assert.equal(basename(patch), `secret-dsh-${revision}.patch.yml`);
+    assert.equal(verifyDshSecretPatch(patch), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('DSH launch admits concurrent first creation of the same managed patch revision', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'secret-dsh-patch-concurrent-'));
+  try {
+    const attempts = await Promise.allSettled(
+      Array.from({ length: 32 }, () => prepareDshSecretPatch('/fixture/dsh', ['--profile', 'acp'], root)),
+    );
+    const rejected = attempts.filter((attempt) => attempt.status === 'rejected');
+    assert.deepEqual(rejected, []);
+
+    const patches = attempts.map((attempt) => {
+      assert.equal(attempt.status, 'fulfilled');
+      return attempt.value.at(-1);
+    });
+    assert.equal(new Set(patches).size, 1);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

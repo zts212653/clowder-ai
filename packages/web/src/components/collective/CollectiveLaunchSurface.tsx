@@ -24,6 +24,7 @@ import { useCollectiveConnectorLaunch } from './use-collective-connector-launch'
 import { useCollectiveContextBridge } from './use-collective-context-bridge';
 import { useCollectiveDocumentBridge } from './use-collective-document-bridge';
 import { useCollectiveEntryPairing } from './use-collective-entry-pairing';
+import { useCollectiveFrameRecovery } from './use-collective-frame-recovery';
 import { useCollectiveMediaRpc } from './use-collective-media-rpc';
 import { useCollectiveMediaShare } from './use-collective-media-share';
 import { useCollectivePairingBridge } from './use-collective-pairing-bridge';
@@ -118,13 +119,13 @@ export function CollectiveLaunchSurface({
   const policyBridge = useCollectiveWorkPolicyBridge(iframeRef, connection, contextBridge.context);
   useCollectiveAppearanceBridge({ iframeRef, frameGeneration: world.frameGeneration });
   const frameUrl = world.frameUrl;
-  const previousRemoteState = useRef(status?.remoteService?.state);
-  useEffect(() => {
-    const current = status?.remoteService?.state;
-    if (previousRemoteState.current === 'offline' && current && current !== 'offline')
-      setFrameAttempt((attempt) => attempt + 1);
-    previousRemoteState.current = current;
-  }, [status?.remoteService?.state]);
+  useCollectiveFrameRecovery({
+    iframeRef,
+    frameGeneration: world.frameGeneration,
+    remoteState: status?.remoteService?.state,
+    remoteServiceInstanceId: status?.remoteService?.serviceInstanceId,
+    setFrameAttempt,
+  });
 
   if (!status || status.runtimeStatus === 'inactive')
     return <CollectiveConnectorBoundary status={status} error={error} />;

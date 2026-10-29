@@ -74,6 +74,7 @@ it('the common text landing restores the exact playing sentence and keeps native
   expect(active?.getAttribute('data-listen-sentence-anchor')).toBe(sentences[2]!.anchor);
   expect(scroll.mock.contexts).toContain(active);
   expect(container.textContent).toContain('听读');
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click());
   expect(container.textContent).toContain('缓存全文');
   expect(controls.startDocument).not.toHaveBeenCalled();
 });

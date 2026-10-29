@@ -22,7 +22,9 @@ export function FileToolbar({
   byteLength,
   text,
   leading,
+  location,
   controls,
+  overflowControls,
   readOnlyReason,
 }: {
   source: FileActionSource;
@@ -31,7 +33,9 @@ export function FileToolbar({
   byteLength?: number;
   text?: string;
   leading?: ReactNode;
+  location?: ReactNode;
   controls?: ReactNode;
+  overflowControls?: ReactNode;
   readOnlyReason?: string;
 }) {
   const name = useRef<HTMLSpanElement>(null);
@@ -45,18 +49,18 @@ export function FileToolbar({
       role="toolbar"
       aria-label={copy.toolbar}
       data-testid="content-file-toolbar"
-      className="flex h-10 min-w-0 shrink-0 items-center gap-2 border-b border-cafe-subtle bg-cafe-surface px-3"
+      className="content-file-toolbar flex h-10 min-w-0 shrink-0 items-center gap-2 border-b border-cafe-subtle bg-cafe-surface px-3"
     >
       {leading ?? owner.leading}
       <span ref={name} title={filename} className="min-w-0 flex-1 truncate text-xs text-cafe-muted">
-        {filename}
+        {location ?? filename}
       </span>
       {readOnlyReason && (
         <span className="shrink-0 text-xs text-cafe-muted" title={readOnlyReason}>
           {copy.readonly}
         </span>
       )}
-      <div className="flex min-w-0 shrink items-center gap-2 overflow-x-auto">
+      <div className="flex min-w-0 shrink items-center gap-1 overflow-x-auto whitespace-nowrap">
         {hostControls}
         {owner.controls}
         {controls}
@@ -68,6 +72,8 @@ export function FileToolbar({
         byteLength={byteLength}
         text={text}
         contextRef={name}
+        appearance="toolbar"
+        wholeWorkAction={overflowControls}
         copyName
       />
     </div>

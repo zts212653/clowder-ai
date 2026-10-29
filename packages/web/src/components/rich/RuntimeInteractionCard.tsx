@@ -52,6 +52,8 @@ export interface RuntimeInteractionHostRead {
   revision: number;
   cardRef: NonNullable<RuntimeInteractionRecord['cardRef']>;
   readCurrent: boolean;
+  /** Re-check containing owner/source/generation immediately before a hosted write. */
+  verifyCurrentRead: () => boolean;
 }
 export function RuntimeInteractionCard({
   block,
@@ -127,7 +129,7 @@ export function RuntimeInteractionCard({
       source.failed ||
       source.stale ||
       submittingRef.current ||
-      (host && (!hostAligned || loading))
+      (host && (!hostAligned || loading || host.verifyCurrentRead?.() !== true))
     )
       return;
     submittingRef.current = true;

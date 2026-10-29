@@ -6,6 +6,7 @@ vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 
 import { apiFetch } from '@/utils/api-client';
 import { CollectiveLaunchSurface } from '../CollectiveLaunchSurface';
+import { getWorldDirectoryStoreSnapshot, resetWorldDirectoryStoreForTests } from '../collective-world-directory-store';
 
 const mockApiFetch = vi.mocked(apiFetch);
 const intent = {
@@ -124,6 +125,26 @@ describe('CollectiveLaunchSurface', () => {
     expect(mockApiFetch.mock.calls.some(([url]) => String(url).endsWith('/service/provision'))).toBe(false);
   });
 
+  it('keeps loading the configured Client while the bounded remote probe is unconfirmed', async () => {
+    mockApiFetch.mockResolvedValue(
+      response({
+        runtimeStatus: 'active',
+        connections: [],
+        remoteService: {
+          state: 'unconfirmed',
+          probe: 'timed_out',
+          serviceUrl: 'http://127.0.0.1:15201',
+        },
+      }),
+    );
+    await act(async () => root.render(<CollectiveLaunchSurface />));
+    await flush();
+
+    expect(new URL(requiredIframe(container).src).origin).toBe('http://127.0.0.1:15201');
+    expect(container.textContent).not.toContain('暂时无法打开这个共同体');
+    expect(mockApiFetch.mock.calls.some(([url]) => String(url).endsWith('/service/provision'))).toBe(false);
+  });
+
   it('keeps the remote destination visible through tunnel loss and retries it without provisioning', async () => {
     let offline = true;
     mockApiFetch.mockImplementation(async () =>
@@ -147,6 +168,192 @@ describe('CollectiveLaunchSurface', () => {
     expect(new URL(requiredIframe(container).src).origin).toBe('http://127.0.0.1:15201');
     expect(container.textContent).not.toContain('暂时无法打开');
     expect(mockApiFetch.mock.calls.some(([url]) => String(url).endsWith('/service/provision'))).toBe(false);
+  });
+
+  it('keeps a handshaken Client mounted when a confirmed remote outage recovers', async () => {
+    resetWorldDirectoryStoreForTests();
+    vi.useFakeTimers();
+    let remoteState: 'offline' | 'unpaired' = 'unpaired';
+    try {
+      mockApiFetch.mockImplementation(async () =>
+        response({
+          runtimeStatus: 'active',
+          connections: [],
+          remoteService: {
+            state: remoteState,
+            serviceUrl: 'http://127.0.0.1:15201',
+            ...(remoteState === 'unpaired' ? { serviceInstanceId: 'svc_remote001' } : {}),
+          },
+        }),
+      );
+      await act(async () => root.render(<CollectiveLaunchSurface />));
+      await flush();
+      const iframe = requiredIframe(container);
+      const contentWindow = iframe.contentWindow;
+      if (!contentWindow) throw new Error('Expected Collective iframe contentWindow');
+      const postMessage = vi.spyOn(contentWindow, 'postMessage');
+      await act(async () =>
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            source: iframe.contentWindow,
+            origin: 'http://127.0.0.1:15201',
+            data: { type: 'collective:world-directory-ready' },
+          }),
+        ),
+      );
+      const init = postMessage.mock.calls.find(
+        ([message]) => message.type === 'collective:host-world-directory-init',
+      )?.[0];
+      if (!init) throw new Error('Host did not initialize the world-directory bridge');
+      const publishDirectory = async (revision: number) =>
+        act(async () =>
+          window.dispatchEvent(
+            new MessageEvent('message', {
+              source: iframe.contentWindow,
+              origin: 'http://127.0.0.1:15201',
+              data: {
+                type: 'collective:client-world-directory',
+                bridgeId: init.bridgeId,
+                revision,
+                state: 'ready',
+                serviceInstanceId: 'svc_remote001',
+                humanId: 'human_12345678',
+                currentCollectiveId: 'col_12345678',
+                memberships: [{ collectiveId: 'col_12345678', name: 'Existing world', role: 'steward' }],
+              },
+            }),
+          ),
+        );
+      await publishDirectory(1);
+      expect(getWorldDirectoryStoreSnapshot().services[0]).toMatchObject({ status: 'ready', revision: 1 });
+
+      remoteState = 'offline';
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      await flush();
+      expect(container.textContent).toContain('暂时无法打开这个共同体');
+
+      remoteState = 'unpaired';
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      await flush();
+      expect(requiredIframe(container)).toBe(iframe);
+      expect(container.textContent).not.toContain('暂时无法打开这个共同体');
+      await publishDirectory(2);
+      expect(getWorldDirectoryStoreSnapshot().services[0]).toMatchObject({ status: 'ready', revision: 2 });
+    } finally {
+      await act(async () => resetWorldDirectoryStoreForTests());
+      vi.useRealTimers();
+    }
+  });
+
+  it('recreates a handshaken Client when the recovered remote reports another Service instance', async () => {
+    vi.useFakeTimers();
+    let remoteState: 'offline' | 'unpaired' = 'unpaired';
+    let serviceInstanceId = 'svc_remote001';
+    try {
+      mockApiFetch.mockImplementation(async () =>
+        response({
+          runtimeStatus: 'active',
+          connections: [],
+          remoteService: {
+            state: remoteState,
+            serviceUrl: 'http://127.0.0.1:15201',
+            ...(remoteState === 'unpaired' ? { serviceInstanceId } : {}),
+          },
+        }),
+      );
+      await act(async () => root.render(<CollectiveLaunchSurface />));
+      await flush();
+      const firstFrame = requiredIframe(container);
+      await act(async () =>
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            source: firstFrame.contentWindow,
+            origin: 'http://127.0.0.1:15201',
+            data: { type: 'collective:world-directory-ready' },
+          }),
+        ),
+      );
+
+      remoteState = 'offline';
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      serviceInstanceId = 'svc_remote002';
+      remoteState = 'unpaired';
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      await flush();
+
+      expect(requiredIframe(container)).not.toBe(firstFrame);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recreates a verified Client when a late first probe reports another Service instance', async () => {
+    resetWorldDirectoryStoreForTests();
+    vi.useFakeTimers();
+    let remoteState: 'unconfirmed' | 'unpaired' = 'unconfirmed';
+    try {
+      mockApiFetch.mockImplementation(async () =>
+        response({
+          runtimeStatus: 'active',
+          connections: [],
+          remoteService: {
+            state: remoteState,
+            serviceUrl: 'http://127.0.0.1:15201',
+            ...(remoteState === 'unpaired' ? { serviceInstanceId: 'svc_remote002' } : {}),
+          },
+        }),
+      );
+      await act(async () => root.render(<CollectiveLaunchSurface />));
+      await flush();
+      const firstFrame = requiredIframe(container);
+      const contentWindow = firstFrame.contentWindow;
+      if (!contentWindow) throw new Error('Expected Collective iframe contentWindow');
+      const postMessage = vi.spyOn(contentWindow, 'postMessage');
+      await act(async () =>
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            source: firstFrame.contentWindow,
+            origin: 'http://127.0.0.1:15201',
+            data: { type: 'collective:world-directory-ready' },
+          }),
+        ),
+      );
+      const init = postMessage.mock.calls.find(
+        ([message]) => message.type === 'collective:host-world-directory-init',
+      )?.[0];
+      if (!init) throw new Error('Host did not initialize the world-directory bridge');
+      await act(async () =>
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            source: firstFrame.contentWindow,
+            origin: 'http://127.0.0.1:15201',
+            data: {
+              type: 'collective:client-world-directory',
+              bridgeId: init.bridgeId,
+              revision: 1,
+              state: 'ready',
+              serviceInstanceId: 'svc_remote001',
+              humanId: 'human_12345678',
+              currentCollectiveId: 'col_12345678',
+              memberships: [{ collectiveId: 'col_12345678', name: 'Existing world', role: 'steward' }],
+            },
+          }),
+        ),
+      );
+      expect(getWorldDirectoryStoreSnapshot().services[0]).toMatchObject({
+        status: 'ready',
+        serviceInstanceId: 'svc_remote001',
+      });
+
+      remoteState = 'unpaired';
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      await flush();
+
+      expect(requiredIframe(container)).not.toBe(firstFrame);
+    } finally {
+      await act(async () => resetWorldDirectoryStoreForTests());
+      vi.useRealTimers();
+    }
   });
 
   it('creates the independent local Service without a terminal and opens its one-time bootstrap in the canonical Client', async () => {

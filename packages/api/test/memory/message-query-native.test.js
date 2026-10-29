@@ -57,6 +57,7 @@ async function exercise(t, failed = false) {
     assert.ok(args.includes('--strict-mcp-config'));
     assert.ok(args.includes('--safe-mode'));
     assert.equal(options.env.CLAUDE_CODE_SAFE_MODE, '1');
+    assert.equal(options.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE, '1');
     assert.equal(readFileSync(at('--system-prompt-file'), 'utf8'), fullL0);
     // Only this owned fixture is spawned. The actual carrier, final launch
     // adapter, OAuth resolver and process-supervisor/exit path run unchanged.

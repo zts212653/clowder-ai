@@ -1,6 +1,7 @@
 // F209 Phase A: passage-level vector CRUD for raw semantic / hybrid recall.
 
 import type Database from 'better-sqlite3';
+import type { FileVectorQueryReader } from './file-vector-read-window.js';
 
 export function passageVectorKey(docAnchor: string, passageId: string): string {
   return JSON.stringify([docAnchor, passageId]);
@@ -17,7 +18,8 @@ export function parsePassageVectorKey(key: string): { docAnchor: string; passage
 export class PassageVectorStore {
   constructor(
     private db: Database.Database,
-    private dim: number,
+    _dim: number,
+    private readonly readQuery: FileVectorQueryReader = (query) => query(),
   ) {}
 
   upsert(passageKey: string, embedding: Float32Array): void {
@@ -47,12 +49,11 @@ export class PassageVectorStore {
   }
 
   search(queryVec: Float32Array, k: number): Array<{ passageKey: string; distance: number }> {
-    return this.db
-      .prepare(
-        `SELECT passage_key as passageKey, distance FROM passage_vectors
+    const statement = this.db.prepare(
+      `SELECT passage_key as passageKey, distance FROM passage_vectors
       WHERE embedding MATCH ? AND k = ?`,
-      )
-      .all(queryVec, k) as Array<{ passageKey: string; distance: number }>;
+    );
+    return this.readQuery(() => statement.all(queryVec, k)) as Array<{ passageKey: string; distance: number }>;
   }
 
   clearAll(): void {

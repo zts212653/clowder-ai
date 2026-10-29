@@ -26,6 +26,7 @@ export function MemoryPersonDetail({
     else detail.retry();
   });
   const data = detail.data;
+  const mutationBlocked = action.busy || !!action.error;
   return (
     <aside
       aria-label="人物详情"
@@ -82,7 +83,7 @@ export function MemoryPersonDetail({
                   key={`${claim.claimId}:${claim.revision}`}
                   personId={personId}
                   claim={claim}
-                  busy={action.busy || !!action.error}
+                  busy={mutationBlocked}
                   submit={action.submit}
                 />
               ))
@@ -98,7 +99,7 @@ export function MemoryPersonDetail({
                   key={`${item.eventId}:${item.revision}`}
                   personId={personId}
                   item={item}
-                  busy={action.busy || !!action.error}
+                  busy={mutationBlocked}
                   submit={action.submit}
                 />
               ))
@@ -113,7 +114,7 @@ export function MemoryPersonDetail({
           )}
           <button
             type="button"
-            disabled={action.busy}
+            disabled={mutationBlocked}
             onClick={() => {
               setForgetting(!forgetting);
               setConfirmed(false);
@@ -131,7 +132,7 @@ export function MemoryPersonDetail({
               </label>
               <button
                 type="button"
-                disabled={!confirmed || action.busy}
+                disabled={!confirmed || mutationBlocked}
                 onClick={() =>
                   action.submit({
                     action: 'hard_forget_person',

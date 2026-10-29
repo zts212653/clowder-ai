@@ -175,7 +175,12 @@ export function WorkspaceFileViewer(props: WorkspaceFileViewerProps | ContentDoc
                   {rendered ? copy.source : copy.rendered}
                 </button>
               )}
-              {listenAction}
+              <span className="file-toolbar-listen shrink-0">{listenAction}</span>
+            </>
+          }
+          overflowControls={
+            <>
+              <div className="file-toolbar-menu-listen">{listenAction}</div>
               {cacheAction}
             </>
           }

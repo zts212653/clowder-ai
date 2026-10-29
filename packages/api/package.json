@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "node --import tsx ./scripts/copy-bundled-plugin-packages.mjs --source && node scripts/dev-supervisor.mjs",
     "verify:sigusr1": "node scripts/verify-sigusr1-guard.mjs",
-    "build": "pnpm --dir ../shared build && pnpm --dir ../mcp-server build && tsc && node ./scripts/build-governance-metadata.mjs && node ./scripts/copy-bundled-plugin-packages.mjs && node ./scripts/copy-marketplace-catalog-data.mjs && node ../../scripts/check-provider-request-recorder.mjs",
+    "build": "pnpm --dir ../shared build && pnpm --dir ../mcp-server build && tsc && node ./scripts/build-memory-read-window.mjs && node ./scripts/build-governance-metadata.mjs && node ./scripts/copy-bundled-plugin-packages.mjs && node ./scripts/copy-marketplace-catalog-data.mjs && node ../../scripts/check-provider-request-recorder.mjs",
     "gate:f202-artifacts": "node scripts/f202-connector-artifact-gate.mjs",
     "audit:codex-protocol": "node ./scripts/audit-codex-app-server-protocol.mjs",
     "verify:codex-build-independence": "node ./scripts/verify-codex-build-independence.mjs",

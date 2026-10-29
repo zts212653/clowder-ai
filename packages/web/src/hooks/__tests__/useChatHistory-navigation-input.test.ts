@@ -280,6 +280,48 @@ describe('useChatHistory navigation input owner', () => {
     expect(readChatReadingRef(captured.ref)).toBeUndefined();
   });
 
+  it('confirms the saved paragraph after a long origin reflows and its real widget acknowledges input', async () => {
+    const threadId = 'search-return-reflowed-paragraph';
+    const { el, top } = await openThread(threadId);
+    const boundary = el.querySelector<HTMLElement>('[data-message-viewport-id="first"]')!;
+    const paragraph = document.createElement('p');
+    paragraph.textContent = 'The same paragraph the reader left.';
+    let paragraphTop = 240;
+    paragraph.getBoundingClientRect = () =>
+      ({ top: 100 + paragraphTop - top.get(), bottom: 140 + paragraphTop - top.get() }) as DOMRect;
+    boundary.querySelector('[data-message-id]')!.appendChild(paragraph);
+    act(() => {
+      const gesture = beginGesture();
+      gesture.scrollTo(200);
+      gesture.end();
+    });
+    const origin = capturedHook!.captureReadingRef()!;
+    expect(readChatReadingRef(origin.ref)?.position).toMatchObject({
+      messageAnchor: { messageId: 'first', viewportOffsetPx: -200, blockViewportOffsetPx: 40 },
+    });
+    const fixture = await mountReceiptWidget(el);
+    try {
+      paragraphTop += 80;
+      act(() => {
+        const gesture = beginGesture();
+        gesture.scrollTo(500);
+        gesture.end();
+      });
+      let receipt!: ReturnType<ReturnType<typeof useChatHistory>['restoreReadingRef']>;
+      act(() => {
+        receipt = capturedHook!.restoreReadingRef(origin.ref);
+      });
+      await act(async () => flushAnimationFrames());
+      expect(top.get()).toBe(280);
+      expect(paragraph.getBoundingClientRect().top - el.getBoundingClientRect().top).toBe(40);
+      await act(async () => fixture.acknowledge(fixture.requests()[0]!));
+      expect(await receipt).toMatchObject({ status: 'settled', exact: true });
+      expect(readChatReadingRef(origin.ref)).toBeDefined();
+    } finally {
+      fixture.dispose();
+    }
+  });
+
   it.each([2, 100])('keeps an older origin pending while its page takes %i frames', async (frames) => {
     const threadId = `return-slow-page-${frames}`;
     const { el, top } = await openThread(threadId);

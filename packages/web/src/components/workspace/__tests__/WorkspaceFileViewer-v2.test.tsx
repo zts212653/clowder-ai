@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { fileMenuItems } from '../../content-review/FileActionMenu';
 import { writeShellLanguage } from '../../shell/shell-language';
 import { writeShellPresentation } from '../../shell/shell-presentation';
 import type { WorkspaceFileViewerProps } from '../WorkspaceFileViewer.types';
@@ -75,7 +76,29 @@ beforeEach(() => {
   document.body.append(host);
   root = createRoot(host);
 });
-it.each([true, false])('keeps the HTML action unfilled with page preview=%s', (htmlPreview) => {
+it('keeps secondary English document actions in More and preserves the edited document', async () => {
+  writeShellLanguage('en');
+  const p = { ...props(), onRequestModification: vi.fn() };
+  act(() => root.render(<WorkspaceFileViewer {...p} />));
+  const toolbar = host.querySelector<HTMLElement>('[data-testid="content-file-toolbar"]')!;
+  const content = host.querySelector<HTMLTextAreaElement>('[data-testid="owner-content"]')!;
+  content.value = 'Keep this unsaved document';
+  expect(toolbar.textContent).not.toContain('Cache document');
+  expect(toolbar.textContent).not.toContain('Ask a cat to edit');
+  const trigger = toolbar.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+  await act(async () => trigger.click());
+  const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+  expect(menu.textContent).toContain('Cache document');
+  const ask = [...menu.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === 'Ask a cat to edit',
+  )!;
+  expect(ask).toBeDefined();
+  act(() => ask.click());
+  expect(p.onRequestModification).toHaveBeenCalledOnce();
+  expect(host.querySelector('[data-testid="owner-content"]')).toBe(content);
+  expect(content.value).toBe('Keep this unsaved document');
+});
+it.each([true, false])('keeps the HTML action unfilled with page preview=%s', async (htmlPreview) => {
   writeShellLanguage('zh');
   const original = props();
   const p = {
@@ -92,12 +115,12 @@ it.each([true, false])('keeps the HTML action unfilled with page preview=%s', (h
   assert(toolbar);
   const buttons = [...toolbar.querySelectorAll<HTMLButtonElement>('button')];
   const toggle = buttons.find((button) => button.textContent === (htmlPreview ? '看源码' : '页面预览'));
-  const ask = buttons.find((button) => button.textContent === '请猫修改');
-  assert(toggle && ask);
-  expect(toggle.className).toBe(ask.className);
+  assert(toggle);
   expect(toggle.className).not.toContain('bg-cafe-accent');
   act(() => toggle.click());
   expect(p.onToggleHtmlPreview).toHaveBeenCalledOnce();
+  await act(async () => toolbar.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click());
+  expect(document.querySelector('[role="menu"]')?.textContent).toContain('请猫修改');
 });
 it.each(['markdown', 'jsx'] as const)('preserves the filled %s state label', (kind) => {
   writeShellLanguage('zh');
@@ -173,12 +196,14 @@ it('v2 keeps the named return, primary edit controls and the same file menu', as
   expect(tabs?.textContent).toContain('‹ 文件');
   expect(tabs?.textContent).toContain('guide.md');
   const toolbar = host.querySelector('[data-testid="workspace-file-toolbar"]');
-  expect(toolbar?.textContent).toContain('请猫修改');
-  expect(toolbar?.textContent).toContain('批注 3');
+  expect(toolbar?.textContent).not.toContain('请猫修改');
+  expect(toolbar?.textContent).not.toContain('批注 3');
   const trigger = host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]');
   expect(trigger).not.toBeNull();
   await act(async () => trigger?.click());
-  expect(document.querySelector('[role="menu"]')).not.toBeNull();
+  const menu = document.querySelector('[role="menu"]');
+  expect(menu?.textContent).toContain('请猫修改');
+  expect(menu?.textContent).toContain('批注 3');
   const edit = [...toolbar!.querySelectorAll<HTMLButtonElement>('button')].find(
     (button) => button.textContent === '编辑',
   );
@@ -226,6 +251,24 @@ it('classic keeps its original toolbar and collaboration control', () => {
   expect(host.querySelector('[data-testid="v2-file-chrome"]')).toBeNull();
   expect(host.textContent).toContain('Rendered');
   expect(host.textContent).toContain('协作批注');
+});
+
+it('keeps document caching in the shared menu for published copies too', async () => {
+  writeShellLanguage('en');
+  act(() =>
+    root.render(<WorkspaceFileViewer file={props().file} source={{ kind: 'url', url: '/uploads/guide.md' }} />),
+  );
+  const toolbar = host.querySelector('[data-testid="content-file-toolbar"]')!;
+  expect(toolbar.textContent).not.toContain('Cache document');
+  await act(async () => toolbar.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click());
+  expect(document.querySelector('[role="menu"]')?.textContent).toContain('Cache document');
+});
+
+it('skips actions inside hidden overflow groups during menu keyboard navigation', () => {
+  const menu = document.createElement('div');
+  menu.innerHTML = '<div style="display:none"><button>Hidden listen</button></div><button>Visible action</button>';
+  host.append(menu);
+  expect(fileMenuItems(menu).map((item) => item.textContent)).toEqual(['Visible action']);
 });
 
 it.each<{ label: string; origin: WorkspaceFileViewerProps['navigationOrigin'] }>([

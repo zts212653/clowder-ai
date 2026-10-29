@@ -88,6 +88,107 @@ test('slow Host preparation obtains a genuinely fresh reply before publishing un
   assert.equal((await f.store.snapshot()).staticFeatures?.leases[0]?.state, 'active');
 });
 
+test('slow preparation starts the next heartbeat promptly before its still-live lease expires', async (t) => {
+  const f = await fixture();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.method(performance, 'now', () => f.now() - 2_000);
+  t.after(() => f.observer.stop());
+  f.setVerify(async () => {
+    f.advance(22_000);
+  });
+  let delayNextSnapshot = false;
+  const snapshot = f.store.snapshot.bind(f.store);
+  t.mock.method(f.store, 'snapshot', async (...args: Parameters<typeof snapshot>) => {
+    if (delayNextSnapshot) {
+      delayNextSnapshot = false;
+      f.advance(4_000);
+    }
+    return snapshot(...args);
+  });
+  await f.observer.observe();
+  const leaseId = (await snapshot()).runtimeLeases[0]?.runtimeLeaseId;
+  assert.ok(leaseId);
+  const failures: unknown[] = [];
+  f.observer.start((error) => failures.push(error));
+  for (let cycle = 0; cycle < 3; cycle++) {
+    // Complete real observer/authority work, then advance the actual scheduler.
+    // A five-second post-work sleep plus4s Broker wait would cross the30s TTL.
+    delayNextSnapshot = true;
+    f.advance(1);
+    t.mock.timers.tick(1);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(f.polls(), 4 + cycle * 2, 'Host preparation already spent the heartbeat interval');
+    assert.deepEqual(failures, []);
+    assert.equal(f.observer.observation?.observedAt, f.now());
+    assert.equal(f.observer.observation?.expiresAt, f.now() + 15_000);
+    const current = await snapshot();
+    assert.equal(current.sessions[0]?.phase, 'active');
+    assert.equal(current.runtimeLeases[0]?.runtimeLeaseId, leaseId, 'no repair or replacement binding');
+    assert.equal(current.runtimeLeases[0]?.state, 'live');
+  }
+});
+
+test('fast observations retain the normal five-second heartbeat cadence', async (t) => {
+  const f = await fixture();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.method(performance, 'now', () => f.now() - 2_000);
+  t.after(() => f.observer.stop());
+  await f.observer.observe();
+  const failures: unknown[] = [];
+  f.observer.start((error) => failures.push(error));
+  f.advance(4_999);
+  t.mock.timers.tick(4_999);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(f.polls(), 1, 'a fast path must not busy-poll');
+  f.advance(1);
+  t.mock.timers.tick(1);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(f.polls(), 2);
+  assert.deepEqual(failures, []);
+});
+
+test('a three-second preparation leaves two seconds until the next heartbeat', async (t) => {
+  const f = await fixture();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.method(performance, 'now', () => f.now() - 2_000);
+  t.after(() => f.observer.stop());
+  f.setVerify(async () => {
+    f.advance(3_000);
+  });
+  await f.observer.observe();
+  assert.equal(f.polls(), 1);
+  f.observer.start(() => assert.fail('unexpected heartbeat failure'));
+  f.advance(1_999);
+  t.mock.timers.tick(1_999);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(f.polls(), 1);
+  f.advance(1);
+  t.mock.timers.tick(1);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(f.polls(), 2);
+});
+
+for (const step of [-20_000, 20_000]) {
+  test(`a wall-clock step of ${step}ms does not move the heartbeat timer`, async (t) => {
+    const f = await fixture();
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let monotonic = 0;
+    t.mock.method(performance, 'now', () => monotonic);
+    t.after(() => f.observer.stop());
+    await f.observer.observe();
+    f.advance(step);
+    f.observer.start(() => assert.fail('unexpected heartbeat failure'));
+    monotonic += 4_999;
+    t.mock.timers.tick(4_999);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(f.polls(), 1);
+    monotonic += 1;
+    t.mock.timers.tick(1);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(f.polls(), 2);
+  });
+}
+
 test('a refreshed reply uses the new native state and a failed refresh cannot be retried into success', async () => {
   const f = await fixture();
   f.setVerify(async () => {

@@ -42,6 +42,7 @@ import {
   isLinkedCloudBindingRecoveryNotice,
   projectCloudBindingRecovery,
 } from './cloud-binding-recovery';
+import { cloudCarrierDispatch, cloudReceiptOf } from './cloud-dispatch-receipt';
 import { CompanionMessageAvatar, CompanionMessageIdentity } from './concierge/CompanionMessageIdentity';
 import { ContentModificationReceiptCard } from './content-review/ContentModificationReceiptCard';
 import { ContentModificationSourceMessage } from './content-review/ContentModificationSourceMessage';
@@ -89,6 +90,7 @@ import { useShellPresentation } from './shell/shell-presentation';
 import { NativeFailureDiagnostics, TerminalDiagnosticsPanel } from './TerminalDiagnosticsPanel';
 import { ThinkingContent } from './ThinkingContent';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
+import { useCloudReply } from './useCloudReply';
 
 const BREED_STYLES: Record<string, { radius: string; font?: string }> = {
   ragdoll: { radius: 'rounded-2xl rounded-bl-sm' },
@@ -178,6 +180,7 @@ interface ChatMessageProps {
 function needsTimelineProjection(message: ChatMessageType): boolean {
   return Boolean(
     hasCloudBindingRecoveryMetadata(message) ||
+      cloudReceiptOf(message) ||
       message.extra?.turnExecution ||
       message.extra?.auxiliaryTurnExecutions?.length ||
       message.lifecycle?.dispatchRefs?.length ||
@@ -256,8 +259,13 @@ function ChatMessageContent({
       timelineMessages ??
       (needsTimelineProjection(message) ? getOrderedMessageTimeline(s.messages) : EMPTY_TIMELINE_MESSAGES),
   );
+  const cloudCarrier = shellPresentation === 'v2' ? cloudCarrierDispatch(message, threadMessages) : undefined;
+  const cloudReply = useCloudReply(cloudCarrier?.identity, renderThreadId, threadMessages, {
+    readDotEvent: shellPresentation === 'v2',
+  });
   const dispatchLine = (
     <MessageDispatchAvatars
+      threadId={renderThreadId}
       message={message}
       timelineMessages={threadMessages}
       activeRuns={activeRuns ?? []}
@@ -441,6 +449,8 @@ function ChatMessageContent({
     : message.variant === 'error'
       ? ('failed' as const)
       : ('done' as const);
+  if (cloudCarrier && cloudReply.state !== 'unverified')
+    return <div data-message-id={message.id} aria-hidden="true" className="h-0" />;
   if (isSummary && message.summary) {
     return (
       <div data-message-id={message.id}>

@@ -2,6 +2,9 @@ import type { Root } from 'mdast';
 import remarkGfm from 'remark-gfm';
 import remarkParse from 'remark-parse';
 import { type Plugin, unified } from 'unified';
+import { maskLeadingMarkdownFrontmatter } from '../markdown-frontmatter';
+
+export { maskLeadingMarkdownFrontmatter };
 
 export interface ListenSourceFragment {
   start: number;
@@ -58,19 +61,6 @@ const SKIPPED_NODE_TYPES = new Set([
 ]);
 const TABLE_NODE_TYPES = new Set(['table', 'tableRow', 'tableCell']);
 const BARE_URL_RE = /^(?:https?:\/\/|mailto:|www\.)\S+$/i;
-
-/**
- * Replace leading YAML frontmatter with spaces while preserving newlines and
- * source offsets. remark-frontmatter is intentionally not required by the web
- * bundle; masking keeps the parser from treating the fence/body as readable
- * Markdown without changing every later AST position.
- */
-export function maskLeadingMarkdownFrontmatter(markdown: string): string {
-  const match = markdown.match(/^(?:\uFEFF)?---[\t ]*\r?\n[\s\S]*?\r?\n---[\t ]*(?:\r?\n|$)/);
-  if (!match) return markdown;
-  const masked = match[0].replace(/[^\r\n]/g, ' ');
-  return masked + markdown.slice(match[0].length);
-}
 
 function normalizeSentenceText(text: string): string {
   return text

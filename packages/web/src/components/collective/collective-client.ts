@@ -32,7 +32,8 @@ export interface CollectiveConnectorStatus {
   readonly localService?: LocalCollectiveServiceStatus;
   readonly remoteService?: {
     readonly serviceUrl: string;
-    readonly state: 'offline' | 'instance_mismatch' | 'setup_required' | 'unpaired' | 'ready';
+    readonly state: 'unconfirmed' | 'offline' | 'instance_mismatch' | 'setup_required' | 'unpaired' | 'ready';
+    readonly probe?: 'completed' | 'timed_out';
     readonly serviceInstanceId?: string;
     readonly pairedConnections?: number;
   };

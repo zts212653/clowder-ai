@@ -12,6 +12,8 @@ import {
 } from './CloudConversationChoices';
 import { CloudReplyStatus } from './CloudReplyStatus';
 import type { RecoveryDeliveryStatus, RecoveryLoadState, RecoveryPhase } from './cloud-binding-recovery-operations';
+import { cloudDispatchReceipt } from './cloud-dispatch-receipt';
+import { useShellPresentation } from './shell/shell-presentation';
 import { useCloudBindingRecovery } from './useCloudBindingRecovery';
 import { useCloudReply } from './useCloudReply';
 
@@ -268,6 +270,7 @@ export function CloudBindingRecoveryCardView(props: CloudBindingRecoveryCardView
 }
 
 export function CloudBindingRecoveryCard(props: CloudBindingRecoveryCardProps) {
+  const shell = useShellPresentation();
   const receipt = props.timelineMessages
     ?.flatMap((m) => {
       const value = m.source?.meta?.cloudBridgeOutboundReceipt;
@@ -291,6 +294,14 @@ export function CloudBindingRecoveryCard(props: CloudBindingRecoveryCardProps) {
         }
       : undefined);
   const logical = useCloudReply(identity, props.threadId, props.timelineMessages);
+  const source = props.timelineMessages?.find((m) => m.id === props.sourceMessageId);
+  const native = source ? cloudDispatchReceipt(source, props.targetCatId, props.timelineMessages ?? []) : undefined;
+  if (
+    shell === 'v2' &&
+    native?.identity.dispatchInvocationId === identity?.dispatchInvocationId &&
+    logical.state !== 'unverified'
+  )
+    return null;
   if (logical.state !== 'unverified')
     return (
       <section data-testid="cloud-binding-recovery-card" className="mt-3 rounded-xl border border-default p-4">

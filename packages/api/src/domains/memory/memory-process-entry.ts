@@ -1,7 +1,9 @@
+import type Database from 'better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
 import { createSqliteReadDiagnostics } from '../../infrastructure/sqlite-read-diagnostics.js';
 import { CatCafeScanner } from './CatCafeScanner.js';
 import { checkpointMemoryDatabase } from './checkpoint-memory-database.js';
+import { prepareFileVectorReadWindow } from './file-vector-read-window.js';
 import { GenericRepoScanner } from './GenericRepoScanner.js';
 import type { EmbedModelInfo, IEmbeddingService } from './interfaces.js';
 import { memoryProcessStderrBoundary } from './memory-process-diagnostics.js';
@@ -53,6 +55,11 @@ function embeddingProxy(snapshot: EmbeddingSnapshot): IEmbeddingService {
   };
 }
 
+function prepareVectorReadQuery(job: MemoryProcessJob, db: Database.Database) {
+  if (job.kind !== 'search' && job.kind !== 'message-search') return;
+  return job.embedding?.passages ? prepareFileVectorReadWindow(db) : undefined;
+}
+
 async function execute(
   job: MemoryProcessJob,
   started: () => void,
@@ -81,6 +88,8 @@ async function execute(
   let detachReadDiagnostics: (() => void) | undefined;
   try {
     const db = store.getDb();
+    // Only a killable read-pool child may map file-backed vector reads.
+    const readVectorQuery = prepareVectorReadQuery(job, db);
     // Register existing vec0 tables; this does not create/migrate or mutate them.
     try {
       sqliteVec.load(db);
@@ -108,7 +117,7 @@ async function execute(
             embedding: embeddingProxy(job.embedding),
             mode: job.embedding.mode,
             vectorStore: new VectorStore(db, dim),
-            ...(job.embedding.passages ? { passageVectorStore: new PassageVectorStore(db, dim) } : {}),
+            ...(job.embedding.passages ? { passageVectorStore: new PassageVectorStore(db, dim, readVectorQuery) } : {}),
           });
         }
         if (job.kind === 'message-search')

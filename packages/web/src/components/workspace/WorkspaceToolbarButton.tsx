@@ -21,7 +21,7 @@ export function WorkspaceToolbarButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`rounded px-2 py-0.5 text-micro font-medium transition-colors ${active ? activeStyle : 'text-cafe-secondary hover:bg-cafe-surface/10 hover:text-cafe-muted'} ${disabled ? 'cursor-not-allowed opacity-30' : ''}`}
+      className={`shrink-0 whitespace-nowrap rounded px-2 py-0.5 text-micro font-medium transition-colors ${active ? activeStyle : 'text-cafe-secondary hover:bg-cafe-surface/10 hover:text-cafe-muted'} ${disabled ? 'cursor-not-allowed opacity-30' : ''}`}
       title={title}
     >
       {children}
