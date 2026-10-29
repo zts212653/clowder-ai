@@ -152,10 +152,28 @@ test('an absolute native deadline retains only observed progress and does not fa
     (error) => {
       assert.equal(error.name, 'TimeoutError');
       assert.equal(error.memoryProcess.outcome, 'rejected');
-      assert.equal(error.memoryProcess.lastObservedSql.event, 'sql-start');
+      if (error.memoryProcess.lastObservedSql) {
+        const sql = error.memoryProcess.lastObservedSql;
+        assert.match(sql.sqlFingerprint, /^[a-f0-9]{64}$/);
+        if (sql.event === 'sql-start') {
+          assert.equal(sql.elapsedMs, undefined);
+          assert.equal(sql.rows, undefined);
+        } else {
+          assert.equal(sql.event, 'sql-finish');
+          assert.ok(sql.elapsedMs >= 0, 'a completed subquery keeps its measured duration');
+          assert.ok(sql.rows === null || (Number.isInteger(sql.rows) && sql.rows >= 0));
+        }
+      } else {
+        assert.equal(error.memoryProcess.sqlObservations, 0);
+        assert.equal(error.memoryProcess.observedSqlMs, 0);
+        assert.equal(error.memoryProcess.cjk, null, 'a deadline before SQL observation has no native witness');
+      }
       if (error.memoryProcess.cjk) {
-        assert.equal(error.memoryProcess.cjk.complete, false);
-        assert.equal(error.memoryProcess.cjk.returnedRows, null);
+        const cjk = error.memoryProcess.cjk;
+        assert.equal(cjk.complete, cjk.outcome !== 'running');
+        if (cjk.outcome === 'fulfilled') {
+          assert.ok(Number.isInteger(cjk.returnedRows) && cjk.returnedRows >= 0);
+        } else assert.equal(cjk.returnedRows, null);
       } else assert.equal(error.memoryProcess.cjk, null, 'no checkpoint is unknown, not zero work');
       return true;
     },

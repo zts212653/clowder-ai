@@ -38,22 +38,33 @@ test(
       }),
       async write(message) {
         writes.push(message);
-        if (message.method === 'initialize') push({ id: message.id, result: {} });
-        if (message.method === 'thread/start') push({ id: message.id, result: { thread: { id: 'native-thread' } } });
-        if (message.method === 'turn/start')
-          push({ id: message.id, result: { turn: { id: 'native-turn', status: 'inProgress' } } });
-        if (message.method === 'thread/read')
-          push({
-            id: message.id,
-            result: {
-              thread: {
-                id: 'native-thread',
-                turns: [{ id: 'native-turn', items: [{ type: 'userMessage', clientId: readItemClientId }] }],
+        if (message.id === undefined || !message.method) return;
+        switch (message.method) {
+          case 'initialize':
+            return push({ id: message.id, result: {} });
+          case 'thread/start':
+            return push({ id: message.id, result: { thread: { id: 'native-thread' } } });
+          case 'turn/start':
+            return push({ id: message.id, result: { turn: { id: 'native-turn', status: 'inProgress' } } });
+          case 'thread/items/list':
+            assert.deepEqual(message.params, {
+              threadId: 'native-thread',
+              turnId: 'native-turn',
+              limit: 50,
+              sortDirection: 'desc',
+            });
+            return push({
+              id: message.id,
+              result: {
+                data: [{ turnId: 'native-turn', item: { type: 'userMessage', clientId: readItemClientId } }],
+                nextCursor: null,
               },
-            },
-          });
-        if (message.method === 'turn/steer')
-          push({ id: message.id, error: { code: -32000, message: 'reply uncertain after handoff' } });
+            });
+          case 'turn/steer':
+            return push({ id: message.id, error: { code: -32000, message: 'reply uncertain after handoff' } });
+          default:
+            assert.fail(`Unexpected native RPC in append fixture: ${message.method}`);
+        }
       },
       terminate: async () => close(),
       close: async () => close(),
@@ -99,6 +110,8 @@ test(
       assert.equal(await dispatcher.inspectInput(clientId), 'unknown');
       readItemClientId = clientId;
       assert.equal(await dispatcher.inspectInput(clientId), 'accepted');
+      assert.equal(writes.filter((message) => message.method === 'thread/items/list').length, 2);
+      assert.equal(reads, 0, 'history evidence must not fabricate the late consumption notification');
       assert.equal(writes.filter((message) => message.method === 'turn/steer').length, 1);
       push({
         method: 'item/completed',
@@ -121,5 +134,6 @@ test(
       });
       await run;
     }
+    assert.equal(reads, 1, 'the exact late notification is consumed once after the run drains');
   },
 );

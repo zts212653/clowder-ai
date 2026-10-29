@@ -83,13 +83,10 @@ test('a canceled message reader retains its own bounded pre-return native witnes
   const events = channel('cat-cafe.memory-process');
   let pid = 0;
   let cancelAt = 0;
+  let observed;
   const subscriber = (event) => {
     if (event.kind !== 'message-search' || pid) return;
     pid = event.pid;
-    setTimeout(() => {
-      cancelAt = performance.now();
-      controller.abort(new DOMException('controlled deadline', 'TimeoutError'));
-    }, 25);
   };
   events.subscribe(subscriber);
   t.after(() => events.unsubscribe(subscriber));
@@ -99,16 +96,33 @@ test('a canceled message reader retains its own bounded pre-return native witnes
       sort: 'relevance',
       visibleThreadIds: ['fixture'],
       signal: controller.signal,
+      // A fail-safe, never the evidence that native SQL has actually begun.
+      deadlineAt: Date.now() + 8000,
+      onReadSnapshot(snapshot) {
+        if (controller.signal.aborted || snapshot.cjk?.outcome !== 'running') return;
+        observed = snapshot;
+        cancelAt = performance.now();
+        controller.abort(new DOMException('controlled deadline', 'TimeoutError'));
+      },
     }),
     (error) => {
       assert.equal(error, controller.signal.reason);
+      assert.ok(observed, 'cancel only after an actual pre-return CJK checkpoint');
+      assert.ok(observed.cjk.bodyVisits >= 256);
       const evidence = error.memoryProcess;
       assert.ok(evidence, 'a killed native message reader must retain its request-scoped progress');
       assert.equal(evidence.kind, 'message-search');
       assert.equal(evidence.pid, pid);
+      assert.equal(evidence.pid, observed.pid);
+      assert.equal(evidence.executionId, observed.executionId);
       assert.ok(evidence.queueMs >= 0 && evidence.elapsedMs >= evidence.queueMs);
+      assert.equal(evidence.lastObservedSql.event, 'sql-start');
       assert.match(evidence.lastObservedSql?.sqlFingerprint ?? '', /^[a-f0-9]{64}$/);
       assert.ok(evidence.lastObservedSql.caller.some((line) => line.includes('message-passage-lexical')));
+      assert.deepEqual(evidence.lastObservedSql, observed.lastObservedSql);
+      assert.deepEqual(evidence.cjk, observed.cjk);
+      assert.equal(evidence.cjk.complete, false);
+      assert.equal(evidence.cjk.returnedRows, null);
       assert.doesNotMatch(JSON.stringify(evidence), /private-body|SELECT|FROM evidence_passages/);
       return true;
     },
@@ -125,4 +139,44 @@ test('a canceled message reader retains its own bounded pre-return native witnes
     await pause(10);
   }
   assert.ok(exited, 'the observed message reader must actually exit');
+});
+
+test('canceling at worker ready does not invent an unobserved SQL witness', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'message-before-sql-'));
+  const store = new SqliteEvidenceStore(join(root, 'evidence.sqlite'));
+  await store.initialize();
+  t.after(() => {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const controller = new AbortController();
+  const events = channel('cat-cafe.memory-process');
+  let pid = 0;
+  const subscriber = (event) => {
+    if (event.kind !== 'message-search' || pid) return;
+    pid = event.pid;
+    controller.abort(new DOMException('left before SQL observation', 'AbortError'));
+  };
+  events.subscribe(subscriber);
+  t.after(() => events.unsubscribe(subscriber));
+  await assert.rejects(
+    store.searchMessagePassages('private-query-canary', {
+      mode: 'lexical',
+      visibleThreadIds: ['fixture'],
+      signal: controller.signal,
+      deadlineAt: Date.now() + 8000,
+    }),
+    (error) => {
+      assert.equal(error, controller.signal.reason);
+      assert.ok(pid > 0, 'the worker really reported ready');
+      assert.equal(error.memoryProcess.pid, pid);
+      assert.equal(error.memoryProcess.outcome, 'rejected');
+      assert.equal(error.memoryProcess.lastObservedSql, undefined);
+      assert.equal(error.memoryProcess.sqlObservations, 0);
+      assert.equal(error.memoryProcess.observedSqlMs, 0);
+      assert.equal(error.memoryProcess.cjk, null);
+      assert.doesNotMatch(JSON.stringify(error.memoryProcess), /private-query|SELECT|bindings/);
+      return true;
+    },
+  );
 });
