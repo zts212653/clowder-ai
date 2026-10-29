@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 export const REQUIRED_INITIAL_PLUGINS = Object.freeze([
   'official.companion.personal-chrome',
   'official.enterprise-workflow',
+  'official.collective-connector',
 ]);
 
 export function initialPluginStates(value) {
