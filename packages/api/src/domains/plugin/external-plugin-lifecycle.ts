@@ -127,6 +127,38 @@ export class ExternalPluginLifecycleService {
       return this.startFromDormant(instanceId, dormant.lifecycleRevision, 'repair');
     });
   }
+  restart(instanceId: string, expectedRevision: number): Promise<PluginInstanceRecord> {
+    return this.queue.run(instanceId, async () => {
+      const current = await this.readCurrent(instanceId);
+      await this.assertCompatible(current);
+      assertRevision(current, expectedRevision);
+      this.assertState(current, ['enabled', 'error'], undefined, 'restart');
+      if (current.configReadiness !== 'ready')
+        throw new PluginLifecycleError('INVALID_TRANSITION', 'Plugin configuration is not ready');
+      await this.stopOrFail(instanceId, expectedRevision, 'owner_restart');
+      const dormant = await this.advance(instanceId, expectedRevision, {
+        activationState: 'disabled',
+        runtimeState: 'stopped',
+      });
+      return this.startFromDormant(instanceId, dormant.lifecycleRevision, 'restart');
+    });
+  }
+
+  /** Serialize a resource choice with uninstall/restart without stopping unrelated runtime work. */
+  runWithCurrentRevision<T>(
+    instanceId: string,
+    expectedRevision: number,
+    work: (current: PluginInstanceRecord) => Promise<T>,
+  ): Promise<T> {
+    return this.queue.run(instanceId, async () => {
+      const current = await this.readCurrent(instanceId);
+      assertRevision(current, expectedRevision);
+      await this.assertCompatible(current);
+      this.assertState(current, ['enabled'], undefined, 'resolve skill conflict');
+      return work(current);
+    });
+  }
+
   uninstall(instanceId: string, expectedRevision: number): Promise<PluginInstanceRecord> {
     return this.queue.run(instanceId, async () => {
       const current = await this.readCurrent(instanceId);
@@ -423,7 +455,7 @@ export class ExternalPluginLifecycleService {
   private async startFromDormant(
     instanceId: string,
     expectedRevision: number,
-    phase: Extract<PluginStartPhase, 'enable' | 'repair'>,
+    phase: Extract<PluginStartPhase, 'enable' | 'repair' | 'restart'>,
   ): Promise<PluginInstanceRecord> {
     const enabling = await this.advance(
       instanceId,

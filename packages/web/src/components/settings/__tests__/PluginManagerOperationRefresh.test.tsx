@@ -79,10 +79,10 @@ describe('Plugin Manager operation refresh', () => {
     vi.restoreAllMocks();
   });
 
-  it('keeps Repair on the failed row, Update in its detail, and refreshes after repair', async () => {
+  it('retries startup through restart, keeps update separate, and refreshes afterward', async () => {
     let repaired = false;
     mockApiFetch.mockImplementation(async (path, options) => {
-      if (String(path).endsWith('/repair')) {
+      if (String(path).endsWith('/restart')) {
         expect(JSON.parse(String(options?.body))).toEqual({ expectedRevision: 1 });
         repaired = true;
         return json({ pluginId: plugin.pluginId, pluginInstanceId: plugin.pluginInstanceId });
@@ -92,7 +92,7 @@ describe('Plugin Manager operation refresh', () => {
         ...plugin,
         availableVersion: '1.1.0',
         live: repaired ? 'running' : 'crashed',
-        actions: { ...plugin.actions, install: true, repair: !repaired },
+        actions: { ...plugin.actions, install: true, restart: true },
       };
       return String(path).includes(plugin.pluginId)
         ? json({ plugin: { ...current, capabilities: [], configFields: [] }, catalog: { status: 'fresh' } })
@@ -104,13 +104,13 @@ describe('Plugin Manager operation refresh', () => {
     const buttons = () => [...(row?.querySelectorAll('button') ?? [])];
     expect(buttons().some((button) => button.textContent === '更新')).toBe(false);
     expect(container.querySelector('[data-plugin-detail-action="update"]')?.textContent).toBe('更新到 1.1.0');
-    const repair = buttons().find((button) => button.textContent === '修复');
+    const repair = buttons().find((button) => button.textContent === '重试启动');
     expect(repair).toBeDefined();
     await act(async () => repair?.click());
     await flushEffects();
     expect(repaired).toBe(true);
     expect(container.textContent).not.toContain('修复');
-    expect(mockApiFetch.mock.calls.some(([path]) => String(path).endsWith('/repair'))).toBe(true);
+    expect(mockApiFetch.mock.calls.some(([path]) => String(path).endsWith('/restart'))).toBe(true);
   });
 
   it('opens the requested package from a recovery settings link instead of selecting the first item', async () => {

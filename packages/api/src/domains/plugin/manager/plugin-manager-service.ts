@@ -11,6 +11,7 @@ import type {
   PluginManagerUninstallRequest,
 } from '@cat-cafe/shared';
 import { pluginDescriptionVariants } from '@cat-cafe/shared';
+import type { PluginSkillResources, ResolvePluginSkillConflict } from '../declared/plugin-skill-resources.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import type { PluginInventorySnapshot } from '../host-inventory/types.js';
 import { connectorPermissionsProjection } from './connector-settings.js';
@@ -60,6 +61,12 @@ export interface PluginManagerInstallPort {
 }
 
 export interface PluginManagerLifecyclePort {
+  restart?(pluginInstanceId: string, expectedRevision: number): Promise<void>;
+  resolveSkillConflict?(
+    pluginInstanceId: string,
+    expectedRevision: number,
+    request: ResolvePluginSkillConflict,
+  ): Promise<{ backupPath: string }>;
   repair?(pluginInstanceId: string, expectedRevision: number): Promise<void>;
   setEnabled(pluginInstanceId: string, enabled: boolean, expectedRevision: number): Promise<void>;
   uninstall(pluginInstanceId: string, expectedRevision: number): Promise<void>;
@@ -84,6 +91,7 @@ export interface PluginManagerConfigurationPort {
 }
 
 export interface PluginManagerServiceOptions {
+  readonly skillResources?: PluginSkillResources;
   readonly catalog: PluginManagerCatalogPort;
   readonly inventory: Pick<PluginInventoryStore, 'snapshot'>;
   readonly installedPackages?: PluginManagerInstalledPackagesPort;
@@ -286,11 +294,18 @@ export class PluginManagerService {
     if (!projected) throw new PluginManagerServiceError('PLUGIN_NOT_FOUND', `Unknown plugin ${pluginId}`);
     const detail = projected.detail ?? detailFromListItem(projected.plugin);
     const configurationFields = await this.options.configuration?.fields(pluginId);
+    const resources = this.options.skillResources;
+    const snapshot = resources ? await this.options.inventory.snapshot() : undefined;
+    const pkg = snapshot?.packages.find((p) => p.packageDigest === detail.packageDigest);
+    const skillConflicts = pkg && resources && detail.artifact === 'installed' ? await resources.read(pkg) : undefined;
     return {
-      plugin:
-        configurationFields === undefined
-          ? detail
-          : { ...detail, configFields: configurationFields.map((field) => structuredClone(field)) },
+      plugin: {
+        ...detail,
+        ...(skillConflicts ? { skillConflicts } : {}),
+        ...(configurationFields === undefined
+          ? {}
+          : { configFields: configurationFields.map((field) => structuredClone(field)) }),
+      },
       catalog: result.response.catalog,
     };
   }
@@ -441,6 +456,28 @@ export class PluginManagerService {
     }
     await this.options.lifecycle.setEnabled(instance.pluginInstanceId, request.enabled, request.expectedRevision);
     return { pluginId, pluginInstanceId: instance.pluginInstanceId };
+  }
+
+  async restart(pluginId: string, request: { expectedRevision: number }): Promise<PluginManagerMutationResult> {
+    const current = (await this.getInstalled(pluginId)).plugin;
+    const instance = this.requireCurrentInstance(current, request.expectedRevision);
+    if (!current.actions.restart)
+      throw new PluginManagerServiceError('ACTION_NOT_ALLOWED', 'Plugin cannot restart now');
+    if (!this.options.lifecycle?.restart)
+      throw new PluginManagerServiceError('LIFECYCLE_UNAVAILABLE', 'Plugin restart is unavailable');
+    await this.options.lifecycle.restart(instance.pluginInstanceId, request.expectedRevision);
+    return { pluginId, pluginInstanceId: instance.pluginInstanceId };
+  }
+
+  async resolveSkillConflict(
+    pluginId: string,
+    request: ResolvePluginSkillConflict & { expectedRevision: number },
+  ): Promise<{ backupPath: string }> {
+    const current = (await this.getInstalled(pluginId)).plugin;
+    const instance = this.requireCurrentInstance(current, request.expectedRevision);
+    if (!this.options.lifecycle?.resolveSkillConflict)
+      throw new PluginManagerServiceError('LIFECYCLE_UNAVAILABLE', 'Skill conflict handling is unavailable');
+    return this.options.lifecycle.resolveSkillConflict(instance.pluginInstanceId, request.expectedRevision, request);
   }
 
   async repair(pluginId: string, request: { expectedRevision: number }): Promise<PluginManagerMutationResult> {

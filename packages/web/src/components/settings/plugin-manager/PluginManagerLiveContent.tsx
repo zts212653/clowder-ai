@@ -366,10 +366,10 @@ export function PluginManagerLiveContent({
       }}
       onMarketplaceChange={refresh}
       onDirectoryInstall={installFromDirectory}
-      onRepair={(pluginId) => {
+      onRestart={(pluginId) => {
         const plugin = plugins.find((candidate) => candidate.pluginId === pluginId);
-        if (!plugin?.actions.repair || plugin.lifecycleRevision === null) return;
-        void mutate(pluginId, `/api/plugin-manager/plugins/${encodeURIComponent(pluginId)}/repair`, {
+        if (!plugin?.actions.restart || plugin.lifecycleRevision === null) return;
+        void mutate(pluginId, `/api/plugin-manager/plugins/${encodeURIComponent(pluginId)}/restart`, {
           expectedRevision: plugin.lifecycleRevision,
         });
       }}

@@ -9,7 +9,7 @@ import {
 
 const incompatibleActions = {
   install: false,
-  repair: false,
+  restart: false,
   setEnabled: false,
   uninstall: true,
   blockingReasons: ['package-incompatible'],
@@ -123,7 +123,7 @@ describe('loaded-page state and update follow-up', () => {
       availableVersion: '0.2.0',
       actions: { ...incompatibleActions, install: true, setEnabled: true, blockingReasons: [] },
     };
-    const broken = { ...update, id: 'broken', live: 'crashed' as const, actions: { ...update.actions, repair: true } };
+    const broken = { ...update, id: 'broken', live: 'crashed' as const, actions: { ...update.actions, restart: true } };
     act(() =>
       root.render(
         <PluginManagerContent
@@ -131,7 +131,7 @@ describe('loaded-page state and update follow-up', () => {
           fixtures={[update, broken]}
           selectedPluginId="broken"
           onInstall={vi.fn()}
-          onRepair={vi.fn()}
+          onRestart={vi.fn()}
         />,
       ),
     );

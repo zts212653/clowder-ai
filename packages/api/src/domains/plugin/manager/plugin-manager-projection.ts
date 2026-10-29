@@ -305,6 +305,13 @@ export function projectPluginManagerCatalogCandidate(
           config === 'ready' &&
           (auth === 'connected' || auth === 'not-required') &&
           !activationTransition &&
+          (intent === 'enabled' || instance?.activationState === 'error')
+            ? { restart: true }
+            : {}),
+          ...(artifact === 'installed' &&
+          config === 'ready' &&
+          (auth === 'connected' || auth === 'not-required') &&
+          !activationTransition &&
           (instance?.activationState === 'error' ||
             (intent === 'enabled' && live === 'crashed') ||
             (instance?.pluginId === 'official.companion' && hasRetainedDesktopLoss(instance)))

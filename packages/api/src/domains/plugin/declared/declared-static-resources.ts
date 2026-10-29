@@ -2,14 +2,17 @@ import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, sta
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { CapabilityEntry } from '@cat-cafe/shared';
+import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import type { McpConfigIO } from '../../../config/capabilities/capability-mcp-service.js';
 import {
   readCapabilitiesConfig,
   withCapabilityLock,
   writeCapabilitiesConfig,
 } from '../../../config/capabilities/capability-orchestrator.js';
+import { isValidSkillName } from '../../../config/governance/skill-sync.js';
 import { readMountRules } from '../../../config/mount/mount-rules-store.js';
-import { addSkill, removeSkill } from '../../../skills/skill-manage.js';
+import { addSkill, removeSkill, SkillRegistrationConflictError } from '../../../skills/skill-manage.js';
+import { migrateLegacyPluginSkillMounts } from '../../../skills/skill-mount-ops.js';
 import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
 import { packageDirectoryName } from '../external-runtime/filesystem-package-locator.js';
 import { ExternalPluginRuntimeError, type VerifiedPluginPackageLocator } from '../external-runtime/types.js';
@@ -87,9 +90,17 @@ export async function activateDeclaredStaticResources(
 export async function removeDeclaredStaticResources(
   pluginId: string,
   host: DeclaredStaticResourceHost | undefined,
+  manifest?: Pick<PluginManifest, 'contributions'>,
 ): Promise<void> {
   if (!host) return;
-  const results = await Promise.allSettled([removeDeclaredSkills(pluginId, host), removeDeclaredMcp(pluginId, host)]);
+  const legacyNames = (manifest?.contributions ?? [])
+    .filter((c) => c.type === 'skill')
+    .map((c) => basename(c.path))
+    .filter(isValidSkillName);
+  const results = await Promise.allSettled([
+    removeDeclaredSkills(pluginId, host, legacyNames),
+    removeDeclaredMcp(pluginId, host),
+  ]);
   const failures = results
     .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
     .map((result) => result.reason);
@@ -128,24 +139,26 @@ export async function activateDeclaredSkills(
   const mountRules = await readMountRules(host.projectRoot, host.projectRoot);
   await withCapabilityLock(host.projectRoot, async () => {
     for (const skillName of materialized.names) {
-      const result = await addSkill(host.projectRoot, skillName, materialized.source, {
-        mountRules,
-        pluginId: admission.packageRecord.pluginId,
-        capabilityId: skillName,
-        skillsSource: relative(host.projectRoot, materialized.source),
-      });
-      if (result.mounted.length === 0 && result.conflicts.length > 0) {
-        throw new Error(
-          `All skill mount points conflict for plugin skill '${skillName}': ${result.conflicts
-            .map((conflict) => conflict.path)
-            .join(', ')}`,
-        );
+      try {
+        await addSkill(host.projectRoot, skillName, materialized.source, {
+          mountRules,
+          pluginId: admission.packageRecord.pluginId,
+          capabilityId: skillName,
+          skillsSource: relative(host.projectRoot, materialized.source),
+        });
+      } catch (error) {
+        // Conflicts remain visible through skill governance; they do not revoke unrelated runtime work.
+        if (!(error instanceof SkillRegistrationConflictError)) throw error;
       }
     }
   });
 }
 
-export async function removeDeclaredSkills(pluginId: string, host: DeclaredStaticResourceHost | undefined) {
+export async function removeDeclaredSkills(
+  pluginId: string,
+  host: DeclaredStaticResourceHost | undefined,
+  legacyNames: readonly string[] = [],
+) {
   if (!host || host.persistCapabilities === false) return;
   const mountRules = await readMountRules(host.projectRoot, host.projectRoot);
   await withCapabilityLock(host.projectRoot, async () => {
@@ -168,6 +181,18 @@ export async function removeDeclaredSkills(pluginId: string, host: DeclaredStati
     }
     if (failures.length > 0) {
       throw new AggregateError(failures, `Failed to remove all persisted skills for ${pluginId}`);
+    }
+    for (const name of legacyNames) {
+      const otherOwner = config?.capabilities.some(
+        (c) => c.type === 'skill' && c.id === name && c.pluginId && c.pluginId !== pluginId,
+      );
+      if (!otherOwner)
+        await migrateLegacyPluginSkillMounts(
+          host.projectRoot,
+          name,
+          join(host.projectRoot, 'cat-cafe-skills'),
+          mountRules,
+        );
     }
   });
 }

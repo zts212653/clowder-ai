@@ -74,6 +74,7 @@ export function pluginAttentionReason(plugin: PluginManagerDesignFixture, locale
   if (plugin.artifact !== 'installed') return plugin.artifact === 'quarantined' ? t.quarantined : t.staged;
   if (plugin.actions?.blockingReasons.includes('package-incompatible')) return t.incompatible;
   if (plugin.activationFailed === true) return t.failed;
+  if (plugin.skillConflicts?.length) return t.skillConflicts;
   if (plugin.config !== 'ready') return plugin.config === 'invalid' ? t.invalid : t.incomplete;
   if (plugin.auth === 'expired' || plugin.auth === 'error') return plugin.auth === 'expired' ? t.expired : t.authError;
   if (plugin.live === 'degraded' || plugin.live === 'crashed') {

@@ -63,6 +63,29 @@ async function harness(overrides = {}) {
   return { store, lifecycle, calls };
 }
 
+test('owner restart stops and starts a running plugin and rejects stale or disabled requests', async () => {
+  const { store, lifecycle, calls } = await harness();
+  await lifecycle.prepare('pi_official', 1);
+  const running = await lifecycle.enable('pi_official', 2);
+  calls.length = 0;
+  await assert.rejects(
+    lifecycle.restart('pi_official', running.lifecycleRevision - 1),
+    lifecycleError('STALE_REVISION'),
+  );
+  assert.deepEqual(calls, []);
+  const restarted = await lifecycle.restart('pi_official', running.lifecycleRevision);
+  assert.equal(restarted.activationState, 'enabled');
+  assert.deepEqual(calls, ['stop:pi_official:enabled', 'start:pi_official']);
+  const disabled = await lifecycle.disable('pi_official', restarted.lifecycleRevision);
+  calls.length = 0;
+  await assert.rejects(
+    lifecycle.restart('pi_official', disabled.lifecycleRevision),
+    lifecycleError('INVALID_TRANSITION'),
+  );
+  assert.deepEqual(calls, []);
+  assert.equal((await store.snapshot()).instances[0].activationState, 'disabled');
+});
+
 test('prepares then explicitly enables one official runtime with revision fencing', async () => {
   const { store, lifecycle, calls } = await harness();
 

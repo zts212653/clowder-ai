@@ -2002,6 +2002,82 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
+  it('preserves an explicitly selected plugin source across capability discovery', async () => {
+    const previousCwd = process.cwd();
+    const Fastify = (await import('fastify')).default;
+
+    const pluginId = `same-id-source-plugin-${Date.now()}`;
+    const mainDir = await makeTmpDir('source-plugin-main');
+    const projectDir = await makeTmpDir('source-plugin-same-id');
+    const pluginDir = join(projectDir, 'plugins', pluginId);
+    await writeFile(join(mainDir, 'pnpm-workspace.yaml'), 'packages: []\n');
+    await mkdir(join(pluginDir, 'skills', 'debugging'), { recursive: true });
+    await writeFile(join(pluginDir, 'skills', 'debugging', 'SKILL.md'), '# plugin debugging\n');
+    await writeFile(
+      join(pluginDir, 'plugin.yaml'),
+      [
+        `id: ${pluginId}`,
+        'name: Same ID Source Plugin',
+        'version: "1.0.0"',
+        'resources:',
+        '  - type: skill',
+        '    path: skills/debugging',
+      ].join('\n'),
+    );
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'debugging',
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          pluginId,
+          skillsSource: relative(projectDir, join(pluginDir, 'skills')),
+          mountPaths: ['claude'],
+        },
+      ],
+    });
+    process.chdir(mainDir);
+    const routeModuleUrl = new URL(`../dist/routes/capabilities.js?source-plugin=${Date.now()}`, import.meta.url);
+    const { capabilitiesRoutes } = await import(routeModuleUrl.href);
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const config = await readCapabilitiesConfig(projectDir);
+      const pluginCap = config?.capabilities.find((item) => item.id === 'debugging' && item.pluginId === pluginId);
+      assert.ok(pluginCap, 'declared plugin-owned skill should survive');
+      assert.deepEqual(pluginCap.mountPaths, ['claude']);
+      const catCafeCap = config?.capabilities.find((item) => item.id === 'debugging' && !item.pluginId);
+      assert.equal(catCafeCap, undefined, 'discovery must preserve the selected plugin source');
+      assert.equal(config.capabilities.filter((item) => item.id === 'debugging').length, 1);
+      const again = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+      assert.equal(again.statusCode, 200, again.payload);
+      assert.equal(
+        (await readCapabilitiesConfig(projectDir)).capabilities.filter((item) => item.id === 'debugging').length,
+        1,
+      );
+    } finally {
+      await app.close();
+      process.chdir(previousCwd);
+      await rm(mainDir, { recursive: true, force: true });
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
   it('preserves same-id external skill capability when adding Clowder AI source skill on GET', async () => {
     const previousCwd = process.cwd();
     const Fastify = (await import('fastify')).default;

@@ -3,7 +3,8 @@ import { defineShellCopy } from '../../../shell/shell-copy';
 export const pluginManagerCopy = defineShellCopy(
   {
     zh: {
-      repair: '修复',
+      restart: '重启插件',
+      retryStart: '重试启动',
       update: '更新',
       install: '安装',
       working: '处理中…',
@@ -24,6 +25,7 @@ export const pluginManagerCopy = defineShellCopy(
       starting: '正在启动',
       stopped: '尚未运行',
       failed: '运行出错',
+      skillConflicts: '技能挂载有冲突',
       incompatible: '版本和当前 Host 不兼容，已停用',
       degraded: '运行受限',
       incomplete: '配置尚未完成',
@@ -45,7 +47,7 @@ export const pluginManagerCopy = defineShellCopy(
       uninstallPlugin: '卸载插件…',
       removePlugin: '移除插件…',
       viewMore: '查看更多插件',
-      repairHint: '可以先尝试修复；如仍有问题，请检查下方配置和诊断详情。',
+      restartHint: '重试会重新启动当前插件。配置或技能冲突需在对应位置处理。',
       configHint: '请检查下方配置和插件文档，再使用插件提供的操作处理。',
       packageHint: '请检查安装包和插件文档中的安装要求。',
       incompatibleHint: '请更新到兼容当前 Host 的插件版本，再重新启用。',
@@ -69,7 +71,8 @@ export const pluginManagerCopy = defineShellCopy(
       repository: (name: string) => `来自 ${name}`,
     },
     en: {
-      repair: 'Repair',
+      restart: 'Restart plugin',
+      retryStart: 'Retry start',
       update: 'Update',
       install: 'Install',
       working: 'Working…',
@@ -90,6 +93,7 @@ export const pluginManagerCopy = defineShellCopy(
       starting: 'Starting',
       stopped: 'Not running',
       failed: 'Runtime error',
+      skillConflicts: 'Skill mount conflicts',
       incompatible: 'Incompatible with this Host; disabled',
       degraded: 'Limited operation',
       incomplete: 'Configuration incomplete',
@@ -111,7 +115,7 @@ export const pluginManagerCopy = defineShellCopy(
       uninstallPlugin: 'Uninstall plugin…',
       removePlugin: 'Remove plugin…',
       viewMore: 'Show more plugins',
-      repairHint: 'Try Repair first. If the problem continues, check the configuration and diagnostic details below.',
+      restartHint: 'Retry starts the current plugin again. Resolve configuration or skill conflicts separately.',
       configHint: 'Check the configuration and plugin documentation, then use the plugin’s actions below.',
       packageHint: 'Check the package and the installation requirements in the plugin documentation.',
       incompatibleHint: 'Update to a compatible plugin version, then enable it again.',

@@ -57,7 +57,7 @@ export function PluginListRow({
   onSelect,
   onInstall,
   onSetEnabled,
-  onRepair,
+  onRestart,
   onBlockedToggle,
   onUninstall,
   busy,
@@ -70,7 +70,7 @@ export function PluginListRow({
   onSelect: () => void;
   onInstall?: () => void;
   onSetEnabled?: (enabled: boolean) => void;
-  onRepair?: () => void;
+  onRestart?: () => void;
   onBlockedToggle?: () => void;
   onUninstall?: () => void;
   busy: boolean;
@@ -187,7 +187,7 @@ export function PluginListRow({
           locale={locale}
           busy={busy}
           onInstall={onInstall}
-          onRepair={onRepair}
+          onRestart={onRestart}
           onSetEnabled={onSetEnabled}
           onBlockedToggle={onBlockedToggle}
           onUninstall={onUninstall}

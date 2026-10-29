@@ -8,6 +8,7 @@ export function mutationRequestOptions(path: string): { mutationTimeoutMs: numbe
     path.endsWith('/set-enabled') ||
     path.endsWith('/uninstall') ||
     path.endsWith('/repair') ||
+    path.endsWith('/restart') ||
     path.endsWith('/contributions/configuration')
   ) {
     return { mutationTimeoutMs: LIFECYCLE_TIMEOUT_MS };

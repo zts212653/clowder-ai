@@ -5,7 +5,12 @@ import { personalChromeSettingsHref } from '@/utils/personal-chrome-settings';
 import { HubIcon } from '../../hub-icons';
 import { settingsResourceCardClass, settingsResourceRowClass } from '../../SettingsResourceCard';
 import { SettingsText } from '../primitives/SettingsText';
-import { PluginDetailFooter, PluginDetailHeader, PluginDetailStateAction } from './controls/PluginManagerDetailChrome';
+import {
+  PluginDetailFooter,
+  PluginDetailHeader,
+  PluginDetailOperations,
+  PluginDetailStateAction,
+} from './controls/PluginManagerDetailChrome';
 import { pluginManagerText } from './controls/plugin-manager.shell-copy';
 import { DotConnectionDetail } from './DotConnectionDetail';
 import { PluginCapabilityDocumentation } from './PluginCapabilityDocumentation';
@@ -13,6 +18,7 @@ import PluginConnectorSettings from './PluginConnectorSettings';
 import { PluginManagerBindings } from './PluginManagerBindings';
 import { PluginManagerConfigurationSection } from './PluginManagerConfigurationSection';
 import { PluginManagerDetailPrelude } from './PluginManagerDetailPrelude';
+import { PluginSkillConflicts } from './PluginSkillConflicts';
 import { PluginSourceLabel } from './PluginSourceLabel';
 import { PluginVisual } from './PluginVisual';
 import type { PluginManagerPresentation } from './plugin-manager-attention';
@@ -43,7 +49,7 @@ export function PluginManagerDetailCard({
   configurationSaved = false,
   onStateChanged,
   onInstall,
-  onRepair,
+  onRestart,
   onUninstall,
   onSetEnabled,
   onBlockedToggle,
@@ -58,7 +64,7 @@ export function PluginManagerDetailCard({
   configurationSaved?: boolean;
   onStateChanged?: () => void | Promise<void>;
   onInstall?: (() => void) | undefined;
-  onRepair?: (() => void) | undefined;
+  onRestart?: (() => void) | undefined;
   onUninstall?: (() => void) | undefined;
   onSetEnabled?: ((enabled: boolean) => void) | undefined;
   onBlockedToggle?: (() => void) | undefined;
@@ -79,6 +85,8 @@ export function PluginManagerDetailCard({
             onInstall={onInstall}
             onSetEnabled={onSetEnabled}
             onBlockedToggle={onBlockedToggle}
+            onRestart={onRestart}
+            onUninstall={onUninstall}
           />
         )}
         {presentation === 'v1' && (
@@ -113,9 +121,18 @@ export function PluginManagerDetailCard({
                 onSetEnabled={onSetEnabled}
                 onBlockedToggle={onBlockedToggle}
               />
+              <PluginDetailOperations
+                plugin={plugin}
+                locale={locale}
+                busy={busy}
+                onRestart={onRestart}
+                onUninstall={onUninstall}
+              />
             </div>
           </section>
         )}
+
+        <PluginSkillConflicts plugin={plugin} locale={locale} onResolved={onOperationChange} />
 
         {presentation === 'v1' && (
           <section className="space-y-2" data-plugin-detail-section="introduction">
@@ -157,7 +174,6 @@ export function PluginManagerDetailCard({
                 locale={locale}
                 busy={busy}
                 onInstall={onInstall}
-                onRepair={onRepair}
               />
             )}
             <DotConnectionDetail
@@ -182,7 +198,6 @@ export function PluginManagerDetailCard({
                     locale={locale}
                     busy={busy}
                     onInstall={onInstall}
-                    onRepair={onRepair}
                   />
                 ) : undefined
               }
@@ -209,9 +224,7 @@ export function PluginManagerDetailCard({
             <PluginCapabilityDocumentation plugin={plugin} presentation={presentation} />
           </>
         )}
-        {presentation === 'v2' && (
-          <PluginDetailFooter plugin={plugin} locale={locale} busy={busy} onUninstall={onUninstall} />
-        )}
+        {presentation === 'v2' && <PluginDetailFooter plugin={plugin} locale={locale} />}
       </div>
     </article>
   );

@@ -3,6 +3,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
+vi.mock('@/hooks/useAgentClientLibraries', () => ({
+  useAgentClientLibraries: () => ({ libraries: [], loading: false, error: '' }),
+}));
 
 import { apiFetch } from '@/utils/api-client';
 import { PluginManagerConfigurationSection } from '../plugin-manager/PluginManagerConfigurationSection';
@@ -73,9 +76,11 @@ describe('Plugin Manager test connection', () => {
     await act(async () => testButton()?.click());
     await flushEffects();
 
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/plugins/dev.clowder.fixture/test', { method: 'POST' });
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/plugins/dev.clowder.fixture/test',
+      expect.objectContaining({ method: 'POST' }),
+    );
     expect(container.textContent).toContain('Connection healthy');
-    expect(container.querySelector('.bg-conn-emerald-bg')).not.toBeNull();
   });
 
   it('shows declared and HTTP test failures without rewriting their message', async () => {

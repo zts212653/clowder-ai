@@ -21,6 +21,7 @@ import {
 } from '../declared/declared-static-resources.js';
 import { NativeMcpLaunches, type NativeMcpServer } from '../declared/native-mcp-launches.js';
 import { NativePluginActions } from '../declared/native-plugin-actions.js';
+import { PluginSkillResources } from '../declared/plugin-skill-resources.js';
 import { type PluginRuntimeLifecyclePort, removesPluginOwnedResources } from '../external-plugin-lifecycle-types.js';
 import { ExternalPluginRuntimeError, type VerifiedPluginPackageLocator } from '../external-runtime/types.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
@@ -76,6 +77,7 @@ export interface PluginRuntimeCarrier {
 }
 
 export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
+  readonly skillResources: PluginSkillResources | undefined;
   readonly nativeActions = new NativePluginActions((id) => this.#admission(id));
   readonly #nativeMcpLaunches = new NativeMcpLaunches((id) => this.#admission(id), this.nativeActions);
   readonly #carriers: PluginRuntimeCarrier[] = [];
@@ -88,6 +90,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     private readonly beforeStop?: (instanceId: string, reason: string) => Promise<void>,
     private readonly projectOutputs?: PluginProjectOutputs,
   ) {
+    this.skillResources = resources ? new PluginSkillResources(resources) : undefined;
     this.#runtimeContributions = new DeclaredRuntimeContributions(
       runtimeContributions ?? {
         packages: resources?.packages ?? unsupportedPackageLocator,
@@ -148,7 +151,8 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     if (pkg?.manifest === null) {
       await this.beforeStop?.(pluginInstanceId, reason);
       await this.#runtimeContributions.deactivate(pluginInstanceId);
-      if (removesPluginOwnedResources(reason)) await removeDeclaredStaticResources(pkg.pluginId, this.resources);
+      if (removesPluginOwnedResources(reason))
+        await removeDeclaredStaticResources(pkg.pluginId, this.resources, pkg.manifest ?? undefined);
       return;
     }
     const admission = await this.#admission(pluginInstanceId);
@@ -157,7 +161,11 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     await this.#runtimeContributions.deactivate(pluginInstanceId);
     await carrier.stop(pluginInstanceId, reason);
     if (removesPluginOwnedResources(reason)) {
-      await removeDeclaredStaticResources(admission.packageRecord.pluginId, this.resources);
+      await removeDeclaredStaticResources(
+        admission.packageRecord.pluginId,
+        this.resources,
+        admission.packageRecord.manifest,
+      );
     }
   }
 
@@ -368,7 +376,11 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     }
     try {
       await this.#runtimeContributions.deactivate(admission.instance.pluginInstanceId);
-      await removeDeclaredStaticResources(admission.packageRecord.pluginId, this.resources);
+      await removeDeclaredStaticResources(
+        admission.packageRecord.pluginId,
+        this.resources,
+        admission.packageRecord.manifest,
+      );
     } catch (error) {
       rollbackErrors.push(error);
     }

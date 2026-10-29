@@ -85,7 +85,7 @@ describe('Plugin Manager v2 presentation', () => {
     expect(container.querySelector('[data-plugin-description]')?.className).toContain('line-clamp-2');
   });
 
-  it('keeps provenance in the badge title and offers uninstall at the selected detail footer', () => {
+  it('keeps provenance in the badge title and offers uninstall beside the selected detail identity', () => {
     const onUninstall = vi.fn();
     act(() =>
       root.render(<PluginManagerContent presentation="v2" fixtures={[ready, failed]} onUninstall={onUninstall} />),
@@ -97,7 +97,7 @@ describe('Plugin Manager v2 presentation', () => {
     expect(row?.querySelector('details')).toBeNull();
     act(() => row?.querySelector('button')?.click());
     const uninstall = container.querySelector(
-      '[data-plugin-detail-section="provenance"] button[aria-label="卸载GitHub"]',
+      '[data-plugin-detail-section="identity"] button[aria-label="卸载GitHub"]',
     ) as HTMLButtonElement;
     expect(uninstall.tabIndex).toBe(0);
     expect(uninstall.disabled).toBe(false);

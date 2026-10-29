@@ -91,6 +91,14 @@ async function harness({
       calls.push(['repair', pluginId, request]);
       return { pluginId, pluginInstanceId: 'pi_video' };
     },
+    restart: async (pluginId, request) => {
+      calls.push(['restart', pluginId, request]);
+      return { pluginId, pluginInstanceId: 'pi_video' };
+    },
+    resolveSkillConflict: async (pluginId, request) => {
+      calls.push(['resolve-skill-conflict', pluginId, request]);
+      return { backupPath: '.codex/skills/.guide.backup-fixture' };
+    },
     setEnabled: async (pluginId, request) => {
       calls.push(['set-enabled', pluginId, request]);
       return { pluginId, pluginInstanceId: 'pi_video' };
@@ -1130,6 +1138,77 @@ test('repair retains the Manager owner, strict revision and audit boundaries', a
     assert.equal(ok.statusCode, 200, ok.payload);
     assert.deepEqual(calls, [['repair', 'official.video', { expectedRevision: 3 }]]);
     assert.equal(audits.at(-1).data.operation, 'repair');
+  } finally {
+    await app.close();
+  }
+});
+
+test('restart and skill choices require owner access, strict revisions, explicit confirmation and audit', async () => {
+  const { app, calls, audits } = await harness();
+  try {
+    for (const [suffix, payload, operation] of [
+      ['restart', { expectedRevision: 3 }, 'restart'],
+      [
+        'skills/resolve',
+        { expectedRevision: 3, skillName: 'guide', mountPointId: 'codex', revision: 'a'.repeat(64), confirmed: true },
+        'resolve-skill-conflict',
+      ],
+    ]) {
+      const url = `/api/plugin-manager/plugins/official.video/${suffix}`;
+      const denied = await app.inject({ method: 'POST', url, payload, remoteAddress: '203.0.113.1' });
+      assert.ok(denied.statusCode >= 400);
+      const invalid = await app.inject({
+        method: 'POST',
+        url,
+        headers: writeHeaders,
+        payload: { ...payload, path: '/outside' },
+        remoteAddress: '127.0.0.1',
+      });
+      assert.equal(invalid.statusCode, 400);
+      const ok = await app.inject({ method: 'POST', url, headers: writeHeaders, payload, remoteAddress: '127.0.0.1' });
+      assert.equal(ok.statusCode, 200, ok.payload);
+      assert.equal(calls.at(-1)[0], operation);
+      assert.equal(audits.at(-1).data.operation, operation);
+    }
+    assert.equal(calls.length, 2);
+    const unconfirmed = await app.inject({
+      method: 'POST',
+      url: '/api/plugin-manager/plugins/official.video/skills/resolve',
+      headers: writeHeaders,
+      payload: { expectedRevision: 3, skillName: 'guide', mountPointId: 'codex', revision: 'a'.repeat(64) },
+      remoteAddress: '127.0.0.1',
+    });
+    assert.equal(unconfirmed.statusCode, 400);
+    assert.equal(calls.length, 2);
+  } finally {
+    await app.close();
+  }
+});
+
+test('restart and skill choices perform no mutation when audit is unavailable', async () => {
+  const { app, calls } = await harness({
+    auditAppend: async () => {
+      throw new Error('audit unavailable');
+    },
+  });
+  try {
+    for (const [suffix, payload] of [
+      ['restart', { expectedRevision: 3 }],
+      [
+        'skills/resolve',
+        { expectedRevision: 3, skillName: 'guide', mountPointId: 'codex', revision: 'a'.repeat(64), confirmed: true },
+      ],
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/plugin-manager/plugins/official.video/${suffix}`,
+        headers: writeHeaders,
+        payload,
+        remoteAddress: '127.0.0.1',
+      });
+      assert.equal(response.statusCode, 503);
+    }
+    assert.deepEqual(calls, []);
   } finally {
     await app.close();
   }

@@ -341,8 +341,11 @@ export const capabilitiesRoutes: FastifyPluginAsync<CapabilitiesRoutesOptions> =
       for (const skillName of allSkillNames) {
         const isCatCafe = catCafeOwnSkills !== null && catCafeOwnSkills.includes(skillName);
         if (!isCatCafe) continue; // Skip non-cat-cafe skills — don't add external entries
-        // Plugin-owned and custom-source skills may share an id with a built-in
-        // skill; neither should suppress the built-in registry entry.
+        // A sole plugin entry with a materialized source is the selected source
+        // for this bare id. Discovery must not recreate the rejected built-in.
+        // Legacy plugin entries without a source keep their existing discovery behavior.
+        const sameIdSkills = config.capabilities.filter((c) => c.type === 'skill' && c.id === skillName);
+        if (sameIdSkills.length === 1 && sameIdSkills[0]?.pluginId && sameIdSkills[0]?.skillsSource) continue;
         const exists = config.capabilities.some(
           (c) => c.type === 'skill' && c.id === skillName && c.source === 'cat-cafe' && !c.pluginId && !c.skillsSource,
         );

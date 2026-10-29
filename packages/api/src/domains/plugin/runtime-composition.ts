@@ -48,6 +48,7 @@ import { ContentEditorSemanticWorker } from './content-editor-runtime/semantic-w
 import type { CloudConversationHostRegistry } from './declared/cloud-conversation-host-registry.js';
 import type { AgentSessionProviderLifecycle } from './declared/declared-agent-session-providers.js';
 import type { DeclaredScheduleTaskRunner } from './declared/declared-runtime-contributions.js';
+import { PluginSkillConflictChangedError } from './declared/plugin-skill-resources.js';
 import { desktopWindowContribution } from './desktop-window-runtime/admission.js';
 import { OwnerDesktop } from './desktop-window-runtime/owner-desktop.js';
 import { validateHostPluginManifest as validateManifest } from './desktop-window-runtime/presentation-manifest.js';
@@ -949,6 +950,7 @@ export function createPluginManagerRuntimeComposition(
     now,
   });
   const manager = new PluginManagerService({
+    ...(options.runtime.supervisor.skillResources ? { skillResources: options.runtime.supervisor.skillResources } : {}),
     catalog,
     inventory: options.runtime.inventoryStore,
     installedPackages,
@@ -990,6 +992,33 @@ export function createPluginManagerRuntimeComposition(
       },
     },
     lifecycle: {
+      restart: async (pluginInstanceId, expectedRevision) => {
+        try {
+          await options.runtime.lifecycle.restart(pluginInstanceId, expectedRevision);
+        } catch (error) {
+          lifecycleFailure(error);
+        }
+      },
+      resolveSkillConflict: async (pluginInstanceId, expectedRevision, request) => {
+        try {
+          return await options.runtime.lifecycle.runWithCurrentRevision(
+            pluginInstanceId,
+            expectedRevision,
+            async (current) => {
+              const snapshot = await options.runtime.inventoryStore.snapshot();
+              const pkg = snapshot.packages.find((p) => p.packageDigest === current.packageDigest);
+              const skills = options.runtime.supervisor.skillResources;
+              if (!pkg || !skills)
+                throw new PluginManagerServiceError('LIFECYCLE_UNAVAILABLE', 'Skill resources are unavailable');
+              return skills.resolve(pkg, request);
+            },
+          );
+        } catch (error) {
+          if (error instanceof PluginSkillConflictChangedError)
+            throw new PluginManagerServiceError('STALE_REVISION', error.message);
+          return lifecycleFailure(error);
+        }
+      },
       repair: async (pluginInstanceId, expectedRevision) => {
         try {
           await options.runtime.lifecycle.repair(pluginInstanceId, expectedRevision);

@@ -178,9 +178,23 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
 
     // Build mount status lookup for each source skill
     const sourceSet = new Set(sourceSkills);
+    const selectedPluginSources = new Set(
+      (skillsCapConfig?.capabilities ?? [])
+        .filter(
+          (c) =>
+            c.type === 'skill' &&
+            c.pluginId &&
+            c.skillsSource &&
+            !skillsCapConfig?.capabilities.some(
+              (other) => other.type === 'skill' && other.id === c.id && !other.pluginId && !other.skillsSource,
+            ),
+        )
+        .map((c) => c.id),
+    );
     const mountLookup = new Map<string, SkillEntry>();
     await Promise.all(
       sourceSkills.map(async (name) => {
+        if (selectedPluginSources.has(name)) return;
         const [claude, codex, gemini, kimi] = await Promise.all([
           isSkillMountedAtPoint(mountPointDirCandidates.claude, skillsSrc, name, mainSkillsSrc),
           isSkillMountedAtPoint(mountPointDirCandidates.codex, skillsSrc, name, mainSkillsSrc),
@@ -273,7 +287,8 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
     // Collected into a separate array and sorted by (pluginId, name) for deterministic order
     // across projects — Promise.all completion order is non-deterministic (#F228 ordering fix).
     const pluginCaps = (skillsCapConfig?.capabilities ?? []).filter(
-      (c) => c.type === 'skill' && c.pluginId && c.skillsSource && !sourceSet.has(c.id),
+      (c) =>
+        c.type === 'skill' && c.pluginId && c.skillsSource && (!sourceSet.has(c.id) || selectedPluginSources.has(c.id)),
     );
     const pluginSkills: SkillEntry[] = await Promise.all(
       pluginCaps.map(async (cap): Promise<SkillEntry | null> => {

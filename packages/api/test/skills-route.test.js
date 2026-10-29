@@ -61,6 +61,45 @@ async function buildSessionSkillsApp(opts = {}) {
 }
 
 describe('Skills Route', () => {
+  it('GET /api/skills shows the explicitly selected plugin source when a built-in has the same name', async () => {
+    const raw = await mkdtemp(join(tmpdir(), 'skills-selected-source-'));
+    const root = await realpath(raw);
+    const source = join(root, 'cat-cafe-skills');
+    const pluginSource = join(root, 'plugin-skills');
+    await mkdir(join(source, 'guide'), { recursive: true });
+    await mkdir(join(pluginSource, 'guide'), { recursive: true });
+    await writeFile(join(source, 'guide/SKILL.md'), '# Built-in');
+    await writeFile(join(pluginSource, 'guide/SKILL.md'), '# Plugin');
+    await writeCapabilitiesConfig(root, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'guide',
+          type: 'skill',
+          source: 'cat-cafe',
+          pluginId: 'fixture.skills',
+          skillsSource: pluginSource,
+          enabled: true,
+          mountPaths: ['claude'],
+        },
+      ],
+    });
+    const app = await buildSessionSkillsApp({ mainProjectRoot: root, skillsSourceDir: source });
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/skills?projectPath=${encodeURIComponent(root)}`,
+        headers: AUTH_HEADERS,
+      });
+      assert.equal(response.statusCode, 200, response.payload);
+      const rows = response.json().skills.filter((skill) => skill.name === 'guide');
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].pluginId, 'fixture.skills');
+    } finally {
+      await app.close();
+      await rm(raw, { recursive: true, force: true });
+    }
+  });
   it('resolves the source skills directory without requiring cwd to be a git checkout', async () => {
     const previousCwd = process.cwd();
     const nonGitDir = await mkdtemp(join(tmpdir(), 'skills-route-nogit-'));

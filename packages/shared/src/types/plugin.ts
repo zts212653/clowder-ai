@@ -235,6 +235,8 @@ export interface PluginManagerDiagnostic {
 }
 
 export interface PluginManagerActions {
+  /** Stop and start an enabled plugin, or retry its failed start. */
+  restart?: boolean;
   /** Explicit retry of a failed activation through the existing lifecycle authority. */
   repair?: boolean;
   install: boolean;
@@ -391,6 +393,8 @@ export interface PluginManagerListItem {
 }
 
 export interface PluginManagerDetail extends PluginManagerListItem {
+  /** Live skill governance conflicts; independent of plugin runtime health. */
+  skillConflicts?: PluginManagerSkillConflict[];
   /** Owner-scoped Host bindings; absent when this projection is unavailable. */
   bindings?: Array<{ key: string; threadId: string; threadTitle: string | null; createdAt: number }>;
   capabilities: PluginManagerCapability[];
@@ -403,6 +407,18 @@ export interface PluginManagerDetail extends PluginManagerListItem {
   permissions?: { label: string };
   testable?: boolean;
   configFields: PluginManagerConfigField[];
+}
+
+export interface PluginManagerSkillConflict {
+  skillName: string;
+  mountPointId: string;
+  /** Project-relative location; never accepted back as a write path. */
+  path: string;
+  source: string;
+  sourcePluginId?: string;
+  canResolve: boolean;
+  /** Observed blocker identity, checked again before an explicit replacement. */
+  revision: string;
 }
 
 export interface PluginManagerCatalogProjection {

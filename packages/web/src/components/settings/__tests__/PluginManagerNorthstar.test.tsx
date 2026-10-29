@@ -19,7 +19,7 @@ const update: PluginManagerDesignFixture = {
   id: 'update',
   displayName: 'Update plugin',
   availableVersion: '2.0.0',
-  actions: { install: true, repair: false, setEnabled: true, uninstall: true, blockingReasons: [] },
+  actions: { install: true, restart: false, setEnabled: true, uninstall: true, blockingReasons: [] },
 };
 const broken: PluginManagerDesignFixture = {
   ...update,
@@ -28,7 +28,7 @@ const broken: PluginManagerDesignFixture = {
   live: 'crashed',
   trust: 'unknown',
   diagnostic: 'UNEXPECTED_RUNTIME_FAILURE',
-  actions: { ...update.actions!, repair: true },
+  actions: { ...update.actions!, restart: true },
 };
 const available: PluginManagerDesignFixture = {
   ...ready,
@@ -94,8 +94,8 @@ describe('accepted plugin north star', () => {
     }
   });
 
-  it('separates repair and update, and retains uninstall only at the detail footer', () => {
-    const onRepair = vi.fn(),
+  it('keeps restart and uninstall with identity while update remains separate', () => {
+    const onRestart = vi.fn(),
       onInstall = vi.fn(),
       onUninstall = vi.fn();
     act(() =>
@@ -103,7 +103,7 @@ describe('accepted plugin north star', () => {
         <PluginManagerContent
           presentation="v2"
           fixtures={[broken]}
-          onRepair={onRepair}
+          onRestart={onRestart}
           onInstall={onInstall}
           onUninstall={onUninstall}
         />,
@@ -112,15 +112,14 @@ describe('accepted plugin north star', () => {
     const detail = container.querySelector('[data-testid="plugin-manager-detail"]')!;
     const error = detail.querySelector('[data-plugin-detail-section="attention"]')!;
     const newer = detail.querySelector('[data-plugin-detail-section="update"]')!;
-    const repair = error.querySelector<HTMLButtonElement>('[data-plugin-detail-action="repair"]');
+    const repair = detail.querySelector<HTMLButtonElement>('[data-plugin-detail-action="restart"]');
     const upgrade = newer.querySelector<HTMLButtonElement>('[data-plugin-detail-action="update"]');
-    expect(repair?.classList.contains('console-button-primary')).toBe(true);
+    expect(repair?.textContent).toBe('重试启动');
     expect(upgrade?.classList.contains('console-button-primary')).toBe(false);
     expect(upgrade?.textContent).toBe('更新到 2.0.0');
-    expect(detail.querySelectorAll('.console-button-primary')).toHaveLength(1);
     expect(error.querySelector('details')?.open).toBe(false);
     expect(error.querySelector('summary')?.textContent).toBe('技术详情');
-    const footer = detail.querySelector('[data-plugin-detail-section="provenance"]')!;
+    const footer = detail.querySelector('[data-plugin-detail-section="identity"]')!;
     const uninstall = footer.querySelector<HTMLButtonElement>('[data-plugin-uninstall]');
     expect(container.querySelector('[data-plugin-list-row] [data-plugin-uninstall]')).toBeNull();
     act(() => {
@@ -128,7 +127,7 @@ describe('accepted plugin north star', () => {
       upgrade?.click();
       uninstall?.click();
     });
-    expect(onRepair).toHaveBeenCalledWith('broken');
+    expect(onRestart).toHaveBeenCalledWith('broken');
     expect(onInstall).toHaveBeenCalledWith('broken');
     expect(onUninstall).toHaveBeenCalledWith('broken');
   });
@@ -143,7 +142,7 @@ describe('accepted plugin north star', () => {
               ...broken,
               actions: {
                 install: false,
-                repair: true,
+                restart: true,
                 setEnabled: false,
                 uninstall: false,
                 blockingReasons: ['policy'],
@@ -151,7 +150,7 @@ describe('accepted plugin north star', () => {
             },
           ]}
           onInstall={vi.fn()}
-          onRepair={vi.fn()}
+          onRestart={vi.fn()}
           onUninstall={vi.fn()}
         />,
       ),

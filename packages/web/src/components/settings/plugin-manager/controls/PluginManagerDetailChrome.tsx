@@ -13,6 +13,41 @@ interface PluginDetailActionProps {
   onSetEnabled?: ((enabled: boolean) => void) | undefined;
   onBlockedToggle?: (() => void) | undefined;
   onInstall?: (() => void) | undefined;
+  onRestart?: (() => void) | undefined;
+  onUninstall?: (() => void) | undefined;
+}
+
+export function PluginDetailOperations({ plugin, locale, busy, onRestart, onUninstall }: PluginDetailActionProps) {
+  const t = pluginManagerText(locale);
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-plugin-detail-section="operations">
+      {plugin.actions?.restart && onRestart && (
+        <button
+          type="button"
+          data-plugin-detail-action="restart"
+          disabled={busy}
+          onClick={onRestart}
+          className="console-button-secondary !font-medium disabled:opacity-50"
+        >
+          {busy ? t.working : plugin.activationFailed || plugin.live === 'crashed' ? t.retryStart : t.restart}
+        </button>
+      )}
+      {(plugin.actions?.uninstall ?? plugin.artifact === 'installed') && onUninstall && (
+        <button
+          type="button"
+          data-plugin-uninstall
+          disabled={busy}
+          onClick={onUninstall}
+          aria-label={
+            plugin.artifact === 'quarantined' ? t.remove(plugin.displayName) : t.uninstall(plugin.displayName)
+          }
+          className="console-button-secondary !font-medium disabled:opacity-50"
+        >
+          {plugin.artifact === 'quarantined' ? t.removePlugin : t.uninstallPlugin}
+        </button>
+      )}
+    </div>
+  );
 }
 
 /** The selected detail remains actionable even when its list row is folded away. */
@@ -66,7 +101,7 @@ export function PluginDetailHeader(props: PluginDetailActionProps) {
   return (
     <header
       data-plugin-detail-section="identity"
-      className="flex flex-wrap items-center gap-3 border-b border-cafe-border pb-4"
+      className="sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-cafe-border bg-[var(--console-card-bg)] pb-4 pt-1"
     >
       <PluginVisual icon={plugin.icon} iconBg={plugin.iconBg} name={plugin.displayName} size="large" />
       <div className="min-w-0 flex-1">
@@ -76,6 +111,7 @@ export function PluginDetailHeader(props: PluginDetailActionProps) {
         </p>
       </div>
       <PluginDetailStateAction {...props} />
+      <PluginDetailOperations {...props} />
     </header>
   );
 }
@@ -118,19 +154,8 @@ export function PluginUpdateNotice({
   );
 }
 
-export function PluginDetailFooter({
-  plugin,
-  locale,
-  busy,
-  onUninstall,
-}: {
-  plugin: PluginManagerDesignFixture;
-  locale: string;
-  busy: boolean;
-  onUninstall?: (() => void) | undefined;
-}) {
+export function PluginDetailFooter({ plugin, locale }: { plugin: PluginManagerDesignFixture; locale: string }) {
   const t = pluginManagerText(locale);
-  const canUninstall = plugin.actions?.uninstall ?? plugin.artifact === 'installed';
   return (
     <footer
       data-plugin-detail-section="provenance"
@@ -142,20 +167,6 @@ export function PluginDetailFooter({
           {plugin.packageName} · {plugin.publisher} · {t.available(plugin.availableVersion)}
         </p>
       </div>
-      {canUninstall && onUninstall && (
-        <button
-          type="button"
-          data-plugin-uninstall
-          disabled={busy}
-          aria-label={
-            plugin.artifact === 'quarantined' ? t.remove(plugin.displayName) : t.uninstall(plugin.displayName)
-          }
-          onClick={onUninstall}
-          className="console-button-secondary shrink-0 !font-medium text-conn-red-text disabled:opacity-50"
-        >
-          {plugin.artifact === 'quarantined' ? t.removePlugin : t.uninstallPlugin}
-        </button>
-      )}
     </footer>
   );
 }

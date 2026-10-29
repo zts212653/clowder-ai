@@ -39,6 +39,8 @@ export interface PluginManagerDesignFixture {
   intent: PluginManagerIntentState;
   live: PluginManagerLiveState;
   activationFailed?: boolean;
+  lifecycleRevision?: number | null;
+  skillConflicts?: PluginManagerDetail['skillConflicts'];
   capabilities: Array<{ name: string; description: string }>;
   contributions?: PluginManagerContribution[];
   tools?: Array<Pick<PluginManagerContributionTool, 'contributionId' | 'name' | 'description'>>;

@@ -15,7 +15,12 @@ import { join, resolve } from 'node:path';
 import { type CapabilitiesConfig, type CapabilityEntry, type MountRules } from '@cat-cafe/shared';
 import { readCapabilitiesConfig, writeCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
-import { activeMountTargets, mountSkillSymlinks, unmountSkillSymlinks } from './skill-mount-ops.js';
+import {
+  activeMountTargets,
+  migrateLegacyPluginSkillMounts,
+  mountSkillSymlinks,
+  unmountSkillSymlinks,
+} from './skill-mount-ops.js';
 import { syncAll } from './skill-sync-all.js';
 import type { MountConflict } from './skill-sync-engine.js';
 
@@ -23,6 +28,9 @@ export { mountSkillSymlinks, unmountSkillSymlinks } from './skill-mount-ops.js';
 // Re-export for consumers that import from skill-manage
 export type { SkillDetail, SkillInfo } from './skill-query.js';
 export { listSkills, querySkill } from './skill-query.js';
+
+/** A resource conflict, distinct from I/O failures that must still abort activation. */
+export class SkillRegistrationConflictError extends Error {}
 
 // ────────── Types ──────────
 
@@ -180,8 +188,11 @@ export async function addSkill(
     const builtInSkillsRoot =
       opts.builtInSkillsSource ?? opts.cascade?.catCafeSkillsSource ?? join(projectRoot, 'cat-cafe-skills');
     const builtInDirExists = existsSync(join(builtInSkillsRoot, capId));
-    if (builtInConfigCollision || builtInDirExists) {
-      throw new Error(
+    const selectedPluginSource = config.capabilities.some(
+      (c) => c.type === 'skill' && c.id === capId && c.pluginId === pluginId,
+    );
+    if (builtInConfigCollision || (builtInDirExists && !selectedPluginSource)) {
+      throw new SkillRegistrationConflictError(
         `Plugin skill "${capId}" (plugin: ${pluginId}) conflicts with built-in skill "${capId}". ` +
           'Plugin skills must use a unique name that does not match any built-in skill.',
       );
@@ -190,14 +201,15 @@ export async function addSkill(
     // skill basename (e.g. `skills/publish`) would share bare `cap.id` in
     // syncProject/updateSkillMountPaths maps, overwriting each other's state.
     const crossPluginCollision = config.capabilities.find(
-      (c) => c.type === 'skill' && c.id === capId && c.source === 'cat-cafe' && c.pluginId && c.pluginId !== pluginId,
+      (c) => c.type === 'skill' && c.id === capId && c.pluginId && c.pluginId !== pluginId,
     );
     if (crossPluginCollision) {
-      throw new Error(
+      throw new SkillRegistrationConflictError(
         `Plugin skill "${capId}" (plugin: ${pluginId}) conflicts with skill "${capId}" ` +
           `from plugin "${crossPluginCollision.pluginId}". Plugin skills must have unique names across all plugins.`,
       );
     }
+    await migrateLegacyPluginSkillMounts(projectRoot, skillName, builtInSkillsRoot, mountRules);
   }
 
   // Look up existing entry BEFORE computing mountPaths so we can preserve

@@ -11,18 +11,17 @@ export function PluginManagerDetailPrelude({
   description,
   locale = 'zh-CN',
   busy = false,
-  onRepair,
   onInstall,
 }: {
   plugin: PluginManagerDesignFixture;
   description: string;
   locale?: string;
   busy?: boolean;
-  onRepair?: (() => void) | undefined;
   onInstall?: (() => void) | undefined;
 }) {
-  const reason = pluginAttentionReason(plugin, locale);
   const t = pluginManagerText(locale);
+  const attention = pluginAttentionReason(plugin, locale);
+  const reason = attention === t.skillConflicts ? undefined : attention;
   return (
     <>
       {reason && (
@@ -35,24 +34,13 @@ export function PluginManagerDetailPrelude({
               <PluginStatusDot tone={pluginAttentionTone(plugin)} className="mr-2 h-2 w-2" />
               {reason}
             </SettingsText>
-            {plugin.artifact === 'installed' && plugin.actions?.repair && onRepair && (
-              <button
-                type="button"
-                data-plugin-detail-action="repair"
-                disabled={busy}
-                onClick={onRepair}
-                className="console-button-primary col-start-2 row-start-1 !font-medium disabled:opacity-50"
-              >
-                {busy ? t.working : t.repair}
-              </button>
-            )}
             <SettingsText as="p" variant="sm" tone="secondary" className="col-span-2">
               {plugin.actions?.blockingReasons.includes('package-incompatible')
                 ? pluginIncompatibleHint(plugin, locale)
                 : plugin.artifact !== 'installed'
                   ? t.packageHint
-                  : plugin.actions?.repair
-                    ? t.repairHint
+                  : plugin.actions?.restart
+                    ? t.restartHint
                     : t.configHint}
             </SettingsText>
             {plugin.diagnostic && (

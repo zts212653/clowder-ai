@@ -74,7 +74,7 @@ describe('Plugin Manager v2 configuration', () => {
   it('uses concise headings and translates known labels only in v2', () => {
     render();
     const headings = [...container.querySelectorAll('h4')].map((x) => x.textContent);
-    expect(headings).toEqual(['插件标识', '简介', '配置', '能力']);
+    expect(headings).toEqual(['简介', '配置', '能力']);
     expect(container.querySelector('label[for="plugin-manager-github-GITHUB_TOKEN"]')?.textContent).toContain(
       '个人访问令牌',
     );

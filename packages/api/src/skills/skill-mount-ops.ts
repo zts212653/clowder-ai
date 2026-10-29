@@ -6,9 +6,9 @@
  * for per-mount-point toggle reconciliation.
  */
 
-import { lstat, mkdir, rm } from 'node:fs/promises';
+import { lstat, mkdir, realpath, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 
 import { type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
 import {
@@ -49,12 +49,37 @@ export function activeMountTargets(projectRoot: string, rules: MountRules): Moun
   return [...standard, ...custom];
 }
 
-function allMountDirs(projectRoot: string, rules: MountRules): string[] {
+export function allMountDirs(projectRoot: string, rules: MountRules): string[] {
   const standardDirs = STANDARD_MOUNT_POINT_IDS.map((id) => join(projectRoot, rules.mountPoints[id].path));
   const customDirs = buildSkillMountTargets(projectRoot, homedir(), rules)
     .filter((t) => t.kind === 'custom')
     .flatMap((t) => t.candidates);
   return [...new Set([...standardDirs, ...customDirs])];
+}
+
+/** Retire only generated links to a removed built-in skill during its move into a plugin. */
+export async function migrateLegacyPluginSkillMounts(
+  projectRoot: string,
+  skillName: string,
+  builtInSkillsSource: string,
+  rules: MountRules,
+): Promise<void> {
+  try {
+    await lstat(join(builtInSkillsSource, skillName));
+    return; // A live (or independently linked) source remains authoritative.
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const realRoot = await realpath(projectRoot);
+  for (const dir of allMountDirs(projectRoot, rules)) {
+    try {
+      if ((await realpath(dir)) !== resolve(realRoot, relative(projectRoot, dir))) continue;
+      const link = join(dir, skillName);
+      if ((await classifyMountPath(link, builtInSkillsSource, skillName)) === 'managed') await rm(link);
+    } catch (error) {
+      if (!['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+    }
+  }
 }
 
 // ────────── Public API ──────────
@@ -148,9 +173,16 @@ export async function unmountSkillSymlinks(
       continue;
     }
     const linkPath = join(dir, skillName);
-    if ((await classifyMountPath(linkPath, skillsSource, skillName)) === 'managed') {
-      await rm(linkPath);
-      result.unmounted.push({ skillName, mountPointId: 'cleanup', path: linkPath });
+    try {
+      if ((await classifyMountPath(linkPath, skillsSource, skillName)) === 'managed') {
+        await rm(linkPath);
+        result.unmounted.push({ skillName, mountPointId: 'cleanup', path: linkPath });
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') continue;
+      if (!['ENOTDIR', 'EACCES', 'EPERM'].includes(code ?? '')) throw error;
+      result.conflicts.push({ skillName, mountPointId: 'cleanup', path: linkPath });
     }
   }
   return result;
