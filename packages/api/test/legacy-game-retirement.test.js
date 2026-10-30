@@ -27,6 +27,7 @@ test('old game threads remain readable conversations; /game is ordinary queued i
       emitToUser() {},
     },
     router: {
+      previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
       async resolveTargetsAndIntent() {
         return { targetCats: ['opus'], intent: { intent: 'execute', explicit: false, promptTags: [] } };
       },

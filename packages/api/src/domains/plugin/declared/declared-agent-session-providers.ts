@@ -88,15 +88,12 @@ export function declaredAgentSessionProviders(input: {
         providerId = declarationId(raw);
         const result = parseAgentProviderDeclaration(raw, { packageRoot: located.rootDir });
         if (!result.ok) throw new Error(`${result.code}: ${result.reason}`);
-        const declarations =
-          'configurationKey' in result.declaration
-            ? await resolveAgentClientLibrary({
-                declaration: result.declaration,
-                admission,
-                packageRoot: located.rootDir,
-                configuration: input.configuration ?? { readConfig: async () => undefined },
-              })
-            : [result.declaration];
+        const declarations = await resolveAgentClientLibrary({
+          declaration: result.declaration,
+          admission,
+          packageRoot: located.rootDir,
+          configuration: input.configuration ?? { readConfig: async () => undefined },
+        });
         const registrations: ReturnType<typeof registerPluginAgentProvider>[] = [];
         const boundServices = () =>
           [...input.services.values()].filter((service) =>

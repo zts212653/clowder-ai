@@ -142,7 +142,10 @@ test('real messages route admits the literal default target and dispatch uses it
     invocationQueue: queue,
     uploadDir: join(root, 'uploads'),
     socketManager: { emitToUser() {} },
-    router: { resolveExplicitTargets: async (ids) => ids },
+    router: {
+      previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
+      resolveExplicitTargets: async (ids) => ids,
+    },
   });
   try {
     const response = await app.inject({

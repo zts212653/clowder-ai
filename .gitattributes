@@ -5,3 +5,4 @@ packages/web/src/app/*.css text eol=lf
 packages/ui/src/styles.css text eol=lf
 packages/web/src/generated/vendor-stylesheets.json text eol=lf
 packages/web/public/manifest.json text eol=lf
+scripts/secret-dsh-plugin.mjs text eol=lf

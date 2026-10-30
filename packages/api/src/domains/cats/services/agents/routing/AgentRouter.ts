@@ -1189,14 +1189,22 @@ export class AgentRouter {
   private async resolveTargetPreview(
     message: string,
     threadId: string,
-    options?: { prospectivePreferredCats?: readonly CatId[]; publicConversation?: boolean },
+    options?: {
+      prospectivePreferredCats?: readonly CatId[];
+      publicConversation?: boolean;
+      explicitTargetCats?: readonly CatId[];
+    },
   ): Promise<RoutingPreviewResponse> {
-    const { mentions: mentionedCats } = await this.parseAllMentions(message, threadId, {
-      allowGroupFallback: !options?.publicConversation,
-    });
+    const mentionedCats =
+      options?.explicitTargetCats ??
+      (
+        await this.parseAllMentions(message, threadId, {
+          allowGroupFallback: !options?.publicConversation,
+        })
+      ).mentions;
     // Common conversation admission can select an available recipient. Exact
     // callers retain named identities so an unavailable member reports its cause.
-    const targets = options?.publicConversation ? this.filterRoutableCats(mentionedCats) : mentionedCats;
+    const targets = options?.publicConversation ? this.filterRoutableCats(mentionedCats) : [...mentionedCats];
     if (targets.length > 0) {
       const unavailableTargets = options?.publicConversation
         ? this.filterKnownCats(mentionedCats).filter((id) => !this.isRoutableCat(id))
@@ -1204,13 +1212,17 @@ export class AgentRouter {
       return {
         targetCats: targets,
         reason: { kind: 'current_message_mentions' },
-        ...(unavailableTargets.length ? { unavailableTargets } : {}),
+        ...(unavailableTargets.length ? { unavailableTargets, requiresConfirmation: true } : {}),
       };
     }
     const result = await this.resolveImplicitTargetPreview(message, threadId, options);
     const unavailableTargets = this.filterKnownCats(mentionedCats).filter((id) => !this.isRoutableCat(id));
     return unavailableTargets.length
-      ? { ...result, unavailableTargets: [...new Set([...unavailableTargets, ...(result.unavailableTargets ?? [])])] }
+      ? {
+          ...result,
+          unavailableTargets: [...new Set([...unavailableTargets, ...(result.unavailableTargets ?? [])])],
+          requiresConfirmation: true,
+        }
       : result;
   }
 
@@ -1297,10 +1309,11 @@ export class AgentRouter {
   /** Read-only projection for the v2 composer; never mutates participants. */
   async previewTargets(
     message: string,
-    options: { threadId: string; prospectivePreferredCats?: readonly CatId[] },
+    options: { threadId: string; prospectivePreferredCats?: readonly CatId[]; explicitTargetCats?: readonly CatId[] },
   ): Promise<RoutingPreviewResponse> {
     return this.resolveTargetPreview(message, options.threadId, {
       publicConversation: true,
+      ...(options.explicitTargetCats ? { explicitTargetCats: options.explicitTargetCats } : {}),
       ...(options.prospectivePreferredCats === undefined
         ? {}
         : { prospectivePreferredCats: options.prospectivePreferredCats }),

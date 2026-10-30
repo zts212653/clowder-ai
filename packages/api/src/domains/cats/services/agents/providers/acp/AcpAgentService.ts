@@ -66,7 +66,7 @@ import { createAgyAcpPermissionHandler } from './agy/agy-acp-permission.js';
 import { type AgyAcpConfig, prepareAgyAcpSession, selectAgyAcpModel } from './agy/agy-acp-session.js';
 import { type AcpRequestInputBridge, createAcpRequestInputBridge } from './icode/runtime-interaction-adapter.js';
 import { captureNativeDefaults, defaultsForNativeResume } from './native-session-defaults.js';
-import { applySessionConfiguration } from './session-configuration.js';
+import { applySessionConfiguration, reportedSessionModel } from './session-configuration.js';
 import type {
   AcpInitializeResult,
   AcpMcpServer,
@@ -676,10 +676,11 @@ export class AcpAgentService implements AgentService {
       const configureNative = async (session: AcpNewSessionResult, fresh = false) => {
         if (!nativeTool) return;
         if (fresh) nativeDefaults = await captureNativeDefaults(client, session, cwd, preferences.model);
-        await applySessionConfiguration(client, session, {
+        const configured = await applySessionConfiguration(client, session, {
           model: preferences.model || nativeDefaults.model,
           effort: preferences.effort || nativeDefaults.effort,
         });
+        adoptObservedNativeModel(reportedSessionModel(configured));
       };
       let resumedSession: AcpNewSessionResult | undefined;
       if (resumeSessionId) {
@@ -750,7 +751,6 @@ export class AcpAgentService implements AgentService {
       // Configuration rejection is not a load failure: preserve the resumed history.
       if (resumedSession) {
         await configureNative(resumedSession);
-        adoptObservedNativeModel(nativeDefaults.model);
       }
 
       if (resumeDisposition !== 'resumed') {
@@ -766,7 +766,6 @@ export class AcpAgentService implements AgentService {
         );
         const session = await client.newSession(cwd, sessionMcpServers, agy?.meta);
         await configureNative(session, true);
-        adoptObservedNativeModel(nativeDefaults.model);
         sessionId = session.sessionId;
         if (agy) await selectAgyAcpModel(client, session, sessionId, this.modelName);
         this.pool.rememberSession?.(this.poolKey, sessionId, lease);
@@ -1041,7 +1040,6 @@ export class AcpAgentService implements AgentService {
           const retryConfig = buildSessionConfig(retryCreds);
           const freshSession = await client.newSession(cwd, retryConfig.mcpServers);
           await configureNative(freshSession, true);
-          adoptObservedNativeModel(nativeDefaults.model);
           const freshSessionId = freshSession.sessionId;
           this.pool.rememberSession?.(this.poolKey, freshSessionId, lease);
           // Replacement retry is a NEW ACP session, so it must get a fresh

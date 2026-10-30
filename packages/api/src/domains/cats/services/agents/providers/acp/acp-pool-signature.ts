@@ -11,6 +11,7 @@ export interface AcpPoolSpawnSignatureInput {
   transport?: 'stdio' | 'httpstream';
   supportsMultiplexing?: boolean;
   protocolAdapter?: string;
+  permissionPolicy?: 'deny' | 'auto_allow';
   sessionPolicy?: unknown;
 }
 
@@ -28,6 +29,7 @@ export function createAcpPoolSpawnSignature(input: AcpPoolSpawnSignatureInput): 
     transport: input.transport ?? 'stdio',
     supportsMultiplexing: input.supportsMultiplexing === true,
     protocolAdapter: input.protocolAdapter ?? null,
+    permissionPolicy: input.permissionPolicy ?? null,
     ...(input.sessionPolicy ? { sessionPolicy: input.sessionPolicy } : {}),
   });
 }

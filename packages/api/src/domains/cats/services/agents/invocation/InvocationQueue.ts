@@ -95,6 +95,8 @@ type LifecycleTargetRetirementResult =
 export interface QueueEnqueueInput {
   /** Server-owned deliberate repeat keeps the originally selected recipient. */
   exactTargets?: boolean;
+  /** A public named recipient passed preflight; later unavailability must not choose another member. */
+  allowConversationFallback?: false;
   /** Consumer observers register after commit and before the shared drain notification. Not persisted. */
   onQueueEntriesAdmitted?: (entries: readonly QueueEntry[], message?: StoredMessage) => void | Promise<void>;
   threadId: string;
@@ -795,7 +797,12 @@ export class InvocationQueue {
       targetCats:
         committedRow && !exactTargets
           ? [...committedRow.targets]
-          : await this.resolveSendTargets(input.targetCats, input.threadId, input.content, exactTargets),
+          : await this.resolveSendTargets(
+              input.targetCats,
+              input.threadId,
+              input.content,
+              exactTargets || input.allowConversationFallback === false,
+            ),
     };
     const enqueuedAt = this.nextEnqueuedAt();
     const result = await messageStore.appendWithQueueLedgerAdmission(

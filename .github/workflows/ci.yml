@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, next]
+    branches: [main, next, develop]
     paths-ignore:
       - 'docs/**'
       - '*.md'
@@ -65,6 +65,33 @@ jobs:
           --script test:onboarding:production-contracts
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: DSH packaged secret guard admission
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test test/secret-dsh.test.ts
+      - name: Named recipient confirmation before Queue admission
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --test test/message-routing-confirmation.test.js
+      - name: Configurable ACP plugin lifecycle and observed model adoption
+        run: >-
+          node --test
+          packages/api/test/plugin-fixed-acp-client.test.js
+          packages/api/test/plugin-agent-model-route.test.js
+          packages/api/test/acp-model-adoption.test.js
+          packages/api/test/acp-model-probe-adoption.test.js
+          packages/api/test/acp-plugin-permission-policy.test.js
+          packages/api/test/acp/acp-native-model-identity.test.js
+          packages/api/test/agent-session-contract/fixed-client-package.test.js
+          packages/api/test/agent-session-contract/client-library-lifecycle.test.js
+          packages/api/test/acp-bootstrap-config-recovery.test.js
+      - name: ACP plugin configuration and member model UI
+        run: >-
+          pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs pnpm exec vitest run
+          src/components/__tests__/plugin-runtime-models.test.tsx
+          src/components/__tests__/member-runtime-catalog.test.tsx
+          src/components/settings/plugin-manager/__tests__/agent-client-identity.test.tsx
+          src/hooks/__tests__/useSendMessage-routing-confirmation.test.ts
       - name: Owner-confirmed plugin feedback and private-context suppression
         run: pnpm --filter @cat-cafe/api test:plugin-feedback
       - name: Managed Codex layout link diagnostic

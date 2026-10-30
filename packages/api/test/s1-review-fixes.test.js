@@ -308,6 +308,7 @@ describe('R2: delete-guard race via POST /api/messages route', () => {
 
     // Mock AgentRouter: resolveTargetsAndIntent for routing, routeExecution unused here
     const mockRouter = {
+      previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
       async resolveTargetsAndIntent(_msg) {
         return {
           targetCats: ['opus'],

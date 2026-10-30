@@ -38,14 +38,27 @@ export function createCatalogCache(probe: typeof probeRuntimeCatalog = probeRunt
         if (value.status === 'live') {
           if (values.size >= 64) values.delete(values.keys().next().value!);
           values.set(key, { at: now(), value });
-        }
+        } else values.delete(key);
         return value;
       })
-      .catch(() =>
-        previous
-          ? { ...previous.value, status: 'configured' as const, message: 'refresh_failed' }
-          : { status: 'unavailable' as const, models: [], message: 'discovery_failed' },
-      )
+      .catch(() => {
+        values.delete(key);
+        return previous
+          ? {
+              ...previous.value,
+              status: 'configured' as const,
+              message: 'refresh_failed',
+              ...(previous.value.defaultModelStatus === undefined
+                ? {}
+                : {
+                    defaultModel: undefined,
+                    defaultModelLabel: undefined,
+                    selectedModel: undefined,
+                    defaultModelStatus: 'unreported' as const,
+                  }),
+            }
+          : { status: 'unavailable' as const, models: [], message: 'discovery_failed' };
+      })
       .finally(() => inflight.delete(key));
     inflight.set(key, promise);
     return promise;

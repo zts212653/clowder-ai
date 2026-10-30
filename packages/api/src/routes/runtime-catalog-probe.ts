@@ -1,4 +1,5 @@
 import type { SDKUserMessage, query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
+import { applySessionConfiguration } from '../domains/cats/services/agents/providers/acp/session-configuration.js';
 import { buildChildEnv } from '../utils/cli-spawn.js';
 import { resolveWindowsSpawnPlan } from '../utils/cli-spawn-win.js';
 import { catalogRpc } from './runtime-catalog-rpc.js';
@@ -37,18 +38,21 @@ export async function probeRuntimeCatalog(target: CatalogTarget): Promise<Runtim
         // Keep custom / legacy aliases without applying an unadvertised value to the probe session.
         return {
           ...parseAcpCatalog(session, session),
-          selectedModel: target.model,
           effortOptions: undefined,
           message: 'custom_model',
         };
       }
       if (descriptor && target.model !== descriptor.currentValue) {
         // Query dependent options only in this disposable discovery session.
-        selected = await rpc.request('session/set_config_option', {
-          sessionId: session.sessionId,
-          configId: descriptor.id,
-          value: target.model,
-        });
+        if (typeof session.sessionId !== 'string') throw new Error('ACP 模型探测缺少会话标识');
+        selected = await applySessionConfiguration(
+          {
+            setSessionConfigOption: (sessionId, configId, value) =>
+              rpc.request('session/set_config_option', { sessionId, configId, value }),
+          },
+          { sessionId: session.sessionId, configOptions: session.configOptions },
+          { model: target.model },
+        );
       }
     }
     return parseAcpCatalog(selected, session, target.model);
