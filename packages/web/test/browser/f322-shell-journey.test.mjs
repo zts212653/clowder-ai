@@ -284,6 +284,8 @@ async function openProof({
       }
       const bodies = {
         '/api/session': session,
+        '/api/plugins/official.collective-connector/connections': { runtimeStatus: 'active', connections: [] },
+        '/api/config/chat-background': { threads: {} },
         '/api/config/ignored-items': { ownerUserId: session.userId, revision: 0, entries: [] },
         '/api/approval-hub/pending': { items: [], count: 0 },
         // The classic presentation (reached by the theme test) still reads Needs Me for its own rail.
@@ -817,15 +819,15 @@ test('a partly read mailbox shows the "!" in the danger colour, in light and dar
   }
 });
 
-test('avatar opens settings; all 14 sections remain reachable; old and dest: pins stay distinct above the mailbox', async () => {
+test('avatar opens You; all 13 sections remain reachable; old and dest: pins stay distinct above the mailbox', async () => {
   const proof = await openProof();
   const { page } = proof;
   try {
     await page.getByTestId('settings-button').click();
     await page.getByTestId('settings-v2').waitFor();
     assert.equal(new URL(page.url()).searchParams.get('from'), 'thread-return');
-    assert.equal(await page.getByTestId('settings-owner').getAttribute('data-section'), 'members');
-    assert.equal(await page.locator('[data-testid^="settings-entry-"]').count(), 11);
+    assert.equal(await page.getByTestId('settings-owner').getAttribute('data-section'), 'you');
+    assert.equal(await page.locator('[data-testid^="settings-entry-"]').count(), 8);
     const sections = [];
     for (const entry of ['team', 'connect', 'system']) {
       await page.getByTestId(`settings-entry-${entry}`).click();
@@ -840,7 +842,6 @@ test('avatar opens settings; all 14 sections remain reachable; old and dest: pin
       [
         'accounts',
         'concierge',
-        'im',
         'marketplace',
         'mcp',
         'members',
@@ -975,11 +976,86 @@ test('settings tabs support keyboard navigation and their selected content is as
   }
 });
 
-test('the workspace-team second-level destination can be pinned like the other settings items', async () => {
-  const proof = await openProof({ route: '/settings?from=thread-return', pins: [] });
+for (const width of [390, 1440]) {
+  test(`settings deep links show the selected tab and keep the keyboard focus ring visible at ${width}`, async () => {
+    const proof = await openProof({ route: '/settings?s=ops&from=thread-return', viewport: { width, height: 1000 } });
+    const { page } = proof;
+    try {
+      const tab = page.getByTestId('settings-tab-ops');
+      const before = await tab.evaluate((element) => {
+        const list = element.closest('[role="tablist"]');
+        const rect = element.getBoundingClientRect();
+        const viewport = list.getBoundingClientRect();
+        return { tab: { left: rect.left, right: rect.right }, list: { left: viewport.left, right: viewport.right } };
+      });
+      await tab.focus();
+      await page.keyboard.press('ArrowLeft');
+      const focus = await page.getByTestId('settings-tab-notify').evaluate((element) => {
+        const list = element.closest('[role="tablist"]');
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        const viewport = list.getBoundingClientRect();
+        const ring = parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
+        return {
+          focused: document.activeElement === element,
+          clipsY: getComputedStyle(list).overflowY !== 'visible',
+          ringTop: rect.top - ring,
+          ringBottom: rect.bottom + ring,
+          listTop: viewport.top,
+          listBottom: viewport.bottom,
+        };
+      });
+      assert.ok(
+        before.tab.left >= before.list.left && before.tab.right <= before.list.right,
+        `selected tab outside its visible list: ${JSON.stringify(before)}`,
+      );
+      assert.ok(focus.focused);
+      assert.ok(
+        !focus.clipsY || (focus.ringTop >= focus.listTop && focus.ringBottom <= focus.listBottom),
+        `keyboard outline is clipped: ${JSON.stringify(focus)}`,
+      );
+    } finally {
+      await closeProof(proof);
+    }
+  });
+}
+
+for (const section of ['members', 'ops']) {
+  test(`settings pin stays aligned with the first tab at 390 for ${section}`, async () => {
+    const proof = await openProof({
+      route: `/settings?s=${section}&from=thread-return`,
+      viewport: { width: 390, height: 1000 },
+    });
+    try {
+      const geometry = await proof.page.getByRole('tablist').evaluate((list) => {
+        const firstTab = list.querySelector('[role="tab"]').getBoundingClientRect();
+        const pin = list.parentElement.querySelector('[data-testid="settings-pin-toggle"]').getBoundingClientRect();
+        return {
+          firstTabCenterY: firstTab.top + firstTab.height / 2,
+          pinCenterY: pin.top + pin.height / 2,
+          pageWidth: document.documentElement.scrollWidth,
+          viewportWidth: innerWidth,
+        };
+      });
+      assert.ok(
+        Math.abs(geometry.pinCenterY - geometry.firstTabCenterY) <= 2,
+        `pin left the first tab row: ${JSON.stringify(geometry)}`,
+      );
+      assert.ok(
+        geometry.pageWidth <= geometry.viewportWidth,
+        `page overflows horizontally: ${JSON.stringify(geometry)}`,
+      );
+    } finally {
+      await closeProof(proof);
+    }
+  });
+}
+
+test('settings sections remain pinnable and saved Workspace team/eval pins keep opening their original panels', async () => {
+  const proof = await openProof({ route: '/settings?from=thread-return', pins: ['dest:team-workspace', 'dest:eval'] });
   const { page } = proof;
   try {
-    assert.equal(await page.getByTestId('world-rail').locator('[data-testid^="rail-pin-"]').count(), 0);
+    assert.equal(await page.getByTestId('world-rail').locator('[data-testid^="rail-pin-"]').count(), 2);
     await page.getByRole('button', { name: '固定「成员与运行时」到窄栏', exact: true }).click();
     const members = page.getByTestId('rail-pin-members');
     await members.locator('[data-hub-icon="paw"]').waitFor();
@@ -997,17 +1073,17 @@ test('the workspace-team second-level destination can be pinned like the other s
     }
     assert.equal(
       await page.getByRole('button', { name: '固定「成员能力与路由状态」到窄栏', exact: true }).count(),
-      1,
-      'every second-level destination needs its pin action',
+      0,
+      'Workspace tools are no longer offered in settings',
     );
-    await page.getByRole('button', { name: '固定「成员能力与路由状态」到窄栏', exact: true }).click();
     const pin = page.getByTestId('world-rail').getByRole('button', { name: '成员能力与路由状态', exact: true });
     await pin.waitFor();
-    await page.getByTestId('settings-team-workspace').click();
+    assert.equal(await page.getByTestId('settings-team-workspace').count(), 0);
+    await pin.click();
     await page.getByTestId('conversation').waitFor();
     assert.equal(await page.getByTestId('workspace-mode').textContent(), 'team');
     await page.getByTestId('settings-button').click();
-    await page.getByTestId('settings-entry-eval').click();
+    await page.getByTestId('rail-pin-dest-eval').click();
     await page.getByTestId('conversation').waitFor();
     assert.equal(await page.getByTestId('workspace-mode').textContent(), 'eval');
     await page.getByTestId('settings-button').click();

@@ -16,6 +16,11 @@ on:
         description: Exact candidate semver
         required: true
         type: string
+      diagnose-private-path:
+        description: Diagnostic only, installer restore with the pinned private-path observer
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -45,8 +50,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node .github/desktop-acceptance/input.mjs
       - name: Exercise both actual distributions in isolated instances
+        if: ${{ !inputs.diagnose-private-path }}
         shell: pwsh
         run: node .github/desktop-acceptance/distributions.mjs
+      - name: Diagnose the installed private-path restore (not whole-candidate acceptance)
+        if: ${{ inputs.diagnose-private-path }}
+        shell: pwsh
+        run: |
+          $attempt = [guid]::NewGuid().ToString()
+          & .github/desktop-acceptance/windows.ps1 -Distribution installer -AttemptId $attempt -ObservePrivatePath
       - name: Preserve actual receipts, screenshots and bounded instance logs
         if: always() && env.CANDIDATE_ROOT != ''
         uses: actions/upload-artifact@v4

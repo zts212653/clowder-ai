@@ -91,7 +91,7 @@ const runsFor = (title) =>
   );
 
 test(
-  'v2 Settings reads the existing duck goal, four walking originals and two Cortex matches without target aliasing',
+  'v2 Workspace tools reads the existing duck goal, four walking originals and two Cortex matches without target aliasing',
   { timeout: 120_000 },
   async () => {
     report.publicSourceReading = await verifyV2PublicSources({ fixture, browser, capture });
@@ -108,7 +108,7 @@ test(
     const historyEntry = await verifyHistoryEntryJourney({ fixture, browser, capture });
     report.historyEntry = historyEntry;
     report.checks.push(
-      `Settings → Program preserves an old F314 coordinate, leads with explicit current-history recovery before evaluation gaps, opens ${historyEntry.stepCount}-step/${historyEntry.caseCount}-case history with exact original and cited source links, and restores the exact selected step after return; zero Program/proposal writes.`,
+      `Workspace tools → Program preserves an old F314 coordinate, leads with explicit current-history recovery before evaluation gaps, opens ${historyEntry.stepCount}-step/${historyEntry.caseCount}-case history with exact original and cited source links, and restores the exact selected step after return; zero Program/proposal writes.`,
     );
   },
 );
@@ -119,18 +119,18 @@ test(
   async () => {
     report.closureJourney = await verifyV2ClosureJourney({ fixture, browser, capture });
     report.checks.push(
-      'One explicitly isolated F266 candidate traverses Settings → Program → preparation → F314 history → restored selection → Mailbox → later Chat exact-use source; source and rollback only navigate, with zero Program/candidate writes and no optimistic adoption claim.',
+      'One explicitly isolated F266 candidate traverses Workspace tools → Program → preparation → F314 history → restored selection → Mailbox → later Chat exact-use source; source and rollback only navigate, with zero Program/candidate writes and no optimistic adoption claim.',
     );
   },
 );
 
 test(
-  'v2 Settings opens the isolated public archive, keeps counterexamples visible and links exact original videos',
+  'v2 Workspace tools opens the isolated public archive, keeps counterexamples visible and links exact original videos',
   { timeout: 120_000 },
   async () => {
     await verifyV2ExplorationReading({ fixture, browser, catalog, capture });
     report.checks.push(
-      'v2 Settings/public archive reading, independent current/selected pointers, unfiltered counterexample, original paired playback/seek/pause, 416/320/dark; isolated owner Program only, not real 352afab6 source binding.',
+      'v2 Workspace tools/public archive reading, independent current/selected pointers, unfiltered counterexample, original paired playback/seek/pause, 416/320/dark; isolated owner Program only, not real 352afab6 source binding.',
     );
   },
 );

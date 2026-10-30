@@ -155,6 +155,7 @@ import { AgyNativeAgentService } from '../providers/agy-native/AgyNativeAgentSer
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { ClaudeSdkAgentService } from '../providers/ClaudeSdkAgentService.js';
 import { buildClaudeCompactionLaunchPlan } from '../providers/claude-compaction-launch-plan.js';
+import { isCodexCompactionContinuation } from '../providers/codex-active-work-context.js';
 import { servedFactsPayload } from '../providers/codex-served-model.js';
 import { extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from '../providers/env-map.js';
 import { compileL0ViaSubprocess } from '../providers/l0-compiler.js';
@@ -5498,22 +5499,18 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
 
                 const presentation = entityNudgePromptPresentation;
                 const hasCueNudge = Boolean(entityNudgeCuePromptPresentation?.presentation.result.nudges.length);
-                // A capacity-recovery request carries an empty body by design
-                // (turn/start sends input: []), so it can never contain the
-                // nudge promptContext. The nudge was already delivered and
-                // confirmed by the prompt generation it resumes; re-checking
-                // kills every recovery, and re-confirming would double-write
-                // the delivery ledger. The exemption requires the empty body
-                // too: a carrier that misuses the label on a real body falls
-                // back to the strict check, as does every other boundary
-                // (e.g. Claude carrier provider_fallback).
-                const isCapacityRecovery =
-                  prepared.boundaryReason === 'provider_capacity_recovery' &&
-                  'body' in prepared.message &&
-                  prepared.message.body === '';
+                // These continuations carry only recovery context; the original
+                // prompt already delivered and confirmed its nudges. Requiring
+                // or confirming them again either blocks recovery or double-writes
+                // delivery. Arbitrary fallback/continuation bodies stay strict.
+                const isContextContinuation =
+                  (prepared.boundaryReason === 'provider_capacity_recovery' &&
+                    'body' in prepared.message &&
+                    prepared.message.body === '') ||
+                  isCodexCompactionContinuation(prepared);
                 if (
                   !liveFollowup &&
-                  !isCapacityRecovery &&
+                  !isContextContinuation &&
                   !nativeAuthContinuation &&
                   (presentation?.promptContext || hasCueNudge)
                 ) {
@@ -5526,7 +5523,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
                 }
                 if (
                   !liveFollowup &&
-                  !isCapacityRecovery &&
+                  !isContextContinuation &&
                   !nativeAuthContinuation &&
                   currentPresentationAttempt &&
                   !(await currentPresentationAttempt.revalidate())

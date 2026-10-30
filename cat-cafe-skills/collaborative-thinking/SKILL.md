@@ -1,12 +1,14 @@
 ---
 name: collaborative-thinking
-tips_exempt: "This revision corrects conversation-to-work boundaries and optional settlement in an internal thinking method; it adds no user-openable capability."
+tips_exempt: "This revision clarifies natural-language discovery and existing exploration boundaries; it adds no user-openable capability."
 description: >
   单人或多猫的创意探索、独立思考、讨论收敛。
-  Use when: brainstorm、多猫独立思考、讨论结束需要收敛、方向性问题需要多视角。
+  Use when: 有目标但不知道怎么做、已有方向反复不满意、brainstorm、多猫独立思考、讨论收敛或方向性问题需要多视角。
   Not for: 已有明确 spec 直接写代码、单猫执行已定方案。
   Output: 共同理解、反例、取舍或结论；需要留存且已获授权时形成设计或讨论记录。
 triggers:
+  - "不知道怎么做"
+  - "怎么改都不满意"
   - "brainstorm"
   - "讨论"
   - "多猫独立思考"
@@ -18,6 +20,8 @@ triggers:
 # Collaborative Thinking
 
 三种按需使用的思考方式：单人探索 / 多猫独立思考 / 讨论收敛沉淀。`feat-lifecycle` 处理 Feature 的需求与设计；这里也容纳尚未指向交付的共同探索。讨论可以停在更清楚的问题、被推翻的假设或未决取舍，不自动产生任务、审批卡或下一阶段。已有明确委托沿原责任推进，不因开始讨论重新采访。
+
+“想做但不知道怎么做”“改了几版还是不对”也可以从这里开始。猫先带着材料、不同路径或可感知的小样帮助形成判断，不要求人先补出完整方案；按当前缺口选择，不默认召集多猫或制作全部备选。已确定的修改直接沿原任务完成。
 
 ## 核心知识
 

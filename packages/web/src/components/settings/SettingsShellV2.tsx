@@ -76,7 +76,7 @@ export function SettingsShellV2({
   fixedLayout: boolean;
   onSelect: (selection: string) => void;
 }) {
-  const { openEntry, openTeam } = useOpenDestination();
+  const { openEntry } = useOpenDestination();
   const owner = useCoCreatorConfig();
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const { isPinned, pin, unpin } = usePinnedSections();
@@ -208,7 +208,6 @@ export function SettingsShellV2({
               entry={active}
               selection={selection}
               onSelect={onSelect}
-              onOpenTeam={openTeam}
               isPinned={isPinned}
               onTogglePin={togglePin}
             >

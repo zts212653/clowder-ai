@@ -43,6 +43,7 @@ import {
   createCodexRuntimeInteractionRunState,
 } from './CodexRuntimeInteractionRun.js';
 import { createCodexSubexecutionTracker, isExactCodexRootTurnCompletion } from './CodexSubexecutionTracker.js';
+import { continueCodexWorkAfterCompaction } from './codex-active-work-context.js';
 import { classifyCodexAppServerToolSurface, classifyCodexSafeBoundary } from './codex-app-server-boundary.js';
 import {
   buildCodexAppServerThreadParams,
@@ -154,6 +155,8 @@ export interface CodexAppServerRunInput {
   ) => PreparedProviderRequestV1;
   /** F299: recovery has no user message, but its application context is still model-visible input. */
   prepareRecoveryRequest?: (recoveryInstruction: string) => PreparedProviderRequestV1;
+  /** Source-only continuation after a completed native context-window change. */
+  prepareCompactionRequest?: () => PreparedProviderRequestV1 | undefined;
   prepareLiveRequest?: (input: LiveProviderInput) => PreparedProviderRequestV1;
   onLiveInputOutcome?: (receipt: LiveProviderInputOutcome) => Promise<void>;
   beforeProviderLaunch?: (request: PreparedProviderRequestV1) => Promise<ProviderRequestGenerationCommitV1>;
@@ -337,7 +340,10 @@ export class CodexAppServerClient {
         });
       await preflightRequest('initialize', {
         clientInfo: { name: 'cat-cafe', title: `${deploymentDefaults.brand.displayName}`, version: '1' },
-        capabilities: recoveryInstruction || input.collaborationMode || input.live ? { experimentalApi: true } : {},
+        capabilities:
+          recoveryInstruction || input.prepareCompactionRequest || input.collaborationMode || input.live
+            ? { experimentalApi: true }
+            : {},
       });
       await this.write({ method: 'initialized' });
       yield this.lifecycle.event(this.lifecycle.transition('initialized'));
@@ -670,6 +676,7 @@ export class CodexAppServerClient {
         void this.lifecycle.interrupt(threadId, activeTurnId, 'user_cancel', interruptGraceMs);
       }
 
+      const continuedCompactions = new Set<string>();
       for (;;) {
         if (this.pumpFailure instanceof CodexAppServerTurnStartTimeoutError) throw this.pumpFailure;
         const next = await this.notifications.next();
@@ -772,6 +779,31 @@ export class CodexAppServerClient {
         const midTurnCompaction = mapCodexAppServerCompactionObservation(envelope);
         if (midTurnCompaction && midTurnCompaction.runtimeSessionId === threadId) {
           yield { type: 'app_server.context_compaction', observation: midTurnCompaction };
+          if (
+            !input.live &&
+            input.prepareCompactionRequest &&
+            record?.method === 'item/completed' &&
+            activeTurnId &&
+            params?.turnId === activeTurnId &&
+            !continuedCompactions.has(midTurnCompaction.eventId)
+          ) {
+            continuedCompactions.add(midTurnCompaction.eventId);
+            try {
+              await continueCodexWorkAfterCompaction({
+                threadId,
+                turnId: activeTurnId,
+                signal: input.signal,
+                prepare: input.prepareCompactionRequest,
+                commit: input.beforeProviderLaunch,
+                request: (method, value) => this.request(method, value),
+              });
+            } catch (error) {
+              // No authoritative terminal was consumed. A failed continuation
+              // must not return a possibly active native turn to the warm pool.
+              transportDisposition = 'evict';
+              throw error;
+            }
+          }
         }
 
         const mapped = mapCodexAppServerNotification(envelope);

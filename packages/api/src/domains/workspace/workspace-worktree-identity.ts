@@ -86,6 +86,28 @@ export async function resolveVerifiedScopedWorktreeAlias(
   return [...matches][0] ?? null;
 }
 
+async function legacyAuthorizedRoots(worktreeId: string, authorizedEntries: readonly WorkspaceIdentityEntry[]) {
+  const authorizedRoots = new Set<string>();
+  const unavailableScopes = new Set<string>();
+  for (const entry of authorizedEntries) {
+    const root = await canonicalWorkspaceIdentityRoot(entry);
+    if (!root) {
+      // A confirmed canonical path proves its old scope hash even while offline.
+      // Unknown legacy roots and colliding scopes still cannot prove absence.
+      const identity = durableIdForCanonicalRoot(resolve(entry.root));
+      if (
+        entry.rootIdentity !== identity ||
+        identity.startsWith(`${DURABLE_WORKTREE_ID_PREFIX}${worktreeId.slice(0, 6)}`)
+      )
+        return null;
+      unavailableScopes.add(resolve(entry.root));
+      continue;
+    }
+    authorizedRoots.add(root);
+  }
+  return { authorizedRoots, unavailableScopes };
+}
+
 export async function resolveVerifiedScopedWorktreeAliasAtAuthorizedEntries(
   worktreeId: string,
   scopeRoots: readonly (string | undefined)[],
@@ -93,18 +115,19 @@ export async function resolveVerifiedScopedWorktreeAliasAtAuthorizedEntries(
   listWorktrees: ListWorkspaceIdentityEntries,
 ): Promise<string | null> {
   if (!/^[a-f0-9]{6}_.{1,256}$/.test(worktreeId)) return null;
-  const authorizedRoots = new Set<string>();
-  for (const entry of authorizedEntries) {
-    const root = await canonicalWorkspaceIdentityRoot(entry);
-    // Unlike full root identities, short legacy prefixes can collide. An
-    // unresolved registered candidate must not manufacture a unique survivor.
-    if (!root) return null;
-    authorizedRoots.add(root);
-  }
+  const inventory = await legacyAuthorizedRoots(worktreeId, authorizedEntries);
+  if (!inventory) return null;
+  const { authorizedRoots, unavailableScopes } = inventory;
+  const verifiedEntries: ListWorkspaceIdentityEntries = async (scope) => {
+    const entries = await listWorktrees(scope);
+    if (entries.some((entry) => entry.id === worktreeId.slice(7) && unavailableScopes.has(resolve(entry.root))))
+      throw new Error('Legacy workspace candidate cannot be verified');
+    return entries;
+  };
   const matches = new Set<string>();
   for (const root of scopeRoots) {
-    if (!root) continue;
-    const recovered = await resolveVerifiedScopedWorktreeAlias(worktreeId, root, listWorktrees);
+    if (!root || unavailableScopes.has(resolve(root))) continue;
+    const recovered = await resolveVerifiedScopedWorktreeAlias(worktreeId, root, verifiedEntries);
     const canonical = recovered ? await canonicalRoot(recovered) : null;
     if (canonical && authorizedRoots.has(canonical)) matches.add(canonical);
   }

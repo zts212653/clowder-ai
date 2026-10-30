@@ -9,6 +9,11 @@ import { codexManagedLaunchArgs } from '../../../../../config/codex-managed-laun
 import { assertCodexManagedPlatformSupport } from '../../../../../config/codex-managed-support.js';
 import { assertCodexSharedStateRoots } from '../../../../../config/codex-shared-state.js';
 import { inspectCodexImportSession, listCodexImportSessions } from './CodexLocalSessionSource.js';
+import {
+  CODEX_ACTIVE_WORK_CONTEXT_DECISION,
+  CODEX_COMPACTION_CONTINUATION_TRIGGER,
+  codexActiveWorkContext,
+} from './codex-active-work-context.js';
 import { bindCodexAccountConfiguration } from './codex-app-server-account-configuration.js';
 import {
   codexConfigObjectFromArgs,
@@ -2515,6 +2520,27 @@ export class CodexAgentService implements AgentService {
               imagePaths,
               prepareRequest: (body, boundaryReason) => prepareProviderRequest(body, 'app_server', boundaryReason),
               prepareRecoveryRequest,
+              ...(!live && !readOnly && !native && options?.recoveryAnchor
+                ? {
+                    prepareCompactionRequest: () => {
+                      const activeWork = codexActiveWorkContext(options.recoveryAnchor);
+                      if (!activeWork) return undefined;
+                      return Object.freeze({
+                        ...prepareProviderRequest(
+                          CODEX_COMPACTION_CONTINUATION_TRIGGER,
+                          'app_server',
+                          'provider_continuation',
+                        ),
+                        message: Object.freeze({
+                          body: CODEX_COMPACTION_CONTINUATION_TRIGGER,
+                          sourceRefs: Object.freeze([]),
+                          injectionDecision: CODEX_ACTIVE_WORK_CONTEXT_DECISION,
+                        }),
+                        nativeInstructions: Object.freeze([activeWork]),
+                      });
+                    },
+                  }
+                : {}),
               prepareLiveRequest: (input) => {
                 const sourceRefs = Object.freeze(
                   (input.kind === 'context' ? (input.sourceRefs ?? []) : [input.sourceRef]).map((ref) => ({

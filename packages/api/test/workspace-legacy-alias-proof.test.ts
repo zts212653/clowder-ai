@@ -9,7 +9,10 @@ import { promisify } from 'node:util';
 import Fastify from 'fastify';
 import { EventAuditLog } from '../src/domains/cats/services/orchestration/EventAuditLog.js';
 import { listWorktrees, registerWorktrees } from '../src/domains/workspace/workspace-security.js';
-import { resolveAuthorizedWorkspaceContentWorktree } from '../src/domains/workspace/workspace-worktree-identity.js';
+import {
+  durableIdForCanonicalRoot,
+  resolveAuthorizedWorkspaceContentWorktree,
+} from '../src/domains/workspace/workspace-worktree-identity.js';
 import { workspaceRoutes } from '../src/routes/workspace.js';
 
 const run = promisify(execFile);
@@ -103,6 +106,18 @@ test('a real 24-bit scope collision cannot become a unique legacy grant when the
       (await lookup(strong))?.root,
       join(a, 'shared'),
       'the full root identity does not inherit weak-alias ambiguity',
+    );
+    await rm(b, { recursive: true, force: true });
+    assert.equal(
+      await resolveAuthorizedWorkspaceContentWorktree({
+        worktreeId: legacyId,
+        currentEntries,
+        linkedEntries: [{ id: durableIdForCanonicalRoot(b), rootIdentity: durableIdForCanonicalRoot(b), root: b }],
+        legacyRoots: [a, b],
+        listWorktrees,
+      }),
+      null,
+      'even a pinned unavailable root cannot be excluded when its actual 24-bit scope collides',
     );
   } finally {
     await rm(temp, { recursive: true, force: true });
