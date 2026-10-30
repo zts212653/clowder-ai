@@ -6,7 +6,7 @@ import { settingsShellCopy } from './settings-shell.shell-copy';
 
 /**
  * Pin / unpin a 设置与管理 item above the mailbox. The accessible name carries the item's own label; the sentence around it
- * is in the language of the new shell (this toggle only ever appears in the v2 settings page).
+ * is in the language of the new shell. Settings can pin/unpin; Workspace tools expose removal of saved legacy shortcuts.
  */
 export function PinToggle({ pinned, label, onToggle }: { pinned: boolean; label: string; onToggle: () => void }) {
   const t = useShellCopy(settingsShellCopy);

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { refIdentity } from '@cat-cafe/shared';
+import { openWorkspaceTools } from './f307-workspace-open.mjs';
 import {
   chooseExplorationComparison,
   chooseExplorationRun,
@@ -25,9 +26,7 @@ export async function verifyV2ExplorationReading({ fixture, browser, catalog, ca
   try {
     await page.goto(`${fixture.apiUrl}/api/session`);
     await page.goto(`${fixture.webUrl}/thread/${CONTRACT_THREAD_ID}?shell=v2`);
-    await page.getByTestId('settings-button').click();
-    await page.getByTestId('settings-v2').waitFor();
-    await page.getByTestId('settings-entry-evolution').click();
+    await (await openWorkspaceTools(page)).getByTestId('workspace-launcher-capability-evolution').click();
     const home = page.getByTestId('capability-evolution-workspace');
     await home.getByTestId(`capability-evolution-program-${fixture.duck.program.programId}`).click();
     const detail = home.getByTestId('capability-evolution-program-detail');

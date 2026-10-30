@@ -117,7 +117,7 @@ async function assertContained(locator) {
   assert(sizes.scroll <= sizes.client + 1, `horizontal overflow: ${JSON.stringify(sizes)}`);
 }
 test(
-  'v2 Settings opens the F314 and duck projects, summary and exact main reading',
+  'v2 Workspace tools opens the F314 and duck projects, summary and exact main reading',
   { timeout: 120_000, skip: liveAlpha },
   async () => {
     await verifyV2EvolutionJourney({ fixture, browser, capture });
@@ -182,7 +182,7 @@ test(
         capture,
       });
       report.claims.push(
-        'The real v2 Settings entry shows zero pending approvals without calling constitution a user decision; typed 422 owner gaps settle instead of polling every two seconds.',
+        'The real v2 Workspace tools entry shows zero pending approvals without calling constitution a user decision; typed 422 owner gaps settle instead of polling every two seconds.',
       );
     } catch (error) {
       await capture(page, 'v2-home-truth-failure');

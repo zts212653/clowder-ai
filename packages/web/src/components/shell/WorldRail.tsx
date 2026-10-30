@@ -43,7 +43,7 @@ export function WorldRail() {
   useEffect(() => rememberCafeReturnTarget(pathname), [pathname]);
   const go = useCallback(
     (path: string) => {
-      if (isSettingsRoute(path)) captureSettingsOrigin();
+      if (isSettingsRoute(path.split('?')[0])) captureSettingsOrigin();
       router.push(resolveShellNavTarget(path, pathname));
     },
     [router, pathname, captureSettingsOrigin],

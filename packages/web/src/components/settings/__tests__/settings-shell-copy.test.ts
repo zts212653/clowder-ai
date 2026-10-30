@@ -37,13 +37,9 @@ describe('the 设置与管理 catalogue words follow settings-ia, which stays th
     expect(settingsShellCopy.en.entries).toEqual({
       you: 'You',
       team: 'Cat team',
-      schedule: 'Scheduling',
-      evolution: 'Capability evolution',
-      eval: 'Evaluation',
       connect: 'Integrations', // "Connections & extensions" wraps to two lines at 232px
       system: 'System',
       theme: 'Theme',
-      community: 'Community',
       starry: 'Cat Planet',
       mission: 'Mission Hub',
       signals: 'Signals',

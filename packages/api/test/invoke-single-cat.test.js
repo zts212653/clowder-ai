@@ -18,6 +18,11 @@ const hasSourceStagingContent = existsSync(
 
 import { afterEach, before, beforeEach, describe, it } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
+import {
+  CODEX_ACTIVE_WORK_CONTEXT_DECISION,
+  CODEX_COMPACTION_CONTINUATION_TRIGGER,
+  codexActiveWorkContext,
+} from '../dist/domains/cats/services/agents/providers/codex-active-work-context.js';
 import { ContextEpochOwner } from '../dist/domains/cats/services/session/context/ContextEpochOwner.js';
 import { InMemoryContextEpochStore } from '../dist/domains/cats/services/stores/ports/ContextEpochStore.js';
 import { openCodeDirectMcpContract } from './helpers/direct-mcp-contract.js';
@@ -6795,94 +6800,113 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
   });
 
-  it('capacity-recovery prepared requests skip the entity-nudge exact check and never re-confirm delivery', async () => {
-    // A capacity-recovery request carries an empty body by design (turn/start
-    // sends input: []), so it can never contain the nudge promptContext. Before
-    // the dedicated boundary, recovery generations were tagged provider_fallback
-    // and died on entity_nudge_prepared_prompt_not_exact — the exact failure
-    // seen live on invocation 0d676739-4949-4b8c-8fa4-afd362b90110.
-    const activeRecord = {
-      id: 'sr-capacity-recovery-nudge',
-      seq: 0,
-      status: 'active',
-      catId: 'opus',
-      threadId: 'thread-capacity-recovery-nudge',
-      userId: 'u1',
-    };
-    const durable = [];
-    let confirmations = 0;
-    const prepared = (body, boundaryReason) => ({
-      v: 1,
-      ...(boundaryReason ? { boundaryReason } : {}),
-      message: { body },
-      nativeInstructions: [],
-      runtime: { provider: 'openai', carrier: 'app_server' },
-      tools: { finalSurface: 'unknown' },
-      providerNativeVisibility: 'unknown',
+  for (const contextOnly of ['capacity recovery', 'native compaction']) {
+    it(`${contextOnly} skips already-delivered nudges and records the exact continuation`, async () => {
+      // A capacity-recovery request carries an empty body by design (turn/start
+      // sends input: []), so it can never contain the nudge promptContext. Before
+      // the dedicated boundary, recovery generations were tagged provider_fallback
+      // and died on entity_nudge_prepared_prompt_not_exact — the exact failure
+      // seen live on invocation 0d676739-4949-4b8c-8fa4-afd362b90110.
+      const activeRecord = {
+        id: 'sr-capacity-recovery-nudge',
+        seq: 0,
+        status: 'active',
+        catId: 'opus',
+        threadId: 'thread-capacity-recovery-nudge',
+        userId: 'u1',
+      };
+      const durable = [];
+      let confirmations = 0;
+      const prepared = (body, boundaryReason) => ({
+        v: 1,
+        ...(boundaryReason ? { boundaryReason } : {}),
+        message: { body },
+        nativeInstructions: [],
+        runtime: { provider: 'openai', carrier: 'app_server' },
+        tools: { finalSurface: 'unknown' },
+        providerNativeVisibility: 'unknown',
+      });
+      const service = {
+        l0CompilerFn: dummyL0CompilerFn,
+        async *invoke(prompt, options) {
+          await options.beforeProviderLaunch(prepared(prompt));
+          const continuation =
+            contextOnly === 'capacity recovery'
+              ? prepared('', 'provider_capacity_recovery')
+              : {
+                  ...prepared(CODEX_COMPACTION_CONTINUATION_TRIGGER, 'provider_continuation'),
+                  message: {
+                    body: CODEX_COMPACTION_CONTINUATION_TRIGGER,
+                    injectionDecision: CODEX_ACTIVE_WORK_CONTEXT_DECISION,
+                  },
+                  nativeInstructions: [
+                    codexActiveWorkContext({
+                      threadId: activeRecord.threadId,
+                      invocationId: 'active-invocation',
+                      promptMessageIds: ['source'],
+                    }),
+                  ],
+                };
+          await options.beforeProviderLaunch(continuation);
+          yield { type: 'text', catId: 'opus', content: 'recovered', timestamp: Date.now() };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        },
+      };
+      const messages = await collect(
+        invokeSingleCat(
+          {
+            ...makeDeps(),
+            sessionChainStore: {
+              getChain: async () => [activeRecord],
+              getActive: async () => activeRecord,
+              get: async () => activeRecord,
+              create: async () => activeRecord,
+              update: async () => activeRecord,
+            },
+            transcriptWriter: {
+              appendEvent() {},
+              appendDurableEvent: async (_session, event) => {
+                durable.push(event);
+              },
+              keyedContentDigest: async () => `hmac-sha256:${'a'.repeat(64)}`,
+            },
+          },
+          {
+            catId: 'opus',
+            service,
+            prompt: 'test',
+            userId: 'u1',
+            threadId: activeRecord.threadId,
+            isLastCat: true,
+            entityNudgePresentation: {
+              sourceMessageId: 'source',
+              candidates: {},
+              service: {
+                preparePresentation: () => ({
+                  promptContext: '[entity-nudge]known source[/entity-nudge]',
+                  confirmAssembled: () => {
+                    confirmations++;
+                  },
+                }),
+              },
+            },
+          },
+        ),
+      );
+      assert.equal(
+        messages.some((message) => message.type === 'error'),
+        false,
+        JSON.stringify(messages.filter((message) => message.type === 'error')),
+      );
+      assert.equal(confirmations, 1, 'the recovery generation must not re-confirm an already-delivered nudge');
+      const firstTerminal = durable.find((event) => event.type === 'request_generation_terminal');
+      assert.equal(
+        firstTerminal?.reason,
+        contextOnly === 'capacity recovery' ? 'provider_capacity_recovery' : 'provider_continuation',
+        'the previous generation records the actual context-only continuation boundary',
+      );
     });
-    const service = {
-      l0CompilerFn: dummyL0CompilerFn,
-      async *invoke(prompt, options) {
-        await options.beforeProviderLaunch(prepared(prompt));
-        await options.beforeProviderLaunch(prepared('', 'provider_capacity_recovery'));
-        yield { type: 'text', catId: 'opus', content: 'recovered', timestamp: Date.now() };
-        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
-      },
-    };
-    const messages = await collect(
-      invokeSingleCat(
-        {
-          ...makeDeps(),
-          sessionChainStore: {
-            getChain: async () => [activeRecord],
-            getActive: async () => activeRecord,
-            get: async () => activeRecord,
-            create: async () => activeRecord,
-            update: async () => activeRecord,
-          },
-          transcriptWriter: {
-            appendEvent() {},
-            appendDurableEvent: async (_session, event) => {
-              durable.push(event);
-            },
-            keyedContentDigest: async () => `hmac-sha256:${'a'.repeat(64)}`,
-          },
-        },
-        {
-          catId: 'opus',
-          service,
-          prompt: 'test',
-          userId: 'u1',
-          threadId: activeRecord.threadId,
-          isLastCat: true,
-          entityNudgePresentation: {
-            sourceMessageId: 'source',
-            candidates: {},
-            service: {
-              preparePresentation: () => ({
-                promptContext: '[entity-nudge]known source[/entity-nudge]',
-                confirmAssembled: () => {
-                  confirmations++;
-                },
-              }),
-            },
-          },
-        },
-      ),
-    );
-    assert.equal(
-      messages.some((message) => message.type === 'error'),
-      false,
-      JSON.stringify(messages.filter((message) => message.type === 'error')),
-    );
-    assert.equal(confirmations, 1, 'the recovery generation must not re-confirm an already-delivered nudge');
-    const firstTerminal = durable.find((event) => event.type === 'request_generation_terminal');
-    assert.equal(
-      firstTerminal?.reason,
-      'provider_capacity_recovery',
-      'the replaced prompt generation must record the dedicated recovery boundary, not a generic fallback',
-    );
-  });
+  }
 
   it('non-recovery prepared requests that drop the entity nudge stay fail-closed', async () => {
     // The exemption is scoped to provider_capacity_recovery only: Claude carrier

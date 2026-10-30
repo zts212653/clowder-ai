@@ -111,6 +111,14 @@ async function fixture(t) {
   });
   const loaded = await import(pathToFileURL(entrypoint).href);
   const app = Fastify({ logger: false });
+  // The real server registers its global shutdown hook after route plugins.
+  app.register(async (child) => {
+    child.get('/child', async () => ({ ok: true }));
+    child.register(async (nested) => {
+      nested.get('/nested', async () => ({ ok: true }));
+    });
+  });
+  await app.after();
   registerPluginRuntimeShutdown(app, {
     async shutdown(reason) {
       assert.equal(reason, 'api_shutdown');

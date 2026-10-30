@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EVOLUTION_PREPARATION_SECTIONS } from '@cat-cafe/shared';
-import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
+import { ensureWorkspaceOpen, openWorkspaceTools } from './f307-workspace-open.mjs';
 import { waitForResponsiveWorkspaceLayout } from './f311-responsive-workspace-layout.mjs';
 
 /** Unnamed, unavailable-owner fixtures matching the reported shape. Never owner outcome proof. */
@@ -181,9 +181,7 @@ export async function verifyV2HomeTruth({ page, base, threadId, programFixture, 
   });
 
   await navigateShell(page, new URL(`/thread/${threadId}?shell=v2`, base).href);
-  await page.getByTestId('settings-button').click();
-  await page.getByTestId('settings-v2').waitFor();
-  await page.getByTestId('settings-entry-evolution').click();
+  await (await openWorkspaceTools(page)).getByTestId('workspace-launcher-capability-evolution').click();
   const workspace = page.getByTestId('capability-evolution-workspace');
   await workspace.getByText('待判断 0', { exact: true }).waitFor();
   await workspace.getByText('目前没有需要你拍板的提议。', { exact: true }).waitFor();

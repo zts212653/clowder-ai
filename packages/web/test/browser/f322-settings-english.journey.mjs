@@ -26,26 +26,25 @@ for (const width of [1440, 390]) {
       await page.getByRole('button', { name: '← Members & runtime', exact: true }).waitFor();
       assert.equal(await page.getByTestId('settings-tab-members').innerText(), 'Members & runtime');
       assert.equal(await page.getByTestId('settings-tab-concierge').innerText(), 'Cat Ball');
-      assert.equal(await page.getByTestId('settings-team-workspace').innerText(), 'Member capabilities & routing');
+      assert.equal(await page.getByTestId('settings-team-workspace').count(), 0);
+      assert.equal(await page.locator('[data-testid^="settings-entry-"]').count(), 8);
       assert.equal(await page.getByRole('tablist').getAttribute('aria-label'), 'Cat team sections');
       const navigation = page.locator('button[aria-controls="settings-mobile-navigation"]');
       assert.equal(await navigation.innerText(), 'Settings navigation');
       if (width < 768) {
         await navigation.click();
         assert.equal(await navigation.getAttribute('aria-expanded'), 'true');
-        assert.doesNotMatch(await page.locator('#settings-mobile-navigation').innerText(), /\p{Script=Han}/u);
+        const labels = await page
+          .locator(
+            '#settings-mobile-navigation [data-testid^="settings-entry-"]:not([data-testid="settings-entry-you"])',
+          )
+          .allInnerTexts();
+        assert.doesNotMatch(labels.join(' '), /\p{Script=Han}/u);
+        assert.equal(await page.getByTestId('settings-entry-you').getByText('You', { exact: true }).count(), 1);
         await navigation.click();
       }
       assert.doesNotMatch(await page.getByRole('tablist').innerText(), /\p{Script=Han}/u);
       assert.equal(await page.getByTestId('settings-tab-members').getAttribute('aria-selected'), 'true');
-      assert.equal(
-        await page
-          .getByRole('button', { name: 'Pin "Member capabilities & routing" to the narrow rail', exact: true })
-          .count(),
-        1,
-      );
-      const chrome = await page.getByTestId('settings-team-workspace').boundingBox();
-      assert.ok(chrome && chrome.x >= 0 && chrome.x + chrome.width <= width + 1);
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       assert.deepEqual(errors, []);
       assert.equal(
@@ -66,7 +65,6 @@ for (const width of [1440, 390]) {
         selectedTabPreserved: true,
         configurationWrites: 0,
         pageErrors: errors,
-        workspaceButton: chrome,
       });
     } finally {
       await context.close();

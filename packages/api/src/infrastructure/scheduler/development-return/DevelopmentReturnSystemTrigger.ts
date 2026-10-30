@@ -1,7 +1,10 @@
 import type { TaskItem } from '@cat-cafe/shared';
 import type { DevelopmentWorkActor } from '../../../domains/cats/services/stores/ports/DevelopmentWorkTransition.js';
 import type { StoredMessage } from '../../../domains/cats/services/stores/ports/MessageStore.js';
-import { isCurrentDevelopmentReturnReport } from './DevelopmentReturnReportSource.js';
+import {
+  isCurrentDevelopmentReturnReport,
+  isCurrentDevelopmentReturnReportWindow,
+} from './DevelopmentReturnReportSource.js';
 import type { DevelopmentReturnDeps } from './DevelopmentReturnService.js';
 
 type Deps = Pick<DevelopmentReturnDeps, 'tasks' | 'messages' | 'definitions'>;
@@ -58,9 +61,13 @@ export async function resolveTerminalDevelopmentReturnTrigger(
   ) {
     return null;
   }
-  const [predecessorTask, predecessorReport] = await Promise.all([
+  const reportPredecessor = predecessorReturn.predecessorRegistrationId
+    ? deps.definitions.getPrivateExecutionReturn(predecessorReturn.predecessorRegistrationId)
+    : null;
+  const [predecessorTask, predecessorReport, reportPredecessorWake] = await Promise.all([
     deps.tasks.get(predecessorReturn.taskRef.slice('task:work:'.length)),
     deps.messages.getById(predecessorReturn.report.sourceMessageId),
+    reportPredecessor?.wakeMessageId ? deps.messages.getById(reportPredecessor.wakeMessageId) : null,
   ]);
   if (
     !predecessorTask ||
@@ -71,7 +78,13 @@ export async function resolveTerminalDevelopmentReturnTrigger(
     predecessorTask.ownerCatId !== actor.catId ||
     predecessorTask.entrustedWork?.closure.state !== 'satisfied' ||
     predecessorTask.entrustedWork.revision < predecessorReturn.deliveryRevision ||
-    !isCurrentDevelopmentReturnReport(predecessorReport, predecessorReturn)
+    !isCurrentDevelopmentReturnReport(predecessorReport, predecessorReturn) ||
+    !isCurrentDevelopmentReturnReportWindow(
+      predecessorReport,
+      predecessorReturn,
+      reportPredecessor,
+      reportPredecessorWake,
+    )
   ) {
     return null;
   }

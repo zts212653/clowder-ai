@@ -1,10 +1,13 @@
 'use client';
 
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { PinToggle } from '@/components/settings/SettingsPinToggle';
+import { legacyWorkspacePinId } from '@/components/settings/settings-ia';
 import { MemoryBookStarIcon, ShellGlyph, YarnBallIcon } from '@/components/shell/ShellIcons';
 import { useShellCopy } from '@/components/shell/shell-copy';
 import type { WorkspaceLauncherDestination } from '@/components/workspace/WorkspaceLauncher';
 import { type LauncherWorkspaceSearch, WorkspaceLauncherSearch } from '@/components/workspace/WorkspaceLauncherSearch';
+import { usePinnedSections } from '@/hooks/usePinnedSections';
 import {
   destinationTestId,
   HOME_ROWS,
@@ -38,35 +41,51 @@ function ToolRow({
   meta,
   metaKind,
   onClick,
+  onUnpin,
 }: {
   row: HomeRow;
   meta?: string;
   /** `count` for a number with its unit ("12 files"): the narrow layout keeps it whole, under the name, when it does not fit. */
   metaKind?: 'count';
   onClick: () => void;
+  onUnpin?: () => void;
 }) {
   const t = useShellCopy(homeCopy);
+  const button = useRef<HTMLButtonElement>(null);
   const words = t.rows[row.copyKey];
   const destination = row.destination;
   return (
-    <button
-      type="button"
-      className="home-tool shell-focusable"
-      onClick={onClick}
-      data-testid={destinationTestId(destination)}
-      data-workspace-destination={`${destination.kind}:${destination.id}`}
-      data-meta-kind={meta ? metaKind : undefined}
-    >
-      <span className="home-tool-icon">
-        <RowIcon icon={row.icon} />
-      </span>
-      <span className="home-tool-text">
-        <b className="home-tool-name text-compact">{words.label}</b>
-        <small className="home-tool-desc text-xs">{words.description}</small>
-      </span>
-      {meta && <span className="home-tool-meta text-xs">{meta}</span>}
-      <ShellGlyph name="chevronRight" className="home-tool-chevron h-3.5 w-3.5" />
-    </button>
+    <div className="flex min-w-0 items-center">
+      <button
+        ref={button}
+        type="button"
+        className="home-tool shell-focusable flex-1"
+        onClick={onClick}
+        data-testid={destinationTestId(destination)}
+        data-workspace-destination={`${destination.kind}:${destination.id}`}
+        data-meta-kind={meta ? metaKind : undefined}
+      >
+        <span className="home-tool-icon">
+          <RowIcon icon={row.icon} />
+        </span>
+        <span className="home-tool-text">
+          <b className="home-tool-name text-compact">{words.label}</b>
+          <small className="home-tool-desc text-xs">{words.description}</small>
+        </span>
+        {meta && <span className="home-tool-meta text-xs">{meta}</span>}
+        <ShellGlyph name="chevronRight" className="home-tool-chevron h-3.5 w-3.5" />
+      </button>
+      {onUnpin && (
+        <PinToggle
+          pinned
+          label={words.label}
+          onToggle={() => {
+            onUnpin();
+            button.current?.focus({ preventScroll: true });
+          }}
+        />
+      )}
+    </div>
   );
 }
 
@@ -117,6 +136,7 @@ export function HomeTools({
   onSelectDestination: (destination: WorkspaceLauncherDestination) => void;
 }) {
   const t = useShellCopy(homeCopy);
+  const { isPinned, unpin } = usePinnedSections();
   const [query, setQuery] = useState(initialSearchQuery ?? '');
   useEffect(() => setQuery(initialSearchQuery ?? ''), [initialSearchQuery]);
   const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -158,15 +178,19 @@ export function HomeTools({
         <section key={group.id} className="home-group" aria-label={t.tools.groups[group.id]}>
           <h3 className="home-group-title text-xs">{t.tools.groups[group.id]}</h3>
           <div className="home-tool-grid" data-testid="workspace-launcher-grid">
-            {group.rows.map((row) => (
-              <ToolRow
-                key={row.id}
-                row={row}
-                meta={metaFor(row)}
-                metaKind={metaKindFor(row)}
-                onClick={() => onSelectDestination({ ...row.destination, label: t.rows[row.copyKey].label })}
-              />
-            ))}
+            {group.rows.map((row) => {
+              const pinId = legacyWorkspacePinId(row.destination);
+              return (
+                <ToolRow
+                  key={row.id}
+                  row={row}
+                  meta={metaFor(row)}
+                  metaKind={metaKindFor(row)}
+                  onClick={() => onSelectDestination({ ...row.destination, label: t.rows[row.copyKey].label })}
+                  onUnpin={pinId && isPinned(pinId) ? () => unpin(pinId) : undefined}
+                />
+              );
+            })}
           </div>
         </section>
       ))}
