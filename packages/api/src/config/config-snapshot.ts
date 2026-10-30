@@ -6,6 +6,7 @@ export interface ConfigSnapshot {
   coCreator: {
     name: string;
     nickname?: string;
+    nicknameSource?: 'user';
     aliases: string[];
     mentionPatterns: string[];
     timeZone?: string;
