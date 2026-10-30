@@ -35,6 +35,7 @@ import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { isUserSelectedCatalog } from './cat-catalog-initialization.js';
 import { bootstrapCatCatalog, type CatCatalogReadOptions, readCatCatalogRaw } from './cat-catalog-store.js';
+import { captureMemberIdentitySources, projectMemberIdentitySources } from './member-identity-sources.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 import {
   hasOccupiedMentionAlias,
@@ -566,7 +567,7 @@ function removeUnavailableTemplateVariants(
  * Merge template + catalog with #772 template-only breed filter applied.
  * Shared by loadCatConfig() and getAcpConfig() to avoid duplicate merge paths.
  */
-function mergeTemplateWithCatalog(templatePath: string, options: CatCatalogReadOptions = {}): string | null {
+function mergeTemplateWithCatalog(templatePath: string, options: CatCatalogReadOptions = {}) {
   const projectRoot = dirname(templatePath);
   const catalogRaw = readCatCatalogRaw(projectRoot, options);
   if (catalogRaw === null) return null;
@@ -621,7 +622,7 @@ function mergeTemplateWithCatalog(templatePath: string, options: CatCatalogReadO
     }
   }
 
-  return JSON.stringify(merged);
+  return { raw: JSON.stringify(merged), catalog: catalogJson as unknown as CatCafeConfig };
 }
 
 function parseCatConfig(raw: string): CatCafeConfig {
@@ -670,8 +671,9 @@ export function parseRawCatConfig(raw: string): CatCafeConfig {
 
 export function loadResolvedCatConfig(templatePath?: string, options: CatCatalogReadOptions = {}): CatCafeConfig {
   const resolvedTemplatePath = templatePath ?? process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
-  const raw = mergeTemplateWithCatalog(resolvedTemplatePath, options) ?? readTemplate(resolvedTemplatePath);
-  return parseCatConfig(raw);
+  const merged = mergeTemplateWithCatalog(resolvedTemplatePath, options);
+  const config = parseCatConfig(merged?.raw ?? readTemplate(resolvedTemplatePath));
+  return captureMemberIdentitySources(config, merged?.catalog ?? null);
 }
 
 /**
@@ -790,6 +792,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         ...(variant.voiceConfig != null ? { voiceConfig: variant.voiceConfig } : {}),
         roleDescription: variant.roleDescription ?? breed.roleDescription,
         personality: variant.personality ?? defaultVariant?.personality ?? '',
+        identitySources: projectMemberIdentitySources(config, breed, variant),
         breedId: breed.id,
         relationshipKey: variant.relationshipKey ?? breed.relationshipKey ?? breed.id,
         breedDisplayName: breed.displayName,
@@ -1207,7 +1210,7 @@ export function getAcpConfig(catId: string, projectRoot?: string): AcpVariantCon
     const templatePath = projectRoot
       ? resolveProjectTemplatePath(projectRoot)
       : (process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH);
-    const raw = mergeTemplateWithCatalog(templatePath) ?? readTemplate(templatePath);
+    const raw = mergeTemplateWithCatalog(templatePath)?.raw ?? readTemplate(templatePath);
     const json = JSON.parse(raw) as {
       breeds?: Array<{ catId?: string; variants?: Array<{ catId?: string; acp?: AcpVariantConfig | null }> }>;
     };

@@ -12,7 +12,7 @@ import { catRegistry } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { collectConfigSnapshot } from '../config/ConfigRegistry.js';
-import { configStore } from '../config/ConfigStore.js';
+import { ConfigRevisionConflict, configStore } from '../config/ConfigStore.js';
 import {
   clearRuntimeDefaultCatId,
   getDefaultCatId,
@@ -61,7 +61,16 @@ import { configThreadAttentionRoutes } from './config-thread-attention.js';
 const patchSchema = z.object({
   key: z.string().min(1),
   value: z.union([z.string(), z.number(), z.boolean()]),
+  expectedRevision: z.string().min(1).optional(),
 });
+
+const VERSIONED_CLIENT_KEYS = new Set([
+  'cli.codexSandboxMode',
+  'cli.codexApprovalPolicy',
+  'codex.execution.model',
+  'codex.execution.authMode',
+  'codex.execution.passModelArg',
+]);
 
 const PERSISTENT_CLI_OUTPUT_KEY = 'ui.bubble.cliOutput';
 
@@ -84,9 +93,9 @@ function authorizeConfigPatch(request: FastifyRequest, key: string): ConfigPatch
   return gateResult ? { ok: false, status: gateResult.status, error: gateResult.error } : { ok: true, operator };
 }
 
-function applyConfigPatch(projectRoot: string, key: string, value: ConfigPatchValue): void {
+function applyConfigPatch(projectRoot: string, key: string, value: ConfigPatchValue, expectedRevision?: string): void {
   if (key !== PERSISTENT_CLI_OUTPUT_KEY) {
-    configStore.set(key, value);
+    configStore.set(key, value, expectedRevision);
     return;
   }
   const normalized = configStore.normalize(key, value);
@@ -214,6 +223,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
 
   app.get('/api/config', async () => ({
     config: collectConfigSnapshot(projectRoot),
+    revisions: configStore.revisions(),
   }));
 
   app.patch('/api/config', async (request, reply) => {
@@ -227,13 +237,18 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       reply.status(authorization.status);
       return { error: authorization.error };
     }
+    if (VERSIONED_CLIENT_KEYS.has(parsed.data.key) && parsed.data.expectedRevision === undefined) {
+      return reply.code(428).send({ error: '请重新读取客户端设置，携带 expectedRevision 后再保存。' });
+    }
 
     const before = saveSpan('config.snapshot.before', () => collectConfigSnapshot(projectRoot));
     const oldValue = getSnapshotValue(before, parsed.data.key);
     try {
-      saveSpan('config.persist', () => applyConfigPatch(projectRoot, parsed.data.key, parsed.data.value));
+      saveSpan('config.persist', () =>
+        applyConfigPatch(projectRoot, parsed.data.key, parsed.data.value, parsed.data.expectedRevision),
+      );
     } catch (err) {
-      reply.status(400);
+      reply.status(err instanceof ConfigRevisionConflict ? 409 : 400);
       return { error: (err as Error).message };
     }
     const after = saveSpan('config.snapshot.after', () => collectConfigSnapshot(projectRoot));
@@ -271,7 +286,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       request.log.warn({ err, key: parsed.data.key }, 'config audit append failed');
     }
 
-    return { config: after };
+    return { config: after, revisions: configStore.revisions() };
   });
 
   const handleCoCreatorPatch = async (request: FastifyRequest, reply: FastifyReply) => {

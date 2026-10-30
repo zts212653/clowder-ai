@@ -142,6 +142,8 @@ async function fixture(t, serviceOverrides = {}) {
     cliCommand: process.execPath,
     spawnFn,
     l0CompilerFn: async (input) => {
+      assert.equal(input.frozenInput.projection, 'public');
+      assert.equal(input.requireFrozenInput, true);
       projections.push(input.projection);
       await duringL0();
       return '# Public fixture identity\n';

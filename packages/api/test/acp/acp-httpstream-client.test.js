@@ -307,7 +307,7 @@ describe('AcpHttpStreamClient', () => {
     assert.match(caught.message, /closed before final prompt response/);
   });
 
-  it('responds to id-bearing permission requests on prompt streams', async () => {
+  it('denies id-bearing permission requests when no approval handler is installed', async () => {
     let resolvePermissionResponse;
     const permissionResponseReceived = new Promise((resolve) => {
       resolvePermissionResponse = resolve;
@@ -390,7 +390,7 @@ describe('AcpHttpStreamClient', () => {
     assert.equal(caught, null, `Permission request should not stall: ${caught?.message}`);
     assert.ok(capturedPermissionResponse, 'client should POST a JSON-RPC response for the permission request');
     assert.equal(capturedPermissionResponse.result?.outcome?.outcome, 'selected');
-    assert.equal(capturedPermissionResponse.result?.outcome?.optionId, 'allow_once');
+    assert.equal(capturedPermissionResponse.result?.outcome?.optionId, 'reject_once');
     assert.equal(events.at(-1)?.update?.content?.text, 'approved');
   });
 

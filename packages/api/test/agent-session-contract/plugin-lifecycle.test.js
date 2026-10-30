@@ -161,6 +161,7 @@ test('static reference package passes real local admission; activation/disable/r
   await iterator.next();
   const done = iterator.next();
   await h.runtime.deactivate(h.admission.instance.pluginInstanceId);
+  first.inbox.push(turn('done', { outcome: 'cancelled' }));
   assert.equal((await done).value.errorCode, 'cancelled');
   assert.equal(h.registry.has(ref), false);
   assertLifecycleLog(h.logs[1], 'unregistered', 30);
@@ -291,6 +292,7 @@ for (const stop of ['caller', 'release'])
     if (stop === 'caller') controller.abort();
     else await service.releaseAll('disabled');
     assert.equal(received.signal.aborted, true);
+    provider.inbox.push(turn('done', { outcome: 'cancelled' }));
     assert.equal((await next).value.errorCode, 'cancelled');
     assert.deepEqual(opts, snapshot);
     await service.releaseAll('test');

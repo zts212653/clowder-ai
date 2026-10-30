@@ -54,6 +54,7 @@ before(async () => {
     mentionPatterns: ['@opencode'],
     mcpSupport: false,
     roleDescription: 'fixture',
+    relationshipKey: 'oc-default-workspace-fixture',
     personality: 'fixture',
   });
 });

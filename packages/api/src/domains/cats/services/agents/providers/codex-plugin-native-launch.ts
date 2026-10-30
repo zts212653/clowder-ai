@@ -9,6 +9,7 @@ import type { AgentServiceOptions } from '../../types.js';
 import { normalizeToolExecutionPolicy } from '../invocation/tool-execution-policy.js';
 import { normalizeCodexMcpConfigArgs } from './codex-config-overrides.js';
 import { CODEX_LIVE_DISABLED_FEATURES } from './codex-live-policy.js';
+import { captureInvocationL0Input } from './l0-input-capture.js';
 
 const AUTH_KEYS = ['OPENAI_API_KEY', 'OPENAI_ORG_ID', 'OPENAI_ORGANIZATION', 'OPENAI_PROJECT_ID'] as const;
 const MINIMAL_PATH = `${dirname(process.execPath)}:/usr/bin:/bin`;
@@ -56,6 +57,7 @@ export async function prepareCodexNativeLaunch(
   options: AgentServiceOptions,
   carrier: string,
   frozenPrompt: boolean,
+  catId: string,
 ): Promise<PreparedCodexNativeLaunch> {
   const port = options.pluginNativeLaunch;
   if (
@@ -121,6 +123,7 @@ export async function prepareCodexNativeLaunch(
   }
   const captured: AgentServiceOptions = {
     ...options,
+    frozenL0Input: captureInvocationL0Input({ catId, projection: 'public' }),
     signal,
     workingDirectory: canonicalWorkspace,
     callbackEnv,

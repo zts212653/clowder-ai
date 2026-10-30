@@ -23,6 +23,7 @@ export interface CatStrategyEntry {
   effective: EffectiveStrategy;
   source: string;
   revision?: string;
+  overrideRevision?: string;
   changedAt?: number;
   executionStatus?: {
     status: 'active' | 'degraded' | 'unavailable';

@@ -61,6 +61,7 @@ export class AcpSessionProvider implements Contract.AgentSessionProvider {
     signal: AbortSignal,
   ): Promise<Contract.StartTurnResult> {
     if (input.prompt.kind !== 'frozen') return { ok: false, code: 'failed', reason: 'deferred_prompt_unsupported' };
+    const service = this.deps.prepareHostService ? await this.deps.prepareHostService() : this.deps.service;
     const session = this.sessions.get(sessionId);
     if (!session) return { ok: false, code: 'session_unavailable' };
     if (session.active) return { ok: false, code: 'busy' };
@@ -84,22 +85,33 @@ export class AcpSessionProvider implements Contract.AgentSessionProvider {
     };
     let source: AsyncIterable<AgentMessage>;
     try {
-      source = this.deps.service.invoke(input.prompt.text, options);
+      source = service.invoke(input.prompt.text, options);
     } catch (error) {
       cleanup();
       throw error;
     }
     const events = this.events(sessionId, session, source, active, cleanup);
+    let consumed = false;
     return {
       ok: true,
       turn: active.ref,
       events: {
         [Symbol.asyncIterator]: () => ({
-          next: () => events.next(),
+          next: () => {
+            consumed = true;
+            return events.next();
+          },
           return: async () => {
+            const unstarted = !consumed;
             if (!active.done) controller.abort();
-            cleanup();
-            return events.return(undefined);
+            const result = await events.return(undefined);
+            // A never-started generator has no finally. Once consumed, only
+            // that finally may clear active after successful source cleanup.
+            if (unstarted) {
+              active.done = true;
+              cleanup();
+            }
+            return result;
           },
         }),
       },
@@ -214,17 +226,16 @@ export class AcpSessionProvider implements Contract.AgentSessionProvider {
   ): AsyncGenerator<Contract.AgentSessionEvent> {
     let metadata: Pick<MessageMetadata, 'model'> | undefined;
     let seq = 0;
-    let wake = () => {};
-    const aborted = new Promise<undefined>((resolve) => {
-      wake = () => resolve(undefined);
-    });
-    active.controller.signal.addEventListener('abort', wake, { once: true });
     let iterator: AsyncIterator<AgentMessage> | undefined;
+    let terminal: Contract.AgentSessionEvent | undefined;
+    let sourceReadCompleted = false;
     try {
       iterator = source[Symbol.asyncIterator]();
-      while (!active.controller.signal.aborted) {
-        const next = await Promise.race([iterator.next(), aborted]);
-        if (!next || next.done || active.controller.signal.aborted) break;
+      while (true) {
+        sourceReadCompleted = false;
+        const next = await iterator.next();
+        sourceReadCompleted = true;
+        if (next.done) break;
         const current = next.value.metadata;
         if (current && !isDeepStrictEqual(metadata, { model: current.model })) {
           metadata = structuredClone({ model: current.model });
@@ -232,26 +243,35 @@ export class AcpSessionProvider implements Contract.AgentSessionProvider {
         }
         const event = this.project(next.value, sessionId, session, active.ref);
         if (event) {
-          active.done = event.type === 'done';
-          yield { ...event, messageUsage: structuredClone(current?.usage), seq: ++seq };
-          if (event.type === 'done') return;
+          const projected = { ...event, messageUsage: structuredClone(current?.usage), seq: ++seq };
+          if (event.type === 'done') {
+            terminal = projected;
+            break;
+          }
+          if (!active.controller.signal.aborted || event.scope === 'session') yield projected;
         }
       }
-      active.done = true;
-      yield {
+      terminal ??= {
         scope: 'turn',
         sessionId,
         turn: active.ref,
         seq: ++seq,
         type: 'done',
-        outcome: active.controller.signal.aborted ? 'cancelled' : 'completed',
+        outcome: 'failed',
+        errorCode: 'provider_stream_ended_without_done',
       };
     } finally {
-      cleanup();
-      active.controller.signal.removeEventListener('abort', wake);
-      active.done = true;
-      void iterator?.return?.().catch(() => {});
+      // A provider may emit done before its finally releases the execution
+      // lease. Keep active and withhold terminal until that cleanup completes.
+      await iterator?.return?.();
+      // A return on a generator already closed by a failed next is a no-op,
+      // not evidence that its failing finally released the execution lease.
+      if (sourceReadCompleted) {
+        active.done = true;
+        cleanup();
+      }
     }
+    yield terminal;
   }
 }
 

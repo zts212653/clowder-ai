@@ -16,7 +16,7 @@ import { isTaskHandoffSource } from '../domains/ball-custody/OrdinaryTaskHandoff
  */
 
 import { randomUUID } from 'node:crypto';
-import type { CatId, FreshnessCarrierCapability } from '@cat-cafe/shared';
+import { type CatId, createCatId, type FreshnessCarrierCapability } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
@@ -51,7 +51,10 @@ import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftSto
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { type IMessageStore, isTimelinePublished } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import type { ITurnExecutionStore } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
+import {
+  hasUnconfirmedProviderTeardown,
+  type ITurnExecutionStore,
+} from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
 import type { CliExecutionOwnerService, LiveCliExecutionOwner } from '../utils/cli-process-ownership.js';
@@ -250,37 +253,6 @@ async function resolveLiveExecutionCandidates(
     );
   }
   return [...byExecution.values()];
-}
-
-async function terminalizeTrackerlessTurn(input: {
-  turnExecutionStore: Pick<ITurnExecutionStore, 'transitionTerminal'> | undefined;
-  invocationId: string;
-  threadId: string;
-  catId: string;
-  executionId: string;
-  request: FastifyRequest;
-}): Promise<void> {
-  try {
-    await input.turnExecutionStore?.transitionTerminal(input.invocationId, {
-      status: 'canceled',
-      endedAt: Date.now(),
-      terminalReason: 'user_cancel',
-    });
-  } catch (err) {
-    // The provider iterator normally performs the same idempotent transition
-    // when SIGTERM unwinds it. Keep the process cancellation successful, but
-    // retain a loud recovery signal if durable terminalization is unavailable.
-    input.request.log.error(
-      {
-        err,
-        threadId: input.threadId,
-        catId: input.catId,
-        executionId: input.executionId,
-        invocationId: input.invocationId,
-      },
-      'tracker-less process canceled but child terminalization failed',
-    );
-  }
 }
 
 async function retireWithdrawnManagedWake(opts: QueueRoutesOptions, entry: QueueEntry): Promise<void> {
@@ -615,13 +587,20 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         queueProcessor.releaseSlot(input.threadId, input.catId);
       }
     }
-    for (const message of buildCancelMessages({
-      cancelled: true,
-      catIds: [input.catId],
-      executionIds: [input.executionId],
-    })) {
-      socketManager.broadcastAgentMessage(message, input.threadId);
-    }
+    // Durable repair owns this failed Host terminal. It does not claim that
+    // an unavailable native control plane confirmed successful cancellation.
+    socketManager.broadcastAgentMessage(
+      {
+        type: 'done',
+        catId: createCatId(input.catId),
+        invocationId: input.executionId,
+        ...(input.invocationId ? { turnInvocationId: input.invocationId } : {}),
+        errorCode: failureReason,
+        isFinal: true,
+        timestamp: Date.now(),
+      },
+      input.threadId,
+    );
     return { reconciled: true };
   };
 
@@ -644,13 +623,13 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     let processResult = await opts.cliExecutionOwnerService?.terminateExact(executionOwner);
     for (
       let attempt = 1;
-      processResult && !processResult.complete && attempt < CONTROL_PLANE_RETRY_ATTEMPTS;
+      processResult && (!processResult.complete || !processResult.stopped) && attempt < CONTROL_PLANE_RETRY_ATTEMPTS;
       attempt += 1
     ) {
       await waitForControlPlaneRetry();
       processResult = await opts.cliExecutionOwnerService?.terminateExact(executionOwner);
     }
-    if (!processResult?.complete) {
+    if (!processResult?.complete || !processResult.stopped) {
       try {
         await failUncontrollableInvocation({ ...input, invocationId: input.invocationId });
         return { cancelled: false, reconciled: true };
@@ -662,27 +641,38 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     // The request already resolved this exact live owner. A zero-signal result
     // means it exited in the snapshot-to-signal race; cancellation is
     // idempotently complete and its durable child truth still needs closing.
-    await terminalizeTrackerlessTurn({
-      turnExecutionStore: opts.turnExecutionStore,
-      invocationId: input.invocationId,
-      threadId: input.threadId,
-      catId: input.catId,
-      executionId: input.executionId,
-      request: input.request,
-    });
+    const stoppedAt = Date.now();
+    try {
+      await opts.turnExecutionStore?.transitionTerminal(input.invocationId, {
+        status: 'canceled',
+        endedAt: stoppedAt,
+        terminalReason: 'user_cancel',
+        providerTeardownAt: stoppedAt,
+      });
+    } catch (err) {
+      input.request.log.error({ err, ...executionOwner }, 'controlled stop proof could not be committed');
+      return { cancelled: false, controlPlaneUnavailable: true };
+    }
     releaseAgentSessionLocks(
       { threadId: input.threadId, userId: input.ownerUserId ?? input.userId, catId: input.catId },
       input.request,
       'cancel',
       [input.executionId],
     );
-    for (const message of buildCancelMessages({
-      cancelled: true,
-      catIds: [input.catId],
-      executionIds: [input.executionId],
-    })) {
-      socketManager.broadcastAgentMessage(message, input.threadId);
-    }
+    // terminateExact completed and durable child terminalization succeeded;
+    // no live provider remains to publish this exact execution's terminal.
+    socketManager.broadcastAgentMessage(
+      {
+        type: 'done',
+        catId: createCatId(input.catId),
+        invocationId: input.executionId,
+        turnInvocationId: input.invocationId,
+        errorCode: 'cancelled',
+        isFinal: true,
+        timestamp: Date.now(),
+      },
+      input.threadId,
+    );
     return { cancelled: true };
   };
 
@@ -764,6 +754,28 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       };
     }
 
+    // An empty owner snapshot cannot certify a dispatched child whose exact
+    // teardown has never been recorded (including unsupported Windows owners).
+    const children = await opts.turnExecutionStore?.listByParent(input.executionId);
+    if (
+      children?.some(
+        (child) =>
+          child.parentInvocationId === input.executionId &&
+          child.threadId === input.threadId &&
+          child.userId === input.userId &&
+          child.catId === input.catId &&
+          child.status === 'running' &&
+          hasUnconfirmedProviderTeardown(child),
+      )
+    ) {
+      return {
+        reconciled: false,
+        controlPlaneUnavailable: true,
+        error: '原执行停止尚未确认，保留执行占用',
+        code: 'PROVIDER_TEARDOWN_UNCONFIRMED',
+      };
+    }
+
     const inflight = invocationQueue.findProcessingByCat(input.threadId, input.catId);
     if (inflight && queueEntryOwnerId(inflight) !== input.userId) {
       return {
@@ -841,13 +853,16 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     // The socket projection is only a legacy witness. Once every authoritative
     // source says the exact run is gone, publish convergence even when there was
     // no remaining local artifact to remove.
-    for (const message of buildCancelMessages({
-      cancelled: true,
-      catIds: [input.catId],
-      executionIds: [input.executionId],
-    })) {
-      socketManager.broadcastAgentMessage(message, input.threadId);
-    }
+    socketManager.broadcastAgentMessage(
+      {
+        type: 'done',
+        catId: createCatId(input.catId),
+        invocationId: input.executionId,
+        isFinal: true,
+        timestamp: Date.now(),
+      },
+      input.threadId,
+    );
     return {
       reconciled: Boolean(
         inflight ||

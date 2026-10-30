@@ -64,6 +64,8 @@ export * from './ignored-item-preference.js';
 export * from './markdown-link-safety.js';
 // Export shared text helpers
 export * from './markdown-readable-text.js';
+export * from './member-identity.js';
+export * from './member-profiles.js';
 export * from './message-bundle-projection.js';
 export * from './message-output-layout.js';
 export type {

@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
+import { declareKnownHostSessionFixture } from './helpers/known-host-session-fixture.js';
 
 const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/context/ContextEpochOwner.js');
 const { InMemoryContextEpochStore } = await import('../dist/domains/cats/services/stores/ports/ContextEpochStore.js');
@@ -432,17 +433,28 @@ describe('routeParallel collaboration continuity', () => {
       },
     };
 
-    for await (const _message of routeParallel(
+    const { prepareInvocationExecutionBinding } = await import(
+      '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'
+    );
+    const identity = { catId, threadId: 'thread-route-late-capacity', userId: 'user1', service };
+    await declareKnownHostSessionFixture(
+      deps.invocationDeps,
+      identity,
+      await prepareInvocationExecutionBinding(deps.invocationDeps, identity),
+    );
+
+    const errors = [];
+    for await (const message of routeParallel(
       deps,
       [catId],
       'current invocation delta',
       'user1',
       'thread-route-late-capacity',
     )) {
-      // consume route output
+      if (message.type === 'error') errors.push(message);
     }
 
-    assert.equal(prompts.length, 1);
+    assert.equal(prompts.length, 1, JSON.stringify(errors));
     assert.equal(sealRequests, 0, 'stored health cannot activate handoff before this invocation reports usage');
     assert.equal(sessionChainStore.get(active.id).status, 'active');
     assert.doesNotMatch(prompts[0], /prior active-session history/);
@@ -506,6 +518,15 @@ describe('routeParallel collaboration continuity', () => {
     };
 
     const events = [];
+    const { prepareInvocationExecutionBinding } = await import(
+      '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'
+    );
+    const identity = { catId: 'codex', threadId: 'thread-parallel-seal', userId: 'user1', service };
+    await declareKnownHostSessionFixture(
+      deps.invocationDeps,
+      identity,
+      await prepareInvocationExecutionBinding(deps.invocationDeps, identity),
+    );
     for await (const msg of routeParallel(deps, ['codex'], 'parallel seal', 'user1', 'thread-parallel-seal')) {
       events.push(msg);
     }
@@ -518,7 +539,7 @@ describe('routeParallel collaboration continuity', () => {
         return false;
       }
     });
-    assert.ok(sealEvent, 'parallel threshold seal should emit session_seal_requested');
+    assert.ok(sealEvent, `parallel threshold seal should emit session_seal_requested: ${JSON.stringify(events)}`);
     const payload = JSON.parse(sealEvent.content);
     assert.equal(payload.continuityCapsule.threadId, 'thread-parallel-seal');
     assert.equal(payload.continuityCapsule.catId, 'codex');

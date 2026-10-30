@@ -84,11 +84,7 @@ test('owner callback recovers a crashed creator only after exact positive stop p
   assert.equal(created.statusCode, 201, created.body);
   const taskId = created.json().task.id;
   await f.turns.markProviderStarted(old.invocationId, Date.now());
-  await f.turns.transitionTerminal(old.invocationId, {
-    status: 'failed',
-    endedAt: Date.now(),
-    terminalReason: 'process_restart',
-  });
+  assert.equal((await f.turns.get(old.invocationId)).status, 'running', 'a crash cannot prove native teardown');
   const next = await actor(f);
   const unknown = await update(f, next, taskId);
   assert.equal(unknown.statusCode, 409, unknown.body);
@@ -99,6 +95,8 @@ test('owner callback recovers a crashed creator only after exact positive stop p
   const recovered = await update(f, next, taskId);
   assert.equal(recovered.statusCode, 200, recovered.body);
   assert.equal(recovered.json().task.executionRef.invocationId, next.invocationId);
+  assert.equal((await f.turns.get(old.invocationId)).status, 'interrupted');
+  assert.ok((await f.turns.get(old.invocationId)).providerTeardownAt);
   assert.equal(f.tasks.get(taskId).id, taskId);
   assert.ok(
     [401, 409].includes((await update(f, old, taskId, 'done')).statusCode),

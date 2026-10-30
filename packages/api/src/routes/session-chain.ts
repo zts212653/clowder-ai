@@ -179,12 +179,15 @@ function formatRuntimeSessionSummary(metadata: RuntimeSessionMetadata): RuntimeS
 async function attachRuntimeSessionSummary<T extends { id: string }>(
   session: T,
   runtimeSessionStore?: IRuntimeSessionStore,
-): Promise<T & { runtimeSession?: RuntimeSessionSummary }> {
-  if (!runtimeSessionStore) return session;
+): Promise<Omit<T, 'hostExecutionBoundary'> & { runtimeSession?: RuntimeSessionSummary }> {
+  const { hostExecutionBoundary: _privateBoundary, ...publicSession } = session as T & {
+    hostExecutionBoundary?: unknown;
+  };
+  if (!runtimeSessionStore) return publicSession;
   const metadata = await runtimeSessionStore.getBySessionId(session.id);
-  if (!metadata) return session;
+  if (!metadata) return publicSession;
   return {
-    ...session,
+    ...publicSession,
     runtimeSession: formatRuntimeSessionSummary(metadata),
   };
 }
@@ -192,8 +195,7 @@ async function attachRuntimeSessionSummary<T extends { id: string }>(
 async function attachRuntimeSessionSummaries<T extends { id: string }>(
   sessions: T[],
   runtimeSessionStore?: IRuntimeSessionStore,
-): Promise<Array<T & { runtimeSession?: RuntimeSessionSummary }>> {
-  if (!runtimeSessionStore) return sessions;
+): Promise<Array<Omit<T, 'hostExecutionBoundary'> & { runtimeSession?: RuntimeSessionSummary }>> {
   return Promise.all(sessions.map((session) => attachRuntimeSessionSummary(session, runtimeSessionStore)));
 }
 

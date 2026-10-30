@@ -109,6 +109,7 @@ export class AgyNativeAgentService implements AgentService {
       metadata,
       {
         sessionId: input.sessionId,
+        frozenL0Input: input.frozenL0Input,
         nativeSessionBinding: binding,
         requireExactResume: true,
         workingDirectory: binding.workspaceRoot,
@@ -192,6 +193,8 @@ export class AgyNativeAgentService implements AgentService {
         return;
       }
       const body = await this.l0CompilerFn({
+        frozenInput: options?.frozenL0Input,
+        requireFrozenInput: true,
         catId: this.catId as string,
         userId: compactionControl?.userId ?? options?.callbackEnv?.CAT_CAFE_USER_ID,
         projection: 'owner',

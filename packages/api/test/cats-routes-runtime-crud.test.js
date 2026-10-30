@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, afterEach, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { readMemberRequestRevision } from './helpers/member-request-revision.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -220,14 +221,20 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         method: 'PATCH',
         url: '/api/cats/banner-http',
         headers,
-        payload: { banner: 'https://tracker.example/banner.jpg' },
+        payload: {
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/banner-http', headers),
+          banner: 'https://tracker.example/banner.jpg',
+        },
       });
       assert.equal(rejected.statusCode, 400, rejected.payload);
       const cleared = await app.inject({
         method: 'PATCH',
         url: '/api/cats/banner-http',
         headers,
-        payload: { banner: null },
+        payload: {
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/banner-http', headers),
+          banner: null,
+        },
       });
       assert.equal(cleared.statusCode, 200, cleared.payload);
       const cat = await read();
@@ -294,7 +301,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/family-move',
       headers,
-      body: JSON.stringify({ breedId: 'ragdoll' }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/family-move', headers),
+        breedId: 'ragdoll',
+      }),
     });
     assert.equal(moved.statusCode, 200, moved.body);
     const after = JSON.parse(moved.body).cat;
@@ -326,7 +336,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/family-move',
       headers,
-      body: JSON.stringify({ breedId: 'missing-breed' }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/family-move', headers),
+        breedId: 'missing-breed',
+      }),
     });
     assert.equal(invalid.statusCode, 400, invalid.body);
     assert.match(JSON.parse(invalid.body).error, /Unknown breedId "missing-breed"/);
@@ -413,7 +426,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ sessionChain: false }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-spark', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        sessionChain: false,
+      }),
     });
     assert.equal(rejectedLegacyPatch.statusCode, 400);
     assert.match(JSON.parse(rejectedLegacyPatch.body).error, /legacy sessionChain/i);
@@ -426,6 +445,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-spark', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         displayName: '运行时火花猫',
         nickname: '火花',
         mentionPatterns: ['@runtime-spark', '@运行时火花'],
@@ -465,6 +488,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-spark', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         accountRef: 'codex',
       }),
     });
@@ -478,6 +505,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-spark', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         accountRef: null,
       }),
     });
@@ -492,6 +523,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-spark', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         contextWindow: null,
       }),
     });
@@ -535,7 +570,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
           'content-type': 'application/json',
           'x-cat-cafe-user': 'codex',
         },
-        body: JSON.stringify({ available: false }),
+        body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/agy-opus', {
+            'content-type': 'application/json',
+            'x-cat-cafe-user': 'codex',
+          }),
+          available: false,
+        }),
       });
 
       assert.equal(patchRes.statusCode, 200);
@@ -615,7 +656,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ cli: { effort: 'max' } }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-effort', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        cli: { effort: 'max' },
+      }),
     });
     assert.equal(effortPatchRes.statusCode, 200, effortPatchRes.body);
     const effortPatchedCat = JSON.parse(effortPatchRes.body).cat;
@@ -630,7 +677,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ contextWindow: 100000 }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-effort', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        contextWindow: 100000,
+      }),
     });
     assert.equal(contextOnlyPatchRes.statusCode, 200, contextOnlyPatchRes.body);
     const contextOnlyPatchedCat = JSON.parse(contextOnlyPatchRes.body).cat;
@@ -645,7 +698,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ cli: { effort: 'max' } }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-effort', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        cli: { effort: 'max' },
+      }),
     });
     assert.equal(compactOnlyPatchRes.statusCode, 200, compactOnlyPatchRes.body);
     const compactOnlyPatchedCat = JSON.parse(compactOnlyPatchRes.body).cat;
@@ -658,7 +717,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ defaultModel: 'gpt-5.4' }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-effort', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        defaultModel: 'gpt-5.4',
+      }),
     });
     assert.equal(modelPatchRes.statusCode, 200, modelPatchRes.body);
     const modelPatchedCat = JSON.parse(modelPatchRes.body).cat;
@@ -675,6 +740,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-effort', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         defaultModel: 'gpt-5.6-sol',
         contextWindow: 372000,
         cli: { effort: 'max' },
@@ -698,6 +767,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-effort', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         defaultModel: 'gpt-5.4',
         contextWindow: 100000,
       }),
@@ -714,7 +787,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ cli: { effort: null } }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-effort', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        cli: { effort: null },
+      }),
     });
     assert.equal(clearEffortRes.statusCode, 200, clearEffortRes.body);
     assert.equal(JSON.parse(clearEffortRes.body).cat.cli?.effort, undefined);
@@ -726,7 +805,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ defaultModel: 'gpt-5.6-sol' }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-effort', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        defaultModel: 'gpt-5.6-sol',
+      }),
     });
     assert.equal(noEffortModelSwitchRes.statusCode, 200, noEffortModelSwitchRes.body);
     const noEffortModelSwitchedCat = JSON.parse(noEffortModelSwitchRes.body).cat;
@@ -778,7 +863,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/legacy-ctx-cat',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
-      body: JSON.stringify({ cli: { effort: 'high' } }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/legacy-ctx-cat', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        cli: { effort: 'high' },
+      }),
     });
     assert.equal(patchRes.statusCode, 200, patchRes.body);
     const patched = JSON.parse(patchRes.body).cat;
@@ -989,7 +1080,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/legacy-clear-cat',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
-      body: JSON.stringify({ personality: 'updated' }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/legacy-clear-cat', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        personality: 'updated',
+      }),
     });
     assert.equal(promotionRes.statusCode, 200, promotionRes.body);
     const promoted = JSON.parse(promotionRes.body).cat;
@@ -1001,7 +1098,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/legacy-clear-cat',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
-      body: JSON.stringify({ contextWindow: null }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/legacy-clear-cat', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        contextWindow: null,
+      }),
     });
     assert.equal(clearRes.statusCode, 200, clearRes.body);
     const cleared = JSON.parse(clearRes.body).cat;
@@ -1054,7 +1157,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/model-switch-cat',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'opus' },
-      body: JSON.stringify({ defaultModel: 'claude-sonnet-4-6' }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/model-switch-cat', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'opus',
+        }),
+        defaultModel: 'claude-sonnet-4-6',
+      }),
     });
     assert.equal(switchRes.statusCode, 200, switchRes.body);
     const switched = JSON.parse(switchRes.body).cat;
@@ -1233,7 +1342,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         method: 'PATCH',
         url: '/api/cats/runtime-kimi-no-effort',
         headers,
-        body: JSON.stringify({ cli: { effort: 'high' } }),
+        body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-kimi-no-effort', headers),
+          cli: { effort: 'high' },
+        }),
       });
       assert.equal(patchRes.statusCode, 400);
       assert.match(JSON.parse(patchRes.body).error, /effort/i);
@@ -1336,7 +1448,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         method: 'PATCH',
         url: '/api/cats/runtime-codex-carrier',
         headers,
-        body: JSON.stringify({ carrier: 'cli' }),
+        body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-carrier', headers),
+          carrier: 'cli',
+        }),
       });
       assert.equal(patchRes.statusCode, 200, patchRes.body);
       assert.equal(JSON.parse(patchRes.body).cat.carrier, 'cli');
@@ -1345,7 +1460,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         method: 'PATCH',
         url: '/api/cats/runtime-codex-carrier',
         headers,
-        body: JSON.stringify({ carrier: 'app_server' }),
+        body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-carrier', headers),
+          carrier: 'app_server',
+        }),
       });
       assert.equal(clearRes.statusCode, 200, clearRes.body);
       assert.equal(JSON.parse(clearRes.body).cat.carrier, 'app_server');
@@ -1355,14 +1473,20 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         method: 'PATCH',
         url: '/api/cats/runtime-codex-carrier',
         headers,
-        body: JSON.stringify({ carrier: 'app_server' }),
+        body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-carrier', headers),
+          carrier: 'app_server',
+        }),
       });
       assert.equal(modelSwitchRes.statusCode, 200, modelSwitchRes.body);
       const modelChangeRes = await app.inject({
         method: 'PATCH',
         url: '/api/cats/runtime-codex-carrier',
         headers,
-        body: JSON.stringify({ defaultModel: 'gpt-5.5' }),
+        body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-carrier', headers),
+          defaultModel: 'gpt-5.5',
+        }),
       });
       assert.equal(modelChangeRes.statusCode, 200, modelChangeRes.body);
       assert.equal(JSON.parse(modelChangeRes.body).cat.carrier, 'app_server');
@@ -1470,7 +1594,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         method: 'PATCH',
         url: '/api/cats/runtime-codex-speed',
         headers,
-        body: JSON.stringify({ cli: { serviceTier: null } }),
+        body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-speed', headers),
+          cli: { serviceTier: null },
+        }),
       });
       assert.equal(clearRes.statusCode, 200, clearRes.body);
       assert.equal(JSON.parse(clearRes.body).cat.cli?.serviceTier, undefined);
@@ -1479,7 +1606,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         method: 'PATCH',
         url: '/api/cats/runtime-codex-speed',
         headers,
-        body: JSON.stringify({ cli: { serviceTier: 'fast' } }),
+        body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-speed', headers),
+          cli: { serviceTier: 'fast' },
+        }),
       });
       assert.equal(restoreRes.statusCode, 200, restoreRes.body);
 
@@ -1487,7 +1617,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         method: 'PATCH',
         url: '/api/cats/runtime-codex-speed',
         headers,
-        body: JSON.stringify({ accountRef: 'codex-api-key' }),
+        body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-speed', headers),
+          accountRef: 'codex-api-key',
+        }),
       });
       assert.equal(switchBindingRes.statusCode, 200, switchBindingRes.body);
       assert.equal(
@@ -1500,7 +1633,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         method: 'PATCH',
         url: '/api/cats/runtime-codex-speed',
         headers,
-        body: JSON.stringify({ cli: { serviceTier: 'standard' } }),
+        body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex-speed', headers),
+          cli: { serviceTier: 'standard' },
+        }),
       });
       assert.equal(explicitApiKeyRes.statusCode, 400);
       assert.match(JSON.parse(explicitApiKeyRes.body).error, /OAuth/i);
@@ -1559,7 +1695,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         method: 'PATCH',
         url: '/api/cats/runtime-carrier-truth',
         headers,
-        body: JSON.stringify({ carrier: 'app_server' }),
+        body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-carrier-truth', headers),
+          carrier: 'app_server',
+        }),
       });
       assert.equal(patchRes.statusCode, 200, patchRes.body);
       assert.equal(JSON.parse(patchRes.body).cat.carrier, 'app_server');
@@ -1600,6 +1739,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         url: '/api/cats/runtime-carrier-truth',
         headers,
         body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-carrier-truth', headers),
           carrier: 'cli',
         }),
       });
@@ -1682,7 +1822,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         method: 'PATCH',
         url: '/api/cats/runtime-kimi-k3-effort',
         headers,
-        body: JSON.stringify({ cli: { effort: 'low' } }),
+        body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-kimi-k3-effort', headers),
+          cli: { effort: 'low' },
+        }),
       });
       assert.equal(patchRes.statusCode, 200, patchRes.body);
       assert.equal(JSON.parse(patchRes.body).cat.cli?.effort, 'low');
@@ -1691,7 +1834,11 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         method: 'PATCH',
         url: '/api/cats/runtime-kimi-k3-effort',
         headers,
-        body: JSON.stringify({ defaultModel: 'kimi-code/kimi-for-coding', cli: { effort: 'low' } }),
+        body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-kimi-k3-effort', headers),
+          defaultModel: 'kimi-code/kimi-for-coding',
+          cli: { effort: 'low' },
+        }),
       });
       assert.equal(unsupportedPatchRes.statusCode, 400, unsupportedPatchRes.body);
       assert.match(JSON.parse(unsupportedPatchRes.body).error, /effort/i);
@@ -1874,6 +2021,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-antigravity-clear', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         commandArgs: [],
       }),
     });
@@ -2048,6 +2199,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-codex', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         accountRef: 'claude-oauth',
       }),
     });
@@ -2659,7 +2814,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ defaultModel: 'glm-4-plus' }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/legacy-oc-member', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        defaultModel: 'glm-4-plus',
+      }),
     });
     assert.equal(patchRes.statusCode, 200, 'legacy member model edit should succeed without provider');
 
@@ -2671,7 +2832,14 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ defaultModel: 'glm-4-plus', accountRef: legacyProfile.id }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/legacy-oc-member', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        defaultModel: 'glm-4-plus',
+        accountRef: legacyProfile.id,
+      }),
     });
     assert.equal(editorPatchRes.statusCode, 200, 'unchanged accountRef in PATCH should not defeat legacy compat');
 
@@ -2694,7 +2862,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ accountRef: newProfile.id }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/legacy-oc-member', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        accountRef: newProfile.id,
+      }),
     });
     assert.equal(switchRes.statusCode, 400, 'switching account on legacy member without provider should be rejected');
   });
@@ -2912,6 +3086,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/codex', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         defaultModel: 'gpt-5.4-mini',
       }),
     });
@@ -2949,6 +3127,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       },
       // Simulate editor payload carrying the previous visible accountRef while switching client.
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/opus', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         clientId: 'openai',
         defaultModel: 'gpt-5.4',
         accountRef: opusBefore.accountRef,
@@ -2989,6 +3171,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       // Generic ACP is a transport: switching to it must keep the selected account
       // instead of rebasing the old builtin accountRef to a nonexistent "acp" account.
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/opus', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         clientId: 'acp',
         defaultModel: 'acp-model',
         accountRef: opusBefore.accountRef,
@@ -3031,6 +3217,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/opus', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         cli: {
           command: 'claude',
           outputFormat: 'stream-json',
@@ -3056,6 +3246,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/opus', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         clientId: 'openai',
         defaultModel: 'gpt-5.4',
       }),
@@ -3099,6 +3293,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/opencode', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         nickname: '金渐层审计版',
       }),
     });
@@ -3145,6 +3343,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-review-bot', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         mentionPatterns: ['@runtime-review-bot', '@opus'],
       }),
     });
@@ -3206,6 +3408,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/opus', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         available: false,
       }),
     });
@@ -3222,6 +3428,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/opus', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         available: true,
       }),
     });
@@ -3270,6 +3480,11 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.ok(getRuntimeOverride('runtime-strategy-cat'));
 
     const deleteRes = await app.inject({
+      payload: {
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-strategy-cat', {
+          'x-cat-cafe-user': 'codex',
+        }),
+      },
       method: 'DELETE',
       url: '/api/cats/runtime-strategy-cat',
       headers: { 'x-cat-cafe-user': 'codex' },
@@ -3314,6 +3529,11 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(createRes.statusCode, 201);
 
     const deleteRes = await app.inject({
+      payload: {
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-temp', {
+          'x-cat-cafe-user': 'codex',
+        }),
+      },
       method: 'DELETE',
       url: '/api/cats/runtime-temp',
       headers: {
@@ -3348,6 +3568,11 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     );
 
     const deleteRes = await app.inject({
+      payload: {
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/agy-opus', {
+          'x-cat-cafe-user': 'codex',
+        }),
+      },
       method: 'DELETE',
       url: '/api/cats/agy-opus',
       headers: {
@@ -3409,7 +3634,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ variantLabel: 'GPT-5.6' }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-variant', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        variantLabel: 'GPT-5.6',
+      }),
     });
     assert.equal(patchRes.statusCode, 200);
     assert.equal(JSON.parse(patchRes.body).cat.variantLabel, 'GPT-5.6');
@@ -3421,7 +3652,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ variantLabel: null }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-variant', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        variantLabel: null,
+      }),
     });
     assert.equal(clearRes.statusCode, 200);
     assert.equal(JSON.parse(clearRes.body).cat.variantLabel, undefined);
@@ -3438,6 +3675,11 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     await app.register(catsRoutes);
 
     const deleteRes = await app.inject({
+      payload: {
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/opus', {
+          'x-cat-cafe-user': 'codex',
+        }),
+      },
       method: 'DELETE',
       url: '/api/cats/opus',
       headers: {
@@ -3583,7 +3825,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/acp-active-root',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
-      body: JSON.stringify({ displayName: 'Renamed ACP' }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/acp-active-root', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        displayName: 'Renamed ACP',
+      }),
     });
     assert.equal(
       patchRes.statusCode,
@@ -3743,7 +3991,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/acp-patchable',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
-      body: JSON.stringify({ acp: null }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/acp-patchable', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        acp: null,
+      }),
     });
     assert.equal(patchRes.statusCode, 400, 'removing acp from ACP member should be rejected');
 
@@ -3752,7 +4006,15 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/acp-patchable',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
-      body: JSON.stringify({ clientId: 'openai', accountRef: acpProfile.id, acp: null }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/acp-patchable', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        clientId: 'openai',
+        accountRef: acpProfile.id,
+        acp: null,
+      }),
     });
     assert.equal(switchRes.statusCode, 200, `client switch failed: ${switchRes.body}`);
     const switchBody = JSON.parse(switchRes.body);
@@ -3801,7 +4063,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/acp-patch-http',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
-      body: JSON.stringify({ acp: { command: 'http-acp', startupArgs: ['--serve'], transport: 'httpstream' } }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/acp-patch-http', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        acp: { command: 'http-acp', startupArgs: ['--serve'], transport: 'httpstream' },
+      }),
     });
     assert.equal(rejected.statusCode, 400, 'PATCH httpstream without opt-in should be rejected');
     assert.match(JSON.stringify(JSON.parse(rejected.body).details), /experimental/i);
@@ -3811,6 +4079,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       url: '/api/cats/acp-patch-http',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/acp-patch-http', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         acp: { command: 'http-acp', startupArgs: ['--serve'], transport: 'httpstream', experimental: true },
       }),
     });
@@ -3862,6 +4134,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       url: '/api/cats/acp-switch',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/acp-switch', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         clientId: 'openai',
         accountRef: acpProfile.id,
         defaultModel: 'test-model',
@@ -3971,7 +4247,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/acp-patch-noprovider',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
-      body: JSON.stringify({ provider: 'anthropic' }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/acp-patch-noprovider', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        provider: 'anthropic',
+      }),
     });
     assert.equal(patchRes.statusCode, 200, `patch failed: ${patchRes.body}`);
     const patched = JSON.parse(patchRes.body);
@@ -4026,7 +4308,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/acp-patch-whitelist',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
-      body: JSON.stringify({ acp: acpConfig }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/acp-patch-whitelist', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        acp: acpConfig,
+      }),
     });
     assert.equal(patchRes.statusCode, 200, `patch failed: ${patchRes.body}`);
     const patched = JSON.parse(patchRes.body);
@@ -4083,7 +4371,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/acp-preserve-mcp',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
-      body: JSON.stringify({ acp: commandOnlyAcpConfig }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/acp-preserve-mcp', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        acp: commandOnlyAcpConfig,
+      }),
     });
     assert.equal(patchRes.statusCode, 200, `patch failed: ${patchRes.body}`);
     const patched = JSON.parse(patchRes.body);
@@ -4143,7 +4437,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/acp-remove-whitelist',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
-      body: JSON.stringify({ acp: commandOnlyAcpConfig }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/acp-remove-whitelist', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        acp: commandOnlyAcpConfig,
+      }),
     });
     assert.equal(patchRes.statusCode, 200, `patch failed: ${patchRes.body}`);
     const patched = JSON.parse(patchRes.body);
@@ -4206,6 +4506,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       url: '/api/cats/migrate-oc-to-acp',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/migrate-oc-to-acp', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
         clientId: 'acp',
         accountRef: profile.id,
         acp: { command: 'opencode', startupArgs: ['acp', '--pure'] },
@@ -4301,7 +4605,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/transition-cat',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
-      body: JSON.stringify({ cli: null }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/transition-cat', {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        }),
+        cli: null,
+      }),
     });
     assert.equal(patchRes.statusCode, 200, `PATCH cli:null failed: ${patchRes.body}`);
     const patched = JSON.parse(patchRes.body);
@@ -4321,13 +4631,18 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const { catsRoutes } = await import('../dist/routes/cats.js');
     const app = Fastify();
     await app.register(catsRoutes);
+    // Read current versions and complete read-time catalog migration before the write-side-effect snapshot.
+    await app.inject({ method: 'GET', url: '/api/cats' });
     const before = readFileSync(catalogPath, 'utf8');
     for (const id of ['gpt-pro', 'gpt-dot']) {
       const response = await app.inject({
         method: 'PATCH',
         url: `/api/cats/${id}`,
         headers: { 'x-cat-cafe-user': 'codex' },
-        payload: { agentProvider: 'plugin:official.acp-clients/dsh' },
+        payload: {
+          expectedRevision: await readMemberRequestRevision(app, `/api/cats/${id}`, { 'x-cat-cafe-user': 'codex' }),
+          agentProvider: 'plugin:official.acp-clients/dsh',
+        },
       });
       assert.equal(response.statusCode, 409, response.body);
       assert.equal(response.json().code, 'BUILTIN_CLOUD_IDENTITY_PROTECTED');
@@ -4337,7 +4652,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/gpt-pro',
       headers: { 'x-cat-cafe-user': 'codex' },
-      payload: { agentProvider: null },
+      payload: {
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/gpt-pro', { 'x-cat-cafe-user': 'codex' }),
+        agentProvider: null,
+      },
     });
     assert.equal(unchanged.statusCode, 200, unchanged.body);
     await app.close();
@@ -4352,12 +4670,14 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     await app.register(catsRoutes);
     const headers = { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' };
 
+    await app.inject({ method: 'GET', url: '/api/cats', headers });
     const before = readFileSync(catalogPath, 'utf-8');
     const rejected = await app.inject({
       method: 'PATCH',
       url: '/api/cats/gpt-pro',
       headers,
       body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/gpt-pro', headers),
         provider: null,
         mcpSupport: false,
         cli: { command: 'codex', outputFormat: 'json' },
@@ -4375,7 +4695,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/gpt-pro',
       headers,
-      body: JSON.stringify({ nickname: '砚砚 Pro' }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/gpt-pro', headers),
+        nickname: '砚砚 Pro',
+      }),
     });
     assert.equal(profileEdit.statusCode, 200, profileEdit.body);
     const edited = JSON.parse(profileEdit.body).cat;
@@ -4405,6 +4728,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     });
 
     const deleteResult = await app.inject({
+      payload: { expectedRevision: await readMemberRequestRevision(app, '/api/cats/gpt-pro', headers) },
       method: 'DELETE',
       url: '/api/cats/gpt-pro',
       headers,
@@ -4423,13 +4747,17 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     await app.register(catsRoutes);
     const headers = { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' };
 
+    await app.inject({ method: 'GET', url: '/api/cats', headers });
     for (const unsafePatch of [{ breedId: 'maine-coon' }, { mentionPatterns: ['@yanyan-pro'] }]) {
       const before = readFileSync(catalogPath, 'utf-8');
       const rejected = await app.inject({
         method: 'PATCH',
         url: '/api/cats/gpt-pro',
         headers,
-        body: JSON.stringify(unsafePatch),
+        body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/gpt-pro', headers),
+          ...unsafePatch,
+        }),
       });
       assert.equal(rejected.statusCode, 409, rejected.body);
       assert.equal(JSON.parse(rejected.body).code, 'BUILTIN_CLOUD_IDENTITY_PROTECTED');
@@ -4450,7 +4778,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/gpt-pro',
       headers,
-      body: JSON.stringify({ mentionPatterns: ['@gpt-pro', '@yanyan-pro'] }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/gpt-pro', headers),
+        mentionPatterns: ['@gpt-pro', '@yanyan-pro'],
+      }),
     });
     assert.equal(addAlias.statusCode, 200, addAlias.body);
     assert.deepEqual(JSON.parse(addAlias.body).cat.mentionPatterns, ['@gpt-pro', '@yanyan-pro']);
@@ -4533,7 +4864,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         method: 'PATCH',
         url: '/api/cats/local-codex',
         headers,
-        body: JSON.stringify({ mentionPatterns: [reservedPattern] }),
+        body: JSON.stringify({
+          expectedRevision: await readMemberRequestRevision(app, '/api/cats/local-codex', headers),
+          mentionPatterns: [reservedPattern],
+        }),
       });
       assert.equal(reservedHandlePatch.statusCode, 409, reservedHandlePatch.body);
       assert.equal(JSON.parse(reservedHandlePatch.body).code, 'BUILTIN_CLOUD_HANDLE_RESERVED');
@@ -4595,7 +4929,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/gpt-pro',
       headers,
-      body: JSON.stringify({ nickname: '漂移中仍可改资料' }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/gpt-pro', headers),
+        nickname: '漂移中仍可改资料',
+      }),
     });
     assert.equal(profileOnlyEdit.statusCode, 200, profileOnlyEdit.body);
     assert.equal(JSON.parse(profileOnlyEdit.body).cat.nickname, '漂移中仍可改资料');
@@ -4605,7 +4942,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/gpt-pro',
       headers,
-      body: JSON.stringify({ provider: 'openai-chatgpt-pro' }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/gpt-pro', headers),
+        provider: 'openai-chatgpt-pro',
+      }),
     });
     assert.equal(partialRepair.statusCode, 409, partialRepair.body);
     assert.equal(JSON.parse(partialRepair.body).code, 'BUILTIN_CLOUD_IDENTITY_REPAIR_REQUIRED');
@@ -4614,7 +4954,11 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/gpt-pro',
       headers,
-      body: JSON.stringify({ restoreBuiltinCloudIdentity: true, nickname: '不要混写' }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/gpt-pro', headers),
+        restoreBuiltinCloudIdentity: true,
+        nickname: '不要混写',
+      }),
     });
     assert.equal(mixedRepair.statusCode, 400, mixedRepair.body);
     assert.equal(JSON.parse(mixedRepair.body).code, 'BUILTIN_CLOUD_IDENTITY_RESTORE_MIXED_PATCH');
@@ -4623,7 +4967,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       method: 'PATCH',
       url: '/api/cats/gpt-pro',
       headers,
-      body: JSON.stringify({ restoreBuiltinCloudIdentity: true }),
+      body: JSON.stringify({
+        expectedRevision: await readMemberRequestRevision(app, '/api/cats/gpt-pro', headers),
+        restoreBuiltinCloudIdentity: true,
+      }),
     });
     assert.equal(repaired.statusCode, 200, repaired.body);
     const repairedCat = JSON.parse(repaired.body).cat;

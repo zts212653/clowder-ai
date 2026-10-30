@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
-const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
 
 describe('F255 production bootstrap wiring', () => {
   it('routes CAT_CAFE_DATA_DIR into the memory-owned data root', () => {
@@ -60,7 +60,7 @@ describe('F255 production bootstrap wiring', () => {
 
   it('populates CatRegistry before F255 restores persisted cat-life projections', () => {
     const catalogBootstrap = source.indexOf('const catConfig = bootstrapDefaultCatCatalog();');
-    const registryPopulation = source.indexOf('catRegistry.register(id, config);');
+    const registryPopulation = source.indexOf('registerCatalogSnapshot(toAllCatConfigs(catConfig), () =>');
     const autoDreamBootstrap = source.indexOf('await bootstrapAutoDream({');
 
     assert.notEqual(catalogBootstrap, -1, 'production startup must bootstrap the cat catalog');

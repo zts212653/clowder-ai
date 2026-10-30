@@ -65,10 +65,11 @@ import {
   getConfigSessionStrategy,
   getDefaultCatId,
   isCatAvailable,
+  loadResolvedCatConfig,
   toAllCatConfigs,
 } from './config/cat-config-loader.js';
 import { getCatModel } from './config/cat-models.js';
-import { reconcileCatRegistry } from './config/cat-registry-reconciliation.js';
+import { reconcileCatRegistry, registerCatalogSnapshot } from './config/cat-registry-reconciliation.js';
 import { resolveCatRuntimeAccount } from './config/cat-runtime-account.js';
 import { configEventBus } from './config/config-event-bus.js';
 import {
@@ -1834,10 +1835,9 @@ async function main(): Promise<void> {
   // so registry population must precede auto-dream bootstrap as well as AgentRouter construction.
   try {
     const catConfig = bootstrapDefaultCatCatalog();
-    const allConfigs = toAllCatConfigs(catConfig);
-    for (const [id, config] of Object.entries(allConfigs)) {
-      catRegistry.register(id, config);
-    }
+    registerCatalogSnapshot(toAllCatConfigs(catConfig), () =>
+      loadResolvedCatConfig(undefined, { persistMigrations: false }),
+    );
     app.log.info(`[api] CatRegistry initialized: ${catRegistry.getAllIds().join(', ')}`);
   } catch (err) {
     app.log.error(`[api] Failed to load cat catalog — .cat-cafe/cat-catalog.json is required: ${String(err)}`);
@@ -2142,6 +2142,7 @@ async function main(): Promise<void> {
                       config,
                       effectiveModel: getCatModel(id),
                       acpConfig,
+                      resolveCurrentAcpConfig: () => getAcpConfig(id, projectRoot),
                       poolRegistry: acpPoolRegistry,
                       log: app.log,
                       onUnavailable: (reason) => agentRegistry.markUnavailable(id, reason),
@@ -5360,7 +5361,17 @@ async function main(): Promise<void> {
   const { registerConciergeDesktopRoutes } = await import('./routes/concierge-desktop.js');
   registerConciergeDesktopRoutes(app, { ownerUserId: privateUserId, desktop: pluginRuntime.ownerDesktop });
   const { registerPluginRuntimeShutdown } = await import('./routes/plugin-runtime-shutdown.js');
-  registerPluginRuntimeShutdown(app, pluginRuntime);
+  const initialPluginController = new AbortController();
+  let initialPluginInstallation = Promise.resolve();
+  registerPluginRuntimeShutdown(app, pluginRuntime, async () => {
+    initialPluginController.abort();
+    const results = await Promise.allSettled([
+      pluginRuntime.supervisor.stopAll('api_shutdown'),
+      initialPluginInstallation,
+    ]);
+    const failures = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
+    if (failures.length) throw new AggregateError(failures, 'Initial plugin shutdown failed');
+  });
   const { OFFICIAL_BUNDLED_MANIFESTS } = await import('./domains/plugin/official-catalog.js');
   const { createHostOfficialPluginCatalog } = await import('./domains/plugin/manager/host-official-catalog.js');
   const { GitMarketplaceRepository } = await import(
@@ -5471,26 +5482,26 @@ async function main(): Promise<void> {
     deploymentId: sharedMcpDeploymentId(`http://127.0.0.1:${PORT}`),
   });
   const { prepareHostInitialPlugins } = await import('./domains/plugin/manager/initial-plugin-installation.js');
-  let initialPlugins: Awaited<ReturnType<typeof prepareHostInitialPlugins>> | undefined;
-  try {
-    initialPlugins = await prepareHostInitialPlugins({
-      runtime: pluginRuntime,
-      managerRuntime: pluginManagerRuntime,
-      catalog: pluginManagerCatalog,
-      onFailure: (pluginId, error) => app.log.warn({ pluginId, err: error }, '[api] Initial plugin setup pending'),
-    });
-  } catch (error) {
-    // Offline discovery must not prevent the Host from opening. The durable journal retries
-    // unfinished entries on restart; completed entries (including user uninstalls) stay completed.
-    app.log.warn({ err: error }, '[api] Initial plugin installation deferred until next startup');
-  }
-  // Released once app.listen resolves. A resumed desktop window's bridge calls
-  // app.inject; before Fastify has booted that breaks the remaining app.register
-  // calls (AVV_ERR_ROOT_PLG_BOOTED). Other plugins resume immediately.
+  // Discovery/downloads are optional startup work. Like desktop window
+  // recovery, they must wait for listening rather than hold HTTP readiness.
   let releaseHostListening = () => {};
   const hostListening = new Promise<void>((resolve) => {
     releaseHostListening = resolve;
   });
+  initialPluginInstallation = prepareHostInitialPlugins({
+    hostListening,
+    signal: initialPluginController.signal,
+    runtime: pluginRuntime,
+    managerRuntime: pluginManagerRuntime,
+    catalog: pluginManagerCatalog,
+    onFailure: (pluginId, error) => app.log.warn({ pluginId, err: error }, '[api] Initial plugin setup pending'),
+  })
+    .then((prepared) => prepared.activate())
+    .catch((error: unknown) => {
+      if (initialPluginController.signal.aborted) return;
+      // The existing journal retries interrupted installation on restart.
+      app.log.warn({ err: error }, '[api] Initial plugin installation deferred until next startup');
+    });
   const { pluginManagerUploadRoutes, registerPluginManagerRoutes } = await import('./routes/plugin-manager-routes.js');
   const { registerPluginMarketplaceRoutes } = await import('./routes/plugin-marketplace-routes.js');
   const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
@@ -7524,7 +7535,6 @@ async function main(): Promise<void> {
           logger: app.log,
         });
         releaseHostListening();
-        await initialPlugins?.activate();
         return listening;
       },
       recover: async () => {

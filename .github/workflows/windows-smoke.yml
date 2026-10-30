@@ -311,11 +311,15 @@ jobs:
         env:
           CAT_CAFE_INSTALLED_LAYOUT_ROOT: ${{ runner.temp }}\clowder-install
         run: node --test packages/api/test/f296-installed-layout.test.js
+      - name: Locate isolated frozen-startup logs
+        if: always()
+        shell: pwsh
+        run: Add-Content $env:GITHUB_ENV "STARTUP_PROFILE_TEMP=$([System.IO.Path]::GetTempPath())"
       - name: Retain isolated frozen-startup failure logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: windows-frozen-startup-logs-${{ github.sha }}
-          path: ${{ runner.temp }}/.startup-profile-*/build.log
+          path: ${{ env.STARTUP_PROFILE_TEMP }}/clowder-startup-profile-*/build.log
           include-hidden-files: true
           if-no-files-found: warn

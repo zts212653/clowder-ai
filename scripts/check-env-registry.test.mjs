@@ -47,6 +47,7 @@ const ALLOWLIST = new Map([
   ],
   ['PROGRAMFILES', 'Windows OS variable (ImageExporter.ts Chrome detection)'],
   ['PATHEXT', 'Windows OS variable (capability-orchestrator.ts executable extension lookup)'],
+  ['ComSpec', 'Windows OS-provided command shell path used by the ACP frozen spawn plan; not an app setting'],
   ['ProgramData', 'Windows OS-provided machine data root used for the ACP bootstrap fallback; not an app setting'],
   ['ALLUSERSPROFILE', 'Windows OS-provided alias of ProgramData used when ProgramData is unset'],
   ['NODE_ENV', 'Node.js standard'],

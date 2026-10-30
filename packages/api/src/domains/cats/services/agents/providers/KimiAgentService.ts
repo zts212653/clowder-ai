@@ -62,7 +62,7 @@ import {
   lookupKimiL0Fingerprint,
   recordKimiL0Fingerprint,
 } from './kimi-l0-session-fingerprint.js';
-import { type KimiMcpLease, prepareKimiMcpConfig } from './kimi-mcp-config.js';
+import { captureKimiMcpConfig, type KimiMcpLease, prepareKimiMcpConfig } from './kimi-mcp-config.js';
 import { ensureKimiSecretHooks } from './kimi-secret-hooks.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
 
@@ -82,9 +82,10 @@ export function resolveKimiEffortLevel(
   catId: string,
   effectiveModel: string | null | undefined,
   override: CliEffortPreset | null | undefined,
+  preferences?: AgentServiceOptions['executionPreferences'],
 ): string | null {
   if (!getCliEffortOptionsForProvider('kimi', effectiveModel)) return null;
-  const inherited = getCatEffort(catId, undefined, 'kimi', effectiveModel);
+  const inherited = preferences?.effort ?? getCatEffort(catId, undefined, 'kimi', effectiveModel);
   return resolveCliEffortOverride('kimi', effectiveModel, inherited, override).effective;
 }
 
@@ -122,6 +123,17 @@ export class KimiAgentService implements AgentService {
     return isKimiNativeL0ChannelAvailable();
   }
 
+  async captureInvocationOptions(input: Parameters<NonNullable<AgentService['captureInvocationOptions']>>[0]) {
+    return {
+      frozenKimiMcpConfig: await captureKimiMcpConfig({
+        callbackEnv: { CAT_CAFE_CAT_ID: this.catId, ...input.accountEnv },
+        workingDirectory: input.workingDirectory,
+        mcpServerPath: this.mcpServerPath,
+        mcpSupport: input.mcpSupport,
+      }),
+    };
+  }
+
   freshnessCarrierCapability(): AgentFreshnessCarrierCapability {
     return {
       provider: 'kimi',
@@ -150,11 +162,18 @@ export class KimiAgentService implements AgentService {
     // account's overrides. Identity and MCP callback authorization stay scoped
     // to callbackEnv; only path/model readers use this merged environment.
     const runtime = resolveKimiCliRuntime();
-    const toolEnv = { ...options?.callbackEnv, ...options?.accountEnv };
+    const toolEnv = {
+      ...options?.callbackEnv,
+      ...options?.accountEnv,
+      ...(options?.frozenKimiMcpConfig ? { KIMI_CODE_HOME: options.frozenKimiMcpConfig.nativeDirectory } : {}),
+    };
     const runtimePaths = resolveKimiRuntimePaths(toolEnv);
-    const requestedModel = options?.callbackEnv?.CAT_CAFE_KIMI_MODEL_OVERRIDE ?? this.model;
+    const requestedModel =
+      options?.callbackEnv?.CAT_CAFE_KIMI_MODEL_OVERRIDE ?? options?.executionPreferences?.model ?? this.model;
     // Empty native selection means omit --model and let the CLI resolve its own config.
-    const followsNativeConfig = catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool';
+    const followsNativeConfig = options?.executionPreferences
+      ? options.executionPreferences.configurationSource === 'native_tool'
+      : catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool';
     const effectiveModel =
       requestedModel && !followsNativeConfig
         ? resolveKimiModelAlias(requestedModel, toolEnv, runtimePaths)
@@ -168,7 +187,12 @@ export class KimiAgentService implements AgentService {
     const observedModel =
       followsNativeConfig && !effectiveModel ? readKimiConfiguredModel(toolEnv, runtimePaths) : undefined;
     const identityModel = effectiveModel || observedModel || '';
-    const effortLevel = resolveKimiEffortLevel(this.catId as string, identityModel, options?.reasoningEffortOverride);
+    const effortLevel = resolveKimiEffortLevel(
+      this.catId as string,
+      identityModel,
+      options?.reasoningEffortOverride,
+      options?.executionPreferences,
+    );
     const metadata: MessageMetadata = { provider: 'kimi', model: identityModel };
     const imagePaths = await extractTrustedImagePaths(
       options?.contentBlocks,
@@ -217,6 +241,8 @@ export class KimiAgentService implements AgentService {
     let rejectedResumeSessionId: string | undefined;
     try {
       const l0 = await this.l0CompilerFn({
+        frozenInput: options?.frozenL0Input,
+        requireFrozenInput: true,
         catId: this.catId as string,
         userId: options?.callbackEnv?.CAT_CAFE_USER_ID,
       });
@@ -328,9 +354,10 @@ export class KimiAgentService implements AgentService {
 
     let mcpLease: KimiMcpLease | undefined;
     try {
-      await ensureKimiSecretHooks({ ...(options?.callbackEnv ?? {}), ...(options?.accountEnv ?? {}) });
+      await ensureKimiSecretHooks(toolEnv);
       mcpLease = await prepareKimiMcpConfig({
-        callbackEnv: { ...(options?.callbackEnv ?? {}), ...(options?.accountEnv ?? {}) },
+        callbackEnv: toolEnv,
+        frozenKimiMcpConfig: options?.frozenKimiMcpConfig,
         workingDirectory: options?.workingDirectory,
         mcpServerPath: this.mcpServerPath,
       });

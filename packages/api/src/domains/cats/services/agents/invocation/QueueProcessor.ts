@@ -304,6 +304,7 @@ interface QueueExecutionResult {
    * be retried at once: each waits for its retry time while the rest of the thread keeps draining.
    */
   primarySettlementIncomplete?: boolean;
+  providerTeardownUnconfirmed?: true;
 }
 
 type ProcessingSlotReservation = PrestartRetirementReservation;
@@ -3788,6 +3789,7 @@ export class QueueProcessor {
     ).then(
       (result) => {
         reportAdmission?.(false);
+        if (result.providerTeardownUnconfirmed) return;
         if (!this.releaseProcessingSlot(slotKey, reservation)) {
           this.deps.log.info(
             { threadId: entry.threadId, catId, entryId: entry.id, invocationId: result.invocationId },
@@ -4446,6 +4448,7 @@ export class QueueProcessor {
     let lifecycleTransferStarted = false;
     let lifecycleReceiverPersisted = false;
     let lifecycleAdmissionUnknown = false;
+    const unconfirmedProviderCats = new Set<string>();
     let lifecycleQueueTargetsRetired = false;
     let lifecycleClaimRestorePromise: Promise<boolean> | undefined;
     // Freeze the controllers installed for this parent before the first await after
@@ -5812,9 +5815,25 @@ export class QueueProcessor {
             : {}),
         },
       )) {
-        if (controller.signal.aborted) {
-          break;
+        if (msg.providerTeardown === 'unconfirmed' && typeof msg.catId === 'string' && targetCats.includes(msg.catId)) {
+          unconfirmedProviderCats.add(msg.catId);
+          socketManager.broadcastAgentMessage(
+            {
+              ...msg,
+              ...(invocationId
+                ? stampVisibleTurn(invocationId, typeof msg.invocationId === 'string' ? msg.invocationId : undefined)
+                : {}),
+              ...(lifecycleResponseMessageIdByCat.get(msg.catId)
+                ? { messageId: lifecycleResponseMessageIdByCat.get(msg.catId) }
+                : {}),
+            },
+            threadId,
+          );
+          continue;
         }
+        // The router owns provider teardown. Drain its terminal/control facts
+        // after batch cancellation while suppressing late visible output.
+        if (controller.signal.aborted && msg.type !== 'done') continue;
         const awakened = readOrdinaryInvocationCreated(msg);
         if (awakened && messageIds.length > 0) {
           await this.markPromptMessagesAwakened({
@@ -5999,9 +6018,7 @@ export class QueueProcessor {
             });
           }
         }
-        if (controller.signal.aborted) {
-          break;
-        }
+        if (controller.signal.aborted && msg.type !== 'done') continue;
 
         // F194 Phase Z9 (砚砚 R1 P1-2): unified visible turn stamp via helper.
         const msgInvocationId = (msg as { invocationId?: string }).invocationId;
@@ -6041,6 +6058,12 @@ export class QueueProcessor {
         }
       }
 
+      if (unconfirmedProviderCats.size > 0) {
+        const result = executionResult('failed');
+        result.primarySettlementIncomplete = true;
+        result.providerTeardownUnconfirmed = true;
+        return result;
+      }
       // 8. Check abort before marking succeeded (F122B B6 P1: abort→succeeded bug fix)
       // F-parallel-cancel: aggregate against this parent's captured controllers.
       // Current tracker slots may already belong to a replacement and are allocator
@@ -6392,209 +6415,213 @@ export class QueueProcessor {
     } finally {
       await liveCall?.stop();
       if (heartbeatInterval !== undefined) clearInterval(heartbeatInterval);
-      if (!replayClaimLost && invocationId && typeof invocationRecordStore.get === 'function') {
-        try {
-          await ensureTerminalStatus(invocationId, {
-            invocationRecordStore: invocationRecordStore as unknown as EnsureTerminalDeps['invocationRecordStore'],
-            chainCompletion: this.routeChainTracker,
-            log,
-          });
-        } catch (terminalErr) {
-          log.warn({ invocationId, err: terminalErr, feature: 'F194' }, '[QueueProcessor] terminal backstop failed');
-        }
-      }
-      if (invocationId) this.routeChainTracker.release(invocationId);
-
-      // Response terminalization also settles every linked input ref in the
-      // store CAS. Publish those exact same-id snapshots before retiring the
-      // ActiveRun so clients observe terminal truth without an F5 refresh.
-      for (const lifecycleMessageId of [...lifecycleInputMessageIds, ...lifecycleResponseMessageIds]) {
-        try {
-          const lifecycleMessage = await messageStore.getById(lifecycleMessageId);
-          if (lifecycleMessage?.lifecycle) {
-            await this.settleTrackedLifecycleResponseInputs(lifecycleMessage, lifecycleInputMessageIds);
-            this.emitLifecycleMessageUpdated(userId, lifecycleMessage);
+      if (unconfirmedProviderCats.size === 0) {
+        if (!replayClaimLost && invocationId && typeof invocationRecordStore.get === 'function') {
+          try {
+            await ensureTerminalStatus(invocationId, {
+              invocationRecordStore: invocationRecordStore as unknown as EnsureTerminalDeps['invocationRecordStore'],
+              chainCompletion: this.routeChainTracker,
+              log,
+            });
+          } catch (terminalErr) {
+            log.warn({ invocationId, err: terminalErr, feature: 'F194' }, '[QueueProcessor] terminal backstop failed');
           }
-          await this.releaseSettledResponseTurn(lifecycleMessage, log);
-        } catch (err) {
-          log.warn(
-            { err, threadId, lifecycleMessageId },
-            '[QueueProcessor] failed to publish terminal lifecycle message snapshot',
+        }
+        if (invocationId) this.routeChainTracker.release(invocationId);
+
+        // Response terminalization also settles every linked input ref in the
+        // store CAS. Publish those exact same-id snapshots before retiring the
+        // ActiveRun so clients observe terminal truth without an F5 refresh.
+        for (const lifecycleMessageId of [...lifecycleInputMessageIds, ...lifecycleResponseMessageIds]) {
+          try {
+            const lifecycleMessage = await messageStore.getById(lifecycleMessageId);
+            if (lifecycleMessage?.lifecycle) {
+              await this.settleTrackedLifecycleResponseInputs(lifecycleMessage, lifecycleInputMessageIds);
+              this.emitLifecycleMessageUpdated(userId, lifecycleMessage);
+            }
+            await this.releaseSettledResponseTurn(lifecycleMessage, log);
+          } catch (err) {
+            log.warn(
+              { err, threadId, lifecycleMessageId },
+              '[QueueProcessor] failed to publish terminal lifecycle message snapshot',
+            );
+          }
+        }
+
+        // Retire only the tracker projection owned by this queue execution. A pre-start
+        // reservation can be superseded before this path gets a controller; blind
+        // completeAll(..., undefined) would then delete the external replacement.
+        if (controller) {
+          invocationTracker.completeAll(threadId, targetCats, controller);
+        } else if (invocationId) {
+          for (const catId of targetCats) {
+            invocationTracker.completeByExecutionId?.(threadId, catId, invocationId);
+          }
+        }
+        if (!processingReservationReplaced && !prestartClaimRestored) {
+          try {
+            const preReceiverUserCancel =
+              lifecycleTransferStarted && !lifecycleReceiverPersisted && finalStatus === 'canceled_by_user';
+            if (lifecycleAdmissionUnknown) {
+              // The original short claim fences an uncertain durable commit until canonical recovery.
+              if (returnedExecutionResult) returnedExecutionResult.primarySettlementIncomplete = true;
+            } else if (lifecycleTransferStarted && !lifecycleReceiverPersisted && !preReceiverUserCancel) {
+              if (!(await queue.restoreClaimedEntries(threadId, [entry.id, ...batchedEntryIds]))) {
+                throw new Error('pre-receiver Queue claim restoration did not converge');
+              }
+              // The body remains pending by design. Do not immediately hot-loop
+              // the same failed pre-receiver transfer from onInvocationComplete.
+              if (returnedExecutionResult) returnedExecutionResult.primarySettlementIncomplete = true;
+            } else if (lifecycleReceiverPersisted && !lifecycleQueueTargetsRetired) {
+              if (
+                !(await queue.reconcileClaimedLifecycleTargets(threadId, [entry.id, ...batchedEntryIds], messageStore))
+              ) {
+                throw new Error('post-receiver Queue target reconciliation did not converge');
+              }
+              // Accepted siblings are retired; only a source still queued without
+              // its receiver needs the existing failed-handoff backoff.
+              if (returnedExecutionResult) {
+                returnedExecutionResult.primarySettlementIncomplete = [entry.id, ...batchedEntryIds].some(
+                  (id) => queue.getEntrySnapshotAcrossUsers(threadId, id)?.status === 'queued',
+                );
+              }
+            } else {
+              await this.settleAttemptQueueEntry(entry, finalStatus);
+            }
+          } catch (err) {
+            log.error(
+              { err, threadId, queueEntryId: entry.id, finalStatus },
+              '[QueueProcessor] Queue attempt settlement failed closed; durable nonterminal row needs recovery',
+            );
+            if (returnedExecutionResult) returnedExecutionResult.primarySettlementIncomplete = true;
+          }
+        } else if (processingReservationReplaced) {
+          log.info(
+            { threadId, queueEntryId: entry.id, invocationId },
+            '[QueueProcessor] skipped stale Queue settlement after durable retirement barrier replaced the attempt',
+          );
+        } else {
+          if (returnedExecutionResult) returnedExecutionResult.primarySettlementIncomplete = true;
+          log.info(
+            { threadId, queueEntryId: entry.id, invocationId },
+            '[QueueProcessor] kept the exact Queue entry pending after pre-start admission was refused',
           );
         }
-      }
-
-      // Retire only the tracker projection owned by this queue execution. A pre-start
-      // reservation can be superseded before this path gets a controller; blind
-      // completeAll(..., undefined) would then delete the external replacement.
-      if (controller) {
-        invocationTracker.completeAll(threadId, targetCats, controller);
-      } else if (invocationId) {
-        for (const catId of targetCats) {
-          invocationTracker.completeByExecutionId?.(threadId, catId, invocationId);
+        // F175 batch members settle through the same per-entry decision as the primary.
+        const restorePreReceiverBatch =
+          lifecycleTransferStarted && !lifecycleQueueTargetsRetired && finalStatus !== 'canceled_by_user';
+        for (const bid of processingReservationReplaced || prestartClaimRestored || restorePreReceiverBatch
+          ? []
+          : batchedEntryIds) {
+          const batched = queue.getEntrySnapshot(threadId, userId, bid);
+          if (!batched) continue;
+          try {
+            await this.settleAttemptQueueEntry(batched, finalStatus);
+          } catch (err) {
+            log.error(
+              { err, threadId, queueEntryId: bid, finalStatus },
+              '[QueueProcessor] batched Queue attempt settlement failed closed',
+            );
+          }
         }
-      }
-      if (!processingReservationReplaced && !prestartClaimRestored) {
-        try {
-          const preReceiverUserCancel =
-            lifecycleTransferStarted && !lifecycleReceiverPersisted && finalStatus === 'canceled_by_user';
-          if (lifecycleAdmissionUnknown) {
-            // The original short claim fences an uncertain durable commit until canonical recovery.
-            if (returnedExecutionResult) returnedExecutionResult.primarySettlementIncomplete = true;
-          } else if (lifecycleTransferStarted && !lifecycleReceiverPersisted && !preReceiverUserCancel) {
-            if (!(await queue.restoreClaimedEntries(threadId, [entry.id, ...batchedEntryIds]))) {
-              throw new Error('pre-receiver Queue claim restoration did not converge');
+        const producedCapsules = [...continuationCapsules.values()];
+        for (const continuationCapsule of producedCapsules) {
+          if (finalStatus === 'canceled_by_user') {
+            log.info(
+              { threadId, catId: continuationCapsule.catId },
+              '[QueueProcessor] F224: user-canceled invocation — storing continuation without auto-enqueue',
+            );
+            continue;
+          }
+          if (!(await this.shouldEnqueueContinuation(continuationCapsule, userId, finalStatus))) {
+            log.info(
+              { threadId, catId: continuationCapsule.catId },
+              '[QueueProcessor] #836: reborn session — skipping continuation enqueue',
+            );
+            continue;
+          }
+          await this.enqueueContinuation({
+            threadId,
+            userId,
+            ownerAuthProvenance: entry.execution.ownerAuthProvenance,
+            ...(entry.execution.readOnlyToolPolicy ? { toolExecutionPolicy: entry.execution.readOnlyToolPolicy } : {}),
+            catId: continuationCapsule.catId,
+            capsule: continuationCapsule,
+          });
+        }
+        if (this.sessionContinuationCoordinator) {
+          try {
+            await this.sessionContinuationCoordinator.commitInvocationOutcome({
+              finalStatus,
+              threadId,
+              catId: primaryCat,
+              userId,
+              consumedContinuation,
+              producedCapsules,
+            });
+          } catch (err) {
+            log.warn({ threadId, targetCats, err }, '[QueueProcessor] F224: commitInvocationOutcome failed');
+          }
+        }
+        await emitQueueUpdated(socketManager, userId, threadId, queue.list(threadId, userId), 'completed');
+        let completionHookStatus = finalStatus;
+        let completionHookResponse = responseText;
+        if (entry.execution.actionSuccessorFence && !actionFencePreflightRejected && !replayClaimLost) {
+          if (actionFenceAggregateSucceeded) {
+            const successfulHolderCatIds = new Set(terminalDispositions.getSuccessfulCatIds());
+            const nonSuccessfulHolderCatIds = targetCats.filter((catId) => !successfulHolderCatIds.has(catId));
+            const canceledHolderCatIds = nonSuccessfulHolderCatIds.filter(isAdmittedTargetCanceled);
+            const canceledHolderCatIdSet = new Set(canceledHolderCatIds);
+            const failedHolderCatIds = nonSuccessfulHolderCatIds.filter((catId) => !canceledHolderCatIdSet.has(catId));
+            if (canceledHolderCatIds.length > 0) {
+              await finalizeActionFenceOutcome('canceled', false, canceledHolderCatIds);
             }
-            // The body remains pending by design. Do not immediately hot-loop
-            // the same failed pre-receiver transfer from onInvocationComplete.
-            if (returnedExecutionResult) returnedExecutionResult.primarySettlementIncomplete = true;
-          } else if (lifecycleReceiverPersisted && !lifecycleQueueTargetsRetired) {
-            if (
-              !(await queue.reconcileClaimedLifecycleTargets(threadId, [entry.id, ...batchedEntryIds], messageStore))
-            ) {
-              throw new Error('post-receiver Queue target reconciliation did not converge');
-            }
-            // Accepted siblings are retired; only a source still queued without
-            // its receiver needs the existing failed-handoff backoff.
-            if (returnedExecutionResult) {
-              returnedExecutionResult.primarySettlementIncomplete = [entry.id, ...batchedEntryIds].some(
-                (id) => queue.getEntrySnapshotAcrossUsers(threadId, id)?.status === 'queued',
-              );
+            if (failedHolderCatIds.length > 0) {
+              await finalizeActionFenceOutcome('failed', false, failedHolderCatIds);
             }
           } else {
-            await this.settleAttemptQueueEntry(entry, finalStatus);
-          }
-        } catch (err) {
-          log.error(
-            { err, threadId, queueEntryId: entry.id, finalStatus },
-            '[QueueProcessor] Queue attempt settlement failed closed; durable nonterminal row needs recovery',
-          );
-          if (returnedExecutionResult) returnedExecutionResult.primarySettlementIncomplete = true;
-        }
-      } else if (processingReservationReplaced) {
-        log.info(
-          { threadId, queueEntryId: entry.id, invocationId },
-          '[QueueProcessor] skipped stale Queue settlement after durable retirement barrier replaced the attempt',
-        );
-      } else {
-        if (returnedExecutionResult) returnedExecutionResult.primarySettlementIncomplete = true;
-        log.info(
-          { threadId, queueEntryId: entry.id, invocationId },
-          '[QueueProcessor] kept the exact Queue entry pending after pre-start admission was refused',
-        );
-      }
-      // F175 batch members settle through the same per-entry decision as the primary.
-      const restorePreReceiverBatch =
-        lifecycleTransferStarted && !lifecycleQueueTargetsRetired && finalStatus !== 'canceled_by_user';
-      for (const bid of processingReservationReplaced || prestartClaimRestored || restorePreReceiverBatch
-        ? []
-        : batchedEntryIds) {
-        const batched = queue.getEntrySnapshot(threadId, userId, bid);
-        if (!batched) continue;
-        try {
-          await this.settleAttemptQueueEntry(batched, finalStatus);
-        } catch (err) {
-          log.error(
-            { err, threadId, queueEntryId: bid, finalStatus },
-            '[QueueProcessor] batched Queue attempt settlement failed closed',
-          );
-        }
-      }
-      const producedCapsules = [...continuationCapsules.values()];
-      for (const continuationCapsule of producedCapsules) {
-        if (finalStatus === 'canceled_by_user') {
-          log.info(
-            { threadId, catId: continuationCapsule.catId },
-            '[QueueProcessor] F224: user-canceled invocation — storing continuation without auto-enqueue',
-          );
-          continue;
-        }
-        if (!(await this.shouldEnqueueContinuation(continuationCapsule, userId, finalStatus))) {
-          log.info(
-            { threadId, catId: continuationCapsule.catId },
-            '[QueueProcessor] #836: reborn session — skipping continuation enqueue',
-          );
-          continue;
-        }
-        await this.enqueueContinuation({
-          threadId,
-          userId,
-          ownerAuthProvenance: entry.execution.ownerAuthProvenance,
-          ...(entry.execution.readOnlyToolPolicy ? { toolExecutionPolicy: entry.execution.readOnlyToolPolicy } : {}),
-          catId: continuationCapsule.catId,
-          capsule: continuationCapsule,
-        });
-      }
-      if (this.sessionContinuationCoordinator) {
-        try {
-          await this.sessionContinuationCoordinator.commitInvocationOutcome({
-            finalStatus,
-            threadId,
-            catId: primaryCat,
-            userId,
-            consumedContinuation,
-            producedCapsules,
-          });
-        } catch (err) {
-          log.warn({ threadId, targetCats, err }, '[QueueProcessor] F224: commitInvocationOutcome failed');
-        }
-      }
-      await emitQueueUpdated(socketManager, userId, threadId, queue.list(threadId, userId), 'completed');
-      let completionHookStatus = finalStatus;
-      let completionHookResponse = responseText;
-      if (entry.execution.actionSuccessorFence && !actionFencePreflightRejected && !replayClaimLost) {
-        if (actionFenceAggregateSucceeded) {
-          const successfulHolderCatIds = new Set(terminalDispositions.getSuccessfulCatIds());
-          const nonSuccessfulHolderCatIds = targetCats.filter((catId) => !successfulHolderCatIds.has(catId));
-          const canceledHolderCatIds = nonSuccessfulHolderCatIds.filter(isAdmittedTargetCanceled);
-          const canceledHolderCatIdSet = new Set(canceledHolderCatIds);
-          const failedHolderCatIds = nonSuccessfulHolderCatIds.filter((catId) => !canceledHolderCatIdSet.has(catId));
-          if (canceledHolderCatIds.length > 0) {
-            await finalizeActionFenceOutcome('canceled', false, canceledHolderCatIds);
-          }
-          if (failedHolderCatIds.length > 0) {
-            await finalizeActionFenceOutcome('failed', false, failedHolderCatIds);
-          }
-        } else {
-          const uncommittedTargetCats = targetCats.filter((catId) => !actionFenceCommittedHolderCatIds.has(catId));
-          const holderOutcome = finalStatus === 'failed' ? 'failed' : 'canceled';
-          if (uncommittedTargetCats.length > 0) {
-            await finalizeActionFenceOutcome(holderOutcome, Boolean(responseText), uncommittedTargetCats);
-          }
-        }
-      }
-      if (entry.execution.actionSuccessorFence && actionFencePreflightRejected) {
-        completionHookStatus = 'canceled';
-        completionHookResponse = '';
-      }
-      // F122B B6: Fire completion hook (one-shot) and clean up
-      const registeredCompleteHooks = this.entryCompleteHooks.get(entry.id) ?? [];
-      const completeHooks = registeredCompleteHooks.filter(
-        (registration) => !registration.targetCatId || targetCats.includes(registration.targetCatId),
-      );
-      if (completeHooks.length > 0) {
-        const remainingHooks = registeredCompleteHooks.filter((registration) => !completeHooks.includes(registration));
-        if (remainingHooks.length > 0) this.entryCompleteHooks.set(entry.id, remainingHooks);
-        else this.entryCompleteHooks.delete(entry.id);
-        if (!replayClaimLost) {
-          for (const registration of completeHooks) {
-            const targetStatus = registration.targetCatId
-              ? (terminalDispositions.getTerminalStatus(registration.targetCatId) ??
-                (completionHookStatus === 'succeeded' ? 'failed' : completionHookStatus))
-              : completionHookStatus;
-            const targetResponse = registration.targetCatId
-              ? (hookResponseTextByTarget.get(registration.targetCatId) ?? '')
-              : completionHookResponse;
-            try {
-              registration.hook(entry.id, targetStatus, targetResponse);
-            } catch {
-              /* best-effort: hook errors must not break queue chain */
+            const uncommittedTargetCats = targetCats.filter((catId) => !actionFenceCommittedHolderCatIds.has(catId));
+            const holderOutcome = finalStatus === 'failed' ? 'failed' : 'canceled';
+            if (uncommittedTargetCats.length > 0) {
+              await finalizeActionFenceOutcome(holderOutcome, Boolean(responseText), uncommittedTargetCats);
             }
           }
         }
+        if (entry.execution.actionSuccessorFence && actionFencePreflightRejected) {
+          completionHookStatus = 'canceled';
+          completionHookResponse = '';
+        }
+        // F122B B6: Fire completion hook (one-shot) and clean up
+        const registeredCompleteHooks = this.entryCompleteHooks.get(entry.id) ?? [];
+        const completeHooks = registeredCompleteHooks.filter(
+          (registration) => !registration.targetCatId || targetCats.includes(registration.targetCatId),
+        );
+        if (completeHooks.length > 0) {
+          const remainingHooks = registeredCompleteHooks.filter(
+            (registration) => !completeHooks.includes(registration),
+          );
+          if (remainingHooks.length > 0) this.entryCompleteHooks.set(entry.id, remainingHooks);
+          else this.entryCompleteHooks.delete(entry.id);
+          if (!replayClaimLost) {
+            for (const registration of completeHooks) {
+              const targetStatus = registration.targetCatId
+                ? (terminalDispositions.getTerminalStatus(registration.targetCatId) ??
+                  (completionHookStatus === 'succeeded' ? 'failed' : completionHookStatus))
+                : completionHookStatus;
+              const targetResponse = registration.targetCatId
+                ? (hookResponseTextByTarget.get(registration.targetCatId) ?? '')
+                : completionHookResponse;
+              try {
+                registration.hook(entry.id, targetStatus, targetResponse);
+              } catch {
+                /* best-effort: hook errors must not break queue chain */
+              }
+            }
+          }
+        }
+        // Chain auto-dequeue is handled by tryExecuteNext* (calls onInvocationComplete
+        // AFTER releasing processingThreads mutex to avoid self-blocking).
       }
-      // Chain auto-dequeue is handled by tryExecuteNext* (calls onInvocationComplete
-      // AFTER releasing processingThreads mutex to avoid self-blocking).
     }
   }
 

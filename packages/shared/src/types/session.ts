@@ -53,6 +53,22 @@ export interface NativeSessionBinding {
   readonly agentName: string;
 }
 
+/** Selected Host launch boundary, NOT native adoption evidence or a complete compatibility key. */
+export interface HostExecutionBoundary {
+  readonly v: 1;
+  readonly clientId: string;
+  readonly carrier: string;
+  readonly implementationKey: string;
+  /** Process-local generation: a restart conservatively requires a new segment. */
+  readonly implementationGeneration: string;
+  readonly accountRef: string | null;
+  /** Adapter-provided native state root; absent when the adapter has no verified fact. */
+  readonly accountStateRoot?: string;
+  readonly accountOwnerRoot?: string;
+  readonly workspaceRoot: string;
+  readonly projectRoot: string;
+}
+
 export interface SessionRecord {
   readonly id: string;
   /** A one-shot scoped execution is traceable history, never a home resume candidate. */
@@ -74,6 +90,8 @@ export interface SessionRecord {
   /** CLI-reported session ID (from session_init event) */
   cliSessionId?: string;
   nativeSessionBinding?: NativeSessionBinding;
+  /** Write-once Host facts recorded before provider entry; no credentials or instruction body. */
+  hostExecutionBoundary?: HostExecutionBoundary;
   /** User-requested adoption of an existing native history; persisted across reloads. */
   externalImport?: {
     cliSessionId: string;

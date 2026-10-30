@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { apiFetch } from '@/utils/api-client';
+import { MemberIdentityPreview } from './MemberIdentityPreview';
 import { SettingsText } from './primitives';
 
 interface CompiledPreviewData {
@@ -25,6 +26,7 @@ interface CompiledPreviewData {
   staticLength: number;
   staticLines: number;
   hasPackBlocks?: boolean;
+  identityResolution?: Parameters<typeof MemberIdentityPreview>[0]['value'];
 }
 
 type Scenario = 'first-turn' | 'subsequent' | 'after-handoff';
@@ -243,6 +245,7 @@ export function CompiledPreviewModal({ catId, catName, onClose }: CompiledPrevie
               {error}
             </SettingsText>
           )}
+          {data?.identityResolution && <MemberIdentityPreview value={data.identityResolution} />}
           {content &&
             (activeTab === 'system' && content.system === null ? (
               <SettingsText as="p" variant="sm" tone="muted" className="py-8 text-center">

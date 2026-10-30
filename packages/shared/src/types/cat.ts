@@ -89,6 +89,22 @@ export interface CatConfig {
   readonly contextWindow?: number;
   readonly roleDescription: string;
   readonly personality: string;
+  /** Read-time provenance from the same catalog/template snapshot; never persisted as member input. */
+  readonly identitySources?: Readonly<
+    Partial<
+      Record<
+        | 'name'
+        | 'displayName'
+        | 'nickname'
+        | 'roleDescription'
+        | 'personality'
+        | 'teamStrengths'
+        | 'caution'
+        | 'restrictions',
+        'variant' | 'breed' | 'default_variant' | 'template'
+      >
+    >
+  >;
   /** F32-b: Which breed this cat belongs to (for frontend grouping) */
   readonly breedId?: string;
   /** F231: Stable relationship persona key. Explicitly independent from routing/model/breed grouping. */

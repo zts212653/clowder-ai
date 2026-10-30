@@ -88,11 +88,11 @@ test('adapter rejects deferred, busy and absent sessions; cancellation aborts ex
   assert.equal((await provider.cancelTurn('host', { invocationId: 'other' })).code, 'turn_ended');
   assert.deepEqual(await provider.cancelTurn('host', { invocationId: 'inv' }), { ok: true });
   assert.equal(signal.aborted, true);
-  assert.equal((await run).at(-1).outcome, 'cancelled');
   hold.resolve();
+  assert.equal((await run).at(-1).outcome, 'cancelled');
   assert.equal((await provider.cancelTurn('host', { invocationId: 'inv' })).code, 'turn_ended');
 });
-test('adapter supplies done on EOF; errors/outcomes/metadata/status map as agreed', async () => {
+test('adapter reports missing terminal on EOF; errors/outcomes/metadata/status map as agreed', async () => {
   const { bridge } = harness({
     async *invoke() {
       yield message('session_init', { sessionId: 'native' });
@@ -122,7 +122,7 @@ test('adapter supplies done on EOF; errors/outcomes/metadata/status map as agree
   assert.equal(messages[3].toolResultStatus, 'error');
   assert.equal(messages[4].content, 'capacity retry warning');
   assert.equal(messages[5].errorCode, 'provider_error');
-  assert.equal(messages.at(-1).errorCode, undefined);
+  assert.equal(messages.at(-1).errorCode, 'provider_stream_ended_without_done');
 });
 test('release reports errors; native id absence strips stale Host sessionId', async () => {
   let received;

@@ -13,8 +13,8 @@ import type {
   CrossThreadCoordination,
   WorldContextEnvelope,
 } from '@cat-cafe/shared';
-import { catRegistry, collectRosterFamilyLabels, formatRosterLabel } from '@cat-cafe/shared';
-import { getDossierL0Pronouns, getDossierRosterSummary, hasDossierEntry } from '@cat-cafe/shared/dossier';
+import { catRegistry, collectRosterFamilyLabels, formatRosterLabel, resolveMemberIdentity } from '@cat-cafe/shared';
+import { getDossierL0Pronouns, loadDossierProfiles } from '@cat-cafe/shared/dossier';
 import { isCatAvailable } from '../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../config/cat-models.js';
 import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
@@ -387,23 +387,21 @@ export function buildTeammateRoster(currentCatId: CatId, projectRoot = findMonor
     }
     resolvedModel = compactRosterModel(resolvedModel);
     const mentionCell = resolvedModel ? `${mention} · ${resolvedModel}` : mention;
-    // F208 KD-12: dossier l0RosterSummary → legacy teamStrengths → roleDescription
-    const dossierSummary = getDossierRosterSummary(id, projectRoot);
-    // KD-9: warn only for tracked cats (have dossier entry) missing l0RosterSummary.
-    // Runtime/custom cats with no dossier entry silently use config fallback.
-    if (!dossierSummary && hasDossierEntry(id, projectRoot)) {
+    const dossier = loadDossierProfiles(projectRoot).get(id);
+    if (dossier && !dossier.l0RosterSummary) {
       console.warn(
         `[F208 KD-9] cat "${id}" has dossier entry but missing l0RosterSummary — falling back to config.teamStrengths`,
       );
     }
-    const strengths = compactRosterCell(dossierSummary ?? config.teamStrengths ?? config.roleDescription, 52);
+    const identity = resolveMemberIdentity(config, dossier);
+    const strengths = compactRosterCell(identity.rosterDescription, 52);
     // F167 Phase E (KD-20): surface hard restrictions alongside caution — data-driven
     // replacement for the retired L3 role-gate. Sender sees e.g. "禁止写代码" so they
     // self-regulate which cat to @ for which task; no harness-side regex.
     const restrictionsNote =
       config.restrictions && config.restrictions.length > 0 ? `**硬限制**：${config.restrictions.join('、')}` : null;
     const cautionCell = compactRosterCell(
-      [config.caution ?? null, restrictionsNote].filter(Boolean).join('；') || '—',
+      [identity.routingNote ?? null, restrictionsNote].filter(Boolean).join('；') || '—',
       72,
     );
     rows.push(`| ${rosterLabel} | ${mentionCell} | ${strengths} | ${cautionCell} |`);

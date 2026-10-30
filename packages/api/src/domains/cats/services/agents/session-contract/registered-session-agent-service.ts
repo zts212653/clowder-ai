@@ -1,5 +1,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { AgentMessage, AgentService, AgentServiceOptions, ProviderContinuityPreflight } from '../../types.js';
+import { agentServiceGeneration } from '../registry/AgentRegistry.js';
+import { ExecutionAdmissionConflict } from '../registry/AgentServiceUnavailableError.js';
 import { AgentSessionBridgeService } from './AgentSessionBridgeService.js';
 import type {
   HostSessionImplementation,
@@ -18,11 +20,13 @@ interface RegisteredInput {
 }
 interface PreparedBinding {
   registration?: symbol;
+  generation?: string;
   source?: HostSessionImplementation;
   service?: AgentService;
   provider?: AgentSessionProvider;
 }
 export class RegisteredSessionAgentService implements AgentService {
+  readonly cancellationMode = 'drain' as const;
   private cached?: { provider: AgentSessionProvider; bridge: AgentSessionBridgeService; lifetime: AbortController };
   constructor(private readonly input: RegisteredInput) {}
   get implementationKey(): string {
@@ -38,6 +42,10 @@ export class RegisteredSessionAgentService implements AgentService {
   get injectsL0Natively(): AgentService['injectsL0Natively'] {
     const service = this.hostService();
     return service?.injectsL0Natively?.bind(service);
+  }
+  get captureInvocationOptions(): AgentService['captureInvocationOptions'] {
+    const service = this.hostService();
+    return service?.captureInvocationOptions?.bind(service);
   }
   get supportsToolExecutionPolicy(): AgentService['supportsToolExecutionPolicy'] {
     const service = this.hostService();
@@ -61,21 +69,50 @@ export class RegisteredSessionAgentService implements AgentService {
   }
   private preparedBinding(): PreparedBinding {
     const registration = this.input.registry.registrationToken(this.input.ref);
+    const generation = this.input.registry.registrationGeneration(this.input.ref);
     const source = this.input.registry.resolve(this.input.ref, { catId: this.input.catId });
     const service = source?.hostService?.();
     return {
       registration,
+      generation,
       source,
       service,
       provider: service && source?.bindHostService ? source.bindHostService(service) : source,
     };
   }
+  private bindingFailure(binding: PreparedBinding) {
+    const source = binding.source;
+    if (!this.input.registry.has(this.input.ref) || !source) return 'session_implementation_unavailable';
+    if (
+      this.input.registry.registrationToken(this.input.ref) !== binding.registration ||
+      source.hostService?.() !== binding.service ||
+      (binding.service && source.bindHostService?.(binding.service) !== binding.provider)
+    )
+      return 'session_host_generation_changed';
+  }
+  private snapshot(binding: PreparedBinding) {
+    const failure = this.bindingFailure(binding);
+    if (failure || !binding.generation)
+      throw new ExecutionAdmissionConflict(failure ?? 'session_implementation_unavailable');
+    const implementation = binding.service?.implementationSnapshot?.();
+    return Object.freeze({
+      key: this.implementationKey,
+      generation: `${binding.generation}:${implementation?.generation ?? (binding.service ? agentServiceGeneration(binding.service) : 'provider')}`,
+      ...(implementation?.clientId ? { clientId: implementation.clientId } : {}),
+    });
+  }
+  implementationSnapshot() {
+    return this.snapshot(this.preparedBinding());
+  }
   forInvocation(): AgentService {
     const binding = this.preparedBinding();
     const { service } = binding;
     const view: AgentService = {
+      cancellationMode: this.cancellationMode,
       forInvocation: () => view,
+      implementationSnapshot: () => this.snapshot(binding),
       injectsL0Natively: service?.injectsL0Natively?.bind(service),
+      captureInvocationOptions: service?.captureInvocationOptions?.bind(service),
       supportsToolExecutionPolicy: service?.supportsToolExecutionPolicy?.bind(service),
       freshnessCarrierCapability: service?.freshnessCarrierCapability?.bind(service),
       contextCapability: service?.contextCapability?.bind(service),
@@ -110,16 +147,11 @@ export class RegisteredSessionAgentService implements AgentService {
     const provider = binding?.provider;
     const metadata = { ...(this.input.metadata ?? { provider: 'session-contract', model: 'unknown' }) };
     let code: string | undefined;
-    if (!this.input.registry.has(this.input.ref) || !source) {
-      await this.releaseAll('implementation_unavailable');
-      code = 'session_implementation_unavailable';
-    } else if (
-      this.input.registry.registrationToken(this.input.ref) !== binding.registration ||
-      source.hostService?.() !== binding.service ||
-      (binding.service && source.bindHostService?.(binding.service) !== provider)
-    )
-      code = 'session_host_generation_changed';
-    else if (source.prepareHostService && !binding?.service) code = 'session_host_service_unavailable';
+    const failure = this.bindingFailure(binding);
+    if (failure) {
+      if (failure === 'session_implementation_unavailable') await this.releaseAll('implementation_unavailable');
+      code = failure;
+    } else if (source?.prepareHostService && !binding?.service) code = 'session_host_service_unavailable';
     else if (!provider) code = 'session_host_service_unavailable';
     else if (
       options?.toolExecutionPolicy &&

@@ -562,8 +562,8 @@ export interface AgentRouterOptions {
  * Router that parses @ mentions and routes to appropriate agent services
  */
 export class AgentRouter {
-  private services: Record<string, AgentService>;
-  private unavailableServices: ReadonlyMap<string, AgentRegistrationFailure> = new Map();
+  private readonly services: Record<string, AgentService>;
+  private readonly unavailableServices = new Map<string, AgentRegistrationFailure>();
   private registry: InvocationRegistry;
   private messageStore: IMessageStore;
   private messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
@@ -655,8 +655,10 @@ export class AgentRouter {
   private speechMentionRe: RegExp;
 
   private rebuildRuntimeCaches(agentRegistry: AgentRegistry): void {
-    this.unavailableServices = agentRegistry.getAllUnavailableEntries();
-    this.services = {};
+    // Retained route deps see the next member's current service; pinned invocations keep their own reference.
+    this.unavailableServices.clear();
+    agentRegistry.getAllUnavailableEntries().forEach((reason, catId) => this.unavailableServices.set(catId, reason));
+    Object.keys(this.services).forEach((catId) => delete this.services[catId]);
     for (const [catId, service] of agentRegistry.getAllEntries()) {
       this.services[catId] = service;
     }

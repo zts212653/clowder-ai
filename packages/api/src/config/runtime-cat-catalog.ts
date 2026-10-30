@@ -62,7 +62,7 @@ export async function withRuntimeCatMutationLock<T>(projectRoot: string, operati
       }
       if (lockFd === undefined) throw new Error('Timed out waiting for runtime cat catalog lock');
     });
-    return saveSpan('catalog.write', operation);
+    return await saveSpan('catalog.write', operation);
   } finally {
     if (lockFd !== undefined) {
       closeSync(lockFd);

@@ -52,6 +52,7 @@ function dispatchResult(
 
 /** Internal / unstable. No provider-specific policy or Host invocation machinery crosses this boundary. */
 export class AgentSessionBridgeService implements Service.AgentService {
+  readonly cancellationMode = 'drain' as const;
   private readonly sessions = new Map<string, Promise<Contract.OpenSessionResult>>();
   private readonly active = new Set<string>();
   constructor(private readonly input: BridgeInput) {}
@@ -182,13 +183,8 @@ export class AgentSessionBridgeService implements Service.AgentService {
     signal: AbortSignal,
     session: Extract<Contract.OpenSessionResult, { ok: true }>,
   ): AsyncIterable<AgentMessage> {
-    let wake = () => {};
-    const aborted = new Promise<undefined>((resolve) => {
-      wake = () => resolve(undefined);
-    });
     const cancel = () => {
       this.close(live);
-      wake();
       void this.input.provider
         .cancelTurn(live.sessionId, live.turn, 'abort')
         .catch(() => this.input.log?.warn('Session turn cancellation failed'));
@@ -197,19 +193,31 @@ export class AgentSessionBridgeService implements Service.AgentService {
     signal.addEventListener('abort', cancel, { once: true });
     if (signal.aborted) cancel();
     try {
-      while (!signal.aborted) {
-        const next = await Promise.race([iterator.next(), aborted]);
-        if (!next || next.done || signal.aborted) return;
+      while (true) {
+        const next = await iterator.next();
+        if (next.done) return;
+        const event = next.value;
+        const nativeTurnId = event.scope === 'turn' ? event.turn.nativeTurnId : event.nativeTurnRef;
+        if (
+          event.sessionId !== live.sessionId ||
+          (event.scope === 'turn' && event.turn.invocationId !== live.turn.invocationId) ||
+          (nativeTurnId && live.turn.nativeTurnId && nativeTurnId !== live.turn.nativeTurnId)
+        ) {
+          this.input.log?.warn('Ignoring session event outside the active session or turn');
+          continue;
+        }
         await this.observe(next.value, live);
-        if (signal.aborted) return;
         if (next.value.type === 'native_bound')
           session.binding = { state: 'bound', nativeSessionId: next.value.nativeSessionId };
+        // Cancellation closes supplementary input immediately, but only provider
+        // terminal evidence may end this turn. Drain and suppress late output.
+        if (signal.aborted && next.value.type !== 'done') continue;
         for (const message of projectSessionEvent(next.value, { catId: this.input.catId, metadata })) yield message;
         if (next.value.type === 'done') return;
       }
     } finally {
       signal.removeEventListener('abort', cancel);
-      void iterator.return?.().catch(() => {});
+      await iterator.return?.();
     }
   }
   private message(type: AgentMessage['type'], metadata: MessageMetadata, extra: Partial<AgentMessage>): AgentMessage {
@@ -260,18 +268,23 @@ export class AgentSessionBridgeService implements Service.AgentService {
     };
     const signal = options?.signal ?? new AbortController().signal;
     let live: LiveTurn | undefined;
+    let startMayHaveAccepted = false;
     let terminal: AgentMessage | undefined;
     try {
       const prepared = await this.prepare(options, signal, prompt, metadata);
       live = prepared.live;
       const { host, session, invocation } = prepared;
+      startMayHaveAccepted = true;
       const started = await this.input.provider.startTurn(
         host.sessionId,
         { invocation, prompt, ...(this.input.passHostOptions ? { hostOptions: options } : {}) },
         signal,
       );
-      if (!started.ok) throw new SessionFailure(started.code, started.reason);
-      live.turn = started.turn;
+      if (!started.ok) {
+        startMayHaveAccepted = false;
+        throw new SessionFailure(started.code, started.reason);
+      }
+      live.turn = { ...started.turn, invocationId: live.turn.invocationId };
       if (!signal.aborted) this.register(live, metadata, options ?? {});
       for await (const message of this.consume(started.events, live, metadata, signal, session)) {
         if (message.type === 'done') {
@@ -282,7 +295,10 @@ export class AgentSessionBridgeService implements Service.AgentService {
       }
     } catch (error) {
       const failure = this.failure(error);
-      terminal = this.message('done', metadata, { errorCode: failure.code });
+      terminal = this.message('done', metadata, {
+        errorCode: failure.code,
+        ...(startMayHaveAccepted ? { providerTeardown: 'unconfirmed' as const } : {}),
+      });
       if (!signal.aborted) yield this.message('error', metadata, { errorCode: failure.code, error: failure.message });
     } finally {
       if (live) {
@@ -292,7 +308,7 @@ export class AgentSessionBridgeService implements Service.AgentService {
     }
     // A synthetic terminal uses the final session context; a provider terminal keeps its own usage fact.
     terminal ??= this.message('done', metadata, { errorCode: 'provider_stream_ended_without_done' });
-    if (signal.aborted) terminal.errorCode = 'cancelled';
+    if (signal.aborted && !terminal.errorCode) terminal.errorCode = 'cancelled';
     yield terminal;
   }
 }

@@ -5,6 +5,7 @@ import { createRefreshingAcpSessionProvider } from '../../src/domains/cats/servi
 const service = {
   async *invoke() {
     yield { type: 'text' as const, content: 'recovered', catId: 'codex', timestamp: 1 };
+    yield { type: 'done' as const, catId: 'codex', timestamp: 2 };
   },
 };
 const input = {

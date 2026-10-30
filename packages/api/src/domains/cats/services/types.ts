@@ -7,6 +7,7 @@ import type {
   A2ARoutingProjection,
   CatId,
   CliEffortPreset,
+  ClientId,
   CodexSpeedValue,
   CrossThreadCoordination,
   FreshnessCarrierCapability,
@@ -292,6 +293,8 @@ export type AgentMessageType =
  * A message yielded from an agent during invocation
  */
 export interface AgentMessage {
+  /** Negative teardown fact: Host completion cannot attest that this provider stopped. */
+  providerTeardown?: 'unconfirmed';
   /** The type of this message */
   type: AgentMessageType;
   /** F306: provider-neutral user-meaning event; native wire names stop in the adapter. */
@@ -1051,6 +1054,18 @@ export interface LocalSessionReadInput {
 }
 
 export interface AgentServiceOptions {
+  /** Host-selected external Claude program; never fall back to the SDK's bundled engine. */
+  claudeSdkRuntime?: import('./agents/providers/claude-sdk-runtime.js').ClaudeSdkRuntime;
+  /** Admission-owned MCP descriptors; callback credentials are materialized for the current turn. */
+  frozenAcpMcpServers?: import('./agents/providers/acp/types.js').AcpMcpServer[];
+  frozenNativeMcpConfig?: import('./agents/providers/provider-mcp-config.js').ProviderMcpConfigPlan;
+  frozenKimiMcpConfig?: import('./agents/providers/kimi-mcp-surface.js').KimiMcpConfigPlan;
+  frozenCodexMcpInput?: import('./agents/providers/codex-mcp-input.js').CodexMcpInputPlan;
+  codexLaunchPolicy?: import('../../../config/codex-cli.js').CodexLaunchPolicy;
+  /** Frozen requested preferences; actual adopted model/effort remain provider observations. */
+  executionPreferences?: import('./agents/providers/member-execution-preferences.js').MemberExecutionPreferences;
+  /** Admission-owned identity/rules; the L0 child never reloads mutable configuration. */
+  frozenL0Input?: import('@cat-cafe/shared/l0-input').FrozenL0Input;
   /** Host logical SessionRecord identity; sessionId remains the native resume id. */
   hostSessionId?: string;
   /** Binding restored from the canonical SessionRecord, including across API restarts. */
@@ -1233,6 +1248,30 @@ export interface ProviderRequestGenerationCommitV1 {
  * Interface that all agent services must implement
  */
 export interface AgentService {
+  /** The adapter handles AbortSignal and owns teardown; Host must drain it before terminalizing. */
+  readonly cancellationMode?: 'drain';
+  /** Host-owned implementation identity; a pinned registered view rejects a replaced generation. */
+  implementationSnapshot?(): Readonly<{ key: string; generation: string; clientId?: ClientId }>;
+  /** Read configuration before any provider lease. Returns owned descriptors, never starts a model turn. */
+  captureInvocationOptions?(input: {
+    signal?: AbortSignal;
+    workingDirectory?: string;
+    toolExecutionPolicy?: ToolExecutionPolicy;
+    accountEnv?: Record<string, string>;
+    /** Resolved runtime account identity, including implicit defaults; present undefined means native/unbound. */
+    accountRef?: string;
+    mcpSupport?: boolean;
+    liveCompanion?: AgentServiceOptions['liveCompanion'];
+  }): Promise<
+    Pick<
+      AgentServiceOptions,
+      | 'frozenAcpMcpServers'
+      | 'frozenNativeMcpConfig'
+      | 'frozenKimiMcpConfig'
+      | 'frozenCodexMcpInput'
+      | 'claudeSdkRuntime'
+    >
+  >;
   /** Pin one prepared carrier generation before Host policy, L0 and capacity admission. Idempotent on a pinned view. */
   forInvocation?(): AgentService;
   /** Release a pinned Host invocation even when policy/preflight exits before a provider iterator starts. Idempotent. */
@@ -1266,6 +1305,7 @@ export interface AgentService {
 
   /** Request provider-native compaction on an already bound, idle runtime. */
   requestNativeCompaction?(input: {
+    readonly frozenL0Input?: import('@cat-cafe/shared/l0-input').FrozenL0Input;
     readonly nativeSessionBinding?: import('@cat-cafe/shared').NativeSessionBinding;
     readonly userId?: string;
     /** Preserve a proven boundary even if the later control transport fails. */
@@ -1384,6 +1424,8 @@ export interface AgentService {
  * Same as `compileL0ViaSubprocess` but injectable for testing.
  */
 export type L0CompilerFn = (options: {
+  frozenInput?: import('@cat-cafe/shared/l0-input').FrozenL0Input;
+  requireFrozenInput?: boolean;
   catId: string;
   userId?: string;
   projection?: 'owner' | 'public';

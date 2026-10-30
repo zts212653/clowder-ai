@@ -23,6 +23,7 @@ import { resolveWindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.j
 import { buildUnixSupervisedSpawnPlan } from '../../../../../../utils/cli-supervised-process.js';
 import { PI_BRIDGE_NAME, PI_SESSION_BINDING_ERROR } from '../pi/pi-bridge-contract.js';
 import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
+import { resolveAcpPermissionDecision } from './acp-permission-policy.js';
 import { type AcpPromptInput, toAcpPromptContent } from './acp-prompt-content.js';
 import { AcpSessionBindingError, ActiveSessionCache } from './active-session-cache.js';
 import { shutdownAcpChild } from './lifecycle/acp-child-shutdown.js';
@@ -33,7 +34,6 @@ import type {
   AcpMcpServer,
   AcpNewSessionResult,
   AcpNotification,
-  AcpPermissionRequest,
   AcpPromptCapabilities,
   AcpPromptResult,
   AcpResponse,
@@ -93,18 +93,21 @@ export interface AcpClientConfig {
   verifyBootstrapCwd?: (command: string, args: string[], env: NodeJS.ProcessEnv) => void;
   /** Extra env vars to pass to the process */
   env?: Record<string, string>;
+  /** Final private environment captured by the existing factory before admission. */
+  preparedEnv?: Readonly<Record<string, string>>;
+  /** Existing factory's selected executable/argv/shell, before platform supervisor wrapping. */
+  preparedSpawn?: { readonly command: string; readonly args: readonly string[]; readonly shell?: string };
   /** Isolated subscription profiles must not inherit API keys or host credentials. */
   inheritParentEnv?: boolean;
   /** Official AGY 1.4 reports some errors as text + end_turn; exact provider stderr supplies failure provenance. */
   antigravityDiagnostics?: boolean;
   /** Inject spawn function for testing */
   spawnFn?: typeof nodeSpawn;
-  /** Custom permission request handler. Defaults to auto-approve (allow_once). */
+  /** Custom permission request handler. Missing handlers fail closed. */
   permissionHandler?: AcpPermissionHandler;
   /**
    * Default decision when no permissionHandler is set and the agent asks for
-   * permission. 'reject' (iCode fail-closed policy) selects a reject option
-   * instead of auto-approving flagged native effects. Defaults to 'allow'.
+   * permission. Defaults to 'reject'; 'allow' requires an explicit trusted policy.
    */
   defaultPermissionDecision?: 'allow' | 'reject';
 }
@@ -265,12 +268,18 @@ export class AcpClient {
     // On macOS GUI apps (Electron), resolve bare command names (e.g. 'gemini') to
     // full paths via resolveCliCommandOrBare, then inject the bin directory into
     // PATH so `#!/usr/bin/env node` shims can find the node interpreter.
-    let command = resolveCliCommandOrBare(this.config.command);
-    let args = [...this.config.args];
-    const childEnv = buildChildEnv(this.config.env, {
-      workingDirectory: this.config.cwd,
-      inheritParentEnv: this.config.inheritParentEnv,
-    });
+    const selectedSpawn = this.config.preparedSpawn ?? {
+      command: resolveCliCommandOrBare(this.config.command),
+      args: this.config.args,
+    };
+    let { command } = selectedSpawn;
+    let args = [...selectedSpawn.args];
+    const childEnv = this.config.preparedEnv
+      ? { ...this.config.preparedEnv }
+      : buildChildEnv(this.config.env, {
+          workingDirectory: this.config.cwd,
+          inheritParentEnv: this.config.inheritParentEnv,
+        });
     if (!IS_WINDOWS && isAbsolute(command)) {
       const binDir = dirname(command);
       childEnv.PATH = childEnv.PATH ? `${binDir}:${childEnv.PATH}` : binDir;
@@ -291,8 +300,9 @@ export class AcpClient {
       cwd: this.config.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: childEnv,
+      ...(this.config.preparedSpawn?.shell !== undefined ? { shell: this.config.preparedSpawn.shell } : {}),
     };
-    if (IS_WINDOWS && !this.config.spawnFn) {
+    if (IS_WINDOWS && !this.config.spawnFn && !this.config.preparedSpawn) {
       const spawnPlan = resolveWindowsSpawnPlan(command, args);
       log.debug(
         {
@@ -350,7 +360,7 @@ export class AcpClient {
 
     this.child.on('error', (err) => {
       log.error('ACP process error: %s', err.message);
-      this.exited = true;
+      this.closed = true;
       this.rejectAllPending(err);
     });
 
@@ -1006,7 +1016,7 @@ export class AcpClient {
 
     this.rl?.close();
     this.rejectAllPending(new Error('ACP client closed'));
-    if (this.child && !this.exited)
+    if (this.child?.pid !== undefined && !this.exited)
       await shutdownAcpChild(this.child, KILL_GRACE_MS, this.initResult?.agentInfo?.name === PI_BRIDGE_NAME);
   }
 
@@ -1136,12 +1146,12 @@ export class AcpClient {
       } else if (method && !hasId) {
         if (method === ACP_METHODS.requestPermission) {
           // Gemini CLI sends request_permission as notification (no id) when not in yolo mode.
-          // Best-effort auto-approve with synthetic id (Gemini may ignore it).
+          // Respond with the same permission policy and a synthetic id (Gemini may ignore it).
           // Also notify stream listeners so idle watchdog suppresses stall during permission wait.
           const permParams = msg.params as Record<string, unknown>;
           log.info(
             { method, sessionId: permParams.sessionId },
-            'ACP: permission notification (no id) — auto-approve + suppress stall',
+            'ACP: permission notification (no id) — apply policy and suppress stall',
           );
           this.handleAgentRequest({ ...msg, id: `synth-perm-${Date.now()}` } as unknown as AcpAgentRequest);
           // Inject synthetic event into stream so promptStream sets pendingTool=true
@@ -1272,38 +1282,8 @@ export class AcpClient {
           };
           this.child?.stdin?.write(JSON.stringify(errResponse) + '\n');
         }
-      } else if (this.config.defaultPermissionDecision === 'reject') {
-        // iCode fail-closed policy: never auto-approve. Select an explicit
-        // reject option; if the agent offers none, cancel rather than allow.
-        const params = req.params as unknown as AcpPermissionRequest;
-        const rejectOption =
-          params.options?.find((o) => o.kind === 'reject_once') ??
-          params.options?.find((o) => o.kind === 'reject_always') ??
-          params.options?.find((o) => o.optionId === 'reject');
-        if (rejectOption) {
-          respond({ optionId: rejectOption.optionId });
-        } else {
-          log.warn(
-            { method: req.method, id: req.id, sessionId: params.sessionId },
-            'ACP permission: reject policy but no reject option offered — cancelling',
-          );
-          const response = {
-            jsonrpc: '2.0' as const,
-            id: req.id,
-            result: { outcome: { outcome: 'cancelled' as const } },
-          };
-          this.child?.stdin?.write(JSON.stringify(response) + '\n');
-        }
       } else {
-        // Default: auto-approve (allow_once)
-        const params = req.params as unknown as AcpPermissionRequest;
-        // Prefer allow_always (session-wide) over allow_once to avoid repeated permission
-        // prompts for every MCP tool call. Kimi sends optionId "approve_for_session" for this.
-        const allowOption =
-          params.options?.find((o) => o.kind === 'allow_always') ??
-          params.options?.find((o) => o.kind === 'allow_once') ??
-          params.options?.[0];
-        respond({ optionId: allowOption?.optionId ?? 'allow_once' });
+        respond(resolveAcpPermissionDecision(req.params, this.config.defaultPermissionDecision));
       }
     } else if (req.method === ACP_METHODS.chrysRequestInput) {
       this.handleChrysRequestInput(req);

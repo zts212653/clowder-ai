@@ -82,8 +82,12 @@ export async function assertHostListenLifecycle(source, releaseName) {
   assert.deepEqual(success.calls, ['listen'], 'neither windows nor plugins may start before listening succeeds');
   success.listening.resolve('fixture-listening-address');
   await setImmediate();
-  assert.deepEqual(success.calls, ['listen', 'release', 'activate'], 'window release precedes initial activation');
-  assert.equal(settled, false, 'startup must await initial activation');
+  assert.deepEqual(
+    success.calls,
+    ['listen', 'release'],
+    'listening releases background work without inline activation',
+  );
+  assert.equal(settled, true, 'HTTP startup must not await optional initial plugin activation');
   success.activation.resolve();
   assert.equal(await result, 'fixture-listening-address');
 

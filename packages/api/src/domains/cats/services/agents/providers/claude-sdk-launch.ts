@@ -14,6 +14,7 @@ import {
 } from './ClaudeAgentService.js';
 import { composeManagedSettingsDocument } from './claude-compaction-launch-plan.js';
 import { resolveClaudeMcpConfig } from './claude-mcp-config.js';
+import { type ClaudeSdkRuntime, captureClaudeSdkRuntime, claudeSdkRuntimeOptions } from './claude-sdk-runtime.js';
 import { withClaudeSecretHooks } from './claude-secret-hook-settings.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from './image-cli-bridge.js';
 import { extractTrustedImagePaths } from './image-paths.js';
@@ -83,12 +84,15 @@ export async function prepareClaudeSdkLaunch(input: {
   mcpServerPath?: string;
   l0CompilerFn: typeof compileL0ViaSubprocess;
   abortController: AbortController;
+  runtime?: ClaudeSdkRuntime;
   options?: AgentServiceOptions;
 }): Promise<{ prompt: string; model: string; sdkOptions: Options }> {
   const { options, catId } = input;
   if (options?.signal?.aborted) throw options.signal.reason ?? new Error('Invocation cancelled');
   // Alternate spawn transports cannot silently be ignored by this carrier.
   if (options?.spawnCliOverride) throw new Error('claude_sdk_spawn_override_unsupported');
+  const runtime =
+    options?.claudeSdkRuntime ?? input.runtime ?? (await captureClaudeSdkRuntime('claude', options?.signal));
   const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
   const imagePaths = await extractTrustedImagePaths(
     options?.contentBlocks,
@@ -96,9 +100,16 @@ export async function prepareClaudeSdkLaunch(input: {
     options?.resolveTrustedImagePath,
   );
   const prompt = appendLocalImagePathHints(input.prompt, imagePaths);
-  const { effectiveModel, useEnvModelOverride } = resolveClaudeModelSelection(options?.callbackEnv, input.model);
-  const effort = effortValue(resolveClaudeEffortLevel(catId, effectiveModel, options?.reasoningEffortOverride));
+  const { effectiveModel, useEnvModelOverride } = resolveClaudeModelSelection(
+    options?.callbackEnv,
+    options?.executionPreferences?.model ?? input.model,
+  );
+  const effort = effortValue(
+    resolveClaudeEffortLevel(catId, effectiveModel, options?.reasoningEffortOverride, options?.executionPreferences),
+  );
   const l0 = await input.l0CompilerFn({
+    frozenInput: options?.frozenL0Input,
+    requireFrozenInput: true,
     catId,
     userId: options?.callbackEnv?.CAT_CAFE_USER_ID ?? options?.auditContext?.userId,
   });
@@ -109,6 +120,7 @@ export async function prepareClaudeSdkLaunch(input: {
   const mcpResolution =
     !readOnly && options?.callbackEnv && input.mcpServerPath
       ? await resolveClaudeMcpConfig({
+          frozenNativeMcpConfig: options?.frozenNativeMcpConfig,
           callbackEnv: options.callbackEnv,
           workingDirectory: options.workingDirectory,
           mcpServerPath: input.mcpServerPath,
@@ -176,8 +188,8 @@ export async function prepareClaudeSdkLaunch(input: {
     prompt,
     model: effectiveModel,
     sdkOptions: {
+      ...(await claudeSdkRuntimeOptions(runtime, env, options?.signal)),
       abortController: input.abortController,
-      env,
       ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
       ...(!useEnvModelOverride && effectiveModel ? { model: effectiveModel } : {}),
       effort,

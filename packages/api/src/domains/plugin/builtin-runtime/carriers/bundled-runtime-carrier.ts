@@ -368,7 +368,10 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
         !current ||
         current.lifecycleState !== 'installed' ||
         current.packageDigest !== authority.instance.packageDigest ||
-        current.lifecycleRevision !== authority.instance.lifecycleRevision ||
+        // A cancelled start may advance its failure revision while stop joins
+        // it. The observed stop grants nothing and preserves current metadata;
+        // package identity still fences out a replacement executable.
+        (runtimeState !== 'stopped' && current.lifecycleRevision !== authority.instance.lifecycleRevision) ||
         (runtimeState !== 'stopped' && current.activationState !== 'enabled')
       ) {
         throw new ExternalPluginRuntimeError(

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { createAcpServiceForConfig } from '../../dist/domains/cats/services/agents/providers/acp/AcpServiceFactory.js';
-import { skipAcpProfile } from '../../dist/domains/cats/services/agents/providers/acp/acp-registration-failure.js';
+import { skipAcpProfile } from '../../dist/domains/cats/services/agents/providers/acp/lifecycle/acp-registration-failure.js';
 import { AgentRegistry } from '../../dist/domains/cats/services/agents/registry/AgentRegistry.js';
 import { getService } from '../../dist/domains/cats/services/agents/routing/route-helpers.js';
 

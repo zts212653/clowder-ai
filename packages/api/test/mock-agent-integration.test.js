@@ -10,6 +10,9 @@
  */
 
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
 // Shared registry + helpers
@@ -277,23 +280,45 @@ describe('F32-a Mock Agent Integration', () => {
   // ── Capabilities route ──────────────────────────────────
 
   describe('/api/capabilities includes mock-cat', () => {
-    test('GET /api/capabilities returns board items with mock-cat in cats map', async () => {
+    test('GET /api/capabilities returns board items with mock-cat in cats map', async (t) => {
       const Fastify = (await import('fastify')).default;
       const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
       const app = Fastify();
+      const project = mkdtempSync(join(tmpdir(), 'mock-cat-capabilities-'));
+      mkdirSync(join(project, '.cat-cafe'));
+      writeFileSync(
+        join(project, '.cat-cafe/capabilities.json'),
+        JSON.stringify({
+          version: 1,
+          capabilities: [
+            {
+              id: 'fixture-mcp',
+              type: 'mcp',
+              source: 'cat-cafe',
+              enabled: true,
+              mcpServer: { command: 'node', args: [] },
+            },
+          ],
+        }),
+      );
+      t.after(async () => {
+        await app.close();
+        rmSync(project, { recursive: true, force: true });
+      });
       await app.register(capabilitiesRoutes);
 
       const res = await app.inject({
         method: 'GET',
-        url: '/api/capabilities',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(project)}`,
         headers: { 'x-cat-cafe-user': 'test-user' },
       });
-      assert.equal(res.statusCode, 200);
+      assert.equal(res.statusCode, 200, res.body);
       const body = JSON.parse(res.body);
       // F041 re-open: response is now { items, catFamilies, projectPath }
       assert.ok(Array.isArray(body.items), 'response.items should be an array');
       assert.ok(typeof body.projectPath === 'string', 'response.projectPath should be a string');
+      assert.ok(body.items.some((item) => item.type === 'mcp' && item.id === 'fixture-mcp'));
       // Each MCP item's cats map should include mock-cat with a boolean
       for (const item of body.items) {
         if (item.type === 'mcp') {
