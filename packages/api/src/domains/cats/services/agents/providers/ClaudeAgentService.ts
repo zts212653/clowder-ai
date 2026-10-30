@@ -45,6 +45,7 @@ import type {
   PreparedProviderRequestV1,
   ToolExecutionPolicy,
 } from '../../types.js';
+import { type FrozenRuntimeSelection, inheritedEffortFor } from '../invocation/runtime-selection.js';
 import type { RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
@@ -55,6 +56,7 @@ import { resolveClaudeMcpConfig } from './claude-mcp-config.js';
 import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
 import { withClaudeSecretHooks } from './claude-secret-hook-settings.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
+import type { FrozenL0Input } from './l0-frozen-input.js';
 import {
   createMcpSchemaDeliveryLaunchConfig,
   resolveMcpSchemaDeliveryDiscoverySurface,
@@ -131,9 +133,16 @@ export function resolveClaudeEffortLevel(
   catId: string,
   effectiveModel: string,
   override: CliEffortPreset | null | undefined,
+  /** Admission snapshot; absent only for direct (non-queue) callers. */
+  runtimeSelection?: FrozenRuntimeSelection,
 ): string {
-  const inherited = getCatEffort(catId, undefined, 'anthropic', effectiveModel);
-  if (!inherited && !override && catRegistry.tryGet(catId)?.config.configurationSource === 'native_tool') return '';
+  const inherited = runtimeSelection
+    ? inheritedEffortFor(runtimeSelection, 'anthropic')
+    : getCatEffort(catId, undefined, 'anthropic', effectiveModel);
+  const nativeTool = runtimeSelection
+    ? runtimeSelection.nativeTool
+    : catRegistry.tryGet(catId)?.config.configurationSource === 'native_tool';
+  if (!inherited && !override && nativeTool) return '';
   return resolveCliEffortOverride('anthropic', effectiveModel, inherited, override).effective;
 }
 
@@ -419,11 +428,16 @@ export class ClaudeAgentService implements AgentService {
     };
   }
 
-  private async compileL0ToTempFile(userId?: string): Promise<string> {
+  private async compileL0ToTempFile(userId?: string, frozenInput?: FrozenL0Input): Promise<string> {
     const l0Dir = mkdtempSync(join(tmpdir(), 'cat-cafe-l0-'));
     const l0Path = join(l0Dir, 'system-prompt-l0.md');
     try {
-      await this.l0CompilerFn({ catId: this.catId as string, userId, outPath: l0Path });
+      await this.l0CompilerFn({
+        catId: this.catId as string,
+        userId,
+        outPath: l0Path,
+        ...(frozenInput ? { frozenInput } : {}),
+      });
     } catch (err) {
       removeL0TempDir(l0Path);
       throw new Error(`L0 compile failed for ${this.catId as string}: ${(err as Error).message}`);
@@ -445,10 +459,11 @@ export class ClaudeAgentService implements AgentService {
 
     // F198 B-prime refactor: model selection delegates to shared helper so
     // ClaudeBgCarrierService reuses the same rules (single source of truth).
+    const selection = options?.runtimeSelection;
     const { effectiveModel, useEnvModelOverride } = resolveClaudeModelSelection(
       options?.callbackEnv,
-      catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool'
-        ? getCatModel(this.catId)
+      (selection ? selection.nativeTool : catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool')
+        ? (selection?.model ?? getCatModel(this.catId))
         : this.model,
     );
     const isApiKeyMode = options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'api_key';
@@ -471,6 +486,7 @@ export class ClaudeAgentService implements AgentService {
       this.catId as string,
       effectiveModel,
       options?.reasoningEffortOverride,
+      options?.runtimeSelection,
     );
 
     const args: string[] = [
@@ -543,7 +559,7 @@ export class ClaudeAgentService implements AgentService {
     let appendPromptPath: string | undefined;
     let preCompactSettingsPath: string | undefined;
     try {
-      l0Path = await this.compileL0ToTempFile(options?.callbackEnv?.CAT_CAFE_USER_ID);
+      l0Path = await this.compileL0ToTempFile(options?.callbackEnv?.CAT_CAFE_USER_ID, options?.frozenL0Input);
       args.push('--system-prompt-file', l0Path);
       // Route layer passes pack-only systemPrompt for native-L0 providers.
       // Keep it as an append layer, but never use it as the carrier's L0 source.

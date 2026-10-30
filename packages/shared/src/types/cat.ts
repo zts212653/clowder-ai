@@ -110,6 +110,12 @@ export interface CatConfig {
   readonly restrictions?: readonly string[];
   /** F127 Screen 3: editable strength tags */
   readonly strengths?: readonly string[];
+  /**
+   * Identity groups the owner has edited in the member editor. An edited group
+   * outranks the dossier's free-text projection for that group:
+   * 'role' = roleDescription/personality, 'roster' = teamStrengths/caution.
+   */
+  readonly configuredIdentity?: readonly ('role' | 'roster')[];
   /** F127 Screen 3: whether session chain is enabled for this member */
   readonly sessionChain?: boolean;
   /** F103/F190: Per-cat TTS voice configuration, including optional refAudio. */

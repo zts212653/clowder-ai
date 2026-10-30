@@ -135,6 +135,13 @@ describe('member Codex advanced configuration', () => {
       'cli.codexApprovalPolicy',
     ]);
     expect(configWrites.some((entry) => entry.body.key === 'codex.execution.authMode')).toBe(false);
+    // C17/S3: each client-global write names the value it was based on; the
+    // retry after a failed step still uses the read baseline, not the draft.
+    expect(configWrites.map((entry) => entry.body.expectedValue)).toEqual([
+      'workspace-write',
+      'on-request',
+      'on-request',
+    ]);
   });
   it('does not invent a writable global baseline when the read fails', async () => {
     rejectConfigRead = true;

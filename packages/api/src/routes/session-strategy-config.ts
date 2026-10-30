@@ -13,9 +13,9 @@ import type { FastifyPluginAsync } from 'fastify';
 import { sessionStrategySchema } from '../config/cat-config-loader.js';
 import { getSessionStrategyWithSource } from '../config/session-strategy.js';
 import {
-  deleteRuntimeOverride,
   getAllRuntimeOverrides,
-  setRuntimeOverride,
+  StrategyRevisionConflict,
+  updateRuntimeOverrideIfRevision,
 } from '../config/session-strategy-overrides.js';
 import { resolveSessionExecutionStatus } from '../domains/cats/services/agents/context-lifecycle-capability.js';
 import type { AgentContextCapability } from '../domains/cats/services/types.js';
@@ -36,6 +36,24 @@ const UNAVAILABLE_CONTEXT_CAPABILITY: AgentContextCapability = {
   observesCompression: false,
   reason: 'No concrete context capability is registered for this member',
 };
+
+/** The effective revision the GET returned, sent back as `If-Match`. */
+function readExpectedRevision(headers: Record<string, string | string[] | undefined>): string | undefined {
+  const raw = headers['if-match'];
+  const value = (Array.isArray(raw) ? raw[0] : raw)?.trim().replace(/^"(.*)"$/, '$1');
+  return value || undefined;
+}
+
+function missingRevisionError(catId: string): string {
+  return (
+    `Session strategy save for "${catId}" was rejected: the request has no If-Match revision, so it could ` +
+    'overwrite a newer edit. Reload the member settings and save again.'
+  );
+}
+
+function currentRevisionOf(catId: string): () => string {
+  return () => getSessionStrategyWithSource(catId).revision;
+}
 
 function executionStatusFor(capability: AgentContextCapability, strategy: SessionStrategyConfig['strategy']) {
   const hasWindowBinding = capability.reportsRuntimeWindow || capability.nativeWindowControl;
@@ -127,11 +145,26 @@ export const sessionStrategyConfigRoutes: FastifyPluginAsync<SessionStrategyRout
 
     const capability = opts.resolveContextCapability?.(catId) ?? UNAVAILABLE_CONTEXT_CAPABILITY;
 
+    // K3/S2: formal edits must name the revision they were based on.
+    const expectedRevision = readExpectedRevision(request.headers);
+    if (!expectedRevision) {
+      reply.status(428);
+      return { error: missingRevisionError(catId) };
+    }
     // Zod .optional() produces `T | undefined` for nested props; our type uses optional-only.
     // Shapes are equivalent at runtime after validation.
-    await saveSpan('strategy.persist', () =>
-      setRuntimeOverride(catId, override as unknown as Partial<SessionStrategyConfig>),
-    );
+    try {
+      await saveSpan('strategy.persist', () =>
+        updateRuntimeOverrideIfRevision(catId, expectedRevision, currentRevisionOf(catId), {
+          set: override as unknown as Partial<SessionStrategyConfig>,
+        }),
+      );
+    } catch (error) {
+      if (!(error instanceof StrategyRevisionConflict)) throw error;
+      request.log.warn({ operator, catId, expectedRevision }, 'session strategy override revision conflict');
+      reply.status(409);
+      return { error: error.message, currentRevision: error.currentRevision };
+    }
     request.log.info({ operator, catId, override }, 'session strategy override set');
 
     // Return the new effective config after applying the override
@@ -166,7 +199,21 @@ export const sessionStrategyConfigRoutes: FastifyPluginAsync<SessionStrategyRout
       return { error: `Unknown cat ID: "${catId}"` };
     }
 
-    const existed = await deleteRuntimeOverride(catId);
+    const expectedRevision = readExpectedRevision(request.headers);
+    if (!expectedRevision) {
+      reply.status(428);
+      return { error: missingRevisionError(catId) };
+    }
+    let existed: boolean;
+    try {
+      existed = (await updateRuntimeOverrideIfRevision(catId, expectedRevision, currentRevisionOf(catId), {
+        remove: true,
+      })) as boolean;
+    } catch (error) {
+      if (!(error instanceof StrategyRevisionConflict)) throw error;
+      reply.status(409);
+      return { error: error.message, currentRevision: error.currentRevision };
+    }
     request.log.info({ operator, catId, deleted: existed }, 'session strategy override delete');
     if (!existed) {
       reply.status(404);

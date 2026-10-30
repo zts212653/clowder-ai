@@ -111,6 +111,8 @@ export interface CatVariant {
    *  and to the cat itself via buildStaticIdentity. Data-driven replacement
    *  for the retired L3 role-gate hardcoded regex. */
   readonly restrictions?: readonly string[];
+  /** Owner-edited identity groups; see CatConfig.configuredIdentity. */
+  readonly configuredIdentity?: readonly ('role' | 'roster')[];
   /** F127: Extra CLI --config key=value pairs passed to the client at invocation time.
    *  Each entry is a raw config string, e.g. 'model_reasoning_effort="low"'. */
   readonly cliConfigArgs?: readonly string[];

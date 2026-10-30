@@ -79,8 +79,19 @@ describe('PATCH /api/config (F4 hot-reload)', () => {
   it('supports hot-updating codex sandbox/approval policy keys', async () => {
     const app = await setup();
 
-    await patchConfig({ key: 'cli.codexSandboxMode', value: 'workspace-write' });
-    await patchConfig({ key: 'cli.codexApprovalPolicy', value: 'never' });
+    const current = (await app.inject({ method: 'GET', url: '/api/config' })).json().config.cli;
+    const sandbox = await patchConfig({
+      key: 'cli.codexSandboxMode',
+      value: 'workspace-write',
+      expectedValue: current.codexSandboxMode,
+    });
+    assert.equal(sandbox.statusCode, 200);
+    const approval = await patchConfig({
+      key: 'cli.codexApprovalPolicy',
+      value: 'never',
+      expectedValue: current.codexApprovalPolicy,
+    });
+    assert.equal(approval.statusCode, 200);
 
     const res = await app.inject({
       method: 'GET',
@@ -89,6 +100,29 @@ describe('PATCH /api/config (F4 hot-reload)', () => {
     const body = res.json();
     assert.equal(body.config.cli.codexSandboxMode, 'workspace-write');
     assert.equal(body.config.cli.codexApprovalPolicy, 'never');
+  });
+
+  it('C17/S3: client-global Codex keys need expectedValue (428) and reject stale edits (409)', async () => {
+    const app = await setup();
+    const read = async () => (await app.inject({ method: 'GET', url: '/api/config' })).json().config.cli;
+    const before = (await read()).codexApprovalPolicy;
+    const target = before === 'never' ? 'on-request' : 'never';
+    assert.equal((await patchConfig({ key: 'cli.codexApprovalPolicy', value: target })).statusCode, 428);
+    assert.equal((await read()).codexApprovalPolicy, before, 'a blind write changes nothing');
+
+    assert.equal(
+      (await patchConfig({ key: 'cli.codexApprovalPolicy', value: target, expectedValue: before })).statusCode,
+      200,
+    );
+    const retry = await patchConfig({ key: 'cli.codexApprovalPolicy', value: target, expectedValue: before });
+    assert.equal(retry.statusCode, 200, 'resubmitting an already-saved target is complete, not a conflict');
+    assert.equal(retry.json().unchanged, true);
+
+    const other = target === 'never' ? 'untrusted' : 'on-failure';
+    const stale = await patchConfig({ key: 'cli.codexApprovalPolicy', value: other, expectedValue: before });
+    assert.equal(stale.statusCode, 409);
+    assert.equal(stale.json().currentValue, target);
+    assert.equal((await read()).codexApprovalPolicy, target);
   });
 
   it('supports hot-updating codex execution model alignment keys', async () => {
@@ -100,7 +134,13 @@ describe('PATCH /api/config (F4 hot-reload)', () => {
     const patchPassModelArg = await patchConfig({ key: 'codex.execution.passModelArg', value: false });
     assert.equal(patchPassModelArg.statusCode, 200);
 
-    const patchAuthMode = await patchConfig({ key: 'codex.execution.authMode', value: 'oauth' });
+    const currentAuthMode = (await app.inject({ method: 'GET', url: '/api/config' })).json().config.codexExecution
+      .authMode;
+    const patchAuthMode = await patchConfig({
+      key: 'codex.execution.authMode',
+      value: 'oauth',
+      expectedValue: currentAuthMode,
+    });
     assert.equal(patchAuthMode.statusCode, 200);
 
     const res = await app.inject({ method: 'GET', url: '/api/config' });

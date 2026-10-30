@@ -204,7 +204,12 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
     if (!useEnvModelOverride) {
       extraArgs.push('--model', effectiveModel);
     }
-    const effortLevel = resolveClaudeEffortLevel(catId as string, effectiveModel, options?.reasoningEffortOverride);
+    const effortLevel = resolveClaudeEffortLevel(
+      catId as string,
+      effectiveModel,
+      options?.reasoningEffortOverride,
+      options?.runtimeSelection,
+    );
     extraArgs.push('--effort', effortLevel);
     // --mcp-config + --strict-mcp-config (F230 AC-B3): gated on callbackEnv (no callback = MCP unusable).
     if (!readOnly && options?.callbackEnv && this.mcpServerPath && existsSync(this.mcpServerPath)) {

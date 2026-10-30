@@ -61,7 +61,16 @@ import { configThreadAttentionRoutes } from './config-thread-attention.js';
 const patchSchema = z.object({
   key: z.string().min(1),
   value: z.union([z.string(), z.number(), z.boolean()]),
+  /** K3/S3: the effective value the editor read; required for client-global member keys. */
+  expectedValue: z.union([z.string(), z.number(), z.boolean()]).optional(),
 });
+
+/**
+ * Client-global settings the member editor writes (affect every member using
+ * Codex). Formal edits must state the value they were based on: missing → 428,
+ * changed since read → 409. Re-sending the already-saved target is a no-op 200.
+ */
+const CAS_CONFIG_KEYS = new Set(['cli.codexSandboxMode', 'cli.codexApprovalPolicy', 'codex.execution.authMode']);
 
 const PERSISTENT_CLI_OUTPUT_KEY = 'ui.bubble.cliOutput';
 
@@ -230,6 +239,27 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
 
     const before = saveSpan('config.snapshot.before', () => collectConfigSnapshot(projectRoot));
     const oldValue = getSnapshotValue(before, parsed.data.key);
+    if (CAS_CONFIG_KEYS.has(parsed.data.key)) {
+      // Read-check-write is synchronous from here to applyConfigPatch: no interleaving.
+      if (parsed.data.expectedValue === undefined) {
+        reply.status(428);
+        return {
+          error:
+            `Saving "${parsed.data.key}" was rejected: it is a client-global setting and the request did not ` +
+            'include the value it was based on (expectedValue). Reload the settings and save again.',
+        };
+      }
+      if (oldValue === parsed.data.value) return { config: before, unchanged: true };
+      if (oldValue !== parsed.data.expectedValue) {
+        reply.status(409);
+        return {
+          error:
+            `"${parsed.data.key}" was changed to "${String(oldValue)}" since it was read; your change was not ` +
+            'applied. Review the current value, then save again.',
+          currentValue: oldValue,
+        };
+      }
+    }
     try {
       saveSpan('config.persist', () => applyConfigPatch(projectRoot, parsed.data.key, parsed.data.value));
     } catch (err) {

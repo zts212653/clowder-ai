@@ -33,6 +33,13 @@ async function createApp(resolveContextCapability = () => AVAILABLE_CAPABILITY) 
 
 const USER_HEADER = { 'x-cat-cafe-user': 'test-user' };
 
+/** Headers for a formal edit based on the revision the GET currently reports. */
+async function editHeaders(app, catId) {
+  const res = await app.inject({ method: 'GET', url: '/api/config/session-strategy' });
+  const revision = res.json().cats.find((cat) => cat.catId === catId).revision;
+  return { ...USER_HEADER, 'if-match': revision };
+}
+
 describe('session-strategy-config routes', () => {
   let overridesModule;
 
@@ -117,7 +124,7 @@ describe('session-strategy-config routes', () => {
       const res = await app.inject({
         method: 'PATCH',
         url: '/api/config/session-strategy/codex',
-        headers: USER_HEADER,
+        headers: await editHeaders(app, 'codex'),
         payload: { strategy: 'hybrid', hybrid: { maxCompressions: 2 } },
       });
       assert.equal(res.statusCode, 200);
@@ -133,7 +140,7 @@ describe('session-strategy-config routes', () => {
       const res = await app.inject({
         method: 'PATCH',
         url: '/api/config/session-strategy/codex',
-        headers: USER_HEADER,
+        headers: await editHeaders(app, 'codex'),
         payload: { strategy: 'handoff' },
       });
       assert.equal(res.statusCode, 200);
@@ -147,7 +154,7 @@ describe('session-strategy-config routes', () => {
       const res = await app.inject({
         method: 'PATCH',
         url: '/api/config/session-strategy/opus',
-        headers: USER_HEADER,
+        headers: await editHeaders(app, 'opus'),
         payload: { strategy: 'handoff' },
       });
 
@@ -173,7 +180,7 @@ describe('session-strategy-config routes', () => {
       const res = await app.inject({
         method: 'PATCH',
         url: '/api/config/session-strategy/opus',
-        headers: USER_HEADER,
+        headers: await editHeaders(app, 'opus'),
         payload: {
           strategy: 'compress',
           thresholds: { warn: 0.7, action: 0.85 },
@@ -223,7 +230,7 @@ describe('session-strategy-config routes', () => {
       const res = await app.inject({
         method: 'DELETE',
         url: '/api/config/session-strategy/opus',
-        headers: USER_HEADER,
+        headers: await editHeaders(app, 'opus'),
       });
       assert.equal(res.statusCode, 404);
       assert.match(res.json().error, /No runtime override/);
@@ -237,7 +244,7 @@ describe('session-strategy-config routes', () => {
       const res = await app.inject({
         method: 'DELETE',
         url: '/api/config/session-strategy/opus',
-        headers: USER_HEADER,
+        headers: await editHeaders(app, 'opus'),
       });
       assert.equal(res.statusCode, 200);
       const body = res.json();
@@ -246,6 +253,53 @@ describe('session-strategy-config routes', () => {
       assert.notEqual(body.source, 'runtime_override');
       // Cache should be cleared
       assert.equal(overridesModule.getRuntimeOverride('opus'), undefined);
+    });
+  });
+
+  // ── C17 / K3 / S2: server-side CAS ──
+
+  describe('C17 strategy CAS', () => {
+    const patch = (app, headers, strategy) =>
+      app.inject({ method: 'PATCH', url: '/api/config/session-strategy/opus', headers, payload: { strategy } });
+
+    test('a formal edit without If-Match is 428 and writes nothing', async () => {
+      const app = await createApp();
+      const res = await patch(app, USER_HEADER, 'compress');
+      assert.equal(res.statusCode, 428);
+      assert.match(res.json().error, /If-Match/);
+      assert.equal(overridesModule.getRuntimeOverride('opus'), undefined);
+      const del = await app.inject({
+        method: 'DELETE',
+        url: '/api/config/session-strategy/opus',
+        headers: USER_HEADER,
+      });
+      assert.equal(del.statusCode, 428);
+    });
+
+    test('a late request from an old page (stale revision) is 409 and cannot overwrite the newer value', async () => {
+      const app = await createApp();
+      const stale = await editHeaders(app, 'opus');
+      assert.equal((await patch(app, await editHeaders(app, 'opus'), 'handoff')).statusCode, 200);
+      const late = await patch(app, stale, 'compress');
+      assert.equal(late.statusCode, 409);
+      assert.equal(typeof late.json().currentRevision, 'string');
+      assert.equal(overridesModule.getRuntimeOverride('opus').strategy, 'handoff');
+    });
+
+    test('two editors saving from the same revision: exactly one wins', async () => {
+      const app = await createApp();
+      const headers = await editHeaders(app, 'opus');
+      const results = await Promise.all([patch(app, headers, 'handoff'), patch(app, headers, 'compress')]);
+      assert.deepEqual(results.map((res) => res.statusCode).sort(), [200, 409]);
+      const winner = results.find((res) => res.statusCode === 200).json().effective.strategy;
+      assert.equal(overridesModule.getRuntimeOverride('opus').strategy, winner);
+    });
+
+    test('an internal owner write is serialized with, and invalidates, a formal edit', async () => {
+      const app = await createApp();
+      const headers = await editHeaders(app, 'opus');
+      await overridesModule.setRuntimeOverride('opus', { strategy: 'handoff' });
+      assert.equal((await patch(app, headers, 'compress')).statusCode, 409);
     });
   });
 });

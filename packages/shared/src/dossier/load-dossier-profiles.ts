@@ -96,6 +96,11 @@ export function getDossierL0RoutingNote(catId: string, projectRoot: string): str
  * field must be phrased as role/style plus an actionable correction, never as
  * a diagnosis delivered back to its subject.
  */
+/** The whole profile, for resolveRoleIdentity(). */
+export function getDossierProfile(catId: string, projectRoot: string): DossierProfile | undefined {
+  return loadDossierProfiles(projectRoot).get(catId);
+}
+
 export function getDossierL0SelfDescription(catId: string, projectRoot: string): string | undefined {
   return loadDossierProfiles(projectRoot).get(catId)?.l0SelfDescription;
 }

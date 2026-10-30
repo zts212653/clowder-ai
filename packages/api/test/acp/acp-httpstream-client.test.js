@@ -307,7 +307,19 @@ describe('AcpHttpStreamClient', () => {
     assert.match(caught.message, /closed before final prompt response/);
   });
 
-  it('responds to id-bearing permission requests on prompt streams', async () => {
+  for (const permissionCase of [
+    { name: 'fails closed without a permission handler', expectedOptionId: 'reject_once' },
+    {
+      name: 'answers with the session permission handler',
+      expectedOptionId: 'allow_once',
+      sessionHandler: (_req, respond) => respond({ optionId: 'allow_once' }),
+    },
+  ])
+    it(`responds to id-bearing permission requests on prompt streams: ${permissionCase.name}`, async () => {
+      await runHttpPermissionPrompt(permissionCase);
+    });
+
+  async function runHttpPermissionPrompt(permissionCase) {
     let resolvePermissionResponse;
     const permissionResponseReceived = new Promise((resolve) => {
       resolvePermissionResponse = resolve;
@@ -377,6 +389,8 @@ describe('AcpHttpStreamClient', () => {
 
     await client.initialize();
     const session = await client.newSession();
+    if (permissionCase.sessionHandler)
+      client.setSessionPermissionHandler(session.sessionId, permissionCase.sessionHandler);
     const events = [];
     let caught = null;
     try {
@@ -390,9 +404,9 @@ describe('AcpHttpStreamClient', () => {
     assert.equal(caught, null, `Permission request should not stall: ${caught?.message}`);
     assert.ok(capturedPermissionResponse, 'client should POST a JSON-RPC response for the permission request');
     assert.equal(capturedPermissionResponse.result?.outcome?.outcome, 'selected');
-    assert.equal(capturedPermissionResponse.result?.outcome?.optionId, 'allow_once');
+    assert.equal(capturedPermissionResponse.result?.outcome?.optionId, permissionCase.expectedOptionId);
     assert.equal(events.at(-1)?.update?.content?.text, 'approved');
-  });
+  }
 
   it('treats 204 agent response acknowledgements as complete', async () => {
     let agentResponsePostSeen = false;

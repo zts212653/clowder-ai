@@ -23,6 +23,7 @@ import { resolveWindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.j
 import { buildUnixSupervisedSpawnPlan } from '../../../../../../utils/cli-supervised-process.js';
 import { PI_BRIDGE_NAME, PI_SESSION_BINDING_ERROR } from '../pi/pi-bridge-contract.js';
 import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
+import { failClosedPermissionResult } from './acp-permission-policy.js';
 import { type AcpPromptInput, toAcpPromptContent } from './acp-prompt-content.js';
 import { AcpSessionBindingError, ActiveSessionCache } from './active-session-cache.js';
 import { shutdownAcpChild } from './lifecycle/acp-child-shutdown.js';
@@ -33,7 +34,6 @@ import type {
   AcpMcpServer,
   AcpNewSessionResult,
   AcpNotification,
-  AcpPermissionRequest,
   AcpPromptCapabilities,
   AcpPromptResult,
   AcpResponse,
@@ -99,14 +99,11 @@ export interface AcpClientConfig {
   antigravityDiagnostics?: boolean;
   /** Inject spawn function for testing */
   spawnFn?: typeof nodeSpawn;
-  /** Custom permission request handler. Defaults to auto-approve (allow_once). */
-  permissionHandler?: AcpPermissionHandler;
   /**
-   * Default decision when no permissionHandler is set and the agent asks for
-   * permission. 'reject' (iCode fail-closed policy) selects a reject option
-   * instead of auto-approving flagged native effects. Defaults to 'allow'.
+   * Client-wide permission handler. Session handlers take precedence. With
+   * neither, permission requests fail closed (reject option, else cancelled).
    */
-  defaultPermissionDecision?: 'allow' | 'reject';
+  permissionHandler?: AcpPermissionHandler;
 }
 
 export interface AcpSpawnLogFields {
@@ -1136,12 +1133,13 @@ export class AcpClient {
       } else if (method && !hasId) {
         if (method === ACP_METHODS.requestPermission) {
           // Gemini CLI sends request_permission as notification (no id) when not in yolo mode.
-          // Best-effort auto-approve with synthetic id (Gemini may ignore it).
+          // Route it through the same session policy as id'd requests (synthetic id;
+          // Gemini may ignore the answer) — never an implicit grant.
           // Also notify stream listeners so idle watchdog suppresses stall during permission wait.
           const permParams = msg.params as Record<string, unknown>;
           log.info(
             { method, sessionId: permParams.sessionId },
-            'ACP: permission notification (no id) — auto-approve + suppress stall',
+            'ACP: permission notification (no id) — routed to session permission policy + suppress stall',
           );
           this.handleAgentRequest({ ...msg, id: `synth-perm-${Date.now()}` } as unknown as AcpAgentRequest);
           // Inject synthetic event into stream so promptStream sets pendingTool=true
@@ -1272,38 +1270,15 @@ export class AcpClient {
           };
           this.child?.stdin?.write(JSON.stringify(errResponse) + '\n');
         }
-      } else if (this.config.defaultPermissionDecision === 'reject') {
-        // iCode fail-closed policy: never auto-approve. Select an explicit
-        // reject option; if the agent offers none, cancel rather than allow.
-        const params = req.params as unknown as AcpPermissionRequest;
-        const rejectOption =
-          params.options?.find((o) => o.kind === 'reject_once') ??
-          params.options?.find((o) => o.kind === 'reject_always') ??
-          params.options?.find((o) => o.optionId === 'reject');
-        if (rejectOption) {
-          respond({ optionId: rejectOption.optionId });
-        } else {
-          log.warn(
-            { method: req.method, id: req.id, sessionId: params.sessionId },
-            'ACP permission: reject policy but no reject option offered — cancelling',
-          );
-          const response = {
-            jsonrpc: '2.0' as const,
-            id: req.id,
-            result: { outcome: { outcome: 'cancelled' as const } },
-          };
-          this.child?.stdin?.write(JSON.stringify(response) + '\n');
-        }
       } else {
-        // Default: auto-approve (allow_once)
-        const params = req.params as unknown as AcpPermissionRequest;
-        // Prefer allow_always (session-wide) over allow_once to avoid repeated permission
-        // prompts for every MCP tool call. Kimi sends optionId "approve_for_session" for this.
-        const allowOption =
-          params.options?.find((o) => o.kind === 'allow_always') ??
-          params.options?.find((o) => o.kind === 'allow_once') ??
-          params.options?.[0];
-        respond({ optionId: allowOption?.optionId ?? 'allow_once' });
+        // Fail closed: with no session or client handler there is no approval
+        // owner, so never grant. Select an offered reject option, else cancel.
+        const result = failClosedPermissionResult(req.params);
+        log.warn(
+          { method: req.method, id: req.id, sessionId, outcome: 'cancelled' in result ? 'cancelled' : 'rejected' },
+          'ACP permission: no permission handler — failing closed',
+        );
+        respond(result);
       }
     } else if (req.method === ACP_METHODS.chrysRequestInput) {
       this.handleChrysRequestInput(req);

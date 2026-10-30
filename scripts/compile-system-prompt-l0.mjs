@@ -47,7 +47,7 @@ import {
   resolveL0Projections,
   resolvePromptTemplateVariables,
 } from '@cat-cafe/shared';
-import { getDossierL0Pronouns, getDossierL0RoutingNote, getDossierL0SelfDescription } from '@cat-cafe/shared/dossier';
+import { getDossierProfile, resolveRoleIdentity } from '@cat-cafe/shared/dossier';
 import {
   CURRENT_CORPUS_PROFILE_URI,
   CURRENT_RELATIONSHIP_PROFILE_URI,
@@ -125,6 +125,33 @@ let _loadCompiledGovernanceL0 = null;
 // 渲染（buildStaticIdentity L568-571 同源），非 L0 硬编码 @co-creator——
 // 否则删 user message 后 co-creator 多 handle / 自定义 name 丢失。
 let _coCreatorConfig = null;
+/**
+ * W2/C06 frozen input mode: render the member snapshot the parent admitted
+ * instead of re-reading the catalog from disk. CLI-only (a fresh process), so
+ * resetting the registry cannot clobber an embedding caller.
+ */
+async function bootstrapFromFrozenInput(path) {
+  const input = JSON.parse(readFileSync(path, 'utf8'));
+  if (input?.version !== 1 || !input.configs || !Array.isArray(input.availableIds) || !input.models) {
+    throw new Error(
+      `L0 frozen input ${path} is not a supported snapshot (version ${String(input?.version)}); ` +
+        'refusing to fall back to the live catalog. Update the API and compiler together.',
+    );
+  }
+  const { loadCompiledGovernanceL0 } = await import(
+    '../packages/api/dist/domains/cats/services/context/governance-l0.js'
+  );
+  catRegistry.reset();
+  for (const [id, config] of Object.entries(input.configs)) catRegistry.register(id, config);
+  const available = new Set(input.availableIds);
+  _loadedConfig = null;
+  _isCatAvailable = (id) => available.has(id);
+  _getCatModel = (id) => input.models[id] ?? input.configs[id]?.defaultModel ?? '';
+  _loadCompiledGovernanceL0 = loadCompiledGovernanceL0;
+  _coCreatorConfig = input.coCreator;
+  _bootstrapped = true;
+}
+
 async function bootstrapCatRegistry() {
   if (_bootstrapped) return;
   const { loadCatConfig, toAllCatConfigs, isCatAvailable, getCoCreatorConfig } = await import(
@@ -257,7 +284,8 @@ function buildIdentityBlock(config, runtimeModel, dossierRoot) {
   if (config.nickname) {
     lines.push(`昵称 "${config.nickname}" 的由来见 \`docs/stories/cat-names/\`。`);
   }
-  const selfDescription = getDossierL0SelfDescription(config.catId, dossierRoot);
+  // K1/O7: owner-edited identity outranks dossier free text (same rule as the roster).
+  const { selfDescription } = resolveRoleIdentity(config, getDossierProfile(config.catId, dossierRoot));
   if (selfDescription) {
     lines.push(`角色与自我校准：${selfDescription}`);
   } else {
@@ -316,7 +344,8 @@ function buildRosterRow(id, cfg, dossierRoot, familyLabels) {
   const mention = cfg.mentionPatterns?.[0] ?? `@${id}`;
   const model = resolveModel(id, cfg);
   const cell = model ? `${mention} · ${model}` : mention;
-  const pronouns = getDossierL0Pronouns(id, dossierRoot)?.split('/')[0]?.trim();
+  const identity = resolveRoleIdentity(cfg, getDossierProfile(id, dossierRoot));
+  const pronouns = identity.pronouns?.split('/')[0]?.trim();
   // Chinese L0 only needs the Chinese pronoun. The dossier marker limits this
   // scarce surface to evidence-backed repeat failures instead of every profile.
   // Prefer the shorter nickname for marked rows so the reminder is token-negative.
@@ -328,7 +357,7 @@ function buildRosterRow(id, cfg, dossierRoot, familyLabels) {
   // capability dossier. Prefer the explicit compact route note; keep config
   // caution as a compatibility fallback for runtime/custom cats that have not
   // yet acquired a structured dossier profile. Hard restrictions always stay.
-  const routingNote = getDossierL0RoutingNote(id, dossierRoot) ?? cfg.caution;
+  const routingNote = identity.routingNote;
   const routeContract = [routingNote, restrictions].filter(Boolean).join('；') || '—';
   return `| ${label} | ${cell} | ${routeContract} |`;
 }
@@ -567,6 +596,14 @@ if (isCliEntrypoint(import.meta.url, process.argv[1])) {
   const profileDir = profileDirIdx >= 0 ? args[profileDirIdx + 1] : undefined;
   const projectionIdx = args.indexOf('--projection');
   const projection = projectionIdx >= 0 ? args[projectionIdx + 1] : undefined;
+  const frozenIdx = args.indexOf('--frozen-input');
+  if (frozenIdx >= 0) {
+    if (!args[frozenIdx + 1]) {
+      console.error('--frozen-input requires a snapshot path');
+      process.exit(2);
+    }
+    await bootstrapFromFrozenInput(args[frozenIdx + 1]);
+  }
   const outIdx = args.indexOf('--out');
   if (outIdx >= 0 && args[outIdx + 1]) {
     const outPath = args[outIdx + 1];

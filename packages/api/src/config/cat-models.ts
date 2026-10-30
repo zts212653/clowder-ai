@@ -12,7 +12,7 @@ import { catRegistry } from '@cat-cafe/shared';
  * F32-b: Generate dynamic env key from catId.
  * e.g. "opus" → "CAT_OPUS_MODEL", "opus-45" → "CAT_OPUS_45_MODEL"
  */
-function getCatModelEnvKey(catId: string): string {
+export function getCatModelEnvKey(catId: string): string {
   return `CAT_${catId.toUpperCase().replace(/-/g, '_')}_MODEL`;
 }
 

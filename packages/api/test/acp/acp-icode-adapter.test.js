@@ -13,8 +13,9 @@
  *    with fresh per-turn credentials, just like `session/new`.
  *  - The live session instance is closed per turn (`session/close`) so the
  *    next turn can load the persisted session with fresh credentials.
- *  - The factory threads `defaultPermissionDecision: 'reject'` (fail-closed)
- *    into the client config for iCode members only.
+ *  - Permission requests stay reject-only: iCode gets no invocation-scoped
+ *    approval handler, so the client's fail-closed default answers them, and
+ *    `acp.autoApprove` is ignored for iCode members.
  */
 
 import assert from 'node:assert/strict';
@@ -503,7 +504,9 @@ describe('AcpServiceFactory protocolAdapter wiring', () => {
         'modelProfileId is the set_model target, not the display model',
       );
       const client = poolRegistry.get(profileId).clientFactory();
-      assert.equal(client.config.defaultPermissionDecision, 'reject');
+      // No client-wide handler: requests fall through to the client's fail-closed default.
+      assert.equal(client.config.permissionHandler, undefined);
+      assert.equal('defaultPermissionDecision' in client.config, false, 'there is no allow default to opt out of');
     } finally {
       await Promise.all([...poolRegistry.values()].map((pool) => pool.closeAll?.()));
       rmSync(projectRoot, { recursive: true, force: true });
@@ -532,7 +535,53 @@ describe('AcpServiceFactory protocolAdapter wiring', () => {
     }
   });
 
-  it('keeps default members unchanged: no fail-closed default, no adapter field', async () => {
+  it('ignores acp.autoApprove for iCode members (reject-only adapter)', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'acp-icode-auto-approve-'));
+    const profileId = 'icode-auto-approve';
+    const poolRegistry = new Map();
+    try {
+      const service = await createAcpServiceForConfig(
+        makeBaseInput(projectRoot, profileId, poolRegistry, {
+          acpConfig: {
+            command: 'mock-acp',
+            startupArgs: ['acp'],
+            protocolAdapter: 'icode',
+            modelProfileId: 'profile-sol',
+            autoApprove: true,
+          },
+        }),
+      );
+      assert.ok(service);
+      assert.equal(service.autoApprove, false);
+    } finally {
+      await Promise.all([...poolRegistry.values()].map((pool) => pool.closeAll?.()));
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('threads an explicit acp.autoApprove into generic members only when set', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'acp-generic-auto-approve-'));
+    const poolRegistry = new Map();
+    try {
+      const optedIn = await createAcpServiceForConfig(
+        makeBaseInput(projectRoot, 'generic-opted-in', poolRegistry, {
+          acpConfig: { command: 'mock-acp', startupArgs: ['acp'], autoApprove: true },
+        }),
+      );
+      const defaulted = await createAcpServiceForConfig(
+        makeBaseInput(projectRoot, 'generic-default', poolRegistry, {
+          acpConfig: { command: 'mock-acp', startupArgs: ['acp'] },
+        }),
+      );
+      assert.equal(optedIn.autoApprove, true);
+      assert.equal(defaulted.autoApprove, false);
+    } finally {
+      await Promise.all([...poolRegistry.values()].map((pool) => pool.closeAll?.()));
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps default members on the generic path: no adapter field, no client-wide handler', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'acp-default-factory-'));
     const profileId = 'acp-default-factory';
     const poolRegistry = new Map();
@@ -547,7 +596,7 @@ describe('AcpServiceFactory protocolAdapter wiring', () => {
       assert.ok(service);
       assert.equal(service.protocolAdapter, undefined);
       const client = poolRegistry.get(profileId).clientFactory();
-      assert.equal(client.config.defaultPermissionDecision, undefined);
+      assert.equal(client.config.permissionHandler, undefined);
     } finally {
       await Promise.all([...poolRegistry.values()].map((pool) => pool.closeAll?.()));
       rmSync(projectRoot, { recursive: true, force: true });

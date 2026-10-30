@@ -609,7 +609,7 @@ describe('AcpClient', () => {
         if (msg.method === 'initialize') {
           agentRespond(agentStdout, msg.id, INIT_RESULT);
         }
-        // Capture auto-approve response
+        // Capture the no-handler (fail-closed) response
         if (msg.id === 'perm-acp' && msg.result) {
           capturedResponse = msg.result;
         }
@@ -621,7 +621,7 @@ describe('AcpClient', () => {
       args: [],
       cwd: '/tmp',
       spawnFn: () => child,
-      // No permissionHandler → auto-approve path
+      // No permissionHandler → fail-closed path
     });
 
     await client.initialize();
@@ -632,7 +632,14 @@ describe('AcpClient', () => {
           jsonrpc: '2.0',
           method: 'session/request_permission',
           id: 'perm-acp',
-          params: { description: 'Read file', options: [{ optionId: 'allow_once', kind: 'allow_once' }] },
+          params: {
+            description: 'Read file',
+            options: [
+              { optionId: 'allow_always', kind: 'allow_always' },
+              { optionId: 'allow_once', kind: 'allow_once' },
+              { optionId: 'deny', kind: 'reject_once' },
+            ],
+          },
         }) + '\n',
       ),
     );
@@ -642,10 +649,61 @@ describe('AcpClient', () => {
     assert.ok(capturedResponse, 'should have sent a permission response');
     assert.ok(capturedResponse.outcome, 'response must have outcome wrapper');
     assert.equal(capturedResponse.outcome.outcome, 'selected');
-    assert.equal(capturedResponse.outcome.optionId, 'allow_once');
+    assert.equal(capturedResponse.outcome.optionId, 'deny', 'no handler must never select an allow option');
   });
 
-  it('iCode: reject permission policy fails closed instead of auto-approving flagged native effects', async () => {
+  it('O1/F1: no permission handler and no reject option answers cancelled, never allow', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let capturedResponse = null;
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') agentRespond(agentStdout, msg.id, INIT_RESULT);
+        if (msg.id === 'perm-only-allow' && msg.result) capturedResponse = msg.result;
+      }
+    });
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    agentStdout.write(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'session/request_permission',
+        id: 'perm-only-allow',
+        params: { sessionId: 's', options: [{ optionId: 'approve_for_session', kind: 'allow_always' }] },
+      }) + '\n',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(capturedResponse, { outcome: { outcome: 'cancelled' } });
+  });
+
+  it('O1/F1: a throwing session handler is answered cancelled, not allowed', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let capturedResponse = null;
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') agentRespond(agentStdout, msg.id, INIT_RESULT);
+        if (msg.id === 'perm-throw' && (msg.result || msg.error)) capturedResponse = msg;
+      }
+    });
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    client.setSessionPermissionHandler('s-throw', async () => {
+      throw new Error('approval owner unreachable');
+    });
+    agentStdout.write(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'session/request_permission',
+        id: 'perm-throw',
+        params: { sessionId: 's-throw', options: [{ optionId: 'allow_once', kind: 'allow_once' }] },
+      }) + '\n',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(capturedResponse?.result, { outcome: { outcome: 'cancelled' } });
+  });
+
+  it('iCode: client without a handler fails closed instead of auto-approving flagged native effects', async () => {
     const { child, clientStdin, agentStdout } = createMockChild();
     let capturedResponse = null;
 
@@ -662,7 +720,6 @@ describe('AcpClient', () => {
       args: [],
       cwd: '/tmp',
       spawnFn: () => child,
-      defaultPermissionDecision: 'reject',
     });
     await client.initialize();
 
@@ -1571,7 +1628,7 @@ describe('AcpClient', () => {
   // Gate-based test: mock agent only continues AFTER seeing a valid permission
   // response on stdin. If AcpClient doesn't send one, agent stays silent → stall.
 
-  it('permission notification (no id) is auto-approved and does not block stream', async () => {
+  it('permission notification (no id) is answered by the fail-closed policy and does not block stream', async () => {
     const { child, clientStdin, agentStdout } = createMockChild();
     let promptId = null;
 
@@ -1597,7 +1654,7 @@ describe('AcpClient', () => {
               sessionId: 'perm-sess',
               update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: '{"limit":20}' } },
             });
-            // 3. Permission notification (no id!) — should be auto-approved
+            // 3. Permission notification (no id!) — answered (rejected), not implicitly granted
             const permNotif = JSON.stringify({
               jsonrpc: '2.0',
               method: 'session/request_permission',
@@ -1617,7 +1674,8 @@ describe('AcpClient', () => {
           // If AcpClient doesn't send one, agent stays silent → stall → test fails.
           !msg.method &&
           msg.id?.toString().startsWith('synth-perm-') &&
-          msg.result?.outcome?.outcome === 'selected'
+          msg.result?.outcome?.outcome === 'selected' &&
+          msg.result.outcome.optionId === 'cancel'
         ) {
           // Permission response accepted — now continue
           setImmediate(() => {

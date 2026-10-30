@@ -130,6 +130,8 @@ const acpConfigSchema = z
     experimental: z.literal(true).optional(),
     mcpWhitelist: z.array(z.string().min(1)).optional(),
     supportsMultiplexing: z.boolean().optional(),
+    /** Explicit member opt-in to grant permission requests without a human decision. */
+    autoApprove: z.boolean().optional(),
     /** iCode protocol adapter: session/set_model model binding, per-turn session/close, fail-closed permissions. */
     protocolAdapter: z.enum(['icode']).optional(),
     /** iCode: model configuration id sent to session/set_model (distinct from defaultModel). */
@@ -147,6 +149,13 @@ const acpConfigSchema = z
         code: z.ZodIssueCode.custom,
         path: ['experimental'],
         message: 'ACP httpstream transport is experimental; set acp.experimental=true to enable it',
+      });
+    }
+    if (value.autoApprove === true && value.protocolAdapter === 'icode') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['autoApprove'],
+        message: 'The iCode adapter is reject-only for permission requests; remove acp.autoApprove for this member',
       });
     }
   });

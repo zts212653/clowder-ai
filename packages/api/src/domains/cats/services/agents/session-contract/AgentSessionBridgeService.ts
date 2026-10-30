@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { CatId } from '@cat-cafe/shared';
 import type * as Service from '../../types.js';
 import type { AgentMessage, AgentServiceOptions as InvokeOptions, MessageMetadata } from '../../types.js';
@@ -53,6 +53,8 @@ function dispatchResult(
 /** Internal / unstable. No provider-specific policy or Host invocation machinery crosses this boundary. */
 export class AgentSessionBridgeService implements Service.AgentService {
   private readonly sessions = new Map<string, Promise<Contract.OpenSessionResult>>();
+  /** Digests of the instructions and cwd each cached session was opened with. */
+  private readonly openKeys = new Map<string, { instructions: string; cwd: string }>();
   private readonly active = new Set<string>();
   constructor(private readonly input: BridgeInput) {}
   invoke(prompt: string, options?: InvokeOptions): AsyncIterable<AgentMessage> {
@@ -67,41 +69,72 @@ export class AgentSessionBridgeService implements Service.AgentService {
   async releaseAll(reason: string): Promise<void> {
     const sessions = [...this.sessions];
     this.sessions.clear();
-    await Promise.all(
-      sessions.map(async ([id, opened]) => {
-        try {
-          if (!(await opened).ok) return;
-          const result = await this.input.provider.release(id, reason);
-          if (!result.ok) this.input.log?.warn('Session release failed', result.reason);
-        } catch {
-          this.input.log?.warn('Session release failed');
-        }
-      }),
-    );
+    this.openKeys.clear();
+    await Promise.all(sessions.map(([id, opened]) => this.retire(id, opened, reason)));
   }
-  private open(
+  private async retire(id: string, opened: Promise<Contract.OpenSessionResult>, reason: string): Promise<void> {
+    try {
+      if (!(await opened).ok) return;
+      const result = await this.input.provider.release(id, reason);
+      if (!result.ok) this.input.log?.warn('Session release failed', result.reason);
+    } catch {
+      this.input.log?.warn('Session release failed');
+    }
+  }
+  private async open(
     host: BridgeHostSession,
     options: InvokeOptions,
     signal: AbortSignal,
   ): Promise<Contract.OpenSessionResult> {
+    const instructions = options.systemPrompt ?? '';
+    const cwd = options.workingDirectory ?? process.cwd();
+    const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+    const openKey = { instructions: digest(instructions), cwd: digest(cwd) };
     const cached = this.sessions.get(host.sessionId);
-    if (cached) return cached;
+    const previous = this.openKeys.get(host.sessionId);
+    // Resumed turns normally omit systemPrompt/workingDirectory ("keep the
+    // session's identity"); only a supplied value that differs is a change.
+    const changed =
+      cached &&
+      previous &&
+      ((options.systemPrompt !== undefined && previous.instructions !== openKey.instructions) ||
+        (options.workingDirectory !== undefined && previous.cwd !== openKey.cwd));
+    if (cached && !changed) return cached;
+    let resume = host.resumeNativeSessionId;
+    if (cached) {
+      // D1/C10: instructions are applied at open, and this contract has no
+      // verified in-place update. Reusing the cached session would send the
+      // next task under the previous identity, so retire it and start a new
+      // native fragment (never resuming the fragment opened with old instructions).
+      this.input.log?.info('Session fragment replaced: instructions or workspace changed', {
+        sessionId: host.sessionId,
+        instructionsChanged: previous?.instructions !== openKey.instructions,
+        from: previous?.instructions.slice(0, 12),
+        to: openKey.instructions.slice(0, 12),
+      });
+      this.sessions.delete(host.sessionId);
+      this.openKeys.delete(host.sessionId);
+      await this.retire(host.sessionId, cached, 'instructions_changed');
+      resume = undefined;
+    }
     const opened = Promise.resolve().then(() =>
       this.input.provider.openSession(
         {
           sessionId: host.sessionId,
-          instructions: options.systemPrompt ?? '',
-          cwd: options.workingDirectory ?? process.cwd(),
-          ...(host.resumeNativeSessionId
-            ? { resume: { nativeSessionId: host.resumeNativeSessionId, onUnavailable: 'start_new' as const } }
-            : {}),
+          instructions,
+          cwd,
+          ...(resume ? { resume: { nativeSessionId: resume, onUnavailable: 'start_new' as const } } : {}),
         },
         signal,
       ),
     );
     this.sessions.set(host.sessionId, opened);
+    this.openKeys.set(host.sessionId, openKey);
     const forget = () => {
-      if (this.sessions.get(host.sessionId) === opened) this.sessions.delete(host.sessionId);
+      if (this.sessions.get(host.sessionId) === opened) {
+        this.sessions.delete(host.sessionId);
+        this.openKeys.delete(host.sessionId);
+      }
     };
     void opened.then((result) => {
       if (!result.ok) forget();
@@ -224,24 +257,34 @@ export class AgentSessionBridgeService implements Service.AgentService {
     if (!options) throw new SessionFailure('host_session_unavailable');
     if (!options.invocationId) throw new SessionFailure('invocation_id_missing');
     const host = this.input.resolveHostSession(options);
-    const session = await this.open(host, options, signal);
-    if (!session.ok) throw new SessionFailure(session.code, session.reason);
-    const invocation = {
-      invocationId: options.invocationId,
-      callbackEnv: options.callbackEnv ?? {},
-      mcpServers: this.input.resolveMcpServers?.(options) ?? [],
-      ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
-      ...(options.requiredTools ? { requiredTools: options.requiredTools } : {}),
-    };
+    // Claimed before open, so a concurrent invocation with changed instructions
+    // can never retire this session while it is opening or running a turn.
     if (this.active.has(host.sessionId)) throw new SessionFailure('session_busy');
-    if (session.binding.state === 'bound') metadata.sessionId = session.binding.nativeSessionId;
-    if (
-      prompt.kind === 'deferred' &&
-      this.input.provider.capabilities(host.sessionId).continuityEvidence !== 'pre_send'
-    )
-      throw new SessionFailure('continuity_preflight_unsupported');
-    if (signal.aborted) throw new SessionFailure('cancelled');
     this.active.add(host.sessionId);
+    try {
+      const session = await this.open(host, options, signal);
+      if (!session.ok) throw new SessionFailure(session.code, session.reason);
+      const invocation = {
+        invocationId: options.invocationId,
+        callbackEnv: options.callbackEnv ?? {},
+        mcpServers: this.input.resolveMcpServers?.(options) ?? [],
+        ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
+        ...(options.requiredTools ? { requiredTools: options.requiredTools } : {}),
+      };
+      if (session.binding.state === 'bound') metadata.sessionId = session.binding.nativeSessionId;
+      if (
+        prompt.kind === 'deferred' &&
+        this.input.provider.capabilities(host.sessionId).continuityEvidence !== 'pre_send'
+      )
+        throw new SessionFailure('continuity_preflight_unsupported');
+      if (signal.aborted) throw new SessionFailure('cancelled');
+      return this.prepared(host, session, invocation);
+    } catch (error) {
+      this.active.delete(host.sessionId);
+      throw error;
+    }
+  }
+  private prepared<S, I extends { invocationId: string }>(host: BridgeHostSession, session: S, invocation: I) {
     const live: LiveTurn = {
       sessionId: host.sessionId,
       turn: { invocationId: invocation.invocationId },

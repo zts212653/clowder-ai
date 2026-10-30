@@ -77,7 +77,7 @@ import {
   resolveMcpWorkingDir as resolveCodexMcpWorkingDir,
 } from '../../../../../config/capabilities/mcp-launch-paths.js';
 import { pluginMcpEnvironment } from '../../../../../config/capabilities/plugin-mcp-environment.js';
-import { deriveAutoCompactTokenLimit, getCatEffort } from '../../../../../config/cat-config-loader.js';
+import { deriveAutoCompactTokenLimit } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import {
   type CodexCarrierMode,
@@ -134,6 +134,11 @@ import type {
   ToolExecutionPolicy,
 } from '../../types.js';
 import { appendProviderSubexecutionEvent } from '../../types.js';
+import {
+  type FrozenRuntimeSelection,
+  freezeRuntimeSelection,
+  inheritedEffortFor,
+} from '../invocation/runtime-selection.js';
 import type { AuditLogSink, RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { extractCommandExecutionLifecycle, sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import {
@@ -205,6 +210,7 @@ import {
 } from './codex-served-model.js';
 import { createDirectAgentCarrierSession } from './DirectAgentCarrierSession.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
+import type { FrozenL0Input } from './l0-frozen-input.js';
 import {
   createMcpSchemaDeliveryLaunchConfig,
   resolveMcpSchemaDeliveryDiscoverySurface,
@@ -1610,9 +1616,15 @@ export class CodexAgentService implements AgentService {
     cliModel: string,
     userId?: string,
     projection: 'owner' | 'public' = 'owner',
+    frozenInput?: FrozenL0Input,
   ): Promise<{ value: string } | { error: string; metadata: MessageMetadata }> {
     try {
-      const compiledL0 = await this.l0CompilerFn({ catId: this.catId as string, userId, projection });
+      const compiledL0 = await this.l0CompilerFn({
+        catId: this.catId as string,
+        userId,
+        projection,
+        ...(frozenInput ? { frozenInput } : {}),
+      });
       const separator = compiledL0.endsWith('\n') ? '\n' : '\n\n';
       const providerInstructions = `${compiledL0}${separator}${CODEX_SIGNATURE_BOUNDARY_INSTRUCTION}`;
       return { value: providerInstructions };
@@ -1648,13 +1660,17 @@ export class CodexAgentService implements AgentService {
     promptSource: CodexAppServerPromptSource,
     options?: AgentServiceOptions,
   ): AsyncIterable<AgentMessage> {
+    // Admission snapshot when queued; direct callers are snapshotted before any await.
+    const runtimeSelection =
+      options?.runtimeSelection ??
+      freezeRuntimeSelection(this.catId as string, catRegistry.tryGet(this.catId as string)?.config);
     if (!options || (!options.pluginNativeLaunch && options.toolExecutionPolicy?.mode !== 'plugin_native')) {
-      yield* this.invokePrepared(promptSource, options);
+      yield* this.invokePrepared(promptSource, runtimeSelection, options);
       return;
     }
     const native = await prepareCodexNativeLaunch(options, this.carrierMode, promptSource.kind === 'frozen');
     try {
-      for await (const message of this.invokePrepared(promptSource, native.options, native)) {
+      for await (const message of this.invokePrepared(promptSource, runtimeSelection, native.options, native)) {
         await native.assertCurrent();
         yield message;
       }
@@ -1665,6 +1681,7 @@ export class CodexAgentService implements AgentService {
 
   private async *invokePrepared(
     promptSource: CodexAppServerPromptSource,
+    runtimeSelection: FrozenRuntimeSelection,
     options?: AgentServiceOptions,
     native?: PreparedCodexNativeLaunch,
   ): AsyncIterable<AgentMessage> {
@@ -1696,10 +1713,11 @@ export class CodexAgentService implements AgentService {
           };
     /** exec_json can only carry frozen bytes; undefined means "preflight, app_server only". */
     const execStdinInput = effectivePromptSource.kind === 'frozen' ? effectivePromptSource.prompt : undefined;
-    const nativeTool = catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool';
-    const nativeAuthentication = usesNativeToolConfiguration(catRegistry.tryGet(this.catId)?.config);
+    // O2: admission snapshot, not the live registry (awaits above may have let edits land).
+    const nativeTool = runtimeSelection.nativeTool;
+    const nativeAuthentication = runtimeSelection.nativeAuthentication;
     const effectiveModel =
-      options?.callbackEnv?.CAT_CAFE_OPENAI_MODEL_OVERRIDE ?? (nativeTool ? getCatModel(this.catId) : this.model);
+      options?.callbackEnv?.CAT_CAFE_OPENAI_MODEL_OVERRIDE ?? (nativeTool ? runtimeSelection.model : this.model);
     const imagePaths = native
       ? []
       : await extractTrustedImagePaths(options?.contentBlocks, options?.uploadDir, options?.resolveTrustedImagePath);
@@ -1707,7 +1725,7 @@ export class CodexAgentService implements AgentService {
 
     const sandboxMode = readOnly || live || native ? 'read-only' : getCodexSandboxMode();
     const approvalPolicy = readOnly || live || native ? 'never' : getCodexApprovalPolicy();
-    const inheritedEffort = getCatEffort(this.catId as string, undefined, 'openai', effectiveModel);
+    const inheritedEffort = inheritedEffortFor(runtimeSelection, 'openai');
     const effortLevel =
       nativeTool && !inheritedEffort && !options?.reasoningEffortOverride
         ? ''
@@ -1927,6 +1945,7 @@ export class CodexAgentService implements AgentService {
       cliModel,
       native ? undefined : options?.callbackEnv?.CAT_CAFE_USER_ID,
       native ? 'public' : 'owner',
+      options?.frozenL0Input,
     );
     if (native) await native.assertCurrent();
     if ('error' in l0Result) {

@@ -352,3 +352,77 @@ for (const throws of [false, true])
     assert.equal(warnings.length, 1);
     assert.equal(provider.calls.release.length, 1);
   });
+
+test('D1/C10: unchanged instructions reuse the open session; changed instructions open a new fragment', async () => {
+  const { bridge, provider, logs } = fixture();
+  await collect(bridge.invoke('turn 1', options({ invocationId: 'inv-1', systemPrompt: 'role A' })));
+  await collect(bridge.invoke('turn 2', options({ invocationId: 'inv-2', systemPrompt: 'role A' })));
+  assert.equal(provider.calls.open.length, 1, 'same instructions: no re-open');
+  await collect(
+    bridge.invoke('turn 3', options({ invocationId: 'inv-3', systemPrompt: 'role B', sessionId: 'native-old' })),
+  );
+  assert.equal(provider.calls.open.length, 2, 'changed identity must not reuse the first-open instructions');
+  assert.equal(provider.calls.open[1].input.instructions, 'role B');
+  assert.equal(
+    provider.calls.open[1].input.resume,
+    undefined,
+    'never resume the fragment opened with old instructions',
+  );
+  assert.deepEqual(
+    provider.calls.release.map((call) => call.reason),
+    ['instructions_changed'],
+  );
+  assert.ok(provider.calls.release.length === 1 && provider.calls.start.length === 3);
+  assert.ok(
+    logs.some(([message]) => /fragment replaced/.test(message)),
+    'the switch reason is observable',
+  );
+  assert.ok(!JSON.stringify(logs).includes('role B'), 'instruction text is not logged');
+});
+
+test('D1/C10: a changed workspace also opens a new fragment', async () => {
+  const { bridge, provider } = fixture();
+  await collect(bridge.invoke('a', options({ invocationId: 'inv-1', systemPrompt: 'role', workingDirectory: '/w1' })));
+  await collect(bridge.invoke('b', options({ invocationId: 'inv-2', systemPrompt: 'role', workingDirectory: '/w2' })));
+  assert.equal(provider.calls.open.length, 2);
+  assert.equal(provider.calls.open[1].input.cwd, '/w2');
+});
+
+test('D1/C10: a busy session is never retired for an identity change', async () => {
+  const { bridge, provider } = fixture();
+  const gate = deferred();
+  provider.inbox = (async function* () {
+    await gate.promise;
+    yield turn('done', { outcome: 'completed' });
+  })();
+  const first = collect(bridge.invoke('a', options({ invocationId: 'inv-1', systemPrompt: 'role A' })));
+  await new Promise((resolve) => setImmediate(resolve));
+  const second = await collect(bridge.invoke('b', options({ invocationId: 'inv-2', systemPrompt: 'role B' })));
+  assert.equal(second[0].errorCode, 'session_busy');
+  assert.equal(provider.calls.release.length, 0);
+  assert.equal(provider.calls.open.length, 1);
+  gate.resolve();
+  await first;
+});
+
+test('D1/C10: a resumed turn that omits systemPrompt keeps the open session (identity not re-sent)', async () => {
+  const { bridge, provider } = fixture();
+  await collect(bridge.invoke('a', options({ invocationId: 'inv-1', systemPrompt: 'role A', workingDirectory: '/w' })));
+  await collect(bridge.invoke('b', options({ invocationId: 'inv-2' })));
+  assert.equal(provider.calls.open.length, 1);
+  assert.equal(provider.calls.release.length, 0);
+});
+
+test('review P3-6: a changed identity cannot retire a session that is still opening', async () => {
+  const { bridge, provider } = fixture();
+  provider.openGate = deferred();
+  const first = collect(bridge.invoke('a', options({ invocationId: 'inv-1', systemPrompt: 'role A' })));
+  await new Promise((resolve) => setImmediate(resolve));
+  const second = await collect(bridge.invoke('b', options({ invocationId: 'inv-2', systemPrompt: 'role B' })));
+  assert.equal(second[0].errorCode, 'session_busy');
+  provider.openGate.resolve();
+  await first;
+  assert.equal(provider.calls.release.length, 0, 'the opening session was not retired');
+  assert.equal(provider.calls.open.length, 1);
+  assert.equal(provider.calls.start.length, 1);
+});

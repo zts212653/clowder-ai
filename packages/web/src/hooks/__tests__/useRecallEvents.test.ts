@@ -347,4 +347,32 @@ describe('F321 invocation boundaries', () => {
     ]);
     expect(recalls.map((event) => event.toolName)).toEqual(['graph_resolve', 'list_recent']);
   });
+  it('C24: root and child executions reusing one call id pair only within their own execution', () => {
+    const use = (id: string, executionRef: string, query: string) => ({
+      id,
+      executionRef,
+      type: 'tool_use' as const,
+      label: 'sonnet → cat_cafe_search_evidence',
+      detail: JSON.stringify({ query }),
+      toolUseId: 'call-1',
+      timestamp: 100,
+    });
+    const recalls = filterRecallEvents([
+      use('root-use', 'inv-root', 'root query'),
+      use('child-use', 'inv-child', 'child query'),
+      {
+        id: 'child-result',
+        executionRef: 'inv-child',
+        type: 'tool_result',
+        label: 'sonnet ← cat_cafe_search_evidence',
+        detail: 'Evidence search failed: child boom',
+        toolUseId: 'call-1',
+        status: 'error',
+        timestamp: 102,
+      },
+    ]);
+    const byQuery = Object.fromEntries(recalls.map((recall) => [recall.query, recall.resultStatus]));
+    expect(byQuery['child query']).toBe('error');
+    expect(byQuery['root query']).toBeUndefined();
+  });
 });

@@ -14,7 +14,7 @@ import type {
   WorldContextEnvelope,
 } from '@cat-cafe/shared';
 import { catRegistry, collectRosterFamilyLabels, formatRosterLabel } from '@cat-cafe/shared';
-import { getDossierL0Pronouns, getDossierRosterSummary, hasDossierEntry } from '@cat-cafe/shared/dossier';
+import { getDossierProfile, hasDossierEntry, resolveRoleIdentity } from '@cat-cafe/shared/dossier';
 import { isCatAvailable } from '../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../config/cat-models.js';
 import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
@@ -370,7 +370,9 @@ export function buildTeammateRoster(currentCatId: CatId, projectRoot = findMonor
   const familyLabels = collectRosterFamilyLabels(entries.map(([, config]) => config));
   for (const [id, config] of entries) {
     const label = formatRosterLabel(config, familyLabels);
-    const pronouns = getDossierL0Pronouns(id, projectRoot)?.split('/')[0]?.trim();
+    // K1/O7: same source decision as the L0 self identity and L0 roster.
+    const identity = resolveRoleIdentity(config, getDossierProfile(id, projectRoot));
+    const pronouns = identity.pronouns?.split('/')[0]?.trim();
     const rosterLabel = pronouns ? `${config.nickname ?? label}（${pronouns}）` : label;
     const mention = pickVariantMention(id, config);
     // F167 Phase F (KD-21): surface resolved runtime model next to the @mention so
@@ -387,16 +389,20 @@ export function buildTeammateRoster(currentCatId: CatId, projectRoot = findMonor
     }
     resolvedModel = compactRosterModel(resolvedModel);
     const mentionCell = resolvedModel ? `${mention} · ${resolvedModel}` : mention;
-    // F208 KD-12: dossier l0RosterSummary → legacy teamStrengths → roleDescription
-    const dossierSummary = getDossierRosterSummary(id, projectRoot);
+    // F208 KD-12: dossier l0RosterSummary → legacy teamStrengths → roleDescription,
+    // unless the owner edited the roster group (then config only).
     // KD-9: warn only for tracked cats (have dossier entry) missing l0RosterSummary.
     // Runtime/custom cats with no dossier entry silently use config fallback.
-    if (!dossierSummary && hasDossierEntry(id, projectRoot)) {
+    if (
+      identity.rosterSummarySource === 'config' &&
+      identity.suppressed.length === 0 &&
+      hasDossierEntry(id, projectRoot)
+    ) {
       console.warn(
         `[F208 KD-9] cat "${id}" has dossier entry but missing l0RosterSummary — falling back to config.teamStrengths`,
       );
     }
-    const strengths = compactRosterCell(dossierSummary ?? config.teamStrengths ?? config.roleDescription, 52);
+    const strengths = compactRosterCell(identity.rosterSummary, 52);
     // F167 Phase E (KD-20): surface hard restrictions alongside caution — data-driven
     // replacement for the retired L3 role-gate. Sender sees e.g. "禁止写代码" so they
     // self-regulate which cat to @ for which task; no harness-side regex.

@@ -18,7 +18,7 @@ export function normalizeRecallTool(label: string): string | undefined {
 /** Parse ONE message's events. Never pair across cats, messages or invocations. */
 export function filterRecallEvents(events: ToolEvent[]): RecallEvent[] {
   const recalls: RecallEvent[] = [];
-  const pending: Array<{ recall: RecallEvent; toolUseId?: string; catId?: string }> = [];
+  const pending: Array<{ recall: RecallEvent; toolUseId?: string; catId?: string; executionRef?: string }> = [];
   for (const event of events) {
     const toolName = normalizeRecallTool(event.label);
     const catId = event.label.match(/^(.+?) [→←] /)?.[1];
@@ -34,12 +34,18 @@ export function filterRecallEvents(events: ToolEvent[]): RecallEvent[] {
         timestamp: event.timestamp,
       };
       recalls.push(recall);
-      pending.push({ recall, toolUseId: event.toolUseId, catId });
+      pending.push({ recall, toolUseId: event.toolUseId, catId, executionRef: event.executionRef });
       continue;
     }
     if (event.type !== 'tool_result') continue;
     const text = event.resultMeta ? `${event.detail ?? ''}\n${event.resultMeta}` : (event.detail ?? '');
-    const eligible = pending.filter((item) => !catId || !item.catId || item.catId === catId);
+    // Root and child executions may reuse a native call id: when both rows carry an
+    // execution, they must match. Legacy rows without one stay message-scoped.
+    const eligible = pending.filter(
+      (item) =>
+        (!catId || !item.catId || item.catId === catId) &&
+        (!event.executionRef || !item.executionRef || item.executionRef === event.executionRef),
+    );
     let match = event.toolUseId ? eligible.find((item) => item.toolUseId === event.toolUseId) : undefined;
     if (!event.toolUseId) {
       if (isSearchEvidenceResultText(text)) {

@@ -31,6 +31,7 @@ import { buildUnixSupervisedSpawnPlan } from '../../../../../../utils/cli-superv
 import {
   type AcpCapacitySignal,
   type AcpClientConfig,
+  type AcpPermissionHandler,
   AcpProtocolError,
   AcpSessionCancelledError,
   AcpStreamIdleError,
@@ -38,6 +39,7 @@ import {
   buildAcpSpawnLogFields,
 } from './AcpClient.js';
 import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
+import { failClosedPermissionResult } from './acp-permission-policy.js';
 import { type AcpPromptInput, toAcpPromptContent } from './acp-prompt-content.js';
 import { AcpSessionBindingError, ActiveSessionCache } from './active-session-cache.js';
 import { shutdownAcpChild } from './lifecycle/acp-child-shutdown.js';
@@ -47,7 +49,6 @@ import type {
   AcpMcpServer,
   AcpNewSessionResult,
   AcpNotification,
-  AcpPermissionRequest,
   AcpPromptCapabilities,
   AcpPromptResult,
   AcpResponse,
@@ -100,6 +101,13 @@ export class AcpHttpStreamClient {
   private _recentCapacitySignal: AcpCapacitySignal | null = null;
   /** #1203: Directory identity captured at spawn. */
   private readonly cwdIdentityTracker: AcpCwdIdentityTracker;
+  /** Invocation-scoped permission policy, same precedence as the stdio client. */
+  private readonly sessionPermissionHandlers = new Map<string, AcpPermissionHandler>();
+
+  setSessionPermissionHandler(sessionId: string, handler?: AcpPermissionHandler): void {
+    if (handler) this.sessionPermissionHandlers.set(sessionId, handler);
+    else this.sessionPermissionHandlers.delete(sessionId);
+  }
 
   constructor(private readonly config: AcpHttpStreamClientConfig) {
     this.cwdIdentityTracker = new AcpCwdIdentityTracker(this.config.cwd);
@@ -792,10 +800,12 @@ export class AcpHttpStreamClient {
         return this.sendAgentResponse({ jsonrpc: '2.0', id: req.id, result: acpResult }, responseOptions);
       };
 
-      if (this.config.permissionHandler) {
+      const sessionId = typeof req.params.sessionId === 'string' ? req.params.sessionId : '';
+      const permissionHandler = this.sessionPermissionHandlers.get(sessionId) ?? this.config.permissionHandler;
+      if (permissionHandler) {
         let responsePromise: Promise<void> | null = null;
         try {
-          await this.config.permissionHandler(req, (result) => {
+          await permissionHandler(req, (result) => {
             responsePromise = respond(result);
           });
         } catch (err) {
@@ -812,14 +822,13 @@ export class AcpHttpStreamClient {
         }
         if (responsePromise) await responsePromise;
       } else {
-        // Prefer allow_always (session-wide) over allow_once to avoid repeated permission
-        // prompts for every MCP tool call. Kimi sends optionId "approve_for_session" for this.
-        const params = req.params as unknown as AcpPermissionRequest;
-        const allowOption =
-          params.options?.find((o) => o.kind === 'allow_always') ??
-          params.options?.find((o) => o.kind === 'allow_once') ??
-          params.options?.[0];
-        await respond({ optionId: allowOption?.optionId ?? 'allow_once' });
+        // Fail closed: no approval owner means no grant.
+        const result = failClosedPermissionResult(req.params);
+        log.warn(
+          { method: req.method, id: req.id, sessionId, outcome: 'cancelled' in result ? 'cancelled' : 'rejected' },
+          'ACP HTTP permission: no permission handler — failing closed',
+        );
+        await respond(result);
       }
       return;
     }

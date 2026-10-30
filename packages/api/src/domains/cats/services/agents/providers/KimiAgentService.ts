@@ -27,6 +27,7 @@ import type {
   MessageMetadata,
   PreparedProviderRequestV1,
 } from '../../types.js';
+import { type FrozenRuntimeSelection, inheritedEffortFor } from '../invocation/runtime-selection.js';
 import type { RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import { collectImageAccessDirectories } from './image-cli-bridge.js';
@@ -82,9 +83,13 @@ export function resolveKimiEffortLevel(
   catId: string,
   effectiveModel: string | null | undefined,
   override: CliEffortPreset | null | undefined,
+  /** Admission snapshot; absent only for direct (non-queue) callers. */
+  runtimeSelection?: FrozenRuntimeSelection,
 ): string | null {
   if (!getCliEffortOptionsForProvider('kimi', effectiveModel)) return null;
-  const inherited = getCatEffort(catId, undefined, 'kimi', effectiveModel);
+  const inherited = runtimeSelection
+    ? inheritedEffortFor(runtimeSelection, 'kimi')
+    : getCatEffort(catId, undefined, 'kimi', effectiveModel);
   return resolveCliEffortOverride('kimi', effectiveModel, inherited, override).effective;
 }
 
@@ -168,7 +173,12 @@ export class KimiAgentService implements AgentService {
     const observedModel =
       followsNativeConfig && !effectiveModel ? readKimiConfiguredModel(toolEnv, runtimePaths) : undefined;
     const identityModel = effectiveModel || observedModel || '';
-    const effortLevel = resolveKimiEffortLevel(this.catId as string, identityModel, options?.reasoningEffortOverride);
+    const effortLevel = resolveKimiEffortLevel(
+      this.catId as string,
+      identityModel,
+      options?.reasoningEffortOverride,
+      options?.runtimeSelection,
+    );
     const metadata: MessageMetadata = { provider: 'kimi', model: identityModel };
     const imagePaths = await extractTrustedImagePaths(
       options?.contentBlocks,
@@ -219,6 +229,7 @@ export class KimiAgentService implements AgentService {
       const l0 = await this.l0CompilerFn({
         catId: this.catId as string,
         userId: options?.callbackEnv?.CAT_CAFE_USER_ID,
+        ...(options?.frozenL0Input ? { frozenInput: options.frozenL0Input } : {}),
       });
       l0Fingerprint = computeKimiL0Fingerprint(l0);
       let freshStartReason: 'stale' | 'unverifiable' | undefined;

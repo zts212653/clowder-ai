@@ -33,6 +33,7 @@ import { profilePointerEmitted } from '../../../../../infrastructure/telemetry/i
 import { saveSpan } from '../../../../../utils/member-save-diagnostics.js';
 import { FileProfileRepository } from '../../profile/ProfileRepository.js';
 import { L0DependencySignatureTracker } from './l0-dependency-signature.js';
+import { type FrozenL0Input, freezeL0Input, frozenL0InputDigest, writeFrozenL0Input } from './l0-frozen-input.js';
 import { type L0CacheGeneration, L0ProfileCache, type L0Projection } from './l0-profile-cache.js';
 
 const SCRIPT_BASENAME = 'compile-system-prompt-l0.mjs';
@@ -74,9 +75,19 @@ export async function warmL0Cache(
   logger?: { warn: (obj: Record<string, unknown>, msg: string) => void },
   userId: string = process.env.CAT_CAFE_USER_ID ?? DEFAULT_PROFILE_USER_ID,
 ): Promise<void> {
+  // Invocations compile from an admission snapshot, whose digest is in the
+  // cache key; warm the same key or the first invoke still compiles cold.
+  let frozenInput: FrozenL0Input | undefined;
+  try {
+    frozenInput = freezeL0Input();
+  } catch (err) {
+    logger?.warn({ err: (err as Error).message }, 'L0 warm-up could not snapshot members; warming the live key');
+  }
   await Promise.all(
     catIds.map((catId) =>
-      saveSpan('l0.compile', () => compileL0ViaSubprocess({ catId, userId }), { catId }).catch((err: unknown) => {
+      saveSpan('l0.compile', () => compileL0ViaSubprocess({ catId, userId, ...(frozenInput ? { frozenInput } : {}) }), {
+        catId,
+      }).catch((err: unknown) => {
         logger?.warn({ catId, err: (err as Error).message }, 'L0 pre-compile failed at startup (will retry on invoke)');
       }),
     ),
@@ -148,6 +159,11 @@ export interface CompileL0Options {
   cwd?: string;
   /** Test seam — replaces the real spawn. */
   spawnFn?: typeof nodeSpawn;
+  /**
+   * C06: member snapshot frozen at invocation admission. The child renders it
+   * instead of re-reading the catalog from disk; its digest is part of the cache key.
+   */
+  frozenInput?: FrozenL0Input;
 }
 
 type L0ProjectionContext =
@@ -193,7 +209,9 @@ export async function compileL0ViaSubprocess(options: CompileL0Options): Promise
   const { catId, outPath } = options;
   const userId = options.userId ?? process.env.CAT_CAFE_USER_ID ?? DEFAULT_PROFILE_USER_ID;
   const projection = resolveProjection(options);
-  const key = l0Cache.key(userId, catId, projection);
+  const baseKey = l0Cache.key(userId, catId, projection);
+  // Segments [0]/[1] stay userId/catId so owner/cat invalidation still matches.
+  const key = options.frozenInput ? `${baseKey}\0${frozenL0InputDigest(options.frozenInput)}` : baseKey;
   const cwd = options.cwd ?? process.cwd();
   const scriptPath = resolveL0CompilerScriptPath(cwd);
   const dependencySignature = scriptPath ? refreshL0DependencySignature(cwd, scriptPath) : null;
@@ -272,6 +290,8 @@ async function doCompileL0(
       : ['--profile-dir', projectionContext.profileDir]),
     ...(outPath ? ['--out', outPath] : []),
   ];
+  const frozenFile = options.frozenInput ? writeFrozenL0Input(options.frozenInput) : undefined;
+  if (frozenFile) args.push('--frozen-input', frozenFile.path);
 
   const stdout = await new Promise<string>((resolvePromise, rejectPromise) => {
     const child = spawnFn(process.execPath, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -299,7 +319,7 @@ async function doCompileL0(
       settled = true;
       resolvePromise(out);
     });
-  });
+  }).finally(() => frozenFile?.dispose());
 
   let result: string;
   if (outPath) {

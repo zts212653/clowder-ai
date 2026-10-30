@@ -262,9 +262,9 @@ async function ensureAcpPool(
         cwd: bootstrap.verifyCwd(),
         ...(process.platform === 'win32' ? { verifyBootstrapCwd: bootstrap.verifyCwd } : {}),
         ...(spawn.env ? { env: spawn.env } : {}),
-        // iCode fail-closed policy: flagged native effects must never be
-        // auto-approved by the generic default (allow) path.
-        ...(acpConfig.protocolAdapter === 'icode' ? { defaultPermissionDecision: 'reject' as const } : {}),
+        // Permission requests without a session handler fail closed in the
+        // client. iCode keeps that reject-only policy for every turn; other
+        // generic members get an invocation-scoped approval handler.
         ...(spawn.antigravity
           ? { inheritParentEnv: false, permissionHandler: denyAgyAcpPermission, antigravityDiagnostics: true }
           : {}),
@@ -393,6 +393,7 @@ export async function createAcpServiceForConfig(
       // The factory rejects iCode members without it, so this is always defined.
       sessionModel: acpConfig.protocolAdapter === 'icode' ? icodeModelProfileId : spawn.sessionModel,
       protocolAdapter: acpConfig.protocolAdapter,
+      autoApprove: acpConfig.autoApprove === true && acpConfig.protocolAdapter !== 'icode',
       contextBinding: {
         model: effectiveModel,
         ...((config.clientId === 'opencode' || config.clientId === 'kimi') && spawn.contextPolicy?.windowTokens

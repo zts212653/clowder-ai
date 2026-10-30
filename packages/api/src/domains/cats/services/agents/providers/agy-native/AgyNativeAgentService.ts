@@ -195,6 +195,7 @@ export class AgyNativeAgentService implements AgentService {
         catId: this.catId as string,
         userId: compactionControl?.userId ?? options?.callbackEnv?.CAT_CAFE_USER_ID,
         projection: 'owner',
+        ...(options?.frozenL0Input ? { frozenInput: options.frozenL0Input } : {}),
       });
       const launch = await prepareAgyNativeLaunch({
         catId: this.catId,

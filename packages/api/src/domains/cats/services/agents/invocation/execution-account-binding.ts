@@ -15,10 +15,16 @@ import {
 } from '../../../../../config/codex-account-launch.js';
 import { codexExecutionAccountSnapshot } from '../../../../../config/codex-execution-account.js';
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
+import type { FrozenL0Input } from '../providers/l0-frozen-input.js';
 import type { FrozenExecutionWorkspace } from './execution-workspace.js';
+import { type FrozenRuntimeSelection, freezeRuntimeSelection } from './runtime-selection.js';
 
 export interface FrozenExecutionBinding {
   readonly catConfig?: CatConfig;
+  /** Model/effort/configuration source captured with catConfig at admission. */
+  readonly runtimeSelection?: FrozenRuntimeSelection;
+  /** C06: the member snapshot the L0 compile renders (no live catalog read). */
+  readonly frozenL0Input?: FrozenL0Input;
   readonly workspace: FrozenExecutionWorkspace;
   readonly projectRoot: string;
   readonly effectiveAccountRef?: string;
@@ -39,10 +45,15 @@ function deepFreeze<T>(value: T): T {
 export function freezeExecutionAccountBinding(input: {
   catId: string;
   catConfig?: CatConfig;
+  /** Captured synchronously with catConfig; derived here only for legacy callers. */
+  runtimeSelection?: FrozenRuntimeSelection;
+  /** Captured synchronously with catConfig; absent for callers that do not compile L0 from it. */
+  frozenL0Input?: FrozenL0Input;
   model?: string;
   workspace: FrozenExecutionWorkspace;
 }): FrozenExecutionBinding {
   const catConfig = input.catConfig ? deepFreeze(structuredClone(input.catConfig)) : undefined;
+  const runtimeSelection = input.runtimeSelection ?? freezeRuntimeSelection(input.catId, catConfig);
   const provider = catConfig?.clientId;
   const client = provider ? resolveBuiltinClientForProvider(provider) : null;
   const projectRoot = resolveActiveProjectRoot(process.cwd());
@@ -90,6 +101,8 @@ export function freezeExecutionAccountBinding(input: {
           : undefined;
   return Object.freeze({
     catConfig,
+    runtimeSelection,
+    ...(input.frozenL0Input ? { frozenL0Input: input.frozenL0Input } : {}),
     workspace: input.workspace,
     projectRoot,
     effectiveAccountRef,

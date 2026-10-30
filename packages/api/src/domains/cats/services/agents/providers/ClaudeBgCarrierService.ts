@@ -68,6 +68,7 @@ import {
 import { resolveClaudeMcpConfig } from './claude-mcp-config.js';
 import { JobEventConsumer, type JobState } from './JobEventConsumer.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
+import type { FrozenL0Input } from './l0-frozen-input.js';
 import { writeInvocationMcpConfigFile } from './session-credential-file.js';
 import { TranscriptTailer } from './TranscriptTailer.js';
 
@@ -290,11 +291,16 @@ export class ClaudeBgCarrierService implements AgentService {
    * (mirrors the per-instance mcp-config temp-file pattern, also not cleaned).
    * @returns absolute path to the written L0 file.
    */
-  private async compileL0ToTempFile(userId?: string): Promise<string> {
+  private async compileL0ToTempFile(userId?: string, frozenInput?: FrozenL0Input): Promise<string> {
     const l0Dir = mkdtempSync(join(tmpdir(), 'cat-cafe-l0-'));
     const l0Path = join(l0Dir, 'system-prompt-l0.md');
     try {
-      await this.l0CompilerFn({ catId: this.catId as string, userId, outPath: l0Path });
+      await this.l0CompilerFn({
+        catId: this.catId as string,
+        userId,
+        outPath: l0Path,
+        ...(frozenInput ? { frozenInput } : {}),
+      });
     } catch (err) {
       throw new CarrierError(`L0 compile failed for ${this.catId as string}: ${(err as Error).message}`, err);
     }
@@ -312,7 +318,7 @@ export class ClaudeBgCarrierService implements AgentService {
     // Native 2.1.296 retains daemon-start auth, ignoring later dispatch credentials.
     if (options?.claudeTokenAccount) throw new Error('claude_token_carrier_unsupported');
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
-    const l0Path = await this.compileL0ToTempFile(options?.callbackEnv?.CAT_CAFE_USER_ID);
+    const l0Path = await this.compileL0ToTempFile(options?.callbackEnv?.CAT_CAFE_USER_ID, options?.frozenL0Input);
     const mcpResolution =
       !readOnly && options?.callbackEnv && this.mcpServerPath
         ? await resolveClaudeMcpConfig({
@@ -371,6 +377,7 @@ export class ClaudeBgCarrierService implements AgentService {
         this.catId as string,
         effectiveModel,
         options?.reasoningEffortOverride,
+        options?.runtimeSelection,
       );
       // #840 R2 (砚砚 review 2026-06-02): bg carrier prompt also rides argv
       // historically — same ENAMETOOLONG risk as the `-p` carrier. Spike

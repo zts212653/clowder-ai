@@ -69,6 +69,7 @@ export async function prepareAgyAcpSession(input: {
     catId: input.catId,
     userId: options?.callbackEnv?.CAT_CAFE_USER_ID ?? options?.auditContext?.userId,
     projection: 'owner',
+    ...(options?.frozenL0Input ? { frozenInput: options.frozenL0Input } : {}),
   });
   if (!body.trim()) throw new Error('AGY ACP canonical L0 is empty');
   const binding: Omit<NativeSessionBinding, 'cliSessionId'> = {

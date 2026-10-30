@@ -113,7 +113,12 @@ export function useMemberEditor(
         if (cancelled) return;
         const entry = body.cats?.find((item) => item.catId === cat.id);
         const strategy = entry ? toStrategyForm(entry) : null;
-        setDraft((previous) => ({ ...previous, strategy, strategyBaseline: strategy }));
+        setDraft((previous) => ({
+          ...previous,
+          strategy,
+          strategyBaseline: strategy,
+          ...(entry?.revision ? { strategyRevision: entry.revision } : {}),
+        }));
       })
       .catch(() => {
         if (!cancelled) setNotice('会话策略暂不可读取，其他设置仍可保存；原策略会保留。');
@@ -277,32 +282,43 @@ export function useMemberEditor(
       setDraft(next);
       persistMemberDraft(storageKey.current, next);
       if (strategy && JSON.stringify(strategy) !== JSON.stringify(snapshot.strategyBaseline)) {
-        await trace.phase('strategy.write', () =>
+        // S2: the server rejects a save without the revision it was based on (428)
+        // or when another editor changed it since (409); the draft is kept.
+        const saved = await trace.phase('strategy.write', () =>
           apiFetch(`/api/config/session-strategy/${result.cat.id}`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', ...trace.headers() },
+            headers: {
+              'Content-Type': 'application/json',
+              ...(snapshot.strategyRevision ? { 'If-Match': snapshot.strategyRevision } : {}),
+              ...trace.headers(),
+            },
             body: JSON.stringify(buildStrategyPayload(strategy)),
-          }).then(readResponse<unknown>),
+          }).then(readResponse<{ revision?: string }>),
         );
-        next = { ...next, strategyBaseline: snapshot.strategy };
+        next = {
+          ...next,
+          strategyBaseline: snapshot.strategy,
+          ...(saved?.revision ? { strategyRevision: saved.revision } : {}),
+        };
         setDraft(next);
         persistMemberDraft(storageKey.current, next);
       }
       if (snapshot.codexSettings && snapshot.codexBaseline) {
         for (const configPatch of buildCodexConfigPatches(snapshot.codexSettings, snapshot.codexBaseline)) {
-          await trace.phase('codex.write', () =>
-            apiFetch('/api/config', {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json', ...trace.headers() },
-              body: JSON.stringify(configPatch),
-            }).then(readResponse<unknown>),
-          );
           const field =
             configPatch.key === 'cli.codexSandboxMode'
               ? 'sandboxMode'
               : configPatch.key === 'cli.codexApprovalPolicy'
                 ? 'approvalPolicy'
                 : 'authMode';
+          // S3: client-global CAS — the server compares against the value this editor read.
+          await trace.phase('codex.write', () =>
+            apiFetch('/api/config', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', ...trace.headers() },
+              body: JSON.stringify({ ...configPatch, expectedValue: snapshot.codexBaseline![field] }),
+            }).then(readResponse<unknown>),
+          );
           next = { ...next, codexBaseline: { ...next.codexBaseline!, [field]: snapshot.codexSettings[field] } };
           setDraft(next);
           persistMemberDraft(storageKey.current, next);

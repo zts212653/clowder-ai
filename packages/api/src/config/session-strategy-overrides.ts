@@ -82,10 +82,68 @@ export function getAllRuntimeOverrides(): ReadonlyMap<string, Partial<SessionStr
  * Set a runtime strategy override for a variant cat.
  * Write-through: Redis first, then cache on success (P1-3: no cache split on Redis failure).
  */
-export async function setRuntimeOverride(
+export function setRuntimeOverride(
   catId: string,
   override: Partial<SessionStrategyConfig>,
 ): Promise<RuntimeStrategyOverride> {
+  return withOverrideLock(catId, () => writeOverride(catId, override));
+}
+
+/**
+ * Delete a runtime strategy override for a variant cat.
+ * Redis DEL result is the source of truth for existence (not cache).
+ * Falls back to cache check only when Redis is unavailable.
+ */
+export function deleteRuntimeOverride(catId: string): Promise<boolean> {
+  return withOverrideLock(catId, () => removeOverride(catId));
+}
+
+/** Formal edit conflict: the caller's expected revision is not the current one. */
+export class StrategyRevisionConflict extends Error {
+  constructor(
+    readonly catId: string,
+    readonly currentRevision: string,
+  ) {
+    super(
+      `Session strategy for "${catId}" changed since it was read (current revision ${currentRevision}). ` +
+        'Reload the member settings, review the newer value, then save again.',
+    );
+    this.name = 'StrategyRevisionConflict';
+  }
+}
+
+/**
+ * K3/S2 CAS: the revision check and the write run under the same per-member
+ * lock, so two editors cannot both pass the check before either writes.
+ * `currentRevision` reads the effective revision the caller's GET returned.
+ */
+export function updateRuntimeOverrideIfRevision(
+  catId: string,
+  expectedRevision: string,
+  currentRevision: () => string,
+  change: { set: Partial<SessionStrategyConfig> } | { remove: true },
+): Promise<RuntimeStrategyOverride | boolean> {
+  return withOverrideLock(catId, async () => {
+    const current = currentRevision();
+    if (current !== expectedRevision) throw new StrategyRevisionConflict(catId, current);
+    return 'set' in change ? writeOverride(catId, change.set) : removeOverride(catId);
+  });
+}
+
+const _locks = new Map<string, Promise<unknown>>();
+
+async function withOverrideLock<T>(catId: string, task: () => Promise<T>): Promise<T> {
+  const previous = _locks.get(catId) ?? Promise.resolve();
+  const run = previous.catch(() => undefined).then(task);
+  _locks.set(catId, run);
+  try {
+    return await run;
+  } finally {
+    if (_locks.get(catId) === run) _locks.delete(catId);
+  }
+}
+
+async function writeOverride(catId: string, override: Partial<SessionStrategyConfig>) {
   const entry: RuntimeStrategyOverride = {
     config: override,
     revision: randomUUID(),
@@ -98,12 +156,7 @@ export async function setRuntimeOverride(
   return entry;
 }
 
-/**
- * Delete a runtime strategy override for a variant cat.
- * Redis DEL result is the source of truth for existence (not cache).
- * Falls back to cache check only when Redis is unavailable.
- */
-export async function deleteRuntimeOverride(catId: string): Promise<boolean> {
+async function removeOverride(catId: string): Promise<boolean> {
   let existed: boolean;
   if (_redis) {
     const deleted = await _redis.del(SessionStrategyKeys.override(catId));

@@ -19,6 +19,8 @@ export interface MemberDraft {
   section: string;
   strategy?: StrategyFormState | null;
   strategyBaseline?: StrategyFormState | null;
+  /** Server revision of strategyBaseline, sent as If-Match (S2 CAS). */
+  strategyRevision?: string;
   codexSettings?: CodexRuntimeSettings;
   codexBaseline?: CodexRuntimeSettings;
 }

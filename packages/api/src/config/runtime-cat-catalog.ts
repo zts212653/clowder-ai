@@ -6,6 +6,7 @@ import type {
   CatCafeConfig,
   CatCarrier,
   CatColor,
+  CatConfig,
   CatVariant,
   CliConfig,
   ClientId,
@@ -826,6 +827,7 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
     }
   }
 
+  recordConfiguredIdentity(catalog, catId, previous.cat, patch);
   assertCodexMemberMutationReady(
     projectRoot,
     catalog as unknown as CatCafeConfig,
@@ -834,6 +836,34 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
     patch.available === true || patch.accountBindingMode !== undefined,
   );
   return writeAndValidateCatalog(projectRoot, catalog);
+}
+
+/**
+ * K1/O7: an identity group becomes owner-authoritative only when this save
+ * actually changes its effective value. Re-saving an unchanged form (or editing
+ * only the avatar) keeps a dossier-backed member on its historic projection.
+ */
+function recordConfiguredIdentity(
+  catalog: Record<string, any>,
+  catId: string,
+  before: CatConfig | undefined,
+  patch: RuntimeCatUpdate,
+): void {
+  if (!before) return;
+  const after = toAllCatConfigs(catalog as unknown as CatCafeConfig)[catId];
+  const located = findBreedVariant(catalog as unknown as CatCafeConfig, catId);
+  if (!after || !located) return;
+  const variant = (catalog.breeds[located.breedIndex] as Record<string, any>).variants[located.variantIndex];
+  const groups = new Set<'role' | 'roster'>(variant.configuredIdentity ?? []);
+  // Unset, null and blank render identically, so they are not a change.
+  const text = (value: string | null | undefined) => value?.trim() || null;
+  const changed = (field: 'roleDescription' | 'personality' | 'teamStrengths' | 'caution') =>
+    patch[field] !== undefined && text(before[field]) !== text(after[field]);
+  // Only fields this save sent count: a breed move that changes inherited text
+  // is not an owner edit of that text.
+  if (changed('roleDescription') || changed('personality')) groups.add('role');
+  if (changed('teamStrengths') || changed('caution')) groups.add('roster');
+  if (groups.size > 0) variant.configuredIdentity = [...groups].sort();
 }
 
 export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCreatorUpdate): CatCafeConfig {

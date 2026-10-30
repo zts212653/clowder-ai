@@ -26,8 +26,6 @@ import {
   resolveInvokeCapabilityRoot,
 } from '../../../../../../config/capabilities/invoke-capability-root.js';
 import { readInvocationMcpConfig } from '../../../../../../config/capabilities/invoke-mcp-config.js';
-import { getCatEffort } from '../../../../../../config/cat-config-loader.js';
-import { getCatModel } from '../../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { createPromptDigest } from '../../../context/prompt-digest.js';
 import type {
@@ -37,6 +35,7 @@ import type {
   MessageMetadata,
   PreparedProviderRequestV1,
 } from '../../../types.js';
+import { freezeRuntimeSelection } from '../../invocation/runtime-selection.js';
 import {
   type AcpCapacitySignal,
   type AcpPermissionHandler,
@@ -55,6 +54,7 @@ import {
 import { createAcpSessionState, flushAcpThinking, transformAcpEvent } from './acp-event-transformer.js';
 import { readAcpImageBlocks, withAcpImages } from './acp-image-input.js';
 import { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
+import { createAcpApprovalQueue, createAcpPermissionHandler } from './acp-permission-policy.js';
 import { AcpImageInputError, type AcpPromptInput } from './acp-prompt-content.js';
 import {
   callbackEnvDiagnostic,
@@ -167,6 +167,11 @@ export interface AcpAgentServiceConfig {
    * per-turn session/close of the live instance.
    */
   protocolAdapter?: 'icode';
+  /**
+   * Member's explicit `acp.autoApprove` opt-in. Without it, permission requests
+   * go to the invocation's approval owner, or fail closed when there is none.
+   */
+  autoApprove?: boolean;
   /** #1208: model/window already applied to this process-pool generation. */
   contextBinding?: import('../../../types.js').AgentContextBinding;
   /** When false, disables ALL MCP servers (base + per-project) for this member. */
@@ -210,6 +215,8 @@ export class AcpAgentService implements AgentService {
   private modelName: string;
   private readonly sessionModel?: string;
   readonly protocolAdapter: 'icode' | undefined;
+  /** Member's explicit permission opt-in (always false for iCode). */
+  readonly autoApprove: boolean;
   private readonly appliedContextBinding?: import('../../../types.js').AgentContextBinding;
   private readonly mcpSupportEnabled: boolean;
   /**
@@ -239,6 +246,7 @@ export class AcpAgentService implements AgentService {
     this.modelName = config.modelName ?? config.sessionModel ?? 'acp';
     this.sessionModel = config.sessionModel?.trim() || undefined;
     this.protocolAdapter = config.protocolAdapter;
+    this.autoApprove = config.autoApprove === true;
     this.appliedContextBinding = config.contextBinding;
     this.mcpSupportEnabled = config.mcpSupport !== false;
     this.idleTtlMs = config.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS;
@@ -418,6 +426,11 @@ export class AcpAgentService implements AgentService {
       return;
     }
 
+    // Queue-admitted invocations carry their admission snapshot; direct callers
+    // are snapshotted here, still before the lease wait below.
+    const runtimeSelection =
+      options?.runtimeSelection ?? freezeRuntimeSelection(this.catId as string, catRegistry.tryGet(this.catId)?.config);
+
     let lease: AcpLease | null = null;
     try {
       lease = await this.pool.acquire(this.poolKey, { sessionId: options?.sessionId });
@@ -455,7 +468,8 @@ export class AcpAgentService implements AgentService {
         mcpServers: AcpMcpServer[],
         meta?: Record<string, unknown>,
       ): Promise<AcpNewSessionResult>;
-      setSessionPermissionHandler(sessionId: string, handler?: AcpPermissionHandler): void;
+      /** Optional: a client without session-scoped policy keeps its fail-closed client default. */
+      setSessionPermissionHandler?(sessionId: string, handler?: AcpPermissionHandler): void;
       readonly agentCapabilities?: AcpInitializeResult['agentCapabilities'];
       setSessionConfigOption(sessionId: string, configId: string, value: string): Promise<unknown>;
       setSessionModel(sessionId: string, modelId: string): Promise<void>;
@@ -499,6 +513,33 @@ export class AcpAgentService implements AgentService {
     };
     const markPromptAcknowledged = () => {
       if (promptPhase === 'active_unacknowledged') promptPhase = 'provider_acknowledged';
+    };
+    // AGY owns its own permission handler and iCode stays reject-only (client
+    // default). Every other ACP member gets an invocation-scoped fail-closed policy.
+    const usesGenericPermissionPolicy = !this.antigravity && this.protocolAdapter !== 'icode';
+    const permissionSessionIds = new Set<string>();
+    const approvalQueue = createAcpApprovalQueue();
+    const installGenericPermissionPolicy = (permissionSessionId: string) => {
+      if (!usesGenericPermissionPolicy) return;
+      const audit = options?.auditContext;
+      const owner =
+        audit?.userId && audit.threadId && audit.catId && audit.invocationId
+          ? { userId: audit.userId, threadId: audit.threadId, catId: audit.catId, invocationId: audit.invocationId }
+          : undefined;
+      permissionSessionIds.add(permissionSessionId);
+      client.setSessionPermissionHandler?.(
+        permissionSessionId,
+        createAcpPermissionHandler({
+          catId: this.catId as string,
+          providerId: this.providerName,
+          sessionId: permissionSessionId,
+          autoApprove: this.autoApprove,
+          queue: approvalQueue,
+          ...(options?.runtimeInteractionPort ? { port: options.runtimeInteractionPort } : {}),
+          ...(owner ? { owner } : {}),
+          ...(options?.signal ? { signal: options.signal } : {}),
+        }),
+      );
     };
 
     // Per-invoke capacity listener — covers the entire invoke lifecycle (newSession + prompt + grace).
@@ -659,10 +700,14 @@ export class AcpAgentService implements AgentService {
         { type: 'done', catId: this.catId, metadata, timestamp: Date.now() },
       ];
 
-      const nativeTool = catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool';
+      // O2: read the admission snapshot, never the live registry, after the lease wait.
+      const nativeTool = runtimeSelection.nativeTool;
       const preferences = {
-        model: nativeTool ? getCatModel(this.catId) || undefined : undefined,
-        effort: nativeTool ? (options?.reasoningEffortOverride ?? (getCatEffort(this.catId) || undefined)) : undefined,
+        model: nativeTool ? runtimeSelection.model || undefined : undefined,
+        // nativeTool implies a member snapshot, so inheritedEffort is never null here.
+        effort: nativeTool
+          ? (options?.reasoningEffortOverride ?? (runtimeSelection.inheritedEffort || undefined))
+          : undefined,
       };
       let nativeDefaults: { model?: string; effort?: string } = {};
       if (nativeTool && resumeSessionId) {
@@ -801,8 +846,9 @@ export class AcpAgentService implements AgentService {
       // At this point sessionId is always defined (resume or newSession path).
       // TS control-flow can't prove it across the if/else — assert for downstream usage.
       if (!sessionId) throw new Error('ACP invariant: sessionId must be set after session setup');
+      installGenericPermissionPolicy(sessionId);
       if (agy)
-        client.setSessionPermissionHandler(
+        client.setSessionPermissionHandler?.(
           sessionId,
           createAgyAcpPermissionHandler({
             sessionId,
@@ -1047,6 +1093,9 @@ export class AcpAgentService implements AgentService {
           // Repoint the outer sessionId so the abort handler cancels the fresh
           // session, not the dead resumed one.
           sessionId = freshSessionId;
+          // The replaced session's permission policy is cleared in finally with
+          // the rest; the fresh session needs its own before the retry prompt.
+          installGenericPermissionPolicy(freshSessionId);
 
           // The replacement session must serve ask_user too. Rebind the
           // request_input bridge to the fresh session, clear the replaced
@@ -1247,7 +1296,8 @@ export class AcpAgentService implements AgentService {
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } finally {
       agyActive = false;
-      if (this.antigravity && sessionId) client.setSessionPermissionHandler(sessionId);
+      if (this.antigravity && sessionId) client.setSessionPermissionHandler?.(sessionId);
+      for (const id of permissionSessionIds) client.setSessionPermissionHandler?.(id);
       if (this.antigravity && requiresProviderShutdown()) await client.close?.();
       if (requestInputBridge) {
         // Clear the bridge first so no late request re-enters a dead turn, then

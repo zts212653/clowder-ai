@@ -97,10 +97,13 @@ export async function prepareClaudeSdkLaunch(input: {
   );
   const prompt = appendLocalImagePathHints(input.prompt, imagePaths);
   const { effectiveModel, useEnvModelOverride } = resolveClaudeModelSelection(options?.callbackEnv, input.model);
-  const effort = effortValue(resolveClaudeEffortLevel(catId, effectiveModel, options?.reasoningEffortOverride));
+  const effort = effortValue(
+    resolveClaudeEffortLevel(catId, effectiveModel, options?.reasoningEffortOverride, options?.runtimeSelection),
+  );
   const l0 = await input.l0CompilerFn({
     catId,
     userId: options?.callbackEnv?.CAT_CAFE_USER_ID ?? options?.auditContext?.userId,
+    ...(options?.frozenL0Input ? { frozenInput: options.frozenL0Input } : {}),
   });
   const nativeInstructions = [
     { body: l0, injectionDecision: 'native_l0_compiled' },

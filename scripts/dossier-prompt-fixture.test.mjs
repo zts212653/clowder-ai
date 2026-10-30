@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { resolveL0Projections } from '@cat-cafe/shared';
+import { catRegistry, resolveL0Projections } from '@cat-cafe/shared';
 import { buildTeammateRoster } from '../packages/api/dist/domains/cats/services/context/SystemPromptBuilder.js';
 import { writeDossierFixture } from '../packages/api/test/helpers/dossier-fixture.js';
 import { compileL0 } from './compile-system-prompt-l0.mjs';
@@ -41,6 +41,40 @@ test('compiled identity consumes self description and preserves absent-dossier f
   const absent = await compileL0({ catId: 'fable-5', dossierRoot: join(dossierRoot, 'absent'), profileDir });
   assert.doesNotMatch(absent, /fixture-self-canary/);
   assert.match(absent, /角色：/);
+});
+
+test('C02: owner-edited identity outranks the dossier for self identity and every roster', async (t) => {
+  const { root: dossierRoot, profileDir } = fixture(t);
+  const original = catRegistry.getAllConfigs();
+  t.after(() => {
+    catRegistry.reset();
+    for (const [id, config] of Object.entries(original)) catRegistry.register(id, config);
+  });
+  catRegistry.reset();
+  for (const [id, config] of Object.entries(original)) {
+    catRegistry.register(
+      id,
+      id === 'fable-5'
+        ? {
+            ...config,
+            roleDescription: 'config-role-canary',
+            teamStrengths: 'config-roster-canary',
+            caution: 'config-route-canary',
+            configuredIdentity: ['role', 'roster'],
+          }
+        : config,
+    );
+  }
+  const self = await compileL0({ catId: 'fable-5', dossierRoot, profileDir });
+  assert.doesNotMatch(self, /fixture-self-canary/);
+  assert.match(self, /角色：config-role-canary/);
+  const teammateL0 = await compileL0({ catId: 'codex', dossierRoot, profileDir });
+  assert.doesNotMatch(teammateL0, /fixture-route-canary/);
+  assert.match(teammateL0, /config-route-canary/);
+  assert.match(teammateL0, /（戊）/, 'pronoun reminder is a dossier-only supplement and stays');
+  const apiRoster = buildTeammateRoster('codex', dossierRoot);
+  assert.doesNotMatch(apiRoster, /fixture-roster-canary/);
+  assert.match(apiRoster, /config-roster-canary/);
 });
 
 test('public participation ignores the owner dossier even when explicitly supplied', async (t) => {
