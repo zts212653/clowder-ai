@@ -1,5 +1,6 @@
 'use client';
 
+import { coCreatorNickname } from '@cat-cafe/shared';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
 import { CO_CREATOR_COLOR } from '@/lib/color-defaults';
@@ -21,6 +22,8 @@ export function YouProfileCard({
 }) {
   const copy = useShellCopy(youSettingsCopy);
   const [name, setName] = useState('');
+  const [nickname, setNickname] = useState('');
+  const [nicknameEdited, setNicknameEdited] = useState(false);
   const [mentions, setMentions] = useState('');
   const [avatar, setAvatar] = useState('');
   const [primary, setPrimary] = useState(CO_CREATOR_COLOR.primary);
@@ -34,6 +37,8 @@ export function YouProfileCard({
   useEffect(() => {
     if (!coCreator) return;
     setName(coCreator.name);
+    setNickname(coCreatorNickname(coCreator) ?? '');
+    setNicknameEdited(false);
     setMentions(coCreator.mentionPatterns.join('  '));
     setAvatar(coCreator.avatar ?? '');
     setPrimary(coCreator.color?.primary ?? CO_CREATOR_COLOR.primary);
@@ -72,12 +77,13 @@ export function YouProfileCard({
     setError(null);
     setSaved(false);
     try {
-      // This form owns the visible fields. The canonical writer preserves aliases/nickname from other editors.
+      // Preserve hidden aliases and only confirm a nickname when its field was edited.
       const response = await apiFetch('/api/config/co-creator', {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           name: name.trim(),
+          ...(nicknameEdited ? { nickname: nickname.trim() || null } : {}),
           mentionPatterns,
           avatar: avatar || null,
           color: { primary, secondary },
@@ -148,6 +154,24 @@ export function YouProfileCard({
           <span>{copy.name}</span>
           <input value={name} onChange={(event) => setName(event.target.value)} required />
         </label>
+        <div className="you-profile-field">
+          <label htmlFor="you-nickname">{copy.nickname}</label>
+          <div>
+            <input
+              id="you-nickname"
+              value={nickname}
+              placeholder={copy.nicknameHint}
+              maxLength={64}
+              onChange={(event) => {
+                setNickname(event.target.value);
+                setNicknameEdited(true);
+              }}
+            />
+            {coCreator?.nickname && coCreatorNickname(coCreator) === undefined && !nicknameEdited ? (
+              <p>{copy.nicknameUnconfirmed}</p>
+            ) : null}
+          </div>
+        </div>
         <div className="you-profile-field">
           <label htmlFor="you-mentions">{copy.mentions}</label>
           <div>
