@@ -919,6 +919,7 @@ export interface CallbackRoutesOptions {
   /** F246 Phase I: canonical runtime ingress for all approval producers. */
   approvalIngress?: ApprovalIngress;
   /** F231 KD-19: canonical user/persona profile repository. */
+  profileReadEvidenceDb?: import('better-sqlite3').Database;
   profileRepository?: import('../domains/cats/services/profile/ProfileRepository.js').FileProfileRepository;
   /** F155 B-4: Independent guide session store */
   guideSessionStore?: import('../domains/guides/GuideSessionRepository.js').IGuideSessionStore;
@@ -6052,7 +6053,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   }
 
   if (opts.profileRepository) {
-    registerCallbackReadProfileRoutes(app, { repository: opts.profileRepository });
+    registerCallbackReadProfileRoutes(app, {
+      repository: opts.profileRepository,
+      evidenceDb: opts.profileReadEvidenceDb,
+    });
   }
 
   // F225: Cat-initiated session handoff propose callback

@@ -31,6 +31,9 @@ export const InvocationKeys = {
    */
   runningThreadsByUser: (userId: string) => `invoc:running-threads:${userId}`,
 
+  /** Complete legacy backfill of both running indexes; outside the invoc:* record namespace. */
+  runningIndexComplete: () => 'invoc-index:running:v1',
+
   /**
    * Latest terminal InvocationRecord for one thread+user.
    *

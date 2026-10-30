@@ -1,8 +1,55 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { inspectOwnedProcessCredentials, projectProcessCensus } from './mcp-process-census.mjs';
+
+test('labels the verified F193 inline SDK probe without archiving its source or treating arbitrary eval as retired', () => {
+  const code = readFileSync(
+    new URL('../packages/api/test/fixtures/f193-retired-probe-source.txt', import.meta.url),
+    'utf8',
+  );
+  const row = (pid, source) => ({
+    pid,
+    ppid: 1,
+    rssKiB: 10,
+    cpuPercent: 0,
+    elapsed: '00:10',
+    command: `node --input-type=module --eval ${source}`,
+  });
+  const census = projectProcessCensus([row(2, code), row(3, `${code} // user customization`)]);
+  assert.equal(census.processes[0].family, 'f193-retired-probe');
+  assert.notEqual(census.processes[1].family, 'f193-retired-probe');
+  assert.ok(!JSON.stringify(census).includes(code));
+});
+
+test('attributes hashed managed packages by metadata and separates API descendants from independent clients', () => {
+  const root = '/work/.cat-cafe/plugins/resources/opaque-plugin/opaque-package/mcp-package-v3';
+  const row = (pid, ppid, command) => ({ pid, ppid, command, rssKiB: 90, cpuPercent: 0, elapsed: '00:10' });
+  const census = projectProcessCensus(
+    [
+      row(10, 1, 'node /work/packages/api/dist/index.js'),
+      row(11, 10, '/opt/bin/claude'),
+      row(12, 11, `node ${root}/dist/work-mcp-entrypoint.js --token private-value`),
+      row(13, 1, `node ${root}/dist/work-mcp-entrypoint.js`),
+      row(14, 10, 'node /tools/pinchtab/dist/index.js'),
+      row(15, 10, 'node /unknown/mcp-package-v3/dist/mcp-entrypoint.js'),
+    ],
+    { apiPids: [10], managedPackages: [{ root, pluginId: 'collective-connector', packageDigest: 'sha256:known' }] },
+  );
+  const plugin = census.processes.find((p) => p.pid === 12);
+  assert.equal(plugin.category, 'plugin_mcp');
+  assert.equal(plugin.pluginId, 'collective-connector');
+  assert.equal(plugin.family, 'dist/work-mcp-entrypoint.js');
+  assert.equal(plugin.scope, 'api_tree');
+  assert.equal(census.processes.find((p) => p.pid === 13).scope, 'outside_api_tree');
+  assert.equal(census.processes.find((p) => p.pid === 14).family, 'pinchtab');
+  assert.equal(census.processes.find((p) => p.pid === 15).category, 'unverified_plugin_mcp');
+  assert.equal(census.groups.filter((g) => g.category === 'plugin_mcp').length, 2);
+  assert.ok(!JSON.stringify(census).includes('private-value'));
+  assert.ok(!JSON.stringify(census).includes('opaque-plugin'), 'hash directories never become plugin IDs');
+});
 
 test('accounts for protection proxies separately and preserves carrier ancestry without archiving argv', () => {
   const census = projectProcessCensus([

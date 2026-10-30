@@ -40,7 +40,8 @@ describe('cat_cafe_read_profile MCP tool', () => {
 
     const result = await handleReadProfile({});
     assert.equal(result.isError, undefined);
-    assert.match(capturedUrl, /\/api\/callbacks\/profile$/);
+    assert.equal(new URL(capturedUrl).pathname, '/api/callbacks/profile');
+    assert.match(new URL(capturedUrl).searchParams.get('requestId'), /^[a-f0-9-]{36}$/);
     assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
     assert.doesNotMatch(capturedUrl, /userId|catId|relationshipKey/);
@@ -49,7 +50,7 @@ describe('cat_cafe_read_profile MCP tool', () => {
   test('schema exposes transport identity selector and optional layer, never target identity', async () => {
     const { readProfileInputSchema } = await import('../dist/tools/callback-tools.js');
     const keys = Object.keys(readProfileInputSchema).sort();
-    assert.deepEqual(keys, ['agentKeyCatId', 'expectedRevision', 'layer']);
+    assert.deepEqual(keys, ['agentKeyCatId', 'expectedRevision', 'layer', 'requestId']);
   });
 
   test('registration description carries routing boundaries and URI trigger', async () => {
@@ -119,6 +120,77 @@ describe('cat_cafe_read_profile MCP tool', () => {
 
     await handleReadProfile({});
     assert.doesNotMatch(capturedUrl, /layer=/, 'no layer param when not supplied');
+  });
+
+  test('preserves the exact read ID across explicit retries', async () => {
+    const { handleReadProfile } = await import('../dist/tools/callback-tools.js');
+    const urls = [];
+    globalThis.fetch = async (url) => {
+      urls.push(new URL(url));
+      return { ok: true, json: async () => ({ usageRecorded: true }) };
+    };
+    await handleReadProfile({ requestId: 'same-read', layer: 'corpus' });
+    await handleReadProfile({ requestId: 'same-read', layer: 'corpus' });
+    assert.deepEqual(
+      urls.map((url) => url.searchParams.get('requestId')),
+      ['same-read', 'same-read'],
+    );
+  });
+
+  test('a receipt already bound to an older profile starts a new read instead of retrying the rejected ID', async () => {
+    const { handleReadProfile } = await import('../dist/tools/callback-tools.js');
+    const seen = [];
+    globalThis.fetch = async (url) => {
+      seen.push(new URL(url).searchParams.get('requestId'));
+      return seen.length === 1
+        ? { ok: true, json: async () => ({ content: 'VERSION A', readRequestId: 'bound-to-a' }) }
+        : {
+            ok: false,
+            status: 409,
+            text: async () => JSON.stringify({ error: 'profile_read_request_changed', readRequestId: 'bound-to-a' }),
+          };
+    };
+    assert.equal((await handleReadProfile({ requestId: 'bound-to-a' })).isError, undefined);
+    const changed = await handleReadProfile({ requestId: 'bound-to-a' });
+    assert.equal(changed.isError, true);
+    const advice = changed.content
+      .filter((item) => item.type === 'text')
+      .map((item) => item.text)
+      .join('\n');
+    assert.match(advice, /new requestId/);
+    assert.doesNotMatch(advice, /Retry this read with requestId: bound-to-a/);
+    assert.deepEqual(seen, ['bound-to-a', 'bound-to-a']);
+  });
+
+  test('recovery advice distinguishes stale revisions, transient or unknown failure, and permanent rejection', async () => {
+    const { handleReadProfile } = await import('../dist/tools/callback-tools.js');
+    for (const [status, error, expected] of [
+      [409, 'profile_revision_changed', /without expectedRevision/],
+      [503, 'profile_read_recording_unavailable', /requestId: preserve-me/],
+      [400, 'invalid_profile_query', null],
+      [401, 'callback_auth_failed', null],
+      [429, 'rate_limited', /requestId: preserve-me/],
+    ]) {
+      globalThis.fetch = async () => ({
+        ok: false,
+        status,
+        text: async () => JSON.stringify({ error, ...(status === 401 ? { reason: 'token_mismatch' } : {}) }),
+      });
+      const result = await handleReadProfile({ requestId: 'preserve-me' });
+      assert.equal(result.isError, true);
+      const extra = result.content
+        .slice(1)
+        .map((item) => item.text)
+        .join('\n');
+      if (expected) assert.match(extra, expected);
+      else assert.equal(extra, '', 'a known client rejection must not invite an unchanged retry');
+    }
+    globalThis.fetch = async () => {
+      throw new Error('response lost');
+    };
+    const unknown = await handleReadProfile({ requestId: 'preserve-me' });
+    assert.equal(unknown.isError, true);
+    assert.match(unknown.content.at(-1).text, /requestId: preserve-me/);
   });
 
   test('description mentions corpus layer', async () => {

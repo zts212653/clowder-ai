@@ -111,6 +111,9 @@ export function projectAgyNativeTurn(
       ...asRecord(metadata.diagnostics?.agyNative),
       upstreamStatus: turn.upstreamStatus,
       outcome,
+      ...(outcome === 'unconfirmed' && turn.upstreamStatus === 'ERROR'
+        ? { retainedUnconfirmedError: sanitizeCliStderr(turn.upstreamError ?? turn.diagnosis).slice(0, 2000) }
+        : {}),
       ...(retainedSessionError
         ? {
             upstreamOutcome: turn.outcome,

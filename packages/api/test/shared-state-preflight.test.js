@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 let checkSharedStatePreflight;
@@ -47,7 +47,7 @@ function addBareRemote(repoDir) {
 
 const tempDirs = [];
 
-describe('checkSharedStatePreflight (integration)', () => {
+describe('checkSharedStatePreflight (integration)', async () => {
   before(async () => {
     const mod = await import('../dist/config/shared-state-preflight.js');
     checkSharedStatePreflight = mod.checkSharedStatePreflight;
@@ -63,7 +63,39 @@ describe('checkSharedStatePreflight (integration)', () => {
     }
   });
 
-  it('detects unpushed shared-state files via upstream', () => {
+  it('serves an event-loop turn while a slow Git preflight still detects dirty shared state', async () => {
+    const repo = createTempRepo('responsive');
+    const bare = addBareRemote(repo);
+    const bin = mkdtempSync(join(tmpdir(), 'ss-test-git-bin-'));
+    tempDirs.push(repo, bare, bin);
+    writeFileSync(join(repo, 'cat-template.json'), '{}');
+    execSync('git add cat-template.json', { cwd: repo, stdio: 'ignore' });
+    const realGit = execSync('command -v git', { encoding: 'utf8' }).trim();
+    writeFileSync(
+      join(bin, 'git'),
+      `#!${process.execPath}\nconst { spawn } = require('node:child_process');\nsetTimeout(() => {\n  const child = spawn(${JSON.stringify(realGit)}, process.argv.slice(2), { stdio: 'inherit' });\n  child.on('error', () => process.exit(127));\n  child.on('exit', code => process.exit(code ?? 1));\n}, 40);\n`,
+      { mode: 0o700 },
+    );
+    const previousPath = process.env.PATH;
+    let completed = false;
+    let eventLoopServed = false;
+    const heartbeat = setImmediate(() => {
+      eventLoopServed = !completed;
+    });
+    process.env.PATH = `${bin}${delimiter}${previousPath ?? ''}`;
+    try {
+      const result = await checkSharedStatePreflight(repo);
+      completed = true;
+      assert.deepEqual(result, { ok: false, uncommittedFiles: ['cat-template.json'] });
+      assert.equal(eventLoopServed, true, 'Git preflight must let the API event loop run before it finishes');
+    } finally {
+      clearImmediate(heartbeat);
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
+  it('detects unpushed shared-state files via upstream', async () => {
     const repo = createTempRepo('unpushed');
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
@@ -73,13 +105,13 @@ describe('checkSharedStatePreflight (integration)', () => {
     writeFileSync(join(repo, 'docs/ROADMAP.md'), '# Backlog');
     execSync('git add docs/ROADMAP.md && git commit -m "add backlog"', { cwd: repo, stdio: 'ignore' });
 
-    const result = checkSharedStatePreflight(repo);
+    const result = await checkSharedStatePreflight(repo);
     assert.equal(result.ok, false, 'should detect unpushed shared-state');
     assert.deepEqual(result.unpushedFiles, ['docs/ROADMAP.md']);
     assert.equal(result.uncommittedFiles, undefined);
   });
 
-  it('detects uncommitted shared-state files (staged but not committed)', () => {
+  it('detects uncommitted shared-state files (staged but not committed)', async () => {
     const repo = createTempRepo('uncommitted');
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
@@ -88,13 +120,13 @@ describe('checkSharedStatePreflight (integration)', () => {
     writeFileSync(join(repo, 'cat-template.json'), '{}');
     execSync('git add cat-template.json', { cwd: repo, stdio: 'ignore' });
 
-    const result = checkSharedStatePreflight(repo);
+    const result = await checkSharedStatePreflight(repo);
     assert.equal(result.ok, false, 'should detect staged shared-state');
     assert.deepEqual(result.uncommittedFiles, ['cat-template.json']);
     assert.equal(result.unpushedFiles, undefined);
   });
 
-  it('detects staged shared-state files as uncommitted', () => {
+  it('detects staged shared-state files as uncommitted', async () => {
     const repo = createTempRepo('staged');
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
@@ -104,12 +136,12 @@ describe('checkSharedStatePreflight (integration)', () => {
     writeFileSync(join(repo, 'docs/ROADMAP.md'), '# Backlog');
     execSync('git add docs/ROADMAP.md', { cwd: repo, stdio: 'ignore' });
 
-    const result = checkSharedStatePreflight(repo);
+    const result = await checkSharedStatePreflight(repo);
     assert.equal(result.ok, false, 'should detect staged shared-state');
     assert.ok(result.uncommittedFiles?.includes('docs/ROADMAP.md'));
   });
 
-  it('detects both unpushed and uncommitted simultaneously', () => {
+  it('detects both unpushed and uncommitted simultaneously', async () => {
     const repo = createTempRepo('both');
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
@@ -123,23 +155,23 @@ describe('checkSharedStatePreflight (integration)', () => {
     writeFileSync(join(repo, 'cat-template.json'), '{}');
     execSync('git add cat-template.json', { cwd: repo, stdio: 'ignore' });
 
-    const result = checkSharedStatePreflight(repo);
+    const result = await checkSharedStatePreflight(repo);
     assert.equal(result.ok, false);
     assert.deepEqual(result.unpushedFiles, ['docs/ROADMAP.md']);
     assert.deepEqual(result.uncommittedFiles, ['cat-template.json']);
   });
 
-  it('returns ok:true when everything is clean', () => {
+  it('returns ok:true when everything is clean', async () => {
     const repo = createTempRepo('clean');
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
 
     // All pushed, nothing dirty
-    const result = checkSharedStatePreflight(repo);
+    const result = await checkSharedStatePreflight(repo);
     assert.deepEqual(result, { ok: true });
   });
 
-  it('ignores non-shared-state files in unpushed diff', () => {
+  it('ignores non-shared-state files in unpushed diff', async () => {
     const repo = createTempRepo('nonshared');
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
@@ -148,19 +180,19 @@ describe('checkSharedStatePreflight (integration)', () => {
     writeFileSync(join(repo, 'src-index.ts'), 'console.log("hi")');
     execSync('git add src-index.ts && git commit -m "add src"', { cwd: repo, stdio: 'ignore' });
 
-    const result = checkSharedStatePreflight(repo);
+    const result = await checkSharedStatePreflight(repo);
     assert.deepEqual(result, { ok: true }, 'should ignore non-shared-state files');
   });
 
-  it('returns ok:true when git is not available (non-git directory)', () => {
+  it('returns ok:true when git is not available (non-git directory)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ss-test-nogit-'));
     tempDirs.push(dir);
 
-    const result = checkSharedStatePreflight(dir);
+    const result = await checkSharedStatePreflight(dir);
     assert.deepEqual(result, { ok: true }, 'should fail-open when git is unavailable');
   });
 
-  it('skips unpushed check on non-main branches (worktree / feature branch)', () => {
+  it('skips unpushed check on non-main branches (worktree / feature branch)', async () => {
     const repo = createTempRepo('feature-skip');
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
@@ -170,11 +202,11 @@ describe('checkSharedStatePreflight (integration)', () => {
     writeFileSync(join(repo, 'cat-template.json'), '{}');
     execSync('git add cat-template.json && git commit -m "add config"', { cwd: repo, stdio: 'ignore' });
 
-    const result = checkSharedStatePreflight(repo);
+    const result = await checkSharedStatePreflight(repo);
     assert.deepEqual(result, { ok: true }, 'feature branch should skip unpushed check');
   });
 
-  it('still detects uncommitted shared-state on non-main branches', () => {
+  it('still detects uncommitted shared-state on non-main branches', async () => {
     const repo = createTempRepo('feature-uncommitted');
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
@@ -184,13 +216,13 @@ describe('checkSharedStatePreflight (integration)', () => {
     writeFileSync(join(repo, 'cat-template.json'), '{}');
     execSync('git add cat-template.json', { cwd: repo, stdio: 'ignore' });
 
-    const result = checkSharedStatePreflight(repo);
+    const result = await checkSharedStatePreflight(repo);
     assert.equal(result.ok, false, 'uncommitted shared-state on feature branch should still be detected');
     assert.deepEqual(result.uncommittedFiles, ['cat-template.json']);
     assert.equal(result.unpushedFiles, undefined, 'unpushed should not be checked on feature branch');
   });
 
-  it('skips unpushed check on brand-new branches without remote', () => {
+  it('skips unpushed check on brand-new branches without remote', async () => {
     const repo = createTempRepo('brand-new-skip');
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
@@ -200,11 +232,11 @@ describe('checkSharedStatePreflight (integration)', () => {
     writeFileSync(join(repo, 'docs/ROADMAP.md'), '# New');
     execSync('git add docs/ROADMAP.md && git commit -m "add backlog on new branch"', { cwd: repo, stdio: 'ignore' });
 
-    const result = checkSharedStatePreflight(repo);
+    const result = await checkSharedStatePreflight(repo);
     assert.deepEqual(result, { ok: true }, 'brand-new feature branch should skip unpushed check');
   });
 
-  it('returns ok:true when local is only behind upstream (no local unpushed commits)', () => {
+  it('returns ok:true when local is only behind upstream (no local unpushed commits)', async () => {
     // Codex cloud review P1: git diff --name-only upstream..HEAD is a tree diff,
     // so when local is behind upstream it falsely reports upstream-only files.
     // Fix: check rev-list ahead count first; if ahead=0, skip diff.
@@ -225,11 +257,11 @@ describe('checkSharedStatePreflight (integration)', () => {
     // Original repo fetches but doesn't merge — HEAD is behind upstream
     execSync('git fetch origin', { cwd: repo, stdio: 'ignore' });
 
-    const result = checkSharedStatePreflight(repo);
+    const result = await checkSharedStatePreflight(repo);
     assert.deepEqual(result, { ok: true }, 'behind-only should NOT report unpushed files');
   });
 
-  it('ignores upstream-only shared-state drift when branch is both ahead and behind', () => {
+  it('ignores upstream-only shared-state drift when branch is both ahead and behind', async () => {
     const repo = createTempRepo('diverged');
     const bare = addBareRemote(repo);
     tempDirs.push(repo, bare);
@@ -252,11 +284,11 @@ describe('checkSharedStatePreflight (integration)', () => {
     execSync('git add notes.txt && git commit -m "local unrelated change"', { cwd: repo, stdio: 'ignore' });
     execSync('git fetch origin', { cwd: repo, stdio: 'ignore' });
 
-    const result = checkSharedStatePreflight(repo);
+    const result = await checkSharedStatePreflight(repo);
     assert.deepEqual(result, { ok: true }, 'diverged branch should ignore shared-state files changed only on upstream');
   });
 
-  it('returns ok:true when no upstream + no origin/<branch> + no merge-base (fail-open)', () => {
+  it('returns ok:true when no upstream + no origin/<branch> + no merge-base (fail-open)', async () => {
     // Create a completely isolated repo with no remote at all
     const repo = createTempRepo('isolated');
     tempDirs.push(repo);
@@ -265,7 +297,7 @@ describe('checkSharedStatePreflight (integration)', () => {
     writeFileSync(join(repo, 'cat-template.json'), '{}');
     execSync('git add cat-template.json && git commit -m "add config"', { cwd: repo, stdio: 'ignore' });
 
-    const result = checkSharedStatePreflight(repo);
+    const result = await checkSharedStatePreflight(repo);
     // Fail-open: no remote to compare against
     assert.deepEqual(result, { ok: true }, 'should fail-open when no remote available');
   });

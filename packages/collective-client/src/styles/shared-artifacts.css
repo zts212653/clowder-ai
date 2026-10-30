@@ -299,6 +299,9 @@
 .shared-discussion-toggle {
   display: none;
 }
+.scene-layout[data-shared-artifact-open="true"] > .context-panel .topic-close {
+  display: none;
+}
 @container (max-width: 760px) {
   .scene-layout[data-shared-artifact-open="true"] {
     grid-template-columns: minmax(0, 1fr);
@@ -335,6 +338,9 @@
     max-width: 64%;
   }
   .shared-discussion-toggle {
+    display: inline-flex;
+  }
+  .scene-layout[data-shared-artifact-open="true"] > .context-panel .topic-close {
     display: inline-flex;
   }
 }

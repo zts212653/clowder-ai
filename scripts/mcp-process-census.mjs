@@ -1,46 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const carriers = [
-  ['agy-native', /(?:antigravity|agy)[^ ]*(?: |$)/i],
-  ['claude', /(?:^|[/ ])claude(?: |$|\/)/],
-  ['codex', /(?:^|[/ ])codex(?: |$|\/)/],
-  ['gemini', /(?:^|[/ ])gemini(?: |$|\/)/],
-  ['kimi', /(?:^|[/ ])kimi(?: |$|\/)/],
-  ['opencode', /(?:^|[/ ])opencode(?: |$|\/)/],
-  ['acp', /(?:icode|acp-client|acp-stdio)/i],
-];
-
-function classify(command) {
-  const builtin =
-    /([^\s]+)\/packages\/mcp-server\/(?:dist|src)\/(secret-mcp-proxy|index|collab|memory|signals|limb|audio|finance|remote-spike|dot-remote-proxy)\.[cm]?[jt]s(?: |$)/.exec(
-      command,
-    );
-  if (builtin)
-    return {
-      category: builtin[2] === 'secret-mcp-proxy' ? 'protection_proxy' : 'self_mcp',
-      family: builtin[2] === 'secret-mcp-proxy' ? null : builtin[2],
-      deploymentRoot: builtin[1],
-    };
-  if (
-    /(?:Google Chrome(?: Helper)?(?:\.app)?|chrome-headless-shell|\/Chromium|\/firefox(?: |$)|ms-playwright\/.*(?:chrome|headless))/i.test(
-      command,
-    )
-  )
-    return { category: 'browser' };
-  if (
-    /(?:mcp-server|server-(?:filesystem|memory|everything)|playwright\/cli\.js|chrome-devtools-mcp|pencil.*mcp|mcp-remote|context7|fetch-mcp)/i.test(
-      command,
-    )
-  )
-    return { category: 'external_mcp' };
-  if (carriers.some(([, pattern]) => pattern.test(command))) return { category: 'carrier' };
-  if (/(?:^|[/ ])node(?: |$)/.test(command)) return { category: 'unknown_node' };
-  return { category: 'other' };
-}
+import { carriers, classifyMcpProcess, loadManagedMcpPackages } from './lib/mcp-process-classification.mjs';
 
 /** Only this public projection may be archived; argv and environment never leave this function. */
-export function projectProcessCensus(rows) {
+export function projectProcessCensus(rows, { apiPids = [], managedPackages = [] } = {}) {
+  const apiRoots = new Set(apiPids);
   const byPid = new Map(rows.map((row) => [row.pid, row]));
   const processes = rows.map(({ pid, ppid, rssKiB, cpuPercent, elapsed, command }) => {
     let parent = byPid.get(pid);
@@ -55,6 +20,17 @@ export function projectProcessCensus(rows) {
       }
       parent = byPid.get(parent.ppid);
     }
+    let ancestor = byPid.get(pid);
+    const ancestry = new Set();
+    let scope = apiPids.length ? 'outside_api_tree' : 'unobserved';
+    while (ancestor && !ancestry.has(ancestor.pid)) {
+      ancestry.add(ancestor.pid);
+      if (apiRoots.has(ancestor.pid)) {
+        scope = 'api_tree';
+        break;
+      }
+      ancestor = byPid.get(ancestor.ppid);
+    }
     return {
       pid,
       ppid,
@@ -64,19 +40,33 @@ export function projectProcessCensus(rows) {
       carrier,
       family: null,
       deploymentRoot: null,
-      ...classify(command),
+      pluginId: null,
+      packageDigest: null,
+      scope,
+      ...classifyMcpProcess(command, managedPackages),
       activity: 'unobserved',
       permissionDomain: 'unobserved',
     };
   });
   const groups = new Map();
   for (const row of processes) {
-    const key = JSON.stringify([row.category, row.carrier, row.deploymentRoot, row.family]);
+    const key = JSON.stringify([
+      row.category,
+      row.carrier,
+      row.deploymentRoot,
+      row.family,
+      row.pluginId,
+      row.packageDigest,
+      row.scope,
+    ]);
     const group = groups.get(key) ?? {
       category: row.category,
       carrier: row.carrier,
       deploymentRoot: row.deploymentRoot,
       family: row.family,
+      pluginId: row.pluginId,
+      packageDigest: row.packageDigest,
+      scope: row.scope,
       count: 0,
       rssKiB: 0,
       cpuPercent: 0,
@@ -93,7 +83,7 @@ export function projectProcessCensus(rows) {
   };
 }
 
-export function collectProcessCensus() {
+export function collectProcessCensus(options = {}) {
   // argv is read only in memory for classification. No raw output, errors or env are archived.
   const output = execFileSync('ps', ['-ww', '-axo', 'pid=,ppid=,rss=,%cpu=,etime=,command='], {
     encoding: 'utf8',
@@ -114,7 +104,7 @@ export function collectProcessCensus() {
         ]
       : [];
   });
-  const census = projectProcessCensus(rows);
+  const census = projectProcessCensus(rows, { ...options, managedPackages: loadManagedMcpPackages(rows) });
   const revisions = [...new Set(census.processes.map((row) => row.deploymentRoot).filter(Boolean))].map((root) => {
     let checkoutHead = 'unknown';
     try {
@@ -209,5 +199,16 @@ export function inspectOwnedProcessCredentials(rootPid, credentialValues) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  process.stdout.write(`${JSON.stringify(collectProcessCensus(), null, 2)}\n`);
+  process.stdout.write(
+    `${JSON.stringify(
+      collectProcessCensus({
+        apiPids: process.argv.slice(2).map((arg) => {
+          if (!/^--api-pid=[1-9][0-9]*$/.test(arg)) throw new Error('Expected --api-pid=<positive PID>');
+          return Number(arg.slice(10));
+        }),
+      }),
+      null,
+      2,
+    )}\n`,
+  );
 }

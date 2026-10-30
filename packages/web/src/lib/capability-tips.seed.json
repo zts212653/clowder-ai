@@ -3596,6 +3596,31 @@
     "owner": "codex61-sol"
   },
   {
+    "id": "feature-f332-profile-usage",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F332-experience-informed-memory.md",
+      "anchor": "本次实施范围：第1步剩余交付（2026-10-29）"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/memory/page/MemoryProfileUsage.tsx",
+      "anchor": "MemoryProfileUsage"
+    },
+    "bodySource": {
+      "path": "docs/features/F332-experience-informed-memory.md",
+      "anchor": "逐画像使用次数"
+    },
+    "contexts": ["concierge_open", "long_running"],
+    "audience": ["all"],
+    "body": "想知道一份画像被带上或翻到过几次？在「记忆 → 画像」打开它，再展开「统计范围与原使用记录」。次数按版本区分，只表示已记录的递送或读取，不代表猫实际采用。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "带我看画像次数",
+      "draftPrompt": "请带我在记忆的画像详情里查看当前版本的使用次数、统计起点与原使用记录，说明哪些历史仍未知。"
+    },
+    "owner": "codex-astra"
+  },
+  {
     "id": "feature-f332-opening-brief",
     "kind": "feature",
     "sourceRef": {

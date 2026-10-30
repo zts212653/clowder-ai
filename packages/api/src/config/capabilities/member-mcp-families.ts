@@ -34,7 +34,8 @@ export async function resolveConfiguredMemberMcpFamilies(
       catId,
       capabilitiesConfig: config,
       configSourceRoot,
-      disabledServerIds: resolveDisabledServerIds(memberRoot, catId, config),
+      accessScope,
+      disabledServerIds: resolveDisabledServerIds(memberRoot, catId, config, { accessScope }),
     });
     names = servers.map((server) => server.name);
   } else {

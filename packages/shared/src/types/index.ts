@@ -1411,6 +1411,7 @@ export {
   isAllowedCollectionSignal,
   PROFILE_UPDATE_TARGET_LAYERS,
 } from './profile-update.js';
+export * from './profile-usage.js';
 export type {
   ActiveParticipantInput,
   AssemblerInput,

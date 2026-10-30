@@ -12,6 +12,7 @@ import { readMembershipLeaveReadiness } from './leave-readiness.js';
 import { createMessageExpressionPort } from './message-expression-context.js';
 import {
   announcePairingAvailability,
+  PAIRING_PENDING_NOTICE,
   resolvePairingAuthority,
   respondToPairingRequest,
   trustedPairingHostRequest,
@@ -233,10 +234,14 @@ export function useCollectiveClient() {
     });
     setSnapshot((current) =>
       result === 'paired'
-        ? { ...current, notice: 'Clowder AI 正在安全托管连接凭据…', error: undefined }
+        ? { ...current, notice: PAIRING_PENDING_NOTICE, error: undefined }
         : { ...current, error: '暂时无法创建新的配对邀请' },
     );
   }, [loadMe, request, snapshot.collective, snapshot.me, snapshot.phase, snapshot.restrictedScope, token]);
+
+  const onHostPaired = useCallback(() => {
+    setSnapshot((current) => (current.notice === PAIRING_PENDING_NOTICE ? { ...current, notice: undefined } : current));
+  }, []);
 
   const announcePairingState = useCallback(() => {
     const hostOrigin = new URLSearchParams(location.search).get('hostOrigin');
@@ -298,7 +303,7 @@ export function useCollectiveClient() {
     snapshot,
     artifacts,
     expression,
-    hostHumanSession: { request, refresh: refreshEvents },
+    hostHumanSession: { request, refresh: refreshEvents, onPaired: onHostPaired },
     invitationMode,
     bootstrap,
     authenticate,

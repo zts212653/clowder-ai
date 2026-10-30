@@ -178,6 +178,10 @@
   "pnpm": {
     "overrides": {
       "@clowder-ai/plugin-sdk@0.3.0-beta.2-candidate.0>@clowder-ai/plugin-contract": "file:packages/api/vendor/clowder-ai-plugin-contract-0.3.1-candidate.0-f327-3edd45d1c7ba.tgz"
+    },
+    "patchedDependencies": {
+      "@clowder-ai/plugin-contract@0.3.1-candidate.0": "patches/@clowder-ai__plugin-contract@0.3.1-candidate.0.patch",
+      "@clowder-ai/plugin-contract@0.3.2-candidate.0": "patches/@clowder-ai__plugin-contract@0.3.2-candidate.0.patch"
     }
   }
 }

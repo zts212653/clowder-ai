@@ -40,9 +40,11 @@ export function useCollectiveArtifacts(
   }>();
   const [publicationSource, setPublicationSource] = useState<string>();
   const generation = useRef(0);
+  const pending = useRef<number>();
   const refresh = useCallback(async () => {
     if (!api || namespace !== currentNamespace.current) return;
     const current = ++generation.current;
+    pending.current = current;
     try {
       const result = await api.list();
       if (current !== generation.current || namespace !== currentNamespace.current) return;
@@ -56,6 +58,8 @@ export function useCollectiveArtifacts(
         failure instanceof CollectiveClientRequestError && failure.status === 403 ? 'access_denied' : 'unavailable',
       );
       setError(collectiveClientErrorMessage(failure));
+    } finally {
+      if (pending.current === current) pending.current = undefined;
     }
   }, [api, namespace]);
   useEffect(() => {
@@ -65,7 +69,9 @@ export function useCollectiveArtifacts(
     setStatus('loading');
     if (!api || snapshot.phase !== 'ready') return;
     void refresh();
-    const interval = window.setInterval(() => void refresh(), 1800);
+    const interval = window.setInterval(() => {
+      if (pending.current === undefined) void refresh();
+    }, 1800);
     return () => {
       ++generation.current;
       window.clearInterval(interval);

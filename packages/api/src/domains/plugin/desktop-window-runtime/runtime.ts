@@ -82,10 +82,18 @@ export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
     try {
       return await this.features.run(
         run.lease,
-        async () =>
-          this.active === run && run.ready && !run.closing && this.now() - observation.observedAt < this.freshnessMs
-            ? structuredClone(observation)
-            : null,
+        async () => {
+          // The observer can publish a new genuine sample while package IO waits.
+          // Read its current projection without polling or changing its timestamp.
+          const current = run.observer?.observation;
+          return this.active === run &&
+            run.ready &&
+            !run.closing &&
+            current &&
+            this.now() - current.observedAt < this.freshnessMs
+            ? structuredClone(current)
+            : null;
+        },
         new ObservationDiagnostics('presence'),
       );
     } catch {

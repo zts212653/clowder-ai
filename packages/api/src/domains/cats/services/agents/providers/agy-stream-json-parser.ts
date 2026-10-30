@@ -1,3 +1,4 @@
+import { agyReplyEvidence } from './agy-reply-evidence.js';
 import { AgyStepEvidence, isAgyAnonymousCompletion } from './agy-step-evidence.js';
 import { parseAgyResultFields, parseAgyToolFields } from './agy-stream-json-fields.js';
 
@@ -435,74 +436,34 @@ export function summarizeAgyStreamJsonTurn(lines: Iterable<string>): AgyStreamJs
   const latestUsage = usageSteps.at(-1)?.[1];
   const steps = [...state.steps.entries()];
   const unconfirmedStepIndices = steps.filter(([, step]) => step.anonymousCompletion).map(([index]) => index);
-  const inputs = steps.filter(([, step]) => step.type === 'user_input' && step.state === 'DONE');
-  const inputIndex = inputs.length === 1 ? inputs[0]?.[0] : undefined;
-  const finalStep = lastStepIndex === null ? undefined : state.steps.get(lastStepIndex);
-  // Revisiting a lower index must not erase a later observed operation.
-  const finalStepIsLatest = lastStepIndex !== null && steps.every(([index]) => index <= lastStepIndex);
-  // CLI result can retain a prior-turn error or an earlier failed attempt in
-  // this turn. A completed error message is superseded only by a later proven
-  // final response/checkpoint; a terminal or unfinished error still blocks it.
-  const completedCurrentStep =
-    inputIndex !== undefined &&
-    lastStepIndex !== null &&
-    lastStepIndex > inputIndex &&
-    finalStepIsLatest &&
-    finalStep?.state === 'DONE' &&
-    steps.every(([index, step]) =>
-      step.type === 'error_message'
-        ? step.state === 'DONE' && index > inputIndex && index < lastStepIndex
-        : ['user_input', 'system_message', 'agent_response', 'tool', 'checkpoint'].includes(step.type) &&
-          (step.type === 'tool' || step.state !== 'ERROR'),
-    );
-  // A tool can split one reply into several response steps. Qualify the whole
-  // current reply, and never use an unfinished or out-of-order segment as proof.
-  const responseSteps = steps.filter(([, step]) => step.type === 'agent_response');
-  const completedResponseText =
-    responseSteps.at(-1)?.[0] === lastStepIndex &&
-    responseSteps.every(
-      ([index, step], n) =>
-        step.state === 'DONE' && index > (responseSteps[n - 1]?.[0] ?? inputIndex ?? Number.POSITIVE_INFINITY),
-    )
-      ? responseSteps.map(([, step]) => step.text).join('')
-      : null;
-  const completedResponseStep =
-    completedCurrentStep &&
-    finalStep?.type === 'agent_response' &&
-    finalStep.text.trim().length > 0 &&
-    completedResponseText?.trim() === finalText.trim()
-      ? lastStepIndex
-      : null;
-  const completedCompactionStep = completedCurrentStep && finalStep?.type === 'checkpoint' ? lastStepIndex : null;
-  if (outcome === 'ok' && unconfirmedStepIndices.length > 0) {
+  const {
+    completedResponseStep,
+    completedCompactionStep,
+    recoveredErrorSteps,
+    anonymousReplyComplete,
+    retainedAttemptEOF,
+  } = agyReplyEvidence({
+    steps: state.steps,
+    lastStepIndex,
+    finalText,
+    deltaText: state.deltas.join(''),
+    upstreamStatus,
+    upstreamError: result?.error ?? null,
+    hasDeniedActions: deniedActions.length > 0,
+  });
+  if (
+    (outcome === 'ok' || (outcome === 'error' && retainedAttemptEOF && anonymousReplyComplete)) &&
+    unconfirmedStepIndices.length > 0
+  ) {
     // The matching later response proves delivery only. It cannot identify the
-    // missing operation, authorize recovery, or supersede an error-message step.
-    const replyComplete =
-      inputIndex !== undefined &&
-      lastStepIndex !== null &&
-      lastStepIndex > inputIndex &&
-      finalStepIsLatest &&
-      unconfirmedStepIndices.every((index) => index > inputIndex && index < lastStepIndex) &&
-      finalStep?.type === 'agent_response' &&
-      finalStep.state === 'DONE' &&
-      finalStep.text.trim().length > 0 &&
-      state.deltas.join('').trim() === finalText.trim() &&
-      steps.every(
-        ([, step]) =>
-          (step.state === 'DONE' || (step.type === 'tool' && step.state === 'ERROR')) && step.type !== 'error_message',
-      );
-    outcome = replyComplete ? 'unconfirmed' : 'protocol_error';
-    if (!replyComplete)
+    // missing operation or authorize auth recovery/side-effect replay.
+    outcome = anonymousReplyComplete ? 'unconfirmed' : 'protocol_error';
+    if (!anonymousReplyComplete)
       anomalies.push({
         kind: 'invalid_step_identity',
         detail: 'anonymous completion has no matching complete current reply',
       });
   }
-  const recoveredErrorSteps =
-    completedResponseStep !== null || completedCompactionStep !== null
-      ? steps.filter(([, step]) => step.type === 'error_message').map(([index]) => index)
-      : [];
-
   return {
     conversationId,
     firstStepIndex,

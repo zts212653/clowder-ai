@@ -6,6 +6,7 @@ import type { IThreadStore } from '../../../cats/services/stores/ports/ThreadSto
 import type { MessagingService } from '../../../messaging/messaging-service.js';
 import type { SubscriptionDelivery } from '../../../messaging/subscription-delivery.js';
 import { type PluginInvocationOutcome, settlePluginInvocation } from '../../carrier/host-invocation.js';
+import type { SharedMcpFactory } from '../../declared/shared-mcp-factory.js';
 import { verifyPackageEntrypoint } from '../../external-runtime/package-entrypoint-authority.js';
 import {
   ExternalPluginRuntimeError,
@@ -194,6 +195,22 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
   readonly #unfinished = new Map<string, readonly ModuleTeardownStep[]>();
 
   constructor(private readonly options: ModulePluginRuntimeOptions) {}
+
+  async resolveMcpFactory(pluginInstanceId: string, contributionId: string): Promise<SharedMcpFactory | undefined> {
+    const loaded = this.#loaded.get(pluginInstanceId);
+    const declarations = loaded?.manifest.contributions?.filter((c) => c.type === 'mcp' && c.id === contributionId);
+    const declaration = declarations?.length === 1 ? declarations[0] : undefined;
+    if (!loaded || declaration?.type !== 'mcp' || !declaration.sharedFactory) return undefined;
+    const { entrypoint } = await verifyPackageEntrypoint(loaded.packageRecord, loaded.located, contributionId);
+    await loaded.located.verifyIntegrity();
+    const namespace: Record<string, unknown> = await import(pathToFileURL(entrypoint).href);
+    if (this.#loaded.get(pluginInstanceId) !== loaded || !this.#neutralActivations.has(pluginInstanceId))
+      throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'MCP factory activation changed');
+    const factory = namespace[declaration.sharedFactory.export];
+    if (typeof factory !== 'function')
+      throw new ExternalPluginRuntimeError('INVALID_ENTRYPOINT', 'MCP factory export is unavailable');
+    return factory as SharedMcpFactory;
+  }
 
   /**
    * Claims any admitted package that declares a module to load. The claim reads the

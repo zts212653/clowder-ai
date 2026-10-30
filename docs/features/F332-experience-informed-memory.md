@@ -14,7 +14,7 @@ description_updated_at: 2026-10-24T00:01:00Z
 
 # F332: 经历参与判断 — 从共同经历到新情境的记忆
 
-> **Status**: in-progress（读源修复、第2步目录及第1步画像主要路径已交；原1387的统计、三处文案和验证缺口转独立执行线程继续） | **Owner**: 小星星·Maine Coon (@codex-astra) | **Priority**: P1
+> **Status**: in-progress（第1步画像次数、文案和更正读取路径已完成独审、合入、Alpha及正式验收；自然使用与完整开场成本证据仍待补齐） | **Owner**: 小星星·Maine Coon (@codex-astra) | **Priority**: P1
 
 Architecture cell: `memory`
 Map delta: none
@@ -51,10 +51,24 @@ You 在 `[thread-id]#private-source-id` 明确：
 | 三处文字同轮修正 | 同屏型号、摘要和标签一致 | 历史能力只认原记录型号，若登记表有对应显示名则用其写法，不能换成成员当前型号；「关于你」卡摘要按既有中西文规则处理换行/空格；小标签写「每场新对话自动带上」。依据 Opus1361，不另请设计者逐轮对稿 |
 | 原递送与成本盘点缺口 | 一份能说明各通道实际带了什么、有哪些真实记录、还有哪些未知的盘点 | 消费已有自然样本，继续核 Kimi/AGY 等原生载体与历史能力片段；区分原生请求/递送记录、模型实际采用和完整首条输入成本。没有样本时记录原缺口及原责任，不为验收额外启动模型，不拿预览token或全站监控数代填 |
 
-现有代码证据：`callback-read-profile-routes.ts` 的直接画像读取只递增按层监控；
-`MemoryProfileSource.tsx` 仍显示「使用次数尚未汇总」。开场已有 `memory_cue_events` 可追溯记录，
+实施前代码证据：`callback-read-profile-routes.ts` 的直接画像读取只递增按层监控；
+`MemoryProfileSource.tsx` 当时显示「使用次数尚未汇总」。开场已有 `memory_cue_events` 可追溯记录，
 不意味着直接读取已有完整持久历史。执行猫先核这些来源的适用范围，再在既有权威/记录体系内补齐，
 不另造平行记忆库；新增记录的隐私、持久化、去重及读面契约按风险独立审查。
+
+### 当前交付结论（10-30）
+
+**画像功能已完成技术验收。** 正式页面能看到每份画像的开场/读取次数、统计起点、当前与旧版本、历史未知及来源；
+桌面和手机宽度的编辑草稿保护、放弃重进、刷新已走通。正式绑定MCP读取同一版本并精确重试，只记一次。
+保存更正后的版本、让下一位认证消费者读到新版、重试去重及原文恢复，在官方命名Alpha完整通过；凭据、服务与工位已清理。
+三处文字已实现：实际中文摘要和自动带上标签在正式页已验；历史型号显示已有工位及Web检查，正式未配置该片段，不能伪称正式看过。
+
+**原1387仍开放的是证据缺口。** Kimi自然开场、AGY等通道完整原生首包与材料token、正式历史能力片段及实际采用尚未证实。
+不能再把已通过的工程验收写成“等主机恢复”或“等正式到版”。
+
+它没有活服务，等待原设施缺口合法处置后由原执行现场收尾，不撤销本次Alpha成功清理或产品验收结果。
+母owner已核最终回报 `[thread-id]#private-source-id`、两份驱动哈希、版本包含性、清理回执及关键实页；
+回报连接已完成投递，原Task保持未完成，不新挂相同等待，也不代关整个F332。
 
 ### 谁做、在哪里做
 
@@ -62,8 +76,22 @@ You 在 `[thread-id]#private-source-id` 明确：
 - **执行**：小星星 `codex-astra`。本包涉及持久使用记录、历史缺口、原生递送和 owner 读面，判断为复杂；三处文字与同一画像页面一起交，不拆第二个 writer。新线程是同一身份的独立上下文，不与本现场同时实现。
 - **独立审查**：优先 Sol5.6 `codex-sol`，按 You 本次指定候选在实际发审时核路由；作者不自审。只给需要审查的实际代码包，不预先叫醒 reviewer。
 - **原任务**：1387 的身份、最初批准、已验事实与剩余责任保留；提案绑定同一 Task，批准后沿正式 delegation / development-return 接执行与最终回报，不在子线程复制或搬走父 Task。
-- **全线指挥**：仍由 `[thread-id]` 的 Sol6.1 / Task1432 维护跨线排序与完整验收；本次不接管其余施工线。
+- **全线指挥**：场所仍为 `[thread-id]`；You在该现场10-29消息 `private-source-id` 明确由该现场Astra直接指挥。原Task1432的登记不在本施工现场迁移，本次不接管其余施工线。
+
+<details>
+<summary>实施承接与验收历史（当时的阻塞及回报坐标）</summary>
+
 - **执行承接**：提案 `proposal_mvtcz6u20hcmni4u` 经 You 批准（原现场 `private-source-id`），创建 `[thread-id]`。最初 seed 只启动了只读核验，回流登记也不授予实施权；原owner已补发绑定1387的 `single implement` 正式交接，唯一消息为执行现场 `private-source-id`，服务端已将它纳入该现场当前 invocation 的 sources。原 Task 的身份、scope 与责任不迁移；最终结果沿既有 `development-return-a8a74b00242fcc31b2295d12b76adbc6` 接回，不重复派发。
+
+**10-29 22:22原owner续办**：已消费原return的blocked回报，并独立核GitHub合入、Sol5.6 typed verdict与正式boot63。原1387已登记runtime generation6，条件为API/Web包含冻结 `f208fabfe8bfcbd007491948e787ec5d35d4310e`；没有重启授权或重启动作。22:20:44Z canonical准入采样为normal，fseventsd仍warning（系统可用62%），仅证明可以有据续试，不证明系统根因治愈。已经执行现场消息 `private-source-id` 交回同一scope的Alpha续验；原return为delivered，后继 `development-return-edc570d0c7dd20a4cb7f71c66ac5f589` 已登记waiting，内部复核期限24小时。原Task r66/doing，保留部署等待与原自然证据缺口，母现场不平行实现，也不把派发/登记当验收通过。
+
+**10-30 01:09 UTC正式到版续办**：runtime generation6已matched/delivered；母现场独立核API `/health`与Web HTML均为boot64版本 `684266cf6db19503b708a41237482549928dfa00`，Git祖先检查确认包含f208，不重挂同一加载等待。01:10:32 canonical准入仍critical（PID328约13.9GiB、CPU167%），原Task783/r34已接F332恢复结果回传，仍记为等待管理员操作。原1387更新为r71/blocked，已向同一执行现场发消息 `private-source-id`，先核当前正式owner/API及既有记录的对应关系；不启动浏览器、反复排Alpha或额外模型采样。后继回报 `development-return-0d9bc81393f892ac0a90f1b4941033ee` 已登记waiting，前驱edc570保留delivered；完整旅程与自然证据缺口继续原责任，加载不等于验收完成。
+
+**10-30 02:24 UTC恢复后续验**：原恢复现场通知 `[thread-id]#private-source-id` 与三次采样原件已核：旧PID328结束，新PID79276在02:19–02:20连续为normal。母现场02:23:52复核fseventsd仍normal，当前CPU负载使总准入为critical，仍需标准资源票据，不宣称旧故障复发或绕过准入。原1387 r73恢复doing；消息 `[thread-id]#private-source-id` 已将Alpha/正式完整旅程交回同一执行现场，复用通过的审查、工位和正式只读证据。以已delivered的0d9bc为前驱，新回报 `development-return-1c683cdb4252f8ace207b9fc1406a4af` 已登记waiting；没有重挂已完成的runtime到版等待，也没有关闭原未满足项。
+
+**10-30 03:46 UTC技术验收接回**：原1c683回报已delivered；正式浏览器/MCP及Alpha R6结果由母owner核验通过。原1387更新r74/blocked，剩余原因改为自然证据/成本盘点及独立旧登记依赖；不再标主机、runtime g6或工程验收未过。F306依赖源485/492与完整证据均保留，原暂停D不因本通知解除。
+
+</details>
 
 ### 这次怎样才算完成
 
@@ -311,6 +339,7 @@ dot 本轮只是带题面提示、不额外搜索的一次回答；Q1–3 为“
 | KD-6 | 守望猫（伴随猫）不做静默实验：You 参与，按线程由他决定开关，要有配置和 UI/UX 设计；提示经猫猫球（F229）或小信箱递给他是首选候选。守望猫须服从性好、有自己的思考、幻觉低；候选先比Maine Coon（OpenAI 原生，可直接用现有整理猫位）与 Sonnet | You 同上：“让我参与，我来选什么时候开什么时候关，按照thread来，得有配置……联动猫猫球……或者在我们的小信箱里”；“守望🐈必须是一只遵从性好，有自己思考 幻觉低的猫” | 2026-10-24 |
 | KD-8 | 胶囊可插拔、人人看得见：内容按用户存在各自的私有数据区，不进仓库、不随开源发布；产品里给每位用户一个能看、能改自己胶囊的地方，猫可以起草，本人确认后生效；家里和开源用户走同一个入口，不设家里专用通道。家里 v1 已获批；写入开场的时机按交付路线原则 3，随看得见、能改的入口同批 | You `private-source-id`：“胶囊的稿子我觉得是OK的”；“这个可不合适丢到开源社区，只应该是家里的，开源社区的小伙伴的稿子应该有个地方他们能看见能改，猫猫能去形成”；“我们自己的胶囊也应该是能看见，反正开源社区的小伙伴能怎么看见，我们也应该能怎么看见” | 2026-10-25 |
 | KD-9 | 原F312/F321现场保留设计讨论；第1步剩余先写清F332范围，再新建执行thread，按难度选小星星或Sol6.1，review可找Sol5.6 | You `private-source-id`；本包跨持久记录/原生递送/画像读面，判复杂交小星星，复用原1387、不扩新阶段 | 2026-10-29 |
+| KD-10 | 守望猫角色选Sol6.1；当前指挥thread由Astra直接指挥。旧Luna/Sonnet离线结果保留，不能冒充Sol6.1的效果证据；选猫不自动启用试点 | 本指挥thread `[thread-id]` 的You `private-source-id`与`private-source-id`；10-30直接回读核对并补记 | 2026-10-29 |
 
 ## Design Gate
 

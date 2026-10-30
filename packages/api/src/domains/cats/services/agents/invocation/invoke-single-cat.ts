@@ -2871,7 +2871,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       try {
         const { checkSharedStatePreflight } = await import('../../../../../config/shared-state-preflight.js');
         const preflightRoot = workingProjectRoot ?? hostProjectRoot;
-        const ssCheck = checkSharedStatePreflight(preflightRoot);
+        const ssCheck = await checkSharedStatePreflight(preflightRoot);
         if (!ssCheck.ok) {
           if (ssCheck.unpushedFiles?.length) {
             const msg =

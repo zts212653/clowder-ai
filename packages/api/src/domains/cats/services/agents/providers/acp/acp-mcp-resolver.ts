@@ -259,6 +259,7 @@ export async function resolveAcpMcpServers(
      * (MCP dist is under the runtime root).
      */
     configSourceRoot?: string;
+    accessScope?: 'global' | 'project';
   },
 ): Promise<AcpMcpServer[]> {
   // F161: when mcpSupport is explicitly disabled, skip ALL MCP servers
@@ -357,8 +358,9 @@ export async function resolveAcpMcpServers(
           missing.push(name);
           continue;
         }
-        // F249: respect globalEnabled for external servers
-        const isEnabled = cap.globalEnabled ?? cap.enabled ?? true;
+        const isEnabled = opts?.catId
+          ? isMcpEnabledForCat(cap, opts.catId, { accessScope: opts.accessScope })
+          : (cap.globalEnabled ?? cap.enabled ?? true);
         if (!isEnabled) {
           log.info({ name }, 'Skipping globally disabled external server');
           continue;
@@ -373,9 +375,14 @@ export async function resolveAcpMcpServers(
           }
           continue;
         }
-        const server = capabilityEntryToAcpMcpServer(name, cap.mcpServer, externalRoot);
+        const serverName = cap.pluginId ? cap.id.replaceAll(':', '__') : name;
+        const server = capabilityEntryToAcpMcpServer(serverName, cap.mcpServer, externalRoot);
         if (server) {
-          if ('command' in server && cap.source === 'plugin' && cap.pluginId) server.hostSource = 'plugin';
+          if (servers.some((current) => current.name === server.name)) {
+            log.warn({ name: server.name }, 'Skipping duplicate encoded MCP server name');
+            continue;
+          }
+          if ('command' in server && cap.pluginId) server.hostSource = 'plugin';
           servers.push(server);
         } else missing.push(name);
       }
@@ -446,13 +453,14 @@ export function resolveDisabledServerIds(
   projectRoot: string,
   catId: string,
   preloadedConfig?: CapabilitiesConfig | null,
+  options: { accessScope?: 'global' | 'project' } = {},
 ): Set<string> {
   const capConfig = preloadedConfig !== undefined ? preloadedConfig : readCapabilitiesConfigSync(projectRoot);
   if (!capConfig) return new Set();
   const disabled = new Set(
     invocationPluginMcpConfig(capConfig, catId)
       .capabilities.filter((cap) => cap.type === 'mcp')
-      .filter((cap) => !projectInvocationPluginMcp(cap).available || !isMcpEnabledForCat(cap, catId))
+      .filter((cap) => !projectInvocationPluginMcp(cap).available || !isMcpEnabledForCat(cap, catId, options))
       .map((cap) => cap.id),
   );
   if (disabled.has('cat-cafe')) {

@@ -94,28 +94,34 @@ export function useCollectiveParticipation(connectionId: string) {
   const [notice, setNotice] = useState<string>();
   const busyRef = useRef(false);
   const readRevision = useRef(0);
+  const reading = useRef<number>();
   const base = `/api/plugins/official.collective-connector/connections/${encodeURIComponent(connectionId)}`;
   const load = useCallback(
     async (signal?: AbortSignal) => {
       const revision = ++readRevision.current;
-      const response = await apiFetch(`${base}/participation`, { signal }, { afterCurrentGet: true });
-      if (!response.ok) throw new Error('暂时无法读取参与设置，请重试。');
-      const data = (await response.json()) as ParticipationView;
-      if (
-        !Array.isArray(data.cats) ||
-        !Array.isArray(data.requests) ||
-        !Array.isArray(data.tasks) ||
-        !data.bindings ||
-        !data.desiredParticipation ||
-        !data.channelRoutes ||
-        !data.standingInterests ||
-        !Number.isInteger(data.attentionRevision) ||
-        !Number.isInteger(data.revision)
-      )
-        throw new Error('参与设置暂不可用，请稍后重试。');
-      if (signal?.aborted || revision !== readRevision.current) return;
-      setView(data);
-      setError(undefined);
+      reading.current = revision;
+      try {
+        const response = await apiFetch(`${base}/participation`, { signal }, { afterCurrentGet: true });
+        if (!response.ok) throw new Error('暂时无法读取参与设置，请重试。');
+        const data = (await response.json()) as ParticipationView;
+        if (
+          !Array.isArray(data.cats) ||
+          !Array.isArray(data.requests) ||
+          !Array.isArray(data.tasks) ||
+          !data.bindings ||
+          !data.desiredParticipation ||
+          !data.channelRoutes ||
+          !data.standingInterests ||
+          !Number.isInteger(data.attentionRevision) ||
+          !Number.isInteger(data.revision)
+        )
+          throw new Error('参与设置暂不可用，请稍后重试。');
+        if (signal?.aborted || revision !== readRevision.current) return;
+        setView(data);
+        setError(undefined);
+      } finally {
+        if (reading.current === revision) reading.current = undefined;
+      }
     },
     [base],
   );
@@ -128,7 +134,9 @@ export function useCollectiveParticipation(connectionId: string) {
       });
     };
     refresh();
-    const timer = window.setInterval(refresh, 5000);
+    const timer = window.setInterval(() => {
+      if (reading.current === undefined) refresh();
+    }, 5000);
     return () => {
       abort.abort();
       readRevision.current++;

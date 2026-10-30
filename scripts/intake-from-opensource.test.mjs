@@ -1143,6 +1143,17 @@ function makeHookFixture() {
   cpSync(resolve('scripts/lib/intake-brand-paths.mjs'), join(repoRoot, 'scripts/lib/intake-brand-paths.mjs'));
   chmodSync(join(repoRoot, 'scripts', 'intake-from-opensource.sh'), 0o755);
 
+  // The actual hook runs its secret scanner before the branch-specific guards.
+  // Keep that scanner real in the fixture, including its local module closure.
+  for (const path of [
+    'secret-git-guard.mjs',
+    'lib/secret-content-scan.mjs',
+    'lib/secret-content-rules.mjs',
+    'lib/secret-git-objects.mjs',
+  ]) {
+    cpSync(resolve('scripts', path), join(repoRoot, 'scripts', path));
+  }
+
   cpSync(
     resolve('scripts/materialize-biome-index-snapshot.mjs'),
     join(repoRoot, 'scripts/materialize-biome-index-snapshot.mjs'),

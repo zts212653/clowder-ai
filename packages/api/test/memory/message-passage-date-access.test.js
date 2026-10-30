@@ -103,7 +103,9 @@ test('a legacy file remains readable without migrating in the worker, then gains
   const { store, path } = await fixture(t);
   const db = store.getDb();
   db.exec('DROP INDEX IF EXISTS idx_message_passage_date');
-  db.prepare('DELETE FROM schema_version WHERE version=73').run();
+  // Rewind to v72 even when the initialized store includes later migrations.
+  db.prepare('DELETE FROM schema_version WHERE version >= 73').run();
+  assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_version').get().version, 72);
   store.close();
   const legacyReader = new SqliteEvidenceStore(path, undefined, { workerMode: 'read' });
   await legacyReader.initialize();
@@ -114,7 +116,7 @@ test('a legacy file remains readable without migrating in the worker, then gains
       before.plan.some((detail) => detail.includes('created_at>?')),
       false,
     );
-    assert.equal(legacyReader.getDb().prepare('SELECT 1 FROM schema_version WHERE version=73').get(), undefined);
+    assert.equal(legacyReader.getDb().prepare('SELECT MAX(version) AS version FROM schema_version').get().version, 72);
   } finally {
     legacyReader.close();
   }
@@ -154,7 +156,9 @@ test('an interrupted version stamp rolls back the new index and can retry withou
   const { store } = await fixture(t);
   const db = store.getDb();
   db.exec('DROP INDEX IF EXISTS idx_message_passage_date');
-  db.prepare('DELETE FROM schema_version WHERE version=73').run();
+  // Rewind to v72 even when the initialized store includes later migrations.
+  db.prepare('DELETE FROM schema_version WHERE version >= 73').run();
+  assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_version').get().version, 72);
   const before = queryAndPlan(db, 'time').rows;
   db.exec(`CREATE TRIGGER reject_date_upgrade BEFORE INSERT ON schema_version
     WHEN NEW.version=73 BEGIN SELECT RAISE(ABORT, 'controlled date upgrade failure'); END`);

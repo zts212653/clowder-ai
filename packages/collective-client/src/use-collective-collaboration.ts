@@ -102,14 +102,18 @@ export function useCollectiveCollaboration(input: {
     const { snapshot } = input,
       namespace = collectiveClientNamespace(snapshot);
     if (!namespace || !snapshot.meta || !snapshot.collective) throw new Error('Collective session unavailable');
-    const result = await input.request(path, {
-      method: 'POST',
-      body: JSON.stringify({
-        serviceInstanceId: snapshot.meta.serviceInstanceId,
-        collectiveId: snapshot.collective.collectiveId,
-        roadmapId,
-      }),
-    });
+    const result = await input.request(
+      path,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          serviceInstanceId: snapshot.meta.serviceInstanceId,
+          collectiveId: snapshot.collective.collectiveId,
+          roadmapId,
+        }),
+      },
+      { readOnly: true },
+    );
     if (namespace !== input.currentNamespace.current) throw new Error('Collective session changed');
     return result;
   };

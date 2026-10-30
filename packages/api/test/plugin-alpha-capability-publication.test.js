@@ -42,16 +42,27 @@ test('a runtime-labelled linked worktree without its root cannot publish or remo
   await verifyReadOnlyLifecycle(t, 'runtime', false);
 });
 
-test('a persistent runtime still publishes its own managed MCP descriptor', async (t) => {
+test('a persistent runtime publishes its managed descriptor and current member view', async (t) => {
   const f = await fixture(t, 'runtime');
   await f.mutate(true);
-  assert.equal(await f.runtime.supervisor.resolveMemberMcpView(), undefined);
+  const view = await f.runtime.supervisor.resolveMemberMcpView();
+  assert.equal(view.localCapabilityRoot, f.capabilityProjectRoot);
+  assert.equal(view.entries.length, 1);
+  const [entry] = view.entries;
+  assert.equal(entry.capabilityId, `plugin:${f.pluginId}:native`);
+  assert.equal(entry.pluginId, f.pluginId);
+  assert.equal(entry.isCurrent(), true);
   const config = await readCapabilitiesConfig(f.capabilityProjectRoot);
   const mcp = config.capabilities.find((entry) => entry.id === `plugin:${f.pluginId}:native`);
   assert.ok(mcp.mcpServer.workingDir.startsWith(f.projectRoot));
+  assert.equal(entry.server.workingDir, mcp.mcpServer.workingDir);
+  assert.equal(entry.server.command, mcp.mcpServer.command);
+  assert.deepEqual(entry.server.args, mcp.mcpServer.args);
   assert.deepEqual(mcp.blockedCats, ['blocked-cat']);
   assert.equal(f.writes(), 1);
   assert.equal(config.capabilities.find((entry) => entry.id === 'unrelated').enabled, false);
+  await f.mutate(false);
+  assert.equal(entry.isCurrent(), false);
 });
 
 test('failed Alpha activation cannot restore policy over the persistent owner configuration', async (t) => {

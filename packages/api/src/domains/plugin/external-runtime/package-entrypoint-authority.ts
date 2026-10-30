@@ -47,6 +47,7 @@ async function rejectSymlinkComponents(rootDir: string, entrypoint: string): Pro
 export async function verifyPackageEntrypoint(
   packageRecord: ExecutablePluginPackageRecord,
   located: VerifiedPluginPackage,
+  sharedMcpContributionId?: string,
 ): Promise<{ readonly rootDir: string; readonly entrypoint: string }> {
   if (!isDeepStrictEqual(located.manifest, packageRecord.manifest)) {
     throw new ExternalPluginRuntimeError(
@@ -54,7 +55,16 @@ export async function verifyPackageEntrypoint(
       'located package manifest differs from the admitted package record',
     );
   }
-  const declared = packageRecord.manifest.runtime?.entrypoint;
+  const candidates = packageRecord.manifest.contributions?.filter(
+    (c) => c.type === 'mcp' && c.id === sharedMcpContributionId,
+  );
+  const contribution = candidates?.length === 1 ? candidates[0] : undefined;
+  const declared =
+    sharedMcpContributionId === undefined
+      ? packageRecord.manifest.runtime?.entrypoint
+      : packageRecord.manifest.runtime?.transport === 'builtin' && contribution?.type === 'mcp'
+        ? contribution.sharedFactory?.module
+        : undefined;
   if (declared === undefined) {
     throw new ExternalPluginRuntimeError(
       'INVALID_ENTRYPOINT',

@@ -6,8 +6,7 @@ import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadSt
 import { createPluginThreadHost } from '../dist/domains/plugin/host-surface/plugin-thread-host.js';
 import { MemoryConnectorThreadBindingStore } from '../dist/infrastructure/connectors/ConnectorThreadBindingStore.js';
 
-function fixture() {
-  const threadStore = new ThreadStore();
+function fixture(threadStore = new ThreadStore()) {
   const messageStore = new MessageStore();
   const bindingStore = new MemoryConnectorThreadBindingStore();
   const cats = {
@@ -92,6 +91,40 @@ test('lists owner-accessible threads, bounded by recent activity, without privat
   assert.equal(JSON.stringify(list).includes('private'), false);
   assert.deepEqual(f.backlogReads, [['private-backlog-id', 'owner']]);
   for (const limit of [0, 51, 1.5, NaN]) await assert.rejects(() => f.host.list({ limit }), /limit/);
+});
+
+test('candidate thread reads use the owner visibility index without scanning unrelated threads', async () => {
+  const f = fixture(new ThreadStore({ maxThreads: 10_000 }));
+  const referenced = await f.threadStore.create('owner', 'Referenced');
+  for (let i = 0; i < 120; i++) await f.threadStore.create('owner', `Unrelated ${i}`);
+  const foreign = await f.threadStore.create('foreign', 'Foreign');
+  const indexed = await f.threadStore.ensureThread('indexed-system', 'Indexed system');
+  await f.threadStore.indexForUser(indexed.id, 'owner');
+  const deleted = await f.threadStore.create('owner', 'Deleted');
+  await f.threadStore.softDelete(deleted.id);
+  const anchor = await f.threadStore.ensureExternalRuntimeAnchorThread('antigravity-desktop', 'owner');
+  await f.threadStore.indexForUser(anchor.id, 'owner');
+  await f.threadStore.get('default');
+  let fullListCalls = 0;
+  const fullList = f.threadStore.list.bind(f.threadStore);
+  f.threadStore.list = (...args) => {
+    fullListCalls += 1;
+    return fullList(...args);
+  };
+
+  assert.deepEqual(
+    (await f.host.list({ threadIds: [referenced.id, foreign.id, indexed.id, deleted.id, anchor.id, 'default'] }))
+      .map((thread) => thread.id)
+      .sort(),
+    ['default', indexed.id, referenced.id].sort(),
+  );
+  assert.equal(fullListCalls, 0);
+  await assert.rejects(
+    () => f.host.list({ threadIds: [referenced.id], limit: 1 }),
+    /threadIds.*limit|limit.*threadIds/,
+  );
+  f.threadStore.listCandidates = undefined;
+  await assert.rejects(() => f.host.list({ threadIds: [referenced.id] }), /unavailable/);
 });
 
 test('list cursor reaches owner threads beyond 50 and terminates without repeating the boundary', async () => {
