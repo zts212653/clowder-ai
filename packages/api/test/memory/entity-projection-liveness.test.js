@@ -75,6 +75,11 @@ test(
     const address = app.server.address();
     assert.ok(address && typeof address !== 'string');
     const url = `http://127.0.0.1:${address.port}/health`;
+    // Establish the client/server path before measuring responsiveness under
+    // projection. Cold client initialization is not projection work.
+    const warmupStarted = performance.now();
+    assert.equal(await (await fetch(url)).text(), 'ok');
+    const warmupHealthMs = performance.now() - warmupStarted;
     const health = [];
     const writes = [];
     const publications = [];
@@ -83,6 +88,7 @@ test(
     let phase = 'before-projection';
     let stagedRows = 0;
     let slowestWrite;
+    let slowestHealth;
     const telemetry = channel('cat-cafe.entity-mention-projection');
     const subscriber = (message) => {
       const event = message;
@@ -99,9 +105,24 @@ test(
     let running = true;
     const probe = (async () => {
       while (running) {
+        const healthPhase = phase;
+        const healthRows = stagedRows;
+        const healthCpu = process.cpuUsage();
         const started = performance.now();
         assert.equal(await (await fetch(url)).text(), 'ok');
-        health.push(performance.now() - started);
+        const healthMs = performance.now() - started;
+        health.push(healthMs);
+        if (!slowestHealth || healthMs > slowestHealth.durationMs) {
+          slowestHealth = {
+            durationMs: healthMs,
+            atMs: started - probeStarted,
+            phaseBefore: healthPhase,
+            phaseAfter: phase,
+            stagedRowsBefore: healthRows,
+            stagedRowsAfter: stagedRows,
+            processCpuUs: process.cpuUsage(healthCpu),
+          };
+        }
         diagnostics.phase(phase);
         // The shared helper's passageCount records the current stagedRows here.
         diagnostics.beforeWrite(stagedRows);
@@ -146,8 +167,10 @@ test(
         t.diagnostic(
           JSON.stringify({
             rows: 400_000,
+            warmupHealthMs,
             healthSamples: health.length,
             healthMaxMs: Math.max(...health),
+            slowestHealth,
             ledgerMaxMs: Math.max(...writes),
             publishMaxMs: Math.max(...publications),
             slowestWrite,
