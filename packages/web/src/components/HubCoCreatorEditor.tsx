@@ -1,5 +1,6 @@
 'use client';
 
+import { coCreatorNickname } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
@@ -38,6 +39,8 @@ interface HubCoCreatorEditorProps {
 export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoCreatorEditorProps) {
   const current = coCreator ?? DEFAULT_CO_CREATOR;
   const [name, setName] = useState(current.name);
+  const [nickname, setNickname] = useState(coCreatorNickname(current) ?? '');
+  const [nicknameEdited, setNicknameEdited] = useState(false);
   const [avatar, setAvatar] = useState(current.avatar ?? '');
   const [colorPrimary, setColorPrimary] = useState(current.color?.primary ?? DEFAULT_CO_CREATOR.color!.primary);
   const [colorSecondary, setColorSecondary] = useState(current.color?.secondary ?? DEFAULT_CO_CREATOR.color!.secondary);
@@ -52,6 +55,8 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
     if (!open) return;
     const next = coCreator ?? DEFAULT_CO_CREATOR;
     setName(next.name);
+    setNickname(coCreatorNickname(next) ?? '');
+    setNicknameEdited(false);
     setAvatar(next.avatar ?? '');
     setColorPrimary(next.color?.primary ?? DEFAULT_CO_CREATOR.color!.primary);
     setColorSecondary(next.color?.secondary ?? DEFAULT_CO_CREATOR.color!.secondary);
@@ -94,6 +99,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: cleanedName,
+          ...(nicknameEdited ? { nickname: nickname.trim() || null } : {}),
           aliases: uniqueTags(aliases.map((alias) => alias.trim())),
           mentionPatterns: cleanedMentions,
           avatar: avatar.trim() || null,
@@ -108,17 +114,8 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
         setError((payload.error as string) ?? `保存失败 (${res.status})`);
         return;
       }
-      primeCoCreatorConfigCache({
-        name: cleanedName,
-        ...(current.nickname !== undefined ? { nickname: current.nickname } : {}),
-        aliases: uniqueTags(aliases.map((alias) => alias.trim())),
-        mentionPatterns: cleanedMentions,
-        avatar: avatar.trim() || '',
-        color: {
-          primary: colorPrimary,
-          secondary: colorSecondary,
-        },
-      });
+      const saved = (await res.json()) as { config: { coCreator: CoCreatorConfig } };
+      primeCoCreatorConfigCache(saved.config.coCreator);
       await onSaved();
       onClose();
     } catch (err) {
@@ -159,6 +156,19 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
               required
               placeholder="Owner 显示名称"
             />
+            <TextField
+              label="称呼（可选）"
+              ariaLabel="Owner Nickname"
+              value={nickname}
+              onChange={(value) => {
+                setNickname(value);
+                setNicknameEdited(true);
+              }}
+              placeholder="留空使用 co-creator"
+            />
+            {current.nickname && coCreatorNickname(current) === undefined && !nicknameEdited ? (
+              <p className="text-xs text-cafe-secondary">历史称呼“{current.nickname}”未启用，可在此重新设置。</p>
+            ) : null}
 
             <div className="flex items-center gap-3">
               <span className="w-[150px] shrink-0 text-xs font-bold text-cafe-secondary">Avatar</span>
