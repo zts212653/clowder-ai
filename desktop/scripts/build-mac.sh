@@ -406,7 +406,7 @@ for arch in "${ARCHS[@]}"; do
   #   2. Convert the writable image to compressed UDZO for distribution.
   rw_dmg="$(mktemp -u).dmg"
   echo "  Creating writable staging DMG for ${arch} ..."
-  hdiutil create -volname "Clowder AI" -srcfolder "$dmg_staging" -ov \
+  hdiutil create -puppetstrings -volname "Clowder AI" -srcfolder "$dmg_staging" -ov \
     -fs HFS+ -format UDRW "$rw_dmg" \
     || die "hdiutil create (writable) failed for ${arch}"
   rm -rf "$dmg_staging"
