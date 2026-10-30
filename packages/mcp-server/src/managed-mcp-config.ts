@@ -88,13 +88,15 @@ function launchCredentials(callback: Record<string, string>, server: Server) {
 export function materializeNativeMcpHttp(
   servers: Record<string, Server>,
   callback: Record<string, string>,
+  pluginPaths: Readonly<Record<string, string>> = {},
 ): Record<string, Server> {
   if (callback.CAT_CAFE_MCP_TRANSPORT !== 'shared') return servers;
   let credentials: ReturnType<typeof launchCredentials> | undefined;
   return Object.fromEntries(
     Object.entries(servers).map(([name, server]) => {
       const family = installedFamily(server);
-      if (family === undefined) return [name, server];
+      const pluginPath = pluginPaths[name];
+      if (family === undefined && pluginPath === undefined) return [name, server];
       const origin = new URL(callback.CAT_CAFE_API_URL ?? '');
       if (
         origin.protocol !== 'http:' ||
@@ -107,9 +109,15 @@ export function materializeNativeMcpHttp(
       )
         throw new Error('shared_mcp_loopback_required');
       credentials ??= launchCredentials(callback, server);
-      const url = new URL('/api/member-mcp/mcp', origin);
+      if (
+        pluginPath !== undefined &&
+        !/^\/api\/plugin-mcp\/[^/?#]+\/[^/?#]+\?shared=1&activation=[A-Za-z0-9-]+$/.test(pluginPath)
+      )
+        throw new Error('shared_plugin_mcp_path_invalid');
+      const url = new URL(pluginPath ?? '/api/member-mcp/mcp', origin);
+      if (url.origin !== origin.origin) throw new Error('shared_mcp_loopback_required');
       url.searchParams.set('shared', '1');
-      if (family) url.searchParams.set('family', family);
+      if (family && pluginPath === undefined) url.searchParams.set('family', family);
       const { command: _command, args: _args, cwd: _cwd, env: _env, env_vars: _inherited, ...settings } = server;
       return [
         name,

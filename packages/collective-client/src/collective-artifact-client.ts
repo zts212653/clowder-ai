@@ -13,7 +13,7 @@ import {
   collectiveArtifactProjectionSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
-import type { ClientRequest } from './client-request.js';
+import type { ClientReadPolicy, ClientRequest } from './client-request.js';
 import { appendSharedAnnotationPage, assertSharedAnnotationPage } from './shared-artifact-annotation-pages.js';
 import { resolveSharedArtifactModification } from './shared-artifact-control-client.js';
 import { sendSharedArtifactFeedback } from './shared-artifact-feedback-client.js';
@@ -66,13 +66,13 @@ type Coordinates = { serviceInstanceId: string; collectiveId: string };
 /** This factory retains one authenticated coordinate binding; mutation clients are split out, while shared page/schema assembly stays here to avoid cyclic imports.
  * Shared Service coordinates only; the current Human bearer stays inside the existing request transport. */
 export function collectiveArtifactClient(request: ClientRequest, coordinates: Coordinates, namespace: string) {
-  const post = <T>(path: string, body: unknown) =>
-    request<T>(`/api/artifacts/${path}`, { method: 'POST', body: JSON.stringify(body) });
+  const post = <T>(path: string, body: unknown, policy?: ClientReadPolicy) =>
+    request<T>(`/api/artifacts/${path}`, { method: 'POST', body: JSON.stringify(body) }, policy);
   const historyClient = sharedArtifactHistoryClient(post, coordinates);
   const list = async () => {
     const artifacts = z
       .object({ artifacts: z.array(collectiveArtifactProjectionSchema) })
-      .parse(await post('list', coordinates)).artifacts;
+      .parse(await post('list', coordinates, { readOnly: true })).artifacts;
     if (
       artifacts.some(
         (artifact) =>

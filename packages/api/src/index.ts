@@ -573,6 +573,7 @@ import { createLiveTaskAuthority } from './routes/live-task-authority.js';
 import { marketplaceRoutes } from './routes/marketplace.js';
 import { mediaRoutes } from './routes/media-routes.js';
 import { registerMemberMcpRoutes, resolveMemberToolFamiliesForCat } from './routes/member-mcp.js';
+import { resolveMessageStickerDirectories } from './routes/message-sticker-runtime-assets.js';
 import { registerPersonMemoryDecisionRoutes } from './routes/person-memory-decision-routes.js';
 import { personMemoryOwnerReadRoutes } from './routes/person-memory-owner-read.js';
 import { previewRoutes } from './routes/preview.js';
@@ -3542,6 +3543,7 @@ async function main(): Promise<void> {
     sourceReaders: entityMemorySourceReaders,
   });
   await app.register(profileMemoryOwnerRoutes, {
+    evidenceDb: memoryServices.store.getDb(),
     ownerUserId: privateUserId,
     store: profileMemoryLifecycleStore,
     lifecycle: profileMemoryLifecycleService,
@@ -4818,6 +4820,7 @@ async function main(): Promise<void> {
       : {}),
     approvalIngress,
     profileRepository,
+    profileReadEvidenceDb: memoryServices.store.getDb(),
     agentRegistry,
     router,
     invocationRecordStore,
@@ -5445,6 +5448,16 @@ async function main(): Promise<void> {
     threadStore,
     sources: { messageStore },
   });
+  const { registerPluginSharedMcpRoutes } = await import('./routes/plugin-shared-mcp.js');
+  registerPluginSharedMcpRoutes(app, {
+    actions: pluginRuntime.supervisor.nativeActions,
+    supervisor: pluginRuntime.supervisor,
+    registry,
+    threadStore,
+    sources: { messageStore },
+    apiBaseUrl: `http://127.0.0.1:${PORT}`,
+    deploymentId: sharedMcpDeploymentId(`http://127.0.0.1:${PORT}`),
+  });
   const { prepareHostInitialPlugins } = await import('./domains/plugin/manager/initial-plugin-installation.js');
   let initialPlugins: Awaited<ReturnType<typeof prepareHostInitialPlugins>> | undefined;
   try {
@@ -5885,13 +5898,7 @@ async function main(): Promise<void> {
     transcribeAudio: (
       await import('./infrastructure/connectors/media/CollectiveSttProvider.js')
     ).createConfiguredCollectiveTranscriber(),
-    stickerDirectories: {
-      memory: join(findMonorepoRoot(dirname(fileURLToPath(import.meta.url))), 'packages/web/public/f321/stickers'),
-      collaboration: join(
-        findMonorepoRoot(dirname(fileURLToPath(import.meta.url))),
-        'docs/videos/shared-assets/cat-stickers/2026-10-11-collaboration',
-      ),
-    },
+    stickerDirectories: resolveMessageStickerDirectories(),
     owner: collaborativeContent.owner,
     media: artifactReview.media,
     reviews: workspaceContentReviews.store,

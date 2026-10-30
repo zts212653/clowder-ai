@@ -131,6 +131,8 @@ export function useCollectiveRefresh(
             error: collectiveClientErrorMessage(error),
           }));
         }
+      } finally {
+        if (pending.current === abort) pending.current = undefined;
       }
     },
     [key, loadMe, request, setSnapshot, token],
@@ -140,7 +142,8 @@ export function useCollectiveRefresh(
     if (snapshot.phase !== 'ready' || !key) return;
     if (!latest.current.restrictedScope) void run();
     const interval = window.setInterval(() => {
-      if (!latest.current.restrictedScope) void run();
+      // A timer is not a newer user intent: let a slow serial read finish.
+      if (!latest.current.restrictedScope && !pending.current) void run();
     }, 1800);
     return () => {
       window.clearInterval(interval);

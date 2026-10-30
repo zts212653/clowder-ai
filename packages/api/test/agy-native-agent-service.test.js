@@ -390,7 +390,7 @@ describe('F325 one-turn native AGY carrier', () => {
       assert.deepEqual(mcp.mcpServers, {});
       assert.doesNotMatch(body, / {2}- (?:run_command|write_to_file|call_mcp_tool)\n/);
       const guardCommand = hooks['cat-cafe-native-effect'].PreToolUse[0].hooks[0].command;
-      assert.ok(guardCommand.endsWith(`'read-only' '${launch.env.HOME}'`), guardCommand);
+      assert.ok(guardCommand.endsWith(`'read-only' '${launch.env.HOME}' '${realpathSync(f.workspace)}'`), guardCommand);
     } finally {
       f.cleanup();
     }

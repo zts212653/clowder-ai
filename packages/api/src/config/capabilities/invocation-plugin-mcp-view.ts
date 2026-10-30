@@ -7,6 +7,9 @@ export interface InvocationPluginMcpEntry {
   readonly pluginId: string;
   readonly installationPolicy?: Omit<CapabilityEntry, 'mcpServer' | 'mcpServerOverride'>;
   readonly policySourceRef?: string;
+  /** Host-only projection; never persisted or accepted as package-supplied caller authority. */
+  readonly sharedHttpPath?: string;
+  readonly sharedHttpUnavailableReason?: string;
   readonly server: {
     readonly command: string;
     readonly args: readonly string[];
@@ -27,6 +30,23 @@ const invocationView = new AsyncLocalStorage<{
   readonly view: InvocationPluginMcpView | undefined;
   readonly scope: PluginMcpExposureScope | undefined;
 }>();
+
+export function invocationPluginMcpHttpPaths(servers: Record<string, Record<string, unknown>>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const entry of invocationView.getStore()?.view?.entries ?? []) {
+    const server = servers[entry.capabilityId.replaceAll(':', '__')];
+    if (!server || !entry.sharedHttpPath || !entry.isCurrent()) continue;
+    const env = server.env as Record<string, unknown> | undefined;
+    if (
+      server.command !== entry.server.command ||
+      JSON.stringify(server.args) !== JSON.stringify(entry.server.args) ||
+      env?.CLOWDER_PLUGIN_ACTION_TOKEN !== entry.server.env.CLOWDER_PLUGIN_ACTION_TOKEN
+    )
+      continue;
+    result[entry.capabilityId.replaceAll(':', '__')] = entry.sharedHttpPath;
+  }
+  return result;
+}
 
 export function invocationPluginMcpConfig(config: import('@cat-cafe/shared').CapabilitiesConfig, memberCatId: string) {
   const context = invocationView.getStore();

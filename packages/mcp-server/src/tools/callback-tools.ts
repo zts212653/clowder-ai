@@ -83,6 +83,7 @@ import {
   createDeferredPersonMemoryTool,
   createProactiveMemoryAbstentionTool,
 } from './proactive-memory-opportunity-tool.js';
+import { withProfileReadRecovery } from './profile-read-recovery.js';
 import { projectRoutingCallbackResponse } from './routing-preflight-response.js';
 
 /**
@@ -2737,6 +2738,15 @@ export async function handleProposeSessionHandoff(input: {
 // ============ F231 Phase C: Propose Profile Update ============
 
 export const readProfileInputSchema = {
+  requestId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      'Stable ID for this read. Reuse on retry to avoid counting twice; omit to generate one. A successful response includes readRequestId. Use a new ID for a new read or a changed profile.',
+    ),
   agentKeyCatId: agentKeyCatIdSchema,
   expectedRevision: z
     .string()
@@ -2754,18 +2764,17 @@ export const readProfileInputSchema = {
 };
 
 export async function handleReadProfile(input: {
+  requestId?: string | undefined;
   expectedRevision?: string | undefined;
   layer?: ProfileUpdateTargetLayer | undefined;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  const params: Record<string, string> = {};
+  const requestId = input.requestId ?? randomUUID();
+  const params: Record<string, string> = { requestId };
   if (input.layer) params.layer = input.layer;
   if (input.expectedRevision) params.expectedRevision = input.expectedRevision;
-  return callbackGet(
-    '/api/callbacks/profile',
-    Object.keys(params).length > 0 ? params : undefined,
-    agentKeyOptions(input),
-  );
+  const result = await callbackGet('/api/callbacks/profile', params, agentKeyOptions(input));
+  return withProfileReadRecovery(result, requestId);
 }
 
 export const proposeProfileUpdateInputSchema = {
@@ -4359,7 +4368,7 @@ export const callbackTools = [
       'Supports primer (default, per-persona relationship), corpus (owner-wide shared facts), and capsule (the current opening portrait). ' +
       'Use when: L0 shows the profile URI, you are starting a session and need relationship or owner context, or you need to verify the currently effective content before proposing an update. ' +
       'NOT for: searching project knowledge or old threads (use search_evidence), reading arbitrary workspace files (use read_file_slice), or reading another user/cat/persona. ' +
-      'Output: the current content + revision (sha256 hash); expectedRevision rejects changed snapshots without returning content. Read-only, no profile change. ' +
+      'Output: the current content + revision (sha256 hash); expectedRevision rejects changed snapshots without returning content. No profile change; successful reads retain content-free owner-scoped usage evidence. Reuse requestId when retrying. ' +
       `GOTCHA: for a runtime invocation, use the ${deploymentDefaults.brand.displayName} MCP bound to that invocation; a separately installed App with the same tool name is not a substitute. A missing profile on another connection does not establish absence here. The primer is approved current context, not proof of a historical first occurrence. For original message coordinates use cat_cafe_get_message(mode="full", messageId=the bare ID after #), not graph_resolve. A revision mismatch requires a fresh read. An unavailable current layer is not permission to reconstruct a current agreement from old messages; describe history as history instead. Identity comes from authentication, never userId, catId, path or relationshipKey input.`,
     inputSchema: readProfileInputSchema,
     handler: handleReadProfile,

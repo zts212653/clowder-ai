@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
+import { validateHostPluginManifest } from '../dist/domains/plugin/desktop-window-runtime/presentation-manifest.js';
 import {
   HostInventoryControlPlane,
   MemoryPluginInventoryStore,
@@ -62,16 +63,16 @@ describe('K-2A contract-native inventory', () => {
   it('pins the consumed contract candidate archive and preserves older manifest compatibility', () => {
     assert.equal(
       packageJson.dependencies['@clowder-ai/plugin-contract'],
-      'file:vendor/clowder-ai-plugin-contract-0.3.1-candidate.0-f327-3edd45d1c7ba.tgz',
+      'file:vendor/clowder-ai-plugin-contract-0.3.2-candidate.0-f333-20a1e1094c63.tgz',
     );
     const archive = readFileSync(
-      new URL('../vendor/clowder-ai-plugin-contract-0.3.1-candidate.0-f327-3edd45d1c7ba.tgz', import.meta.url),
+      new URL('../vendor/clowder-ai-plugin-contract-0.3.2-candidate.0-f333-20a1e1094c63.tgz', import.meta.url),
     );
     assert.equal(
       createHash('sha256').update(archive).digest('hex'),
-      '3edd45d1c7ba35dae56ccafd10225be52acc7689f91f8bcad7483c0fa84300af',
+      '20a1e1094c63f1c8c6554d87b8c16ad732430063db611dd5218a44fca4a95a1c',
     );
-    assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, '0.3.1-candidate.0');
+    assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, '0.3.2-candidate.0');
     assert.equal(PLUGIN_CONTRACT_VERSION, '0.1.0');
     assert.equal(PLUGIN_MANIFEST_CONTRACT_RANGE, `>=0.1.0-beta.13 <=${PLUGIN_CONTRACT_PACKAGE_VERSION}`);
   });
@@ -156,6 +157,9 @@ describe('K-2A contract-native inventory', () => {
       '0.2.0-beta.1',
       '0.2.0+build.1',
       '0.3.1-beta.1',
+      '0.3.1-candidate.1',
+      '0.3.1',
+      '0.3.2-beta.1',
     ]) {
       const { store, controlPlane } = harness();
       await controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion }) }));
@@ -164,7 +168,7 @@ describe('K-2A contract-native inventory', () => {
   });
 
   it('rejects declarations below the compatibility floor or above the implemented contract without writes', async () => {
-    for (const contractVersion of ['0.0.99', '0.1.0-beta.12', '0.3.1-candidate.1', '0.3.1', '0.4.0', '1.0.0']) {
+    for (const contractVersion of ['0.0.99', '0.1.0-beta.12', '0.3.2-candidate.1', '0.3.2', '0.4.0', '1.0.0']) {
       const { store, controlPlane } = harness();
       const before = await store.snapshot();
       await assert.rejects(controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion }) })), {
@@ -183,10 +187,27 @@ describe('K-2A contract-native inventory', () => {
 
   it('rejects a newer contract without admitting any inventory', async () => {
     const { store, controlPlane } = harness();
-    await assert.rejects(controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion: '0.3.1' }) })), {
+    await assert.rejects(controlPlane.installPackage(candidate({ manifest: manifest({ contractVersion: '0.3.2' }) })), {
       code: 'CONTRACT_VERSION_MISMATCH',
     });
     assert.deepEqual((await store.snapshot()).packages, []);
+  });
+
+  it('keeps the old Host range from admitting a plugin that requires the new contract', async () => {
+    const contract = {
+      manifestContractRange: '>=0.1.0-beta.13 <=0.3.1-candidate.0',
+      validateManifest: validateHostPluginManifest,
+    };
+    const store = new MemoryPluginInventoryStore(undefined, { contract });
+    const controlPlane = new HostInventoryControlPlane(store, { contract });
+    await assert.rejects(
+      controlPlane.installPackage(
+        candidate({ manifest: manifest({ contractVersion: PLUGIN_CONTRACT_PACKAGE_VERSION }) }),
+      ),
+      { code: 'CONTRACT_VERSION_MISMATCH' },
+    );
+    assert.deepEqual((await store.snapshot()).packages, []);
+    assert.deepEqual((await store.snapshot()).instances, []);
   });
 
   it('can bind admission to an exact newer contract runtime using the selected contract runtime', async () => {

@@ -6,6 +6,7 @@ import {
   settlePluginInvocation,
 } from '../../carrier/host-invocation.js';
 import type { PluginRuntimeAdmission, PluginRuntimeCarrier } from '../../carrier/runtime-carrier.js';
+import type { SharedMcpFactory } from '../../declared/shared-mcp-factory.js';
 import { startFailureRecord } from '../../diagnostics/plugin-start-failure.js';
 import { ExternalPluginRuntimeError } from '../../external-runtime/types.js';
 import type { PluginInventoryStore } from '../../host-inventory/ports.js';
@@ -19,6 +20,7 @@ import type { ExecutablePluginPackageRecord, PluginInstanceRecord, RuntimeState 
  * (F202 Train C1 terminal contract, clause 6).
  */
 export interface BundledPluginRuntime {
+  resolveMcpFactory?(pluginInstanceId: string, contributionId: string): Promise<SharedMcpFactory | undefined>;
   claims(packageRecord: Pick<ExecutablePluginPackageRecord, 'manifest'>): boolean;
   /**
    * The carrier hands over the package record it fenced, so a runtime that needs the
@@ -77,12 +79,22 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
     this.#now = options.now ?? Date.now;
   }
 
+  async resolveMcpFactory(pluginInstanceId: string, contributionId: string): Promise<SharedMcpFactory | undefined> {
+    await this.authority(pluginInstanceId);
+    const active = this.#active.get(pluginInstanceId);
+    if (!active?.valid || active.starting || active.stopping) return undefined;
+    const factory = await active.runtime.resolveMcpFactory?.(pluginInstanceId, contributionId);
+    await this.authority(pluginInstanceId);
+    if (this.#active.get(pluginInstanceId) !== active || !active.valid) return undefined;
+    return factory;
+  }
+
   claims({ packageRecord }: PluginRuntimeAdmission): boolean {
     const { runtime } = packageRecord.manifest;
     return (runtime === undefined || runtime.transport === 'builtin') && this.#runtimeFor(packageRecord) !== undefined;
   }
 
-  async start(pluginInstanceId: string): Promise<unknown> {
+  async start(pluginInstanceId: string, admitContributions?: () => Promise<void>): Promise<unknown> {
     const epoch = this.#startEpoch.get(pluginInstanceId) ?? 0;
     const authority = await this.authority(pluginInstanceId);
     if (epoch !== (this.#startEpoch.get(pluginInstanceId) ?? 0)) {
@@ -135,6 +147,12 @@ export class BundledPluginRuntimeCarrier implements PluginRuntimeCarrier {
       if (this.#active.get(pluginInstanceId) !== active || !active.valid) {
         throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'builtin startup was cancelled');
       }
+      // The module is available to the Host, but its factories/static contributions
+      // must finish admission before the owner-facing card can promise "running".
+      active.starting = false;
+      await admitContributions?.();
+      if (this.#active.get(pluginInstanceId) !== active || !active.valid)
+        throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'builtin startup was cancelled');
       await this.setBundledRuntimeState(authority, 'healthy');
       if (!active.valid) throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'builtin startup was cancelled');
       return { pluginInstanceId, closed };

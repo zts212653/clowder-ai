@@ -2,6 +2,7 @@ import type { NativeMcpServer } from './native-mcp-types.js';
 
 export type { NativeMcpServer } from './native-mcp-types.js';
 
+import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { CapabilityEntry } from '@cat-cafe/shared';
 import type {
@@ -12,6 +13,7 @@ import { normalizeToolExecutionPolicy } from '../../cats/services/agents/invocat
 import type { ToolExecutionPolicy } from '../../cats/services/types.js';
 import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
 import { NativePluginActionError, type NativePluginActions } from './native-plugin-actions.js';
+import type { SharedMcpFactory } from './shared-mcp-factory.js';
 
 export interface DeclaredMcpLaunch {
   readonly contributionId: string;
@@ -24,6 +26,9 @@ interface Activation {
   readonly admission: PluginRuntimeAdmission;
   readonly generation: number;
   readonly launches: readonly DeclaredMcpLaunch[];
+  readonly revision: string;
+  readonly factories: ReadonlyMap<string, SharedMcpFactory>;
+  readonly factoryUnavailableReasons: ReadonlyMap<string, string>;
 }
 
 /** A snapshot resolves only while its original activation and authority remain current. */
@@ -35,10 +40,23 @@ export class NativeMcpLaunches {
     private readonly actions: NativePluginActions,
   ) {}
 
-  activate(admission: PluginRuntimeAdmission, generation: number, launches: readonly DeclaredMcpLaunch[]): void {
+  activate(
+    admission: PluginRuntimeAdmission,
+    generation: number,
+    launches: readonly DeclaredMcpLaunch[],
+    factories: ReadonlyMap<string, SharedMcpFactory> = new Map(),
+    factoryUnavailableReasons: ReadonlyMap<string, string> = new Map(),
+  ): void {
     const instanceId = admission.instance.pluginInstanceId;
     if (this.actions.generation(instanceId) !== generation) throw unavailable();
-    this.#activations.set(instanceId, { admission: structuredClone(admission), generation, launches });
+    this.#activations.set(instanceId, {
+      admission: structuredClone(admission),
+      generation,
+      launches,
+      revision: randomUUID(),
+      factories: new Map(factories),
+      factoryUnavailableReasons: new Map(factoryUnavailableReasons),
+    });
   }
 
   deactivate(instanceId: string): void {
@@ -47,6 +65,31 @@ export class NativeMcpLaunches {
 
   deactivateAll(): void {
     this.#activations.clear();
+  }
+
+  async resolveShared(instanceId: string, contributionId: string, revision: string) {
+    const { activation, current } = await this.currentActivation(instanceId);
+    // Discovery denies ambiguous same-plugin sources. A guessed HTTP URL must
+    // not select one of those sources through a different entry point.
+    if (
+      [...this.#activations].some(
+        ([id, other]) => id !== instanceId && other.admission.instance.pluginId === current.instance.pluginId,
+      )
+    )
+      throw unavailable();
+    const declaration = current.packageRecord.manifest.contributions?.filter(
+      (c) => c.type === 'mcp' && c.id === contributionId,
+    );
+    const factory = activation.factories.get(contributionId);
+    if (activation.revision !== revision || declaration?.length !== 1 || !factory) throw unavailable();
+    const token = this.actions.environment(instanceId, contributionId).CLOWDER_PLUGIN_ACTION_TOKEN;
+    if (!token) throw unavailable();
+    return {
+      factory,
+      token,
+      pluginId: current.instance.pluginId,
+      capabilityId: `plugin:${current.instance.pluginId}:${contributionId}`,
+    };
   }
 
   async resolve(policy: ToolExecutionPolicy): Promise<NativeMcpServer> {
@@ -85,6 +128,7 @@ export class NativeMcpLaunches {
         const declarations = activation.admission.packageRecord.manifest.contributions?.filter(
           (item) => item.type === 'mcp' && item.id === launch.contributionId,
         );
+        const unavailableReason = activation.factoryUnavailableReasons.get(launch.contributionId);
         entries.push(
           Object.freeze({
             capabilityId: `plugin:${activation.admission.instance.pluginId}:${launch.contributionId}`,
@@ -92,7 +136,13 @@ export class NativeMcpLaunches {
             ...(launch.installationPolicy
               ? { installationPolicy: Object.freeze(structuredClone(launch.installationPolicy)) }
               : {}),
-            policySourceRef: `plugin-activation:${instanceId}:${activation.generation}`,
+            policySourceRef: `plugin-activation:${instanceId}:${activation.generation}:${activation.revision}`,
+            ...(activation.factories.has(launch.contributionId)
+              ? {
+                  sharedHttpPath: `/api/plugin-mcp/${encodeURIComponent(instanceId)}/${encodeURIComponent(launch.contributionId)}?shared=1&activation=${activation.revision}`,
+                }
+              : {}),
+            ...(unavailableReason ? { sharedHttpUnavailableReason: unavailableReason } : {}),
             server: Object.freeze({
               command: launch.server.command,
               args: Object.freeze([...launch.server.args]),

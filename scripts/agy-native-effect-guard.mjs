@@ -19,6 +19,25 @@ const DELEGATED_TOOLS = new Set(vocabulary.delegatedTools);
 const READERS = new Set(vocabulary.readOnlyComponents);
 const CONTROL_ENTRIES = new Set(['hooks.json', 'mcp_config.json', 'agents', 'plugins', 'skills.json']);
 
+function commandInDirectory(command, cwd) {
+  if (process.platform === 'win32') {
+    const path = cwd.replaceAll("'", "''");
+    return `try { Set-Location -LiteralPath '${path}' -ErrorAction Stop } catch { exit 1 }\n${command}`;
+  }
+  const path = `'${cwd.replaceAll("'", `'"'"'`)}'`;
+  return `cd -P -- ${path} || exit "$?"\n${command}`;
+}
+
+function commandDirectory(args, defaultCwd) {
+  return typeof args.Cwd === 'string' ? args.Cwd : defaultCwd;
+}
+
+function commandOverwrite(name, args, command, cwd) {
+  if (name === 'run_command') return { CommandLine: commandInDirectory(command, cwd) };
+  if (args.Cwd !== cwd) return { Cwd: cwd };
+  return undefined;
+}
+
 function profileControlPath(path, profileHome) {
   if (!profileHome) return false;
   const roots = [resolve(profileHome), kernelPath(profileHome)].filter(Boolean).map((root) => root.toLowerCase());
@@ -83,8 +102,23 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
   const { name, args } = payload.toolCall;
   if (typeof name !== 'string' || !args || typeof args !== 'object' || Array.isArray(args))
     return deny('invalid AGY tool arguments');
-  const cwd = typeof args.Cwd === 'string' ? args.Cwd : payload.workspacePaths?.[0];
+  const pinDirectory = COMMANDS.has(name) && options.workspaceRoot !== undefined;
+  // A terminal may have changed cwd after launch; model-supplied Cwd is not
+  // evidence of its current execution coordinate. This carrier has no binding.
+  if (pinDirectory && name === 'send_command_input')
+    return deny('terminal input directory is unverified; start a new run_command instead');
+  if (pinDirectory && (typeof options.workspaceRoot !== 'string' || !isAbsolute(options.workspaceRoot)))
+    return deny('invalid host command workspace');
+  if (pinDirectory && args.Cwd !== undefined && typeof args.Cwd !== 'string')
+    return deny('invalid tool command workspace');
+  let cwd = commandDirectory(args, pinDirectory ? options.workspaceRoot : payload.workspacePaths?.[0]);
   if (typeof cwd !== 'string' || !isAbsolute(cwd)) return deny('missing tool workspace');
+  if (pinDirectory) {
+    // Preserve symlink/.. kernel traversal, then freeze that one directory for
+    // both policy evaluation and shell/workflow execution. Never fall back.
+    cwd = kernelPath(cwd);
+    if (!cwd) return deny('command workspace is unavailable');
+  }
   // Preserve raw content and delegated arguments before effect/target projection.
   const secretTool =
     name === 'call_mcp_tool' && args.ServerName === 'browser' ? `mcp__browser__${args.ToolName}` : name;
@@ -97,6 +131,7 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
 
   let toolName;
   let toolInput;
+  let overwrite;
   if (FILE_WRITERS.has(name)) {
     const target = args.TargetFile ?? args.NotebookPath;
     if (typeof target !== 'string' || !target) return deny('missing file target');
@@ -123,6 +158,11 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
     }
     toolName = 'Bash';
     toolInput = { command };
+    if (pinDirectory) {
+      // CLI 1.4.10 ignores run_command.Cwd, but its documented hook argument
+      // overwrite executes CommandLine verbatim. Workflows still honor Cwd.
+      overwrite = commandOverwrite(name, args, command, cwd);
+    }
   } else {
     // Browser, MCP and model-native interactions retain their canonical
     // provider/callback authority. They do not become shell or file commands.
@@ -131,7 +171,9 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
   const projected = { tool_name: toolName, tool_input: toolInput, cwd };
   const verdict = decideNativeHookPayload(projected, options);
   options.onTargetDecision?.(projected, verdict);
-  return verdict.decision === 'allow' ? { decision: 'allow' } : { decision: 'deny', reason: guardReason(verdict) };
+  return verdict.decision === 'allow'
+    ? { decision: 'allow', ...(overwrite ? { overwrite } : {}) }
+    : { decision: 'deny', reason: guardReason(verdict) };
 }
 
 async function main() {
@@ -150,6 +192,7 @@ async function main() {
     const decision = decideAgyNativeHookPayload(JSON.parse(raw), {
       profileHome,
       toolHome,
+      ...(process.argv[5] !== undefined ? { workspaceRoot: process.argv[5] } : {}),
       readOnly: process.argv[3] === 'read-only',
       selfHost: () => readSelfHostFacet({ ...(hostHome ? { homeDir: hostHome } : {}) }),
       onTargetDecision: (payload, verdict) =>

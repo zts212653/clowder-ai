@@ -5,13 +5,16 @@ import {
 } from '@cat-cafe/shared';
 import { PROFILE_CAPSULE_RELATIVE_PATH } from '@cat-cafe/shared/profile-contract';
 import { profileRevisionOf } from '@cat-cafe/shared/profile-revision';
+import type Database from 'better-sqlite3';
 import type { FastifyPluginAsync } from 'fastify';
 import type { IProfileUpdateProposalStore } from '../domains/cats/services/stores/ports/ProfileUpdateProposalStore.js';
+import { canAccessThread } from '../domains/guides/guide-state-access.js';
 import type { ProfileMemoryLifecycleService } from '../domains/memory/profile/ProfileMemoryLifecycleService.js';
 import type {
   ProfileMemoryLifecycleStore,
   StoredProfileMemoryEntry,
 } from '../domains/memory/profile/ProfileMemoryLifecycleStore.js';
+import { readProfileUsage } from '../domains/memory/profile/ProfileUsageReader.js';
 import { resolveSessionUserId } from '../utils/request-identity.js';
 import { authorizeOwnerBrowserAction, ownerMemoryActionHttpStatus } from './owner-memory-browser-auth.js';
 import { readProfileMemoryProposals } from './profile-memory-proposals.js';
@@ -19,6 +22,7 @@ import { type ProfileMemorySourceReaders, readProfileMemorySource } from './prof
 
 export interface ProfileMemoryOwnerRoutesOptions {
   ownerUserId: string;
+  evidenceDb?: Database.Database;
   store: Pick<ProfileMemoryLifecycleStore, 'get' | 'list'>;
   lifecycle?: Pick<ProfileMemoryLifecycleService, 'executeOwnerAction'>;
   proposalStore: Pick<IProfileUpdateProposalStore, 'listByTarget'>;
@@ -70,6 +74,40 @@ export const profileMemoryOwnerRoutes: FastifyPluginAsync<ProfileMemoryOwnerRout
       if (!entry) return reply.status(404).send({ error: 'Profile memory not found' });
       if (entry.revision !== request.query.revision) return reply.status(409).send({ error: 'Revision changed' });
       return readProfileMemorySource(entry, owner, opts.sourceReaders);
+    },
+  );
+
+  app.get<{ Params: { memoryId: string }; Querystring: { revision?: string } }>(
+    '/api/memory/profile/:memoryId/usage',
+    async (request, reply) => {
+      reply.header('Cache-Control', 'private, no-store');
+      const owner = authorizeRead(request, reply, opts.ownerUserId);
+      if (!owner) return;
+      if (!request.query.revision) return reply.status(400).send({ error: 'Revision required' });
+      const entry = opts.store.get(owner, request.params.memoryId);
+      if (!entry) return reply.status(404).send({ error: 'Profile memory not found' });
+      if (entry.revision !== request.query.revision) return reply.status(409).send({ error: 'Revision changed' });
+      if (!opts.evidenceDb) return reply.status(503).send({ error: 'Usage recording unavailable' });
+      try {
+        const usage = readProfileUsage(opts.evidenceDb, owner, entry);
+        usage.recent = await Promise.all(
+          usage.recent.map(async (item) => {
+            if (!item.threadId) return item;
+            const thread = await opts.sourceReaders.threadStore.get(item.threadId);
+            const visible =
+              thread &&
+              !thread.deletedAt &&
+              (canAccessThread(thread, owner) ||
+                (thread.createdBy === 'system' &&
+                  (await opts.sourceReaders.threadStore.list(owner)).some((candidate) => candidate.id === thread.id)));
+            return { ...item, threadId: visible ? item.threadId : null };
+          }),
+        );
+        return usage;
+      } catch (error) {
+        request.log.warn({ err: error }, 'Profile usage read unavailable');
+        return reply.status(503).send({ error: 'Usage recording unavailable' });
+      }
     },
   );
 

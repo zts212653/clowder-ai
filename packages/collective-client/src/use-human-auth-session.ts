@@ -1,5 +1,11 @@
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef } from 'react';
-import { type ClientRequest, CollectiveClientRequestError, collectiveClientErrorMessage } from './client-request.js';
+import {
+  type ClientReadPolicy,
+  type ClientRequest,
+  CollectiveClientRequestError,
+  collectiveClientErrorMessage,
+  fetchClientJson,
+} from './client-request.js';
 import type {
   ClientSnapshot,
   CollectiveMe,
@@ -162,40 +168,42 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
     }
     return response;
   }, []);
-  const request = useCallback(<Result>(path: string, init?: RequestInit): Promise<Result> => {
-    const generation = sessionGeneration.current;
-    const options: RequestInit = {
-      ...init,
-      credentials: 'same-origin',
-      headers: {
-        'content-type': 'application/json',
-        'x-collective-message-content': '2',
-        ...(token.current ? { authorization: `Bearer ${token.current}` } : {}),
-        ...init?.headers,
-      },
-    };
-    const result = requestTail.current.then(async () => {
-      options.signal?.throwIfAborted();
-      if (generation !== sessionGeneration.current) throw new Error('身份已变化');
-      const response = await fetch(path, options);
-      const payload = (await response.json()) as Result & { error?: { code?: string; message?: string } };
-      if (generation !== sessionGeneration.current) throw new Error('身份已变化');
-      if (!response.ok) {
-        throw new CollectiveClientRequestError(
-          response.status,
-          payload.error?.message ?? `请求失败（${response.status}）`,
-          payload.error?.code,
-        );
-      }
-      return payload;
-    });
-    // Settle the lane after either outcome, without retrying or hiding this request's failure.
-    requestTail.current = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
-  }, []);
+  const request = useCallback(
+    <Result>(path: string, init?: RequestInit, policy?: ClientReadPolicy): Promise<Result> => {
+      const generation = sessionGeneration.current;
+      const options: RequestInit = {
+        ...init,
+        credentials: 'same-origin',
+        headers: {
+          'content-type': 'application/json',
+          'x-collective-message-content': '2',
+          ...(token.current ? { authorization: `Bearer ${token.current}` } : {}),
+          ...init?.headers,
+        },
+      };
+      const result = requestTail.current.then(async () => {
+        options.signal?.throwIfAborted();
+        if (generation !== sessionGeneration.current) throw new Error('身份已变化');
+        const { response, payload } = await fetchClientJson<Result>(path, options, policy);
+        if (generation !== sessionGeneration.current) throw new Error('身份已变化');
+        if (!response.ok) {
+          throw new CollectiveClientRequestError(
+            response.status,
+            payload.error?.message ?? `请求失败（${response.status}）`,
+            payload.error?.code,
+          );
+        }
+        return payload;
+      });
+      // Settle the lane after either outcome, without retrying or hiding this request's failure.
+      requestTail.current = result.then(
+        () => undefined,
+        () => undefined,
+      );
+      return result;
+    },
+    [],
+  );
 
   const loadMe = useCallback(async () => {
     const credential = token.current;

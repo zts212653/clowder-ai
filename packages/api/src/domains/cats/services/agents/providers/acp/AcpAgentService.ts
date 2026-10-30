@@ -562,15 +562,20 @@ export class AcpAgentService implements AgentService {
       } else if (this.mcpWhitelist !== null) {
         const binaryRoot = resolveBinaryRoot(this.projectRoot);
         const capabilitiesRoot = await resolveInvokeCapabilityRoot(binaryRoot);
-        const { config: capConfig, configSourceRoot } = readInvocationMcpConfig(capabilitiesRoot, userProjectRoot);
+        const {
+          config: capConfig,
+          configSourceRoot,
+          accessScope,
+        } = readInvocationMcpConfig(capabilitiesRoot, userProjectRoot);
         if (this.mcpSupportEnabled) assertMappedCapabilitySource(capConfig !== null, binaryRoot, capabilitiesRoot);
-        const disabled = resolveDisabledServerIds(this.projectRoot, this.catId as string, capConfig);
+        const disabled = resolveDisabledServerIds(this.projectRoot, this.catId as string, capConfig, { accessScope });
         baseMcpServers = await resolveAcpMcpServers(this.projectRoot, this.mcpWhitelist, undefined, {
           mcpSupport: this.mcpSupportEnabled,
           disabledServerIds: disabled,
           catId: this.catId as string,
           capabilitiesConfig: capConfig,
           configSourceRoot,
+          accessScope,
         });
       } else {
         baseMcpServers = this.mcpServers;

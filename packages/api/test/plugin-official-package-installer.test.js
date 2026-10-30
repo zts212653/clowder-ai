@@ -65,7 +65,7 @@ test('installs a package declaring the contract implemented by this Host', async
   assert.equal((await store.snapshot()).packages[0].contractVersion, PLUGIN_CONTRACT_PACKAGE_VERSION);
 });
 
-for (const contractVersion of ['0.1.0-beta.14', '0.3.1-beta.1']) {
+for (const contractVersion of ['0.1.0-beta.14', '0.3.1-beta.1', '0.3.1-candidate.1', '0.3.1', '0.3.2-beta.1']) {
   test(`installs the in-range historical declaration ${contractVersion}`, async () => {
     const archive = await packageArchive({ packageManifest: manifest({ contractVersion }) });
     const entry = catalogEntry(archive.integrity);
@@ -80,7 +80,7 @@ for (const contractVersion of ['0.1.0-beta.14', '0.3.1-beta.1']) {
   });
 }
 
-for (const contractVersion of ['0.1.0-beta.12', '0.3.1-candidate.1', '0.3.1']) {
+for (const contractVersion of ['0.1.0-beta.12', '0.3.2-candidate.1', '0.3.2']) {
   test(`quarantines ${contractVersion} outside the Host supported contract range`, async () => {
     const packageManifest = manifest({ contractVersion });
     const archive = await packageArchive({ packageManifest });

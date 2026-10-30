@@ -26,7 +26,7 @@ export function useHostContext(
   snapshot: ClientSnapshot,
   channelId: string,
   channelIds: readonly string[],
-  humanSession?: { request: ClientRequest; refresh: () => Promise<void> },
+  humanSession?: { request: ClientRequest; refresh: () => Promise<void>; onPaired?: () => void },
   media?: {
     selection?: MediaSelection;
     api?: ReturnType<typeof collectiveArtifactClient>;
@@ -61,6 +61,7 @@ export function useHostContext(
   const serviceInstanceId = snapshot.meta?.serviceInstanceId;
   const collectiveId = snapshot.collective?.collectiveId;
   const humanId = snapshot.me?.human.humanId;
+  const onHostPaired = humanSession?.onPaired;
   const projectionReady =
     snapshot.participants !== undefined && snapshot.members !== undefined && snapshot.collaboration !== undefined;
   const applyWorkFocus = useCallback((value: CollectiveHostWorkFocus) => {
@@ -108,6 +109,7 @@ export function useHostContext(
       const matched = hostInitMatches(parsed.data, serviceInstanceId, collectiveId, humanId) ? parsed.data : undefined;
       liveBridge.current = matched;
       setBridge(matched);
+      if (matched?.authorityStatus === 'connected') onHostPaired?.();
       return true;
     };
     const handleParticipationReady = (data: unknown) => {
@@ -178,6 +180,7 @@ export function useHostContext(
     collectiveId,
     hostOrigin,
     humanId,
+    onHostPaired,
     handleAccountabilityFocus,
     projectAttentionContext.handleFocus,
     projectAttentionContext.reset,

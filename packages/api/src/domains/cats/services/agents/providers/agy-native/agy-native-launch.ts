@@ -184,6 +184,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       profileHome: configHome,
       accountHome: home,
       runtimeRoot: findMonorepoRoot(process.cwd()),
+      workspaceRoot: policy.workspaceRoot,
       readOnly: options?.toolExecutionPolicy?.mode === 'read_only',
     });
     const command = input.command ?? resolveCliCommand('agy');

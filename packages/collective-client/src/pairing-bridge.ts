@@ -7,6 +7,8 @@ import {
 } from '@cat-cafe/shared';
 import type { ClientPhase } from './client-types.js';
 
+export const PAIRING_PENDING_NOTICE = 'Clowder AI 正在安全托管连接凭据…';
+
 export interface PairingRequestEvent {
   readonly origin: string;
   readonly source: unknown;

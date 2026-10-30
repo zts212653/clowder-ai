@@ -20,7 +20,7 @@ export async function buildRetainedClient(outdir = path.join(root, 'dist')) {
     outfile: path.join(outdir, 'collective-client/app.js'),
     alias: { '@cat-cafe/shared': path.resolve(root, '../shared/src/index.ts') },
     sourcemap: false,
-    minify: false,
+    minify: true,
     legalComments: 'none',
     external: ['/collective-client/collective-landing-A.png'],
     write: false,

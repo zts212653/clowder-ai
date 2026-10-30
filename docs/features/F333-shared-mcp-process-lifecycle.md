@@ -10,7 +10,7 @@ description: "让多只猫并行工作时复用 MCP 的重复运行开销，保�
 description_source: model
 description_author: codex-astra
 description_updated_at: 2026-10-26T04:44:27Z
-tips_exempt: "2026-10-29 续订：本次增量仅记录 Phase B 方案、开工授权、执行与审核分工、Task/回流及文档链接，没有新增已实现的用户入口或操作步骤，继续沿用现有聊天、工具与配置入口。Phase A 既有验收结论保留；本次记录不表示 Phase B 实现或全量资源验收完成，OpenCode 仍暂缓未验。"
+tips_exempt: "2026-10-29 Phase B 实现续订：插件安装、启用、授权、撤权与原 MCP 工具继续沿用既有入口；共享运行与显式 stdio 回退不新增需要用户学习的产品操作。规划、开工与审核分工记录同样没有新增操作步骤。Phase A 既有验收结论保留；此声明不代签 Phase B 验收或生产激活，OpenCode 仍暂缓未验。"
 ---
 
 # F333: Shared MCP Process Lifecycle｜多猫共用 MCP 运行资源

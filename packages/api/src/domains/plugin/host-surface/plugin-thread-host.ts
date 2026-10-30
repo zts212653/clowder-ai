@@ -17,18 +17,24 @@ export type { PluginThreadCats, PluginThreadMessage, PluginThreadSummary } from 
 
 const MAX_THREAD_ID_LENGTH = 500;
 const MAX_THREAD_TITLE_LENGTH = 200;
+const MAX_THREAD_CANDIDATES = 5_000;
 export interface PluginThreadListCursor {
   readonly lastActiveAt: number;
   readonly id: string;
 }
 
+export interface PluginThreadListOptions {
+  readonly limit?: number;
+  readonly before?: PluginThreadListCursor;
+  /** Exact owner-visible candidates. This mode is complete for the supplied ids
+   * and must not be combined with directory pagination. */
+  readonly threadIds?: readonly string[];
+}
+
 export interface PluginThreadHost {
   get(threadId: string): Promise<PluginThreadSummary | null>;
   /** Live keyset pagination: pass the last row's coordinates; a short/empty page ends traversal. */
-  list(options?: {
-    readonly limit?: number;
-    readonly before?: PluginThreadListCursor;
-  }): Promise<readonly PluginThreadSummary[]>;
+  list(options?: PluginThreadListOptions): Promise<readonly PluginThreadSummary[]>;
   readMessages(
     threadId: string,
     options: { readonly before?: { readonly timestamp: number; readonly id: string }; readonly limit: number },
@@ -88,6 +94,16 @@ function threadId(value: unknown): string {
   return boundedString(value, 'threadId', MAX_THREAD_ID_LENGTH);
 }
 
+function candidateThreadIds(value: readonly string[] | undefined): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_THREAD_CANDIDATES) {
+    throw new TypeError(`threadIds must be an array with at most ${MAX_THREAD_CANDIDATES} entries`);
+  }
+  const ids = value.map((id) => threadId(id));
+  if (new Set(ids).size !== ids.length) throw new TypeError('threadIds must not contain duplicates');
+  return ids;
+}
+
 function listCursor(value: PluginThreadListCursor | undefined): PluginThreadListCursor | undefined {
   if (value === undefined) return undefined;
   if (
@@ -103,9 +119,38 @@ function listCursor(value: PluginThreadListCursor | undefined): PluginThreadList
   return value;
 }
 
+type ThreadListRequest =
+  | { readonly kind: 'candidates'; readonly threadIds: readonly string[] }
+  | { readonly kind: 'page'; readonly limit: number; readonly before?: PluginThreadListCursor };
+
+function threadListRequest(value: unknown): ThreadListRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new TypeError('list options must be an object');
+  if (Object.keys(value).some((key) => key !== 'limit' && key !== 'before' && key !== 'threadIds'))
+    throw new TypeError('list options must contain limit, before or threadIds only');
+  const options = value as PluginThreadListOptions;
+  const threadIds = candidateThreadIds(options.threadIds);
+  if (threadIds !== undefined) {
+    if (options.limit !== undefined || options.before !== undefined)
+      throw new TypeError('threadIds cannot be combined with limit or before');
+    return { kind: 'candidates', threadIds };
+  }
+  const before = listCursor(options.before);
+  return {
+    kind: 'page',
+    limit: boundedLimit(options.limit ?? 50, 50),
+    ...(before ? { before } : {}),
+  };
+}
+
 // One locale-independent ordering for both sorting and the exclusive cursor boundary.
 function compareThreadPosition(a: PluginThreadListCursor, b: PluginThreadListCursor): number {
   return b.lastActiveAt - a.lastActiveAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+async function readOwnerThreadCandidates(input: PluginThreadHostDeps, threadIds: readonly string[]) {
+  if (!input.threadStore.listCandidates) return projectionUnavailable();
+  return input.threadStore.listCandidates(input.ownerUserId, threadIds);
 }
 
 /** Ordinary Host thread operations; business mappings belong to plugin storage. */
@@ -130,17 +175,16 @@ export function createPluginThreadHost(input: PluginThreadHostDeps): PluginThrea
   return {
     async list(options = {}) {
       requireService();
-      if (!options || typeof options !== 'object' || Array.isArray(options))
-        throw new TypeError('list options must be an object');
-      if (Object.keys(options).some((key) => key !== 'limit' && key !== 'before'))
-        throw new TypeError('list options must contain limit or before only');
-      const limit = boundedLimit(options.limit ?? 50, 50);
-      const before = listCursor(options.before);
+      const request = threadListRequest(options);
+      if (request.kind === 'candidates') {
+        const candidates = await readOwnerThreadCandidates(input, request.threadIds);
+        return Promise.all([...candidates].sort(compareThreadPosition).map(summary));
+      }
       const visible = await input.threadStore.list(input.ownerUserId);
       const accessible: Thread[] = [];
       for (const thread of [...visible].sort(compareThreadPosition)) {
-        if (accessible.length === limit) break;
-        if (before && compareThreadPosition(thread, before) <= 0) continue;
+        if (accessible.length === request.limit) break;
+        if (request.before && compareThreadPosition(thread, request.before) <= 0) continue;
         if (!thread.deletedAt) accessible.push(thread);
       }
       return Promise.all(accessible.map(summary));

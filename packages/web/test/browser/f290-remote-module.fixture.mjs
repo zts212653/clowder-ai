@@ -5,7 +5,7 @@ import { parse } from 'yaml';
 import { expressionHostFixture } from './f290-expression-voice.fixture.mjs';
 
 /** Production plugin activation and owner controller. Local owner authentication and the registered roster are explicit Host fixtures. */
-export async function remoteModuleHost({ directory, serviceUrl, port, label }) {
+export async function remoteModuleHost({ directory, serviceUrl, port, label, threads }) {
   const packageRoot = resolve(process.env.F290_PLUGIN_PACKAGE_ROOT);
   const manifest = parse(await readFile(join(packageRoot, 'plugin.yaml'), 'utf8'));
   const { default: entrypoint } = await import(pathToFileURL(join(packageRoot, manifest.runtime.entrypoint)).href);
@@ -36,7 +36,7 @@ export async function remoteModuleHost({ directory, serviceUrl, port, label }) {
     storage,
     secrets: { get: async () => undefined },
     tasks: { list: async () => [] },
-    threads: { get: async () => null, getCats: async () => ({ participants: [] }) },
+    threads: threads ?? { get: async () => null, getCats: async () => ({ participants: [] }) },
     streams: { read: async function* () {} },
     messaging: { get: async () => null, subscribe: async () => {}, unsubscribe: async () => {} },
     members: {

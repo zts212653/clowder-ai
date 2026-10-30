@@ -4,6 +4,7 @@ import {
   type PluginDeliveryInput,
   type PluginDeliveryReceipt,
 } from '@clowder-ai/plugin-contract';
+import { createModuleLogger } from '../../../infrastructure/logger.js';
 import type { ToolExecutionPolicy } from '../../cats/services/types.js';
 import { activateDeclaredMcp } from '../declared/declared-mcp-resources.js';
 import {
@@ -21,6 +22,7 @@ import {
 } from '../declared/declared-static-resources.js';
 import { NativeMcpLaunches, type NativeMcpServer } from '../declared/native-mcp-launches.js';
 import { NativePluginActions } from '../declared/native-plugin-actions.js';
+import type { SharedMcpFactory } from '../declared/shared-mcp-factory.js';
 import { type PluginRuntimeLifecyclePort, removesPluginOwnedResources } from '../external-plugin-lifecycle-types.js';
 import { ExternalPluginRuntimeError, type VerifiedPluginPackageLocator } from '../external-runtime/types.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
@@ -51,9 +53,11 @@ export interface PluginRuntimeAdmission {
 }
 
 export interface PluginRuntimeCarrier {
+  resolveMcpFactory?(pluginInstanceId: string, contributionId: string): Promise<SharedMcpFactory | undefined>;
   /** Derived from the admitted package alone. Carrier selection has no other input. */
   claims(admission: PluginRuntimeAdmission): boolean;
-  start(pluginInstanceId: string): Promise<unknown>;
+  /** In-process carriers join Host contribution admission before publishing runtime health. */
+  start(pluginInstanceId: string, admitContributions?: () => Promise<void>): Promise<unknown>;
   stop(pluginInstanceId: string, reason: string): Promise<void>;
   readStream?(
     pluginInstanceId: string,
@@ -111,30 +115,40 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     const admission = await this.#admission(pluginInstanceId);
     const carrier = this.#selectAdmission(admission);
     const previousSkillPolicy = await captureDeclaredSkillPolicy(admission.packageRecord.pluginId, this.resources);
-    const result = await carrier.start(pluginInstanceId);
+    let admitted: Promise<void> | undefined;
+    const admitContributions = () =>
+      (admitted ??= (async () => {
+        this.nativeActions.activate(admission, generation, (method, input) =>
+          this.invoke(pluginInstanceId, method, input),
+        );
+        const launches = await activateDeclaredStaticResources(
+          admission,
+          this.resources && {
+            ...this.resources,
+            nativeActionEnvironment: (contributionId) =>
+              this.nativeActions.environment(pluginInstanceId, contributionId),
+            nativeActionEnvironmentReferences: (id) => this.nativeActions.environmentReferences(pluginInstanceId, id),
+          },
+        );
+        await this.#runtimeContributions.activate(
+          admission,
+          (instanceId, method, params) => this.invoke(instanceId, method, params),
+          {
+            attempt: (instanceId, method, params) => this.attemptInvoke(instanceId, method, params),
+            exposes: (instanceId, method) => this.exposesAction(instanceId, method),
+          },
+        );
+        const shared = await this.#sharedFactories(admission, carrier);
+        this.#nativeMcpLaunches.activate(admission, generation, launches, shared.factories, shared.unavailable);
+      })());
     try {
-      this.nativeActions.activate(admission, generation, (method, input) =>
-        this.invoke(pluginInstanceId, method, input),
-      );
-      const launches = await activateDeclaredStaticResources(
-        admission,
-        this.resources && {
-          ...this.resources,
-          nativeActionEnvironment: (contributionId) => this.nativeActions.environment(pluginInstanceId, contributionId),
-          nativeActionEnvironmentReferences: (id) => this.nativeActions.environmentReferences(pluginInstanceId, id),
-        },
-      );
-      await this.#runtimeContributions.activate(
-        admission,
-        (instanceId, method, params) => this.invoke(instanceId, method, params),
-        {
-          attempt: (instanceId, method, params) => this.attemptInvoke(instanceId, method, params),
-          exposes: (instanceId, method) => this.exposesAction(instanceId, method),
-        },
-      );
-      this.#nativeMcpLaunches.activate(admission, generation, launches);
+      const result = await carrier.start(pluginInstanceId, admitContributions);
+      // External and legacy carriers may not publish a separate Host-ready state.
+      // Joining the same promise preserves one admission and its original rollback boundary.
+      await admitContributions();
       return result;
     } catch (error) {
+      if (!admitted) throw error;
       await this.#rollbackStartedRuntime(error, carrier, admission, previousSkillPolicy);
     }
   }
@@ -187,7 +201,8 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
         nativeActionEnvironmentReferences: (id) => this.nativeActions.environmentReferences(pluginInstanceId, id),
       },
     );
-    this.#nativeMcpLaunches.activate(admission, generation, launches);
+    const shared = await this.#sharedFactories(admission, carrier);
+    this.#nativeMcpLaunches.activate(admission, generation, launches, shared.factories, shared.unavailable);
     await this.#runtimeContributions.refreshAgentSessionProviders(admission);
   }
 
@@ -219,12 +234,37 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     return this.#nativeMcpLaunches.resolve(policy);
   }
 
-  /** Isolated deployments read local launches without publishing into the persistent capability root. */
+  resolveSharedMcp(instanceId: string, contributionId: string, revision: string) {
+    return this.#nativeMcpLaunches.resolveShared(instanceId, contributionId, revision);
+  }
+
+  async #sharedFactories(admission: PluginRuntimeAdmission, carrier: PluginRuntimeCarrier) {
+    const factories = new Map<string, SharedMcpFactory>();
+    const unavailable = new Map<string, string>();
+    for (const contribution of admission.packageRecord.manifest.contributions ?? []) {
+      if (contribution.type !== 'mcp' || !contribution.sharedFactory) continue;
+      try {
+        const factory = await carrier.resolveMcpFactory?.(admission.instance.pluginInstanceId, contribution.id);
+        if (factory) factories.set(contribution.id, factory);
+        else unavailable.set(contribution.id, 'shared_factory_carrier_unavailable');
+      } catch {
+        // Keep the original stdio path usable, without exposing package exceptions/secrets.
+        unavailable.set(contribution.id, 'shared_factory_load_failed');
+      }
+    }
+    for (const [contributionId, reason] of unavailable)
+      createModuleLogger('plugin-native-mcp').warn(
+        { instanceId: admission.instance.pluginInstanceId, contributionId, reason },
+        'Shared MCP unavailable; using original stdio',
+      );
+    return { factories, unavailable };
+  }
+
+  /** Every deployment projects its own activation; isolated Hosts never publish into shared configuration. */
   async resolveMemberMcpView(): Promise<
     import('../../../config/capabilities/invocation-plugin-mcp-view.js').InvocationPluginMcpView | undefined
   > {
-    if (this.resources?.persistCapabilities !== false) return undefined;
-    return this.#nativeMcpLaunches.memberView(this.resources.projectRoot);
+    return this.#nativeMcpLaunches.memberView(this.resources?.projectRoot);
   }
 
   async deliver(pluginInstanceId: string, input: PluginDeliveryInput): Promise<PluginDeliveryReceipt> {

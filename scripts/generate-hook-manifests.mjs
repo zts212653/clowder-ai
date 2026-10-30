@@ -111,7 +111,7 @@ const TIER1_HOOKS = [
     transparencyTier: 'visible-by-default',
     governanceTier: 'immutable',
     inputs: [],
-    userExplanation: '代码哲学：愿景驱动 + 质量门禁 + TDD，不是最小改动',
+    userExplanation: '代码哲学：愿景驱动 + 质量门禁 + TDD，改动围绕结果；同根因一起改，说不出失败路径的防护不加',
   },
   {
     id: 'S1',

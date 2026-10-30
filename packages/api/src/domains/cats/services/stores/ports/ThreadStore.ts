@@ -1025,6 +1025,11 @@ export class ThreadStore implements IThreadStore {
     return `${threadId}:${catId}`;
   }
 
+  private isVisibleToUser(thread: Thread, userId: string, indexed: ReadonlySet<string> | undefined): boolean {
+    if (thread.deletedAt || thread.externalRuntimeAnchorState) return false;
+    return thread.createdBy === userId || thread.id === DEFAULT_THREAD_ID || (indexed?.has(thread.id) ?? false);
+  }
+
   create(
     userId: string,
     title?: string,
@@ -1173,12 +1178,7 @@ export class ThreadStore implements IThreadStore {
     const result: Thread[] = [];
     for (const thread of this.threads.values()) {
       throwIfStoreReadAborted(options);
-      if (thread.externalRuntimeAnchorState) continue;
-      const ownedOrDefault = thread.createdBy === userId || thread.id === DEFAULT_THREAD_ID;
-      const userIndexed = indexed?.has(thread.id) ?? false;
-      if ((ownedOrDefault || userIndexed) && !thread.deletedAt) {
-        result.push(thread);
-      }
+      if (this.isVisibleToUser(thread, userId, indexed)) result.push(thread);
     }
     throwIfStoreReadAborted(options);
     // Sort by lastActiveAt descending (most recent first)
@@ -1187,8 +1187,13 @@ export class ThreadStore implements IThreadStore {
   }
 
   listCandidates(userId: string, threadIds: readonly string[]): Thread[] {
-    const candidates = new Set(threadIds);
-    return this.list(userId).filter((thread) => candidates.has(thread.id));
+    const indexed = this.userThreadIndex.get(userId);
+    const result: Thread[] = [];
+    for (const id of new Set(threadIds)) {
+      const thread = this.threads.get(id);
+      if (thread && this.isVisibleToUser(thread, userId, indexed)) result.push(thread);
+    }
+    return result.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
   }
 
   listByProject(userId: string, projectPath: string): Thread[] {
