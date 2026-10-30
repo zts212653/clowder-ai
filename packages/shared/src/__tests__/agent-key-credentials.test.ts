@@ -99,7 +99,7 @@ describe('hasUsableAgentKeyCredentials', () => {
     ).toBe(false);
     expect(
       hasUsableAgentKeyCredentials({
-        CAT_CAFE_AGENT_KEY_FILES: `{"a":"/nonexistent.secret","b":"${path}"}`,
+        CAT_CAFE_AGENT_KEY_FILES: JSON.stringify({ a: '/nonexistent.secret', b: path }),
         CAT_CAFE_AGENT_KEY_SECRET: 's',
       }),
     ).toBe(true);

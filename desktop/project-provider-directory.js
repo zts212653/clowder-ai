@@ -1,6 +1,5 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { lstat } = require('./project-resource-tree');
 
 /** Seed mutable provider configuration, preserving links as configuration entries. */
 function seedProviderDirectory({ source, destination, previousLink, removeLink, log }) {
@@ -17,7 +16,7 @@ function seedProviderDirectory({ source, destination, previousLink, removeLink, 
     try {
       fs.renameSync(stage, destination);
     } catch (error) {
-      if (removedLink && !lstat(destination)) {
+      if (removedLink && !fs.lstatSync(destination, { throwIfNoEntry: false })) {
         fs.symlinkSync(previousLink, destination, process.platform === 'win32' ? 'junction' : 'dir');
       }
       throw error;

@@ -157,7 +157,7 @@ test('release reports errors; native id absence strips stale Host sessionId', as
   assert.deepEqual(await failing.provider.release('host'), { ok: false, code: 'failed', reason: 'close failed' });
   await bridge.releaseAll('done');
 });
-test('real ACP transformer replay preserves thinking, loop telemetry and existing consumed fields', async () => {
+test('real ACP transformer replay preserves output, thinking and usage telemetry', async () => {
   const metadata = { provider: 'acp', model: 'fixture' };
   const updates = [
     { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hello' } },
@@ -186,10 +186,16 @@ test('real ACP transformer replay preserves thinking, loop telemetry and existin
     model: m.metadata?.model,
     usage: m.metadata?.usage,
   });
-  for (const original of native.filter((m) => ['text', 'tool_use'].includes(m.type)))
+  for (const original of native)
     assert.deepEqual(fields(messages.find((m) => m.type === original.type)), fields(original));
-  for (const type of ['system_info', 'agent_loop'])
-    assert.deepEqual(fields(messages.find((m) => m.type === type)), fields(native.find((m) => m.type === type)));
+  for (const type of ['system_info', 'agent_loop']) {
+    assert.ok(native.some((m) => m.type === type));
+    assert.ok(messages.some((m) => m.type === type));
+  }
+  assert.equal(
+    messages.some((m) => m.type === 'status'),
+    false,
+  );
 });
 test(
   'reference ACP subprocess: factory → adapter → bridge, two turns + resume + cancel',

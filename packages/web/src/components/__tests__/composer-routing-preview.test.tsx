@@ -5,6 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CatData } from '@/hooks/useCatData';
+import { refreshCoCreatorMentionData } from '@/lib/mention-highlight';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useRoutingPreview } from '../../hooks/useRoutingPreview';
@@ -103,6 +104,7 @@ beforeEach(() => {
   writeShellLanguage('zh');
   api.mockReset();
   cats = defaultCats;
+  refreshCoCreatorMentionData(['@co-creator']);
   threadDrafts.clear();
   useActiveExecutionStore.getState().reset();
   useChatStore.setState({
@@ -167,7 +169,7 @@ describe('server-backed composer routing preview', () => {
     });
     await act(async () => root.render(<RoutedRecipientProbe />));
     await act(async () => vi.advanceTimersByTimeAsync(180));
-    expect(host.textContent).toContain('宪宪 · Opus 5.5暂时不能用，改发给砚砚');
+    expect(host.textContent).toContain('布偶猫（Opus 5.5） · 宪宪暂时不能用，改发给缅因猫 · 砚砚');
     expect(host.querySelector('button')?.getAttribute('aria-label')).toContain('砚砚');
   });
 
@@ -286,12 +288,12 @@ describe('server-backed composer routing preview', () => {
 
     const trigger = host.querySelector('[data-testid="composer-routing-preview"]') as HTMLButtonElement;
     expect(trigger.textContent).toContain('发给');
-    expect(trigger.textContent).toContain('宪宪 · Opus 5.5、砚砚');
-    expect(trigger.getAttribute('aria-label')).toContain('这条里 @ 了宪宪 · Opus 5.5、砚砚');
+    expect(trigger.textContent).toContain('布偶猫（Opus 5.5） · 宪宪、缅因猫 · 砚砚');
+    expect(trigger.getAttribute('aria-label')).toContain('这条里 @ 了布偶猫（Opus 5.5） · 宪宪、缅因猫 · 砚砚');
     act(() => trigger.click());
     const choice = document.querySelector('[data-testid="composer-recipient-codex"]') as HTMLButtonElement;
     act(() => choice.click());
-    expect(onInsertMention).toHaveBeenCalledWith(expect.objectContaining({ id: 'codex', insert: '@砚砚 ' }));
+    expect(onInsertMention).toHaveBeenCalledWith(expect.objectContaining({ id: 'codex', insert: '@缅因猫 · 砚砚 ' }));
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
@@ -356,7 +358,7 @@ describe('server-backed composer routing preview', () => {
     expect(name.getAttribute('data-compact-name-policy')).toBe('whole-or-hidden');
     expect(
       (host.querySelector('[data-testid="composer-routing-preview"]') as HTMLButtonElement).getAttribute('aria-label'),
-    ).toContain('Send to: 宪宪 · Opus 5.5, 宪宪 · Sonnet 5.5, 烁烁');
+    ).toContain('Send to: 布偶猫（Opus 5.5） · 宪宪, 布偶猫（Sonnet 5.5） · 宪宪, 暹罗猫 · 烁烁');
   });
 
   it('disambiguates shared nicknames and inserts a unique visible handle', async () => {
@@ -375,22 +377,46 @@ describe('server-backed composer routing preview', () => {
     );
 
     const trigger = host.querySelector('[data-testid="composer-routing-preview"]') as HTMLButtonElement;
-    expect(trigger.textContent).toContain('宪宪 · Opus 5.5');
+    expect(trigger.textContent).toContain('布偶猫（Opus 5.5） · 宪宪');
     act(() => trigger.click());
 
     const opus = document.querySelector('[data-testid="composer-recipient-opus"]') as HTMLButtonElement;
     const sonnet = document.querySelector('[data-testid="composer-recipient-sonnet"]') as HTMLButtonElement;
-    expect(opus.textContent).toContain('宪宪 · Opus 5.5');
-    expect(sonnet.textContent).toContain('宪宪 · Sonnet 5.5');
+    expect(opus.textContent).toContain('布偶猫（Opus 5.5） · 宪宪');
+    expect(sonnet.textContent).toContain('布偶猫（Sonnet 5.5） · 宪宪');
 
     act(() => sonnet.click());
-    expect(onInsertMention).toHaveBeenCalledWith(expect.objectContaining({ id: 'sonnet', insert: '@sonnet ' }));
+    expect(onInsertMention).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'sonnet', insert: '@布偶猫（Sonnet 5.5） · 宪宪 ' }),
+    );
+  });
+
+  it('refreshes insertion when an owner alias changes while the recipient menu is open', async () => {
+    cats = defaultCats
+      .filter((cat) => cat.id === 'codex')
+      .map((cat) => ({ ...cat, id: 'dsh', displayName: 'Felix', nickname: '', mentionPatterns: ['@dsh'] }));
+    const onInsertMention = vi.fn();
+    await act(async () =>
+      root.render(
+        <ComposerRoutingPreview
+          preview={{ status: 'ready', targetCats: ['dsh'] as CatId[], reason: { kind: 'recent_replier' } }}
+          onInsertMention={onInsertMention}
+        />,
+      ),
+    );
+    act(() => (host.querySelector('[data-testid="composer-routing-preview"]') as HTMLButtonElement).click());
+    expect(document.querySelector('[data-testid="composer-recipient-dsh"]')?.textContent).toContain('@Felix');
+    act(() => refreshCoCreatorMentionData(['@Felix']));
+    const choice = document.querySelector('[data-testid="composer-recipient-dsh"]') as HTMLButtonElement;
+    expect(choice.textContent).toContain('@dsh');
+    act(() => choice.click());
+    expect(onInsertMention).toHaveBeenCalledWith(expect.objectContaining({ id: 'dsh', insert: '@dsh ' }));
   });
 
   it('disables a duplicate-name recipient when the catalog has no registered unique mention', async () => {
     cats = defaultCats
       .filter((cat) => cat.id === 'opus' || cat.id === 'sonnet')
-      .map((cat) => ({ ...cat, mentionPatterns: ['@宪宪'] }));
+      .map((cat) => ({ ...cat, variantLabel: undefined, mentionPatterns: ['@宪宪'] }));
     const onInsertMention = vi.fn();
 
     await act(async () =>
@@ -420,6 +446,7 @@ describe('server-backed composer routing preview', () => {
       .filter((cat) => cat.id === 'opus' || cat.id === 'sonnet')
       .map((cat) => ({
         ...cat,
+        variantLabel: undefined,
         mentionPatterns: cat.id === 'opus' ? ['@宪宪', '@architect'] : ['@宪宪'],
       }));
     const onInsertMention = vi.fn();
@@ -474,9 +501,11 @@ describe('server-backed composer routing preview', () => {
         'aria-pressed',
       ),
     ).toBe('true');
-    expect(host.querySelector('[data-testid="composer-preferred-cat-opus"]')?.textContent).toContain('宪宪 · Opus 5.5');
+    expect(host.querySelector('[data-testid="composer-preferred-cat-opus"]')?.textContent).toContain(
+      '布偶猫（Opus 5.5） · 宪宪',
+    );
     expect(host.querySelector('[data-testid="composer-preferred-cat-sonnet"]')?.textContent).toContain(
-      '宪宪 · Sonnet 5.5',
+      '布偶猫（Sonnet 5.5） · 宪宪',
     );
     await act(async () =>
       (host.querySelector('[data-testid="composer-preferred-cat-gemini"]') as HTMLButtonElement).click(),
@@ -496,8 +525,8 @@ describe('server-backed composer routing preview', () => {
         return {
           ok: true,
           json: async () => ({
-            targetCats: body.content.startsWith('@砚砚 ') ? ['codex'] : ['opus'],
-            reason: { kind: body.content.startsWith('@砚砚 ') ? 'current_message_mentions' : 'preferred_cat' },
+            targetCats: body.content.startsWith('@缅因猫 · 砚砚 ') ? ['codex'] : ['opus'],
+            reason: { kind: body.content.startsWith('@缅因猫 · 砚砚 ') ? 'current_message_mentions' : 'preferred_cat' },
           }),
         };
       }
@@ -514,7 +543,7 @@ describe('server-backed composer routing preview', () => {
     act(() => (host.querySelector('[data-testid="composer-routing-preview"]') as HTMLButtonElement).click());
     act(() => (document.querySelector('[data-testid="composer-recipient-codex"]') as HTMLButtonElement).click());
     await act(async () => vi.advanceTimersByTimeAsync(0));
-    expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('@砚砚 ');
+    expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('@缅因猫 · 砚砚 ');
     await act(async () => vi.advanceTimersByTimeAsync(180));
     expect(host.querySelector('[data-testid="composer-routing-preview"]')?.textContent).toContain('砚砚');
 
@@ -562,7 +591,7 @@ describe('server-backed composer routing preview', () => {
     const codexWhisperChoice = document.querySelector('img[alt="砚砚"]')?.closest('button') as HTMLButtonElement;
     act(() => codexWhisperChoice.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
     expect(preview.textContent).toContain('砚砚');
-    expect(preview.getAttribute('aria-label')).toContain('悄悄话会发给砚砚');
+    expect(preview.getAttribute('aria-label')).toContain('悄悄话会发给缅因猫 · 砚砚');
 
     await act(async () => vi.advanceTimersByTimeAsync(180));
     expect(routingCallCount()).toBe(1);

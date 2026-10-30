@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { NativeGoalStep } from './first-run-quest/NativeGoalStep';
 import { NativePartnerCard } from './first-run-quest/NativePartnerCard';
+import { nativePartnerSelectable } from './first-run-quest/native-onboarding';
+import { needsExistingDshRepair } from './first-run-quest/native-partner-persistence';
 import { useNativeOnboarding } from './first-run-quest/useNativeOnboarding';
 
 interface FirstRunQuestWizardProps {
@@ -15,7 +17,6 @@ interface FirstRunQuestWizardProps {
 export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestWizardProps) {
   const setup = useNativeOnboarding(open, onCreated);
   const [step, setStep] = useState<'partners' | 'goal'>('partners');
-  const [invalid, setInvalid] = useState<Record<string, boolean>>({});
   const close = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -28,10 +29,9 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
   }, [open]);
   if (!open) return null;
   const { draft, loading, busy, error, errorStage } = setup;
-  const selected = draft?.partners.filter((p) => p.selected) ?? [];
-  const invalidSelection = selected.some((p) => invalid[p.id] || !p.form.displayName.trim());
-  const available =
-    draft?.partners.filter((p) => p.runtime.installed && (p.runtime.clientId !== 'acp' || p.runtime.acp)) ?? [];
+  const selected = draft?.partners.filter((p) => p.selected && nativePartnerSelectable(p)) ?? [];
+  const invalidSelection = selected.some((p) => !p.form.displayName.trim());
+  const available = draft?.partners.filter(nativePartnerSelectable) ?? [];
 
   return createPortal(
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--console-overlay-medium)] px-3 py-4 backdrop-blur-sm">
@@ -69,7 +69,7 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
             </h2>
             <p className="mt-2 text-sm text-cafe-secondary">
               {step === 'partners'
-                ? '已安装的工具会自动推荐。选择要加入的伙伴，模型和思考强度默认跟随工具。'
+                ? '已检测到可用配置的工具会自动推荐。选择要加入的伙伴，模型和思考强度默认跟随工具。'
                 : '从一个具体、可完成的目标开始。你可以改写内容，再交给伙伴。'}
             </p>
           </div>
@@ -141,13 +141,8 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
                   key={partner.id}
                   partner={partner}
                   disabled={Boolean(busy)}
-                  created={Boolean(draft.created[partner.id] || partner.existingId)}
+                  created={!needsExistingDshRepair(partner) && Boolean(draft.created[partner.id] || partner.existingId)}
                   patch={(change) => setup.patchPartner(partner.id, change)}
-                  onValidityChange={(valid) =>
-                    setInvalid((current) =>
-                      current[partner.id] === !valid ? current : { ...current, [partner.id]: !valid },
-                    )
-                  }
                 />
               ))}
               {available.length > 0 && !selected.length && (

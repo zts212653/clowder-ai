@@ -129,9 +129,9 @@ it('uses the configured display name consistently in cards, selectors and the ed
   await overview();
   expect(host.querySelector('[data-testid=cat-card-opus-5]')?.textContent).toContain('布偶猫 Opus（5.5）');
   expect(host.querySelector('[data-testid=cat-card-sonnet-5]')?.textContent).toContain('布偶猫 Sonnet（5）');
-  expect(host.querySelector('option[value=opus-5]')?.textContent).toBe('布偶猫 Opus（5.5）');
+  expect(host.querySelector('option[value=opus-5]')?.textContent).toBe('布偶猫 Opus（5.5） · 宪宪');
   await editor();
-  expect(host.querySelector('h1')?.textContent).toBe('布偶猫 Opus（5.5）');
+  expect(host.querySelector('h1')?.textContent).toBe('布偶猫 Opus（5.5） · 宪宪');
   expect(field('名字').value).toBe('布偶猫 Opus');
   expect(host.querySelector('[data-testid=member-save-bar]')?.textContent).toContain('没有改动');
 });
@@ -141,7 +141,7 @@ it('shows a saved rename after returning to the list without changing the siblin
   await fill('名字', '架构伙伴');
   await click('保存');
   expect(saved.mock.calls.at(-1)?.[0]).toEqual(cat);
-  expect(host.querySelector('h1')?.textContent).toBe('架构伙伴（5.5）');
+  expect(host.querySelector('h1')?.textContent).toBe('架构伙伴（5.5） · 宪宪');
   expect(field('名字').value).toBe('架构伙伴');
   expect(host.querySelector('[data-testid=member-save-bar]')?.textContent).toContain('没有改动');
   expect(cat.displayName).toBe('架构伙伴');
@@ -149,10 +149,10 @@ it('shows a saved rename after returning to the list without changing the siblin
   expect(cat.breedDisplayName).toBe('布偶猫');
   await overview();
   expect(host.querySelector('[data-testid=cat-card-opus-5]')?.textContent).toContain('架构伙伴（5.5）');
-  expect(host.querySelector('option[value=opus-5]')?.textContent).toBe('架构伙伴（5.5）');
+  expect(host.querySelector('option[value=opus-5]')?.textContent).toBe('架构伙伴（5.5） · 宪宪');
   expect(host.querySelector('[data-testid=cat-card-sonnet-5]')?.textContent).toContain('布偶猫 Sonnet（5）');
   await editor();
-  expect(host.querySelector('h1')?.textContent).toBe('架构伙伴（5.5）');
+  expect(host.querySelector('h1')?.textContent).toBe('架构伙伴（5.5） · 宪宪');
 });
 
 it('keeps nickname edits secondary and clearing the nickname removes it without changing the name', async () => {
@@ -160,7 +160,7 @@ it('keeps nickname edits secondary and clearing the nickname removes it without 
   await fill('昵称', '新昵称');
   await click('保存');
   expect(saved.mock.calls.at(-1)?.[0]).toEqual(cat);
-  expect(host.querySelector('h1')?.textContent).toBe('布偶猫 Opus（5.5）');
+  expect(host.querySelector('h1')?.textContent).toBe('布偶猫 Opus（5.5） · 新昵称');
   expect(field('昵称').value).toBe('新昵称');
   expect(host.querySelector('[data-testid=member-save-bar]')?.textContent).toContain('没有改动');
   expect(cat.name).toBe('legacy-internal-name');
@@ -169,10 +169,11 @@ it('keeps nickname edits secondary and clearing the nickname removes it without 
   const card = host.querySelector('[data-testid=cat-card-opus-5]');
   expect(card?.textContent).toContain('布偶猫 Opus（5.5）');
   expect(card?.textContent).toContain('昵称：新昵称');
-  expect(host.querySelector('option[value=opus-5]')?.textContent).toBe('布偶猫 Opus（5.5）');
+  expect(host.querySelector('option[value=opus-5]')?.textContent).toBe('布偶猫 Opus（5.5） · 新昵称');
   await editor();
   await fill('昵称', '');
   await click('保存');
   await overview();
   expect(host.querySelector('[data-testid=cat-card-opus-5]')?.textContent).not.toContain('昵称：');
+  expect(host.querySelector('option[value=opus-5]')?.textContent).toBe('布偶猫 Opus（5.5）');
 });

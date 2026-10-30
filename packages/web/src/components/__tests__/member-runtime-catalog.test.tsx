@@ -66,6 +66,49 @@ it.each([false, true])('never borrows native models for an explicit connection (
   }
 });
 
+it('invalidates cached models for a changed launch signature without sending draft arguments to the server', async () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const pending: Array<(response: Response) => void> = [];
+  vi.mocked(apiFetch).mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  function Catalog({ launch }: { launch: string }) {
+    const result = useRuntimeCatalog('acp:dsh', 'fixture', '', '', 0, false, launch);
+    return <output>{JSON.stringify(result)}</output>;
+  }
+  const snapshot = () => JSON.parse(host.textContent || '{}');
+  const response = (model?: string) =>
+    new Response(
+      JSON.stringify({
+        status: model ? 'live' : 'configured',
+        models: model ? [{ value: model, label: model }] : [],
+        message: model ? undefined : 'custom_startup',
+      }),
+    );
+  try {
+    await act(async () => root.render(<Catalog launch="before-patch" />));
+    await act(async () => pending[0](response('deepseek-official')));
+    expect(snapshot().catalog.models[0].value).toBe('deepseek-official');
+    await act(async () => root.render(<Catalog launch="managed-patch-one" />));
+    expect(snapshot().catalog).toBeNull();
+    await act(async () => root.render(<Catalog launch="managed-patch-two" />));
+    await act(async () => pending[1](response('stale-official')));
+    expect(snapshot().catalog).toBeNull();
+    await act(async () => pending[2](response()));
+    expect(snapshot().catalog.models).toEqual([]);
+    expect(snapshot().catalog.message).toBe('custom_startup');
+    expect(vi.mocked(apiFetch).mock.calls).toHaveLength(3);
+    const payload = JSON.parse(String(vi.mocked(apiFetch).mock.calls[2]?.[1]?.body));
+    expect(payload).toEqual({ runtimeId: 'acp:dsh', catId: 'fixture', customStartup: false, refresh: false });
+    expect(JSON.stringify(payload)).not.toContain('managed-patch');
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.resetAllMocks();
+  }
+});
+
 it.each([
   'acp:dsh',
   'pi',

@@ -17,6 +17,7 @@ export * from './capability-tip-telemetry.js';
 export * from './capability-tips.js';
 // Human-facing runtime member identity shared by API notifications and Web surfaces.
 export * from './cat-display-name.js';
+export * from './cat-mention-identity.js';
 export * from './chat-background.js';
 export * from './chat-background-state.js';
 export * from './chat-references.js';

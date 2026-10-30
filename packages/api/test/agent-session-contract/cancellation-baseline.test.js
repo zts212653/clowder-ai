@@ -25,8 +25,8 @@ for (const bridged of [false, true]) {
       const root = await mkdtemp(join(tmpdir(), 'cancel-acp-baseline-'));
       const pools = new Map();
       const previousMode = process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE;
-      // This fixture verifies cancel delivery, not trust in the machine's Temp ancestors.
-      // Strict-mode rejection remains covered by the native bootstrap security tests.
+      // This real-child fixture tests cancellation, not trust in the machine's
+      // shared Temp ancestors. Native bootstrap still verifies the private directory itself.
       if (process.platform === 'win32') process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE = 'trusted-host';
       try {
         const native = await createAcpServiceForConfig({
@@ -134,10 +134,13 @@ for (const bridged of [false, true]) {
         assert.equal(store.getById(responseMessageId).lifecycle.invocationId, 'child-turn');
         assert.ok(done[0].message.seq < done[1].message.seq);
       } finally {
-        await Promise.all([...pools.values()].map((pool) => pool.closeAll()));
-        if (previousMode === undefined) delete process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE;
-        else process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE = previousMode;
-        await rm(root, { recursive: true, force: true });
+        try {
+          await Promise.all([...pools.values()].map((pool) => pool.closeAll()));
+        } finally {
+          if (previousMode === undefined) delete process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE;
+          else process.env.CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE = previousMode;
+          await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        }
       }
     },
   );

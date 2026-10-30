@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type CatData, useCatData } from '@/hooks/useCatData';
+import { useCoCreatorMentionPatterns } from '@/hooks/useCoCreatorMentionPatterns';
 import type { ComposerRoutingPreviewReason, RoutingPreviewState } from '@/hooks/useRoutingPreview';
 import { AppTooltip } from './AppTooltip';
 import { ComposerRecipientMenu, type ComposerRecipientOption } from './ComposerRecipientMenu';
@@ -34,7 +35,7 @@ function buildRecipientOptions(
   cats: CatData[],
   identities: ReadonlyMap<string, ComposerRecipientIdentity>,
 ): ComposerRecipientOption[] {
-  return buildCatOptions(cats)
+  return buildCatOptions(cats, true)
     .filter((option) => !option.isGroup)
     .map((option) => ({ ...option, insert: identities.get(option.id)?.insert ?? null }));
 }
@@ -159,7 +160,11 @@ export function ComposerRoutingPreview({
   const avatarGroup = useRef<HTMLSpanElement>(null);
   const chevron = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
-  const identities = useMemo(() => buildComposerRecipientIdentities(cats), [cats]);
+  const coCreatorMentions = useCoCreatorMentionPatterns();
+  const identities = useMemo(
+    () => buildComposerRecipientIdentities(cats, coCreatorMentions),
+    [cats, coCreatorMentions],
+  );
   const options = useMemo(() => buildRecipientOptions(cats, identities), [cats, identities]);
   const { reason, stateLabel, whisperPreview, unavailableNotice } = presentRoutingPreview(
     preview,

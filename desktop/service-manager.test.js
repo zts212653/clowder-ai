@@ -179,3 +179,22 @@ test('waits for all startup-critical mirror files before spawning services', asy
     rmSync(userDataRoot, { recursive: true, force: true });
   }
 });
+
+test('separated-plugin installation starts without the retired loose GitHub plugin directory', async () => {
+  const installRoot = await mkdtemp(path.join(tmpdir(), 'service-manager-separated-plugins-'));
+  const userDataRoot = await mkdtemp(path.join(tmpdir(), 'service-manager-separated-data-'));
+  try {
+    seedMirrorSource(installRoot, 'docs', path.join('harness-feedback', 'eval-domains', 'eval-design-gate.yaml'));
+    seedMirrorSource(installRoot, 'cat-cafe-skills', path.join('refs', 'shared-rules.md'));
+    seedMirrorSource(installRoot, 'cat-cafe-skills', path.join('custody-recognition', 'SKILL.md'));
+    const manager = new ServiceManager(installRoot, { frontendPort: 5331, apiPort: 5332, redisPort: 6389 });
+    manager._ensureUserDataDir(userDataRoot);
+    assert.equal(existsSync(path.join(installRoot, 'plugins')), false);
+    await manager._waitForProjectMirrors(userDataRoot, 100);
+    fs.unlinkSync(path.join(installRoot, 'docs', 'harness-feedback', 'eval-domains', 'eval-design-gate.yaml'));
+    await assert.rejects(manager._waitForProjectMirrors(userDataRoot, 100), /eval-design-gate.yaml/);
+  } finally {
+    rmSync(installRoot, { recursive: true, force: true });
+    rmSync(userDataRoot, { recursive: true, force: true });
+  }
+});

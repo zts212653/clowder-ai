@@ -137,6 +137,17 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'CAT_CAFE_INTRANET_EDITION',
+    defaultValue: '0',
+    description:
+      '内网发行版：启用内置 CodeAgent 角色推荐优先级；由专用桌面发行版设置，重启 API 生效，不改变登录或本机管理边界',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+    restartRequired: true,
+    allowedValues: ['0', '1'],
+  },
+  {
     name: 'CAT_CAFE_AGENT_SESSION_CONTRACT',
     runtimeEditable: false,
     restartRequired: true,

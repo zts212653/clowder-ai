@@ -57,10 +57,14 @@ test('dev supervisor restarts a failed child and stops on clean exit', async () 
   });
   const exits = [];
   const messages = [];
+  const launches = [];
   await runDevSupervisor({
     root: packageRoot,
     tsxCli: join(packageRoot, 'fake-tsx.mjs'),
-    spawnChild: () => children.shift(),
+    spawnChild: (_command, _args, options) => {
+      launches.push(options);
+      return children.shift();
+    },
     exit: (code) => exits.push(code),
     sleepFn: async () => {},
     log: { error: (message) => messages.push(message), warn: () => {} },
@@ -70,6 +74,11 @@ test('dev supervisor restarts a failed child and stops on clean exit', async () 
   assert.equal(messages.length, 1);
   assert.match(messages[0], /\[api\] dev exited \(1\)/);
   assert.match(messages[0], /auto-restarting in 1s/);
+  assert.equal(launches.length, 2);
+  for (const options of launches) {
+    assert.equal(options.windowsHide, true);
+    assert.equal(options.stdio, 'inherit');
+  }
 });
 
 for (const [signal, expectedCode] of [
@@ -112,6 +121,7 @@ test('dev supervisor direct execution follows a directory alias', () => {
       cwd: packageRoot,
       encoding: 'utf8',
       env: { ...process.env, CAT_CAFE_DEV_TSX_CLI: fakeCli },
+      windowsHide: true,
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);

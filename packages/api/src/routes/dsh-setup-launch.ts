@@ -10,6 +10,7 @@ import { CLI_PROCESS_OWNER_ENV } from '../utils/cli-process-environment.js';
 import { resolveCliCommandOrBare } from '../utils/cli-resolve.js';
 import { buildChildEnv } from '../utils/cli-spawn.js';
 import { resolveWindowsSpawnPlan } from '../utils/cli-spawn-win.js';
+import { resolveDshDesktopLauncher } from '../utils/dsh-desktop-launcher.js';
 import { createDshDumpSnapshot } from './dsh-setup-snapshot.js';
 import { resolveDshHome } from './native-dsh-home.js';
 import { dshProfileState } from './native-dsh-profile.js';
@@ -25,7 +26,12 @@ export interface DshSetupLaunch {
 /** Unknown wrappers can change HOME or run arbitrary commands: keep them manual. */
 export function resolveDshSetupLaunch(command: string, args: string[], cwd: string): DshSetupLaunch {
   resolveDshHome();
-  const plan = process.platform === 'win32' ? resolveWindowsSpawnPlan(command, args) : { command, args };
+  const desktop = resolveDshDesktopLauncher(command, args);
+  const plan = desktop
+    ? { command, args }
+    : process.platform === 'win32'
+      ? resolveWindowsSpawnPlan(command, args)
+      : { command, args };
   if ('shell' in plan && plan.shell) throw Error('dsh_setup_custom_startup');
   let offset = 0;
   if (/^node(?:\.exe)?$/i.test(basename(plan.command))) {
@@ -34,9 +40,9 @@ export function resolveDshSetupLaunch(command: string, args: string[], cwd: stri
       throw Error('dsh_setup_custom_startup');
     assertDshEntry(entry);
     offset = 1;
-  } else if (process.platform === 'win32' || !/^dsh$/i.test(basename(plan.command))) {
+  } else if (!desktop && (process.platform === 'win32' || !/^dsh$/i.test(basename(plan.command)))) {
     throw Error('dsh_setup_custom_startup');
-  } else {
+  } else if (!desktop) {
     assertDshEntry(realpathSync(resolveCliCommandOrBare(plan.command)));
   }
   const rest = plan.args.slice(offset);
@@ -87,13 +93,18 @@ export async function dumpDshConfig(launch: DshSetupLaunch): Promise<string> {
 }
 async function runDump(target: ReturnType<typeof dshSetupBootstrap>, home: string): Promise<string> {
   const owner = randomUUID();
-  const child = spawn(target.command, target.args, {
+  const plan =
+    process.platform === 'win32'
+      ? resolveWindowsSpawnPlan(target.command, target.args)
+      : { command: target.command, args: target.args };
+  const child = spawn(plan.command, plan.args, {
     cwd: target.verifyCwd(),
     windowsHide: true,
-    shell: false,
+    shell: 'shell' in plan ? plan.shell : false,
     detached: process.platform !== 'win32',
     env: {
       ...buildChildEnv(undefined, { workingDirectory: target.cwd }),
+      ...('env' in plan ? plan.env : {}),
       DSH_HOME: home,
       [CLI_PROCESS_OWNER_ENV]: owner,
     },

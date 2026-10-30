@@ -13,6 +13,8 @@ export async function createProfileSource(root) {
     'docs/harness-feedback/eval-domains/eval-design-gate.yaml',
     'cat-cafe-skills/refs/shared-rules.md',
     'cat-cafe-skills/custody-recognition/SKILL.md',
+    'assets/prompt-templates/a2a-ball-check.md',
+    'guides/registry.yaml',
     'cat-template.json',
     'pnpm-workspace.yaml',
     'package.json',

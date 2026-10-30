@@ -177,8 +177,9 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     const carrier = this.#selectAdmission(admission);
     this.#nativeMcpLaunches.deactivate(pluginInstanceId);
     await carrier.configRefresh?.(pluginInstanceId);
-    // Configuration saves also change declared MCP env. Reuse the mutation
-    // pipeline so project copies refresh without rotating the live action token.
+    await this.#runtimeContributions.refreshAgentSessionProviders(admission);
+    // ACP client-library and MCP configuration share the same saved values.
+    // Refresh both without rotating the live native-action generation.
     const launches = await activateDeclaredMcp(
       admission,
       this.resources && {
@@ -188,7 +189,6 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
       },
     );
     this.#nativeMcpLaunches.activate(admission, generation, launches);
-    await this.#runtimeContributions.refreshAgentSessionProviders(admission);
   }
 
   async stopAll(reason = 'host_shutdown'): Promise<void> {

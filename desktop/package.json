@@ -22,10 +22,11 @@
     }
   },
   "build": {
-    "appId": "ai.clowderai.desktop",
-    "productName": "Clowder AI",
+    "appId": "ai.clowderai.intranet",
+    "productName": "Clowder AI Intranet",
     "artifactName": "ClowderAI-${version}-${arch}.${ext}",
     "win": {
+      "executableName": "Clowder AI",
       "target": "dir",
       "icon": "assets/icon.ico"
     },
@@ -60,6 +61,7 @@
     },
     "files": [
       "app-identity.js",
+      "intranet-profile.js",
       "desktop-update-menu.js",
       "lifecycle-diagnostics.js",
       "app-lifecycle.js",
@@ -77,11 +79,12 @@
       "service-manager.js",
       "project-mirrors.js",
       "project-provider-directory.js",
-      "project-resource-tree.js",
-      "project-resource-materialization.js",
       "project-mirror-readiness.js",
       "project-mirror-consumer.js",
       "project-mirror-diagnostics.js",
+      "project-mirror-resource-state.js",
+      "project-mirror-materialization.js",
+      "project-mirror-materialization-worker.js",
       "memory-fallback-consent.js",
       "client-homes.js",
       "subprocess-entry.js",
@@ -189,6 +192,8 @@
       "**/node_modules/@anthropic-ai/claude-agent-sdk-*/claude-agent-sdk.*.node",
       "**/api-startup-probe.mjs",
       "**/api-startup-read-ahead.mjs",
+      "**/project-mirror-materialization-worker.js",
+      "**/project-mirror-resource-state.js",
       "**/runtime-web-server.js",
       "**/runtime-web-config.js",
       "**/startup-timing.js",

@@ -6,7 +6,7 @@ import { SelectField } from '../../hub-cat-editor-fields';
 interface ConfigInfo {
   provider?: string;
   model?: string;
-  providers: { id: string; models: { id: string; label: string }[] }[];
+  providers: { id: string; models: { id: string; label: string }[]; credentialStatus?: 'configured' | 'missing' }[];
 }
 interface Inspection {
   profiles: string[];
@@ -41,21 +41,31 @@ const errors: Record<string, [string, string]> = {
     '验证凭据已过期，请重新读取和选择配置。',
     'The test receipt expired. Read and prepare the configuration again.',
   ],
+  dsh_setup_credential_required: [
+    '此路由尚无可读取的凭据。请在 DSH 的模型设置中配置接口凭据，再重新读取。',
+    'This route has no readable credential. Configure it in DSH Models, then read again.',
+  ],
+  dsh_setup_credential_unavailable: [
+    '无法读取 DSH 凭据状态，原文件已保留。',
+    'Could not inspect DSH credentials. Existing files are preserved.',
+  ],
 };
 export function DshProviderSetup({
   runtimeId,
   configurationKey,
   onPrepared,
   t,
+  autoInspect = false,
 }: {
   runtimeId: string;
   configurationKey?: string;
   onPrepared: (command: string, args: string[]) => void;
   t: (zh: string, en: string) => string;
+  autoInspect?: boolean;
 }) {
   const [inspection, setInspection] = useState<Inspection>();
   const [profiles, setProfiles] = useState(['acp', 'desktop', 'web']);
-  const [sourceProfile, setSourceProfile] = useState('acp');
+  const [sourceProfile, setSourceProfile] = useState('auto');
   const [provider, setProvider] = useState(''),
     [model, setModel] = useState('');
   const [busy, setBusy] = useState(false),
@@ -99,8 +109,10 @@ export function DshProviderSetup({
         if (active !== generation.current) return;
         setInspection(data);
         setProfiles(data.profiles);
+        setSourceProfile(data.sourceProfile);
         setReceipt('');
-        const route = data.source.providers.find((p) => p.id === data.active.provider) ?? data.source.providers[0];
+        const usable = data.source.providers.filter((p) => p.credentialStatus !== 'missing' && p.models.length);
+        const route = usable.find((p) => p.id === data.active.provider) ?? usable[0];
         setProvider(route?.id ?? '');
         setModel(route?.models.find((m) => m.id === data.active.model)?.id ?? route?.models[0]?.id ?? '');
       } else if (action === 'prepare' && inspection) {
@@ -126,17 +138,25 @@ export function DshProviderSetup({
       if (active === generation.current) setBusy(false);
     }
   }
+  // biome-ignore lint/correctness/useExhaustiveDependencies: launch changes own auto reads; choosing another source remains an explicit read.
+  useEffect(() => {
+    if (autoInspect) void run('inspect');
+  }, [autoInspect, runtimeId, configurationKey]);
   const routes = inspection?.source.providers ?? [];
+  const usableRoute = routes.find((p) => p.id === provider && p.credentialStatus !== 'missing');
   const models = routes.find((p) => p.id === provider)?.models ?? [];
   return (
     <>
       <p className="text-sm text-cafe-secondary">
         {t(
-          '首次使用自定义接口时，请在下方选择路由并保存成员。检测到 DSH 不代表 ACP 已切换到该接口。',
-          'Before first use, choose your custom provider below and save the teammate. Detecting DSH does not switch its ACP provider.',
+          '手动接入或调整 DSH 连接时，请在下方确认供应商和模型，再保存成员。推荐伙伴可在一键创建时确认已检测到的连接。',
+          'For manual setup or a connection change, confirm the provider and model below, then save the teammate. Recommended partners confirm the detected connection when you create them.',
         )}
       </p>
-      <details className="rounded-xl border border-[var(--console-border-soft)] p-4 text-sm">
+      <details
+        open={autoInspect || undefined}
+        className="rounded-xl border border-[var(--console-border-soft)] p-4 text-sm"
+      >
         <summary className="cursor-pointer font-medium">{t('DSH 自定义 LLM', 'DSH custom LLM')}</summary>
         <p className="my-3 text-cafe-secondary">
           {t(
@@ -156,7 +176,10 @@ export function DshProviderSetup({
           <SelectField
             label={t('读取配置来源', 'Read configuration from')}
             value={sourceProfile}
-            options={profiles.map((value) => ({ value, label: value }))}
+            options={[
+              { value: 'auto', label: t('自动选择可用配置', 'Automatically choose usable configuration') },
+              ...profiles.map((value) => ({ value, label: value })),
+            ]}
             onChange={(value) => {
               setSourceProfile(value);
               setInspection(undefined);
@@ -179,12 +202,20 @@ export function DshProviderSetup({
                 {t('当前 ACP 选择', 'Current ACP selection')}：{inspection.active.provider ?? '—'} /{' '}
                 {inspection.active.model ?? '—'}
               </p>
+              <p>
+                {t('已读取配置来源', 'Configuration source')}：{inspection.sourceProfile}
+              </p>
               {routes.length ? (
                 <>
                   <SelectField
                     label={t('供应商路由', 'Provider route')}
                     value={provider}
-                    options={routes.map((p) => ({ value: p.id, label: p.id }))}
+                    options={routes.map((p) => ({
+                      value: p.id,
+                      label:
+                        p.credentialStatus === 'missing' ? `${p.id} · ${t('缺少凭据', 'Credential missing')}` : p.id,
+                      disabled: p.credentialStatus === 'missing',
+                    }))}
                     onChange={(value) => {
                       setProvider(value);
                       setModel(routes.find((p) => p.id === value)?.models[0]?.id ?? '');
@@ -212,12 +243,20 @@ export function DshProviderSetup({
                   )}
                   <button
                     type="button"
-                    disabled={busy || !model}
+                    disabled={busy || !model || !usableRoute}
                     onClick={() => void run('prepare')}
                     className="min-h-10 text-cafe-accent disabled:opacity-50"
                   >
                     {t('使用此配置', 'Use this configuration')}
                   </button>
+                  {!usableRoute && (
+                    <p role="status">
+                      {t(
+                        '没有已配置凭据的可用路由。请在 DSH 的“设置 → 模型”配置接口和凭据，然后点击“读取 DSH 配置”。不会使用未配置的官方接口创建伙伴。',
+                        'No usable credential is configured. Configure the provider in DSH Settings → Models, then read again. An unconfigured official route will not be used to create this teammate.',
+                      )}
+                    </p>
+                  )}
                 </>
               ) : (
                 <p className="text-cafe-secondary">

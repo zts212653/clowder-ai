@@ -1,6 +1,6 @@
 'use client';
 import type { MemberVisualAssets } from '@cat-cafe/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import type { MemberSaveTrace } from '@/utils/member-save-trace';
@@ -11,7 +11,6 @@ import {
   buildCodexConfigPatches,
   buildStrategyPayload,
   type CodexRuntimeSettings,
-  type HubCatEditorFormState,
   initialState,
   type StrategyFormState,
   toCodexRuntimeSettings,
@@ -28,7 +27,7 @@ import {
   rebaseMemberDraft,
   templateForm,
 } from './member-editor-state';
-import { patchMemberRuntime, type RuntimeChoice, switchMemberRuntime } from './member-runtime-draft';
+import { useMemberRuntimeEditing } from './useMemberRuntimeEditing';
 import { useMemberSaveTrace } from './useMemberSaveTrace';
 
 async function readResponse<T>(response: Response): Promise<T> {
@@ -183,14 +182,7 @@ export function useMemberEditor(
     return () => window.removeEventListener('beforeunload', guard);
   }, [dirtyCount]);
 
-  const patch = useCallback((change: Partial<HubCatEditorFormState>) => {
-    setNotice(null);
-    setDraft((previous) => patchMemberRuntime(previous, change));
-  }, []);
-  const switchRuntime = (next: RuntimeChoice) => {
-    setNotice(null);
-    setDraft((previous) => switchMemberRuntime(previous, next));
-  };
+  const { patch, switchRuntime, observeRuntime } = useMemberRuntimeEditing(setDraft, setNotice);
   const setSection = (section: string) => setDraft((previous) => ({ ...previous, section }));
   const chooseTemplate = (template: TemplateCard | null) =>
     setDraft((previous) => ({
@@ -340,6 +332,7 @@ export function useMemberEditor(
     avatarCommitted: (value: { avatar?: string; visualAssets: MemberVisualAssets }) =>
       setDraft((previous) => commitMemberAvatar(previous, value)),
     switchRuntime,
+    observeRuntime,
     setSection,
     chooseTemplate,
     patchStrategy,

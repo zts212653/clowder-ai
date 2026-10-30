@@ -40,9 +40,7 @@ it.each([
   const peer = runtime(invalid);
   const partner = recommendNativePartners([peer], [], [], 'dsh-status')[0];
   const patch = vi.fn();
-  await act(async () =>
-    root.render(<NativePartnerCard partner={partner} created={false} patch={patch} onValidityChange={vi.fn()} />),
-  );
+  await act(async () => root.render(<NativePartnerCard partner={partner} created={false} patch={patch} />));
   const checkbox = host.querySelector<HTMLInputElement>('input[type=checkbox]');
   if (!checkbox) throw new Error('Partner checkbox missing');
   expect(checkbox.disabled).toBe(invalid);

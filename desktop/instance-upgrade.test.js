@@ -17,7 +17,7 @@ function configure(root, args = []) {
   execFileSync(
     'powershell.exe',
     ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-AppDir', root, ...args],
-    { timeout: 60000, stdio: 'pipe' },
+    { timeout: 60000, stdio: 'pipe', windowsHide: true },
   );
 }
 
@@ -76,7 +76,7 @@ test(
 );
 
 test('installer preserves identity before any payload delete', () => {
-  const iss = fs.readFileSync(path.join(__dirname, 'installer/cat-cafe.iss'), 'utf8');
+  const iss = fs.readFileSync(path.join(__dirname, 'installer/installation-identity.iss'), 'utf8');
   const prepare = iss.slice(iss.indexOf('function PrepareToInstall'));
   assert.match(prepare, /configure-desktop-instance\.ps1/);
   assert.ok(prepare.indexOf('configure-desktop-instance.ps1') < prepare.indexOf('stop-installed-desktop.ps1'));

@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { resolveInvokeCapabilityRoot } from '../config/capabilities/invoke-capability-root.js';
 import { AcpClient } from '../domains/cats/services/agents/providers/acp/AcpClient.js';
 import { buildDshPatch, canonicalDshConfig, composeDshProviderSource, inspectDshConfig } from './dsh-setup-config.js';
+import { assertDefaultDshCredentialStore } from './dsh-setup-credential-store.js';
 import { type DshSetupLaunch, dshSetupBootstrap, dumpDshConfig } from './dsh-setup-launch.js';
+import { inspectDshRouteReadiness } from './dsh-setup-readiness.js';
 import { resolveDshHome } from './native-dsh-home.js';
 
 export function dshSourceProfiles(configuredHome?: string): string[] {
@@ -49,25 +51,50 @@ function patchFile(path: string): string {
 export async function readDshSetup(launch: DshSetupLaunch, sourceProfile: string) {
   const activeProfile = launch.args[launch.profileIndex] ?? '';
   const profiles = [...new Set([...dshSourceProfiles(), ...(activeProfile === 'acp' ? ['acp'] : [])])];
-  if (!profiles.includes(sourceProfile) || !profiles.includes(launch.args[launch.profileIndex] ?? ''))
+  if ((sourceProfile !== 'auto' && !profiles.includes(sourceProfile)) || !profiles.includes(activeProfile))
     throw Error('dsh_setup_profile_required');
   const active = await dumpDshConfig(launch);
   const home = resolveDshHome();
-  const source =
-    sourceProfile === launch.args[launch.profileIndex]
-      ? active
-      : composeDshProviderSource(
-          patchFile(join(home, 'profiles', sourceProfile, 'cordis.patch.yml')),
-          patchFile(join(home, 'cordis.patch.yml')),
-        );
+  const cwd = dshSetupBootstrap(launch).cwd;
+  assertDefaultDshCredentialStore(active, home, cwd, true);
+  const sourceFor = (profile: string) => {
+    if (profile === activeProfile) return active;
+    const profilePatch = patchFile(join(home, 'profiles', profile, 'cordis.patch.yml'));
+    const homePatch = patchFile(join(home, 'cordis.patch.yml'));
+    assertDefaultDshCredentialStore(profilePatch, home, cwd);
+    assertDefaultDshCredentialStore(homePatch, home, cwd);
+    return composeDshProviderSource(profilePatch, homePatch);
+  };
+  const viewFor = (profile: string) => inspectDshRouteReadiness(sourceFor(profile), home, cwd);
+  if (sourceProfile === 'auto') {
+    const ordered = [...new Set([activeProfile, 'desktop', 'web', ...profiles])].filter((p) => profiles.includes(p));
+    const available = ordered.find((p) =>
+      viewFor(p).providers.some((route) => route.credentialStatus === 'configured' && route.models.length),
+    );
+    sourceProfile =
+      available ?? ordered.find((p) => p !== activeProfile && viewFor(p).providers.length) ?? activeProfile;
+  }
+  const source = sourceFor(sourceProfile);
+  const sourceView = viewFor(sourceProfile);
+  const activeView = inspectDshConfig(active);
+  const usable = sourceView.providers.filter((route) => route.credentialStatus === 'configured' && route.models.length);
+  const selected =
+    usable.find((route) => route.id === sourceView.provider) ??
+    usable.find((route) => route.id === activeView.provider) ??
+    usable[0];
+  const model =
+    selected?.models.find((item) => item.id === sourceView.model)?.id ??
+    selected?.models.find((item) => item.id === activeView.model)?.id ??
+    selected?.models[0]?.id;
   return {
     active,
     source,
     view: {
       profiles,
       sourceProfile,
-      active: inspectDshConfig(active),
-      source: inspectDshConfig(source),
+      active: activeView,
+      source: sourceView,
+      suggestedSelection: selected && model ? { provider: selected.id, model } : undefined,
       revision: digest(JSON.stringify([launch, home, canonicalDshConfig(active), canonicalDshConfig(source)])),
     },
   };
@@ -83,6 +110,8 @@ export async function prepareDshSetup(
 ) {
   const current = await readDshSetup(launch, sourceProfile);
   if (current.view.revision !== revision) throw Error('dsh_setup_changed');
+  if (current.view.source.providers.find((route) => route.id === provider)?.credentialStatus !== 'configured')
+    throw Error('dsh_setup_credential_required');
   const patch = buildDshPatch(current.active, current.source, provider, model);
   const root = await resolveInvokeCapabilityRoot(launch.cwd);
   const parent = join(root, '.cat-cafe');

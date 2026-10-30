@@ -8,10 +8,12 @@ import {
   type StrategyFormState,
 } from '../../hub-cat-editor.model';
 import { normalizeMemberDraftBaseline, normalizeMemberDraftForm } from './member-carrier-compat';
+import type { MemberRuntimeContext } from './member-runtime-context';
 import type { RuntimeDrafts } from './member-runtime-draft';
 
 export interface MemberDraft {
   runtimeDrafts?: RuntimeDrafts;
+  runtimeContext?: MemberRuntimeContext;
   version: 1;
   form: HubCatEditorFormState;
   baseline: CatData | null;

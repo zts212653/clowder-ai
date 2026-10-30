@@ -112,10 +112,60 @@ const llm = z.object({ providers: z.record(provider) }).strict();
 const acp = z
   .object({ provider: z.string().optional(), model: z.string().optional(), sessionListPageSize: number.optional() })
   .strict();
+// Separate protocol: shipped @deepseek-ai/dsh-llm-deepseek-api-key 0.2.0-rc.2
+// deepSeekConfigFields/catalogModel. Unknown additions remain manual.
+const positiveInteger = number.int().positive().max(Number.MAX_SAFE_INTEGER);
+const nativeModel = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1).optional(),
+    description: z.string().optional(),
+    contextWindow: positiveInteger.optional(),
+    maxTokens: positiveInteger.optional(),
+    inputModalities: z
+      .array(z.enum(['text', 'image']))
+      .min(1)
+      .optional(),
+    imagePixelBudget: z.union([positiveInteger, z.literal('low')]).optional(),
+    imageMaxBytes: positiveInteger.optional(),
+    systemPromptUpdate: z.literal('in-history').optional(),
+    toolUpdate: z.enum(['in-history', 'addition-only']).optional(),
+  })
+  .strict();
+const native = z
+  .object({
+    apiKeyEnv: z
+      .string()
+      .regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
+      .optional(),
+    baseURL: endpoint.optional(),
+    thinking: z.enum(['enabled', 'disabled']).optional(),
+    reasoningEffort: z.enum(['off', 'low', 'high', 'max']).optional(),
+    maxTokens: positiveInteger.optional(),
+    defaultContextWindow: positiveInteger.optional(),
+    models: z.array(nativeModel).optional(),
+    streamIdleTimeoutMs: number.positive().max(2147483647).optional(),
+    maxRequestFilesBytes: positiveInteger.optional(),
+    maxInlineRequestImageBytes: positiveInteger.optional(),
+    maxImagesPerRequest: positiveInteger.optional(),
+    imageOffloadByteQuantum: positiveInteger.optional(),
+    inlineImageOffloadByteQuantum: positiveInteger.optional(),
+    imageOffloadCountQuantum: positiveInteger.optional(),
+    filesApiTimeoutMs: number.positive().max(2147483647).optional(),
+    fileExpiresAfterSeconds: positiveInteger.min(3600).max(2592000).optional(),
+    fileRefreshMarginSeconds: number.int().min(0).optional(),
+    fileQuotaCleanupBatch: positiveInteger.max(1000).optional(),
+    retryPolicy: retry.optional(),
+  })
+  .strict();
 
 /** Check the entire emitted config, including every retained active provider. */
-export function assertDshCopyPolicy(llmConfig: unknown, acpConfig: unknown): void {
-  if (!llm.safeParse(llmConfig).success || !acp.safeParse(acpConfig).success) {
+export function assertDshCopyPolicy(llmConfig: unknown, acpConfig: unknown, nativeConfig?: unknown): void {
+  if (
+    !llm.safeParse(llmConfig).success ||
+    !acp.safeParse(acpConfig).success ||
+    (nativeConfig !== undefined && !native.safeParse(nativeConfig).success)
+  ) {
     // Do not return Zod issues: they can include private field names or values.
     throw Error('dsh_config_manual');
   }

@@ -138,3 +138,32 @@ describe('web build pipeline wiring', () => {
     assert.match(pkg.scripts.postbuild ?? '', /write-build-stamp\.cjs/);
   });
 });
+
+describe('generated stylesheet build identity', () => {
+  it('keeps a CRLF checkout clean when the immutable manifest is regenerated with LF', () => {
+    const repoRoot = makeSandbox();
+    const git = (...args) => execFileSync('git', args, { cwd: repoRoot, stdio: 'pipe', encoding: 'utf8' });
+    git('init', '-q');
+    git('config', 'core.autocrlf', 'true');
+    git('config', 'core.safecrlf', 'false');
+    fs.writeFileSync(path.join(repoRoot, '.gitignore'), 'packages/web/.next/\n');
+    fs.copyFileSync(path.resolve(__dirname, '../../../.gitattributes'), path.join(repoRoot, '.gitattributes'));
+    const relativeManifest = 'packages/web/src/generated/vendor-stylesheets.json';
+    const manifest = path.join(repoRoot, relativeManifest);
+    fs.mkdirSync(path.dirname(manifest), { recursive: true });
+    const contents = '[\n  "/vendor/immutable.css"\n]\n';
+    fs.writeFileSync(manifest, contents.replace(/\n/g, '\r\n'));
+    git('add', '.');
+    git('-c', 'user.name=Build fixture', '-c', 'user.email=build-fixture@example.invalid', 'commit', '-qm', 'fixture');
+    fs.unlinkSync(manifest);
+    git('checkout', '--', relativeManifest);
+    fs.writeFileSync(manifest, contents);
+    const webPackageDir = path.join(repoRoot, 'packages/web');
+    const stamp = writeBuildStamp({ repoRoot, webPackageDir, env: {} });
+    assert.equal(stamp, buildStampPath(webPackageDir));
+    assert.equal(fs.readFileSync(stamp, 'utf8').trim(), git('rev-parse', 'HEAD').trim());
+    assert.equal(writeBuildStamp({ repoRoot, webPackageDir, env: {} }), stamp);
+    fs.appendFileSync(manifest, 'unexpected content\n');
+    assert.equal(writeBuildStamp({ repoRoot, webPackageDir, env: {} }), null);
+  });
+});

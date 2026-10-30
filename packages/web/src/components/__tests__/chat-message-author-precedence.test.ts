@@ -162,8 +162,10 @@ describe('ChatMessage author precedence', () => {
 
     expect(container.textContent).toContain('始皇帝');
     expect(container.textContent).not.toContain('co-creator');
-    const avatar = container.querySelector('img[alt="始皇帝"]') as HTMLImageElement | null;
+    // The visible author name carries identity; the shared avatar image is decorative.
+    const avatar = container.querySelector('[data-sender-avatar="message"] img') as HTMLImageElement | null;
     expect(avatar?.getAttribute('src')).toBe('/uploads/qin-owner.png');
+    expect(avatar?.getAttribute('alt')).toBe('');
   });
 
   it('hides raw scheduler trigger preview and shows scheduler accent on first reply', async () => {

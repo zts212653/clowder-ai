@@ -32,10 +32,21 @@ function canonicalWithMissingSuffix(value) {
 
 function assertDesktopDataBoundary(instanceRoot, installRoot) {
   const candidate = canonicalWithMissingSuffix(instanceRoot);
-  for (const directory of ['desktop-dist', 'packages', 'node', 'node_modules', path.join('scripts', 'node_modules')]) {
+  for (const directory of [
+    'desktop-dist',
+    'packages',
+    'node',
+    'node_modules',
+    path.join('scripts', 'node_modules'),
+    'bundled',
+    path.join('cat-cafe-skills', '.cat-cafe-shared-refs'),
+  ]) {
     const payload = canonicalWithMissingSuffix(path.join(installRoot, directory));
-    const relative = path.relative(payload, candidate);
-    if (!relative || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`)))
+    const inside = (parent, child) => {
+      const relative = path.relative(parent, child);
+      return !relative || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+    };
+    if (inside(payload, candidate) || inside(candidate, payload))
       throw new Error(`Desktop instance root is inside the installation replacement boundary: ${directory}`);
   }
 }
@@ -55,7 +66,7 @@ function resolveDesktopRuntime(env = process.env, executable = process.execPath)
     env = { ...env, ...saved };
   }
   const instanceRoot = env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
-  if (instanceRoot === undefined) return { frontendPort: 3003, apiPort: 3004, redisPort: 6399, instanceRoot: null };
+  if (instanceRoot === undefined) return { frontendPort: 5331, apiPort: 5332, redisPort: 6389, instanceRoot: null };
   if (!instanceRoot || !path.isAbsolute(instanceRoot)) throw new Error('Desktop instance root must be absolute');
   assertDesktopDataBoundary(
     instanceRoot,

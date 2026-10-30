@@ -5,7 +5,7 @@
  * to populate regex with all cats from the runtime catalog.
  */
 
-import { escapeRegExp } from '@cat-cafe/shared';
+import { buildUserMentionAliases, escapeRegExp } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
 import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { CO_CREATOR_MENTION_COLOR as CO_CREATOR_MENTION } from '@/lib/color-defaults';
@@ -46,7 +46,9 @@ const DEFAULT_CO_CREATOR_MENTION_PATTERNS = ['@co-creator', '@co-creator'];
 
 // Include co-creator as pseudo-cat so @co-creator highlights gold
 let _cats: CatData[] = [];
+let _registryCats: CatData[] = [];
 let _coCreatorMentionPatterns = [...DEFAULT_CO_CREATOR_MENTION_PATTERNS];
+const coCreatorMentionListeners = new Set<() => void>();
 let _mentionToCat = buildMentionToCat([]);
 let _mentionRe = buildMentionRe(_mentionToCat);
 let _mentionColor = buildMentionColor([]);
@@ -79,7 +81,12 @@ function rebuildMentionCache(): void {
   const canonicalMentionToCat = Object.fromEntries(_cats.map((cat) => [cat.id.toLowerCase(), cat.id]));
   // Display may humanize a canonical id preserved in prose, but routing
   // projections must continue to mirror the server's mentionPatterns exactly.
-  _displayMentionToCat = { ...canonicalMentionToCat, ..._mentionToCat };
+  const friendlyMentionToCat = Object.fromEntries(
+    [...buildUserMentionAliases(_registryCats, _coCreatorMentionPatterns)]
+      .filter(([id]) => _mentionLabel[id] !== undefined)
+      .map(([id, alias]) => [alias.slice(1).toLowerCase(), id]),
+  );
+  _displayMentionToCat = { ...friendlyMentionToCat, ...canonicalMentionToCat, ..._mentionToCat };
   _displayMentionRe = buildMentionRe(_displayMentionToCat);
   _canonicalOnlyMentionAliases = new Set(
     Object.keys(canonicalMentionToCat).filter((alias) => _mentionToCat[alias] === undefined),
@@ -93,6 +100,7 @@ rebuildMentionCache();
 /** Called once by useCatData after API fetch succeeds.
  *  Filters out disabled members (roster.available === false) so they don't highlight. */
 export function refreshMentionData(cats: CatData[]): void {
+  _registryCats = cats;
   _cats = cats.filter((cat) => cat.roster?.available !== false);
   rebuildMentionCache();
 }
@@ -100,6 +108,18 @@ export function refreshMentionData(cats: CatData[]): void {
 export function refreshCoCreatorMentionData(mentionPatterns: readonly string[]): void {
   _coCreatorMentionPatterns = normalizeCoCreatorMentionPatterns(mentionPatterns);
   rebuildMentionCache();
+  for (const listener of coCreatorMentionListeners) listener();
+}
+
+export function getCoCreatorMentionPatterns(): readonly string[] {
+  return _coCreatorMentionPatterns;
+}
+
+export function subscribeCoCreatorMentionData(listener: () => void): () => void {
+  coCreatorMentionListeners.add(listener);
+  return () => {
+    coCreatorMentionListeners.delete(listener);
+  };
 }
 
 /** Get the current mention regex (refreshed after API load) */
@@ -138,6 +158,7 @@ export function isCanonicalOnlyMentionAlias(alias: string): boolean {
 
 export function resetMentionDataForTest(): void {
   _cats = [];
+  _registryCats = [];
   _coCreatorMentionPatterns = [...DEFAULT_CO_CREATOR_MENTION_PATTERNS];
   rebuildMentionCache();
 }

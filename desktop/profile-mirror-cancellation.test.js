@@ -63,7 +63,8 @@ function preload({ optionsPath, events, release, window, cause }) {
   childProcess.spawn = function observeOwnedChildren(command, args, settings) {
     const child = originalSpawn(command, args, settings);
     const probe = args[0] === '-e';
-    record({ type: probe ? 'probe-spawn' : 'api-spawn', pid: child.pid });
+    const resource = String(args[0]).endsWith('project-mirror-materialization-worker.js');
+    record({ type: probe ? 'probe-spawn' : resource ? 'resource-spawn' : 'api-spawn', pid: child.pid });
     child.once('close', (code, signal) => record({ type: 'child-close', pid: child.pid, code, signal }));
     if (probe && window === 'consumer') {
       let stderr = '';
@@ -155,7 +156,8 @@ for (const window of ['backoff', 'consumer']) {
           if (window === 'consumer')
             assert.ok(probes.length, 'a real independent Node must have reached its read phase');
           else assert.equal(probes.length, 0, 'backoff cancellation must prevent starting a new probe');
-          for (const probe of probes) {
+          const ownedReaders = observed.filter((event) => ['probe-spawn', 'resource-spawn'].includes(event.type));
+          for (const probe of ownedReaders) {
             assert.ok(
               observed.some((event) => event.type === 'child-close' && event.pid === probe.pid),
               'probe close must precede runner exit',
@@ -175,7 +177,7 @@ for (const window of ['backoff', 'consumer']) {
           const observed = readEvents(events);
           const reaped = new Set(observed.filter((event) => event.type === 'child-close').map((event) => event.pid));
           const outstanding = observed.filter(
-            (event) => ['probe-spawn', 'api-spawn'].includes(event.type) && !reaped.has(event.pid),
+            (event) => ['probe-spawn', 'resource-spawn', 'api-spawn'].includes(event.type) && !reaped.has(event.pid),
           );
           // A historic PID alone is not authority to kill a surviving process.
           if (outstanding.length) console.error('Retaining failed profile evidence:', root, outstanding);

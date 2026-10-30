@@ -251,7 +251,22 @@ test('webhook mode with a Token delivers it to the actual MCP launch env', async
   assert.equal(capability.mcpServer.env?.FEISHU_TOKEN, 'tok_feishu');
 });
 
-test('variant changes refresh existing project MCP providers while preserving member and project blocks', async () => {
+test('variant changes refresh existing project MCP providers while preserving member and project blocks', async (t) => {
+  const originalRegistry = catRegistry.getAllConfigs();
+  t.after(() => {
+    catRegistry.reset();
+    for (const [id, config] of Object.entries(originalRegistry)) catRegistry.register(id, config);
+  });
+  catRegistry.reset();
+  for (const id of ['codex', 'variant-allowed']) {
+    catRegistry.register(id, {
+      id,
+      clientId: 'openai',
+      carrier: 'cli',
+      defaultModel: 'fixture-model',
+      mcpSupport: true,
+    });
+  }
   const projectRoot = await tempRoot('variants-cascade-home-');
   const consumer = await tempRoot('variants-cascade-consumer-');
   const blockedProject = await tempRoot('variants-cascade-blocked-');

@@ -13,7 +13,11 @@ export function catalogRpc(command: string, args: string[], cwd: string, timeout
   const ownerId = randomUUID();
   const child = spawn(plan.command, plan.args, {
     cwd,
-    env: { ...buildChildEnv(undefined, { workingDirectory: cwd }), [CLI_PROCESS_OWNER_ENV]: ownerId },
+    env: {
+      ...buildChildEnv(undefined, { workingDirectory: cwd }),
+      ...('env' in plan ? plan.env : {}),
+      [CLI_PROCESS_OWNER_ENV]: ownerId,
+    },
     detached: process.platform !== 'win32',
     shell: 'shell' in plan ? plan.shell : false,
     windowsHide: true,

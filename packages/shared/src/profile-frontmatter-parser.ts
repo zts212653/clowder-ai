@@ -281,7 +281,8 @@ function isDescriptionSource(value: string | null): value is DescriptionSource {
 }
 
 function isSkillPath(path: string): boolean {
-  return path.split('\\').join('/').includes('/cat-cafe-skills/') && path.endsWith('/SKILL.md');
+  const normalized = path.split('\\').join('/');
+  return normalized.includes('/cat-cafe-skills/') && normalized.endsWith('/SKILL.md');
 }
 
 function isIsoDate(value: string): boolean {

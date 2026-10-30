@@ -36,11 +36,12 @@ it('reads only on request and prepares a complete route for the existing member 
   vi.stubGlobal('fetch', fetch);
   await act(async () => root.render(<DshProviderSetup runtimeId="dsh" onPrepared={prepared} t={(zh) => zh} />));
   expect(fetch).not.toHaveBeenCalled();
-  const firstUseHint = [...host.querySelectorAll('p')].find((element) =>
-    element.textContent?.includes('首次使用自定义接口'),
+  const setupHint = [...host.querySelectorAll('p')].find((element) =>
+    element.textContent?.includes('手动接入或调整 DSH 连接'),
   );
-  expect(firstUseHint).toBeDefined();
-  expect(firstUseHint?.closest('details')).toBeNull();
+  expect(setupHint).toBeDefined();
+  expect(setupHint?.closest('details')).toBeNull();
+  expect(host.querySelector('details')?.open).toBe(false);
   await act(async () => host.querySelector<HTMLButtonElement>('button')!.click());
   expect(host.textContent).toContain('deepseek-official');
   await act(async () => [...host.querySelectorAll('button')].find((b) => b.textContent === '使用此配置')!.click());
@@ -50,18 +51,27 @@ it('reads only on request and prepares a complete route for the existing member 
   expect(setupCalls).toHaveLength(2);
   expect(JSON.parse(setupCalls[1]![1]!.body as string)).toMatchObject({ provider: 'custom', model: 'custom-model' });
 });
-it.each([
-  ['dsh_setup_changed', '配置已变化'],
-  ['dsh_config_manual', '无法安全自动复制'],
-])('preserves the draft and explains %s', async (error, message) => {
+it('preserves the draft and offers retry when composition changed', async () => {
   const prepared = vi.fn();
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => ({ ok: false, json: async () => ({ error, profiles: ['desktop'] }) })),
+    vi.fn(async () => ({ ok: false, json: async () => ({ error: 'dsh_setup_changed', profiles: ['desktop'] }) })),
   );
   await act(async () => root.render(<DshProviderSetup runtimeId="dsh" onPrepared={prepared} t={(zh) => zh} />));
   await act(async () => host.querySelector<HTMLButtonElement>('button')!.click());
-  expect(host.textContent).toContain(message);
+  expect(host.textContent).toContain('配置已变化');
+  expect(prepared).not.toHaveBeenCalled();
+});
+it('explains unsupported automatic copies without replacing the member draft', async () => {
+  const prepared = vi.fn();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify({ error: 'dsh_config_manual' }), { status: 400 })),
+  );
+  await act(async () => root.render(<DshProviderSetup runtimeId="dsh" onPrepared={prepared} t={(zh) => zh} />));
+  await act(async () => host.querySelector<HTMLButtonElement>('button')!.click());
+  expect(host.querySelector('[role=alert]')?.textContent).toContain('无法安全自动复制');
+  expect(host.querySelector('[role=alert]')?.textContent).toContain('保留原配置');
   expect(prepared).not.toHaveBeenCalled();
 });
 it.each(['runtime', 'launch'])('does not apply a late preparation result after changing %s', async (change) => {

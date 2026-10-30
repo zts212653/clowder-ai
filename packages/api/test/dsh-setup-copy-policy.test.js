@@ -75,3 +75,39 @@ test('does not copy or reject an unselected source provider that contains custom
   const result = parse(buildDshPatch(active(route), stringify(entries), 'custom', 'model'));
   assert.deepEqual(Object.keys(result[0].config.providers), ['retained', 'custom']);
 });
+
+const official = (native) =>
+  stringify([
+    { id: 'llm-pi-ai', config: { providers: { retained: route } } },
+    { id: 'llm-deepseek', config: native },
+    { id: 'acp', config: { provider: 'deepseek-official', model: 'model' } },
+  ]);
+for (const [name, native] of [
+  ['custom header', { headers: { 'X-Custom-Credential': 'synthetic-inline-value' } }],
+  ['unknown extension', { extension: { proof: 'synthetic-inline-value' } }],
+  ['query', { baseURL: 'https://gateway.example/anthropic?signature=synthetic-inline-value' }],
+  ['fragment', { baseURL: 'https://gateway.example/anthropic#synthetic-inline-value' }],
+  ['model header', { models: [{ id: 'model', headers: { 'X-Custom': 'synthetic-inline-value' } }] }],
+]) {
+  test(`rejects native official ${name} in the selected source and retained active native config`, () => {
+    assert.throws(() => buildDshPatch(official({}), official(native), 'deepseek-official', 'model'), /manual/);
+    assert.throws(() => buildDshPatch(official(native), official({}), 'deepseek-official', 'model'), /manual/);
+  });
+}
+test('preserves the explicitly supported official native metadata and only credential references', () => {
+  const native = {
+    apiKeyEnv: 'SAFE_OFFICIAL_REF',
+    baseURL: 'https://gateway.example/anthropic',
+    thinking: 'enabled',
+    reasoningEffort: 'high',
+    maxTokens: 4096,
+    models: [{ id: 'model', name: 'Official', inputModalities: ['text'], toolUpdate: 'addition-only' }],
+    retryPolicy: { mode: 'normal', maxRetries: 0 },
+  };
+  const result = parse(
+    buildDshPatch(official({ streamIdleTimeoutMs: 300000 }), official(native), 'deepseek-official', 'model'),
+  );
+  assert.deepEqual(result[0], { id: 'llm-deepseek', config: { streamIdleTimeoutMs: 300000, ...native } });
+  assert.deepEqual(result[1].config.providers, { retained: route });
+  assert.equal(result[2].config.provider, 'deepseek-official');
+});

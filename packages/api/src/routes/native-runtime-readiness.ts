@@ -87,7 +87,7 @@ export async function nativeRuntimeReadiness(target: Target, cwd: string, refres
       loginShell: process.platform === 'win32' ? 'powershell' : 'sh',
     };
   if (!target.command || !['codex', 'claude'].includes(target.id)) return { status: 'unknown', checkedAt: Date.now() };
-  if (target.id === 'claude' && hasNativeClaudeApiConfig()) return { status: 'configured', checkedAt: Date.now() };
+  if (target.id === 'claude' && hasNativeClaudeApiConfig(cwd)) return { status: 'configured', checkedAt: Date.now() };
   const key = JSON.stringify([
     target.id,
     target.command,

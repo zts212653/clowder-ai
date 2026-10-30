@@ -1,6 +1,5 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { PHYSICAL_RESOURCES, materializeResource } = require('./project-resource-materialization');
 const { seedProviderDirectory } = require('./project-provider-directory');
 
 const PROJECT_MIRRORS = Object.freeze([
@@ -72,27 +71,6 @@ function prepareMirrorEntry({ source, destination, rebuild, log }) {
   log(`Mirror link created: ${destination} -> ${source}`);
 }
 
-function preparePhysicalResource(options, rebuild) {
-  const { destination } = options;
-  // A second read/copy cannot repair a transient reader failure in an already
-  // physical directory. Leave it for the actual consumer probe.
-  if (rebuild.size) {
-    try {
-      if (!fs.lstatSync(destination).isSymbolicLink()) return;
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-    }
-  }
-  try {
-    materializeResource({ ...options, removeLink: removeMirrorLink });
-  } catch (error) {
-    options.log(
-      `Bundled resource preparation failed: ${options.source} -> ${destination}: ${describeFilesystemError(error)}`,
-    );
-    throw error;
-  }
-}
-
 function isPriorProviderMirror(target, destination) {
   if (path.basename(target) !== '.claude') return false;
   const packages = path.join(path.dirname(destination), 'packages');
@@ -132,18 +110,15 @@ function prepareProviderDirectory(options) {
   seedProviderDirectory({ ...options, previousLink, removeLink: removeMirrorLink });
 }
 
-/** Prepare physical Windows resources and optional links; preserve owner data. */
-function prepareProjectMirrors({
-  installRoot,
-  projectDir,
-  log = () => {},
-  rebuildMirrors = [],
-  platform = process.platform,
-}) {
+/** Seed writable provider configuration; resource materialization runs in the readiness worker. */
+function prepareProjectMirrors({ installRoot, projectDir, log = () => {}, rebuildMirrors = [] }) {
   const rebuild = new Set(rebuildMirrors);
   fs.mkdirSync(projectDir, { recursive: true });
+  if (fs.existsSync(path.join(projectDir, '.clowder-resource-transaction.json'))) {
+    log('Deferring mirror preparation until the interrupted managed resource transaction is recovered');
+    return;
+  }
   for (const mirror of PROJECT_MIRRORS) {
-    if (rebuild.size && !rebuild.has(mirror)) continue;
     const source = path.join(installRoot, mirror);
     const destination = path.join(projectDir, mirror);
     try {
@@ -154,12 +129,6 @@ function prepareProjectMirrors({
     }
     if (mirror === '.claude') {
       prepareProviderDirectory({ source, destination, log });
-      continue;
-    }
-    if (platform === 'win32' && PHYSICAL_RESOURCES.has(mirror)) {
-      // Failure is fatal: a readable probe must not hide an incomplete copy or
-      // overwrite a modified resource. Readiness still performs its full reads.
-      preparePhysicalResource({ source, destination, installRoot, mirror, log }, rebuild);
       continue;
     }
     try {

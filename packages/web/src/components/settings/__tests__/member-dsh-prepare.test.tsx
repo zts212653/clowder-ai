@@ -24,6 +24,8 @@ async function prepare(runtimeId = 'acp:existing-dsh') {
             runtimes: [
               {
                 id: runtimeId,
+                kind: runtimeId === 'dsh' ? 'tool' : 'binding',
+                harnessId: 'dsh',
                 label: 'DSH',
                 clientId: 'acp',
                 installed: true,

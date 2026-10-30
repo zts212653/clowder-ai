@@ -29,7 +29,7 @@ test(
     };
     process.env.DSH_HOME = home;
     process.env.CAT_CAFE_CONFIG_ROOT = host;
-    process.env.DSH_SETUP_FIXTURE_KEY = 'local-fixture-only';
+    delete process.env.DSH_SETUP_FIXTURE_KEY;
     t.after(() => {
       for (const [key, value] of Object.entries(before)) {
         if (value === undefined) delete process.env[key];
@@ -81,6 +81,9 @@ test(
       writeFileSync(join(directory, 'cordis.patch.yml'), '[]\n');
     }
     const desktopPatch = join(home, 'profiles/desktop/cordis.patch.yml');
+    const credentialsPath = join(home, '.credentials.yaml');
+    const credentialsSource = 'version: 1\nrefs:\n  DSH_SETUP_FIXTURE_KEY: local-fixture-only\n';
+    writeFileSync(credentialsPath, credentialsSource, { mode: 0o600 });
     const nativeSource = stringify([
       {
         id: 'llm-pi-ai',
@@ -92,14 +95,33 @@ test(
               apiKeyEnv: 'DSH_SETUP_FIXTURE_KEY',
               models: [{ id: 'only-custom-model', contextWindow: 131072, maxTokens: 1024 }],
             },
+            'missing-key': {
+              api: 'openai-completions',
+              baseURL: `http://127.0.0.1:${address.port}/v1`,
+              apiKeyEnv: 'DSH_MISSING_FIXTURE_KEY',
+              models: [{ id: 'unavailable-model', contextWindow: 131072, maxTokens: 1024 }],
+            },
           },
         },
       },
     ]);
     writeFileSync(desktopPatch, nativeSource);
     const launch = resolveDshSetupLaunch(process.execPath, [entry, '--profile', 'acp'], host);
-    const inspection = await readDshSetup(launch, 'desktop');
+    const inspection = await readDshSetup(launch, 'auto');
+    assert.equal(
+      inspection.view.sourceProfile,
+      'desktop',
+      'discovery must prefer a usable custom route over the unconfigured official default',
+    );
     assert.equal(inspection.view.active.provider, 'deepseek-official');
+    assert.equal(
+      inspection.view.source.providers.find((route) => route.id === 'custom-only')?.credentialStatus,
+      'configured',
+    );
+    assert.equal(
+      inspection.view.source.providers.find((route) => route.id === 'missing-key')?.credentialStatus,
+      'missing',
+    );
     assert.equal(requests.length, 0, 'inspection must not call any provider');
     await assert.rejects(prepareDshSetup(launch, 'desktop', 'changed', 'custom-only', 'only-custom-model'), /changed/);
     const app = Fastify();
@@ -115,6 +137,20 @@ test(
       },
     });
     t.after(() => app.close());
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/api/cats/dsh-setup/prepare',
+      payload: {
+        runtimeId: 'dsh',
+        sourceProfile: 'desktop',
+        revision: inspection.view.revision,
+        provider: 'missing-key',
+        model: 'unavailable-model',
+      },
+    });
+    assert.equal(rejected.statusCode, 422);
+    assert.equal(rejected.json().error, 'dsh_setup_credential_required');
+    assert.equal(requests.length, 0);
     const preparedResponse = await app.inject({
       method: 'POST',
       url: '/api/cats/dsh-setup/prepare',
@@ -142,7 +178,7 @@ test(
       payload: { id: prepared.id },
     });
     assert.equal(verified.statusCode, 200, verified.body);
-    assert.deepEqual(audit, ['dsh-acp-preparation', 'dsh-acp-connection-test']);
+    assert.deepEqual(audit, ['dsh-acp-preparation', 'dsh-acp-preparation', 'dsh-acp-connection-test']);
     const target = dshSetupBootstrap({ ...launch, args: prepared.startupArgs });
     const client = new AcpClient({
       command: target.command,
@@ -163,6 +199,7 @@ test(
       }
       assert.equal(requests.length, 3);
       assert.ok(requests[2]?.includes('REMEMBER_NATIVE_1668'), 'native continuation contains the first turn');
+      assert.equal(readFileSync(credentialsPath, 'utf8'), credentialsSource);
     } finally {
       await client.close();
     }

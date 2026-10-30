@@ -12,7 +12,7 @@ tips_exempt: 首启自动恢复缺陷修复，沿用现有启动及日志入口�
 
 ## 自动恢复的边界
 
-桌面把安装目录中的资源提供到用户数据根下的 `project`。Windows 的 `docs`、`cat-cafe-skills`、`assets`、`guides` 现在使用普通目录，首次启动自动完成，不需要设置兼容变量或寻找引导目录。已有旧 junction 只替换链接入口，目标不变；其他便利映射沿用原逻辑。MCP 二进制直接从安装根解析，避免依赖 `project/packages` junction。就绪检查仍覆盖以下三份实际会使用的资源：
+桌面把安装目录中的只读资源提供到用户数据根下的 `project`。Windows 启动会把 `docs`、`cat-cafe-skills`、`assets`、`guides` 四份完整资源树准备为普通目录，避免关键消费者依赖用户创建的 NTFS junction；其他便利镜像仍可使用链接。就绪检查覆盖以下三份实际会使用的资源：
 
 ```text
 docs/harness-feedback/eval-domains/eval-design-gate.yaml
@@ -22,15 +22,23 @@ cat-cafe-skills/custody-recognition/SKILL.md
 
 插件分离后，旧 `plugins/github/plugin.yaml` 不再是 Host 首启的必需资源；安装目录仍有 plugins 时仍可映射该目录。
 
-普通目录发布前，完整读取源资源树并计算逐文件 SHA256，暂存副本写完后再次实读比对，展开安装根内的资源链接，拒绝越界和环。准备完成后，仍在原有有限就绪预算内区分源文件和项目资源的错误，执行退避重试；还可使用本次启动 API 所选的同一 Node，在继承当前用户权限的新进程中读取全部探针。只有完整读取通过才允许启动后续服务。
+四根资源准备并完整读取通过后继续启动。读取失败时，在原有有限就绪预算内区分安装源文件和项目镜像的错误，执行退避重试及受控的链接恢复；还可使用本次启动 API 所选的同一 Node 可执行文件，在继承当前用户权限的新进程中实际读取源文件和全部关键镜像。只有完整读取通过才允许启动后续服务，不以 source 正常或进程退出码为零代替镜像实读。
 
-RedirectionGuard 开启时，Windows 可能禁止跟随非管理员创建的 junction；已在真实开启该防护的进程及继承防护的 Node 子进程中复现 UNKNOWN/-4094/open，并验证普通目录可读。该实验解释了一种机制，不能单凭 UNKNOWN 唯一归因现场 EDR；修复不关闭 RedirectionGuard、Defender、EDR 或任何安全防护。
-
-已有真实目录无受管理标记时保留，不自动采用或覆盖。受管理副本内容未变时重复启动不重写；升级先准备新副本，再发布并保留一个静态回退副本。发布失败回滚，下次启动可恢复两次 rename 间的中断；不完整暂存改名留存后重试。配置、角色、认证、Redis、SQLite 和会话历史保持原样。
-
-受管理资源中的原有文件被修改、标记损坏或存在不安全链接时，日志给出路径并停止，不自动覆盖。新增评测结果等用户文件保留且不阻止普通重启；若同时发生资源版本变化，日志显示 `Preserving extended resource directory ... bundled refresh deferred`，该目录继续使用当前副本，资源更新需人工合并，不把业务数据移入暂存/回退目录。真实目录缺少探针、源缺失或持续不可读时仍拒绝启动。不要为此修改系统盘 ACL 或关闭防护。
+恢复只处理已知资源目录中可确认的链接入口，不递归删除链接目标。已有真实目录、自定义文件、配置、角色、认证、Redis、SQLite 和会话历史保持原样。真实目录缺少必需资源、源文件确实缺失或持续无法读取时，仍明确拒绝启动，不通过覆盖用户文件、提权或修改系统盘 ACL 解决。
 
 取消启动时同时停止本次的探针子进程；不会继续启动 API。代码不改变 ACP 的信任、审计、权限模式或客户端命令参数，内网包可继续保留其 CodeAgent 接入。
+
+### 自动准备、升级及失败重试
+
+Windows 首次和旧包升级启动均主动准备四根完整资源，随后验证源与项目路径。API、治理规则、提示词和 ACP 客户端继续使用原来的项目相对路径，不是只复制三个探针。此过程无需用户配置新环境变量、提权、修改 ACL 或重建角色。非 Windows 或后续实际读取失败仍保留原 consumer 恢复路径。
+
+复制由隐藏的独立 Node worker 执行，另有最多 60 秒的有界预算，支持取消启动。它先核对入口确实是本次安装源的链接，拒绝源树中的 reparse entry，在旁边创建受管理 staging，完成全量源/副本摘要校验后再交换入口。复制或发布失败会恢复原入口；取消留下的已记录事务由下一次启动先恢复，避免反复积累 staging。空间不足或文件访问失败保留原错误及可重试状态，不通过覆盖用户数据解决。
+
+实体目录含 `.clowder-bundled-resource.json` 全量清单。每次启动验证所有受管理原文件；内容未变不重写。新增评测结果等普通用户文件不会被读取、复制或删除，也不阻止普通重启。安装源有更新且目录包含用户新增内容时，保留整个原目录并记录 `refresh deferred`，由用户合并资源变更，不自动搬运或覆盖业务数据。受管理原文件被修改、未知真实目录、非法清单、链接、变更后的备份/staging 仍保留并明确拒绝替换；请勿手工修改清单绕过保护。配置、身份、认证、Redis、SQLite 和历史不参与复制和替换。
+
+旧静态回退完整校验后先原子移出恢复槽，再清理；清理失败只留下独立 `retired` 静态副本并在结果记录其路径，不会让下次健康启动永久卡在部分删除的回退上。被用户修改的回退不进入清理。
+
+MCP 二进制使用安装根 `CAT_CAFE_RUNTIME_ROOT`，可写数据配套映射到 `CAT_CAFE_WORKSPACE_ROOT`；由 Host 启动时传给 API，无需用户手写配置。普通部署保留已有显式工作区，隔离实例强制使用自己的 project，配置和历史仍在既有持久根，不经 project/packages 的便利链接解析 MCP。
 
 ## 如何看日志
 
@@ -39,17 +47,12 @@ RedirectionGuard 开启时，Windows 可能禁止跟随非管理员创建的 jun
 ```text
 Project mirror parent read failed
 Project mirror consumer diagnostic
+Project mirror materialization
+refresh deferred
 Project mirror readiness verified
 Project mirror readiness failed before API start
 failed to prepare mirror
 Preserving existing non-link mirror
-Bundled resource materialized
-Bundled resource verified
-Bundled resource preparation failed
-Restored interrupted bundled resource publication
-Retained interrupted bundled resource staging
-Retained retired bundled resource backup
-Preserving extended resource directory
 ```
 
 成功日志会标明读取验证路径：父进程、重试后的父进程，或实际 Node consumer。失败日志区分 `source` 和 `mirror`，并保留路径、`code`、`errno`、`syscall`，用于判断安装源文件问题还是项目镜像入口问题。`UNKNOWN` 本身不能确认 Windows 原始错误码或缓存机制。
@@ -62,7 +65,7 @@ Preserving extended resource directory
 
 ```powershell
 Get-Content -LiteralPath .\desktop.log -Tail 500 |
-  Select-String 'Project mirror|[Bb]undled resource|failed to prepare mirror|Preserving'
+  Select-String 'Project mirror|failed to prepare mirror|Preserving existing'
 Get-Content -LiteralPath .\main.log -Tail 150 |
   Select-String 'Desktop startup FAILED|Desktop startup diagnostic|identity'
 $state = Get-Content -LiteralPath .\startup-state.json -Raw | ConvertFrom-Json
@@ -76,10 +79,6 @@ $state.diagnostics | ConvertTo-Json -Depth 12
 | source 读取失败 | 保留对应安装路径和错误码，核查安装资源及实际运行账户。 |
 | mirror 读取失败、source 正常 | 检查同次日志中的建链/重建信息、目标路径及真实目录保留提示。 |
 | Preserving existing non-link mirror | 已有真实目录或不能安全确认类型的入口已保留，不自动覆盖。 |
-| Bundled resource materialized / verified | 已完成普通目录全量准备或校验，条目数和耗时在同一行。 |
-| Restored interrupted / Retained interrupted | 已自动恢复旧副本或留存不完整暂存，下次启动重试，无需删除用户数据。 |
-| Retained retired bundled resource backup | 旧静态备份清理失败，已退出发布槽位并留存，不影响当前副本或下次重试。 |
-| bundled refresh deferred | 目录有用户新增内容，当前副本保留；需要人工合并该目录的资源升级。 |
 
 反馈时附上发生时间、`projectRoot`、`User data dir`，以及对应 source/mirror 错误和恢复结果。用户名和企业路径可以脱敏，但保留路径层级及错误类型。
 
@@ -99,7 +98,7 @@ Get-Content -LiteralPath (Join-Path $projectRoot 'packages\web\.next\.build-comm
 
 将安装器 SHA256 与交付的 `build-manifest.json` 对照，同时记录安装目录的两个标记和 ASAR 哈希。manifest 描述构建时的输入与产物，不能证明后来安装目录未被其他安装/部署覆盖。API/Web 标记不同或与交付源提交不同，应先查清组件来源；不要覆盖已有配置或历史来排除问题。
 
-开发者进一步从实际 `app.asar` 读取 `service-manager.js`、`project-mirrors.js`、`project-mirror-readiness.js`、`project-mirror-consumer.js` 四个文件，比较内容哈希并记录是否统一换行；新增诊断版本还应包含 `project-mirror-diagnostics.js` 和 `startup-error-diagnostics.js`。使用本仓库 `desktop` 的 `@electron/asar` 依赖读取，不在内网临时下载工具。例如在已安装开发依赖的源码目录执行：
+开发者进一步核对实际 `app.asar` 中入口、readiness、consumer 与诊断模块，以及 `app.asar.unpacked` 中 `project-mirror-materialization-worker.js`、`project-mirror-resource-state.js` 的内容哈希。使用本仓库 `desktop` 的 `@electron/asar` 依赖读取，不在内网临时下载工具。例如在已安装开发依赖的源码目录执行：
 
 ```powershell
 @'
@@ -125,4 +124,6 @@ for (const n of ['service-manager.js', 'project-mirrors.js', 'project-mirror-rea
 
 回归需要覆盖首个读取失败、父进程持续失败而实际 Node 可读、docs 和 skills 两类镜像、旧/失效 junction、真实目录保护、源缺失、持久失败、取消和超时后的探针回收。
 
-故障注入回归证明恢复行为，正常安装后的实测证明打包接线与启动流程；二者分别记录。它们不等同于已在企业文件系统环境重现 Windows 底层竞态，也不代表真实企业 CodeAgent 的端到端验收已经完成。
+真实 Windows RedirectionGuard 回归使用一次性进程启用并读回继承的 EnforceRedirectionTrust：旧的非管理员 junction 三份镜像稳定 UNKNOWN/-4094/open，随后四根准备、实际 Node 读取、design-gate/custody/governance/提示词/L0/ACP MCP 消费者及 ACP 夹具/MCP 握手通过。未模拟该 UNKNOWN、未修改系统策略或磁盘 ACL。这证明一种可产生同类故障的 Windows 机制，不能唯一归因现场天擎或 Defender。
+
+正常安装后的实测另外验证最终 EXE 接线、Medium 启动和历史/绑定回读；原生 Guard 源码回归不能代替安装包验收，ACP 夹具和 MCP 工具发现也不代表企业 CodeAgent 或真实模型调用验收。

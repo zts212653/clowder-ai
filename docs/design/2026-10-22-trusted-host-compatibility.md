@@ -33,7 +33,7 @@ Windows 企业存储可能无法满足严格祖先信任，且审计追加失败
 
 Host .env 或服务管理器的持久环境可一次保存策略，重启 API 生效；不要求每次 PowerShell export。AUDIT_LOG_DIR 构造时绑定且不可从 Hub 热改；现有显式路径不静默迁移，API 默认仍为其 cwd/data/audit-logs。
 
-D 的一次性准备、模板、探针和源码部署接线单独交付，普通启动只读，不夹带安装器或 F289 数据迁移。新 Agent 推荐单 Agent 静态插件，现有官方动态目录保持兼容；第三方动态 grant 和命令执行沙箱不在此契约内。
+D 的一次性准备、模板、探针和源码部署接线单独交付，普通启动只读，不夹带安装器或 F289 数据迁移。本分支另行提供独立内网 Windows 发行版，默认配置由桌面只读注入，已有配置长期保留，见[内网包指南](../ops/intranet-windows-codeagent.md)。新 Agent 推荐单 Agent 静态插件，现有官方动态目录保持兼容；第三方动态 grant 和命令执行沙箱不在此契约内。
 
 验收覆盖正常审计、root-only 正反例、原生身份、原始文本/digest/grant 并发、健康 refresh/stop/crashed、失败重试、本机门禁、warning 与错误、跨进程重叠事务排他及崩溃后释放；合成 ACP 与真实客户端证据分别标识。操作见[指南](../ops/acp-trusted-host-compatibility.md)。
 

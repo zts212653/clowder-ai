@@ -1,7 +1,9 @@
+import { buildCatMentionIdentities } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
 import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { catColorVar } from '@/lib/cat-slug';
 import { GROUP_MENTION_COLOR } from '@/lib/color-defaults';
+import { getCoCreatorMentionPatterns } from '@/lib/mention-highlight';
 
 export interface CatOption {
   id: string;
@@ -100,17 +102,25 @@ function detectCloudProvider(cat: CatData): string | undefined {
   return undefined;
 }
 
-export function buildCatOptions(cats: CatData[]): CatOption[] {
+export function buildCatOptions(
+  cats: CatData[],
+  includeUnroutable = false,
+  reservedMentionPatterns: readonly string[] = getCoCreatorMentionPatterns(),
+): CatOption[] {
   const breedGroups = buildBreedGroupOptions(cats);
+  const identities = buildCatMentionIdentities(cats, reservedMentionPatterns);
   const individuals = cats
-    .filter((cat) => cat.mentionPatterns.length > 0 && isAvailable(cat))
+    .filter(
+      (cat) =>
+        cat.mentionPatterns.length > 0 && isAvailable(cat) && (includeUnroutable || identities.get(cat.id)?.insert),
+    )
     .map((cat) => {
       const providerLabel = detectCloudProvider(cat);
       return {
         id: cat.id,
         label: formatCatLabel(cat),
         desc: cat.roleDescription,
-        insert: `@${cat.mentionPatterns[0].replace(/^@/, '')} `,
+        insert: identities.get(cat.id)?.insert ?? '',
         color: catColorVar(cat.id, 'primary'),
         avatar: cat.avatar,
         ...(providerLabel ? { isCloud: true as const, providerLabel } : {}),
@@ -125,11 +135,12 @@ export function buildCatOptions(cats: CatData[]): CatOption[] {
 /** Build whisper target options from dynamic cat data.
  *  Includes ALL cats — whisper routing accepts any catId regardless of mentionPatterns. */
 export function buildWhisperOptions(cats: CatData[]): CatOption[] {
+  const identities = buildCatMentionIdentities(cats, getCoCreatorMentionPatterns());
   return cats.filter(isAvailable).map((cat) => ({
     id: cat.id,
     label: formatCatLabel(cat),
     desc: cat.roleDescription,
-    insert: cat.mentionPatterns.length > 0 ? `@${cat.mentionPatterns[0].replace(/^@/, '')} ` : '',
+    insert: identities.get(cat.id)?.insert ?? '',
     color: cat.color.primary,
     avatar: cat.avatar,
   }));

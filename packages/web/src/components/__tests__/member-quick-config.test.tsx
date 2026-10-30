@@ -21,8 +21,8 @@ describe('quick member configuration', () => {
     expect(html).toContain('跟随');
     expect(html).not.toContain('模型恢复跟随');
     expect(html).not.toContain('执行身份');
-    for (const tool of ['Claude Code', 'Codex', 'AGY Native', 'Kimi', 'OpenCode', 'Cat Agent', '自定义 ACP'])
-      expect(html).toContain(tool);
+    expect(html).toContain('正在读取工具');
+    expect(html).toContain('disabled');
     expect(html).not.toContain('Gemini');
     expect(html).not.toContain('Antigravity');
   });

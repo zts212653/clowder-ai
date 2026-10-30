@@ -47,7 +47,7 @@ function fixture(t) {
   mkdirSync(home);
   mkdirSync(cwd);
   const active =
-    '- id: acp\n  config:\n    provider: real-active\n    model: active-model\n- id: llm-pi-ai\n  config:\n    providers:\n      real-active:\n        models: [{id: active-model}]\n';
+    '- id: credentials\n  name: "@deepseek-ai/dsh-credentials-local"\n- id: acp\n  config:\n    provider: real-active\n    model: active-model\n- id: llm-pi-ai\n  config:\n    providers:\n      real-active:\n        models: [{id: active-model}]\n';
   writeFileSync(join(root, 'expected.yml'), active);
   const source =
     '- id: llm-pi-ai\n  config:\n    providers:\n      real-source:\n        models: [{id: source-model}]\n';
@@ -90,6 +90,8 @@ for (const value of ['', '   ', 'absolute', 'relative', '~/relative'])
       cwd,
       env: {
         NODE_ENV: 'test',
+        // This suite checks HOME resolution, using the intranet Host policy for its synthetic launcher.
+        CAT_CAFE_WINDOWS_ACP_BOOTSTRAP_MODE: 'trusted-host',
         PATH: process.env.PATH,
         HOME: home,
         USERPROFILE: home,
@@ -98,6 +100,7 @@ for (const value of ['', '   ', 'absolute', 'relative', '~/relative'])
         DSH_TEST_BLANK: value.trim() === '' ? '1' : '0',
         DSH_TEST_RELATIVE: ['relative', '~/relative'].includes(value) ? '1' : '0',
       },
+      windowsHide: true,
       encoding: 'utf8',
       timeout: 30_000,
     });

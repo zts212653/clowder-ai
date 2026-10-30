@@ -1,5 +1,13 @@
 import { timingEnvironment, writeTimingReport } from './report-format.mjs';
 
+/**
+ * Keep the consumed hooks structural across workspace Vitest peer variants.
+ * @typedef {{moduleId: string, state?: () => string | undefined, ok?: () => boolean,
+ * diagnostic?: () => {duration?: number, environmentSetupDuration?: number, collectDuration?: number}}} TimingTestModule
+ * @typedef {{onTestModuleEnd: (module: TimingTestModule) => void,
+ * onTestRunEnd: (modules: readonly TimingTestModule[]) => void}} FileTimingReporter
+ */
+
 function moduleStatus(testModule) {
   try {
     const state = testModule.state?.();
@@ -36,13 +44,13 @@ function moduleTiming(testModule) {
 export function createVitestFileTimingReporter(environment = process.env) {
   if (!timingEnvironment(environment)) return null;
   const files = new Map();
-  /** @type {import('vitest/reporters').Reporter} */
+  /** @type {FileTimingReporter} */
   const reporter = {
     onTestModuleEnd(testModule) {
       const timing = moduleTiming(testModule);
       if (timing) files.set(testModule.moduleId, timing);
     },
-    onTestRunEnd(testModules, _unhandledErrors, _reason) {
+    onTestRunEnd(testModules) {
       for (const testModule of testModules) {
         const timing = moduleTiming(testModule);
         if (timing) files.set(testModule.moduleId, timing);
@@ -57,7 +65,7 @@ export function createVitestFileTimingReporter(environment = process.env) {
   return reporter;
 }
 
-/** @returns {Array<'default' | import('vitest/reporters').Reporter>} */
+/** @returns {Array<'default' | FileTimingReporter>} */
 export function vitestReporters(environment = process.env) {
   const reporter = createVitestFileTimingReporter(environment);
   return reporter ? ['default', reporter] : ['default'];

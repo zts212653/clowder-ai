@@ -1,6 +1,6 @@
-import { type CatDisplayNameData, formatCatDisplayName } from '@cat-cafe/shared';
+import { type CatDisplayNameData, formatCatIdentityLabel } from '@cat-cafe/shared';
 
-export { formatCatDisplayName };
+export const formatCatDisplayName = formatCatIdentityLabel;
 export type { CatDisplayNameData };
 
 export type GetCatDisplayNameData = (catId: string) => CatDisplayNameData | undefined;

@@ -39,7 +39,7 @@ test('source provider initialization preserves skill links without traversing mi
   fs.mkdirSync(external);
   fs.writeFileSync(path.join(external, 'SKILL.md'), 'external owner data');
   const links = {
-    'collective-participation': '../../cat-cafe-skills/collective-participation',
+    'collective-participation': path.join('..', '..', 'cat-cafe-skills', 'collective-participation'),
     external: path.relative(skills, external),
   };
   for (const [name, target] of Object.entries(links)) {

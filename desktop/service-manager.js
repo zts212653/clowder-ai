@@ -18,6 +18,7 @@ const { createStartupTimeline } = require('./startup-timing');
 const { prepareStartupServices, stopOwnedStartupProcess } = require('./startup-services');
 const { resolveExternalNodeEntry } = require('./subprocess-entry');
 const { readClientHomes, resolveDefaultClientHomes } = require('./client-homes');
+const { intranetApiEnvironment } = require('./intranet-profile');
 const {
   consumeMemoryFallbackConsent,
   discardMemoryFallbackConsent,
@@ -62,16 +63,10 @@ const ARCH_SEG = process.arch === 'arm64' ? 'arm64' : 'x64';
 function resolveUserDataDir() {
   const { instanceRoot } = resolveDesktopRuntime();
   if (instanceRoot) return instanceRoot;
-  let brandName;
-  try {
-    brandName = require('./package.json').build?.productName || 'Clowder AI';
-  } catch {
-    brandName = 'Clowder AI';
-  }
   const base = IS_MAC
     ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support')
     : process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
-  return path.join(base, brandName);
+  return path.join(base, 'Clowder AI Intranet');
 }
 
 // Desktop log alongside API logs in the user data directory.
@@ -416,24 +411,20 @@ class ServiceManager {
   _buildApiEnv(userDataDir) {
     const salt = this._getOrCreateTelemetrySalt(userDataDir);
     return {
-      // Binary lookup and runtime-path redirection are one API contract.
-      // Keep writable project data outside the installation and respect an
-      // ordinary deployment's existing explicit workspace selection.
+      // Resolve bundled ACP/MCP binaries from the installation while keeping
+      // writable project resources and agent work outside its program files.
       CAT_CAFE_RUNTIME_ROOT: this.root,
-      CAT_CAFE_WORKSPACE_ROOT: process.env.CAT_CAFE_WORKSPACE_ROOT?.trim() || path.join(userDataDir, 'project'),
-      ...(resolveDesktopRuntime().instanceRoot
-        ? {
-            CAT_CAFE_CONFIG_ROOT: path.join(userDataDir, 'project'),
-            CAT_CAFE_WORKSPACE_ROOT: path.join(userDataDir, 'project'),
-            CAT_CAFE_GLOBAL_CONFIG_ROOT: path.join(userDataDir, 'global'),
-            CAT_CAFE_DATA_DIR: path.join(userDataDir, 'data'),
-            PREVIEW_GATEWAY_PORT: '0',
-            CAT_CAFE_SKIP_HOMEDIR_MIGRATION: '1',
-            CAT_CAFE_SESSION_COOKIE_NAME: `cat_cafe_desktop_${crypto.createHash('sha256').update(userDataDir).digest('hex').slice(0, 12)}`,
-          }
-        : {}),
+      CAT_CAFE_WORKSPACE_ROOT: resolveDesktopRuntime().instanceRoot
+        ? path.join(userDataDir, 'project')
+        : process.env.CAT_CAFE_WORKSPACE_ROOT?.trim() || path.join(userDataDir, 'project'),
+      CAT_CAFE_SESSION_COOKIE_NAME: `cat_cafe_intranet_${crypto.createHash('sha256').update(userDataDir).digest('hex').slice(0, 12)}`,
       TELEMETRY_HMAC_SALT: salt,
       EVIDENCE_DB: path.join(userDataDir, 'evidence.sqlite'),
+      CAT_CAFE_CONFIG_ROOT: path.join(userDataDir, 'project'),
+      CAT_CAFE_GLOBAL_CONFIG_ROOT: path.join(userDataDir, 'global'),
+      CAT_CAFE_DATA_DIR: path.join(userDataDir, 'data'),
+      PREVIEW_GATEWAY_PORT: '0',
+      CAT_CAFE_SKIP_HOMEDIR_MIGRATION: '1',
       TRANSCRIPT_DATA_DIR: path.join(userDataDir, 'data', 'transcripts'),
       LOG_DIR: path.join(userDataDir, 'data', 'logs', 'api'),
       UPLOAD_DIR: path.join(userDataDir, 'uploads'),
@@ -441,6 +432,7 @@ class ServiceManager {
       TTS_CACHE_DIR: path.join(userDataDir, 'data', 'tts-cache'),
       AUDIT_LOG_DIR: path.join(userDataDir, 'data', 'audit-logs'),
       CLI_RAW_ARCHIVE_DIR: path.join(userDataDir, 'data', 'cli-raw-archive'),
+      ...intranetApiEnvironment(userDataDir),
       ...(this.pluginNetworkBinding
         ? {
             CAT_CAFE_PLUGIN_NETWORK_BRIDGE_URL: this.pluginNetworkBinding.endpoint,
@@ -670,6 +662,7 @@ class ServiceManager {
             CODEX_HOME: path.join(instanceRoot, 'home', '.codex'),
             CLAUDE_CONFIG_DIR: path.join(instanceRoot, 'home', '.claude'),
             DSH_HOME: path.join(instanceRoot, 'home', '.dsh'),
+            CAT_CAFE_RUNTIME_ROOT: this.root,
             CAT_CAFE_WORKSPACE_ROOT: path.join(instanceRoot, 'project'),
             ALLOWED_WORKSPACE_DIRS: path.join(instanceRoot, 'project'),
             REDIS_PORT: String(this.redisPort),

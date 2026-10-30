@@ -4,6 +4,11 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { PROJECT_MIRROR_PROBES, prepareProjectMirrors } = require('./project-mirrors');
 const { readProjectMirrorsInConsumer } = require('./project-mirror-consumer');
 const { safeFilesystemFields, safeProbeFailure, attachMirrorDiagnostics } = require('./project-mirror-diagnostics');
+const {
+  refreshMaterializedMirrors,
+  preparePhysicalMirrors,
+  materializeFailedMirrors,
+} = require('./project-mirror-materialization');
 
 function readEntries(entries) {
   return entries.flatMap((entry) => {
@@ -60,11 +65,26 @@ async function probeConsumer({ nodeExe, entries, signal, remaining, attempt, log
 /** Verify bundled resources before API startup; a fresh consumer is evidence,
  * not a claim about Windows cache behavior or permission-policy relaxation. */
 async function waitWithDiagnostics(
-  { installRoot, projectDir, nodeExe, signal, log = () => {}, timeoutMs = 5000, probes = PROJECT_MIRROR_PROBES },
+  {
+    installRoot,
+    projectDir,
+    nodeExe,
+    signal,
+    log = () => {},
+    timeoutMs = 5000,
+    probes = PROJECT_MIRROR_PROBES,
+    platform = process.platform,
+  },
   state,
 ) {
   signal?.throwIfAborted();
-  const deadline = Date.now() + timeoutMs;
+  const recoveryOptions = { installRoot, projectDir, nodeExe, signal, log };
+  const preparationDeferred = fs.existsSync(path.join(projectDir, '.clowder-resource-transaction.json'));
+  await refreshMaterializedMirrors(recoveryOptions);
+  if (preparationDeferred) {
+    signal?.throwIfAborted();
+    prepareProjectMirrors({ installRoot, projectDir, log });
+  }
   const entries = (kind, root) =>
     probes.map(({ mirror, relativePath }) => ({
       kind,
@@ -73,6 +93,12 @@ async function waitWithDiagnostics(
     }));
   const mirrorEntries = entries('mirror', projectDir);
   const sourceEntries = entries('source', installRoot);
+  // Windows resources must be ordinary directories even if the three probes
+  // happen to pass today. Keep source failures on the existing diagnostic path.
+  if (platform === 'win32' && nodeExe && fs.existsSync(nodeExe) && !readEntries(sourceEntries).length) {
+    await preparePhysicalMirrors(recoveryOptions);
+  }
+  const deadline = Date.now() + timeoutMs;
   let failures = readEntries(mirrorEntries);
   let sourceFailures = readEntries(sourceEntries);
   state.mirrorFailures = failures;
@@ -124,6 +150,32 @@ async function waitWithDiagnostics(
           `Project mirror readiness verified (${probes.length} probes; bundled Node consumer). Parent read remained unavailable; no ACL, configuration or history was changed.`,
         );
         return { verification: 'consumer' };
+      }
+      // Only an actual completed consumer read can authorize materialization.
+      // Source failures, launch failures and timeouts never authorize a copy.
+      if (!consumerError && consumerFailures.length && consumerFailures.every((failure) => failure.kind === 'mirror')) {
+        if (await materializeFailedMirrors(recoveryOptions, consumerFailures)) {
+          const verified = await probeConsumer({
+            nodeExe,
+            entries: [...sourceEntries, ...mirrorEntries],
+            signal,
+            remaining: 5000,
+            attempt: attempt + 1,
+            log,
+            onDiagnostic: state.observe,
+          });
+          if (!verified.error && !verified.failures.length) {
+            log('Project mirror readiness verified (complete materialized resources; bundled Node consumer)');
+            return { verification: 'consumer', recovery: 'materialized' };
+          }
+          throw readinessError({
+            sourceFailures: readEntries(sourceEntries),
+            failures: readEntries(mirrorEntries),
+            consumerFailures: verified.failures,
+            consumerError: verified.error,
+            nodeExe,
+          });
+        }
       }
     }
     attempt += 1;

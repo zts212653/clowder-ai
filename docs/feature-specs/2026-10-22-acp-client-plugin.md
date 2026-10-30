@@ -62,3 +62,5 @@ Host PR 依赖 #1665；插件 PR 依赖本次 Host 扩展。这里只提交源�
 审计失败只允许 Windows trusted-host 下已有 ACP client 的显式 bootstrapRoot 变化；完整原生检查后，在写事务内复读原文本、包 digest、grant 并消费版本围栏。新增 client、改名称/顺序/命令/argv/MCP 或其他插件配置均不豁免，安装/启用和工具调用保持原准入。
 旧 exact 1 对未设置的新键映射受限组合，新键逐项优先，strict 会屏蔽 C；非法新值启动失败，warning 与 error 分开。保留目录自身私有权限、原生身份和直接本机管理；不改系统盘或已有 ACL，不改存量 ID/绑定/历史。持久 inventory 写事务由原生锁排他，配置写者共享事务；运行部署仍只支持一套 Host API，不提供多个 API 的 runtime 协同。
 契约与操作见[设计](../design/2026-10-22-trusted-host-compatibility.md)和[指南](../ops/acp-trusted-host-compatibility.md)。报告者已有 CodeAgent 正常使用反馈，但精确构建/访问拓扑和逐项 MCP/协作/续接证据未齐；本机合成验证与真实 dsh/Claude/Pi 结果须分开记录。
+
+独立内网 Windows 发行版属于 D：内置 CodeAgent 发现与角色身份推荐，无需插件，预置持久默认值；不把该默认值混入公共 Host。见[内网包指南](../ops/intranet-windows-codeagent.md)。

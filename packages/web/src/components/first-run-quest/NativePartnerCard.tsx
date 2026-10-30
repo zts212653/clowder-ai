@@ -1,9 +1,7 @@
-import { useState } from 'react';
-import { MemberRuntimeFields } from '../settings/members/MemberRuntimeFields';
 import { nativeAcpProfileLabel, nativeAcpProfileMessage } from '../settings/members/native-acp-profile-status';
 import { usesDefaultNativeIdentity } from '../settings/members/native-login-state';
 import { NativeInstallHelp } from './NativeInstallHelp';
-import { type NativePartner, nativeRuntimeSelectable } from './native-onboarding';
+import { type NativePartner, nativePartnerSelectable, requiresDshDraftConfirmation } from './native-onboarding';
 import { nativeModelLabel, usesDetectedRuntimeConfiguration } from './native-partner-config';
 
 const chinese = (zh: string) => zh;
@@ -13,19 +11,18 @@ export function NativePartnerCard({
   disabled = false,
   compact = false,
   patch,
-  onValidityChange,
 }: {
   partner: NativePartner;
   created: boolean;
   disabled?: boolean;
   compact?: boolean;
   patch: (change: Partial<NativePartner>) => void;
-  onValidityChange: (valid: boolean) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const { runtime, form } = partner;
+  const locked = created && !(runtime.dshSetupRequired && partner.existingId);
   const available = runtime.installed && (runtime.clientId !== 'acp' || Boolean(runtime.acp));
-  const selectable = nativeRuntimeSelectable(runtime, form);
+  const selectable = nativePartnerSelectable(partner);
+  const manualDsh = requiresDshDraftConfirmation(partner);
   const detectedConfiguration = usesDetectedRuntimeConfiguration(form, runtime);
   const defaultIdentity = usesDefaultNativeIdentity(form) && detectedConfiguration;
   const model = nativeModelLabel(
@@ -33,17 +30,26 @@ export function NativePartnerCard({
     form.defaultModel || (detectedConfiguration ? runtime.configuredModel : undefined),
   );
   const effort = form.cliEffort || (detectedConfiguration ? runtime.configuredEffort : undefined);
-  const profileLabel = nativeAcpProfileLabel(runtime.discoveryStatus, chinese);
-  const profileMessage = nativeAcpProfileMessage(runtime.discoveryStatus, chinese);
+  const dshRoute = runtime.dshSetup;
+  const profileLabel = manualDsh
+    ? '已保留自定义设置 · 待确认连接'
+    : dshRoute?.status === 'configured'
+      ? '已检测可用配置'
+      : nativeAcpProfileLabel(runtime.discoveryStatus, chinese);
+  const profileMessage = manualDsh
+    ? `模型：${form.defaultModel || '跟随工具'}${form.cliEffort ? ` · 强度：${form.cliEffort}` : ''}`
+    : dshRoute?.status === 'configured'
+      ? `连接：${dshRoute.provider} / ${dshRoute.model} · 复用 ${dshRoute.sourceProfile} 配置`
+      : nativeAcpProfileMessage(runtime.discoveryStatus, chinese);
   return (
     <article
-      className={`rounded-xl border p-4 ${partner.selected ? 'border-cafe-accent bg-cafe-surface' : 'border-[var(--console-border-soft)] bg-cafe-surface-canvas'}`}
+      className={`rounded-xl border p-4 ${partner.selected && selectable ? 'border-cafe-accent bg-cafe-surface' : 'border-[var(--console-border-soft)] bg-cafe-surface-canvas'}`}
     >
       <div className={`flex items-center ${compact ? 'gap-2' : 'gap-3'}`}>
         <input
           type="checkbox"
           aria-label={`加入 ${runtime.label} 伙伴`}
-          checked={partner.selected}
+          checked={partner.selected && selectable}
           disabled={!selectable || disabled}
           onChange={(e) => patch({ selected: e.target.checked })}
           className="h-5 w-5 shrink-0 accent-[var(--color-cafe-accent)]"
@@ -65,7 +71,7 @@ export function NativePartnerCard({
           </h3>
           <p className="mt-1 text-sm text-cafe-secondary">
             {runtime.label} ·{' '}
-            {created
+            {locked
               ? '已添加'
               : profileLabel
                 ? profileLabel
@@ -78,17 +84,6 @@ export function NativePartnerCard({
                       : '未检测到'}
           </p>
         </div>
-        {runtime.installed && (
-          <button
-            type="button"
-            disabled={created || disabled}
-            onClick={() => setExpanded(!expanded)}
-            aria-expanded={expanded}
-            className="min-h-10 shrink-0 text-sm text-cafe-accent"
-          >
-            {expanded ? '收起' : '调整'}
-          </button>
-        )}
       </div>
       {form.roleDescription && (
         <p className={`${compact ? '' : 'ml-8'} mt-3 text-sm text-cafe-secondary`}>{form.roleDescription}</p>
@@ -109,6 +104,13 @@ export function NativePartnerCard({
       {!available && <NativeInstallHelp runtime={runtime} />}
       {partner.missingExisting && !created && (
         <p className="mt-3 text-sm text-cafe-secondary">原伙伴已不在当前名单中。确认创建后，会按保留的配置重新添加。</p>
+      )}
+      {runtime.dshSetupRequired && (manualDsh || dshRoute?.status !== 'configured') && !locked && (
+        <p role="status" className="mt-3 text-sm text-cafe-secondary">
+          {manualDsh
+            ? '此前的模型或思考强度已保留，请在“设置 → 成员与运行时”确认连接。'
+            : '未找到可复用的 DSH 连接。请在成员配置中完成接入后重新检测。'}
+        </p>
       )}
       {partner.recoverable && !created && (
         <div className="mt-3 text-sm text-cafe-secondary">
@@ -142,48 +144,19 @@ export function NativePartnerCard({
         </div>
       )}
       {available && defaultIdentity && runtime.readiness?.status === 'configured' && (
-        <p className="mt-3 text-sm text-cafe-secondary">已检测登录 · 实际连接待验证</p>
+        <p className="mt-3 text-sm text-cafe-secondary">本机连接配置已就绪 · 实际连接待验证</p>
       )}
       {available && !defaultIdentity && (
-        <p className="mt-3 text-sm text-cafe-secondary">此连接的登录状态尚未检查 · 实际连接待验证</p>
+        <p className="mt-3 text-sm text-cafe-secondary">
+          {manualDsh
+            ? '连接需要再次确认 · 原有设置已保留'
+            : dshRoute?.status === 'configured' && detectedConfiguration
+              ? '已检测到供应商与凭据配置 · 实际连接待验证'
+              : '此连接的登录状态尚未检查 · 实际连接待验证'}
+        </p>
       )}
       {available && runtime.clientId === 'opencode' && (
         <p className="mt-2 text-sm text-cafe-secondary">未选择项目时使用默认工作区；你也可以为对话选择项目目录。</p>
-      )}
-      {expanded && (
-        <fieldset
-          disabled={disabled || created}
-          className="mt-4 space-y-4 border-t border-[var(--console-border-soft)] pt-4"
-        >
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="text-sm">
-              名字
-              <input
-                value={form.displayName}
-                onChange={(e) => patch({ form: { ...form, name: e.target.value, displayName: e.target.value } })}
-                className="mt-2 min-h-10 w-full rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface-canvas px-3"
-              />
-            </label>
-            <label className="text-sm">
-              昵称
-              <input
-                value={form.nickname}
-                onChange={(e) => patch({ form: { ...form, nickname: e.target.value } })}
-                className="mt-2 min-h-10 w-full rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface-canvas px-3"
-              />
-            </label>
-          </div>
-          <MemberRuntimeFields
-            nativeSetup
-            form={form}
-            accounts={[]}
-            patch={(change) => patch({ form: { ...form, ...change } })}
-            t={chinese}
-            accountHref="/settings?s=members"
-            editing={false}
-            onValidityChange={onValidityChange}
-          />
-        </fieldset>
       )}
     </article>
   );

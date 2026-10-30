@@ -1,8 +1,8 @@
-import { relative, resolve, sep } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 export function isWithinProjectRoot(projectRoot: string, candidatePath: string): boolean {
   const rel = relative(resolve(projectRoot), resolve(candidatePath));
-  return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..');
+  return rel === '' || (!isAbsolute(rel) && !rel.startsWith(`..${sep}`) && rel !== '..');
 }
 
 export function resolveProjectTemplatePath(projectRoot: string): string {
