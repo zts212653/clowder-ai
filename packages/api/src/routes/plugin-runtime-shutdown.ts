@@ -18,4 +18,10 @@ export function registerPluginRuntimeShutdown(
     })();
     await shutdown;
   });
+  app.addHook('onResponse', async () => {
+    // A request active when server.close() starts can finish into keep-alive
+    // after that call has swept idle sockets. Preserve its response, then reap
+    // only idle connections so HTTP drain does not wait for the keep-alive timer.
+    if (shutdown) app.server.closeIdleConnections();
+  });
 }
