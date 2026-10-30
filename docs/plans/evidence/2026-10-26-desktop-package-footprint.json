@@ -1,0 +1,1454 @@
+{
+  "evidenceType": "Author experiment summary assembled from retained raw receipts; not raw stdout or maintainer acceptance",
+  "baseSha": "fa1dc90fa9704691121cd90a2aa6be6422c954eb",
+  "packagedSourceSha": "c482cbef6dcb82eae032bbb6fd5ad1b8e96ecc69",
+  "platform": "win32-x64",
+  "node": "v24.16.0",
+  "zlib": "1.3.1-e00f703",
+  "comparisonMethod": "Actual candidate installer compared with actual gzip1 baseline compiled from the identical new application/resource build. Baseline restores only omitted foreign node-pty prebuilds and the two compiler caches from this same isolated frozen workspace/Web build. No installation is performed.",
+  "packages": {
+    "baseline": {
+      "file": "ClowderAI-Setup-1.14.0-Comparison-Baseline.exe",
+      "bytes": 722093247,
+      "sha256": "1c0967cc7923c8058372139857ff816ac26a6e4edc138e795e43c755000d9834"
+    },
+    "candidate": {
+      "file": "ClowderAI-Setup-1.14.0.exe",
+      "bytes": 662091774,
+      "sha256": "b93871ab8a4dc1e0b524bf347b118f2b10b7e08707d1240485312a930bcf91e2"
+    }
+  },
+  "savingBytes": 60001473,
+  "savingPercent": 8.309380159595925,
+  "archiveCompressedBytes": 596540058,
+  "archiveRegularFileBytes": 1604273449,
+  "directFileAndInstallerResidualBytes": 65551716,
+  "archives": [
+    {
+      "archive": "deploy-dependencies",
+      "compressedBytes": 252692768,
+      "sha256": "9688e51e0d86c320d7c77e09b099c3db3304a18145ab5acb4b54da7a298cb137",
+      "regularFiles": 50884,
+      "rawBytes": 806798126,
+      "largestPackagesOrRoots": [
+        ["@anthropic-ai/claude-agent-sdk-win32-x64", 243751648],
+        ["@next/swc-win32-x64-msvc", 135864842],
+        ["next", 86662079],
+        ["date-fns", 22601076],
+        ["js-tiktoken", 22432828],
+        ["@img/sharp-win32-x64", 19890145],
+        ["@cat-cafe/shared", 17408921],
+        ["node-pty", 16103042],
+        ["chromium-bidi", 13240203],
+        ["better-sqlite3", 12154354],
+        ["@opentelemetry/semantic-conventions", 11463785],
+        ["@cat-cafe/mcp-server", 11425879],
+        ["@anthropic-ai/sdk", 9503985],
+        ["puppeteer-core", 8533623],
+        ["@opentelemetry/otlp-transformer", 6784565],
+        ["rollup", 6452533],
+        ["webpack", 6006711],
+        ["@vscode/ripgrep-win32-x64", 5431448],
+        ["@anthropic-ai/claude-agent-sdk", 5384396],
+        ["luxon", 4592735],
+        ["react-dom", 4513549],
+        ["@modelcontextprotocol/sdk", 4322438],
+        ["katex", 4037040],
+        ["devtools-protocol", 3705759],
+        ["zod", 3594196],
+        ["protobufjs", 2948443],
+        ["es-abstract", 2786378],
+        ["@babel/types", 2750097],
+        ["fastify", 2561624],
+        ["@grpc/grpc-js", 2503452],
+        ["caniuse-lite", 2336576],
+        ["terser", 2333446],
+        ["@types/node", 2282558],
+        ["@babel/parser", 1995445],
+        ["@clowder-ai/plugin-sdk", 1971576]
+      ]
+    },
+    {
+      "archive": "deploy-api",
+      "compressedBytes": 29762428,
+      "sha256": "97fab7de639c4cc86c9a669ffeb9889fc736f6fe5777b671af9e2b044baae8ab",
+      "regularFiles": 11292,
+      "rawBytes": 129358899,
+      "largestPackagesOrRoots": [
+        ["dist", 101710443],
+        ["src", 25761666],
+        ["vendor", 1438191],
+        ["scripts", 312417],
+        ["node_modules", 97799],
+        ["config", 20297],
+        ["package.json", 11862],
+        ["runtime", 5240],
+        ["fixtures", 577],
+        ["tsconfig.json", 194],
+        [".gitignore", 116],
+        [".runtime-lock.json", 97],
+        ["uploads", 0]
+      ]
+    },
+    {
+      "archive": "deploy-web",
+      "compressedBytes": 146736000,
+      "sha256": "e96c72d53d4b6801d295a8d817a4e99ed51d84d0fc797cff092f08bd2fe4de37",
+      "regularFiles": 986,
+      "rawBytes": 249930224,
+      "largestPackagesOrRoots": [
+        ["public", 211727560],
+        [".next", 33260839],
+        ["node_modules", 4113394],
+        ["color-audit-report.json", 740028],
+        ["scripts", 29640],
+        ["eslint-plugins", 20780],
+        ["tailwind.config.js", 14949],
+        ["package.json", 9054],
+        ["next.config.js", 6940],
+        ["worker", 3455],
+        [".eslintrc.json", 1238],
+        ["vitest.config.ts", 998],
+        ["tsconfig.json", 597],
+        ["vitest.entry-api.config.ts", 333],
+        ["next-env.d.ts", 233],
+        [".runtime-lock.json", 97],
+        ["postcss.config.js", 89]
+      ]
+    },
+    {
+      "archive": "deploy-mcp-server",
+      "compressedBytes": 1893306,
+      "sha256": "1251c98d60c23569ddfa1310ccca73546617babf758b1530651e4fc13275e3c9",
+      "regularFiles": 1452,
+      "rawBytes": 10388570,
+      "largestPackagesOrRoots": [
+        ["node_modules", 4162554],
+        ["dist", 3952239],
+        ["src", 1154567],
+        ["governance", 1114029],
+        ["scripts", 3735],
+        ["package.json", 1155],
+        ["tsconfig.json", 194],
+        [".runtime-lock.json", 97]
+      ]
+    },
+    {
+      "archive": "electron",
+      "compressedBytes": 127910606,
+      "sha256": "6c28c7e46866e5dea074da82053426dade97c7e0cd79df8f1c92eab417a67f1a",
+      "regularFiles": 78,
+      "rawBytes": 302832396,
+      "largestPackagesOrRoots": [
+        ["Clowder AI.exe", 201481728],
+        ["locales", 43597720],
+        ["LICENSES.chromium.html", 12278238],
+        ["icudtl.dat", 10466624],
+        ["libGLESv2.dll", 8019968],
+        ["resources.pak", 5926839],
+        ["vk_swiftshader.dll", 5577728],
+        ["d3dcompiler_47.dll", 4916728],
+        ["resources", 4765136],
+        ["ffmpeg.dll", 3001344],
+        ["vulkan-1.dll", 903680],
+        ["v8_context_snapshot.bin", 702157],
+        ["libEGL.dll", 493056],
+        ["snapshot_blob.bin", 331874],
+        ["chrome_200_percent.pak", 220631],
+        ["chrome_100_percent.pak", 147743],
+        ["LICENSE.electron.txt", 1096],
+        ["vk_swiftshader_icd.json", 106]
+      ]
+    },
+    {
+      "archive": "node",
+      "compressedBytes": 37544950,
+      "sha256": "10fe856035bea3d3135f3f821be419e379ab956d736f12a83bda9831ebb350f7",
+      "regularFiles": 1942,
+      "rawBytes": 104965234,
+      "largestPackagesOrRoots": [
+        ["node.exe", 92279112],
+        ["node_modules", 12414018],
+        ["LICENSE", 159872],
+        ["CHANGELOG.md", 56187],
+        ["README.md", 43075],
+        ["install_tools.bat", 3094],
+        ["npm", 2073],
+        ["npx", 2073],
+        ["npm.ps1", 1700],
+        ["npx.ps1", 1700],
+        ["nodevars.bat", 702],
+        ["npm.cmd", 538],
+        ["npx.cmd", 538],
+        ["corepack", 334],
+        ["corepack.cmd", 218]
+      ]
+    }
+  ],
+  "regularFileDifference": {
+    "ok": true,
+    "removedFiles": 14,
+    "removedRawBytes": 16083187,
+    "unexpectedAddedChangedRemoved": false
+  },
+  "independentGzip9Counters": {
+    "sourceSha": "c482cbef6dcb82eae032bbb6fd5ad1b8e96ecc69",
+    "node": "v24.16.0",
+    "zlib": "1.3.1-e00f703",
+    "method": "Read-only independent TAR-member removal/gzip9 counts. Not runnable packages or approved removals. Groups overlap; never sum independent marginal savings.",
+    "archives": [
+      {
+        "archive": "deploy-dependencies",
+        "actualArchiveBytes": 252692768,
+        "keepAllGzip9Bytes": 252692768,
+        "calibratedToActual": true,
+        "probes": [
+          {
+            "group": "source-maps",
+            "rawBytes": 89263338,
+            "files": 9930,
+            "gzip9FilteredBytes": 234617046,
+            "modeledReductionBytes": 18075722
+          },
+          {
+            "group": "next-and-swc",
+            "rawBytes": 222526921,
+            "files": 6387,
+            "gzip9FilteredBytes": 189285066,
+            "modeledReductionBytes": 63407702
+          },
+          {
+            "group": "claude-native-runtime",
+            "rawBytes": 243751648,
+            "files": 4,
+            "gzip9FilteredBytes": 142258503,
+            "modeledReductionBytes": 110434265
+          },
+          {
+            "group": "pdb-symbols",
+            "rawBytes": 10788864,
+            "files": 2,
+            "gzip9FilteredBytes": 250565963,
+            "modeledReductionBytes": 2126805
+          }
+        ]
+      },
+      {
+        "archive": "deploy-api",
+        "actualArchiveBytes": 29762428,
+        "keepAllGzip9Bytes": 29762428,
+        "calibratedToActual": true,
+        "probes": [
+          {
+            "group": "source-maps",
+            "rawBytes": 58823489,
+            "files": 3715,
+            "gzip9FilteredBytes": 17071459,
+            "modeledReductionBytes": 12690969
+          },
+          {
+            "group": "api-source-tree",
+            "rawBytes": 25761666,
+            "files": 3722,
+            "gzip9FilteredBytes": 23644011,
+            "modeledReductionBytes": 6118417
+          }
+        ]
+      },
+      {
+        "archive": "deploy-web",
+        "actualArchiveBytes": 146736000,
+        "keepAllGzip9Bytes": 146736000,
+        "calibratedToActual": true,
+        "probes": [
+          {
+            "group": "next-build-trace",
+            "rawBytes": 6632501,
+            "files": 1,
+            "gzip9FilteredBytes": 146128373,
+            "modeledReductionBytes": 607627
+          },
+          {
+            "group": "all-feature-demo-resources",
+            "rawBytes": 35801525,
+            "files": 10,
+            "gzip9FilteredBytes": 111424536,
+            "modeledReductionBytes": 35311464
+          },
+          {
+            "group": "duplicate-demo-video",
+            "rawBytes": 10160715,
+            "files": 1,
+            "gzip9FilteredBytes": 136681460,
+            "modeledReductionBytes": 10054540
+          },
+          {
+            "group": "onnx-asyncify-jspi",
+            "rawBytes": 44179798,
+            "files": 4,
+            "gzip9FilteredBytes": 136380678,
+            "modeledReductionBytes": 10355322
+          },
+          {
+            "group": "onnx-all-nonbase",
+            "rawBytes": 69241147,
+            "files": 6,
+            "gzip9FilteredBytes": 130568539,
+            "modeledReductionBytes": 16167461
+          }
+        ]
+      },
+      {
+        "archive": "deploy-mcp-server",
+        "actualArchiveBytes": 1893306,
+        "keepAllGzip9Bytes": 1893306,
+        "calibratedToActual": true,
+        "probes": [
+          {
+            "group": "source-maps",
+            "rawBytes": 2195958,
+            "files": 606,
+            "gzip9FilteredBytes": 1412723,
+            "modeledReductionBytes": 480583
+          }
+        ]
+      },
+      {
+        "archive": "electron",
+        "actualArchiveBytes": 127910606,
+        "keepAllGzip9Bytes": 127910606,
+        "calibratedToActual": true,
+        "probes": [
+          {
+            "group": "locales-except-en-us-zh-cn-zh-tw",
+            "rawBytes": 42078215,
+            "files": 52,
+            "gzip9FilteredBytes": 116834096,
+            "modeledReductionBytes": 11076510
+          }
+        ]
+      }
+    ]
+  },
+  "byteIdenticalDuplicates": {
+    "duplicateRawBytes": 61162596,
+    "groups": 6189,
+    "largest": [
+      {
+        "bytesEach": 10160715,
+        "sha256": "37bee3133500953e4836eeb002132d1fd9c815fa9d6bb14fa61aac13647bcf4a",
+        "copies": 2,
+        "duplicateRawBytes": 10160715,
+        "locations": [
+          {
+            "archive": "deploy-web",
+            "path": "public/vendor/demos/panel-vote-v1.zh.mp4"
+          },
+          {
+            "archive": "deploy-web",
+            "path": "public/vendor/demos/panel-vote-voting-v1.zh.mp4"
+          }
+        ]
+      },
+      {
+        "bytesEach": 2271192,
+        "sha256": "2db132f0d7e6ea57f0768c56756ad0882ccdf17353e3a71ddc745ed6d4303fc4",
+        "copies": 2,
+        "duplicateRawBytes": 2271192,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "chromium-bidi/lib/cjs/protocol-parser/generated/webdriver-bidi.d.ts"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "chromium-bidi/lib/esm/protocol-parser/generated/webdriver-bidi.d.ts"
+          }
+        ]
+      },
+      {
+        "bytesEach": 1062472,
+        "sha256": "7f68c840226505004215c0b82d4e502c24b5bc3f4b93c4baaaa19bd679c0def8",
+        "copies": 3,
+        "duplicateRawBytes": 2124944,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "node-pty/build/Release/conpty/OpenConsole.exe"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "node-pty/prebuilds/win32-x64/conpty/OpenConsole.exe"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "node-pty/third_party/conpty/1.25.260303002/win10-x64/OpenConsole.exe"
+          }
+        ]
+      },
+      {
+        "bytesEach": 1860236,
+        "sha256": "3e2c28a805b843f5d47b05a641b1b91364a7d9c4409cbd71366d6e7c39237259",
+        "copies": 2,
+        "duplicateRawBytes": 1860236,
+        "locations": [
+          {
+            "archive": "deploy-web",
+            "path": "public/avatars/codex_box.png"
+          },
+          {
+            "archive": "deploy-web",
+            "path": "public/avatars/sliced-finial/codex_box.png"
+          }
+        ]
+      },
+      {
+        "bytesEach": 1756612,
+        "sha256": "6e8e33ff9c475ec777b4d0bd182005d6abc0bca973841d8896b78401daec7509",
+        "copies": 2,
+        "duplicateRawBytes": 1756612,
+        "locations": [
+          {
+            "archive": "deploy-web",
+            "path": "public/avatars/antig-opus.png"
+          },
+          {
+            "archive": "deploy-web",
+            "path": "public/avatars/sliced-finial/antigravity_cyber.png"
+          }
+        ]
+      },
+      {
+        "bytesEach": 667290,
+        "sha256": "d624d025d2b3bf298a42ed67ee4b7abed361a28fca0aefbbd08dc7698f1fc088",
+        "copies": 3,
+        "duplicateRawBytes": 1334580,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esm/experimental_attributes.d.ts"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esnext/experimental_attributes.d.ts"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/src/experimental_attributes.d.ts"
+          }
+        ]
+      },
+      {
+        "bytesEach": 1254480,
+        "sha256": "65b9b28f06940d4947b65638b20d102ba5b3b143357612f71a69f98a077e11b3",
+        "copies": 2,
+        "duplicateRawBytes": 1254480,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/otlp-transformer/build/esm/generated/root.js.map"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/otlp-transformer/build/esnext/generated/root.js.map"
+          }
+        ]
+      },
+      {
+        "bytesEach": 380243,
+        "sha256": "32b9985f620a9e8c005a291da13da8a66807751a5bfe4587eb247a6c30c316e1",
+        "copies": 4,
+        "duplicateRawBytes": 1140729,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@cat-cafe/mcp-server/node_modules/@modelcontextprotocol/sdk/dist/cjs/types.d.ts"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@cat-cafe/mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/types.d.ts"
+          },
+          {
+            "archive": "deploy-mcp-server",
+            "path": "node_modules/@modelcontextprotocol/sdk/dist/cjs/types.d.ts"
+          },
+          {
+            "archive": "deploy-mcp-server",
+            "path": "node_modules/@modelcontextprotocol/sdk/dist/esm/types.d.ts"
+          }
+        ]
+      },
+      {
+        "bytesEach": 1095055,
+        "sha256": "88de2d97b352766cfb625d1725a4cbca51a45c42f10058b45f5b928382ac1879",
+        "copies": 2,
+        "duplicateRawBytes": 1095055,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@cat-cafe/mcp-server/governance/mcp-surface-baseline.json"
+          },
+          {
+            "archive": "deploy-mcp-server",
+            "path": "governance/mcp-surface-baseline.json"
+          }
+        ]
+      },
+      {
+        "bytesEach": 857813,
+        "sha256": "0ff272f95423cd51dc81092ac3b435252a6c7e25d50f10a90948d4d203a33db6",
+        "copies": 2,
+        "duplicateRawBytes": 857813,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/otlp-transformer/build/esm/generated/root.js"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/otlp-transformer/build/esnext/generated/root.js"
+          }
+        ]
+      },
+      {
+        "bytesEach": 797939,
+        "sha256": "1b7a2a02336b0ec7ea6b6605360ab7ba26b352f9a809ed71cf0128733d2f3665",
+        "copies": 2,
+        "duplicateRawBytes": 797939,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esm/experimental_attributes.js.map"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esnext/experimental_attributes.js.map"
+          }
+        ]
+      },
+      {
+        "bytesEach": 656908,
+        "sha256": "c8983333313e98ad19f12af3c7741ddcd6416958d5147e765079e8c71c52d7e1",
+        "copies": 2,
+        "duplicateRawBytes": 656908,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esm/experimental_attributes.js"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esnext/experimental_attributes.js"
+          }
+        ]
+      },
+      {
+        "bytesEach": 545326,
+        "sha256": "b80484921a6dcc6cf499609ee8f2d7ec5db3281ab0a3b7ec2a2abda21a4a1bcc",
+        "copies": 2,
+        "duplicateRawBytes": 545326,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "js-tiktoken/dist/ranks/gpt2.cjs"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "js-tiktoken/dist/ranks/r50k_base.cjs"
+          }
+        ]
+      },
+      {
+        "bytesEach": 545324,
+        "sha256": "1895031f2ae2257e4e0c7df144cf381b8643001e9957794e4905dba93dec0969",
+        "copies": 2,
+        "duplicateRawBytes": 545324,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "js-tiktoken/dist/ranks/gpt2.js"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "js-tiktoken/dist/ranks/r50k_base.js"
+          }
+        ]
+      },
+      {
+        "bytesEach": 87122,
+        "sha256": "6db8edeca35c1e7fbc123b3b2b59c3f80686b0ee437ec73967e831a9b7c4504d",
+        "copies": 7,
+        "duplicateRawBytes": 522732,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta21/dist/wire/disposition-fixtures.js"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta23/dist/wire/disposition-fixtures.js"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta24/dist/wire/disposition-fixtures.js"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta25/dist/wire/disposition-fixtures.js"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta27/dist/wire/disposition-fixtures.js"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta28/dist/wire/disposition-fixtures.js"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta29/dist/wire/disposition-fixtures.js"
+          }
+        ]
+      },
+      {
+        "bytesEach": 11357,
+        "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "copies": 44,
+        "duplicateRawBytes": 488351,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "b4a/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "bare-events/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "bare-fs/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "bare-os/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "bare-path/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "bare-stream/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "bare-url/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "baseline-browser-mapping/LICENSE.txt"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "chromium-bidi/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "events-universal/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "import-in-the-middle/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "text-decoder/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/api/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/api-logs/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/configuration/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/context-async-hooks/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/core/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/exporter-logs-otlp-grpc/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/exporter-logs-otlp-http/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/exporter-logs-otlp-proto/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/exporter-metrics-otlp-grpc/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/exporter-metrics-otlp-http/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/exporter-metrics-otlp-proto/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/exporter-prometheus/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/exporter-trace-otlp-grpc/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/exporter-trace-otlp-http/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/exporter-trace-otlp-proto/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/exporter-zipkin/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/instrumentation/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/otlp-exporter-base/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/otlp-grpc-exporter-base/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/otlp-transformer/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/propagator-b3/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/propagator-jaeger/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/resources/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/sdk-logs/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/sdk-metrics/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/sdk-node/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/sdk-trace-base/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/sdk-trace-node/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@pkgjs/parseargs/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@grpc/grpc-js/proto/xds/LICENSE"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "next/dist/compiled/@opentelemetry/api/LICENSE"
+          }
+        ]
+      },
+      {
+        "bytesEach": 202387,
+        "sha256": "b760e41f4897ae20447cff00ca3f02f8bf00ff37af3690e90876bb2a233f45f5",
+        "copies": 3,
+        "duplicateRawBytes": 404774,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esm/experimental_metrics.d.ts"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esnext/experimental_metrics.d.ts"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/src/experimental_metrics.d.ts"
+          }
+        ]
+      },
+      {
+        "bytesEach": 390383,
+        "sha256": "8b628e417f49835275adbb315603b6b1a392886497453917a43259b71f489f97",
+        "copies": 2,
+        "duplicateRawBytes": 390383,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@cat-cafe/mcp-server/dist/tools/callback-tools.d.ts"
+          },
+          {
+            "archive": "deploy-mcp-server",
+            "path": "dist/tools/callback-tools.d.ts"
+          }
+        ]
+      },
+      {
+        "bytesEach": 381960,
+        "sha256": "992f47b4534fed1f6064c90095c171d60118412a63d4432b5983b08d0148c880",
+        "copies": 2,
+        "duplicateRawBytes": 381960,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@modelcontextprotocol/sdk/dist/cjs/types.d.ts"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@modelcontextprotocol/sdk/dist/esm/types.d.ts"
+          }
+        ]
+      },
+      {
+        "bytesEach": 50665,
+        "sha256": "ec625986cec52180aa1a8a6c2bfdd6efb3e8a702f9064df52dbe0827416309bc",
+        "copies": 7,
+        "duplicateRawBytes": 303990,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta21/dist/wire/disposition-fixtures.js.map"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta23/dist/wire/disposition-fixtures.js.map"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta24/dist/wire/disposition-fixtures.js.map"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta25/dist/wire/disposition-fixtures.js.map"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta27/dist/wire/disposition-fixtures.js.map"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta28/dist/wire/disposition-fixtures.js.map"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta29/dist/wire/disposition-fixtures.js.map"
+          }
+        ]
+      },
+      {
+        "bytesEach": 147977,
+        "sha256": "18ad8f49eddd1c5555b989c3eb48d376359852f460cc8a3b20d1f2f5e04b9b02",
+        "copies": 3,
+        "duplicateRawBytes": 295954,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esm/trace/SemanticAttributes.d.ts"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esnext/trace/SemanticAttributes.d.ts"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/src/trace/SemanticAttributes.d.ts"
+          }
+        ]
+      },
+      {
+        "bytesEach": 235972,
+        "sha256": "d850b428ce4519c912a7d22010479af9542cd7d99d67118d7db0ff7ad7bc58d8",
+        "copies": 2,
+        "duplicateRawBytes": 235972,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esm/experimental_metrics.js.map"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esnext/experimental_metrics.js.map"
+          }
+        ]
+      },
+      {
+        "bytesEach": 235195,
+        "sha256": "e9e26b539e2e9b02be4285ba3abd9ffa5f02a3960fc9921043f10193650cc5c9",
+        "copies": 2,
+        "duplicateRawBytes": 235195,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@cat-cafe/mcp-server/src/tools/callback-tools.ts"
+          },
+          {
+            "archive": "deploy-mcp-server",
+            "path": "src/tools/callback-tools.ts"
+          }
+        ]
+      },
+      {
+        "bytesEach": 224711,
+        "sha256": "4e493bff84740e135002fc9a784659cf971f0a6796313aa4f358851489da76ca",
+        "copies": 2,
+        "duplicateRawBytes": 224711,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@cat-cafe/mcp-server/dist/tools/callback-tools.js"
+          },
+          {
+            "archive": "deploy-mcp-server",
+            "path": "dist/tools/callback-tools.js"
+          }
+        ]
+      },
+      {
+        "bytesEach": 110152,
+        "sha256": "3319b484b80bb53d1f4d0a9eb0ea60fd0f61da69db7280ca43b84215f19245ff",
+        "copies": 3,
+        "duplicateRawBytes": 220304,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "node-pty/build/Release/conpty/conpty.dll"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "node-pty/prebuilds/win32-x64/conpty/conpty.dll"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "node-pty/third_party/conpty/1.25.260303002/win10-x64/conpty.dll"
+          }
+        ]
+      },
+      {
+        "bytesEach": 9127,
+        "sha256": "16346551fc7b4c5735128eeaf4bc9af298208e94ef693f273e693007825aedf1",
+        "copies": 25,
+        "duplicateRawBytes": 219048,
+        "locations": [
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f221-takeaway-approval/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f229-chat-surface-parity/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f246-history-details/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f247-inline-recovery-preview/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f276-person-memory-preview/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f277-attention-preview/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f290-asset-collaboration/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f293-human-recovery/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f294-card-selection/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f294-html-widget-live-message/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f294-html-widget-responsive-export/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f294-live-selection-id/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f294-long-message-export/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f294-quote-plane-fixtures/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f294-selection-toolbar-preview/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f305-approval-design-gate/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f310-readable-return-preview/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f322-replay-preview/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/f331-demo-preview/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/first-run-onboarding/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/issue1371-adopted-hold/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/dev/markdown-math-preview/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/showcase/f052-cross-thread-author-label/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/showcase/f11-review/page.js.nft.json"
+          },
+          {
+            "archive": "deploy-web",
+            "path": ".next/server/app/story/[storyId]/page.js.nft.json"
+          }
+        ]
+      },
+      {
+        "bytesEach": 215315,
+        "sha256": "f35f7e9a92f6e9354a4c19f5813a3f7de2e743c013af37ab7397fa496d5d61da",
+        "copies": 2,
+        "duplicateRawBytes": 215315,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esm/trace/SemanticAttributes.js.map"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esnext/trace/SemanticAttributes.js.map"
+          }
+        ]
+      },
+      {
+        "bytesEach": 68526,
+        "sha256": "128af4391080197acd459d65d1b044b15c96101a4bf91495aaf14672b7a16cbe",
+        "copies": 4,
+        "duplicateRawBytes": 205578,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@cat-cafe/mcp-server/node_modules/@modelcontextprotocol/sdk/dist/cjs/spec.types.d.ts"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@cat-cafe/mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/spec.types.d.ts"
+          },
+          {
+            "archive": "deploy-mcp-server",
+            "path": "node_modules/@modelcontextprotocol/sdk/dist/cjs/spec.types.d.ts"
+          },
+          {
+            "archive": "deploy-mcp-server",
+            "path": "node_modules/@modelcontextprotocol/sdk/dist/esm/spec.types.d.ts"
+          }
+        ]
+      },
+      {
+        "bytesEach": 203401,
+        "sha256": "a715e365986ba8d997e5ca2616dda85d63493f062e134d50364daf5fec15552a",
+        "copies": 2,
+        "duplicateRawBytes": 203401,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@cat-cafe/mcp-server/dist/tools/capability-evolution-preparation-tools.d.ts"
+          },
+          {
+            "archive": "deploy-mcp-server",
+            "path": "dist/tools/capability-evolution-preparation-tools.d.ts"
+          }
+        ]
+      },
+      {
+        "bytesEach": 200188,
+        "sha256": "b31ac58fbf040409b98f88004eeb3c818ec792f7bf0f0264064d27a2577c04d7",
+        "copies": 2,
+        "duplicateRawBytes": 200188,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esm/experimental_metrics.js"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esnext/experimental_metrics.js"
+          }
+        ]
+      },
+      {
+        "bytesEach": 185882,
+        "sha256": "85c8e1ba609079947c8df83c092900ab0226e1d7b60e5e7105fb7dd701833263",
+        "copies": 2,
+        "duplicateRawBytes": 185882,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "accepts/node_modules/mime-db/db.json"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "webpack/node_modules/mime-db/db.json"
+          }
+        ]
+      },
+      {
+        "bytesEach": 24718,
+        "sha256": "636ce509f37ebf7aa581632a288a1a1311ba474a2f9496b9b5bbff4e4db8425e",
+        "copies": 7,
+        "duplicateRawBytes": 148308,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta21/fixtures/behavior/messaging/adversarial-invariants.json"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta23/fixtures/behavior/messaging/adversarial-invariants.json"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta24/fixtures/behavior/messaging/adversarial-invariants.json"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta25/fixtures/behavior/messaging/adversarial-invariants.json"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta27/fixtures/behavior/messaging/adversarial-invariants.json"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta28/fixtures/behavior/messaging/adversarial-invariants.json"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@clowder-ai/plugin-contract-beta29/fixtures/behavior/messaging/adversarial-invariants.json"
+          }
+        ]
+      },
+      {
+        "bytesEach": 73678,
+        "sha256": "b01b6730bcd4b2083fbb92ee6b58118d902c01ff252c1cec3db44aa9b82c47ae",
+        "copies": 3,
+        "duplicateRawBytes": 147356,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esm/resource/SemanticResourceAttributes.d.ts"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esnext/resource/SemanticResourceAttributes.d.ts"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/src/resource/SemanticResourceAttributes.d.ts"
+          }
+        ]
+      },
+      {
+        "bytesEach": 142762,
+        "sha256": "71e9d3321e104bc82af42e6251baa15c864a19f72703b95477ed1f158e69e6e9",
+        "copies": 2,
+        "duplicateRawBytes": 142762,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esm/trace/SemanticAttributes.js"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@opentelemetry/semantic-conventions/build/esnext/trace/SemanticAttributes.js"
+          }
+        ]
+      },
+      {
+        "bytesEach": 43933,
+        "sha256": "7c859e2f8ee6f21120d12a774038d0022dda0f44c37e4c7de34b07b7323b742c",
+        "copies": 4,
+        "duplicateRawBytes": 131799,
+        "locations": [
+          {
+            "archive": "deploy-dependencies",
+            "path": "@fastify/static/test/content-type/sample.jpg"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@fastify/static/test/static-pre-compressed/sample.jpg"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@fastify/static/example/public/images/sample.jpg"
+          },
+          {
+            "archive": "deploy-dependencies",
+            "path": "@fastify/static/test/static/shallow/sample.jpg"
+          }
+        ]
+      }
+    ],
+    "limitation": "Equal bytes do not establish interchangeable module identity, private peers or safe deletability. ASAR contents are not flattened into this count."
+  },
+  "asar": {
+    "headerBytes": 20536,
+    "regularFiles": 78,
+    "embeddedFileBytes": 4726300,
+    "largest": [
+      {
+        "path": "assets/icon.icns",
+        "bytes": 1575771,
+        "unpacked": false
+      },
+      {
+        "path": "plugin-window/assets/yanyan-companion.icns",
+        "bytes": 1559920,
+        "unpacked": false
+      },
+      {
+        "path": "plugin-window/assets/yanyan-companion.png",
+        "bytes": 708027,
+        "unpacked": false
+      },
+      {
+        "path": "assets/icon.png",
+        "bytes": 285861,
+        "unpacked": false
+      },
+      {
+        "path": "assets/icon.ico",
+        "bytes": 285478,
+        "unpacked": false
+      },
+      {
+        "path": "service-manager.js",
+        "bytes": 39870,
+        "unpacked": false
+      },
+      {
+        "path": "plugin-window/window.cjs",
+        "bytes": 18465,
+        "unpacked": false
+      },
+      {
+        "path": "main.js",
+        "bytes": 13056,
+        "unpacked": false
+      },
+      {
+        "path": "update-manager.js",
+        "bytes": 12787,
+        "unpacked": false
+      },
+      {
+        "path": "update-installer.js",
+        "bytes": 11876,
+        "unpacked": false
+      },
+      {
+        "path": "update-prompt-controller.js",
+        "bytes": 11458,
+        "unpacked": false
+      },
+      {
+        "path": "update-checker.js",
+        "bytes": 10943,
+        "unpacked": false
+      },
+      {
+        "path": "plugin-window/voice-host.cjs",
+        "bytes": 10624,
+        "unpacked": false
+      },
+      {
+        "path": "plugin-window/pet-window.cjs",
+        "bytes": 10602,
+        "unpacked": false
+      },
+      {
+        "path": "plugin-window/host-voice.cjs",
+        "bytes": 7982,
+        "unpacked": false
+      },
+      {
+        "path": "plugin-window/pet-placement.cjs",
+        "bytes": 7442,
+        "unpacked": false
+      },
+      {
+        "path": "plugin-window/main.cjs",
+        "bytes": 7112,
+        "unpacked": false
+      },
+      {
+        "path": "update-downloader.js",
+        "bytes": 6803,
+        "unpacked": false
+      },
+      {
+        "path": "runtime-config.js",
+        "bytes": 6572,
+        "unpacked": false
+      },
+      {
+        "path": "plugin-network-bridge.js",
+        "bytes": 6095,
+        "unpacked": false
+      }
+    ],
+    "limitation": "Nested inventory only; do not add again to the Electron archive total."
+  },
+  "pngIdatProbe": {
+    "totals": {
+      "images": 54,
+      "originalBytes": 61284840,
+      "positiveSavingBytes": 6645934
+    },
+    "actualPngFiles": 52,
+    "skipped": [
+      {
+        "file": "avatars/gemini.png",
+        "originalBytes": 528294,
+        "candidateBytes": 528294,
+        "savingBytes": 0,
+        "skipped": "Source extension is .png but the content is not PNG; preserve unchanged",
+        "magic": "ffd8ffe000104a4649460001"
+      },
+      {
+        "file": "avatars/opus.png",
+        "originalBytes": 533790,
+        "candidateBytes": 533790,
+        "savingBytes": 0,
+        "skipped": "Source extension is .png but the content is not PNG; preserve unchanged",
+        "magic": "ffd8ffe000104a4649460001"
+      }
+    ],
+    "method": "Read-only IDAT zlib9 recompression. Every non-IDAT chunk, including color/text/authenticity metadata, and every decompressed filtered scanline byte is preserved; no image decoder, resize or color conversion. Output is an experiment, not a product change.",
+    "sourceFilesUnchanged": true
+  },
+  "otherImageReencodingExperiment": {
+    "method": "Lossless PNG and WebP variants generated only in an experiment directory. Product files are read-only. Exact decoded RGBA and ICC/EXIF/XMP bytes are checked; format changes still require product review.",
+    "images": 54,
+    "sourceFilesUnchanged": true,
+    "pngDecodedRgbaMismatches": 0,
+    "webpDecodedRgbaMismatches": 1,
+    "strictMetadataEligibleSavingsBytes": 0,
+    "pngPixelOnlyPositiveSavingBytes": 7765263,
+    "webpPixelOnlyPositiveSavingBytes": 23823018,
+    "adoptedInProduct": false
+  },
+  "electronNodeReuseProbe": {
+    "currentNodeVersion": "24.16.0",
+    "currentNodeAbi": "137",
+    "electronVersion": "35.7.5",
+    "electronNodeVersion": "22.16.0",
+    "electronNodeAbi": "133",
+    "sameShippedSqliteLoaded": false,
+    "observedFailure": "NODE_MODULE_VERSION 137 vs required 133"
+  },
+  "verification": {
+    "relatedTests": {
+      "pass": 58,
+      "fail": 0,
+      "skip": 0
+    },
+    "pwaCachePolicy": {
+      "pass": 2,
+      "fail": 0
+    },
+    "sourceCiAtPackagedCommit": {
+      "success": 19,
+      "skipped": 1
+    },
+    "nativeSmoke": true,
+    "runtimeSmoke": {
+      "ok": true,
+      "routeChecks": 5,
+      "resourceHashChecks": 33,
+      "memoryFallback": false,
+      "observedStartupMs": 101254,
+      "controlledColdBenchmark": false
+    },
+    "ownListenersClosed": true,
+    "sourceReview": "Independent local peer approved code/test design at packagedSourceSha; final analysis has separate content review",
+    "systemInstallerExecuted": false,
+    "vmOfflineInstallUpgradeFailureRecovery": "Not performed; user confirmed no isolated environment",
+    "publicBinaryDownload": "Not yet hosted; fork Actions disabled, existing artifacts-only dispatch returned HTTP 422; repository settings unchanged",
+    "modelCalls": false
+  }
+}
