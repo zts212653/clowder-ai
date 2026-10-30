@@ -99,7 +99,7 @@ export async function verifyArchiveDigest(archivePath: string, packageDigest: st
 }
 
 export function archiveMembers(output: string): string[] {
-  const members = output.split('\n').filter(Boolean);
+  const members = output.split(/\r?\n/).filter(Boolean);
   if (members.length === 0) throw runtimeError('staged package archive is empty');
   for (const member of members) {
     if (member.includes('\\') || isAbsolute(member)) {

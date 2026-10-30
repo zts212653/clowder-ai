@@ -149,6 +149,7 @@ export interface DormantPluginRuntimeCompositionOptions {
   ) => Promise<DeliveryPresentationContext>;
   readonly taskStore?: ITaskStore;
   readonly members?: PluginMembersServices;
+  readonly runtimeInfo?: () => import('./host-surface/plugin-neutral-host.js').PluginRuntimeInfo;
   readonly redis?: RedisClient;
   /** The Host-wide messaging stores shared with the one publishing MessageStore wrapper. */
   readonly messagingStores?: MessagingStores;
@@ -484,6 +485,7 @@ export function createDormantPluginRuntimeComposition(
         assertActivation,
         inventory: inventoryStore,
         ...(options.members ? { members: options.members } : {}),
+        ...(options.runtimeInfo ? { runtimeInfo: options.runtimeInfo } : {}),
       }),
     packages,
     materializer: builtinPackages,

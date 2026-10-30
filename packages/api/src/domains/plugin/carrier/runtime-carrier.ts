@@ -7,6 +7,7 @@ import {
 import { createModuleLogger } from '../../../infrastructure/logger.js';
 import type { ToolExecutionPolicy } from '../../cats/services/types.js';
 import { activateDeclaredMcp } from '../declared/declared-mcp-resources.js';
+import { DeclaredPluginUi } from '../declared/declared-plugin-ui.js';
 import {
   type DeclaredPluginTool,
   type DeclaredPluginWebhook,
@@ -80,6 +81,7 @@ export interface PluginRuntimeCarrier {
 }
 
 export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
+  readonly ui = new DeclaredPluginUi((id, method, input) => this.invoke(id, method, input));
   readonly nativeActions = new NativePluginActions((id) => this.#admission(id));
   readonly #nativeMcpLaunches = new NativeMcpLaunches((id) => this.#admission(id), this.nativeActions);
   readonly #carriers: PluginRuntimeCarrier[] = [];
@@ -140,6 +142,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
         );
         const shared = await this.#sharedFactories(admission, carrier);
         this.#nativeMcpLaunches.activate(admission, generation, launches, shared.factories, shared.unavailable);
+        this.ui.activate(admission);
       })());
     try {
       const result = await carrier.start(pluginInstanceId, admitContributions);
@@ -154,6 +157,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
   }
 
   async stop(pluginInstanceId: string, reason = 'host_stop'): Promise<void> {
+    this.ui.deactivate(pluginInstanceId);
     this.#nativeMcpLaunches.deactivate(pluginInstanceId);
     this.nativeActions.deactivate(pluginInstanceId);
     const snapshot = await this.inventory.snapshot();

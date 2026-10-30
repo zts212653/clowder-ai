@@ -9,7 +9,7 @@ on:
       - 'designs/**'
       - 'assets/**'
   pull_request:
-    branches: [main, next]
+    branches: [main, next, develop]
     paths-ignore:
       - 'docs/**'
       - '*.md'
@@ -65,6 +65,8 @@ jobs:
           --script test:onboarding:production-contracts
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Owner-confirmed plugin feedback and private-context suppression
+        run: pnpm --filter @cat-cafe/api test:plugin-feedback
       - name: Managed Codex layout link diagnostic
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs

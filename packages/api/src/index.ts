@@ -35,7 +35,7 @@ import { catRegistryMentionPatterns } from './infrastructure/connectors/mention-
 // 必须最先 import：Node 24.16 undici setTypeOfService EINVAL 崩溃防护（见文件头注释）
 import './settos-guard.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { homedir, tmpdir } from 'node:os';
+import { arch, homedir, platform, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -5335,6 +5335,14 @@ async function main(): Promise<void> {
       isCatAvailable,
     },
     threadDeepLinkUrl: createThreadDeepLinkUrl(frontendBaseUrl),
+    runtimeInfo: () => ({
+      version: runtimeDeploymentRevision ?? 'unknown',
+      platform: platform(),
+      architecture: arch(),
+      nodeVersion: process.versions.node,
+      projectRoot: resolveActiveProjectRoot(),
+      logDirectory: LOG_DIR_PATH,
+    }),
     threadProjections: {
       backlogStore,
       cats: {
@@ -5745,6 +5753,8 @@ async function main(): Promise<void> {
   });
   const { pluginWebhookForwardingRoutes } = await import('./routes/plugin/plugin-webhook-forwarding-routes.js');
   await app.register(pluginWebhookForwardingRoutes, { webhooks: pluginRuntime.supervisor });
+  const { pluginUiRoutes } = await import('./routes/plugin/plugin-ui-routes.js');
+  await app.register(pluginUiRoutes, { ui: pluginRuntime.supervisor.ui });
 
   // F246/F313: one registry and one renderer projection. The F266 writer stays
   // fenced until an owner-backed resolver/dispatcher and a v1_active epoch are
