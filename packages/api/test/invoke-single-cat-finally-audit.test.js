@@ -150,4 +150,42 @@ describe('F118 finally block audit fallback (AC-C5)', () => {
       `should have exactly 1 cat_error (not double-write), got ${catErrors.length}: ${JSON.stringify(catErrors.map((e) => e.data?.error))}`,
     );
   });
+  for (const reason of ['user_cancel', 'cancel_all', 'preempted']) {
+    it(`#1672 explicit ${reason} is audited as canceled, not CAT_ERROR`, async () => {
+      const controller = new AbortController();
+      const threadId = `thread-explicit-${reason}`;
+      const service = {
+        async *invoke() {
+          yield { type: 'text', catId: 'codex', content: 'partial', timestamp: Date.now() };
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        },
+      };
+      const iterator = invokeSingleCat(makeDeps(), {
+        catId: 'codex',
+        service,
+        prompt: 'cancel',
+        userId: 'user1',
+        threadId,
+        isLastCat: true,
+        signal: controller.signal,
+      })[Symbol.asyncIterator]();
+      while (true) {
+        const item = await iterator.next();
+        assert.equal(item.done, false);
+        if (item.value.type === 'text') break;
+      }
+      controller.abort(reason);
+      await iterator.return();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const events = (await Promise.all((await readdir(tempDir)).map((name) => readFile(join(tempDir, name), 'utf8'))))
+        .join('\n')
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+        .filter((e) => e.threadId === threadId);
+      assert.equal(events.filter((e) => e.type === 'cat_error').length, 0);
+      assert.equal(events.filter((e) => e.type === 'cat_responded' && e.data.status === 'canceled').length, 1);
+    });
+  }
 });

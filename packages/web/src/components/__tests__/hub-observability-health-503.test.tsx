@@ -2,6 +2,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
+import { OverviewPanel } from '../HubObservabilityOverview';
 import { HubObservabilityTab } from '../HubObservabilityTab';
 import type { HealthData } from '../observability-helpers';
 
@@ -53,5 +54,31 @@ describe('HealthPanel degraded responses', () => {
     await act(async () => root.render(<HubObservabilityTab initialSubTab="health" />));
     expect(host.textContent).toContain('Unable to load health data.');
     expect(host.textContent).not.toContain('Readiness Checks');
+  });
+  it('#1672 renders canceled counts without diluting the error percentage', async () => {
+    vi.mocked(apiFetch).mockImplementation(async (url) => {
+      const path = String(url);
+      const body = path.includes('metrics/history')
+        ? {
+            snapshots: [
+              {
+                timestamp: 1,
+                metrics: {
+                  'cat_cafe_invocation_completed{status="ok"}': 2,
+                  'cat_cafe_invocation_completed{status="error"}': 1,
+                  'cat_cafe_invocation_completed{status="canceled"}': 10,
+                },
+              },
+            ],
+          }
+        : path.includes('env-summary')
+          ? { variables: [] }
+          : degraded;
+      return new Response(JSON.stringify(body));
+    });
+    await act(async () => root.render(<OverviewPanel />));
+    const label = [...host.querySelectorAll('div')].find((node) => node.textContent === 'Invocation (canceled)');
+    expect(label?.parentElement?.textContent).toBe('Invocation (canceled)10');
+    expect(host.textContent).toContain('33.3% error');
   });
 });

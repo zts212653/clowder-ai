@@ -657,6 +657,7 @@ import {
   extractTaskProgress,
   isCliStartupTimeoutError,
   isContextWindowOverflowError,
+  isExpectedInvocationCancellation,
   isMalformedToolCallError,
   isMissingClaudeSessionError,
   isPromptTokenLimitExceededError,
@@ -4958,6 +4959,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               userId,
               invocationId,
               durationMs,
+              ...(isExpectedInvocationCancellation(callerSignal) && !hadStreamError
+                ? { status: 'canceled', reason: callerSignal?.reason }
+                : {}),
               ...(hadStreamError ? { error: lastErrorMessage ?? 'unknown stream error' } : {}),
               isFinal: isLastCat,
               metadata: msg.metadata,
@@ -5260,8 +5264,8 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         });
         if (routingDispatchFailureClass !== undefined) routingFailureObservedAt ??= messageObservedAt;
         if (out.type === 'error') {
-          hadError = true;
           const cancelled = out.errorCode === 'INVOCATION_CANCELLED';
+          hadError ||= !cancelled || !isExpectedInvocationCancellation(callerSignal);
           hadProviderCancellation ||= cancelled;
           if (!cancelled) turnExecutionFailureReason ??= 'provider_execution_failed';
           terminalTaskProgressStatus = 'interrupted';
@@ -6421,6 +6425,14 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     didComplete = true; // F118 AC-C5: Normal completion reached
   } catch (err) {
     await closeActiveServiceIterator();
+    if (
+      isExpectedInvocationCancellation(callerSignal) &&
+      !hadError &&
+      (err === callerSignal?.reason || (err instanceof Error && err.name === 'AbortError'))
+    ) {
+      yield { type: 'done', catId, isFinal: isLastCat, errorCode: 'INVOCATION_CANCELLED', timestamp: Date.now() };
+      return;
+    }
     // F117 KD-22: a member stopped by its output timeout failed; any other stop cancelled it.
     await terminateCurrentRequestGeneration(
       signal.aborted && signal.reason !== MEMBER_TIMEOUT_REASON ? 'cancelled' : 'error',
@@ -6581,21 +6593,29 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       });
     }
 
+    const expectedCancellation =
+      isExpectedInvocationCancellation(callerSignal) &&
+      !hadError &&
+      turnExecutionFailureReason === undefined &&
+      !turnExecutionCompletedSuccessfully;
+
     // F118 AC-C5: Fallback audit for generator .return() path (#99)
     // If generator was force-returned (e.g. AbortController, client disconnect)
-    // and the catch block didn't fire, write a fallback CAT_ERROR audit entry.
+    // and catch did not audit it, distinguish explicit cancellation from an unknown failure.
     if (!didWriteAudit && !hadError && !didComplete) {
       const durationMs = Date.now() - startTime;
       auditLog
         .append({
-          type: AuditEventTypes.CAT_ERROR,
+          type: expectedCancellation ? AuditEventTypes.CAT_RESPONDED : AuditEventTypes.CAT_ERROR,
           threadId,
           data: {
             catId,
             userId,
             invocationId,
             durationMs,
-            error: 'generator_returned_without_completion',
+            ...(expectedCancellation
+              ? { status: 'canceled', reason: callerSignal?.reason }
+              : { error: 'generator_returned_without_completion' }),
           },
         })
         .catch((auditErr) => {
@@ -6608,7 +6628,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     // F152: Record invocation duration and decrement active count
     const finalDurationMs = Date.now() - startTime;
     const wasAbortedWithoutError = !didWriteAudit && !hadError && !didComplete;
-    const otelStatus = hadError || wasAbortedWithoutError ? 'error' : 'ok';
+    const otelStatus = expectedCancellation ? 'canceled' : hadError || wasAbortedWithoutError ? 'error' : 'ok';
     const otelAttrs = { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke', [STATUS]: otelStatus };
     invocationDuration.record(finalDurationMs / 1000, otelAttrs);
     activeInvocations.add(-1, { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke' });
@@ -6622,7 +6642,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
 
     // F089: Mark agent pane status when invocation completes
     if (deps.agentPaneRegistry?.getByInvocation(invocationId)) {
-      if (hadError || wasAbortedWithoutError) {
+      if (!expectedCancellation && (hadError || wasAbortedWithoutError)) {
         deps.agentPaneRegistry.markCrashed(invocationId, null);
       } else {
         deps.agentPaneRegistry.markDone(invocationId, 0);
@@ -6633,7 +6653,10 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
 
     // F152: End invocation span + emit completion/error log through OTel
     // Three paths: (1) catch already handled, (2) yielded-error, (3) abort, (4) ok
-    if (hadError && !didWriteAudit) {
+    if (expectedCancellation) {
+      invocationSpan.setAttribute(STATUS, 'canceled');
+      emitOtelLog('INFO', 'invocation_canceled', { [AGENT_ID]: catId, [STATUS]: 'canceled' }, invocationSpan);
+    } else if (hadError && !didWriteAudit) {
       // Yielded-error path — catch didn't fire, so emit error here
       invocationSpan.setStatus({ code: SpanStatusCode.ERROR, message: 'invocation completed with error' });
       emitOtelLog('ERROR', 'invocation_error', { [AGENT_ID]: catId, [STATUS]: 'error' }, invocationSpan);
