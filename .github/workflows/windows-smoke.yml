@@ -1,5 +1,5 @@
 name: Windows Resource Readiness
-run-name: F330 Collective Windows private paths at d522df44
+run-name: F330 Collective Windows private paths at adf029c0
 
 # Isolated probe branch only. The default-branch desktop workflow is unchanged.
 on:
@@ -17,7 +17,7 @@ jobs:
         shell: pwsh
         working-directory: plugin-source
     env:
-      EXPECTED_COLLECTIVE_SOURCE: d522df44a3b6e8ef59f5085c8c6d88b227cf0455
+      EXPECTED_COLLECTIVE_SOURCE: adf029c02225fcd51cc9e1400c16f10e56f2d116
       NODE_ENV: development
     steps:
       - uses: actions/checkout@v4
