@@ -97,16 +97,16 @@ foreach ($kind in @($Distribution)) {
   Assert-Free $ports
   $wrapper = Join-Path $root "$kind-distribution"
   Expand-OwnedZip (Join-Path $root "$kind-artifact.zip") $wrapper $true
-  $distribution = @(Get-ChildItem -LiteralPath $wrapper -File)
-  if ($distribution.Count -ne 1 -or $distribution[0].Extension -ne $(if ($kind -eq 'installer') { '.exe' } else { '.zip' })) { throw 'Unexpected distribution content' }
-  Get-FileHash -LiteralPath $distribution[0].FullName -Algorithm SHA256 | ConvertTo-Json | Set-Content (Join-Path $output 'distribution-sha256.json')
+  $distributionFiles = @(Get-ChildItem -LiteralPath $wrapper -File)
+  if ($distributionFiles.Count -ne 1 -or $distributionFiles[0].Extension -ne $(if ($kind -eq 'installer') { '.exe' } else { '.zip' })) { throw 'Unexpected distribution content' }
+  Get-FileHash -LiteralPath $distributionFiles[0].FullName -Algorithm SHA256 | ConvertTo-Json | Set-Content (Join-Path $output 'distribution-sha256.json')
   $logsComplete = $true
   try {
     if ($kind -eq 'installer') {
       $arguments = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NOICONS','/NoAutoStart=1',"/DIR=$install","/LOG=$(Join-Path $output 'setup.log')","/DesktopInstanceRoot=$state","/FrontendPort=$($ports[0])","/ApiPort=$($ports[1])","/RedisPort=$($ports[2])")
-      Wait-Success (Start-Owned $distribution[0].FullName $arguments $root $state $ports 'install') 600
+      Wait-Success (Start-Owned $distributionFiles[0].FullName $arguments $root $state $ports 'install') 600
     } else {
-      Expand-OwnedZip $distribution[0].FullName $install $false
+      Expand-OwnedZip $distributionFiles[0].FullName $install $false
       # Exercise the shipped first-run entrypoint, including its real offline configuration.
       $null = Start-Owned "$env:SystemRoot\System32\cmd.exe" @('/d','/c','start.bat') $install $state $ports 'portable-first-run'
       Wait-Ready $ports[1]
