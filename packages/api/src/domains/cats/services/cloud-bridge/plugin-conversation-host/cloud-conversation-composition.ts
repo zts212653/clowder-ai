@@ -17,6 +17,7 @@ type PollerOptions = ConstructorParameters<typeof PluginConversationReturnPoller
 export function createCloudConversationComposition(
   options: Omit<PollerOptions, 'registry' | 'provider'> & {
     reconcileCats: () => Promise<void>;
+    warmCats?: CatCatalogSubscriberOpts['onWarm'];
     catalogLog: CatCatalogSubscriberOpts['log'];
   },
 ) {
@@ -37,6 +38,7 @@ export function createCloudConversationComposition(
           await options.reconcileCats();
           poller.reevaluate();
         },
+        onWarm: options.warmCats,
       });
       poller.start();
     },
