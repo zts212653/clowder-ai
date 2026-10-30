@@ -37,7 +37,56 @@ function clock(read) {
   };
 }
 
-test('requires both dependency-bearing defaults to be installed, enabled and actually running', async () => {
+function runningCollective() {
+  const snapshot = running();
+  snapshot.plugins = snapshot.plugins.filter((plugin) => plugin.pluginId !== 'official.collective-connector');
+  snapshot.plugins.push({
+    pluginId: 'official.collective-connector',
+    pluginInstanceId: 'pi_collective_receipt_fixture',
+    installedVersion: '0.1.0-alpha.22',
+    packageDigest: 'sha512-rIbsKosJBKLYgTh2UbMZHvVM7FbhtQMIvr6A5GlzTghSpXkTSRGrJyFokolWEy6lJZxsGE11Qo5+Th9fvt7k/w==',
+    artifact: 'installed',
+    intent: 'enabled',
+    live: 'running',
+  });
+  return snapshot;
+}
+
+test('healthy historical defaults cannot certify a missing Collective installation', async () => {
+  const snapshot = runningCollective();
+  snapshot.plugins = snapshot.plugins.filter((plugin) => plugin.pluginId !== 'official.collective-connector');
+  await assert.rejects(waitForInitialPlugins(clock(async () => snapshot)), /did not become installed/);
+});
+
+test('Collective receipt preserves the actual installed instance, version and package digest', async () => {
+  const snapshot = runningCollective();
+  const result = await waitForInitialPlugins(clock(async () => snapshot));
+  assert.deepEqual(
+    result.plugins.find((plugin) => plugin.pluginId === 'official.collective-connector'),
+    {
+      ...snapshot.plugins.find((plugin) => plugin.pluginId === 'official.collective-connector'),
+      activationFailed: false,
+    },
+  );
+});
+
+test('Collective activation failure rejects the otherwise healthy defaults on the first read', async () => {
+  const snapshot = runningCollective();
+  snapshot.plugins.find((plugin) => plugin.pluginId === 'official.collective-connector').activationFailed = true;
+  let reads = 0;
+  await assert.rejects(
+    waitForInitialPlugins(
+      clock(async () => {
+        reads++;
+        return snapshot;
+      }),
+    ),
+    /activation failed/,
+  );
+  assert.equal(reads, 1);
+});
+
+test('requires dependency-bearing defaults to be installed, enabled and actually running', async () => {
   const input = running();
   const result = await waitForInitialPlugins(clock(async () => input));
   assert.equal(result.defaultInitialPluginsReady, true);

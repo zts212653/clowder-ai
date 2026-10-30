@@ -5344,7 +5344,8 @@ async function main(): Promise<void> {
   subscriptionDrainScheduler.attach(pluginRuntime.subscriptionDelivery);
   const { registerConciergeDesktopRoutes } = await import('./routes/concierge-desktop.js');
   registerConciergeDesktopRoutes(app, { ownerUserId: privateUserId, desktop: pluginRuntime.ownerDesktop });
-  app.addHook('onClose', async () => pluginRuntime.shutdown('api_shutdown'));
+  const { registerPluginRuntimeShutdown } = await import('./routes/plugin-runtime-shutdown.js');
+  registerPluginRuntimeShutdown(app, pluginRuntime);
   const { OFFICIAL_BUNDLED_MANIFESTS } = await import('./domains/plugin/official-catalog.js');
   const { createHostOfficialPluginCatalog } = await import('./domains/plugin/manager/host-official-catalog.js');
   const { GitMarketplaceRepository } = await import(

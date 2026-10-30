@@ -1,3 +1,11 @@
+param(
+  [Parameter(Mandatory = $true)]
+  [ValidateSet('installer', 'portable')]
+  [string]$Distribution,
+  [Parameter(Mandatory = $true)]
+  [ValidatePattern('^[a-f0-9-]{36}$')]
+  [string]$AttemptId
+)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = [IO.Path]::GetFullPath($env:CANDIDATE_ROOT)
@@ -80,7 +88,7 @@ function Quit-Owned([string]$Exe, [string]$Install, [string]$State, [int[]]$Port
   throw 'Normal application exit did not release its owned processes'
 }
 
-foreach ($kind in @('installer', 'portable')) {
+foreach ($kind in @($Distribution)) {
   $install = Join-Path $root "$kind-install"
   $state = Join-Path $root "$kind-state"
   $output = Join-Path $evidence $kind
@@ -139,10 +147,20 @@ foreach ($kind in @('installer', 'portable')) {
     }
     @{ allStreamsCapturedWithinBudget=$logsComplete } | ConvertTo-Json | Set-Content (Join-Path $output 'log-capture.json')
     $records.Clear()
+    $cleanupDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+      $left = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase) })
+      if ($left.Count -eq 0) { break }
+      Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $cleanupDeadline)
+    $listeners = @()
+    foreach ($port in $ports) { $listeners += @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) }
+    @{ distribution=$kind; attemptId=$AttemptId; ownedProcessesAbsent=($left.Count -eq 0); portsFree=($listeners.Count -eq 0) } | ConvertTo-Json | Set-Content (Join-Path $output 'cleanup-confirmed.json')
+    if ($left.Count -ne 0) { throw 'Owned process cleanup was not confirmed' }
     Assert-Free $ports
   }
   if (-not $logsComplete) { throw 'Actual startup logs exceed the evidence budget; cannot certify absence of plugin errors' }
   & $node (Join-Path $PSScriptRoot 'initial-plugins.mjs') --logs $output
   if ($LASTEXITCODE -ne 0) { throw 'Actual distribution logs contain initial plugin setup failures' }
-  @{ status='passed'; distribution=$kind; instanceRoot=$state; ports=$ports; normalExit=$true; actualInstallAndRestore=$true; defaultInitialPluginsReady=$true; actualStartupLogsChecked=$true; scope='fresh runner; no paid model, real account import or non-elevated installation claim' } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $output 'result.json')
+  @{ status='passed'; distribution=$kind; attemptId=$AttemptId; instanceRoot=$state; ports=$ports; normalExit=$true; actualInstallAndRestore=$true; defaultInitialPluginsReady=$true; actualStartupLogsChecked=$true; scope='fresh runner; no paid model, real account import or non-elevated installation claim' } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $output 'result.json')
 }

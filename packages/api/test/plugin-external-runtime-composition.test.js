@@ -268,10 +268,8 @@ test('production composition constructs and recovers K-2D but exposes no startup
     managerCompositionIndex >= 0 && managerCompositionIndex < recoveryIndex,
     'Plugin Manager state projection must be composed before durable instances resume',
   );
-  assert.match(
-    source,
-    new RegExp(`app\\.addHook\\('onClose', async \\(\\) => ${runtimeName}\\.shutdown\\('api_shutdown'\\)\\)`),
-  );
+  assert.match(source, new RegExp(`registerPluginRuntimeShutdown\\(app, ${runtimeName}\\)`));
+  assert.match(source, /import\('\.\/routes\/plugin-runtime-shutdown\.js'\)/);
   assert.match(source, /createPluginManagerRuntimeComposition\(\{/);
   assert.match(source, /const pluginManagerCatalog = createHostOfficialPluginCatalog\(\)/);
   assert.match(catalogSource, /new MachineOfficialPluginCatalog\(\{/);

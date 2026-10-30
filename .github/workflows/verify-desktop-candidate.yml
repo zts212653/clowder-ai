@@ -46,7 +46,7 @@ jobs:
         run: node .github/desktop-acceptance/input.mjs
       - name: Exercise both actual distributions in isolated instances
         shell: pwsh
-        run: .github/desktop-acceptance/windows.ps1
+        run: node .github/desktop-acceptance/distributions.mjs
       - name: Preserve actual receipts, screenshots and bounded instance logs
         if: always() && env.CANDIDATE_ROOT != ''
         uses: actions/upload-artifact@v4
