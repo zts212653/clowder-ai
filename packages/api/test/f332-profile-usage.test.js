@@ -199,7 +199,9 @@ test('schema upgrade and repeated open preserve old cue events and immutable new
     observedAt: 1000,
   });
   db.exec('DROP TABLE profile_read_events');
-  db.prepare('DELETE FROM schema_version WHERE version = 74').run();
+  // Rewind to v73 even when the initialized store includes later migrations.
+  db.prepare('DELETE FROM schema_version WHERE version >= 74').run();
+  assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_version').get().version, 73);
   applyMigrations(db);
   await read();
   applyMigrations(db);
