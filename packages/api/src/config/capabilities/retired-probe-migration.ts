@@ -6,7 +6,11 @@ import { createModuleLogger } from '../../infrastructure/logger.js';
 
 // F193 Phase D and its migration guide retire these three debugging entries.
 // The fingerprint pins the observed probe implementation, not an arbitrary name.
-const probeSource = '3bfb1cdc8bdcca70024d5c19eaeef63bbbee241f7b38ef7ff9e5454922d0600c';
+const probeSources = new Set([
+  '3bfb1cdc8bdcca70024d5c19eaeef63bbbee241f7b38ef7ff9e5454922d0600c',
+  // The exact canonical public export, not arbitrary cwd normalization.
+  '8ba14ed1c7bb943df1757fbb4bf6dc4dbddfe3cbbafb60dec691017c7c9d409d',
+]);
 const sha = (value: string) => createHash('sha256').update(value).digest('hex');
 type Entry = Record<string, unknown>;
 const record = (value: unknown): Entry => {
@@ -88,7 +92,7 @@ async function retired(name: string, value: unknown, carrier: 'capabilities' | '
       args[0] === 'ok'
     );
   if (!(await isOriginalNodeCommand(launch.command))) return false;
-  if (args.length !== 3 || args[0] !== '--input-type=module' || args[1] !== '--eval' || sha(args[2]) !== probeSource)
+  if (args.length !== 3 || args[0] !== '--input-type=module' || args[1] !== '--eval' || !probeSources.has(sha(args[2])))
     return false;
   return isOriginalProbeCwd(launch, cwdField, args[2]) && isOriginalProbeEnvironment(name, launch);
 }
