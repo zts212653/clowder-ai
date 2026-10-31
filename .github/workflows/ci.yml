@@ -411,6 +411,8 @@ jobs:
           REQUIRE_OPENCODE_MODEL_ID_TEST: '1'
       - name: Desktop tests
         run: node --test desktop/*.test.js
+      - name: Operator CLI tests
+        run: pnpm --filter @cat-cafe/operator-cli test
 
   test:
     name: Test (Public)

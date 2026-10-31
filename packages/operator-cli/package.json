@@ -1,0 +1,10 @@
+{
+  "name": "@cat-cafe/operator-cli",
+  "version": "0.1.0",
+  "description": "Operator CLI for the Cat Cafe Host HTTP API",
+  "type": "module",
+  "bin": { "cat-cafe": "./bin/cat-cafe.mjs" },
+  "files": ["bin", "README.md"],
+  "engines": { "node": ">=24.0.0" },
+  "scripts": { "test": "node --test test/*.test.mjs" }
+}
