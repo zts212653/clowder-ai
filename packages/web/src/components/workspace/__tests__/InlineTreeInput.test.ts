@@ -142,11 +142,10 @@ describe('InlineTreeInput', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
-    // Simulate Enter during IME composition (isComposing = true)
+    // Simulate Enter during IME composition: compositionstart → keydown(Enter)
     act(() => {
-      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
-      Object.defineProperty(event, 'isComposing', { value: true });
-      input.dispatchEvent(event);
+      input.dispatchEvent(new Event('compositionstart', { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
 
     expect(onConfirm).not.toHaveBeenCalled();

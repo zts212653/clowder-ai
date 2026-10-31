@@ -1,18 +1,22 @@
 'use client';
 
+import { getContextWindowFallback } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
+import { HubSessionStrategyEditor } from './HubSessionStrategyEditor';
 import {
   CODEX_APPROVAL_OPTIONS,
   CODEX_AUTH_MODE_OPTIONS,
   CODEX_SANDBOX_OPTIONS,
   type CodexRuntimeSettings,
+  getCliEffortOptionsForClient,
   type HubCatEditorFormState,
-  SESSION_CHAIN_OPTIONS,
-  SESSION_STRATEGY_OPTIONS,
   type StrategyFormState,
+  usesCliCarrier,
 } from './hub-cat-editor.model';
-import { RangeField, SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
+import { SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
 import { TagEditor } from './hub-tag-editor';
+import { useEditorText, useMemberEditorPresentation } from './members/editor-presentation';
+import { MemberChangedField } from './members/MemberChangeMark';
 
 type FormPatch = Partial<HubCatEditorFormState>;
 
@@ -27,6 +31,8 @@ export function AdvancedRuntimeSection({
   codexSettingsError,
   codexSettingsEditable,
   showCodexSettings,
+  codexSpeedVisible,
+  codexFastSupported,
   onChange,
   onStrategyChange,
   onCodexChange,
@@ -41,162 +47,154 @@ export function AdvancedRuntimeSection({
   codexSettingsError: string | null;
   codexSettingsEditable: boolean;
   showCodexSettings: boolean;
+  codexSpeedVisible?: boolean;
+  codexFastSupported?: boolean;
   onChange: (patch: FormPatch) => void;
   onStrategyChange: (patch: Partial<StrategyFormState>) => void;
   onCodexChange: (patch: Partial<CodexRuntimeSettings>) => void;
 }) {
+  const page = useMemberEditorPresentation();
+  const t = useEditorText();
   const effectiveCodexSettings = codexSettings ?? {
     sandboxMode: 'workspace-write' as const,
     approvalPolicy: 'on-request' as const,
     authMode: 'oauth' as const,
   };
+  const cliEffortOptions = getCliEffortOptionsForClient(form.clientId, form.defaultModel);
+  const cliExtensionsAvailable = usesCliCarrier(form);
 
   return (
     <SectionCard
       title="高级运行时参数"
-      description="contextBudget + Session 策略 + Client 特有参数。🏷️ 标记的参数仅在选择对应 Client 时显示。"
+      description={
+        page
+          ? undefined
+          : 'Context Window + Session 策略 + Client 特有参数。标有 (Codex) 的参数仅在选择对应 Client 时显示。'
+      }
       tone="success"
     >
-      <p className="text-xs leading-5 text-[#6C7A6D]">
-        上下文预算会随成员配置一起持久化到运行时 catalog。4 项要么全部留空，要么全部填写。
-      </p>
       <div className="space-y-2">
-        <TextField
-          label="Max Prompt Tokens"
-          value={form.maxPromptTokens}
-          onChange={(value) => onChange({ maxPromptTokens: value })}
-          inputMode="numeric"
-          tone="success"
-          placeholder="留空默认 48000"
-        />
-        <TextField
-          label="Max Context Tokens"
-          value={form.maxContextTokens}
-          onChange={(value) => onChange({ maxContextTokens: value })}
-          inputMode="numeric"
-          tone="success"
-          placeholder="留空默认 128000"
-        />
-        <TextField
-          label="Max Messages"
-          value={form.maxMessages}
-          onChange={(value) => onChange({ maxMessages: value })}
-          inputMode="numeric"
-          tone="success"
-          placeholder="留空默认 50"
-        />
-        <TextField
-          label="Max Content Length Per Msg"
-          ariaLabel="Max Content Length Per Msg"
-          value={form.maxContentLengthPerMsg}
-          onChange={(value) => onChange({ maxContentLengthPerMsg: value })}
-          inputMode="numeric"
-          tone="success"
-          placeholder="留空默认 16000"
-        />
-        <SelectField
-          label="Session Chain"
-          value={form.sessionChain}
-          options={SESSION_CHAIN_OPTIONS}
-          onChange={(value) => onChange({ sessionChain: value as HubCatEditorFormState['sessionChain'] })}
-          tone="success"
-        />
-        {form.client === 'openai' || form.client === 'opencode' ? (
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-[#3D2E22]">额外 CLI 参数</p>
-            <TagEditor
-              tags={form.cliConfigArgs}
-              onChange={(nextTags) => onChange({ cliConfigArgs: nextTags })}
-              addLabel="+ 添加参数"
-              placeholder={
-                form.client === 'opencode' ? '例如 --variant low' : '例如 --config model_reasoning_effort="low"'
-              }
-              emptyLabel="无额外参数"
-              tone="green"
+        {!page && (
+          <>
+            <TextField
+              label="Context Window"
+              value={form.contextWindow}
+              onChange={(value) => onChange({ contextWindow: value })}
+              inputMode="numeric"
+              tone="success"
+              placeholder="留空或 0 = Auto；正整数 = Manual"
+              ariaDescribedBy="context-window-compat-notice"
             />
-            <p className="text-[11px] leading-4 text-[#8A776B]">
-              每条直接追加到 CLI 命令，不做隐式转换。 参考：
-              {form.client === 'opencode' ? (
-                <a href="https://opencode.ai/docs/cli" target="_blank" rel="noreferrer" className="underline">
-                  OpenCode CLI
-                </a>
+            <p className="text-xs leading-5 text-[var(--console-runtime-hint)]">
+              填写正整数 = Manual 模式，作为该成员的上下文窗口大小。留空或填 0 = Auto，由运行时自动探测。
+            </p>
+            <ContextWindowCompatibilityNotice cat={cat} form={form} />
+          </>
+        )}
+        {form.configurationSource !== 'native_tool' && cliExtensionsAvailable && cliEffortOptions ? (
+          <>
+            <TextField
+              label="CLI Effort"
+              value={form.cliEffort}
+              onChange={(value) => onChange({ cliEffort: value })}
+              placeholder="留空使用 Client 默认值；也可输入原生值，例如 ultra"
+              suggestions={cliEffortOptions}
+              tone="success"
+            />
+            <p className="-mt-1 text-label leading-4 text-cafe-muted">
+              {page ? (
+                t('思考深度使用客户端支持的原生值。')
               ) : (
-                <a href="https://github.com/openai/codex" target="_blank" rel="noreferrer" className="underline">
-                  Codex CLI
-                </a>
+                <>
+                  维护 preset：{cliEffortOptions.join(' / ')}。也可直接输入所选 CLI 支持的原生值；CLI
+                  会返回其自身的校验错误。
+                </>
               )}
+            </p>
+          </>
+        ) : null}
+        {codexSpeedVisible ? (
+          <div className="space-y-1">
+            <SelectField
+              label="速度档位"
+              value={form.codexSpeed ?? ''}
+              options={[
+                { value: '', label: '继承 Codex 设置' },
+                { value: 'standard', label: 'Standard' },
+                {
+                  value: 'fast',
+                  label: codexFastSupported ? 'Fast' : 'Fast（当前模型不可用）',
+                  disabled: !codexFastSupported,
+                },
+              ]}
+              onChange={(value) => onChange({ codexSpeed: value as HubCatEditorFormState['codexSpeed'] })}
+              tone="success"
+            />
+            <p className="text-label leading-4 text-cafe-muted">
+              {page
+                ? t('速度档位和思考深度分别设置；上游可能调整实际速度。')
+                : '仅 Codex OAuth 可用；这是请求档位，不代表上游最终实际服务档位。与 CLI Effort（思考深度）互不影响。'}
             </p>
           </div>
         ) : null}
+        {cliExtensionsAvailable ? (
+          <MemberChangedField label="Extra CLI arguments">
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-cafe">{t('额外 CLI 参数')}</p>
+              <TagEditor
+                tags={form.cliConfigArgs}
+                onChange={(nextTags) => onChange({ cliConfigArgs: nextTags })}
+                addLabel={t('+ 添加参数')}
+                placeholder={t('例如 --model xxx 或 --flag value')}
+                emptyLabel={t('无额外参数')}
+                tone="green"
+              />
+              <p className="text-label leading-4 text-cafe-muted">
+                {page
+                  ? t('启动时附加这些参数；与上方字段重复的保留参数以上方字段为准。')
+                  : '每条直接追加到 CLI 命令。普通重复参数以用户参数为准；`CLI Effort`、`速度档位`等结构化保留项始终以上方字段为准，对应 raw 参数会被忽略。'}
+              </p>
+            </div>
+          </MemberChangedField>
+        ) : null}
       </div>
 
-      {cat ? (
-        <div className="space-y-3 rounded-2xl border border-[#DCE9E0] bg-white/80 p-4">
-          {loadingStrategy ? <p className="text-sm text-[#7F7168]">Session 策略加载中...</p> : null}
-          {strategyError ? (
-            <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600">{strategyError}</p>
-          ) : null}
-          {strategyForm ? (
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-[#CFE5D5] bg-[#F5FBF6] px-4 py-3 text-xs leading-5 text-[#6C7A6D]">
-                📊 阈值基于 context 填充率 = 当前 tokens / Max Context Tokens。拖动滑条调节百分比。
-              </div>
-              <div className="space-y-2">
-                <SelectField
-                  label="Session Strategy"
-                  value={strategyForm.strategy}
-                  options={SESSION_STRATEGY_OPTIONS.filter(
-                    (option) => option.value !== 'hybrid' || strategyForm.hybridCapable,
-                  )}
-                  onChange={(value) => onStrategyChange({ strategy: value as StrategyFormState['strategy'] })}
-                  tone="success"
-                />
-                <RangeField
-                  label="Session Warn Threshold"
-                  value={strategyForm.warnThreshold}
-                  onChange={(value) => onStrategyChange({ warnThreshold: value })}
-                  hint="⚡ context 填充到此比例时前端弹出警告提示"
-                />
-                <RangeField
-                  label="Session Action Threshold"
-                  value={strategyForm.actionThreshold}
-                  onChange={(value) => onStrategyChange({ actionThreshold: value })}
-                  hint="🔥 context 填充到此比例时触发 Session 策略动作（如 handoff 换 session）"
-                />
-                {strategyForm.strategy === 'hybrid' ? (
-                  <TextField
-                    label="Max Compressions"
-                    value={strategyForm.maxCompressions}
-                    onChange={(value) => onStrategyChange({ maxCompressions: value })}
-                    inputMode="numeric"
-                    tone="success"
-                  />
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-        </div>
+      {cat && !page ? (
+        <HubSessionStrategyEditor
+          strategyForm={strategyForm}
+          loading={loadingStrategy}
+          error={strategyError}
+          onChange={onStrategyChange}
+        />
       ) : null}
 
       {showCodexSettings ? (
-        <div className="space-y-3 rounded-2xl border border-[#DCE9E0] bg-white/80 p-4">
-          {loadingCodexSettings ? <p className="text-sm text-[#7F7168]">Codex 运行参数加载中...</p> : null}
+        <div className="space-y-3 rounded-[14px] bg-[var(--console-runtime-group-bg)] p-[14px]">
+          {loadingCodexSettings ? <p className="text-sm text-cafe-secondary">{t('Codex 运行参数加载中...')}</p> : null}
           {codexSettingsError ? (
-            <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600">{codexSettingsError}</p>
-          ) : null}
-          {!loadingCodexSettings && !codexSettingsEditable ? (
-            <p className="rounded-xl border border-[#F5D2B8] bg-[#FFF4EC] px-3 py-2 text-xs leading-5 text-[#C27D52]">
-              Codex 配置基线未加载成功，以下 3 项已禁用；请刷新后重试，避免保存时误以为已生效。
+            <p className="rounded-[20px] border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-sm text-conn-red-text">
+              {codexSettingsError}
             </p>
           ) : null}
-          <p className="text-center text-xs font-semibold text-[#B59A88]">── Codex 专属 (仅 Client=Codex 时显示) ──</p>
-          <p className="rounded-xl border border-[#CFE5D5] bg-[#F5FBF6] px-3 py-2 text-xs leading-5 text-[#6C7A6D]">
-            成员资料与 Codex 执行参数收敛到同一个入口保存。保存后会分别写入成员 overlay 与全局运行配置。
+          {!loadingCodexSettings && !codexSettingsEditable ? (
+            <p className="rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2 text-xs leading-5 text-[var(--cafe-accent)]">
+              {page
+                ? t('全局设置读取失败，以下选项暂不能修改。请重开本页重试。')
+                : 'Codex 配置基线未加载成功，以下 3 项已禁用；请刷新后重试，避免保存时误以为已生效。'}
+            </p>
+          ) : null}
+          <p className="text-center text-xs font-semibold text-cafe-muted">
+            {t('── Codex 专属 (仅 Client=Codex 时显示) ──')}
+          </p>
+          <p className="rounded-[10px] bg-[var(--console-runtime-field-bg)] px-3 py-2 text-xs leading-5 text-[var(--console-runtime-hint)]">
+            {page
+              ? t('以下是全局 Codex 执行参数，修改会影响所有本地 Codex 成员；与成员资料一起保存。')
+              : '成员资料与 Codex 执行参数收敛到同一个入口保存。保存后会分别写入成员 overlay 与全局运行配置。'}
           </p>
           <div className="space-y-2">
             <SelectField
-              label="Codex Sandbox 🏷️"
-              ariaLabel="Codex Sandbox 🏷️"
+              label="Codex Sandbox (Codex)"
+              ariaLabel="Codex Sandbox"
               value={effectiveCodexSettings.sandboxMode}
               options={CODEX_SANDBOX_OPTIONS}
               onChange={(value) => onCodexChange({ sandboxMode: value as CodexRuntimeSettings['sandboxMode'] })}
@@ -204,8 +202,8 @@ export function AdvancedRuntimeSection({
               tone="success"
             />
             <SelectField
-              label="Codex Approval 🏷️"
-              ariaLabel="Codex Approval 🏷️"
+              label="Codex Approval (Codex)"
+              ariaLabel="Codex Approval"
               value={effectiveCodexSettings.approvalPolicy}
               options={CODEX_APPROVAL_OPTIONS}
               onChange={(value) => onCodexChange({ approvalPolicy: value as CodexRuntimeSettings['approvalPolicy'] })}
@@ -213,8 +211,8 @@ export function AdvancedRuntimeSection({
               tone="success"
             />
             <SelectField
-              label="Codex Auth Mode 🏷️"
-              ariaLabel="Codex Auth Mode 🏷️"
+              label="Codex Auth Mode (Codex)"
+              ariaLabel="Codex Auth Mode"
               value={effectiveCodexSettings.authMode}
               options={CODEX_AUTH_MODE_OPTIONS}
               onChange={(value) => onCodexChange({ authMode: value as CodexRuntimeSettings['authMode'] })}
@@ -225,5 +223,59 @@ export function AdvancedRuntimeSection({
         </div>
       ) : null}
     </SectionCard>
+  );
+}
+
+function selectionMatchesSavedContext(cat: CatData | null | undefined, form: HubCatEditorFormState): boolean {
+  return Boolean(cat && cat.clientId === form.clientId && cat.carrier === form.carrier);
+}
+
+function draftCannotResolveOrApplyContextWindow(form: HubCatEditorFormState): boolean | null {
+  if (form.carrier === 'acp') return false;
+  if (form.clientId === 'antigravity' || form.clientId === 'catagent' || form.clientId === 'google') return true;
+  if (form.clientId !== 'openai') return false;
+  return form.carrier === 'app_server';
+}
+
+export function ContextWindowCompatibilityNotice({ cat, form }: { cat?: CatData | null; form: HubCatEditorFormState }) {
+  const page = useMemberEditorPresentation();
+  const t = useEditorText();
+  const usesSavedContext = selectionMatchesSavedContext(cat, form);
+  const capability = usesSavedContext ? cat?.resolvedContext : null;
+  const projectedIncompatibility =
+    capability?.reportsRuntimeWindow === false && capability.nativeWindowControl === false
+      ? true
+      : capability?.reportsRuntimeWindow === true || capability?.nativeWindowControl === true
+        ? false
+        : null;
+  const cannotResolveOrApply = projectedIncompatibility ?? draftCannotResolveOrApplyContextWindow(form);
+  if (cannotResolveOrApply !== true) return null;
+
+  const manualWindow = Number(form.contextWindow.trim());
+  const isManual = Number.isInteger(manualWindow) && manualWindow > 0;
+  const hasCurrentAutoResolution =
+    !isManual &&
+    usesSavedContext &&
+    cat?.contextWindow == null &&
+    cat?.defaultModel === form.defaultModel &&
+    (capability?.source === 'reported' || capability?.source === 'catalog');
+  const hasCatalogAutoResolution = !isManual && getContextWindowFallback(form.defaultModel) != null;
+  if (hasCurrentAutoResolution || hasCatalogAutoResolution) return null;
+
+  return (
+    <output
+      id="context-window-compat-notice"
+      className="block rounded-[10px] border border-conn-amber-ring bg-conn-amber-bg px-3 py-2 text-xs leading-5 text-conn-amber-text"
+    >
+      {page
+        ? t(
+            isManual
+              ? '此客户端无法校验或调整上下文窗口，请确认填写值不超过实际容量。'
+              : '此客户端无法自动探测上下文窗口，请填写正整数。',
+          )
+        : isManual
+          ? '当前 Client 无法校验或调整自身的上下文窗口；请确认 Manual 值不高于 Client 的实际上限。'
+          : '当前 Client 无法自动探测上下文窗口；请填写正整数使用 Manual 模式。'}
+    </output>
   );
 }

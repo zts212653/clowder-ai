@@ -1,0 +1,130 @@
+.picker {
+  border: 1px solid var(--shell-hairline-strong);
+  border-radius: 10px;
+  background: var(--shell-paper);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--shell-ink) 8%, transparent);
+  overflow: hidden;
+}
+.picker input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--shell-hairline);
+  font-size: 13px;
+  color: var(--shell-ink);
+}
+.picker input:focus-visible {
+  outline: 2px solid var(--shell-primary);
+  outline-offset: -2px;
+}
+.list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+.heading {
+  padding: 6px 10px 2px;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  color: var(--shell-muted);
+}
+.list button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 13.5px;
+  text-align: left;
+  color: var(--shell-body);
+}
+.list button:hover,
+.list button[aria-selected="true"] {
+  background: var(--shell-work);
+}
+.list button:focus-visible {
+  outline: 2px solid var(--shell-primary);
+  outline-offset: -2px;
+}
+.check {
+  width: 16px;
+  flex-shrink: 0;
+  color: var(--shell-primary-text);
+}
+.name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.meta {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--shell-muted);
+  font-size: 12px;
+}
+.picker mark {
+  border-radius: 3px;
+  padding: 0 2px;
+  color: inherit;
+  background: var(--shell-primary-soft);
+}
+.create {
+  border-top: 1px solid var(--shell-hairline);
+}
+.empty {
+  margin: 0;
+  padding: 12px;
+  font-size: 13px;
+  color: var(--shell-muted);
+}
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 72px 16px 16px;
+  background: var(--console-overlay-backdrop);
+}
+.editor {
+  width: 420px;
+  max-width: 100%;
+  max-height: 85dvh;
+  overflow-y: auto;
+  border-radius: 12px;
+  border: 1px solid var(--shell-hairline);
+  background: var(--shell-paper);
+  color: var(--shell-body);
+  box-shadow: var(--console-shadow-soft);
+}
+.header {
+  padding: 14px 16px;
+}
+.header h2 {
+  font-size: 15px;
+}
+.header p {
+  font-size: 12px;
+}
+.header input {
+  height: 34px;
+  font-size: 13.5px;
+}
+.header > fieldset > button:last-child {
+  min-height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--shell-primary);
+  color: var(--shell-primary-on);
+}
+
+.header label {
+  color: var(--shell-muted);
+}
+.header label input {
+  color: var(--shell-ink);
+  background: var(--shell-work);
+  border-color: var(--shell-hairline);
+}

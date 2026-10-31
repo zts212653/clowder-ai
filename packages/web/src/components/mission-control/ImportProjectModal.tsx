@@ -1,5 +1,6 @@
 'use client';
 
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
@@ -11,7 +12,7 @@ interface ImportProjectModalProps {
 export function ImportProjectModal({ onClose, onImported }: ImportProjectModalProps) {
   const [name, setName] = useState('');
   const [sourcePath, setSourcePath] = useState('');
-  const [backlogPath, setBacklogPath] = useState('docs/ROADMAP.md');
+  const [backlogPath, setBacklogPath] = useState(deploymentDefaults.roadmapPath);
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,67 +44,72 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--console-overlay-backdrop)] backdrop-blur-sm"
+      onClick={onClose}
+    >
       <div
-        className="w-full max-w-md rounded-xl border border-[#E7DAC7] bg-[#FFFDF8] p-6 shadow-lg"
+        className="w-full max-w-md rounded-xl bg-[var(--console-card-bg)] p-6 shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-4 text-base font-bold text-[#2B2118]">导入项目</h2>
+        <h2 className="mb-4 text-base font-bold text-cafe">导入项目</h2>
 
         <div className="space-y-3">
           <label className="block">
-            <span className="text-xs font-medium text-[#6B5D4F]">项目名称 *</span>
+            <span className="text-xs font-medium text-cafe-secondary">项目名称 *</span>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. studio-flow"
-              className="mt-1 w-full rounded-lg border border-[#D8C6AD] bg-white px-3 py-2 text-sm text-[#2B2118] focus:border-[#8B6F47] focus:outline-none"
+              className="mt-1 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-sm text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
             />
           </label>
 
           <label className="block">
-            <span className="text-xs font-medium text-[#6B5D4F]">项目路径 *</span>
+            <span className="text-xs font-medium text-cafe-secondary">项目路径 *</span>
             <input
               type="text"
               value={sourcePath}
               onChange={(e) => setSourcePath(e.target.value)}
-              placeholder="/home/user/studio-flow"
-              className="mt-1 w-full rounded-lg border border-[#D8C6AD] bg-white px-3 py-2 text-sm text-[#2B2118] focus:border-[#8B6F47] focus:outline-none"
+              placeholder="/home/user/projects/studio-flow"
+              className="mt-1 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-sm text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
             />
           </label>
 
           <label className="block">
-            <span className="text-xs font-medium text-[#6B5D4F]">Backlog 路径</span>
+            <span className="text-xs font-medium text-cafe-secondary">Backlog 路径</span>
             <input
               type="text"
               value={backlogPath}
               onChange={(e) => setBacklogPath(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[#D8C6AD] bg-white px-3 py-2 text-sm text-[#2B2118] focus:border-[#8B6F47] focus:outline-none"
+              className="mt-1 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-sm text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
             />
           </label>
 
           <label className="block">
-            <span className="text-xs font-medium text-[#6B5D4F]">描述</span>
+            <span className="text-xs font-medium text-cafe-secondary">描述</span>
             <input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="简要描述"
-              className="mt-1 w-full rounded-lg border border-[#D8C6AD] bg-white px-3 py-2 text-sm text-[#2B2118] focus:border-[#8B6F47] focus:outline-none"
+              className="mt-1 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-sm text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
             />
           </label>
         </div>
 
         {error && (
-          <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
+          <div className="mt-3 rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-conn-red-text">
+            {error}
+          </div>
         )}
 
         <div className="mt-4 flex justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-[#D8C6AD] px-4 py-1.5 text-xs font-medium text-[#7A6B5A] hover:bg-[#F7EEDB]"
+            className="rounded-lg bg-[var(--console-shell-bg)] px-4 py-1.5 text-xs font-medium text-cafe-secondary hover:bg-[var(--console-hover-bg)]"
           >
             取消
           </button>
@@ -111,7 +117,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
             type="button"
             onClick={() => void handleSubmit()}
             disabled={submitting}
-            className="rounded-lg bg-[#8B6F47] px-4 py-1.5 text-xs font-medium text-white hover:bg-[#7A6139] disabled:opacity-40"
+            className="rounded-lg bg-[var(--mc-accent)] px-4 py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
           >
             {submitting ? '导入中...' : '导入'}
           </button>

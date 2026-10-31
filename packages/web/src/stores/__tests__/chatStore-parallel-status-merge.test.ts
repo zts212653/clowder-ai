@@ -1,5 +1,5 @@
 /**
- * Tests for #117: ParallelStatusBar only showing single cat.
+ * Tests for #117: independent-sampling status merging across members.
  *
  * Root cause: setTargetCats uses replace semantics — when multi-mention
  * dispatches emit per-cat intent_mode events, each one overwrites the
@@ -23,7 +23,6 @@ describe('chatStore setTargetCats merge semantics (#117)', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
       threadStates: {},
       viewMode: 'single',
       splitPaneThreadIds: [],
@@ -105,7 +104,6 @@ describe('chatStore setThreadTargetCats merge semantics (#117)', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
       threadStates: {},
       viewMode: 'single',
       splitPaneThreadIds: [],
@@ -166,7 +164,6 @@ describe('setTargetCats empty-array clear semantics (#117 P1 regression)', () =>
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
       threadStates: {},
       viewMode: 'single',
       splitPaneThreadIds: [],
@@ -220,7 +217,6 @@ describe('replaceThreadTargetCats replace semantics (#117 P1 queue hydration)', 
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
       threadStates: {},
       viewMode: 'single',
       splitPaneThreadIds: [],

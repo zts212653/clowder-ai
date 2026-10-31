@@ -1,10 +1,20 @@
 import assert from 'node:assert/strict';
+import { unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import {
-  handleLimbInvoke,
+  handleLimbBindEmbodiment,
+  handleLimbInvokeTool,
   handleLimbListAvailable,
-  limbInvokeInputSchema,
+  handleLimbListTools,
+  handleLimbPairList,
+  limbBindEmbodimentInputSchema,
+  limbInvokeToolInputSchema,
   limbListAvailableInputSchema,
+  limbListToolsInputSchema,
+  limbPairApproveInputSchema,
+  limbPairListInputSchema,
   limbTools,
 } from '../dist/tools/limb-tools.js';
 
@@ -12,21 +22,45 @@ describe('limb-tools schema', () => {
   it('limbListAvailableInputSchema has correct shape', () => {
     assert.equal(limbListAvailableInputSchema.type, 'object');
     assert.ok(limbListAvailableInputSchema.properties.capability);
+    assert.ok(limbListAvailableInputSchema.properties.agentKeyCatId);
   });
 
-  it('limbInvokeInputSchema has required fields', () => {
-    assert.equal(limbInvokeInputSchema.type, 'object');
-    assert.ok(limbInvokeInputSchema.properties.nodeId);
-    assert.ok(limbInvokeInputSchema.properties.command);
-    assert.deepEqual(limbInvokeInputSchema.required, ['nodeId', 'command']);
+  it('limbInvokeToolInputSchema has required fields', () => {
+    assert.equal(limbInvokeToolInputSchema.type, 'object');
+    assert.ok(limbInvokeToolInputSchema.properties.nodeId);
+    assert.ok(limbInvokeToolInputSchema.properties.command);
+    assert.ok(limbInvokeToolInputSchema.properties.agentKeyCatId);
+    assert.deepEqual(limbInvokeToolInputSchema.required, ['nodeId', 'command']);
   });
 
-  it('limbTools array has 4 tools', () => {
-    assert.equal(limbTools.length, 4);
+  it('pairing schemas expose agentKeyCatId for shared Antigravity MCP', () => {
+    assert.equal(limbPairListInputSchema.type, 'object');
+    assert.ok(limbPairListInputSchema.properties.agentKeyCatId);
+    assert.equal(limbPairApproveInputSchema.type, 'object');
+    assert.ok(limbPairApproveInputSchema.properties.agentKeyCatId);
+  });
+
+  it('embodiment binding accepts only body presentation fields', () => {
+    assert.equal(limbBindEmbodimentInputSchema.type, 'object');
+    assert.deepEqual(limbBindEmbodimentInputSchema.required, [
+      'nodeId',
+      'expressionRef',
+      'voiceProfileRef',
+      'volumePercent',
+    ]);
+    assert.equal(limbBindEmbodimentInputSchema.properties.userId, undefined);
+    assert.equal(limbBindEmbodimentInputSchema.properties.threadId, undefined);
+    assert.equal(limbBindEmbodimentInputSchema.properties.catId, undefined);
+  });
+
+  it('limbTools array has 6 tools (3-step flow + pairing + embodiment)', () => {
+    assert.equal(limbTools.length, 6);
     assert.equal(limbTools[0].name, 'limb_list_available');
-    assert.equal(limbTools[1].name, 'limb_invoke');
-    assert.equal(limbTools[2].name, 'limb_pair_list');
-    assert.equal(limbTools[3].name, 'limb_pair_approve');
+    assert.equal(limbTools[1].name, 'limb_list_tools');
+    assert.equal(limbTools[2].name, 'limb_invoke_tool');
+    assert.equal(limbTools[3].name, 'limb_pair_list');
+    assert.equal(limbTools[4].name, 'limb_pair_approve');
+    assert.equal(limbTools[5].name, 'limb_bind_embodiment');
   });
 
   it('each tool has name, description, inputSchema, handler', () => {
@@ -65,13 +99,81 @@ describe('limb-tools handlers (no callback config)', () => {
     assert.ok(result.content[0].text.includes('not configured'));
   });
 
-  it('handleLimbInvoke returns error without config', async () => {
-    const result = await handleLimbInvoke({
+  it('handleLimbInvokeTool returns error without config', async () => {
+    const result = await handleLimbInvokeTool({
       nodeId: 'test',
       command: 'test.cmd',
     });
     assert.ok(result.content);
     assert.equal(result.isError, true);
     assert.ok(result.content[0].text.includes('not configured'));
+  });
+
+  it('handleLimbBindEmbodiment returns error without config', async () => {
+    const result = await handleLimbBindEmbodiment({
+      nodeId: 'stackchan-home',
+      expressionRef: 'yanyan:happy',
+      voiceProfileRef: 'yanyan:zh-cn',
+      volumePercent: 55,
+    });
+    assert.equal(result.isError, true);
+  });
+});
+
+describe('limb-tools handlers (shared Antigravity agent-key path)', () => {
+  const origEnv = {};
+  let originalFetch;
+  let secretPath;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    for (const key of [
+      'CAT_CAFE_API_URL',
+      'CAT_CAFE_INVOCATION_ID',
+      'CAT_CAFE_CALLBACK_TOKEN',
+      'CAT_CAFE_AGENT_KEY_SECRET',
+      'CAT_CAFE_AGENT_KEY_FILE',
+      'CAT_CAFE_AGENT_KEY_FILES',
+      'CAT_CAFE_CALLBACK_RETRY_DELAYS_MS',
+    ]) {
+      origEnv[key] = process.env[key];
+    }
+    secretPath = join(tmpdir(), `limb-agent-key-${Date.now()}.secret`);
+    writeFileSync(secretPath, 'variant-secret\n', { mode: 0o600 });
+    process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:3004';
+    delete process.env.CAT_CAFE_INVOCATION_ID;
+    delete process.env.CAT_CAFE_CALLBACK_TOKEN;
+    delete process.env.CAT_CAFE_AGENT_KEY_SECRET;
+    delete process.env.CAT_CAFE_AGENT_KEY_FILE;
+    process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({ 'antig-opus': secretPath });
+    process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0';
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    unlinkSync(secretPath);
+    for (const [key, val] of Object.entries(origEnv)) {
+      if (val !== undefined) process.env[key] = val;
+      else delete process.env[key];
+    }
+  });
+
+  it('handleLimbPairList uses variant-scoped agent-key when agentKeyCatId is provided', async () => {
+    let capturedUrl;
+    let capturedOptions;
+    globalThis.fetch = async (url, options) => {
+      capturedUrl = url;
+      capturedOptions = options;
+      return {
+        ok: true,
+        json: async () => ({ status: 'ok' }),
+      };
+    };
+
+    const result = await handleLimbPairList({ agentKeyCatId: 'antig-opus' });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl.includes('/api/callback/limb/pair/list'));
+    assert.equal(capturedOptions.headers['x-agent-key-secret'], 'variant-secret');
   });
 });

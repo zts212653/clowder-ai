@@ -1,0 +1,469 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+const MESSAGE_BUNDLE = {
+  v: 1,
+  sourceThreadId: 'thread-source',
+  note: 'bundle-level reason',
+  items: [
+    { kind: 'message', messageId: 'message-source-1' },
+    {
+      kind: 'cli_quote',
+      messageId: 'message-cli',
+      sourceMessageIds: ['message-cli'],
+      segmentId: 'stdout',
+      selectionStart: 0,
+      selectionEnd: 4,
+      sourceProjectionVersion: 1,
+      sourceProjectionSha256: 'a'.repeat(64),
+    },
+    {
+      kind: 'rich_block',
+      messageId: 'message-rich',
+      sourceMessageIds: ['message-rich'],
+      blockId: 'card-1',
+      sourceProjectionVersion: 1,
+      sourceProjectionSha256: 'b'.repeat(64),
+    },
+  ],
+};
+
+describe('durable message extra carriers survive Redis round-trips', () => {
+  it('preserves exact conversation-return provenance and drops malformed coordinates', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const runtimeInteractionReturn = {
+      interactionId: 'conversation-1',
+      operationId: 'operation-1',
+      author: 'owner',
+      requesterCatId: 'codex-sol',
+      cardMessageId: 'card-message-1',
+    };
+    assert.deepEqual(
+      safeParseExtra(serializeExtra({ runtimeInteractionReturn }))?.runtimeInteractionReturn,
+      runtimeInteractionReturn,
+    );
+    const malformed = safeParseExtra(
+      serializeExtra({
+        runtimeInteractionReturn: { ...runtimeInteractionReturn, operationId: '' },
+        targetCats: ['codex-sol'],
+      }),
+    );
+    assert.equal(malformed?.runtimeInteractionReturn, undefined);
+    assert.deepEqual(malformed?.targetCats, ['codex-sol']);
+    const runtimeInteractionCard = {
+      version: 1,
+      interactionId: 'conversation-1',
+      blockId: 'decision-block',
+      requestKind: 'conversation_decision',
+    };
+    assert.deepEqual(
+      safeParseExtra(serializeExtra({ runtimeInteractionCard }))?.runtimeInteractionCard,
+      runtimeInteractionCard,
+    );
+  });
+
+  it('preserves the local-review original rich request digest while discarding malformed digests', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const digest = 'a'.repeat(64);
+    assert.equal(
+      safeParseExtra(serializeExtra({ callbackRichRequestDigest: digest }))?.callbackRichRequestDigest,
+      digest,
+    );
+    const malformed = safeParseExtra(
+      JSON.stringify({ callbackRichRequestDigest: 'not-a-digest', isExplicitPost: true }),
+    );
+    assert.equal(malformed.callbackRichRequestDigest, undefined);
+    assert.equal(malformed.isExplicitPost, true);
+  });
+
+  it('F317 preserves spoken-source identity and rejects malformed fields without dropping siblings', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const liveCompanion = {
+      callId: 'call-1',
+      nativeThreadId: 'native-1',
+      realtimeSessionId: 'realtime-1',
+      nativeItemId: 'segment-1',
+      modality: 'voice',
+    };
+    assert.deepEqual(safeParseExtra(serializeExtra({ liveCompanion }))?.liveCompanion, liveCompanion);
+    const identity = {
+      v: 1,
+      name: '猫猫球',
+      partner: { catId: 'fable-5', displayName: '宪宪', skin: 'black-cat' },
+      live: { catId: 'codex-astra', displayName: '砚砚', transport: 'gpt_live_v3', verifiedModel: null },
+      deep: { catId: 'fable-5', displayName: '宪宪', verifiedModel: null },
+    };
+    const result = { ...liveCompanion, nativeItemId: 'answer-1', modality: 'result', nativeTurnId: 'turn-1', identity };
+    assert.deepEqual(safeParseExtra(serializeExtra({ liveCompanion: result }))?.liveCompanion, result);
+    const { identity: _discarded, ...resultWithoutIdentity } = result;
+    assert.deepEqual(
+      safeParseExtra(serializeExtra({ liveCompanion: { ...result, identity: { ...identity, name: 'other' } } }))
+        ?.liveCompanion,
+      resultWithoutIdentity,
+      'a bad display snapshot must not delete the canonical Live source',
+    );
+    for (const malformed of [
+      null,
+      { ...liveCompanion, modality: 'video' },
+      { ...liveCompanion, nativeItemId: '' },
+      { ...liveCompanion, callId: 'x'.repeat(161) },
+    ]) {
+      const read = safeParseExtra(serializeExtra({ liveCompanion: malformed, targetCats: ['codex-astra'] }));
+      assert.equal(read?.liveCompanion, undefined);
+      assert.deepEqual(read?.targetCats, ['codex-astra']);
+    }
+  });
+  it('F311 preserves a valid preparation submission and drops malformed content without dropping siblings', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const valid = {
+      schemaVersion: 1,
+      programId: 'evolution-program:0123456789abcdef0123456789abcdef',
+      section: 'baseline_diagnosis',
+      title: 'Baseline and initial diagnosis',
+      authorCatId: 'codex-sol',
+      revision: `sha256:${'a'.repeat(64)}`,
+      dependsOn: [],
+      body: {
+        kind: 'baseline_diagnosis',
+        summary: 'No customer baseline is connected.',
+        baselineState: 'unknown',
+        observationUnit: 'One complete project opportunity episode.',
+        facts: [],
+        competingExplanations: [
+          {
+            explanationId: 'missing-context',
+            hypothesis: 'The PM lacks current project context.',
+            evidenceFor: [],
+            evidenceAgainst: [],
+            discriminatingNextStep: 'Replay with and without verified context.',
+          },
+          {
+            explanationId: 'policy-gap',
+            hypothesis: 'The PM policy does not express escalation boundaries.',
+            evidenceFor: [],
+            evidenceAgainst: [],
+            discriminatingNextStep: 'Hold context fixed and compare the policy.',
+          },
+        ],
+        unknowns: ['No production records.'],
+        nextAction: 'Connect records before choosing a change.',
+      },
+    };
+    assert.deepEqual(
+      safeParseExtra(serializeExtra({ evolutionPreparationSubmissionV1: valid }))?.evolutionPreparationSubmissionV1,
+      valid,
+    );
+    const malformed = safeParseExtra(
+      serializeExtra({
+        evolutionPreparationSubmissionV1: { ...valid, revision: 'mutable' },
+        targetCats: ['codex-sol'],
+      }),
+    );
+    assert.equal(malformed?.evolutionPreparationSubmissionV1, undefined);
+    assert.deepEqual(malformed?.targetCats, ['codex-sol']);
+  });
+  it('F311 preserves an exact-use source and fails closed on mutable provenance', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const source = {
+      schemaVersion: 1,
+      programId: 'evolution-program:ba0f4524e49cc879279164d5b272cf8c',
+      assetVersionRef: {
+        ownerFeatureId: 'F100',
+        ownerStateRef: 'skill:cat-cafe-skills/request-review/SKILL.md',
+        version: 'a'.repeat(64),
+        assetKind: 'skill',
+        assetId: 'cat-cafe-skills/request-review/SKILL.md',
+      },
+      receiptRef: {
+        ownerFeatureId: 'F100',
+        ownerStateRef: 'request-review-use:receipt-1',
+      },
+      use: 'applied',
+      recordedAt: '2026-10-14T17:00:00.000Z',
+    };
+    assert.deepEqual(safeParseExtra(serializeExtra({ evolutionUseSourceV1: source }))?.evolutionUseSourceV1, source);
+
+    const malformed = safeParseExtra(
+      serializeExtra({
+        evolutionUseSourceV1: { ...source, assetVersionRef: { ...source.assetVersionRef, version: undefined } },
+        targetCats: ['codex-sol'],
+      }),
+    );
+    assert.equal(malformed?.evolutionUseSourceV1, undefined);
+    assert.deepEqual(malformed?.targetCats, ['codex-sol']);
+  });
+  it('F293 preserves bounded routing receipt source refs and rejects malformed protocol data', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const payload = {
+      type: 'routing_preflight',
+      v: 1,
+      ownerId: 'owner-1',
+      observedAt: 10_000,
+      resolverState: 'fresh',
+      sourceMessageId: 'original-message',
+      retryInvocationId: 'original-invocation',
+      target: {
+        targetCatId: 'sol',
+        disposition: 'rejected',
+        automaticRetryAt: 30_000,
+        reasons: [{ code: 'routing_signal_unavailable', summary: 'quota_exhausted', sourceRefs: ['failure:1'] }],
+        contextualSignals: [
+          {
+            code: 'capability_anti_signal',
+            summary: 'Independent review benefits from a complementary reviewer',
+            sourceRefs: ['dossier:sol'],
+          },
+        ],
+        alternatives: [],
+      },
+    };
+    const extra = { systemInfo: { v: 1, payload, fallbackCatId: 'sol' } };
+    assert.deepEqual(safeParseExtra(serializeExtra(extra)), extra);
+    assert.equal(
+      safeParseExtra(serializeExtra({ systemInfo: { v: 1, payload: { ...payload, target: {} } } }))?.systemInfo,
+      undefined,
+    );
+  });
+  it('F167 preserves a typed local-review verdict as a durable review fact', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    for (const verdict of ['approved', 'changes_requested', 'commented']) {
+      const input = {
+        localReviewVerdict: {
+          verdict,
+          clientMessageId: `local-review-verdict-roundtrip-${verdict}`,
+          reviewedHeadSha: 'a'.repeat(40),
+          reviewSubjectRef: 'pr:zts212653/clowder-ai#4255',
+          acceptedSourceRef: 'docs/features/F314-development-episode-alignment-experiment.md',
+          acceptedRevision: 'b'.repeat(40),
+        },
+      };
+
+      assert.deepEqual(safeParseExtra(serializeExtra(input)), input);
+    }
+  });
+
+  it('preserves a legacy F167 local-review verdict without an accepted-source anchor', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const input = {
+      localReviewVerdict: {
+        verdict: 'approved',
+        clientMessageId: 'legacy-local-review-verdict',
+        reviewedHeadSha: 'a'.repeat(40),
+      },
+    };
+    assert.deepEqual(safeParseExtra(serializeExtra(input)), input);
+  });
+
+  it('drops a partial accepted-source anchor without dropping valid sibling metadata', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const parsed = safeParseExtra(
+      serializeExtra({
+        localReviewVerdict: {
+          verdict: 'approved',
+          clientMessageId: 'partial-anchor-local-review-verdict',
+          reviewedHeadSha: 'a'.repeat(40),
+          reviewSubjectRef: 'pr:zts212653/clowder-ai#4255',
+        },
+        targetCats: ['opus5'],
+      }),
+    );
+
+    assert.deepEqual(parsed?.targetCats, ['opus5']);
+    assert.equal(parsed?.localReviewVerdict, undefined);
+  });
+
+  it('drops a malformed accepted-source revision without dropping valid sibling metadata', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const parsed = safeParseExtra(
+      serializeExtra({
+        localReviewVerdict: {
+          verdict: 'approved',
+          clientMessageId: 'malformed-anchor-local-review-verdict',
+          reviewedHeadSha: 'a'.repeat(40),
+          reviewSubjectRef: 'pr:zts212653/clowder-ai#4255',
+          acceptedSourceRef: 'docs/features/F314-development-episode-alignment-experiment.md',
+          acceptedRevision: 'not-a-git-oid',
+        },
+        targetCats: ['opus5'],
+      }),
+    );
+
+    assert.deepEqual(parsed?.targetCats, ['opus5']);
+    assert.equal(parsed?.localReviewVerdict, undefined);
+  });
+
+  it('F167 drops malformed local-review verdicts without dropping valid sibling metadata', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    for (const localReviewVerdict of [
+      { verdict: 'approve', clientMessageId: 'typed-verdict-1' },
+      { verdict: 'approved', clientMessageId: '' },
+      { verdict: 'approved', clientMessageId: 'x'.repeat(201) },
+      { verdict: 'approved', clientMessageId: 'typed-verdict-1', reviewedHeadSha: 'ABC1234' },
+      { verdict: 'approved', clientMessageId: 'typed-verdict-1', reviewedHeadSha: 'a'.repeat(39) },
+    ]) {
+      const parsed = safeParseExtra(
+        serializeExtra({
+          localReviewVerdict,
+          targetCats: ['opus5'],
+        }),
+      );
+
+      assert.deepEqual(parsed?.targetCats, ['opus5']);
+      assert.equal(parsed?.localReviewVerdict, undefined);
+    }
+  });
+
+  it('F294 preserves a Message Bundle while tracing metadata is merged', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const hydrated = safeParseExtra(serializeExtra({ messageBundle: MESSAGE_BUNDLE }));
+    const input = {
+      ...hydrated,
+      tracing: {
+        traceId: 'aaaa1111bbbb2222cccc3333dddd4444',
+        spanId: '1122334455667788',
+      },
+    };
+
+    assert.deepEqual(safeParseExtra(serializeExtra(input)), input);
+  });
+
+  it('F294 drops a malformed Message Bundle without dropping valid sibling metadata', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const parsed = safeParseExtra(
+      serializeExtra({
+        messageBundle: { ...MESSAGE_BUNDLE, items: [{ kind: 'message', messageId: '' }] },
+        targetCats: ['opus'],
+      }),
+    );
+
+    assert.deepEqual(parsed?.targetCats, ['opus']);
+    assert.equal(parsed?.messageBundle, undefined);
+  });
+
+  it('preserves the F272, F292, and write-opportunity carriers', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const dynamicScene = {
+      v: 1,
+      kind: 'memory_write_opportunity',
+      surface: 'dynamic_context',
+      opportunity: {
+        v: 1,
+        opportunityId: `write_opp_${'a'.repeat(24)}00000001`,
+        reflexId: 'asr-person-memory',
+        reflexVersion: 1,
+        generation: 1,
+        producer: 'meeting_artifact',
+        consumer: { kind: 'cat', catId: 'codex-sol' },
+        scope: { ownerUserId: 'owner-1', threadId: 'thread-1' },
+        observedAt: 1,
+        eligibleAt: 2,
+        expiresAt: 3,
+        sourceCoordinates: [
+          {
+            kind: 'asr_transcript_segment',
+            artifactId: 'intake-1',
+            sourceHandle: 'meeting://source-1',
+            sourceRevision: `sha256:${'b'.repeat(64)}`,
+            segment: { unit: 'utf8_byte', start: 0, end: 4 },
+            speaker: {
+              externalSpeakerId: 'speaker-1',
+              label: 'Owner-confirmed speaker',
+              attributionRevision: `sha256:${'c'.repeat(64)}`,
+              attributionCeiling: 'owner_confirmed_mapping',
+            },
+          },
+        ],
+        epistemicCeiling: 'mechanical_observation',
+        destination: { lane: 'person_memory', proposalContract: 'F276.CaptureCandidate.v1' },
+        dedupeLineage: `write_lineage_${'a'.repeat(32)}`,
+        rearmPredicate: 'next_eligible_owner_context_after_defer',
+      },
+    };
+    const input = {
+      proactive: { visitId: 'visit-1', intentId: 'intent-1', source: 'private_time' },
+      meetingArtifact: {
+        intakeId: 'intake-1',
+        sourceHandle: 'meeting://source-1',
+        resourceRef: `meeting-artifact://intakes/intake-1?revision=sha256:${'b'.repeat(64)}`,
+        sourceRevision: `sha256:${'b'.repeat(64)}`,
+        byteLength: 4,
+        contentType: 'text/plain',
+        trust: 'untrusted_external',
+        instructionPolicy: 'data_only',
+      },
+      dynamicSceneEntries: [dynamicScene],
+      writeOpportunityReentry: {
+        v: 1,
+        sourceMessageRef: { kind: 'message', threadId: 'thread-1', messageId: 'message-source-1' },
+        sourceOpportunityId: dynamicScene.opportunity.opportunityId,
+        priorGeneration: 1,
+        scene: {
+          ...dynamicScene,
+          opportunity: {
+            ...dynamicScene.opportunity,
+            opportunityId: `write_opp_${'a'.repeat(24)}00000002`,
+            generation: 2,
+          },
+        },
+      },
+      writeOpportunityPresentationRetry: {
+        v: 1,
+        sourceMessageRef: { kind: 'message', threadId: 'thread-1', messageId: 'message-source-1' },
+        sourceOpportunityId: dynamicScene.opportunity.opportunityId,
+      },
+    };
+    input.writeOpportunityReentries = [input.writeOpportunityReentry];
+
+    assert.deepEqual(safeParseExtra(serializeExtra(input)), input);
+  });
+
+  it('fails closed on malformed proactive and meeting-artifact carriers', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const parsed = safeParseExtra(
+      serializeExtra({
+        proactive: { visitId: '', intentId: 'intent-1', source: 'private_time' },
+        meetingArtifact: {
+          intakeId: 'intake-1',
+          sourceHandle: 'meeting://source-1',
+          trust: 'trusted',
+          instructionPolicy: 'data_only',
+        },
+        isExplicitPost: true,
+      }),
+    );
+
+    assert.equal(parsed?.proactive, undefined);
+    assert.equal(parsed?.meetingArtifact, undefined);
+    assert.equal(parsed?.isExplicitPost, true);
+  });
+});

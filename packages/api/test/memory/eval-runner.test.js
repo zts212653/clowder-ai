@@ -38,9 +38,9 @@ describe('Eval Corpus: Recall@5', () => {
     return parseEvalCorpus(raw);
   }
 
-  it('Recall@5 >= 80% across all recall queries', async () => {
+  it('lexical Recall@5 >= 80% across lexical recall queries', async () => {
     const corpus = loadCorpus();
-    const recallQueries = corpus.filter((q) => q.expected_anchors?.length > 0);
+    const recallQueries = corpus.filter((q) => q.expected_anchors?.length > 0 && q.search_mode !== 'semantic');
 
     let totalExpected = 0;
     let totalHits = 0;
@@ -61,7 +61,7 @@ describe('Eval Corpus: Recall@5', () => {
     }
 
     const recall = totalHits / totalExpected;
-    console.log(`Recall@5: ${totalHits}/${totalExpected} = ${(recall * 100).toFixed(1)}%`);
+    console.log(`Lexical Recall@5: ${totalHits}/${totalExpected} = ${(recall * 100).toFixed(1)}%`);
     if (misses.length > 0) {
       console.log('Misses:', JSON.stringify(misses, null, 2));
     }
@@ -106,6 +106,7 @@ function parseEvalCorpus(raw) {
         const arrMatch = trimmed.match(/\[(.+)]/);
         if (arrMatch) entry.expected_anchors = arrMatch[1].split(',').map((s) => s.trim());
       }
+      if (trimmed.startsWith('search_mode: ')) entry.search_mode = trimmed.slice(13);
       if (trimmed.startsWith('must_not_contain_paths: ')) {
         const arrMatch = trimmed.match(/\[(.+)]/);
         if (arrMatch) entry.must_not_contain_paths = arrMatch[1].split(',').map((s) => s.trim().replace(/"/g, ''));

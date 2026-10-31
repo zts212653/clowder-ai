@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
 describe('POST → GET /api/messages roundtrip', () => {
   let app;
@@ -35,20 +36,24 @@ describe('POST → GET /api/messages roundtrip', () => {
 
   it('messages stored via append() are returned by GET', async () => {
     // Simulate what AgentRouter does: store user msg + cat reply
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'hello @opus',
-      mentions: ['opus'],
-      timestamp: 1000,
-    });
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'hello human',
-      mentions: [],
-      timestamp: 2000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'hello @opus',
+        mentions: ['opus'],
+        timestamp: 1000,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'hello human',
+        mentions: [],
+        timestamp: 2000,
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -62,16 +67,94 @@ describe('POST → GET /api/messages roundtrip', () => {
     assert.equal(body.hasMore, false);
   });
 
+  it('projects the receipt-derived F311 source carrier into Chat history', async () => {
+    const source = {
+      schemaVersion: 1,
+      programId: 'evolution-program:ba0f4524e49cc879279164d5b272cf8c',
+      assetVersionRef: {
+        ownerFeatureId: 'F100',
+        ownerStateRef: 'skill:cat-cafe-skills/request-review/SKILL.md',
+        version: 'a'.repeat(64),
+        assetKind: 'skill',
+        assetId: 'cat-cafe-skills/request-review/SKILL.md',
+      },
+      receiptRef: { ownerFeatureId: 'F100', ownerStateRef: 'request-review-use:receipt-1' },
+      use: 'applied',
+      recordedAt: '2026-10-14T17:00:00.000Z',
+    };
+    messageStore.append({
+      userId: 'default-user',
+      from: { kind: 'agent', catId: 'codex-sol' },
+      content: 'review done',
+      mentions: [],
+      timestamp: 2_000,
+      extra: { evolutionUseSourceV1: source },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(body.messages[0].extra.evolutionUseSourceV1, source);
+  });
+
+  it('normalizes lone surrogates before persisting message JSON', () => {
+    const loneHighSurrogate = String.fromCharCode(0xd800);
+    const loneLowSurrogate = String.fromCharCode(0xdc00);
+    const input = {
+      userId: 'default-user',
+      catId: 'codex',
+      content: `before${loneHighSurrogate}after 😀`,
+      mentions: [],
+      timestamp: 2500,
+      extra: { targetCats: [`codex${loneLowSurrogate}`] },
+    };
+
+    const stored = messageStore.append(canonicalTestMessageInput(input));
+
+    assert.equal(stored.content, 'before�after 😀');
+    assert.deepEqual(stored.extra.targetCats, ['codex�']);
+    assert.equal(input.content, `before${loneHighSurrogate}after 😀`, 'normalization must not mutate caller input');
+  });
+
+  it('returns well-formed Unicode JSON when legacy rows contain lone surrogates', async () => {
+    const loneHighSurrogate = String.fromCharCode(0xd800);
+    const loneLowSurrogate = String.fromCharCode(0xdc00);
+    const legacy = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'codex',
+        content: 'placeholder',
+        mentions: [],
+        timestamp: 2600,
+      }),
+    );
+    // Simulate a row persisted before the Unicode boundary existed.
+    legacy.content = `legacy${loneHighSurrogate}message 😀`;
+    legacy.extra = { targetCats: [`codex${loneLowSurrogate}`] };
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(body.messages[0].content, 'legacy�message 😀');
+    assert.deepEqual(body.messages[0].extra.targetCats, ['codex�']);
+    assert.ok(!res.body.includes('\\ud800'), 'response must not expose an escaped lone high surrogate');
+    assert.ok(!res.body.includes('\\udc00'), 'response must not expose an escaped lone low surrogate');
+  });
+
   it('cursor pagination returns correct pages', async () => {
     // Insert 5 messages
     for (let i = 0; i < 5; i++) {
-      messageStore.append({
-        userId: 'default-user',
-        catId: null,
-        content: `msg ${i}`,
-        mentions: [],
-        timestamp: 1000 + i * 100,
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'default-user',
+          catId: null,
+          content: `msg ${i}`,
+          mentions: [],
+          timestamp: 1000 + i * 100,
+        }),
+      );
     }
 
     // First page: latest 2
@@ -101,13 +184,15 @@ describe('POST → GET /api/messages roundtrip', () => {
   });
 
   it('response format matches frontend ChatMessage interface', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'codex',
-      content: 'review done',
-      mentions: [],
-      timestamp: 5000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'codex',
+        content: 'review done',
+        mentions: [],
+        timestamp: 5000,
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);

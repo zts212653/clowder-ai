@@ -5,11 +5,15 @@
 
 import assert from 'node:assert/strict';
 import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
-import { assertRedisIsolationOrThrow, cleanupPrefixedRedisKeys } from './helpers/redis-test-helpers.js';
+import {
+  assertRedisIsolationOrThrow,
+  cleanupPrefixedRedisKeys,
+  redisIsolationSkipReason,
+} from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
 
-describe('RedisBacklogStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }, () => {
+describe('RedisBacklogStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisBacklogStore;
   let createRedisClient;
   let redis;
@@ -83,6 +87,25 @@ describe('RedisBacklogStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }
     });
     return created.id;
   }
+
+  it('ensureTaskBackedItem atomically reuses one deterministic projection under concurrency', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    const input = {
+      userId: 'default-user',
+      taskId: 'task-f287',
+      featureId: 'F287',
+      title: 'F287 durable task',
+      summary: 'Task truth already exists in this thread',
+      createdBy: 'codex-sol',
+    };
+
+    const [first, second] = await Promise.all([store.ensureTaskBackedItem(input), store.ensureTaskBackedItem(input)]);
+
+    assert.equal(first.id, 'task:task-f287');
+    assert.equal(second.id, first.id);
+    assert.equal((await store.listByUser('default-user')).length, 1);
+    assert.deepEqual(first.tags, ['source:task', 'feature:f287']);
+  });
 
   it('concurrent acquire by different cats: only one succeeds', async () => {
     const itemId = await createDispatchedItem('acquire-race');

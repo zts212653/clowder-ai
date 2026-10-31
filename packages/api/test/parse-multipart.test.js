@@ -54,3 +54,16 @@ test('parseMultipart drains file stream before waiting for remaining parts', asy
     await rm(uploadDir, { recursive: true, force: true });
   }
 });
+
+test('parseMultipart preserves a mounted composer revision as a number', async () => {
+  const request = {
+    parts: async function* () {
+      yield { type: 'field', fieldname: 'content', value: '带图发送' };
+      yield { type: 'field', fieldname: 'threadId', value: 'thread-test' };
+      yield { type: 'field', fieldname: 'composerDraftRevision', value: '3' };
+    },
+  };
+  const parsed = await parseMultipart(request, tmpdir());
+  assert.ok(!('error' in parsed));
+  assert.equal(parsed.composerDraftRevision, 3);
+});

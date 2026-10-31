@@ -1,0 +1,200 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { describe, it } from 'node:test';
+import { publicTestSelectionHash } from '../scripts/resolve-public-test-files.mjs';
+import {
+  categorizePublicTestFailure,
+  filesForPublicTestLane,
+  runPublicTestLane,
+} from '../scripts/run-public-test-shard.mjs';
+
+const selectedFiles = ['test/pure-alpha.test.js', 'test/pure-beta.test.js', 'test/serial-redis.test.js'];
+const manifest = {
+  schemaVersion: 1,
+  selectedFiles,
+  excludedFiles: [],
+  selectionHash: publicTestSelectionHash(selectedFiles),
+  exclusionRegistryHash: 'e'.repeat(64),
+};
+const plannerProvenance = {
+  workspaceTree: 'a'.repeat(40),
+  lockfileHash: 'b'.repeat(64),
+  nodeVersion: process.version,
+  pnpmVersion: '10.0.0',
+  platform: process.platform,
+  arch: process.arch,
+};
+const resolveProvenance = () => plannerProvenance;
+const plan = {
+  schemaVersion: 2,
+  selectedFiles,
+  selectionHash: manifest.selectionHash,
+  exclusionRegistryHash: manifest.exclusionRegistryHash,
+  classificationVersion: 2,
+  plannerProvenance,
+  timingSource: { kind: 'unmeasured_default', estimatedDurationMs: 1_000 },
+  sharedSerialLane: { id: 'serial-shared', files: [], estimatedDurationMs: 0 },
+  distributableShards: [
+    { id: 'distributable-1', files: ['test/pure-alpha.test.js'], estimatedDurationMs: 5 },
+    { id: 'distributable-2', files: ['test/pure-beta.test.js'], estimatedDurationMs: 4 },
+    { id: 'distributable-3', files: ['test/serial-redis.test.js'], estimatedDurationMs: 10 },
+    { id: 'distributable-4', files: [], estimatedDurationMs: 0 },
+    { id: 'distributable-5', files: [], estimatedDurationMs: 0 },
+    { id: 'distributable-6', files: [], estimatedDurationMs: 0 },
+  ],
+  assignments: {
+    'test/pure-alpha.test.js': {
+      lane: 'distributable-1',
+      ruleId: 'runtime-isolated-default',
+      estimatedDurationMs: 5,
+      isolationEvidence: { kind: 'kernel-no-egress-plus-runtime-guard' },
+    },
+    'test/pure-beta.test.js': {
+      lane: 'distributable-2',
+      ruleId: 'runtime-isolated-default',
+      estimatedDurationMs: 4,
+      isolationEvidence: { kind: 'kernel-no-egress-plus-runtime-guard' },
+    },
+    'test/serial-redis.test.js': {
+      lane: 'distributable-3',
+      ruleId: 'runtime-isolated-default',
+      estimatedDurationMs: 10,
+      isolationEvidence: { kind: 'kernel-no-egress-plus-runtime-guard' },
+    },
+  },
+};
+
+function stable(value) {
+  if (Array.isArray(value)) return value.map(stable);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, stable(value[key])]),
+  );
+}
+
+plan.planFingerprint = createHash('sha256')
+  .update(JSON.stringify(stable(plan)))
+  .digest('hex');
+
+// Lane sequencing is exercised with a stubbed executeFile: no test process is
+// spawned. There is no environment opt-out for the isolation preflight, by
+// design, so these inject the probes a loopback-only namespace produces.
+const verifiedBoundaryProbe = {
+  platform: 'linux',
+  readRouteTable: () => 'Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n',
+  readIpv6RouteTable: () => '',
+  // Empty route tables alone do not prove isolation, so the lane also requires
+  // the launcher seal: a netns distinct from PID 1, unprivileged, no_new_privs,
+  // every capability set empty.
+  readNamespaceProof: () => 'verified',
+  readSelfStatus: () =>
+    [
+      'Uid:\t1001\t1001\t1001\t1001',
+      'NoNewPrivs:\t1',
+      'CapInh:\t0000000000000000',
+      'CapPrm:\t0000000000000000',
+      'CapEff:\t0000000000000000',
+      'CapBnd:\t0000000000000000',
+      'CapAmb:\t0000000000000000',
+    ].join('\n'),
+};
+
+describe('F308 public-test shard runner', () => {
+  it('runs each lane serially, stops at its first failure, and keeps typed per-file facts', async () => {
+    const calls = [];
+    const report = await runPublicTestLane({
+      plan,
+      lane: 'distributable-1',
+      packageRoot: process.cwd(),
+      manifest,
+      isolationProbe: verifiedBoundaryProbe,
+      resolveProvenance,
+      executeFile: async ({ file, resourceScope }) => {
+        calls.push(file);
+        assert.equal(resourceScope, 'distributable');
+        return {
+          file,
+          status: 'passed',
+          exitCode: 0,
+          signal: null,
+          durationMs: 7,
+          startedAt: '2026-08-27T00:00:00.000Z',
+          finishedAt: '2026-08-27T00:00:00.007Z',
+          outputHash: 'a'.repeat(64),
+          failureCategory: 'passed',
+        };
+      },
+    });
+
+    assert.deepEqual(calls, ['test/pure-alpha.test.js']);
+    assert.equal(report.status, 'succeeded');
+    assert.equal(report.files[0].durationMs, 7);
+    assert.equal(report.provenance.workspaceTree.length, 40);
+    assert.equal(report.provenance.lockfileHash.length, 64);
+    assert.equal(report.provenance.pnpmVersion.length > 0, true);
+    assert.equal(report.plannedFileCount, 1);
+  });
+
+  it('does not run a later file after the first hard failure', async () => {
+    const twoFilePlan = structuredClone(plan);
+    twoFilePlan.distributableShards[0].files = ['test/pure-alpha.test.js', 'test/pure-beta.test.js'];
+    twoFilePlan.distributableShards[1].files = [];
+    twoFilePlan.assignments['test/pure-beta.test.js'].lane = 'distributable-1';
+    const unsigned = { ...twoFilePlan };
+    delete unsigned.planFingerprint;
+    twoFilePlan.planFingerprint = createHash('sha256')
+      .update(JSON.stringify(stable(unsigned)))
+      .digest('hex');
+    const calls = [];
+    const report = await runPublicTestLane({
+      plan: twoFilePlan,
+      lane: 'distributable-1',
+      packageRoot: process.cwd(),
+      manifest,
+      isolationProbe: verifiedBoundaryProbe,
+      resolveProvenance,
+      executeFile: async ({ file }) => {
+        calls.push(file);
+        return {
+          file,
+          status: 'failed',
+          exitCode: 1,
+          signal: null,
+          durationMs: 8,
+          startedAt: '2026-08-27T00:00:00.000Z',
+          finishedAt: '2026-08-27T00:00:00.008Z',
+          outputHash: 'b'.repeat(64),
+          failureCategory: 'test_failure',
+        };
+      },
+    });
+
+    assert.deepEqual(calls, ['test/pure-alpha.test.js']);
+    assert.equal(report.status, 'failed');
+    assert.equal(report.firstHardFailure.code, 'test_failure');
+  });
+
+  it('rejects a manifest or lane that cannot prove exact selected-file provenance', async () => {
+    assert.deepEqual(filesForPublicTestLane(plan, 'distributable-3'), ['test/serial-redis.test.js']);
+    assert.deepEqual(filesForPublicTestLane(plan, 'serial-shared'), []);
+    assert.throws(() => filesForPublicTestLane(plan, 'distributable-7'), /unknown public-test shard lane/);
+    await assert.rejects(
+      runPublicTestLane({
+        plan,
+        lane: 'distributable-1',
+        packageRoot: process.cwd(),
+        manifest: { ...manifest, exclusionRegistryHash: 'd'.repeat(64) },
+        resolveProvenance,
+      }),
+      /exclusion registry/,
+    );
+  });
+
+  it('keeps state, port, resource, and generic failures distinguishable', () => {
+    assert.equal(categorizePublicTestFailure({ exitCode: 1, output: 'Error: EADDRINUSE' }), 'state_or_port_failure');
+    assert.equal(categorizePublicTestFailure({ exitCode: 1, output: 'heap out of memory' }), 'resource_exhaustion');
+    assert.equal(categorizePublicTestFailure({ exitCode: 1, output: 'plain assertion' }), 'test_failure');
+  });
+});

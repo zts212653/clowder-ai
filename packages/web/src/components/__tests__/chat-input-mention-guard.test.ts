@@ -27,6 +27,7 @@ vi.mock('@/components/icons/AttachIcon', () => ({
   AttachIcon: () => React.createElement('span', null, 'attach'),
 }));
 vi.mock('@/components/ImagePreview', () => ({ ImagePreview: () => null }));
+vi.mock('@/components/AttachmentPreview', () => ({ AttachmentPreview: () => null }));
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
 
 // Controllable useCatData mock — swap cats mid-test via mockCats
@@ -48,7 +49,7 @@ function buildCatsWithPatterns() {
       displayName: '布偶猫',
       color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
       mentionPatterns: ['布偶', '布偶猫', 'opus'],
-      provider: 'anthropic',
+      clientId: 'anthropic',
       defaultModel: 'opus',
       avatar: '/a.png',
       roleDescription: 'dev',
@@ -59,7 +60,7 @@ function buildCatsWithPatterns() {
       displayName: '缅因猫',
       color: { primary: '#5B8C5A', secondary: '#D5E8D4' },
       mentionPatterns: ['缅因', '缅因猫', 'codex'],
-      provider: 'openai',
+      clientId: 'openai',
       defaultModel: 'codex',
       avatar: '/b.png',
       roleDescription: 'review',
@@ -75,7 +76,7 @@ function buildCatsNoPatterns() {
       displayName: '布偶猫',
       color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
       mentionPatterns: [] as string[],
-      provider: 'anthropic',
+      clientId: 'anthropic',
       defaultModel: 'opus',
       avatar: '/a.png',
       roleDescription: 'dev',
@@ -175,18 +176,17 @@ describe('ChatInput mention menu guards', () => {
   });
 
   it('ArrowDown past last item wraps to 0 and Enter still works', () => {
-    // 2 cats: index 0 and 1
+    // 4 options: 布偶猫, 缅因猫 (individuals), @thread, @all (groups).
+    // Default selectedIdx = 0 (first individual, groups are at bottom).
     render();
 
     typeInTextarea('@');
     expect(container.querySelectorAll('.w-64').length).toBe(1);
 
-    // ArrowDown 3 times: 0→1→0→1 (mod 2 wrapping)
-    pressKey('ArrowDown');
-    pressKey('ArrowDown');
+    // ArrowDown once from idx 2 → idx 3 (缅因猫)
     pressKey('ArrowDown');
 
-    // Enter should insert the cat at wrapped index (1) — 缅因猫
+    // Enter should insert 缅因猫
     pressKey('Enter');
 
     const ta = getTextarea();

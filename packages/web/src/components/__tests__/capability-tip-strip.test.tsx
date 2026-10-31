@@ -1,0 +1,306 @@
+import { buildConciergeDraftPrompt, validateCapabilityTipInventory } from '@cat-cafe/shared';
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import rawTips from '@/lib/capability-tips.seed.json';
+import { recordCapabilityTipEvent } from '@/lib/capabilityTipEvents';
+import { computeExposureScope, computeInventoryFingerprint } from '@/lib/capabilityTipExposure';
+import { useConciergeStore } from '@/stores/conciergeStore';
+import { CapabilityTipStrip } from '../CapabilityTipStrip';
+
+vi.mock('@/lib/capabilityTipEvents', async () => ({
+  recordCapabilityTipEvent: vi.fn(),
+}));
+
+let container: HTMLDivElement;
+let root: Root;
+
+type SeedTip = {
+  id: string;
+  contexts: string[];
+  audience: string[];
+  action?: { type?: string };
+};
+
+async function render(jsx: React.ReactNode) {
+  await act(async () => {
+    root.render(jsx);
+    await Promise.resolve();
+  });
+}
+
+describe('F244 CapabilityTipStrip', () => {
+  beforeAll(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterAll(() => {
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    localStorage.clear();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    useConciergeStore.setState({
+      surfaceState: 'collapsed',
+      pendingPrompt: null,
+    });
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it('teaches the shipped F294 message-selection entry and export actions', () => {
+    const tip = (rawTips as readonly (SeedTip & { body?: string })[]).find(
+      (candidate) => candidate.id === 'feature-f294-selective-message-bundles',
+    );
+
+    expect(tip).toBeDefined();
+    expect(tip?.body).toContain('多选消息');
+    expect(tip?.body).toContain('导出');
+    expect(tip?.body).toContain('目标 Thread');
+    expect(tip?.body).toContain('接收猫');
+    expect(tip?.body).toContain('合并卡');
+    expect(tip?.body).not.toContain('从消息的“更多”');
+    expect(tip?.body).not.toContain('移动端长按进入多选');
+  });
+
+  it('teaches that F277 Groups are created deliberately and do not change the default list', () => {
+    const tip = (rawTips as readonly (SeedTip & { body?: string })[]).find(
+      (candidate) => candidate.id === 'feature-f277-thread-attention-navigation',
+    );
+
+    expect(tip).toBeDefined();
+    expect(tip?.body).toContain('长按');
+    expect(tip?.body).toContain('拖');
+    expect(tip?.body).toContain('Group');
+    expect(tip?.body).toContain('默认');
+    expect(tip?.body).not.toContain('相关对话会在侧边栏收成');
+  });
+
+  it('shimmer placeholder has accessible status label (not hidden by aria-hidden)', async () => {
+    await render(
+      <CapabilityTipStrip
+        surface="assistant_stream_bubble"
+        contexts={['thinking']}
+        firstDelayMs={6000}
+        rotateMs={12000}
+      />,
+    );
+    const strip = container.querySelector('[data-testid="capability-tip-strip"]');
+    expect(strip).not.toBeNull();
+    // The sr-only label must be a direct child of the status container,
+    // NOT inside the aria-hidden skeleton — otherwise screen readers see nothing.
+    const srOnly = strip?.querySelector('.sr-only');
+    expect(srOnly).not.toBeNull();
+    expect(srOnly?.textContent).toBe('猫猫思考中');
+    // Must NOT be inside an aria-hidden ancestor
+    expect(srOnly?.closest('[aria-hidden="true"]')).toBeNull();
+  });
+
+  it('shows container immediately with shimmer, then tip content after delay', async () => {
+    await render(
+      <CapabilityTipStrip
+        surface="assistant_stream_bubble"
+        contexts={['thinking']}
+        firstDelayMs={6000}
+        rotateMs={12000}
+      />,
+    );
+    // Container renders immediately (with shimmer placeholder)
+    expect(container.querySelector('[data-testid="capability-tip-strip"]')).not.toBeNull();
+    // But no tip content or action yet.
+    const actionSelector = '[data-testid="capability-tip-learn-more"], [data-testid="capability-tip-open-surface"]';
+    expect(container.querySelector(actionSelector)).toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+    });
+    // After delay: tip content appears
+    expect(container.querySelector('[data-testid="capability-tip-strip"]')).not.toBeNull();
+    expect(container.querySelector(actionSelector)).not.toBeNull();
+  });
+
+  it('does not default omitted audience to all-only tips', async () => {
+    const seedTips = rawTips as readonly SeedTip[];
+    const scope = computeExposureScope('assistant_stream_bubble', undefined, ['review']);
+    const allAudienceReviewTipIds = seedTips
+      .filter(
+        (tip) =>
+          tip.action?.type === 'open_concierge_draft' &&
+          tip.contexts.includes('review') &&
+          tip.audience.includes('all'),
+      )
+      .map((tip) => tip.id);
+    localStorage.setItem(
+      `cat-cafe:tip-exposure:${scope}`,
+      JSON.stringify({
+        exposed: allAudienceReviewTipIds,
+        firstSeen: {},
+        fingerprint: computeInventoryFingerprint(seedTips.map((tip) => tip.id)),
+      }),
+    );
+
+    await render(
+      <CapabilityTipStrip surface="assistant_stream_bubble" contexts={['review']} firstDelayMs={0} rotateMs={12000} />,
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+
+    const tipId = container.querySelector('[data-testid="capability-tip-strip"]')?.getAttribute('data-tip-id');
+    const selectedTip = seedTips.find((tip) => tip.id === tipId);
+    // All "all" review tips are pre-exposed above. Correct omitted-audience behavior
+    // still has non-all tips available; an all-only default would fall back to exposed all tips.
+    expect(selectedTip?.audience).not.toContain('all');
+  });
+
+  it('records the context that matched the selected tip', async () => {
+    const recordCapabilityTipEventMock = vi.mocked(recordCapabilityTipEvent);
+    const contexts = ['pet_waiting_for_user', 'long_running'] as const;
+
+    await render(
+      <CapabilityTipStrip surface="assistant_stream_bubble" contexts={contexts} firstDelayMs={0} rotateMs={12000} />,
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+
+    const tipId = container.querySelector('[data-testid="capability-tip-strip"]')?.getAttribute('data-tip-id');
+    const selectedTip = (rawTips as readonly SeedTip[]).find((tip) => tip.id === tipId);
+    const matchedContext = contexts.find((context) => selectedTip?.contexts.includes(context));
+    expect(matchedContext).toBeDefined();
+
+    expect(recordCapabilityTipEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'capability_tip_exposed',
+        context: matchedContext,
+      }),
+    );
+
+    const actionControl = container.querySelector<HTMLElement>(
+      '[data-testid="capability-tip-learn-more"], [data-testid="capability-tip-open-surface"]',
+    );
+    expect(actionControl).not.toBeNull();
+    act(() => {
+      actionControl?.click();
+    });
+
+    expect(recordCapabilityTipEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'capability_tip_action',
+        context: matchedContext,
+      }),
+    );
+  });
+
+  it('keeps each tip visible for at least 30 seconds', async () => {
+    const recordCapabilityTipEventMock = vi.mocked(recordCapabilityTipEvent);
+
+    await render(
+      <CapabilityTipStrip
+        surface="assistant_stream_bubble"
+        contexts={['long_running']}
+        firstDelayMs={0}
+        rotateMs={12000}
+      />,
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+
+    expect(recordCapabilityTipEventMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(12000);
+      await Promise.resolve();
+    });
+
+    expect(recordCapabilityTipEventMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts rotation dwell after the first tip becomes visible', async () => {
+    const recordCapabilityTipEventMock = vi.mocked(recordCapabilityTipEvent);
+
+    await render(
+      <CapabilityTipStrip
+        surface="assistant_stream_bubble"
+        contexts={['thinking', 'long_running']}
+        firstDelayMs={6000}
+        rotateMs={30000}
+      />,
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+      await Promise.resolve();
+    });
+    expect(recordCapabilityTipEventMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(24000);
+      await Promise.resolve();
+    });
+
+    expect(recordCapabilityTipEventMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('clicking learn more opens concierge bubble with a draft and does not send', async () => {
+    const parsedInventory = validateCapabilityTipInventory(rawTips);
+    if (!parsedInventory.success) throw new Error('Inventory is invalid');
+    const parsedTips = parsedInventory.tips ?? [];
+    const draftTip = parsedTips.find(
+      (tip) => tip.contexts.includes('thinking') && tip.action?.type === 'open_concierge_draft',
+    );
+    if (!draftTip) throw new Error('Thinking inventory has no concierge draft tip');
+
+    // Leave only a draft action unseen; daily shuffling may otherwise select a surface link.
+    const scope = computeExposureScope('assistant_stream_bubble', undefined, ['thinking']);
+    localStorage.setItem(
+      `cat-cafe:tip-exposure:${scope}`,
+      JSON.stringify({
+        exposed: parsedTips.filter((tip) => tip.id !== draftTip.id).map((tip) => tip.id),
+        firstSeen: {},
+        fingerprint: computeInventoryFingerprint(parsedTips.map((tip) => tip.id)),
+      }),
+    );
+
+    await render(
+      <CapabilityTipStrip
+        surface="assistant_stream_bubble"
+        contexts={['thinking']}
+        firstDelayMs={0}
+        rotateMs={12000}
+      />,
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+    });
+
+    const strip = container.querySelector('[data-testid="capability-tip-strip"]');
+    expect(strip?.getAttribute('data-tip-id')).toBe(draftTip.id);
+
+    const button = container.querySelector('[data-testid="capability-tip-learn-more"]') as HTMLButtonElement | null;
+    expect(button).not.toBeNull();
+    expect(button?.getAttribute('title')).toContain('不会自动发送');
+
+    act(() => {
+      button?.click();
+    });
+
+    const state = useConciergeStore.getState();
+    expect(state.surfaceState).toBe('bubble');
+
+    expect(state.pendingPrompt).toBe(buildConciergeDraftPrompt(draftTip));
+  });
+});

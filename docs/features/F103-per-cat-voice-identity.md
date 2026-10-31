@@ -12,7 +12,7 @@ created: 2026-03-11
 
 ## Why
 
-team experience（2026-03-11）：
+operator experience（2026-03-11）：
 > "现在参加的猫 8 只的话，Ragdoll三只一个声线就有问题了！"
 
 F101 狼人杀需要多猫同时发言（语音模式），当前 TTS 声线是按家族/品种区分的（Ragdoll一个声线、Maine Coon一个声线、Siamese一个声线）。但同家族有多只猫（Ragdoll 3 只：Opus 4.6 / Opus 4.5 / Sonnet），如果都用同一个声线，玩家分不清谁在说话。
@@ -31,13 +31,13 @@ F101 狼人杀需要多猫同时发言（语音模式），当前 TTS 声线是�
 - [x] AC-1: `cat-config.json` 每个 cat entry 有独立的 voice 配置字段
 - [x] AC-2: TTS 合成时按 catId 选择对应声线，同家族不同猫可辨识
 - [x] AC-3: 新增猫时可配置声线参数
-- [x] AC-4: F101 狼人杀语音模式下多猫发言声线可区分（实战验证：F103 thread 中 11 只猫各自用独立声线发语音，team lead确认可区分）
+- [x] AC-4: F101 狼人杀语音模式下多猫发言声线可区分（实战验证：F103 thread 中 11 只猫各自用独立声线发语音，operator确认可区分）
 
 ## Dependencies
 
 - **Related**: F066（Voice Pipeline — 当前 TTS 基础设施）
 - **Related**: F101（Mode v2 狼人杀 — 语音模式需要声线区分）
-- **Config**: `cat-config.json`（猫猫 roster 配置）
+- **Config**: `.cat-cafe/cat-catalog.json`（猫猫 roster 运行时配置）
 
 ## Voice Assignments（全员选角）
 
@@ -54,13 +54,13 @@ F101 狼人杀需要多猫同时发言（语音模式），当前 TTS 声线是�
 | gemini | Siamese | **班尼特** | 原神 | 阳光开心少年 | ✅ 已有 |
 | gemini25 | Siamese 2.5 | **米卡** | 原神 | 乖巧可爱、温和 | ✅ v2 选定 |
 | dare | 狸花猫 | **待选** | — | — | ❓ 下次再说 |
-| antigravity | 孟加拉猫 Gemini | **叽米** | 崩铁 | 热血解说偃偶、精力旺盛 | ✅ v1 选定 |
-| antig-opus | 孟加拉猫 Opus | **鹿野院平藏** | 原神 | 机敏侦探少年 | ✅ v2 选定 |
+| antigravity | Bengal Gemini | **叽米** | 崩铁 | 热血解说偃偶、精力旺盛 | ✅ v1 选定 |
+| antig-opus | Bengal Opus | **鹿野院平藏** | 原神 | 机敏侦探少年 | ✅ v2 选定 |
 | opencode | 金渐层 | **重云** | 原神 | 沉稳靠谱正太、清亮少年音 | ✅ v2 选定 |
 
 ## Architecture: 统一入口
 
-team lead要求："做到跟你们头像一样，入口要统一，不要给我丢的到处都是"
+operator要求："做到跟你们头像一样，入口要统一，不要给我丢的到处都是"
 
 ### 目标（per-catId，跟头像一致）
 ```
@@ -80,8 +80,8 @@ Hub 设置页 → 可视化管理声线配置（未来）
 
 | # | 决策 | 理由 |
 |---|------|------|
-| KD-1 | 配置入口统一到 `cat-config.json` per-variant `voiceConfig` | team lead要求跟头像一样统一入口 |
+| KD-1 | 配置入口统一到 `cat-config.json` per-variant `voiceConfig` | operator要求跟头像一样统一入口 |
 | KD-2 | 参考音频源扩展到原神 + 崩铁 | sonnet 用帕姆（崩铁） |
 | KD-3 | `cat-voices.ts` hardcoded 降级为 fallback | 保持向后兼容 |
-| KD-4 | antigravity 从彦卿→嘉明→叽米 | 彦卿 CV 偏少女音，Qwen3 clone 出来全是女声；嘉明 clone 也偏女声且带广东腔；叽米（崩铁远程偃偶）clone 效果好 + 辨识度极高 + 喜剧效果拉满，team lead亲选 |
-| KD-5 | 全员声线选定只能选正太 | team lead铁令："一群可爱猫猫出来一个大叔！笑死我了 只能选正太！" |
+| KD-4 | antigravity 从彦卿→嘉明→叽米 | 彦卿 CV 偏少女音，Qwen3 clone 出来全是女声；嘉明 clone 也偏女声且带广东腔；叽米（崩铁远程偃偶）clone 效果好 + 辨识度极高 + 喜剧效果拉满，operator亲选 |
+| KD-5 | 全员声线选定只能选正太 | operator铁令："一群可爱猫猫出来一个大叔！笑死我了 只能选正太！" |

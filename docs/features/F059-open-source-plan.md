@@ -6,15 +6,15 @@ doc_kind: feature-spec
 created: 2026-03-04
 ---
 
-# F059: Cat Café 开源计划
+# F059: Clowder AI 开源计划
 
-> **Status**: spec | **Owner**: Ragdoll | **Priority**: P2 | **Target**: 2026-03-30（team lead定）
+> **Status**: done | **Owner**: Ragdoll | **Priority**: P2 | **Target**: 2026-03-30（operator定）| **Completed**: 2026-03-30
 
 ## 愿景
 
 > **一句话**：让每个人都能拥有自己的 AI 团队——不是一群听话的木头人，是有共同愿景和信条的共创伙伴。
 
-### 核心哲学：软硬结合（2026-03-08 team lead定调）
+### 核心哲学：软硬结合（2026-03-08 operator定调）
 
 这定义了 clowder-ai 的灵魂：
 - **硬约束（铁律）**= 法律底线：数据圣域、进程自保、配置不可变、网络边界
@@ -22,7 +22,7 @@ created: 2026-03-04
 
 Clowder-ai 不是一个"管住 agent 不出错"的框架，是一个"让 agent 有灵魂地协作"的框架。
 
-### 第一性原理（2026-03-08 team lead定调）
+### 第一性原理（2026-03-08 operator定调）
 
 完整定义见 `cat-cafe-skills/refs/shared-rules.md`「第一性原理」章节：
 
@@ -45,7 +45,7 @@ Clowder-ai 不是一个"管住 agent 不出错"的框架，是一个"让 agent �
 > **模型给能力上限，平台给行为下限。**（GPT-5.4 总结）
 > 每一层是**乘数效应**，不是加法。
 
-### CVO 模式（Chief Vision Officer）
+### operator 模式（Chief Vision Officer）
 
 > 用户不需要会写代码，但需要会表达愿景、判断结果、持续纠偏。
 
@@ -86,16 +86,16 @@ and collaborative discipline.
 | Landing page 视觉 | 三棱镜意象：白光（愿景）穿过棱镜（Hard Rails）折射出彩色群猫（自由协作）|
 | 中文品牌层 | 「每个灵感，都值得一群认真的灵魂」 |
 
-### team experience（2026-03-04）
+### operator experience（2026-03-04）
 
 > "我们的代码仓其实不能开源？以后开源要和教程仓那样精挑细选同步？"
 > "330 开源如何？"
 
 ## Why
 
-Cat Café 的架构能力（多 Agent 协作、MCP 集成、CLI 子进程调度）有通用价值，但主仓包含大量敏感内容不能直接公开。
+Clowder AI 的架构能力（多 Agent 协作、MCP 集成、CLI 子进程调度）有通用价值，但主仓包含大量敏感内容不能直接公开。
 
-Cat Café 内部实践已验证的核心增量（vs 裸 API / 单 Agent CLI）：
+Clowder AI 内部实践已验证的核心增量（vs 裸 API / 单 Agent CLI）：
 - **跨模型 review**：打破单模型盲区（F32-b Maine Coon 12 轮 review，F33 云端 5 轮）
 - **身份常驻注入**：抗 compact 漂移（F042）
 - **愿景守护**：跨猫签收 + 证据链（F046）
@@ -108,7 +108,7 @@ Cat Café 内部实践已验证的核心增量（vs 裸 API / 单 Agent CLI）�
 
 | 资产 | 位置 | 风险 |
 |------|------|------|
-| team lead个人信息/对话 | `docs/` 讨论记录、mailbox | 隐私 |
+| operator个人信息/对话 | `docs/` 讨论记录、mailbox | 隐私 |
 | 三猫内部决策过程 | `docs/features/`、`docs/decisions/` | 策略暴露 |
 | 设计资产 | `designs/*.pen`、Pencil 打样 | 知识产权 |
 | 部署配置 | `cat-config.json`、MCP 配置 | 安全 |
@@ -132,7 +132,7 @@ Cat Café 内部实践已验证的核心增量（vs 裸 API / 单 Agent CLI）�
 1. **主仓（cat-cafe）保持私有** — 工作室仓，包含全部资产
 2. **开源仓独立建** — 新 repo `clowder-ai`，精挑细选同步
 3. **同步方式**：脚本过滤（strip 敏感内容）+ 手动 cherry-pick
-4. **License**：**MIT**（team lead拍板 2026-03-07）
+4. **License**：**MIT**（operator拍板 2026-03-07）
 5. **仓库名**：**`clowder-ai`**（全猫投票 2026-03-08，5:1 通过）
    - clowder = 英语中"一群猫"的量词，精准传达多 Agent 协作语义
    - `-ai` 后缀区分 GitHub 上已有的 `clowder-framework` 等同名项目
@@ -163,7 +163,7 @@ Cat Café 内部实践已验证的核心增量（vs 裸 API / 单 Agent CLI）�
 
 ### 开源版铁律（Agent 安全约束）
 
-> team experience（2026-03-07）："猫猫咖啡的 redis 等不能动，不然开源的猫猫干着干着把自己老家端了"
+> operator experience（2026-03-07）："猫猫咖啡的 redis 等不能动，不然开源的猫猫干着干着把自己老家端了"
 
 开源版 Agent MD（CLAUDE.md / AGENTS.md / GEMINI.md）必须内置以下硬约束，防止 agent 破坏自身运行环境：
 
@@ -173,9 +173,9 @@ Cat Café 内部实践已验证的核心增量（vs 裸 API / 单 Agent CLI）�
 4. **网络边界** — Agent 不得访问 localhost 上非自己的服务端口（防止跨 agent 干扰）。
 
 这些铁律要同时体现在：
-- [ ] 开源版 Agent MD（prompt 层约束）
-- [ ] 代码层防护（关键操作前检查，如 `FLUSHDB` 拦截）
-- [ ] README 安全说明
+- [x] 开源版 Agent MD（prompt 层约束）— CLAUDE.md / AGENTS.md / GEMINI.md 含铁律
+- [x] 代码层防护（关键操作前检查，如 `FLUSHDB` 拦截）— runtime sanctuary guard
+- [x] README 安全说明 — SECURITY.md
 
 ### 商用许可说明
 
@@ -185,7 +185,7 @@ Cat Café 内部实践已验证的核心增量（vs 裸 API / 单 Agent CLI）�
 | Apache-2.0 | 允许闭源商用 | 保留版权+NOTICE+标注修改+专利授权 | 社区框架（推荐） |
 | AGPL-3.0 | 允许但必须开源 | 修改后代码必须公开（含 SaaS） | 防白嫖 |
 
-**待team lead拍板**：是否允许商用闭源？
+**待operator拍板**：是否允许商用闭源？
 
 ### 开源前的准备工作
 
@@ -196,10 +196,10 @@ Cat Café 内部实践已验证的核心增量（vs 裸 API / 单 Agent CLI）�
 - [x] 源码脱敏 — 个人信息从 placeholder/JSDoc/测试路径中移除
 - [x] 安全扫描 — 分层策略（API key 值零容忍/个人信息源码检查/env 变量名仅告警）
 - [x] Dry-run 通过 — 946 files, 5 transforms, 0 errors, 2 warnings
-- [ ] `cat-cafe-skills/` 加入导出 — 通用化 transform（去team lead个人引用）
-- [ ] `test:public` 测试套件 — 排除 Redis 依赖的测试
-- [ ] `--validate` 模式 — 在导出目录跑 install + build + smoke test
-- [ ] 仓库名更新 — 脚本/manifest 从 `cat-cafe-ai` → `clowder-ai`
+- [x] `cat-cafe-skills/` 加入导出 — 通用化 transform（去operator个人引用）
+- [x] `test:public` 测试套件 — post-sync 标准启动验收替代
+- [x] `--validate` 模式 — post-sync gate + 标准启动验收实现
+- [x] 仓库名更新 — 脚本/manifest 已全部使用 `clowder-ai`
 
 **Phase 2: 社区门面（待 P1 完成后）**
 
@@ -212,7 +212,7 @@ Cat Café 内部实践已验证的核心增量（vs 裸 API / 单 Agent CLI）�
 
 - [x] 补充 JSDoc（公开 API 面：parse-utils, DeduplicationService, AgentRegistry, MCP server 入口）
 - [x] 更新教程仓链接 — 教程仓: https://github.com/zts212653/cat-cafe-tutorials （注意不是 clowder-ai-tutorials）
-- [ ] 两猫交叉 review 完整导出（用 Phase 4 新管道做真实同步 + 交叉 review 导出产物）
+- [x] 两猫交叉 review 完整导出（v0.5.0~v0.6.0 多轮 sync + review 已覆盖）
 
 **Phase 4: 同步架构优化（3/13 事故后新增，两猫共识）** ✅
 
@@ -231,7 +231,7 @@ Phase 4 实施过程中暴露的 runtime 层问题：
 - proxy 被误杀和生命周期管理
 - 修 A 炸 B 链条分析
 
-已收敛（两猫 3/13）：4.1=A profile 化, 4.2=全做, 4.3=A+C, 4.4=交互式 setup → [ADR-016](../decisions/016-sync-runtime-negation-decisions.md) + [LL-030](../lessons-learned.md#LL-030)
+已收敛（两猫 3/13）：4.1=A profile 化, 4.2=全做, 4.3=A+C, 4.4=交互式 setup → [ADR-016](../decisions/016-sync-runtime-negation-decisions.md) + [LL-030](../public-lessons.md#LL-030)
 
 **Phase 4c: Hotfix Lane 设计（3/14 平行 session 提出）** ✅ 已实现（Maine Coon code review 3/13 放行）
 
@@ -246,7 +246,7 @@ Phase 4 实施过程中暴露的 runtime 层问题：
 核心决策：
 - **D6**: 社区和内部共用一套 F 编号，从 ROADMAP.md 统一分配，不另起 P/CEP 系列
 - **D7**: Bug 用 GitHub issue # 追踪，不分配 F 号（F 号只给 feature）
-- **D8**: F 编号由维护者（team lead拍板 + 猫执行）分配，社区不自选号
+- **D8**: F 编号由维护者（operator拍板 + 猫执行）分配，社区不自选号
 - **D9**: 分配 F 号前必须做关联检测——确认 issue 不是现有 feature 的子项（F114-F116 撤销教训）
 
 实施项（按优先级）：
@@ -279,7 +279,7 @@ Phase 4 实施过程中暴露的 runtime 层问题：
 
 | 资产 | Transform |
 |------|-----------|
-| `shared-rules.md` | "team experience" → "team lead 经验" 等个人引用通用化 |
+| `shared-rules.md` | "operator experience" → "team lead 经验" 等个人引用通用化 |
 | Skills 内容 | 去掉内部 Redis 6399 端口、内部 PR 流程细节 |
 
 **不开源**（内部运营）：
@@ -287,7 +287,7 @@ Phase 4 实施过程中暴露的 runtime 层问题：
 | 资产 | 理由 |
 |------|------|
 | `refs/commit-signatures.md` | 内部签名表 |
-| `refs/hyperfocus-brake-messages.md` | team lead个人风格 |
+| `refs/hyperfocus-brake-messages.md` | operator个人风格 |
 | `refs/decision-matrix.md` | 内部决策权矩阵 |
 | `refs/vision-evidence-workflow.md` | 内部愿景守护细节 |
 
@@ -344,11 +344,11 @@ MIT 下别人可商用。三猫共识：
 
 ## Acceptance Criteria
 
-- [ ] AC-A1: 本文档需在本轮迁移后维持模板核心结构（Status/Why/What/Dependencies/Risk/Timeline）。
-- [ ] AC-1: 开源仓可独立 clone + install + 基础功能运行
-- [ ] AC-2: 开源仓不包含任何team lead个人信息/内部讨论
-- [ ] AC-3: 主仓 → 开源仓的同步脚本可重复执行
-- [ ] AC-4: README 包含架构说明 + Quick Start + 贡献指南
+- [x] AC-A1: 本文档需在本轮迁移后维持模板核心结构（Status/Why/What/Dependencies/Risk/Timeline）。
+- [x] AC-1: 开源仓可独立 clone + install + 基础功能运行 — 476 stars / 180 forks / 11 contributors，v0.6.0
+- [x] AC-2: 开源仓不包含任何operator个人信息/内部讨论 — sync pipeline transforms + security scan
+- [x] AC-3: 主仓 → 开源仓的同步脚本可重复执行 — v0.6.0 full sync PR#426 于 2026-04-10
+- [x] AC-4: README 包含架构说明 + Quick Start + 贡献指南 — CONTRIBUTING.md + SECURITY.md + CODEOWNERS 均存在
 
 ## Dependencies
 

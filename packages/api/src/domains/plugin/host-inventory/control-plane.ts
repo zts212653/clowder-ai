@@ -1,0 +1,232 @@
+import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import { isHostReservedDataDirectoryName, requestedDataDirectoryName } from './data-directory-name.js';
+import {
+  type PackageAdmissionContractRuntime,
+  type VerifiedPackageAdmission,
+  verifyPackageAdmission,
+} from './manifest-verifier.js';
+import type { PluginInventoryStore, PluginInventoryTransaction } from './ports.js';
+import { normalizePluginInstanceAfterRestart } from './restart-recovery.js';
+import type {
+  InventoryMutationResult,
+  PackageAdmissionCandidate,
+  PluginInstanceRecord,
+  ReinstallPackageInput,
+  UpgradePackageInput,
+} from './types.js';
+import { PluginInventoryError } from './types.js';
+
+export interface HostInventoryControlPlaneOptions {
+  readonly now?: () => number;
+  readonly createInstanceId?: () => string;
+  readonly contract?: PackageAdmissionContractRuntime;
+}
+
+function assertCurrentInstance(
+  transaction: PluginInventoryTransaction,
+  pluginInstanceId: string,
+): PluginInstanceRecord {
+  const instance = transaction.instances.get(pluginInstanceId);
+  if (!instance) throw new PluginInventoryError('INSTANCE_NOT_FOUND', `unknown plugin instance ${pluginInstanceId}`);
+  const current = transaction.instances.getCurrent(instance.pluginId);
+  if (instance.lifecycleState !== 'installed' || current?.pluginInstanceId !== pluginInstanceId) {
+    throw new PluginInventoryError('STALE_INSTANCE', `plugin instance ${pluginInstanceId} is not current`);
+  }
+  return instance;
+}
+
+function assertLifecycleRevision(instance: PluginInstanceRecord, expectedLifecycleRevision: number): void {
+  if (instance.lifecycleRevision !== expectedLifecycleRevision) {
+    throw new PluginInventoryError(
+      'STALE_LIFECYCLE_REVISION',
+      `expected lifecycle revision ${expectedLifecycleRevision}, current ${instance.lifecycleRevision}`,
+    );
+  }
+}
+
+/**
+ * F202 W2-3 h2: two installed plugins never share one data directory. Every admission (install,
+ * upgrade, reinstall) writes its package through putVerifiedPackage, so the check sits there.
+ */
+function assertDataDirectoryFree(transaction: PluginInventoryTransaction, verified: VerifiedPackageAdmission): void {
+  const name = requestedDataDirectoryName(verified.package.manifest);
+  if (name === undefined) return;
+  if (isHostReservedDataDirectoryName(name)) {
+    throw new PluginInventoryError(
+      'DATA_DIRECTORY_IN_USE',
+      `data directory ${name} is reserved for the Host's own files`,
+    );
+  }
+  for (const instance of transaction.instances.list()) {
+    if (instance.lifecycleState !== 'installed' || instance.pluginId === verified.package.pluginId) continue;
+    const holderPackage = transaction.packages.get(instance.packageDigest);
+    const holder = holderPackage?.manifest ?? holderPackage?.incompatibleManifest;
+    if (holder !== undefined && requestedDataDirectoryName(holder) === name) {
+      throw new PluginInventoryError(
+        'DATA_DIRECTORY_IN_USE',
+        `data directory ${name} is already used by the installed plugin ${instance.pluginId}`,
+      );
+    }
+  }
+}
+
+function putVerifiedPackage(transaction: PluginInventoryTransaction, verified: VerifiedPackageAdmission): void {
+  assertDataDirectoryFree(transaction, verified);
+  const existing = transaction.packages.get(verified.package.packageDigest);
+  if (!existing) {
+    transaction.packages.put(verified.package);
+    return;
+  }
+  if (
+    existing.pluginId !== verified.package.pluginId ||
+    existing.version !== verified.package.version ||
+    !isDeepStrictEqual(existing.manifest, verified.package.manifest) ||
+    !isDeepStrictEqual(existing.signalSchemas, verified.package.signalSchemas)
+  ) {
+    throw new PluginInventoryError(
+      'PACKAGE_DIGEST_MISMATCH',
+      'an immutable digest is already bound to another package',
+    );
+  }
+}
+
+function createInstance(
+  pluginInstanceId: string,
+  pluginId: string,
+  packageDigest: string,
+  now: number,
+): PluginInstanceRecord {
+  return {
+    pluginInstanceId,
+    pluginId,
+    packageDigest,
+    lifecycleState: 'installed',
+    configReadiness: 'incomplete',
+    activationState: 'disabled',
+    runtimeState: 'stopped',
+    lifecycleRevision: 1,
+    installedAt: now,
+    updatedAt: now,
+  };
+}
+
+export class HostInventoryControlPlane {
+  constructor(
+    readonly store: PluginInventoryStore,
+    readonly options: HostInventoryControlPlaneOptions = {},
+  ) {}
+
+  async installPackage(input: PackageAdmissionCandidate): Promise<InventoryMutationResult> {
+    const now = this.now();
+    const verified = verifyPackageAdmission(input, now, this.options.contract);
+    const pluginInstanceId = this.createInstanceId();
+    return this.store.transaction((transaction) => {
+      if (transaction.instances.getCurrent(verified.package.pluginId)) {
+        throw new PluginInventoryError(
+          'PACKAGE_ALREADY_INSTALLED',
+          `${verified.package.pluginId} is already installed`,
+        );
+      }
+      if (transaction.instances.get(pluginInstanceId)) {
+        throw new PluginInventoryError(
+          'INSTANCE_ID_COLLISION',
+          `plugin instance id ${pluginInstanceId} already exists`,
+        );
+      }
+      putVerifiedPackage(transaction, verified);
+      transaction.instances.put(
+        createInstance(pluginInstanceId, verified.package.pluginId, input.computedPackageDigest, now),
+      );
+      return { pluginInstanceId, packageDigest: input.computedPackageDigest };
+    });
+  }
+
+  async upgradePackage(input: UpgradePackageInput): Promise<InventoryMutationResult> {
+    const now = this.now();
+    const verified = verifyPackageAdmission(input, now, this.options.contract);
+    return this.store.transaction((transaction) => {
+      const current = assertCurrentInstance(transaction, input.pluginInstanceId);
+      assertLifecycleRevision(current, input.expectedLifecycleRevision);
+      if (current.pluginId !== verified.package.pluginId) {
+        throw new PluginInventoryError(
+          'PACKAGE_ID_MISMATCH',
+          'upgrade package does not belong to the current instance',
+        );
+      }
+      if (
+        !['stopped', 'crashed'].includes(current.runtimeState) ||
+        current.activationState === 'enabling' ||
+        current.activationState === 'disabling'
+      ) {
+        throw new PluginInventoryError('RUNTIME_NOT_STOPPED', 'package mutation requires a stable stopped runtime');
+      }
+      const incompatible = transaction.packages.get(current.packageDigest)?.manifest === null;
+      putVerifiedPackage(transaction, verified);
+      transaction.instances.put({
+        ...current,
+        packageDigest: input.computedPackageDigest,
+        runtimeState: 'stopped',
+        ...(incompatible ? { activationState: 'disabled' as const } : {}),
+        lifecycleRevision: current.lifecycleRevision + 1,
+        updatedAt: now,
+      });
+      return {
+        pluginInstanceId: current.pluginInstanceId,
+        packageDigest: input.computedPackageDigest,
+      };
+    });
+  }
+
+  async reinstallPackage(input: ReinstallPackageInput): Promise<InventoryMutationResult> {
+    const now = this.now();
+    const verified = verifyPackageAdmission(input, now, this.options.contract);
+    const nextInstanceId = this.createInstanceId();
+    return this.store.transaction((transaction) => {
+      const current = assertCurrentInstance(transaction, input.previousPluginInstanceId);
+      if (current.pluginId !== verified.package.pluginId) {
+        throw new PluginInventoryError(
+          'PACKAGE_ID_MISMATCH',
+          'reinstall package does not belong to the current instance',
+        );
+      }
+      if (transaction.instances.get(nextInstanceId)) {
+        throw new PluginInventoryError('INSTANCE_ID_COLLISION', `plugin instance id ${nextInstanceId} already exists`);
+      }
+      putVerifiedPackage(transaction, verified);
+      transaction.instances.put({
+        ...current,
+        lifecycleState: 'retired',
+        activationState: 'disabled',
+        runtimeState: 'stopped',
+        lifecycleRevision: current.lifecycleRevision + 1,
+        retiredAt: now,
+        updatedAt: now,
+      });
+      transaction.instances.put(createInstance(nextInstanceId, current.pluginId, input.computedPackageDigest, now));
+      return { pluginInstanceId: nextInstanceId, packageDigest: input.computedPackageDigest };
+    });
+  }
+
+  async recoverAfterRestart(): Promise<number> {
+    const now = this.now();
+    return this.store.transaction((transaction) => {
+      let changed = 0;
+      for (const instance of transaction.instances.list()) {
+        const recovered = normalizePluginInstanceAfterRestart(instance, now);
+        if (recovered === undefined) continue;
+        transaction.instances.put(recovered);
+        changed += 1;
+      }
+      return changed;
+    });
+  }
+
+  protected now(): number {
+    return this.options.now?.() ?? Date.now();
+  }
+
+  protected createInstanceId(): string {
+    return this.options.createInstanceId?.() ?? `pi_${randomUUID()}`;
+  }
+}

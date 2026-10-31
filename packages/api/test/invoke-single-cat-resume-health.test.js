@@ -41,7 +41,7 @@ describe('F118 resume health check (AC-C4 + AC-C6)', () => {
           invocationId: `inv-${++counter}`,
           callbackToken: `tok-${counter}`,
         }),
-        verify: () => null,
+        verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
       },
       sessionManager: {
         get: async () => undefined,

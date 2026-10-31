@@ -1,10 +1,11 @@
 ---
 feature_ids: [F043]
-related_features: [F041, F052]
+related_features: [F041, F052, F193, F286]
 debt_ids: []
 topics: [mcp, architecture, agent-collaboration]
 doc_kind: feature-spec
 created: 2026-02-27
+tips_exempt: "F286 removes two obsolete MCP tools from this completed architecture; it introduces no new user-invokable capability or workflow."
 ---
 
 # F043: MCP 归一化 — Server 拆分 + 协作工具补全
@@ -17,7 +18,7 @@ created: 2026-02-27
 
 ## 与 F041 的关系
 
-- **F041**：team lead视角 — 能力看板 UI + 配置编排器 + 全局/每猫开关
+- **F041**：operator视角 — 能力看板 UI + 配置编排器 + 全局/每猫开关
 - **F043**：猫的视角 — MCP server 本身怎么拆分、新增哪些协作工具
 - F041 提供配置编排基础设施，F043 在此基础上重组 MCP server 架构
 
@@ -52,7 +53,7 @@ created: 2026-02-27
 
 #### ① cat-cafe-collab（协作核心）
 
-现有：post_message, get_thread_context, get_pending_mentions, ack_mentions, update_task, create_rich_block, get_rich_block_rules, request_permission, check_permission
+立项时现有：post_message, get_thread_context, get_pending_mentions, ack_mentions, update_task, create_rich_block, get_rich_block_rules, request_permission, check_permission（末两项已于 2026-08-24 由 F286 落日；此处保留历史 census）
 
 新增：
 - `search_messages` — catId/keyword 过滤 **[P0]**
@@ -85,14 +86,14 @@ created: 2026-02-27
 
 ```typescript
 // 新增参数
-catId?: CatId | 'user'   // 按猫过滤（'user' = team lead消息）
+catId?: CatId | 'user'   // 按猫过滤（'user' = operator消息）
 keyword?: string          // 内容包含关键词
 ```
 
 **场景**：
 - "看 Sonnet 在这个 thread 说了什么" → `catId=sonnet`
 - "搜之前关于 Redis 的讨论" → `keyword=Redis`
-- "看team lead的原始需求" → `catId=user`
+- "看operator的原始需求" → `catId=user`
 
 **实现**：在现有分页循环里加 `canViewMessage` 之后的额外过滤条件。
 
@@ -137,11 +138,15 @@ interface FeatEntry {
 
 #### P2: cross_post_message
 
-`post_message` 新增可选 `threadId` 参数：
+独立的 `cat_cafe_cross_post_message` 工具，必须指定目标 `threadId`：
 
 ```typescript
-threadId?: string  // 向指定 thread 发消息，省略 = 当前 thread
+threadId: string   // 必填，目标 thread ID
+content: string    // 消息内容
 ```
+
+> **#316 变更**：`post_message` 不再接受 `threadId` 参数（防止 session 上下文泄漏导致跨 thread 误投）。
+> 跨 thread 投递必须使用 `cross_post_message`。
 
 #### P2: list_tasks
 
@@ -227,9 +232,9 @@ Layer 0: Knowledge Engineering Research (Done)
 
 ## 讨论来源
 
-2026-02-27 team lead + Ragdoll (Opus 4.6) + Ragdoll (Opus 4.5)，F037 Agent Swarm 后续讨论。
+2026-02-27 operator + Ragdoll (Opus 4.6) + Ragdoll (Opus 4.5)，F037 Agent Swarm 后续讨论。
 
-核心问题由team lead提出："agent 之间的协作，在 thread 之内和跨 thread 会用到什么功能？现在的搜 codebase 够吗？猫猫咖啡如何进化给你们更多可能性？"
+核心问题由operator提出："agent 之间的协作，在 thread 之内和跨 thread 会用到什么功能？现在的搜 codebase 够吗？猫猫咖啡如何进化给你们更多可能性？"
 
 ## Risk
 | 风险 | 缓解 |
@@ -239,8 +244,8 @@ Layer 0: Knowledge Engineering Research (Done)
 
 | 猫猫 | 读了哪些文档 | 三问结论 | 签收 |
 |------|-------------|---------|------|
-| Ragdoll (Opus 4.6) | F043 spec, VISION.md, tool-registration.test.js, callback-tools.test.js | ① team lead不想当人肉路由器 ② 7/7 AC 通过，愿景对齐 4/5 ③ 猫能自主搜消息/发现 thread/跨 thread 通知/查 feat 映射 | ✅ |
-| Maine Coon (GPT-5.2) | F043 spec, VISION.md, tool-registration.test.js (50/50), capability-orchestrator.test.js (51/51) | ① team lead不想当路由器+猫要自主找上下文 ② 交付物直接贡献愿景 #1/#2/#3/#5 ③ 查证据/找入口/发接力棒/管任务四条链路可用 | ✅ |
+| Ragdoll (Opus 4.6) | F043 spec, VISION.md, tool-registration.test.js, callback-tools.test.js | ① operator不想当人肉路由器 ② 7/7 AC 通过，愿景对齐 4/5 ③ 猫能自主搜消息/发现 thread/跨 thread 通知/查 feat 映射 | ✅ |
+| Maine Coon (GPT-5.2) | F043 spec, VISION.md, tool-registration.test.js (50/50), capability-orchestrator.test.js (51/51) | ① operator不想当路由器+猫要自主找上下文 ② 交付物直接贡献愿景 #1/#2/#3/#5 ③ 查证据/找入口/发接力棒/管任务四条链路可用 | ✅ |
 
 ### GPT-5.2 Open Questions 立场（记录）
 

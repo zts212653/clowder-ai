@@ -13,14 +13,8 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
 // Shared registry + helpers
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
-
-// Populate built-in cats first
-for (const [id, config] of Object.entries(CAT_CONFIGS)) {
-  if (!catRegistry.has(id)) {
-    catRegistry.register(id, config);
-  }
-}
+import { catRegistry } from '@cat-cafe/shared';
+import './helpers/setup-cat-registry.js';
 
 /** Mock cat config (similar structure to built-in cats) */
 const MOCK_CAT_CONFIG = {
@@ -29,7 +23,7 @@ const MOCK_CAT_CONFIG = {
   displayName: '模拟猫',
   nickname: null,
   color: '#888888',
-  provider: 'mock',
+  clientId: 'mock',
   defaultModel: 'mock-v1',
   mentionPatterns: ['@mock-cat', '@模拟猫'],
   mcpSupport: false,
@@ -56,7 +50,7 @@ describe('F32-a Mock Agent Integration', () => {
       assert.ok(catRegistry.has('mock-cat'));
       const entry = catRegistry.getOrThrow('mock-cat');
       assert.equal(entry.config.displayName, '模拟猫');
-      assert.equal(entry.config.provider, 'mock');
+      assert.equal(entry.config.clientId, 'mock');
     });
 
     test('getAllIds includes mock-cat alongside built-in cats', () => {
@@ -145,11 +139,13 @@ describe('F32-a Mock Agent Integration', () => {
   // ── Config lookups ────────────────────────────────────────
 
   describe('Config lookups for mock-cat', () => {
-    test('getCatContextBudget returns fallback for mock-cat', async () => {
-      const { getCatContextBudget } = await import('../dist/config/cat-budgets.js');
-      const budget = getCatContextBudget('mock-cat');
-      assert.ok(budget.maxPromptTokens > 0, 'should have positive maxPromptTokens');
-      assert.ok(budget.maxMessages > 0, 'should have positive maxMessages');
+    test('getCatCapacity leaves an undiscoverable mock carrier unresolved', async () => {
+      const { getCatCapacity } = await import('../dist/config/cat-budgets.js');
+      const capacity = getCatCapacity('mock-cat');
+      assert.equal(capacity.windowTokens, 0);
+      assert.equal(capacity.inputCeilingTokens, 0);
+      assert.equal(capacity.actionable, false);
+      assert.equal(capacity.source, 'unresolved');
     });
 
     test('getSealConfig returns global fallback for mock-cat (unknown provider)', async () => {

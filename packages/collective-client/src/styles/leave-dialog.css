@@ -1,0 +1,204 @@
+.leave-dialog-layer {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.leave-dialog-backdrop {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: var(--console-overlay-backdrop);
+}
+
+.leave-dialog {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: min(480px, 100%);
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--console-border-strong);
+  border-radius: 12px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text);
+  box-shadow: var(--shadow-elevation-3);
+}
+
+.leave-dialog-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 16px 24px;
+  border-bottom: 1px solid var(--console-border-soft);
+}
+
+.leave-dialog-header h2 {
+  margin: 0;
+  color: var(--cafe-text);
+  font-family: "Source Serif 4", "Songti SC", "Noto Serif CJK SC", Georgia, serif;
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.25;
+  letter-spacing: -0.2px;
+}
+
+.leave-dialog-header button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cafe-text-muted);
+  font-size: 22px;
+}
+
+.leave-dialog-header button:hover:not(:disabled) {
+  background: var(--console-hover-bg);
+}
+
+.leave-dialog-body {
+  min-height: 0;
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+
+.leave-dialog-body > p {
+  margin: 0;
+  color: var(--cafe-text);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.leave-dialog-state {
+  min-height: 88px;
+  margin: 0;
+  align-content: center;
+  color: var(--cafe-text-muted);
+  font-size: 14px;
+  line-height: 1.65;
+  text-align: center;
+}
+
+.leave-dialog-state strong,
+.leave-dialog-error strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--cafe-text);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.leave-dialog-state p {
+  margin: 0;
+}
+
+.leave-dialog-unknown,
+.leave-dialog-error {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-panel-bg);
+  color: var(--cafe-text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.leave-dialog-error {
+  margin-top: 16px;
+  border-color: color-mix(in srgb, var(--semantic-critical) 35%, var(--console-border-soft));
+  background: var(--semantic-critical-surface);
+}
+
+.leave-dialog-footer {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 24px 16px;
+  border-top: 1px solid var(--console-border-soft);
+  background: var(--console-card-bg);
+}
+
+.leave-dialog-footer button {
+  min-width: 72px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--console-border-strong);
+  border-radius: 8px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.leave-dialog-footer button:hover:not(:disabled) {
+  background: var(--console-hover-bg);
+}
+
+.leave-dialog-footer .leave-dialog-danger {
+  min-width: 96px;
+  border-color: var(--semantic-critical);
+  background: var(--semantic-critical);
+  color: var(--cafe-accent-foreground);
+}
+
+.leave-dialog-footer-split {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.leave-dialog-footer-split > small {
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+}
+
+.leave-dialog-footer-split > span {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 520px) {
+  .leave-dialog-layer {
+    padding: 8px;
+  }
+
+  .leave-dialog {
+    width: 100%;
+    max-height: calc(100dvh - 16px);
+  }
+
+  .leave-dialog-header,
+  .leave-dialog-body,
+  .leave-dialog-footer {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .leave-dialog-footer-split {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .leave-dialog-footer-split > span {
+    justify-content: flex-end;
+  }
+}

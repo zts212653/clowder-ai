@@ -90,3 +90,40 @@ describe('AgentPaneRegistry', () => {
     assert.equal(list.length, 0, 'task finished >1h ago should be filtered');
   });
 });
+
+describe('AgentPaneRegistry catId (F322 pane identity)', () => {
+  let registry;
+
+  beforeEach(() => {
+    registry = new AgentPaneRegistry();
+  });
+
+  it('register carries catId and listByWorktreeAndUser returns it', () => {
+    registry.register('inv-1', 'wt-a', '%0', 'user-1', 'kimi');
+    const list = registry.listByWorktreeAndUser('wt-a', 'user-1');
+    assert.equal(list.length, 1);
+    assert.equal(list[0].catId, 'kimi');
+  });
+
+  it('catId survives transition to done/crashed', () => {
+    registry.register('inv-1', 'wt-a', '%0', 'user-1', 'kimi');
+    registry.markDone('inv-1', 0);
+    const list = registry.listByWorktreeAndUser('wt-a', 'user-1');
+    assert.equal(list[0].status, 'done');
+    assert.equal(list[0].catId, 'kimi');
+  });
+
+  it('catId survives a real crashed transition', () => {
+    registry.register('inv-2', 'wt-a', '%1', 'user-1', 'kimi');
+    registry.markCrashed('inv-2', 'SIGTERM');
+    const list = registry.listByWorktreeAndUser('wt-a', 'user-1');
+    assert.equal(list[0].status, 'crashed');
+    assert.equal(list[0].catId, 'kimi');
+  });
+
+  it('omitting catId keeps the field absent (legacy spawn path)', () => {
+    registry.register('inv-1', 'wt-a', '%0', 'user-1');
+    const list = registry.listByWorktreeAndUser('wt-a', 'user-1');
+    assert.equal(list[0].catId, undefined);
+  });
+});

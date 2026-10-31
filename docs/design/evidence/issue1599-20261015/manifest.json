@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-15",
+  "subject": "zts212653/clowder-ai#1599",
+  "issueAssociation": "Refs #1598",
+  "productionCodeHead": "4a4f69ff8c1ee8ec1f5617d0143033b788932a63",
+  "base": "7b61230779ba4744cd8c74c61977b3bdfe835c5a",
+  "scope": "Actual product UI/HTTP/Redis/factory/service/STDIO; fixed Claude bridge/model for successful image and cancellation; synthetic agents for injected errors",
+  "sourceHashes": {
+    "AcpAgentService.ts": "e929ded979882239ab93038fbe225c1954b946649612e3d091a35afa4b2e7e99",
+    "acp-image-input.ts": "2220daf25fb1f4ca2dee2c35f58f97f3bebc028dd7dc45c48a43a21f352a1660",
+    "AcpClient.ts": "a679421a92cba413b8bbc63ef73cf82461f5162c77940256e734c6343cea9451"
+  },
+  "binding": {
+    "bridge": "claude-agent-acp",
+    "bridgeVersion": "0.70.0",
+    "bridgeSourcePin": "d0aafb1ca26427285ffaeac8d8a4452fff28e9c3",
+    "sdk": "0.3.285",
+    "requestedModel": "claude-opus-5-5",
+    "observedNativeModel": "claude-opus-5-5[1M]",
+    "nativeVersion": "2.1.299",
+    "tools": [],
+    "hooksDisabled": true,
+    "budgetUsdPerQuery": 1,
+    "sessionOptionsRestrictedByTestRelay": true,
+    "outboundTextReplacedWithFixedSyntheticPrompt": true,
+    "factoryPolicyAcceptanceClaimed": false,
+    "bridgeCopyKind": "isolated prototype copy based on source pin; not claimed pristine upstream distribution",
+    "executedFileHashes": {
+      "index.js": "9d73d1f0f121fb96cc8badb28c22d5bff02d8582eb2e40360a81c189e1b9422a",
+      "acp-agent.js": "ce7e4db6de998053497426a658106d9fd14487fe5b83dd63eb8c7b6b9eaf80bf",
+      "claude.exe": "295b49ec092f31a7de9c6ff286d9d8f120a4f029b9ad9a5ac0b12c35cbf4df2b"
+    }
+  },
+  "image": {
+    "code": "IMG-AB63E6",
+    "shapes": ["green circle", "purple square"],
+    "sha256": "8b92ab641dc35ed6c809a58ddb2a9df57203302bc44575108abd1f4ab5639cbf",
+    "wireSha256": "8b92ab641dc35ed6c809a58ddb2a9df57203302bc44575108abd1f4ab5639cbf",
+    "promptCount": 1,
+    "codeInPrompt": false,
+    "nativeTerminal": ["end_turn"],
+    "sdkReportedCostUsd": 0.005463
+  },
+  "recovery": {
+    "sameIds": true,
+    "imageRetained": true,
+    "answerRetained": true,
+    "historyCount": 2,
+    "http": 200
+  },
+  "unsupported": {
+    "backend": "synthetic image=false initialize",
+    "sessionCount": 0,
+    "promptCount": 0,
+    "uiError": "image_input_unsupported"
+  },
+  "unavailable": {
+    "backend": "synthetic image=true initialize; newly uploaded file temporarily moved before response; original file restored",
+    "sessionCount": 0,
+    "promptCount": 0,
+    "uiError": "image_input_unavailable"
+  },
+  "cancellation": {
+    "liveUiCancelled": true,
+    "promptCount": 1,
+    "cancelRpcCount": 1,
+    "nativeChunksBeforeRetirement": 26,
+    "nativeTerminalStopReasons": [],
+    "unsafeProcessRetired": true,
+    "activeExecutionsAfterCancel": 0,
+    "chatCancelMarkerSurvivedReload": false,
+    "trajectoryAfterReload": "running",
+    "fullDurableTerminalAcceptance": false
+  },
+  "denominators": {
+    "realNativeAcpPrompts": 3,
+    "successfulImageSamples": 1,
+    "cancellationAttempts": 2,
+    "acceptedLiveUiCancellationSamples": 1,
+    "rejectedAutomationAttempts": 1,
+    "note": "First cancellation attempt matched two buttons and sent no cancel; native completed normally. Preserved and excluded from cancellation pass."
+  },
+  "tests": {
+    "red": {
+      "pass": 2,
+      "fail": 10
+    },
+    "regression": {
+      "pass": 285,
+      "fail": 0
+    },
+    "finalValidPngFixtures": {
+      "pass": 39,
+      "fail": 0
+    },
+    "independentNarrowReview": {
+      "target": "4a4f69ff8c1ee8ec1f5617d0143033b788932a63",
+      "pass": 39,
+      "fail": 0,
+      "newP1P2": 0,
+      "source": "non-author same-family local peer; not maintainer approval",
+      "finalValidPngFixturesAlsoReviewed": true
+    },
+    "excludedWindowsFiles": ["acp-bootstrap-cwd.test.js", "acp-mcp-resolver.test.js", "image-upload.test.js"]
+  },
+  "deliberatelyUnverified": [
+    "CodeAgentCLI/MiniMax binding/version/account/model",
+    "native terminal acknowledgement after user cancellation",
+    "durable cancellation projection",
+    "full ACP migration and permission policy acceptance"
+  ],
+  "artifacts": {
+    "cold-online-expanded.png": "fcd41320a35db99515f93bb6cc3e087dbeb5354a3446cb03f00d1dd77fbaa947",
+    "unsupported.png": "305533a2fc7e601905e89471d133f32656200b2bc5637ba0ce06a14b622fb982",
+    "unavailable.png": "27c8662ad46af621f767dc27beafa994088b92676f54f96303e020e83ffd2c93",
+    "cancel.png": "e87ea00926f1a834830c5fb99c0899f9007e4d81191d867a1e974a9edc3b61a9",
+    "cancel-trajectory.png": "942437e3ae837fbe35eae95f118a722fee69d27e1637198c03f65a6165580a02"
+  },
+  "privateHashes": {
+    "native-in.jsonl": "aae28badca22a251f7d4fd72cf75bec920bdc614119ff3ce7d393ac8813eb8e3",
+    "native-out.jsonl": "51ea165f730c016cadee64d8aba0569f7a08a2bd8181329803c37471d7e08819",
+    "native-native-forwarded.jsonl": "227225139760383525b80a24f61ca1641ff7bb214a22bb67cba62c32edb4bb1e",
+    "unsupported-in.jsonl": "fbb2ab148b6792a66f38480e51bc3821a73a808cdbc485170d8c3f88bee40360",
+    "unsupported-out.jsonl": "6e75ce5e6304164fa975f34070a39fce07abd0274dad92ccbe84f96a94bea5f9",
+    "unavailable-in.jsonl": "76cf0fd13b3f2d14f03527917566a858b38d71ae2e6bf1eda738bf68aff43416",
+    "unavailable-out.jsonl": "7e85a5428a1c2adf5dbbbbcbe288161eab454286898ad6680319c4b5d04cfe66",
+    "cancel-in.jsonl": "82bf237b74dfb5e82b17cd089f6cd2e0700566657576c602c727108ffac6fa3c",
+    "cancel-out.jsonl": "3be49e507eeb6c5d77087ef1f82c803f6dfb5e1680774e69f34326fa3abf75d3",
+    "cancel-attempt1-in.jsonl": "bc35ff60fd50b87faf3f7fbb535cd6b9357c82b68061056e8f0a23e04441724d",
+    "cancel-attempt1-out.jsonl": "6f08e3660f420ecf2c4bfbb781c10ac65b46e4f98d46b1dfc6df77b191bee912",
+    "cancel-attempt1-status.json": "e93611d5fe3de1eb5fd4c3c7e48b0e530c5c1a876f0636ffcf0142707daf07e2",
+    "cold-result.json": "ed5edcab27c3a8db8ceddff3aea08e4e0e172221c11109d430dade92fe64a8e8",
+    "history-before-cold.json": "38d8906e875d6a3ac6f39b1f9735150217a3174425fbbc12d6ed3bcefbf8383e",
+    "history-after-cold.json": "38d8906e875d6a3ac6f39b1f9735150217a3174425fbbc12d6ed3bcefbf8383e",
+    "cancel-history.json": "5e93fddcbdf7dc5780e2826f2653a75b40dfa544e0e376123c964c8df3b5e953",
+    "active-after-cancel-canonical-path.json": "99b474346d700dcc61e724cb9e64a0b0808f182a9876fc04800fac13c4980a6e",
+    "cold-online-expanded-dom.txt": "1d812b7b9e2aab9c115c83d5b83335b137020e04bb53e79f77847f4facf3c1c8",
+    "unsupported-dom.txt": "a9e44b72b83e27f29f5911bed92cff6877804f5e5cd08558b1f6fa0bb12207ed",
+    "unavailable-dom.txt": "a77321fb860b370d26fe610ab0b67e0373bb02be290d8f7870b87f4592280216",
+    "cancel-dom.txt": "bbbecc36deccca16493855f21eb8cf7cba766d14288b9fe232c465b4b93ad11d",
+    "cancel-refresh-dom.txt": "0221f13128cf4bb4005d8d195b1e7412a636223effaabed9c8d850cf3eb74e15",
+    "cancel-trajectory-dom.txt": "115547eac709e915db269ae57f4e96980da440efbdbac99036591b1074bd4727",
+    "api-cold-frozen.out.log": "ba045165acd7df9ab73e9780f178e4b6bb759c8bbcaaba99cebc55369ce6598c"
+  },
+  "testHashes": {
+    "image-upload-dir-red.log": "4b12c4ff07c1a68207fb9d4ddd1c09dd7721881be9afa2dc19a6abb3176bfe0b",
+    "image-upload-dir-green-build.log": "5a5d451fdb88500f55ff8165c5822c786b98f274aeb764dc6dd15b061c79709c",
+    "image-upload-dir-green.log": "da16111510785171dd9b81f3858b1fa2839f6401297a8e6fcf111f0093b88f99",
+    "image-upload-dir-final-fixtures.log": "3f0a40eddc0e768a1aa200a123e2c15966b76bd085a2a43a3806d15c60715794",
+    "image-upload-dir-independent-review.log": "56b7bf8aedfeee72fc121ddaa421696c05b085650ed5746e62bcfe41d46f7acf",
+    "image-upload-dir-biome.log": "0c6636e1c20a56d7ead1ef399f14e20a45cabf825e0c2e83cd0d1896e8b9ce12",
+    "image-upload-dir-independent-final-fixtures.log": "40bfdb16dd96bdcf8c87a57bdee7a0e05ddcfad67757508d3bcf7a8e34918840"
+  },
+  "privateCapturePolicy": "Only hashes published; credentials, user settings, profiles and raw logs remain ignored. Runtime test relay hashes below were captured after tests, not claimed as pre-run attestations.",
+  "runnerHashesAfterTests": {
+    "guard": "2da1d3abcf1691b729d005186b85bdd60f2986863623d382dbcff126caae8b7f",
+    "ui": "a68a8284d5607f497c64de5e3777566bc31d0152997c14d933f07279a640e9b6"
+  }
+}

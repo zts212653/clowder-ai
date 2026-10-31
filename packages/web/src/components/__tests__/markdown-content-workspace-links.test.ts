@@ -9,7 +9,7 @@ Object.assign(globalThis as Record<string, unknown>, { React });
 describe('isRelativeMdLink', () => {
   it('returns true for relative .md links', () => {
     expect(isRelativeMdLink('features/F046.md')).toBe(true);
-    expect(isRelativeMdLink('../BACKLOG.md')).toBe(true);
+    expect(isRelativeMdLink('../ROADMAP.md')).toBe(true);
     expect(isRelativeMdLink('./notes.mdx')).toBe(true);
   });
 
@@ -45,7 +45,7 @@ describe('resolveRelativePath', () => {
   });
 
   it('resolves parent traversal (..)', () => {
-    expect(resolveRelativePath('docs/features', '../BACKLOG.md')).toBe('docs/ROADMAP.md');
+    expect(resolveRelativePath('docs/features', '../ROADMAP.md')).toBe('docs/ROADMAP.md');
   });
 
   it('resolves multiple parent traversals', () => {
@@ -91,9 +91,9 @@ describe('MarkdownContent workspace link rendering', () => {
     expect(html).toContain('https://github.com');
   });
 
-  it('renders relative md link as external when no basePath', () => {
+  it('keeps a relative md link inside Workspace when no basePath is available', () => {
     const html = render('[Feature spec](features/F046.md)');
-    expect(html).toContain('target="_blank"');
-    expect(html).not.toContain('在工作区中打开');
+    expect(html).toContain('在工作区中打开');
+    expect(html).not.toContain('target="_blank"');
   });
 });

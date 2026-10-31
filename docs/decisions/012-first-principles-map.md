@@ -1,7 +1,7 @@
 ---
 doc_kind: decision
 decision_id: 012
-title: Cat Café 第一性原理总表
+title: Clowder AI 第一性原理总表
 status: accepted
 created: 2026-03-09
 topics: [first-principles, governance, knowledge-engineering]
@@ -9,7 +9,7 @@ related_features: [F059, F086, F046, F043]
 related_decisions: [005]
 ---
 
-# ADR-012: Cat Café 第一性原理总表
+# ADR-012: Clowder AI 第一性原理总表
 
 ## Context
 
@@ -18,7 +18,7 @@ related_decisions: [005]
 - `cat-cafe-skills/refs/shared-rules.md`
 - `docs/features/F059-open-source-plan.md`
 - `docs/features/F086-cat-orchestration-multi-mention.md`
-- `docs/lessons-learned.md`
+- `docs/public-lessons.md`
 - `docs/decisions/005-hindsight-integration-decisions.md`
 - `cat-cafe-tutorials/docs/lessons/`
 
@@ -32,7 +32,7 @@ related_decisions: [005]
 
 ## Decision
 
-Cat Café 的治理结构分为三层：
+Clowder AI 的治理结构分为三层：
 
 1. **公理层（Axioms）**  
    不可从其他规则推导的底层真理。定义唯一存放在 `shared-rules.md`。
@@ -71,9 +71,9 @@ Cat Café 的治理结构分为三层：
 
 协作的本质不是“互相看消息”，而是共享感知、共享状态、共享上下文。
 
-### W3. 用户是 CVO，不是甲方路由器
+### W3. 用户是 operator，不是甲方路由器
 
-用户负责表达愿景、判断结果、持续纠偏，而不是充当人肉中转站。CVO 授权猫猫自主行动，只在关键决策点介入——猫猫的职责是让 CVO 能"放心不看"，而不是"随时要看"。
+用户负责表达愿景、判断结果、持续纠偏，而不是充当人肉中转站。operator 授权猫猫自主行动，只在关键决策点介入——猫猫的职责是让 operator 能"放心不看"，而不是"随时要看"。
 
 ### W4. 知识必须分层治理，不能随地大小拉 markdown
 
@@ -129,7 +129,7 @@ Cat Café 的治理结构分为三层：
 
 ### D. 教训与反思层
 
-- `docs/lessons-learned.md`
+- `docs/public-lessons.md`
 - *(internal reference removed)*
 
 关键映射：
@@ -154,7 +154,7 @@ Cat Café 的治理结构分为三层：
 2. **tutorial 不是规则层**  
    tutorial 用于解释、教学、外显，不负责定义新规则。
 3. **只有完成蒸馏的内容才进入真相源**  
-   新规则进入 `shared-rules.md`，新教训进入 `lessons-learned.md`，新决策进入 ADR。
+   新规则进入 `shared-rules.md`，新教训进入 `public-lessons.md`，新决策进入 ADR。
 
 ## Consequences
 
@@ -176,4 +176,4 @@ Cat Café 的治理结构分为三层：
 
 ## Decision Status
 
-Draft → Accepted。由Maine Coon(GPT-5.4)起草，Ragdoll(Opus 4.6) review 两轮，Ragdoll(Opus 4.5) 独立思考补充 W3，铲屎官定稿。
+Draft → Accepted。由Maine Coon(GPT-5.4)起草，Ragdoll(Opus 4.6) review 两轮，Ragdoll(Opus 4.5) 独立思考补充 W3，operator定稿。

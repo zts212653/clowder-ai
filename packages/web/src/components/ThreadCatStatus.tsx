@@ -1,58 +1,53 @@
 'use client';
 
-import type { CatStatusType, ThreadState } from '@/stores/chat-types';
+import type { CatStatusType } from '@/stores/chat-types';
+import type { SidebarPresence } from '@/stores/sidebarProjectionStore';
+import { PawIcon } from './icons/PawIcon';
 
 /**
  * ASCII cat status indicator for thread sidebar.
  * Shows ᓚᘏᗢ with CSS animation + color based on aggregate thread state.
  */
 
-function aggregateStatus(ts: ThreadState): 'idle' | 'working' | 'done' | 'error' {
-  const statuses = Object.values(ts.catStatuses);
-  if (statuses.length === 0) return 'idle';
-  if (statuses.some((s) => s === 'error')) return 'error';
-  if (statuses.some((s) => s === 'streaming' || s === 'pending')) return 'working';
-  if (statuses.some((s) => s === 'done')) return 'done';
-  return 'idle';
-}
-
 export function ThreadCatStatus({
-  threadState,
+  presence,
   unreadCount,
   hasUserMention,
 }: {
-  threadState: ThreadState;
+  presence: SidebarPresence;
   unreadCount: number;
   hasUserMention?: boolean;
 }) {
-  const status = aggregateStatus(threadState);
+  const status = presence.status;
 
   if (status === 'idle' && unreadCount === 0 && !hasUserMention) return null;
 
   const statusClasses: Record<string, string> = {
-    idle: 'text-gray-400',
-    working: 'text-amber-500 animate-cat-bounce',
-    done: 'text-green-500',
-    error: 'text-red-500 animate-cat-shake',
+    idle: 'text-cafe-muted',
+    working: 'text-conn-amber-text animate-cat-bounce',
+    done: 'text-conn-emerald-text',
+    error: 'text-conn-red-text animate-cat-shake',
   };
+
+  const tooltip = presence.cats?.length ? `${status}: ${presence.cats.join(', ')}` : status;
 
   return (
     <span className="inline-flex items-center gap-0.5 flex-shrink-0">
       {status !== 'idle' && (
-        <span className={`text-xs ${statusClasses[status]}`} title={status}>
+        <span className={`text-xs ${statusClasses[status]}`} title={tooltip}>
           ᓚᘏᗢ
         </span>
       )}
-      {status === 'done' && <span className="text-green-500 text-[10px]">&#10003;</span>}
+      {status === 'done' && <span className="text-conn-emerald-text text-micro">&#10003;</span>}
       {hasUserMention && (
-        <span className="text-[11px]" title="猫猫 @ 了你">
-          🐾
+        <span title="猫猫 @ 了你">
+          <PawIcon className="text-xs" />
         </span>
       )}
       {unreadCount > 0 && (
         <span
-          className={`inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-white text-[10px] font-bold leading-none ${
-            hasUserMention ? 'bg-red-500' : 'bg-amber-500'
+          className={`inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[var(--cafe-surface)] text-micro font-bold leading-none ${
+            hasUserMention ? 'bg-conn-red-text' : 'bg-[var(--semantic-warning)]'
           }`}
         >
           {unreadCount > 99 ? '99+' : unreadCount}
@@ -67,7 +62,7 @@ export function getCatStatusType(catStatuses: Record<string, CatStatusType>): 'i
   const statuses = Object.values(catStatuses);
   if (statuses.length === 0) return 'idle';
   if (statuses.some((s) => s === 'error')) return 'error';
-  if (statuses.some((s) => s === 'streaming' || s === 'pending')) return 'working';
+  if (statuses.some((s) => s === 'streaming' || s === 'pending' || s === 'spawning')) return 'working';
   if (statuses.some((s) => s === 'done')) return 'done';
   return 'idle';
 }

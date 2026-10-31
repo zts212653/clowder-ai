@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useSyncExternalStore } from 'react';
+import { peekPlaybackManager } from '@/services/playbackRuntime';
 import { apiFetch } from '@/utils/api-client';
 
 export type TtsState = 'idle' | 'loading' | 'playing' | 'error';
@@ -105,6 +106,7 @@ function synthesize(messageId: string, text: string, catId?: string): void {
   }
 
   // Stop any current playback first (global mutex)
+  peekPlaybackManager()?.interrupt();
   stopPlayback();
 
   const cached = urlCache.get(messageId);

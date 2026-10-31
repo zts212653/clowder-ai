@@ -1,8 +1,10 @@
 ---
 feature_ids: [F119]
-related_features: [F101, F107, F075]
+related_features: [F101, F107, F075, F202]
 topics: [game, who-is-spy, party-game, ai-deception, social-deduction]
 doc_kind: spec
+tips_exempt: "2026-10-19：本次仅同步旧游戏基座退役后的历史依赖说明；玩法仍为未实现 spec，没有可引导的使用入口，不把保留的玩法愿望宣传为现有能力。"
+user_journey_exempt: "本次仅更正已退役基座的历史依赖说明；玩法仍为未实现 spec，没有新增或变更的用户旅程。"
 created: 2026-03-14
 ---
 
@@ -10,9 +12,12 @@ created: 2026-03-14
 
 > **Status**: spec | **Owner**: Ragdoll | **Priority**: P1
 
+> 2026-10-18 依赖更新：F101 的主仓旧实现已随退役变更移除；下文复用 F101 的内容是历史方案。
+> 本玩法愿望保留，未来应在 F202 插件边界重新设计；本次不关闭、不宣称已实现。
+
 ## Why
 
-team experience（2026-03-14）：
+operator experience（2026-03-14）：
 > "咱是不是有两个游戏？一个是谁是卧底，一个是脑门贴词儿。"
 
 谁是卧底是坏猫战术推理游戏系列的第二个游戏。与 F107 脑门贴词互补：
@@ -42,7 +47,7 @@ team experience（2026-03-14）：
 近义词组设计原则：
 - 相似但有微妙差异（让描述时容易露馅但又不能太明显）
 - 分难度：简单（猫/狗）、中等（拿铁/卡布奇诺）、困难（TypeScript/JavaScript）
-- 支持team lead自定义词组
+- 支持operator自定义词组
 
 **A3. 坏猫战术 — 卧底专属 prompt**
 
@@ -77,7 +82,7 @@ team experience（2026-03-14）：
 - [ ] AC-A2: 描述→讨论→投票→淘汰回合制流程完整
 - [ ] AC-A3: 投票淘汰逻辑 + 胜负判定正确
 - [ ] AC-A4: 所有猫的 prompt 都注入了坏猫战术（卧底术 + 平民侦察术）
-- [ ] AC-A5: 词组库支持难度分级 + team lead自定义
+- [ ] AC-A5: 词组库支持难度分级 + operator自定义
 - [ ] AC-A6: god-view 可看到所有身份 + 内心戏
 - [ ] AC-A7: 战绩数据写入 game-store
 
@@ -116,4 +121,4 @@ team experience（2026-03-14）：
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
 | KD-1 | 复用 F101 GameEngine 基座 | 与 F107 共享基础设施 | 2026-03-14 |
-| KD-2 | 坏猫战术系列 #2，与 F107 共享战术体系 | team lead确认两个游戏是系列 | 2026-03-14 |
+| KD-2 | 坏猫战术系列 #2，与 F107 共享战术体系 | operator确认两个游戏是系列 | 2026-03-14 |

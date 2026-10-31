@@ -1,0 +1,232 @@
+.card {
+  max-width: 600px;
+  min-width: 0;
+  border: 1px solid var(--shell-hairline);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--shell-paper);
+  color: var(--shell-body);
+  font-size: 13.5px;
+}
+.header {
+  padding: 14px 16px 8px;
+}
+.header h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--shell-ink);
+  overflow-wrap: anywhere;
+}
+.reason {
+  margin-top: 3px;
+  color: var(--shell-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.fields {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 9px 0;
+  align-items: center;
+  margin: 0;
+  padding: 6px 16px 12px;
+}
+.fields dt {
+  font-size: 13px;
+  color: var(--shell-muted);
+}
+.fields dd {
+  min-width: 0;
+  margin: 0;
+}
+.cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.first {
+  border: 1px solid var(--shell-hairline-strong);
+  border-radius: 5px;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--shell-muted);
+}
+.select {
+  max-width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--shell-hairline-strong);
+  border-radius: 8px;
+  background: var(--shell-paper);
+  color: var(--shell-ink);
+  font-size: 13px;
+}
+.why {
+  margin-left: 8px;
+  color: var(--shell-muted);
+  font-size: 12px;
+}
+.message {
+  margin: 0 16px 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--shell-hairline);
+  border-radius: 8px;
+  background: var(--shell-work);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.message summary {
+  cursor: pointer;
+  color: var(--shell-muted);
+  font-size: 12px;
+}
+.message .auto {
+  display: block;
+  margin-top: 3px;
+  color: var(--content-category-rubric);
+}
+.body {
+  max-height: 240px;
+  overflow: auto;
+}
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--shell-hairline);
+  background: var(--shell-work);
+}
+.footer button,
+.ask button {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--shell-hairline-strong);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.footer .primary,
+.ask .primary {
+  background: var(--shell-primary);
+  color: var(--shell-primary-on);
+  border-color: var(--shell-primary);
+}
+.footer .revise {
+  margin-left: auto;
+  height: auto;
+  padding: 0;
+  border: 0;
+  color: var(--shell-primary-text);
+  font-weight: 400;
+}
+.ask {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 16px;
+  border-top: 1px solid var(--shell-hairline);
+}
+.ask input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--shell-hairline-strong);
+  border-radius: 8px;
+  background: var(--shell-paper);
+  font-size: 13px;
+}
+.card :is(input, select, button, [tabindex]):focus-visible {
+  outline: 2px solid var(--shell-primary);
+  outline-offset: 2px;
+}
+.card :is(button, input, select):disabled {
+  opacity: 0.5;
+}
+.notice {
+  display: block;
+  padding: 0 16px 10px;
+  color: var(--shell-muted);
+  font-size: 12px;
+}
+.switch {
+  appearance: none;
+  width: 26px;
+  height: 16px;
+  border: 1px solid var(--shell-muted);
+  border-radius: 8px;
+  background: var(--shell-paper);
+  vertical-align: middle;
+}
+.switch::before {
+  content: "";
+  display: block;
+  width: 12px;
+  height: 12px;
+  margin: 1px;
+  border-radius: 50%;
+  background: var(--shell-muted);
+}
+.switch:checked {
+  background: var(--shell-primary);
+  border-color: var(--shell-primary);
+}
+.switch:checked::before {
+  transform: translateX(10px);
+  background: var(--shell-primary-on);
+}
+
+.groupList {
+  margin-top: 6px;
+  border: 1px solid var(--shell-hairline-strong);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--shell-paper);
+  box-shadow: var(--console-shadow-soft);
+}
+.groupList input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--shell-hairline);
+  background: transparent;
+}
+.groupList [role="listbox"] {
+  max-height: 200px;
+  overflow-y: auto;
+}
+.groupList button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  text-align: left;
+  font-size: 13.5px;
+}
+.groupList button[aria-selected="true"],
+.groupList button:hover {
+  background: var(--shell-work);
+}
+.groupList button span {
+  width: 16px;
+  color: var(--shell-primary-text);
+}
+.groupList [role="option"]:last-child {
+  border-top: 1px solid var(--shell-hairline);
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}

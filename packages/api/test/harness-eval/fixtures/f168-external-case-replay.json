@@ -1,0 +1,102 @@
+{
+  "now": 20000,
+  "scenarios": [
+    {
+      "id": "running-state-only",
+      "events": [
+        { "kind": "case.head_observed", "at": 1000, "payload": { "headSha": "head-1" } },
+        { "kind": "case.ci_observed", "at": 2000, "payload": { "headSha": "head-1", "status": "pass" } },
+        { "kind": "case.cloud_review_observed", "at": 3000, "payload": { "headSha": "head-1", "status": "running" } }
+      ],
+      "expectedVerdict": "keep_observe"
+    },
+    {
+      "id": "blocking-state-only",
+      "events": [
+        { "kind": "case.head_observed", "at": 1000, "payload": { "headSha": "head-2" } },
+        { "kind": "case.ci_observed", "at": 2000, "payload": { "headSha": "head-2", "status": "pass" } },
+        { "kind": "case.cloud_review_observed", "at": 3000, "payload": { "headSha": "head-2", "status": "blocking" } }
+      ],
+      "expectedVerdict": "keep_observe"
+    },
+    {
+      "id": "running-with-noisy-wake",
+      "events": [
+        { "kind": "case.head_observed", "at": 1000, "payload": { "headSha": "head-3" } },
+        { "kind": "case.cloud_review_observed", "at": 2000, "payload": { "headSha": "head-3", "status": "running" } },
+        {
+          "kind": "case.reviewer_wake_delivered",
+          "at": 3000,
+          "payload": { "headSha": "head-3", "messageId": "msg-noisy" }
+        }
+      ],
+      "expectedVerdict": "fix"
+    },
+    {
+      "id": "duplicate-wake",
+      "events": [
+        { "kind": "case.head_observed", "at": 1000, "payload": { "headSha": "head-4" } },
+        {
+          "kind": "case.reviewer_wake_delivered",
+          "at": 3000,
+          "payload": { "headSha": "head-4", "messageId": "msg-1" }
+        },
+        { "kind": "case.reviewer_wake_delivered", "at": 4000, "payload": { "headSha": "head-4", "messageId": "msg-2" } }
+      ],
+      "expectedVerdict": "fix"
+    },
+    {
+      "id": "stale-head-fact",
+      "events": [
+        { "kind": "case.head_observed", "at": 1000, "payload": { "headSha": "head-current" } },
+        { "kind": "case.ci_observed", "at": 2000, "payload": { "headSha": "head-old", "status": "pass" } }
+      ],
+      "expectedVerdict": "keep_observe"
+    },
+    {
+      "id": "delivery-failure-persisted",
+      "events": [
+        { "kind": "case.head_observed", "at": 1000, "payload": { "headSha": "head-5" } },
+        {
+          "kind": "case.review_verdict_recorded",
+          "at": 9000,
+          "payload": {
+            "headSha": "head-5",
+            "delivery": {
+              "kind": "pending_delivery",
+              "headSha": "head-5",
+              "ownerCatId": "reviewer",
+              "reason": "GitHub unavailable",
+              "createdAt": 9000
+            }
+          }
+        }
+      ],
+      "expectedVerdict": "keep_observe"
+    },
+    {
+      "id": "naked-verdict",
+      "events": [
+        { "kind": "case.head_observed", "at": 1000, "payload": { "headSha": "head-6" } },
+        {
+          "kind": "case.review_verdict_recorded",
+          "at": 9000,
+          "payload": { "headSha": "head-6", "verdict": "approved" }
+        }
+      ],
+      "expectedVerdict": "fix"
+    },
+    {
+      "id": "identity-split",
+      "events": [],
+      "diagnostics": { "identitySplitAttempts": 1 },
+      "expectedVerdict": "fix"
+    },
+    {
+      "id": "issue-without-evidence",
+      "events": [],
+      "diagnostics": { "issueClaimsWithoutEvidence": 1 },
+      "expectedVerdict": "fix"
+    }
+  ]
+}

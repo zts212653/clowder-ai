@@ -117,7 +117,7 @@ POST /api/threads/:threadId/vote/start
 Thread 有活跃投票时，在 ChatInput 区域上方显示：
 - 紧凑条: "🗳️ 投票进行中: {question} · 已投 3/5 · 剩余 1:23"
 - 点击展开查看当前状态
-- team lead可点「结束投票」手动关闭
+- operator可点「结束投票」手动关闭
 
 ### 后端改动
 
@@ -188,7 +188,7 @@ AT 猫（antigravity, antig-opus）通过 CDP bridge 通信，回复文本一样
 ### Why
 
 当前投票结果是 rich block card 嵌在 `userId: 'system'` 的消息里，渲染为普通 system message。
-team lead要求投票结果像 **GitHub Review 通知**那样，有独立的 connector 气泡：
+operator要求投票结果像 **GitHub Review 通知**那样，有独立的 connector 气泡：
 - 左对齐、独立配色主题（区别于猫猫消息和系统消息）
 - 自带图标 + 标签头（如 🗳️ + "投票结果"）
 - 结构化字段展示
@@ -216,13 +216,13 @@ team lead要求投票结果像 **GitHub Review 通知**那样，有独立的 con
 
 ### 讨论来源
 
-Thread `thread_mmgfvvq1iut03rjs` (2026-03-08 07:25) — team lead看到手动发的投票汇总消息后提出
+Thread `[thread-id]` (2026-03-08 07:25) — operator看到手动发的投票汇总消息后提出
 
 ## Gap 4: 猫猫发起投票（MCP 工具）
 
 ### Why
 
-当前只有team lead通过 UI `/vote` 命令发起投票。猫猫在协作讨论中需要集体决策时（如"这个 API 用 REST 还是 GraphQL？"），无法自主发起投票，必须请team lead操作。
+当前只有operator通过 UI `/vote` 命令发起投票。猫猫在协作讨论中需要集体决策时（如"这个 API 用 REST 还是 GraphQL？"），无法自主发起投票，必须请operator操作。
 
 ### Scope
 
@@ -258,7 +258,7 @@ Thread `thread_mmgfvvq1iut03rjs` (2026-03-08 07:25) — team lead看到手动发
 
 ### 讨论来源
 
-Thread `thread_mmgfvvq1iut03rjs` (2026-03-08 18:13) — team lead提出猫猫也该能发起投票
+Thread `[thread-id]` (2026-03-08 18:13) — operator提出猫猫也该能发起投票
 
 ## Key Decisions
 

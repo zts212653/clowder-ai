@@ -7,12 +7,17 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
+import { apiFetch } from '@/utils/api-client';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: vi.fn(),
+}));
 
 // ── Stub hooks used by ChatMessage ──
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({ cats: [], isLoading: false, getCatById: () => undefined, getCatsByBreed: () => new Map() }),
+  formatCatName: () => '布偶猫',
 }));
 vi.mock('@/hooks/useTts', () => ({
   useTts: () => ({ state: 'idle', synthesize: vi.fn(), activeMessageId: null }),
@@ -29,12 +34,17 @@ vi.mock('@/components/EvidencePanel', () => ({ EvidencePanel: () => null }));
 vi.mock('@/components/MetadataBadge', () => ({ MetadataBadge: () => null }));
 vi.mock('@/components/SummaryCard', () => ({ SummaryCard: () => null }));
 vi.mock('@/components/rich/RichBlocks', () => ({ RichBlocks: () => null }));
+vi.mock('@/components/PlanBoardPanel', () => ({ PlanBoardPanel: () => null }));
+vi.mock('@/components/SessionChainPanel', () => ({ SessionChainPanel: () => null }));
+vi.mock('@/components/audit/AuditExplorerPanel', () => ({ AuditExplorerPanel: () => null }));
 
-const THINKING_TEXT = 'I am thinking about the meaning of cats and coffee.';
+const THINKING_TEXT =
+  'I am thinking about the meaning of cats and coffee, and why a refresh should still respect thread-specific bubble preferences.';
 
 describe('F045: ThinkingContent thinkingMode toggle', () => {
   let container: HTMLDivElement;
   let root: Root;
+  const apiFetchMock = vi.mocked(apiFetch);
 
   beforeAll(() => {
     (globalThis as { React?: typeof React }).React = React;
@@ -47,6 +57,8 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     root = createRoot(container);
     // Stable baseline for each test
     useChatStore.getState().setUiThinkingExpandedByDefault(false);
+    useChatStore.getState().setGlobalBubbleDefaults({ thinking: 'collapsed', cliOutput: 'collapsed' });
+    apiFetchMock.mockReset();
   });
 
   afterEach(() => {
@@ -69,12 +81,19 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     contentBlocks: [],
   };
 
+  function findBubbleToggleButton(label: string, buttonLabel: string) {
+    return Array.from(container.querySelectorAll('button')).find((button) => {
+      if (button.textContent !== buttonLabel) return false;
+      return button.parentElement?.textContent?.includes(`${label}:`) ?? false;
+    });
+  }
+
   const getCatById = vi.fn(() => ({
     id: 'opus',
     displayName: '布偶猫',
     color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
     breedId: 'ragdoll',
-    provider: 'anthropic',
+    clientId: 'anthropic',
     defaultModel: 'claude-sonnet-4-5-20250929',
     avatar: '/avatars/opus.png',
     mentionPatterns: [],
@@ -109,6 +128,10 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     const { ChatMessage } = await import('@/components/ChatMessage');
 
     act(() => {
+      useChatStore.getState().setLoadingThreads(false);
+    });
+
+    act(() => {
       root.render(
         React.createElement(ChatMessage, {
           message: thinkingMsg as never,
@@ -119,9 +142,9 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
 
     expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
 
-    // Expand globally
+    // Expand globally via bubble defaults
     act(() => {
-      useChatStore.getState().setUiThinkingExpandedByDefault(true);
+      useChatStore.getState().setGlobalBubbleDefaults({ thinking: 'expanded', cliOutput: 'collapsed' });
     });
 
     expect(container.querySelectorAll('.cli-output-md').length).toBeGreaterThanOrEqual(1);
@@ -129,15 +152,118 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
 
     // Collapse globally again
     act(() => {
-      useChatStore.getState().setUiThinkingExpandedByDefault(false);
+      useChatStore.getState().setGlobalBubbleDefaults({ thinking: 'collapsed', cliOutput: 'collapsed' });
     });
 
     expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
   });
 
-  it('stream-origin messages render via CliOutputBlock (F097)', async () => {
+  it('thread-level bubble override loaded async beats initial global default after refresh-like hydration', async () => {
+    const { ChatMessage } = await import('@/components/ChatMessage');
+    const { RightStatusPanel } = await import('@/components/RightStatusPanel');
+
+    act(() => {
+      useChatStore.setState({
+        currentThreadId: 'thread-a',
+        threads: [],
+        isLoadingThreads: true,
+        globalBubbleDefaults: { thinking: 'expanded', cliOutput: 'collapsed' },
+      });
+      root.render(
+        React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(RightStatusPanel, {
+            intentMode: null,
+            targetCats: [],
+            catStatuses: {},
+            catInvocations: {},
+            threadId: 'thread-a',
+            messageSummary: { total: 1, assistant: 1, system: 0, evidence: 0, followup: 0 },
+          }),
+          React.createElement(ChatMessage, {
+            message: thinkingMsg as never,
+            getCatById: getCatById as never,
+          }),
+        ),
+      );
+    });
+
+    expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
+    expect(container.textContent).not.toContain(THINKING_TEXT);
+    expect(container.textContent).toContain('思考过程: 恢复中');
+    expect(container.textContent).toContain('恢复中...');
+
+    act(() => {
+      useChatStore.setState({
+        isLoadingThreads: false,
+        threads: [
+          {
+            id: 'thread-a',
+            projectPath: 'default',
+            title: 'Thread A',
+            createdBy: 'default-user',
+            participants: [],
+            lastActiveAt: Date.now(),
+            createdAt: Date.now(),
+            bubbleThinking: 'collapsed',
+          },
+        ],
+      });
+    });
+
+    expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
+    expect(container.textContent).not.toContain(THINKING_TEXT);
+  });
+
+  it('restores expanded bubble after refresh once thread metadata hydrates', async () => {
     const { ChatMessage } = await import('@/components/ChatMessage');
 
+    act(() => {
+      useChatStore.setState({
+        currentThreadId: 'thread-expanded',
+        threads: [],
+        isLoadingThreads: true,
+        globalBubbleDefaults: { thinking: 'collapsed', cliOutput: 'collapsed' },
+      });
+      root.render(
+        React.createElement(ChatMessage, {
+          message: thinkingMsg as never,
+          getCatById: getCatById as never,
+        }),
+      );
+    });
+
+    expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
+    expect(container.textContent).not.toContain(THINKING_TEXT);
+
+    act(() => {
+      useChatStore.setState({
+        isLoadingThreads: false,
+        threads: [
+          {
+            id: 'thread-expanded',
+            projectPath: 'default',
+            title: 'Thread Expanded',
+            createdBy: 'default-user',
+            participants: [],
+            lastActiveAt: Date.now(),
+            createdAt: Date.now(),
+            bubbleThinking: 'expanded',
+          },
+        ],
+      });
+    });
+
+    expect(container.querySelectorAll('.cli-output-md').length).toBeGreaterThanOrEqual(1);
+    expect(container.textContent).toContain(THINKING_TEXT);
+  });
+
+  it('stream-origin messages render via CliOutputBlock with text content default-expanded (stream-final-speech heuristic)', async () => {
+    const { ChatMessage } = await import('@/components/ChatMessage');
+
+    // Stream + content + no callback companion → CLI Output is default-expanded so the
+    // 4.6/sonnet native final speech is immediately visible (no manual click required).
     const streamMsg = {
       id: 's1',
       type: 'assistant' as const,
@@ -158,18 +284,147 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
       );
     });
 
-    // F097: stream content now renders inside CliOutputBlock, not ThinkingContent
     expect(container.textContent).toContain('CLI Output');
+    // No manual expand needed — the heuristic auto-expands stream-final-speech.
+    expect(container.textContent).toContain('stream inner monologue content here');
+  });
 
-    // Click to expand → content visible in terminal substrate
-    const cliButton = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('CLI Output'),
+  it('bubble toggle click immediately re-renders already-mounted thinking block', async () => {
+    const { ChatMessage } = await import('@/components/ChatMessage');
+    const { RightStatusPanel } = await import('@/components/RightStatusPanel');
+
+    apiFetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ bubbleThinking: 'collapsed' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
     );
-    expect(cliButton).toBeTruthy();
+
     act(() => {
-      cliButton?.click();
+      useChatStore.setState({
+        currentThreadId: 'thread-a',
+        globalBubbleDefaults: { thinking: 'expanded', cliOutput: 'collapsed' },
+        threads: [
+          {
+            id: 'thread-a',
+            projectPath: 'default',
+            title: 'Thread A',
+            createdBy: 'default-user',
+            participants: [],
+            lastActiveAt: Date.now(),
+            createdAt: Date.now(),
+            bubbleThinking: 'expanded',
+          },
+        ],
+      });
+      root.render(
+        React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(RightStatusPanel, {
+            intentMode: null,
+            targetCats: [],
+            catStatuses: {},
+            catInvocations: {},
+            threadId: 'thread-a',
+            messageSummary: { total: 1, assistant: 1, system: 0, evidence: 0, followup: 0 },
+          }),
+          React.createElement(ChatMessage, {
+            message: thinkingMsg as never,
+            getCatById: getCatById as never,
+          }),
+        ),
+      );
     });
 
-    expect(container.textContent).toContain('stream inner monologue content here');
+    expect(container.textContent).toContain(THINKING_TEXT);
+    expect(container.querySelectorAll('.cli-output-md').length).toBeGreaterThanOrEqual(1);
+
+    const collapseButton = findBubbleToggleButton('思考过程', '折叠');
+    expect(collapseButton).toBeTruthy();
+
+    await act(async () => {
+      collapseButton?.click();
+      await Promise.resolve();
+    });
+
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/threads/thread-a',
+      expect.objectContaining({
+        method: 'PATCH',
+      }),
+    );
+    expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
+    expect(container.textContent).not.toContain(THINKING_TEXT);
+  });
+
+  it('bubble toggle first click turns a global-expanded thread into an explicit collapsed override', async () => {
+    const { ChatMessage } = await import('@/components/ChatMessage');
+    const { RightStatusPanel } = await import('@/components/RightStatusPanel');
+
+    apiFetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ bubbleThinking: 'collapsed' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    act(() => {
+      useChatStore.setState({
+        currentThreadId: 'thread-global',
+        globalBubbleDefaults: { thinking: 'expanded', cliOutput: 'collapsed' },
+        threads: [
+          {
+            id: 'thread-global',
+            projectPath: 'default',
+            title: 'Thread Global',
+            createdBy: 'default-user',
+            participants: [],
+            lastActiveAt: Date.now(),
+            createdAt: Date.now(),
+          },
+        ],
+      });
+      root.render(
+        React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(RightStatusPanel, {
+            intentMode: null,
+            targetCats: [],
+            catStatuses: {},
+            catInvocations: {},
+            threadId: 'thread-global',
+            messageSummary: { total: 1, assistant: 1, system: 0, evidence: 0, followup: 0 },
+          }),
+          React.createElement(ChatMessage, {
+            message: thinkingMsg as never,
+            getCatById: getCatById as never,
+          }),
+        ),
+      );
+    });
+
+    expect(container.textContent).toContain('跟随全局');
+    expect(container.textContent).toContain(THINKING_TEXT);
+    expect(container.querySelectorAll('.cli-output-md').length).toBeGreaterThanOrEqual(1);
+
+    const collapseButton = findBubbleToggleButton('思考过程', '折叠');
+    expect(collapseButton).toBeTruthy();
+
+    await act(async () => {
+      collapseButton?.click();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
+    expect(container.textContent).not.toContain(THINKING_TEXT);
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/threads/thread-global',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ bubbleThinking: 'collapsed' }),
+      }),
+    );
   });
 });

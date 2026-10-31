@@ -1,0 +1,57 @@
+{
+  "conversation-proposals-v1": {
+    "tipId": "capability-propose-thread",
+    "title": "新对话提议",
+    "video": "conversation-proposals.zh.mp4",
+    "poster": "conversation-proposals.jpg",
+    "tryPrompt": "请帮我把当前这件事拆成几条可以独立推进的工作线，提议创建新对话，填好提议卡让我确认。先不要直接创建。",
+    "useSignal": "f128-proposal-created",
+    "durationSeconds": 48.5,
+    "sha256": "373931deec39bdedcaa0a769c92fe1e99a7686ce48f84c5c37ae1208036593b6"
+  },
+  "same-bug-v1": {
+    "tipId": "capability-import-native-session",
+    "title": "同一个 bug，两种结局",
+    "video": "same-bug.zh.mp4",
+    "poster": "same-bug.jpg",
+    "tryPrompt": "请带我从新对话页接上一个本机已有的会话，说明当前支持哪些工具、怎样选猫和找会话 ID，以及正在运行或已经接过时怎样处理。",
+    "durationSeconds": 48,
+    "sha256": "89b8b55fecd5c260c69c0298d119034629b1ab76621ee65e23e6c386e3e6e5f2"
+  },
+  "steer-v1": {
+    "tipId": "feature-author-message-disposition",
+    "title": "不用等它说完",
+    "video": "steer.zh.mp4",
+    "poster": "steer.jpg",
+    "tryPrompt": "猫回话的时候，我想直接补一句让它接进这一轮。请带我在输入框 + 里把发送策略换成「引导当前回复」，再说说什么时候该用「排队等待」。",
+    "durationSeconds": 36,
+    "sha256": "490ae89c5a5313ba302a852c939a04b9065b4de78e9f5493096922a036ae8cfe"
+  },
+  "panel-vote-v1": {
+    "tipId": "capability-expert-panel",
+    "title": "拿不准？先各想各的，再投票",
+    "video": "panel-vote.zh.mp4",
+    "poster": "panel-vote.jpg",
+    "tryPrompt": "我有件事拿不准，想听几只猫各自的看法。请带我开一次「专家辩论」：先问我要定什么、我自己的主意是什么；再说说还吵不出结果时，怎么说「四象限」、怎么用 /vote 让猫投票。先别直接开始。",
+    "durationSeconds": 46.7,
+    "sha256": "37bee3133500953e4836eeb002132d1fd9c815fa9d6bb14fa61aac13647bcf4a"
+  },
+  "panel-vote-voting-v1": {
+    "tipId": "feature-voting",
+    "title": "拿不准？先各想各的，再投票",
+    "video": "panel-vote.zh.mp4",
+    "poster": "panel-vote.jpg",
+    "tryPrompt": "几只猫意见不一样时，我想让它们投票定下来。请带我打 /vote 发起一次：问题和选项怎么填、勾哪几只猫、我自己的主意怎样也放上去让猫投。先别直接发起。",
+    "durationSeconds": 46.7,
+    "sha256": "37bee3133500953e4836eeb002132d1fd9c815fa9d6bb14fa61aac13647bcf4a"
+  },
+  "bundles-v1": {
+    "tipId": "feature-f294-selective-message-bundles",
+    "title": "挑几条，带去哪都行",
+    "video": "bundles.zh.mp4",
+    "poster": "bundles.jpg",
+    "tryPrompt": "我想把几条消息带走。请带我从消息动作区点「多选：转发或导出」，说说导出成长图、文档、文本各适合什么时候；再带我把它们转发给另一个对话里的猫并留一句话。先别直接转发。",
+    "durationSeconds": 49,
+    "sha256": "a7951acdc2e6a951262d4344a4678ce909b76b9b4273fc99ff0e26479e7ec799"
+  }
+}

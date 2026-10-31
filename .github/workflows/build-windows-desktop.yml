@@ -1,0 +1,108 @@
+name: Build Windows Desktop
+
+# Reusable workflow: builds Windows installer (.exe) and portable zip for
+# Clowder AI. Produces both ClowderAI-Setup-*.exe and ClowderAI-*.zip.
+#
+# Called by: release-desktop.yml (orchestrator)
+# Standalone: workflow_dispatch for dry-run verification
+#
+# F179: Desktop Installer Release Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Semver version (e.g. 0.10.1)"
+        required: true
+        type: string
+      upload-to-release:
+        description: "Attach artifacts to the triggering GitHub release"
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 0.10.1) — dry-run, artifacts only"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Windows Installer + Portable
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Test desktop config metadata
+        run: node --test desktop/generate-desktop-config.test.js desktop/generate-desktop-config-behavior.test.js
+
+      - name: Install Inno Setup
+        # Inno Setup is required to compile cat-cafe.iss into the final .exe
+        # installer. windows-latest does not ship with it by default.
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $env:Path += ";C:\Program Files (x86)\Inno Setup 6"
+          iscc.exe /? | Select-Object -First 1
+
+      - name: Test native installer preparation and menu behavior
+        shell: pwsh
+        run: |
+          $env:ISCC_EXE = @('C:\Program Files\Inno Setup 7\ISCC.exe', 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe') |
+            Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $env:ISCC_EXE) { throw 'Native Inno compiler was not found after installation' }
+          node --test desktop/installer-preparation-log.test.js desktop/installer-no-icons.test.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build Windows installer
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+          CATCAFE_VERSION: ${{ inputs.version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          .\desktop\scripts\build-desktop.ps1
+
+      - name: List build artifacts
+        shell: pwsh
+        run: Get-ChildItem dist\
+
+      - name: Upload installer to release
+        if: inputs.upload-to-release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/ClowderAI-Setup-*.exe
+            dist/ClowderAI-*.zip
+          fail_on_unmatched_files: true
+
+      - name: Upload installer as workflow artifact
+        if: ${{ !inputs.upload-to-release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-${{ inputs.version }}
+          path: dist/ClowderAI-Setup-*.exe
+          if-no-files-found: error
+
+      - name: Upload portable zip as workflow artifact
+        if: ${{ !inputs.upload-to-release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable-${{ inputs.version }}
+          path: dist/ClowderAI-*.zip
+          if-no-files-found: error

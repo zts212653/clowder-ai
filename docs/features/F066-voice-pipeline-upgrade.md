@@ -1,6 +1,6 @@
 ---
 feature_ids: [F066]
-related_features: [F034, F021, F054]
+related_features: [F034, F021, F054, F279]
 topics: [voice, tts, audio, pipeline, streaming, mlx-audio, kokoro]
 doc_kind: spec
 created: 2026-03-05
@@ -45,14 +45,14 @@ F034 建立了完整的 TTS 架构（ITtsProvider + TtsRegistry + VoiceBlockSynt
 
 3. **声线试听脚本 + 声线选择**
    - 新建 `scripts/tts-voice-audition.py`：传 voice name + 中文文本 → 生成 wav
-   - team lead试听所有 `zm_*` 声线，为每只猫选定声线
-   - 三只猫的声线期望描述（供team lead参考）：
+   - operator试听所有 `zm_*` 声线，为每只猫选定声线
+   - 三只猫的声线期望描述（供operator参考）：
      - **Ragdoll** (Ragdoll)：偏低沉温暖，语速略慢 (0.95)，"安静讲故事"
      - **Maine Coon** (Maine Coon)：清朗干脆，语速标准 (1.0)，"认真审稿的编辑"
      - **Siamese** (Siamese)：明快年轻，语速略快 (1.05)，"灵感停不下来的设计师"
 
 4. **cat-voices.ts 声线更新**
-   - team lead试听拍板后，更新 Kokoro voice name
+   - operator试听拍板后，更新 Kokoro voice name
    - edge-tts voice name 保留为注释（回退参考）
 
 **不做**：不改 Node API 层、不改前端、不改 VoiceBlockSynthesizer——纯后端替换。
@@ -109,14 +109,14 @@ TTS 服务可能因瞬时不可用（OOM / 模型重载 / 请求竞争）导致�
 
 3. **具体错误信息**
    - 🔇 card 的 bodyMarkdown 追加错误分类：`连接被拒绝` / `合成超时` / `服务错误(500)` / `未知错误`
-   - 帮助team lead/用户快速判断是否需要手动干预（重启 TTS 服务 vs 等待 vs 检查配置）
+   - 帮助operator/用户快速判断是否需要手动干预（重启 TTS 服务 vs 等待 vs 检查配置）
 
 ## Acceptance Criteria
 
 - [x] AC-A1: 本文档需在本轮迁移后维持模板核心结构（Status/Why/What/Dependencies/Risk/Timeline）。
 - [x] AC-1: TTS 合成完全在本地 Apple Silicon 完成，不依赖外部云服务 ✅ Qwen3-TTS 1.7B Base clone via mlx-audio
 - [x] AC-2: 现有语音消息功能（F034）不受影响——微信风格语音条、缓存、降级全部正常 ✅ PR #333 回归测试通过
-- [x] AC-3: 中文合成质量主观评估不低于 edge-tts（team lead试听确认）✅ team lead："牛逼！是我要的了！"
+- [x] AC-3: 中文合成质量主观评估不低于 edge-tts（operator试听确认）✅ operator："牛逼！是我要的了！"
 - [x] AC-8: (Phase 4) TTS 瞬时失败（ECONNREFUSED/timeout/5xx）自动重试 1 次，无需用户干预 ✅ PR #356
 - [x] AC-9: (Phase 4) 🔇 warning card 显示具体错误分类（连接拒绝/超时/服务错误） ✅ PR #356
 - [x] AC-10: (Phase 4) 🔇 warning card 提供"重新合成"按钮，点击后可重新触发 TTS 合成 ✅ AC-10 补齐（PR #356 遗漏 → 本 PR 补齐）
@@ -127,10 +127,10 @@ TTS 服务可能因瞬时不可用（OOM / 模型重载 / 请求竞争）导致�
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | 简陋方案升级——从 edge-tts 换成本地 TTS | AC-1, AC-2 | test: mlx-audio 本地合成 + F034 回归测试 | [x] |
-| R2 | 中文声音质量不能倒退 | AC-3 | manual: team lead试听对比 | [x] |
+| R2 | 中文声音质量不能倒退 | AC-3 | manual: operator试听对比 | [x] |
 | R3 | F021++ 播客需要流式合成（AIRI 调研启发） | AC-4, AC-5 | test: 首次发声延迟测量 | [ ] 拆分 |
 | R4 | 双猫交替对话播放（AIRI Intent 系统启发） | AC-6 | test: queue 行为验证 | [ ] 拆分 |
 | R5 | 用户可控制播放 | AC-7 | manual: 暂停/跳过操作 | [ ] 拆分 |
@@ -147,16 +147,16 @@ TTS 服务可能因瞬时不可用（OOM / 模型重载 / 请求竞争）导致�
 
 | 决策 | 选项 | 结论 | 决策者 |
 |------|------|------|--------|
-| Phase 1 首发模型 | Kokoro-82M / Qwen3-TTS / CosyVoice3 | **Qwen3-TTS 1.7B Base clone**（Kokoro 质量不可接受→Qwen3 VoiceDesign 不稳定→GPT-SoVITS 英文弱→Base clone + ref_audio 锚定声线最终胜出） | team lead (2026-03-09) |
+| Phase 1 首发模型 | Kokoro-82M / Qwen3-TTS / CosyVoice3 | **Qwen3-TTS 1.7B Base clone**（Kokoro 质量不可接受→Qwen3 VoiceDesign 不稳定→GPT-SoVITS 英文弱→Base clone + ref_audio 锚定声线最终胜出） | operator (2026-03-09) |
 | 升级路径 | 一步到位 / 渐进 | **渐进**：Qwen3 1.7B → 补 stream_synthesize + chunker → CosyVoice3(可选上限) | Ragdoll+GPT-5.4 |
-| Python TTS 替换策略 | 写死替换 / Adapter 模式 | **Adapter 模式**：`TtsAdapter` 抽象 + env var 切换 provider | team lead (2026-03-05) |
-| 声线选择流程 | 猫猫自选 / team lead选 | **猫猫出期望描述 → team lead试听拍板**（猫听不到声音） | team lead (2026-03-05) |
+| Python TTS 替换策略 | 写死替换 / Adapter 模式 | **Adapter 模式**：`TtsAdapter` 抽象 + env var 切换 provider | operator (2026-03-05) |
+| 声线选择流程 | 猫猫自选 / operator选 | **猫猫出期望描述 → operator试听拍板**（猫听不到声音） | operator (2026-03-05) |
 | Phase 2 流式协议 | WebSocket / SSE | **待定**（Phase 2 plan 时决策） | — |
-| Feature 归属 | 并入 F054 / 并入 F034 / 独立 | **独立 F066**（范围自成体系，F034 已 done） | team lead (2026-03-05) |
-| Ragdoll声线方案 | Qwen3 VoiceDesign / GPT-SoVITS / Qwen3 Base clone | **Qwen3-TTS Base clone + 流浪者 v2 ref audio** — clone 模式 + instruct 叠加解决一切 | team lead (2026-03-09) |
-| Maine Coon声线方案 | Qwen3 VoiceDesign / GPT-SoVITS / Qwen3 Base clone | **Qwen3-TTS Base clone + 魈 v2 ref audio** — 统一引擎 | team lead (2026-03-09) |
-| Siamese声线方案 | Qwen3 VoiceDesign / GPT-SoVITS / Qwen3 Base clone | **Qwen3-TTS Base clone + 班尼特 v1 ref audio** — 统一引擎 | team lead (2026-03-09) |
-| 声线方案架构 | D 型混合(Qwen3+GPT-SoVITS) / E 型统一(Qwen3 Base clone) | **E 型统一方案** — 三猫都走 Qwen3 Base clone，GPT-SoVITS 降为离线工具 | team lead (2026-03-09) |
+| Feature 归属 | 并入 F054 / 并入 F034 / 独立 | **独立 F066**（范围自成体系，F034 已 done） | operator (2026-03-05) |
+| Ragdoll声线方案 | Qwen3 VoiceDesign / GPT-SoVITS / Qwen3 Base clone | **Qwen3-TTS Base clone + 流浪者 v2 ref audio** — clone 模式 + instruct 叠加解决一切 | operator (2026-03-09) |
+| Maine Coon声线方案 | Qwen3 VoiceDesign / GPT-SoVITS / Qwen3 Base clone | **Qwen3-TTS Base clone + 魈 v2 ref audio** — 统一引擎 | operator (2026-03-09) |
+| Siamese声线方案 | Qwen3 VoiceDesign / GPT-SoVITS / Qwen3 Base clone | **Qwen3-TTS Base clone + 班尼特 v1 ref audio** — 统一引擎 | operator (2026-03-09) |
+| 声线方案架构 | D 型混合(Qwen3+GPT-SoVITS) / E 型统一(Qwen3 Base clone) | **E 型统一方案** — 三猫都走 Qwen3 Base clone，GPT-SoVITS 降为离线工具 | operator (2026-03-09) |
 | GPT-SoVITS 版本 | v2 / v3 / v4 | **v2Pro / v2ProPlus** — 社区训练集参差，v2 更宽容 | GPT Pro 调研 (2026-03-09) |
 
 ## Dependencies
@@ -172,7 +172,7 @@ TTS 服务可能因瞬时不可用（OOM / 模型重载 / 请求竞争）导致�
 | 风险 | 影响 | 缓解 |
 |------|------|------|
 | Kokoro-82M 中文质量不如 edge-tts | 用户体验倒退 | Phase 1 做 A/B 对比试听；不满意可快速切 Spark-TTS |
-| mlx-audio 在特定 macOS 版本有兼容问题 | 服务无法启动 | tts-server.sh 做依赖检查 + fallback 到 edge-tts |
+| mlx-audio 在特定 macOS 版本有兼容问题 | 服务无法启动 | scripts/services/tts-server.sh 做依赖检查 + fallback 到 edge-tts |
 | 流式分句对中文分词不准 | 断句不自然 | 用 Intl.Segmenter + 中文标点硬断点双重保障 |
 | Phase 3 播放队列复杂度高 | 开发周期长 | 先只做 queue 行为，interrupt/replace 延后 |
 
@@ -210,7 +210,7 @@ TTS 服务可能因瞬时不可用（OOM / 模型重载 / 请求竞争）导致�
 ### Qwen3-TTS Base clone 试听
 - [x] clone API 调研（`ref_audio` + `ref_text` + `instruct` 三参数）
 - [x] 试听脚本：`scripts/tts-qwen3-clone-audition.py`
-- [x] 全量试听（9 preset × 5 texts = 45 wav）→ team lead拍板通过！
+- [x] 全量试听（9 preset × 5 texts = 45 wav）→ operator拍板通过！
 - [x] 声线配置固化到 `cat-voices.ts` — PR #333 合入 main (f27b827d)
 - [x] Siamese Qwen3 VoiceDesign `shuo_hinata` → clone 模式迁移完成（全部统一 Base clone）
 
@@ -223,7 +223,7 @@ TTS 服务可能因瞬时不可用（OOM / 模型重载 / 请求竞争）导致�
 | VoiceBlockSynthesizer clone passthrough | PR #333 | clone 参数从 cat-voices → synthesize() 全链路透传 |
 | cat-voices.ts E 型统一配置 | PR #333 | 三猫声线：流浪者/魈/班尼特 + Kokoro 兼容 voice ID |
 | Clone-aware timeout (30s→120s) | e57d81ae | 长文本 clone 合成防超时 |
-| Maine Coon R1→R3 review + 云端 review | PR #333 | 5 findings (3P1+1P2) 全部修复 |
+| Maine Coon R1→R3 review + remote review | PR #333 | 5 findings (3P1+1P2) 全部修复 |
 
 ## 踩坑复盘 / 调试心得（2026-03-09）
 
@@ -240,7 +240,7 @@ TTS 服务可能因瞬时不可用（OOM / 模型重载 / 请求竞争）导致�
 ### 坑 3: GPT-SoVITS 英文处理是结构性缺陷
 - **现象**：81 个 wav 中，所有含英文的文本都出现乱码/断裂
 - **根因**：GPT-SoVITS 以中文/日文为主训练，英文 phonemizer 基本不可用
-- **教训**：Cat Café 内容中英混杂频率高（代码术语、猫名等），GPT-SoVITS 不适合做在线引擎。降级为离线声库工具
+- **教训**：Clowder AI 内容中英混杂频率高（代码术语、猫名等），GPT-SoVITS 不适合做在线引擎。降级为离线声库工具
 
 ### 坑 4: Clone 合成超时导致语音降级
 - **现象**：长文本（~200 字"坏猫计划"）发送后显示 `🔇 语音合成失败`
@@ -261,9 +261,9 @@ TTS 服务可能因瞬时不可用（OOM / 模型重载 / 请求竞争）导致�
 - **教训**：多层透传链路（config → service → provider）每层都需要确认参数传递，不能假设"上层已处理"
 
 ### 坑 7: Runtime 激活 TTS_PROVIDER
-- **现象**：team lead执行 `TTS_PROVIDER=qwen3-clone python3 tts-api.py` 后发现仍显示 `mlx-audio`
+- **现象**：operator执行 `TTS_PROVIDER=qwen3-clone python3 tts-api.py` 后发现仍显示 `mlx-audio`
 - **根因**：在 cat-cafe-runtime 目录下运行的是旧代码（未 pull 最新 main）
-- **教训**：合入 main ≠ 部署到 runtime。runtime 是独立的生产环境，需要team lead主动更新
+- **教训**：合入 main ≠ 部署到 runtime。runtime 是独立的生产环境，需要operator主动更新
 
 ### 坑 8: Cache key 缺少 refText 导致声线串台
 - **现象**：Code review 发现的潜在 bug — 同一 text + 不同 refText 会命中同一缓存

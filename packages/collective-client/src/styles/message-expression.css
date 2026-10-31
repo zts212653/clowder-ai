@@ -1,0 +1,77 @@
+.message-quotes {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+.message-quote {
+  min-width: 0;
+  border: 1px solid var(--cafe-border-subtle);
+  border-left: 3px solid var(--cafe-accent);
+  border-radius: 0.6rem;
+  padding: 0.65rem 0.8rem;
+  background: var(--cafe-surface-sunken);
+}
+.message-quote header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+  color: var(--cafe-text-secondary);
+  font-size: 0.75rem;
+}
+.message-quote header button {
+  padding: 0.15rem 0.3rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.composer-voice-status,
+.composer-voice-settings {
+  max-width: 720px;
+  margin: 0 auto 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--cafe-surface-sunken);
+  color: var(--cafe-text-secondary);
+  font-size: 12px;
+}
+.composer-voice-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.composer-voice-status button,
+.composer-voice-settings button {
+  padding: 5px 8px;
+  border: 1px solid var(--cafe-border-subtle);
+  border-radius: 7px;
+  background: var(--cafe-surface);
+  color: inherit;
+  cursor: pointer;
+}
+.composer-voice-status audio {
+  display: block;
+  height: 32px;
+  max-width: 100%;
+}
+.composer-voice-transcript {
+  width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.composer-voice-settings label {
+  display: grid;
+  gap: 5px;
+  margin-block: 8px;
+}
+.composer-voice-settings input {
+  max-width: 100%;
+  padding: 8px;
+  border: 1px solid var(--cafe-border-subtle);
+  border-radius: 7px;
+  background: var(--cafe-surface);
+  color: var(--cafe-text);
+}

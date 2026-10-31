@@ -1,151 +1,252 @@
 ---
 name: request-review
+tips_exempt: "Renewed 2026-10-07 for the reviewer sandbox disposition contract; discovery remains in internal review/worktree guidance, with no end-user Hub operation."
 description: >
-  向跨家族 peer-reviewer 发送 review 请求（含五件套）。
-  Use when: 自检通过后准备请其他猫 review。
-  Not for: 收到 review 结果（用 receive-review）、自检（用 quality-gate）。
-  Output: Review 请求信（存档到 review-notes/）。
+  Route a change to a non-author local peer when local review is the selected independent validation source.
+  Use when: risk routing chooses a stateful local reviewer for implementation, governance, or semantic context.
+  Not for: cloud as the selected source, vision-guardian acceptance, self-check, or review feedback handling.
+  Output: risk-matched review packet in the current thread/PR; mailbox archive only when the change needs the full packet.
 triggers:
   - "请 review"
   - "帮我看看"
   - "request review"
 ---
 
-> **SOP 位置**: 本 skill 是 `docs/SOP.md` Step 3a 的执行细节。
-> **上一步**: `quality-gate` (Step 2) | **下一步**: `receive-review` (Step 3b)
+> **SOP definition**: `sop-definitions/development.yaml` stage `review`。
 
 # Request Review
 
-把改动送到 reviewer 眼前，让 reviewer 花时间在重点上——不是基础检查上。
+先按 `docs/SOP.md` 判断：符合产品快车道时，作者完成真实入口自验与受影响检查后直接交付，默认不进入本 skill。需要 review 时，才把原始约定、本次交付、当前 diff 和真实验证证据送到一只非作者猫眼前。审查先判断“做的是我们约定的东西吗”，再结合实现与风险判断能否放行。默认只选一个合适的独立验证源；local peer、cloud、愿景守护各按自己的风险触发，不能因为“进入 review”就自动叠加。
 
-## 核心知识
+### 先理解本次交付
 
-### 前置条件（三项都要满足才能发请求）
+Reviewer 回读原 issue / 讨论 / 已接受决定，再看计划与实际结果，不能让作者的实现摘要替代原题。有可运行实物就看实物：前端从真实入口走完整操作，后端跑原 issue 描述的使用场景；仅在尚无可运行实物的方案或文档交付中用推演。暂时跑不了要说明未验证处，不能换成文档推演后宣称通过。按[原问题到交付的判断方法](../.cat-cafe-shared-refs/delivery-intent-judgment.md)核对，目标还不清楚就先澄清，实现偏离明确约定就退回修正。
 
-| 条件 | 检查方式 | 未满足时 |
-|------|----------|----------|
-| `quality-gate` 通过 | 有本轮 gate report | BLOCKED — 先跑 quality-gate |
-| 测试全绿 | 附测试命令输出 | BLOCKED — 修到绿灯再发 |
-| 原始需求可引用 | Discussion/Interview 文档路径 + ≤5 行摘录 | BLOCKED — reviewer 有权拒绝审查 |
-| 前端改动已浏览器实测 | Playwright/Chrome 截图证据 | BLOCKED — 涉及前端必须真实打开浏览器验证 |
+结论应说明本次约定结果是否成立及依据，不以“没有剩余 finding”代替。安全、数据与契约检查仍各自成立；这是同一 reviewer 的判断职责，不增加固定表格、逐 AC 必填字段或每 PR 的第三只守护猫。完整 Feature 的终态守护不替代本次交付判断。
 
-> **教训（F041）**：review 信只附了 spec，没附原始 Discussion。结果 10 轮云端 review 全在抓 edge case，没有一轮说"UI 不可用"。Reviewer 没有上下文，无法做愿景验证。
+测试增量按测试规范审其观察结果是否有用：新增、改写、删除都看真实失败、
+最低足够层级、已有覆盖及成本，不能只审 pass 数。复杂源码断言或 fixture 选一个代表性反例：真实故障应红，
+等价重构或加注释不应红；协议/生成器/统一 lint 的源码契约按自身语义判断。不新增固定 reviewer 或全仓变异任务。
 
-### Reviewer 匹配规则
+## 先选验证源
 
-从 `cat-config.json` 动态匹配，**三猫都不能 review 自己的代码**：
+| 风险需要 | 独立验证源 |
+|---|---|
+| 家里语境、skill/SOP/治理文字、实现语义 | local peer（本 skill） |
+| 安全 / 鉴权 / 生产数据 / 外部契约，或需要 context-blind 代码扫描 | cloud；不再同时把同一问题默认发 local |
+| 用户可见 feature 的终态是否符合愿景 | 愿景守护在 feature close 触发；本次交付的约定结果仍由已选 reviewer 判断，不给每个 PR 加第三棒 |
 
+默认只找一只 reviewer：测试能兜住的实现正确性找常规 reviewer（非作者Maine Coon、Sonnet、kimi 或 gemini-argon，同族不同个体也行）；gemini-argon 只审不写代码。在这几只里按派活时各家粮的实际情况和现行有效安排挑，已撤销或已过期的暂停、稀缺标签不作排除依据。方向和形状请创作位一次给完；安全、鉴权、生产数据、外部契约优先 cloud，cloud 不可用时只换成一只本地 reviewer，不拆成两路。
+
+只有两个风险面确实需要不同的人时才加第二只，并写明各自理由。迭代修复只请改动所在那一面的 reviewer 复审；稀缺席位不进迭代循环。F320 #5195 两路复审 6 轮，安全面的两个 P1 都是语义 reviewer 抓到的，是机械拆两路的反例（见 `docs/SOP.md`「Reviewer 配对规则」）。
+
+**选择边界**：只有新增了需要第二只猫判断的实质内容，或风险面明确要求独立验证时才进入本 skill；“有 diff”“SHA 变了”“开了 PR”都不是独立触发器。机械登记、已审内容转录、低风险 direct-main docs 与可证明 continuity 可以 `skip/reuse`。一旦选择 review，同一个体不能 review 自己，证据须覆盖最终实质内容（exact SHA 或 continuityProof）。
+
+### 稀缺判断席位（dossier-driven）
+
+当队友 dossier / L0 把 reviewer 标为周额度稀缺的高杠杆判断猫（以 dossier `engagementPolicy` 当前标注为准）时，不能沿用普通迭代 reviewer 的默认回路。请求必须写明
+`engagementMode=one_shot_calibration|final_seal`、本轮唯一判断问题、停止条件和修后去向：
+
+- `one_shot_calibration`：用于重要 plan、架构/failure-mode 校准。reviewer 一次性交付判断和 findings 后退出；作者负责修复与测试，仍需独立验证时转日常 reviewer。
+- `final_seal`：用于其他猫已经完成多轮审查、分歧和证据已整理后的最终封版讨论。只有 scope 已稳定、预期不再进入实现陪练时才选。
+- **普通修复不复入原稀缺 reviewer**。P1/P2 的严重度不自动等于需要同一只高杠杆猫再次判断；只有修复引入新的架构/决策问题、原 finding 无法机械验收，或 operator 明确要求时才可复入。
+
+稀缺指的是可用判断席位，不是单 token 价格。省下来的额度应留给“判断错的代价高、验证器弱”的节点；routine fix、exact-HEAD 续签、礼貌确认都不占这个席位。
+
+## 发请求前
+
+| 证据 | 何时必需 | 缺失动作 |
+|---|---|---|
+| 当前 diff / branch / HEAD | 始终 | BLOCKED — reviewer 不审漂移目标 |
+| `Review-Subject-Ref` + accepted source/revision | 始终 | BLOCKED — 无法把 verdict 归到同一 review episode 或判断 source 是否移动 |
+| 五轴风险判断（行为、数据、安全、契约、不可逆） | 始终 | BLOCKED — 无法判断 review 深度 |
+| 与风险匹配的验证输出 | 始终 | BLOCKED — 先跑 targeted 或 full gate |
+| 原始需求摘录 | 涉及用户意图 / 愿景 | BLOCKED — reviewer 无法判断做没做对 |
+| Architecture cell / Map delta / Why | 结构或 ownership 变化 | BLOCKED — 回设计面补齐 |
+| author 浏览器 preview 记录 | 前端行为 / 视觉变化 | BLOCKED — author 先实际打开页面验证 |
+| 根目录工件闸门 | 有媒体 / 设计证据 | BLOCKED — 先归档或移出仓库根 |
+
+### 前端证据边界
+
+前端验证劳动属于 author：自己启动/复用正确的 preview，走一遍关键交互，并记录 URL、操作和结果。截图、录屏、DOM assertion、Playwright 输出都可以作为证据载体；**缺截图本身不是 operator 补劳动的许可证**。
+
+- 禁止把“请operator打开页面 / 截图给我”当 review 前置条件。
+- 视觉差异需要看画面时，author 自己采截图；浏览器能力暂不可用就如实 BLOCKED 或换可用验证面，不能把劳动转嫁给 operator。
+- 未合入改动验证当前 worktree，不能拿 runtime `3003/3004` 冒充。
+
+## Review packet 深度
+
+### 结构化轻审
+
+低风险、单一语义面的 diff 直接在当前 thread 或 PR 发，不新增 mailbox 文档：
+
+```text
+Review target: <branch@HEAD>
+Review-Subject-Ref: <pr:owner/repo#N | task:taskId>
+Reviewed-Head-Sha: <exact full Git OID>
+Accepted-Source-Ref: <canonical docs/features/F*.md | immutable threadId#messageId>
+Accepted-Revision: <that file's last-content-change full Git OID | the same immutable source message id>
+Scope: <changed files / one-line intent>
+Risk: <最高风险面，或 none + 理由>
+Evidence: <真实命令 / preview 结果>
+Engagement: <iterative|one_shot_calibration|final_seal> + <stop condition / repair return>
+Ask: <本次约定的结果是否成立，以及需重点检查的风险> verdict=approve|block
 ```
-优先级（从高到低）：
-1. 跨 family（author family ↔ reviewer family）
-2. peer-reviewer 角色标记
-3. 当前可用（无正在进行的 review 任务）
-```
 
-### 工具落点自检（Codex apply_patch 陷阱）
+Feature 以 canonical `docs/features/F*.md` + 该文件最后一次内容变更的完整 40/64 位 Git OID 为 anchor；消息 source 以
+`threadId#messageId` 自身为 revision。普通 local review 按这份 packet 请求，reviewer 一次发出 typed verdict，author 直接读取原消息的 `localReviewFact`；只传引用，不复制 source 正文。
 
-在 worktree 分支上用 `apply_patch` 改代码时，改动可能落到主 worktree（`cat-cafe/`）而非当前 worktree。**发请求前必须确认**：
+只有 F100/F311 已指定要证明 `request-review` **某个 skill 版本在这次 review 中实际沿用**，才在发送请求前 prepare，并在 packet 追加 `Request-Review-Consumption-Handle`；具名 reviewer 可 bind，发出同一条 typed verdict 后 record。prepare/bind/record 是独立的使用测量，不能作为 verdict 送达、作者消费或 merge 的前置条件。handle 缺失、过期、bind/record 失败或结果 `unconfirmed` 时如实保留测量缺口；不得为补回执新建 handle、重发结论、重新唤醒 reviewer 或虚报 `applied`。不适用的已绑定实验可 dismiss；既有历史回执保持原样。
+
+### 完整 packet
+
+跨组件、状态对象、架构或高风险 change 使用 [`../.cat-cafe-shared-refs/review-request-template.md`](../.cat-cafe-shared-refs/review-request-template.md)。只有需要跨 session 持久交接时才存 `review-notes/YYYY-MM-DD-{topic}-review-request.md`；PR/thread 已足够追溯时不另造归档。
+
+完整 packet 额外包含：
+
+- `Original Requirements`：≤5 行原话 + 真相源路径；
+- `Architecture Ownership`：cell / map delta / why；
+- 技术 OQ 与价值 OQ 分开；价值 OQ 才附 Decision Packet；
+- 验证命令、输出与 frontend preview 证据；
+- `Review-Target-ID`（需要 review sandbox 时用于 `/tmp/cat-cafe-review/{id}/{reviewer}`）。
+
+## 工具落点与工件检查
 
 ```bash
-git status  # 只在目标 worktree 有变更，主 worktree 干净
+git status --short
+git diff --name-only origin/main...HEAD
+git status --short | rg '^.. [^/]+\.(png|jpe?g|webp|gif|webm|mp4|mov|wav|pdf|pen)$'
+git diff --name-only origin/main...HEAD | rg '^[^/]+\.(png|jpe?g|webp|gif|webm|mp4|mov|wav|pdf|pen)$'
 ```
 
-## 流程
+两条工件命令应无输出。用 `apply_patch` 时尤其要确认改动只落在目标 worktree，主 worktree 仍干净。
 
-```
-BEFORE 发 review 请求:
+## Review sandbox（按需）
 
-1. 确认 quality-gate 已通过（拿到本轮 gate report）
-2. 确认测试全绿（附这次真实运行的输出）
-3. 找到原始 Discussion 文档路径 + 摘录 ≤5 行铲屎官原话
-4. 检查 worktree 工具落点（git status 干净）
-5. 匹配 reviewer（跨 family 优先）
-6. 用模板写 review 请求 → 存档 mailbox
-7. 发给 reviewer
-```
+只有 reviewer 需要启动未合入应用时才创建 detached / read-only sandbox：
 
-## Review 请求
-
-**使用 `refs/review-request-template.md` 模板**（单一真相源，不在此重复）。
-
-关键字段提醒：
-- **Original Requirements**: 必填，≤5 行铲屎官原话 + 来源文档路径，并明确请 reviewer 对照判断
-- **Open Questions**: 标注 review 重点，帮 reviewer 快速定位
-- **自检证据**: 附 quality-gate report 摘要 + 测试命令输出
-
-存档：*(internal reference removed)*
-
-### Review 沙盒约定（review-target-id）
-
-Review 请求必须包含 `review-target-id`，reviewer 据此创建标准路径的沙盒，merge-gate 回收时依赖此 ID。
-
-**review-target-id 推导规则：**
-- 分支名含 `fNNN` → 取 feature ID（如 `f113`）
-- 无 Feature ID → 取 branch slug（如 `fix-redis-keyprefix`）
-
-**在 review 请求信中附上：**
-```
-Review-Target-ID: {id}
-Branch: {branch-name}
-```
-
-**Reviewer 创建沙盒的标准路径：**
-```
+```text
 /tmp/cat-cafe-review/{review-target-id}/{reviewer-handle}
 ```
-例：`/tmp/cat-cafe-review/f113/codex`
 
-沙盒必须是 detached HEAD / read-only。要改代码 = TAKEOVER，开正式 worktree。
+创建时带出生声明，让 reaper 能识别生命周期：
+`pnpm worktree:new /tmp/cat-cafe-review/{id}/{reviewer} --base {exact-SHA} --owner {reviewer} --policy ttl --ttl-days 7 --role review --source-ref pr:{OWNER}/{REPO}#{PR_NUMBER}`。
+出生来源从本 invocation 的 thread/user 环境继承；独立 CLI 缺环境时显式带 `--thread-id {原threadId} --user-id {原userId}`，不猜平行线程。
+共享 post-checkout 会为带真实 invocation 来源的裸 Git 首次检出补 TTL 声明；这只是兜底，不替代 canonical new，`--no-checkout` 或无来源的外部命令仍需清单调查。
 
-## Block 场景
+统一入口 `pnpm review:start`，请求中记录实际 web/api 端口。只审 diff 或治理文字时不启动 sandbox；要改代码则 TAKEOVER，另开正式 worktree。
 
-**❌ 没有 quality-gate 报告**
+请求中明确沙盒收尾契约：登记 reviewer 在**每轮 verdict 前**停止自有预览、离开沙盒，执行 `worktree:finish` + 同源 `--check`，留下 released 或具名 retained（原因与最多30天截止）回执；不等作者合入。具体命令见 [receive-review 的沙盒生命周期](../receive-review/SKILL.md#review-沙盒生命周期)。没建沙盒不新增工位；blocked 如实回传。作者 merge-gate Step8.5 只读核对本 target 的残留与 owner，TTL/reaper 仅兜底。
 
-```
-⚠️ BLOCKED — 缺少 quality-gate 自检报告
+## Verdict return route
 
-请先运行 quality-gate skill，确认：
-- 原始需求逐项对照
-- 测试/lint/build 全绿
-- 有本轮输出证据
+### Review Entry Mode Classifier（先于 task / PR tracking）
 
-再发 review 请求。
-```
+exact-HEAD external PR review 在写 task 或 PR tracking instructions 时就必须定型，不能等 verdict 出来再补出口：
 
-**❌ 没有原始需求摘录**
+- `reviewMode=formal`（默认）：任务必须授权写回同一 GitHub subject。formal task/tracker 出现 `no-comment`、
+  “不要评论 GitHub”或“不落 GitHub”即互相矛盾，fail closed；退回改写，不能私下做完。
+- `reviewMode=advisory_read_only`（必须显式）：允许只读私下审计，但输出只能是 advisory findings；不得产出
+  `APPROVE` / `REQUEST_CHANGES` 完成态，也不得进入 `review-complete`。
+- `local_cat` handoff：继续走 author cat route，不因 review target 是 PR 而强制 GitHub comment。
 
-```
-⚠️ BLOCKED — 缺少原始需求文档
+先按 **author/custody/handoff source** 判 external / local_cat / unknown，再判 mode。不要把缺少 GitHub 写入授权
+静默解释为 advisory；没有显式 `advisory_read_only` 就按 formal 冲突处理。PR tracking 路径同样适用，旧
+instructions 中的 no-comment 禁令必须在新 HEAD 复审前清除。
 
-请附上：
-- 铲屎官 Discussion/Interview 文档路径
-- ≤5 行铲屎官原话摘录
+正式结论前按 **author/custody/handoff source** 分类，repo 名和 GitHub login 不参与分类：
 
-Reviewer 不只审代码质量，还要判断"这是铲屎官要的吗？"
-没有原始需求 = Reviewer 无法做愿景验证 = 有权拒绝审查。
-```
+- 外部作者或 external PR / Issue custody：verdict 必须写回同一 GitHub subject，并绑定精确 PR HEAD / Issue body digest；没有 review/comment URL 就还没完成。
+- 本地猫通过 `@` / handoff 交来的 review：默认走 author cat route。**direct review carrier** 是直接承载本轮 review 请求的 thread；它压过任务祖先 thread、旧 `sourceThreadId` 与继承 coordination。初审和复审都用 ordinary durable A2A（普通持久 A2A）：同 thread `post_message`，跨 thread `cross_post_message`，行首 `@reviewer`，并附 PR / exact HEAD（或文档 content digest）。不要附 structured action、review lease、generation、replacement authority 或 review coordination。
 
-**❌ 测试未通过**
+  reviewer 用同一 ordinary carrier 回行首 `@author`，并在同一次调用里带显式 `clientMessageId`、typed
+  `localReviewVerdict`（`approved | changes_requested | commented`）、`reviewedHeadSha`、`reviewSubjectRef`、
+  `acceptedSourceRef` 与 `acceptedRevision`。正文给出 reviewer identity、
+  findings / evidence refs；typed fact 才是 merge-gate 消费的 durable authority，公开正文格式不参与授权。
 
-```
-⚠️ BLOCKED — 测试未全绿
+### Accepted source revision
 
-请先修复，再发请求：
-  pnpm test                              # 必须 0 failures
-  pnpm --filter @cat-cafe/api test:redis # Redis 改动额外跑
+发 review 到 merge-gate 之间，author 必须将 durable fact 的 `acceptedRevision` 与 accepted source 的当前 revision
+按下列仓库命令做一次精确的 procedural 比较；当前没有 runtime consumer 代替 author 执行这道 fence：
 
-Reviewer 不应该是第一个发现测试失败的人。
-```
+- Feature 文档的 current revision 是当前 integration cut 上
+  `git log -1 --format=%H -- <acceptedSourceRef>` 返回的最后一次内容变更 commit；不能直接使用每次都会随无关
+  main 提交移动的 `HEAD`。
+- source message 的 current revision 就是 `threadId#messageId` 中同一个不可变 `messageId`。
+
+- 未移动：零提示、零 re-ack；
+- 移动：先回读同一个 `acceptedSourceRef`，在现有 PR/evidence packet 写一条
+  `Accepted-Source-Reack: <sourceRef>@<currentRevision>`，再继续 gate；
+- source ref 本身变了、revision 解析不了或 re-ack 仍指旧 revision：fail closed。不要用聊天概括、旧 verdict、
+  lease/generation/reentry 或第二份 source 正文补空。
+
+re-ack 只确认 author 已看到新的 source revision；它不批准新的代码 HEAD。代码有实质变化时仍按 exact-HEAD
+规则回 active review source。
+
+两条完成证据不能互相代偿。本地 review 只有在 **merge-gate、repository rule 或 operator** 明确要求时才额外写 GitHub；额外 artifact 不取代回作者猫的 custody。
+
+verdict 是这条 review 往返的最后一次必达投递。作者确认 exact target、`no open items` 后直接进入 merge-gate 或 clean-stop；不再为了“出口必须有 @”回传 courtesy ACK。
+
+新 exact HEAD 只有出现需要判断力的新信息才发起普通复审请求；旧 verdict 继续作为历史证据，但不能批准新 HEAD。cloud finding 不是把本地旧 reviewer 拉回来的理由，纯 ACK / 状态复述 / 无新信息也不是。local review 不使用复入字段、generation 或 replacement。
+
+需要额外 GitHub artifact 时，家里共享 GitHub login 不能用 `gh pr review --approve` 自我账号审批，应使用 `gh pr comment {N} --body-file <verdict.md>` 留逻辑 verdict，并包含：
+
+- APPROVE / REQUEST_CHANGES / COMMENT；
+- 覆盖的 final HEAD SHA；
+- 独立验证证据；
+- reviewer 自己的身份签名。
+
+共享 login 不改变“author catId ≠ reviewer catId”的铁律，也不能把平台 self-review 当成跨个体 review。
+
+## Feedback 循环
+
+- 普通 `iterative` review 的 P1/P2 修复后，只让**提出该 finding 的活跃 review source**覆盖新 HEAD。
+- 稀缺席位的 `one_shot_calibration` / `final_seal` findings 交回 author；普通修复不复入原稀缺 reviewer，仍需独立确认时选日常 reviewer 覆盖真实 delta 或 final HEAD。
+- cloud finding 修复回 cloud；local finding 修复回 local。不要把二者叠成常驻双门。
+- R2+ 同型 finding 再出现时，author 给出 Failure-Mode Sweep（pattern / scanned / fixed / N/A），避免 reviewer 逐点补锅。
+
+### 家里 R4 brake（action-time）
+
+自动发下一轮 review 前，从 durable thread history 读取同一 `reviewSubjectRef` 的 typed facts，只计
+`reviewerCatId != authorCatId && verdict=changes_requested`：
+
+`cat_cafe_get_thread_context` 的 `anchor` / `full` / `bounded` 消息投影都会把完整 artifact 投影为
+`localReviewFact`，并在每条 fact 上给出只针对该消息到达时刻的 `localReviewLoopBrakeOnArrival`。只有当前入站/触发消息就是这条 fact 时
+才消费该 sidecar；之后回读历史不能把旧 `pause_once` 再解释成一次新暂停。
+
+- history 不可读：`warn_open`，保留警告但不锁猫；
+- 新到达的 fact 让计数从 `<4` 跨到 `>=4`：本次自动 re-request **只暂停一次**，author 回读 accepted source，
+  写 Finding Pattern Summary（重复模式、共同根因、已扫 siblings、修复/不适用），然后由新的显式动作继续；
+- 同一 history 再处理、或第五轮及以后：继续，不重复暂停。
+
+author 自己的 verdict 不计数；不同 `reviewSubjectRef` 不串线。R4 不创建 Round/Reset、review lease、generation、
+replacement 或第二套 review 状态。
+
+## 正反灰例
+
+- 正例：skill/SOP 语义改动 → 按风险选一只非作者 local peer，同族也行；targeted checks，跳 cloud，SOP 元风险强制升档仍适用。
+- 正例：auth callback 变更 → cloud + 回调鉴权 / consumer 测试；若局部验证覆盖不了跨包影响才补 full，需要家里状态语义才叠 local。
+- 反例：local 已审纯文案，又因“流程到了”触发 cloud。
+- 反例：author 没 preview，要求 operator 截图后才肯发 review。
+- 灰例：前端 copy-only 改动仍应由 author preview；截图可选，DOM/页面证据足够时不阻塞。
+
+## Common Mistakes
+
+| 错误 | 后果 | 修正 |
+|---|---|---|
+| 把 local、cloud、guardian 当固定三连 | 同一风险重复付费 | 每个源写清独立触发理由 |
+| 所有请求都建 mailbox | 为追溯再造追溯 | light 用 thread/PR packet |
+| “没有截图”就把球扔给 operator | 用户替 author 做 QA | author 自跑 preview，截图只是载体 |
+| 只因 reviewer SHA ≠ 新 HEAD 就重开 review | 机械 rebase/合并重复烧判断力 | 先做 continuityProof；只有新增实质内容才回 active source |
+| 本地 finding 修完又找 cloud 续签 | review source 串线 | 回对应 active source |
+| verdict 后 author 再 `@reviewer` ACK | 双方无 open items 仍制造乒乓 | clean-stop；有实质新内容时发一条新的普通 review 请求 |
 
 ## 和其他 skill 的区别
 
-| Skill | 关注点 | 时机 |
-|-------|--------|------|
-| `quality-gate` | 自检（spec 对照 + 证据） | review **之前** |
-| **request-review（本 skill）** | 把改动送到 reviewer 面前 | 自检通过**之后** |
-| `receive-review` | 处理 reviewer 的反馈 | 收到 review **之后** |
-| `merge-gate` | 合入前的门禁 + PR + 云端 review | reviewer 放行**之后** |
+- `quality-gate`：author 自证；本 skill 是选中 local peer 后的独立验证。
+- `receive-review`：处理已经收到的 finding。
+- `merge-gate`：消费选定 review source 与验证证据，决定合入。
 
 ## 下一步
 
-Review 请求发出后 → 等 reviewer 回复 → **直接加载 `receive-review`** skill 处理反馈（SOP Step 3b）。SOP 链条自动推进，不要停下来问铲屎官（§17）。
+收到 local verdict 后进入 `receive-review`；放行且证据覆盖 final HEAD 后进入风险匹配的 `merge-gate`。

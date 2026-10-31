@@ -1,99 +1,17 @@
 ---
-feature_ids: []
+feature_ids: [F056]
 topics: [design, system]
 doc_kind: note
 created: 2026-02-26
+description: "已退役。Clowder AI 视觉 token 与规则的单一真相源是仓库根目录 DESIGN.md（F056 Phase F，2026-09-04）。"
+description_source: human
+description_author: fable-5
+description_updated_at: 2026-09-04T08:00:00Z
 ---
 
-# Cat Café Design System 🐾
+# Clowder AI Design System（已退役）
 
-> **Version**: 1.0.0
-> **Maintainer**: Gemini (Siamese)
-> **Last Updated**: 2026-02-05
-
-## 1. Brand Identity
-
-The **Cat Café** aesthetic is "Cozy, Playful, and Collaborative". It should feel like stepping into a warm, sunlit room with three distinct cat personalities.
-
-### Core Values
-- **Warmth**: Use soft, creamy backgrounds. Avoid stark white (#FFFFFF).
-- **Personality**: Each agent has a distinct visual voice (color, shape, tone).
-- **Clarity**: Despite the cuteness, UI elements must be legible and accessible.
-
----
-
-## 2. Color Palette
-
-We use a semantic variable system defined in `assets/themes/variables.css`.
-
-### Base Colors
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--bg-app` | `#FDF8F3` (Cream) | Main app background |
-| `--text-primary` | `#1E1E24` (Charcoal) | Body text |
-
-### Agent Identities
-
-#### 💜 Opus (The Architect)
-- **Primary**: `#9B7EBD` (Lavender)
-- **Role**: Backend, Core Structure
-- **Vibe**: Elegant, Mystical, Calm
-
-#### 💚 Codex (The Engineer)
-- **Primary**: `#5B8C5A` (Forest Green)
-- **Role**: Security, QA, Testing
-- **Vibe**: Reliable, Grounded, Structured
-
-#### 💙 Gemini (The Artist)
-- **Primary**: `#5B9BD5` (Sky Blue)
-- **Role**: UI/UX, Creativity
-- **Vibe**: Energetic, Fluid, Playful
-
-#### 🤎 Owner (The Shit Shoveler)
-- **Primary**: `#E29578` (Latte)
-- **Role**: Requirement Provider
-- **Vibe**: Warm, Supportive, Human
-
----
-
-## 3. UI Components
-
-### Message Bubbles (`.message-bubble`)
-
-| Agent | Shape Characteristics | Font |
-|-------|-----------------------|------|
-| **Opus** | Rounded with **Bottom-Left Point**. Elegant. | Sans-serif (Inter) |
-| **Codex** | Square-ish with **Bottom-Right Point**. | Monospace (Roboto Mono) |
-| **Gemini** | Super-rounded (20px) with **Top-Right Point**. | Sans-serif (Inter) |
-| **Owner** | Rounded with **Bottom-Right Point**. Right-aligned. | Sans-serif (Inter) |
-
-### Usage Example
-```html
-<!-- Opus Message -->
-<div class="message-bubble message-bubble--opus">
-  System initialized.
-</div>
-
-<!-- Codex Message -->
-<div class="message-bubble message-bubble--codex">
-  Tests passed.
-</div>
-```
-
----
-
-## 4. Assets & Sticker Guidelines
-
-### Avatars
-- **Size**: 256x256px
-- **Format**: PNG (Transparent background)
-- **Style**: Soft cel-shaded, colored border matching primary color.
-
-### Stickers (Expression Packs)
-- **Grid**: 3x4 layout (12 expressions per cat).
-- **Style**: Edge-to-edge cropping, no text labels.
-- **Key Expressions**: Happy, Thinking, Punching (Motion Blur), Identity-Specific (e.g. Wallet Burning).
-
----
-
-*Verified by Gemini 🐾 - "Make it pop!"*
+> **状态**：retired — 2026-09-04（F056 Phase F）。
+> **替代真相源**：仓库根目录 [`DESIGN.md`](../DESIGN.md)（Google DESIGN.md 开源规格：YAML token + 设计理由）。
+> **为什么退役**：本文件的"Cozy, Playful"色板与猫身份色是猫自己定的审美，从未与operator选定的参照对标。2026-09-04 operator选定 **Anthropic 暖编辑感 + Linear 精密结构** 为视觉基线（[thread-id]），种子取自两家真实站点提取的 DESIGN.md，见 F056 KD-37。
+> 历史版本可用 `git log -- docs/design-system.md` 回看；引用本文件的历史文档不改。

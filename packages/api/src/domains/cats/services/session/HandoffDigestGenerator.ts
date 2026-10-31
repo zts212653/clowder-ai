@@ -6,6 +6,7 @@
  * Hard timeout via AbortController. All failures degrade gracefully (return null).
  */
 
+import { buildProviderEndpoint } from '../../../../config/provider-endpoint.js';
 import type { HandoffInvocationSummary } from './TranscriptFormatter.js';
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
@@ -46,8 +47,9 @@ export async function generateHandoffDigest(opts: GenerateHandoffDigestOptions):
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await doFetch(`${baseUrl}/v1/messages`, {
+    const response = await doFetch(buildProviderEndpoint({ protocol: 'anthropic', baseUrl }), {
       method: 'POST',
+      redirect: 'error',
       headers: {
         'content-type': 'application/json',
         'x-api-key': opts.apiKey,

@@ -34,8 +34,9 @@ test('Windows installer headless Redis planning respects existing external Redis
   assert.match(uiHelpersScript, /Mode = "external"; RedisUrl = \$defaultRedisUrl/);
   assert.match(
     uiHelpersScript,
-    /if \(Test-InstallerConsoleUi\) \{ Read-Host " {2}External Redis URL" \} else \{ \$defaultRedisUrl \}/,
+    /if \(\$mode -eq "external"\) \{\s+if \(Test-InstallerConsoleUi\) \{\s+while \(-not \$redisUrl\) \{\s+\$redisUrl = \(Read-Host " {2}External Redis URL"\)\.Trim\(\)/s,
   );
+  assert.match(uiHelpersScript, /\} else \{\s+\$redisUrl = \$defaultRedisUrl\s+\}/);
 });
 
 test('Windows installer headless rerun preserves local authenticated Redis URL via keep_local mode', () => {
@@ -74,6 +75,16 @@ test('Windows installer validates external Redis URLs before persisting them', (
   );
 });
 
+test('Windows installer does not silently fall back to portable Redis when external URL is blank', () => {
+  assert.match(uiHelpersScript, /while \(-not \$redisUrl\) \{/);
+  assert.match(uiHelpersScript, /Write-Warn "External Redis URL is required when you choose external Redis\."/);
+  assert.doesNotMatch(uiHelpersScript, /External Redis URL empty - using local Redis setup/);
+  assert.doesNotMatch(
+    uiHelpersScript,
+    /if \(\$mode -eq "external" -and -not \$redisUrl\) \{\s+Write-Warn .*?\s+\$mode = "portable"\s+\}/s,
+  );
+});
+
 test('Windows installer ignores ambient REDIS_URL until this repo has its own .env', () => {
   const guardedAmbientPattern =
     /\$rawUrl = Get-InstallerEnvValueFromFile -EnvFile \$envFile -Key "REDIS_URL"\s+if \(-not \$rawUrl -and \(Test-Path \$envFile\) -and \$env:REDIS_URL\) \{\s+\$rawUrl = \$env:REDIS_URL\.Trim\(\)\s+\}/g;
@@ -95,11 +106,43 @@ test('Windows Redis auth helpers decode percent-escaped ACL credentials before i
   );
 });
 
+test('Windows RESP helpers use UTF-8 byte counts for bulk string lengths', () => {
+  assert.match(helpersScript, /function Format-RedisRespCommand/);
+  assert.match(helpersScript, /param\(\[string\[\]\]\$CommandArgs\)/);
+  assert.doesNotMatch(helpersScript, /param\(\[string\[\]\]\$Args\)/);
+  assert.match(helpersScript, /\[System\.Text\.Encoding\]::UTF8\.GetByteCount\(\$arg\)/);
+  assert.match(helpersScript, /\$utf8NoBom = \[System\.Text\.UTF8Encoding\]::new\(\$false\)/);
+  assert.match(helpersScript, /\$commandBytes = \$utf8NoBom\.GetBytes\(\$Command\)/);
+  assert.match(helpersScript, /\$Stream\.Write\(\$commandBytes, 0, \$commandBytes\.Length\)/);
+  assert.doesNotMatch(helpersScript, /Format-RedisRespCommand -Args/);
+  assert.doesNotMatch(helpersScript, /\$\(\$arg\.Length\)/);
+  assert.doesNotMatch(helpersScript, /\[System\.IO\.StreamWriter\]::new\(\$stream, \[System\.Text\.Encoding\]::UTF8\)/);
+});
+
 test('Windows portable Redis defers REDIS_URL to runtime instead of hardcoding localhost:6379', () => {
   assert.match(uiHelpersScript, /function Apply-InstallerRedisPlan/);
   assert.match(uiHelpersScript, /Add-InstallerEnvDelete \$State "REDIS_URL"/);
   assert.doesNotMatch(uiHelpersScript, /Set-InstallerEnvValue \$State "REDIS_URL" "redis:\/\/localhost:6379"/);
   assert.doesNotMatch(installScript, /REDIS_URL=redis:\/\/localhost:6379/);
+});
+
+test('Windows installer persists Redis env changes after generating .env without restoring auth prompts', () => {
+  const generateEnvStepIndex = installScript.indexOf('Write-Step "Step 4/7 - Generate .env"');
+  const envApplyIndex = installScript.indexOf('Apply-InstallerAuthEnv -State $authState -EnvFile $envFile');
+  const envLoadIndex = installScript.indexOf('Write-Ok ".env loaded into session"');
+  const cliStepIndex = installScript.indexOf('Write-Step "Step 6/7 - AI CLI tools"');
+  const verifyStepIndex = installScript.indexOf('Write-Step "Step 7/7 - Verify and launch"');
+
+  assert.notEqual(generateEnvStepIndex, -1, 'install.ps1 must still generate .env before env flush');
+  assert.notEqual(envApplyIndex, -1, 'installer must flush Redis EnvSetMap/EnvDeleteMap to .env');
+  assert.notEqual(envLoadIndex, -1, 'installer must still load .env into the current session');
+  assert.notEqual(cliStepIndex, -1, 'installer must still run CLI installation step');
+  assert.notEqual(verifyStepIndex, -1, 'installer must still run verification step');
+  assert.ok(generateEnvStepIndex < envApplyIndex, 'env flush must happen after .env exists');
+  assert.ok(envApplyIndex < envLoadIndex, 'env flush must happen before .env is loaded into the process env');
+  assert.ok(cliStepIndex < verifyStepIndex, 'verification must remain after CLI installation');
+  assert.doesNotMatch(installScript, /Configure-InstallerAuth -ProjectRoot/, 'must not restore removed auth prompts');
+  assert.doesNotMatch(installScript, /Write-Step "Step \d+\/\d+ - Auth config"/, 'must not restore auth config step');
 });
 
 test('Windows installer keeps portable Redis inside the project .cat-cafe directory', () => {
@@ -142,17 +185,14 @@ test('Windows installer prefers plain portable Redis zips before service bundles
   assert.ok(msys2Zip < msys2ServiceZip, 'portable zip should be preferred before service zip');
 });
 
-test('Windows Redis URL handling preserves external backends and treats localhost URLs with suffixes as local', () => {
+test('Windows Redis URL handling validates connectivity with RESP and detects external backends for shutdown skip', () => {
+  assert.match(startWindowsScript, /Test-RedisReachable -RedisUrl \$configuredRedisUrl/);
+  assert.match(helpersScript, /Format-RedisRespCommand -CommandArgs @\("PING"\)/);
   assert.match(startWindowsScript, /Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort/);
-  assert.match(helpersScript, /\$uri\.Host -notin @\("localhost", "127\.0\.0\.1"\)/);
-  assert.match(helpersScript, /if \(\$uri\.Port -gt 0 -and "\$\(\$uri\.Port\)" -ne "\$RedisPort"\) \{/);
+  assert.match(stopWindowsScript, /Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort/);
   assert.match(
     stopWindowsScript,
     /\$configuredRedisUrl = Get-InstallerEnvValueFromFile -EnvFile \$envFile -Key "REDIS_URL"\s+if \(-not \$configuredRedisUrl -and \$env:REDIS_URL\) \{\s+\$configuredRedisUrl = \$env:REDIS_URL\.Trim\(\)\s+\}/,
-  );
-  assert.match(
-    stopWindowsScript,
-    /if \(\$configuredRedisUrl -and -not \(Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort\)\) \{/,
   );
   assert.match(
     stopWindowsScript,
@@ -186,7 +226,12 @@ test('Windows startup preserves configured REDIS_URL with DB suffix after Redis 
   );
 });
 
-test('Windows startup passes localhost REDIS_URL auth into redis-server auto-start and authenticated ping', () => {
+test('Windows Test-LocalRedisUrl treats IPv6 loopback [::1] as local', () => {
+  assert.match(helpersScript, /\[System\.Net\.IPAddress\]::TryParse\(\$uri\.Host, \[ref\]\$ipAddress\)/);
+  assert.match(helpersScript, /\[System\.Net\.IPAddress\]::IsLoopback\(\$ipAddress\)/);
+});
+
+test('Windows startup passes localhost REDIS_URL auth into redis-server auto-start, probe, and shutdown', () => {
   assert.match(helpersScript, /function Get-RedisServerAuthArgs/);
   assert.match(helpersScript, /\$utf8NoBom = New-Object System\.Text\.UTF8Encoding\(\$false\)/);
   assert.match(helpersScript, /\[System\.IO\.File\]::WriteAllLines\(\$AclFilePath, \$aclLines, \$utf8NoBom\)/);
@@ -196,13 +241,13 @@ test('Windows startup passes localhost REDIS_URL auth into redis-server auto-sta
     startWindowsScript,
     /Get-RedisServerAuthArgs -RedisUrl \$configuredRedisUrl -AclFilePath \$redisAclFile/,
   );
+  assert.match(startWindowsScript, /Start-Job -Name "redis-bootstrap"/);
+  assert.match(startWindowsScript, /& \$launcherPath @launcherArgs 2>&1/);
 
-  const pingMatches = startWindowsScript.match(
-    /\$redisPing = & \$redisCliPath -p \$RedisPort @redisAuthArgs ping 2>\$null/g,
+  assert.match(startWindowsScript, /Test-RedisReachable -RedisUrl \$localUrl/);
+  assert.match(
+    startWindowsScript,
+    /\$managedShutdownUrl = if \(\$configuredRedisUrl\) \{ \$configuredRedisUrl \} else \{ "redis:\/\/localhost:\$RedisPort" \}/,
   );
-  assert.ok(
-    pingMatches && pingMatches.length >= 2,
-    `Expected authenticated redis-cli ping in both already-running and auto-start branches, found ${pingMatches ? pingMatches.length : 0}`,
-  );
-  assert.match(startWindowsScript, /& \$redisCliPath -p \$RedisPort @redisAuthArgs shutdown save 2>\$null/);
+  assert.match(startWindowsScript, /Send-RedisShutdown -RedisUrl \$managedShutdownUrl/);
 });

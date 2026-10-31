@@ -1,0 +1,285 @@
+'use client';
+
+import React, { useCallback, useEffect, useState } from 'react';
+import { apiFetch } from '@/utils/api-client';
+import { CreateCollectionDialog } from './CreateCollectionDialog';
+
+interface CollectionItem {
+  manifest: {
+    id: string;
+    displayName: string;
+    kind: string;
+    sensitivity: string;
+    status?: string;
+  };
+  overview: {
+    docCount: number;
+    topKinds: Array<{ kind: string; count: number }>;
+    recentAnchors: Array<{ anchor: string; title: string; updatedAt: string }>;
+  } | null;
+  health: {
+    indexFreshness: string;
+    pendingReviewCount: number;
+  } | null;
+}
+
+interface DocumentGroup {
+  kind: string;
+  count: number;
+  hasMore: boolean;
+  documents: Array<{ anchor: string; title: string; updatedAt: string; status: string }>;
+}
+
+const SENSITIVITY_BADGE: Record<string, string> = {
+  public: 'bg-conn-green-bg text-conn-emerald-text',
+  internal: 'bg-[var(--semantic-info-surface)] text-conn-blue-text',
+  private: 'bg-conn-amber-bg text-conn-amber-text',
+  restricted: 'bg-conn-red-bg text-conn-red-text',
+};
+
+const STATUS_BADGE: Record<string, string> = {
+  registered: 'bg-cafe-surface-elevated text-cafe-secondary',
+  indexing: 'bg-[var(--semantic-info-surface)] text-[var(--semantic-info)]',
+  active: 'bg-conn-green-bg text-conn-emerald-text',
+  stale: 'bg-conn-amber-bg text-conn-amber-text',
+  blocked: 'bg-conn-red-bg text-conn-red-text',
+  archived: 'bg-cafe-surface text-cafe-muted',
+};
+
+function CollectionDetail({ collectionId }: { collectionId: string }) {
+  const [groups, setGroups] = useState<DocumentGroup[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch(`/api/library/${encodeURIComponent(collectionId)}/documents`)
+      .then((r) => r.json())
+      .then((data) => setGroups(data.groups ?? []))
+      .catch(() => setGroups([]))
+      .finally(() => setLoading(false));
+  }, [collectionId]);
+
+  if (loading) {
+    return <div className="text-xs text-cafe-secondary py-2">加载文档...</div>;
+  }
+
+  if (groups.length === 0) {
+    return <div className="text-xs text-cafe-secondary py-2">暂无已索引文档。</div>;
+  }
+
+  return (
+    <div className="mt-3 space-y-3" data-testid={`collection-detail-${collectionId}`}>
+      {groups.map((g) => (
+        <div key={g.kind}>
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className="text-xs font-medium text-cafe-primary capitalize">{g.kind}</span>
+            <span className="text-micro text-cafe-secondary">({g.count})</span>
+          </div>
+          <ul className="space-y-0.5 pl-3">
+            {g.documents.map((doc) => (
+              <li key={doc.anchor} className="text-xs text-cafe-secondary flex items-baseline gap-1.5">
+                <span className="truncate" title={doc.anchor}>
+                  {doc.title || doc.anchor}
+                </span>
+                {doc.updatedAt && (
+                  <span className="text-micro text-cafe-tertiary shrink-0">{doc.updatedAt.slice(0, 10)}</span>
+                )}
+              </li>
+            ))}
+            {g.hasMore && (
+              <li className="text-micro text-cafe-tertiary italic">还有 {g.count - g.documents.length} 条...</li>
+            )}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function CollectionCatalog() {
+  const [collections, setCollections] = useState<CollectionItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  const loadCatalog = useCallback(() => {
+    apiFetch('/api/library/catalog')
+      .then((r) => r.json())
+      .then((data) => setCollections(data.collections ?? []))
+      .catch(() => setCollections([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadCatalog();
+  }, [loadCatalog]);
+
+  const toggleExpand = useCallback((id: string) => {
+    setExpandedId((prev) => (prev === id ? null : id));
+  }, []);
+
+  const handleArchive = useCallback(
+    async (id: string) => {
+      setActionLoading(id);
+      try {
+        await apiFetch(`/api/library/${encodeURIComponent(id)}/archive`, { method: 'POST' });
+        loadCatalog();
+      } finally {
+        setActionLoading(null);
+      }
+    },
+    [loadCatalog],
+  );
+
+  const handleUnarchive = useCallback(
+    async (id: string) => {
+      setActionLoading(id);
+      try {
+        await apiFetch(`/api/library/${encodeURIComponent(id)}/unarchive`, { method: 'POST' });
+        loadCatalog();
+      } finally {
+        setActionLoading(null);
+      }
+    },
+    [loadCatalog],
+  );
+
+  const handleRebuild = useCallback(
+    async (id: string) => {
+      setActionLoading(id);
+      try {
+        await apiFetch(`/api/library/${encodeURIComponent(id)}/rebuild`, { method: 'POST' });
+        loadCatalog();
+      } finally {
+        setActionLoading(null);
+      }
+    },
+    [loadCatalog],
+  );
+
+  if (loading) {
+    return <div className="p-4 text-cafe-secondary text-sm">加载集合...</div>;
+  }
+
+  return (
+    <div data-testid="collection-catalog">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs text-cafe-secondary">{collections.length} 个集合</span>
+        <button
+          type="button"
+          onClick={() => setShowCreate(true)}
+          className="px-3 py-1 text-xs text-[var(--cafe-surface)] bg-cafe-accent rounded-lg hover:bg-cafe-interactive"
+          data-testid="create-collection-btn"
+        >
+          + 新建集合
+        </button>
+      </div>
+      {showCreate && (
+        <CreateCollectionDialog
+          onClose={() => setShowCreate(false)}
+          onCreated={() => {
+            setShowCreate(false);
+            loadCatalog();
+          }}
+        />
+      )}
+      {collections.length === 0 && <div className="p-4 text-cafe-secondary text-sm">暂无已注册集合。</div>}
+      <div className="grid gap-3">
+        {collections.map((c) => {
+          const isExpanded = expandedId === c.manifest.id;
+          const status = c.manifest.status ?? 'active';
+          const isArchived = status === 'archived';
+          const isBusy = actionLoading === c.manifest.id;
+          return (
+            <div
+              key={c.manifest.id}
+              className={`rounded-lg bg-[var(--console-card-bg)] p-4 transition-colors ${isArchived ? 'opacity-60' : ''}`}
+              data-testid={`collection-card-${c.manifest.id}`}
+            >
+              <button
+                type="button"
+                className="flex items-center gap-2 mb-2 w-full text-left cursor-pointer"
+                aria-expanded={isExpanded}
+                onClick={() => toggleExpand(c.manifest.id)}
+              >
+                <span className="text-xs select-none">{isExpanded ? '▼' : '▶'}</span>
+                {(c.manifest.sensitivity === 'private' || c.manifest.sensitivity === 'restricted') && (
+                  <span className="text-xs select-none" title={`${c.manifest.sensitivity} collection`}>
+                    🔒
+                  </span>
+                )}
+                <span className="font-semibold text-sm text-cafe-primary">{c.manifest.displayName}</span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-micro font-medium ${SENSITIVITY_BADGE[c.manifest.sensitivity] ?? ''}`}
+                >
+                  {c.manifest.sensitivity}
+                </span>
+                <span className={`rounded-full px-2 py-0.5 text-micro font-medium ${STATUS_BADGE[status] ?? ''}`}>
+                  {status}
+                </span>
+                <span className="text-micro text-cafe-secondary">{c.manifest.kind}</span>
+              </button>
+              {c.overview && (
+                <div className="text-xs text-cafe-secondary">
+                  <span>{c.overview.docCount} 篇文档</span>
+                  {c.overview.topKinds.length > 0 && (
+                    <span className="ml-2">
+                      热门:{' '}
+                      {c.overview.topKinds
+                        .slice(0, 3)
+                        .map((k) => `${k.kind}(${k.count})`)
+                        .join(', ')}
+                    </span>
+                  )}
+                </div>
+              )}
+              {c.health && (
+                <div className="text-xs text-cafe-secondary mt-1">
+                  <span>最近索引: {c.health.indexFreshness || '从未'}</span>
+                  {c.health.pendingReviewCount > 0 && (
+                    <span className="ml-2 text-conn-amber-text">{c.health.pendingReviewCount} 条待审核</span>
+                  )}
+                </div>
+              )}
+              <div className="mt-2 flex gap-2">
+                {isArchived ? (
+                  <button
+                    type="button"
+                    onClick={() => handleUnarchive(c.manifest.id)}
+                    disabled={isBusy}
+                    className="px-2.5 py-1 text-xs rounded-lg bg-[var(--console-card-bg)] text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] hover:bg-[var(--console-hover-bg)] disabled:opacity-50"
+                    data-testid={`unarchive-${c.manifest.id}`}
+                  >
+                    {isBusy ? '...' : '取消归档'}
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleRebuild(c.manifest.id)}
+                      disabled={isBusy}
+                      className="px-2.5 py-1 text-xs rounded-lg bg-[var(--console-card-bg)] text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] hover:bg-[var(--console-hover-bg)] disabled:opacity-50"
+                      data-testid={`rebuild-${c.manifest.id}`}
+                    >
+                      {isBusy ? '...' : '重建索引'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleArchive(c.manifest.id)}
+                      disabled={isBusy}
+                      className="px-2.5 py-1 text-xs rounded-lg bg-[var(--console-card-bg)] text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] hover:bg-[var(--console-hover-bg)] disabled:opacity-50"
+                      data-testid={`archive-${c.manifest.id}`}
+                    >
+                      {isBusy ? '...' : '归档'}
+                    </button>
+                  </>
+                )}
+              </div>
+              {isExpanded && <CollectionDetail collectionId={c.manifest.id} />}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

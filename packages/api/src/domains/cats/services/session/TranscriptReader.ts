@@ -12,6 +12,10 @@ import { createReadStream } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { normalizeTranscriptEvent } from './TranscriptEventEnvelope.js';
+import { formatEventsHandoff, type HandoffInvocationSummary } from './TranscriptFormatter.js';
+import { TranscriptInvocationReader } from './transcript-index/TranscriptInvocationReader.js';
+import type { IndexedSession } from './transcript-index/transcript-invocation-index-types.js';
 
 export interface TranscriptEvent {
   v: number;
@@ -19,7 +23,7 @@ export interface TranscriptEvent {
   threadId: string;
   catId: string;
   sessionId: string;
-  cliSessionId: string;
+  cliSessionId?: string;
   invocationId?: string;
   eventNo: number;
   event: Record<string, unknown>;
@@ -36,6 +40,17 @@ export interface ReadEventsResult {
   events: TranscriptEvent[];
   nextCursor?: { eventNo: number };
   total: number;
+}
+
+export interface ReadEventsHandoffResult {
+  invocations: HandoffInvocationSummary[];
+  nextCursor?: { eventNo: number };
+  total: number;
+}
+
+export interface ScanEventsResult {
+  present: boolean;
+  eventCount: number;
 }
 
 export interface SearchHit {
@@ -105,7 +120,8 @@ export class TranscriptReader {
       if (line.trim().length === 0) continue;
       if (lineNo >= startEventNo && events.length < limit) {
         try {
-          events.push(JSON.parse(line) as TranscriptEvent);
+          const event = normalizeTranscriptEvent(JSON.parse(line));
+          if (event) events.push(event);
         } catch {
           /* skip malformed lines */
         }
@@ -126,6 +142,94 @@ export class TranscriptReader {
       events,
       ...(hasMore ? { nextCursor: { eventNo: lastEventNo + 1 } } : {}),
       total,
+    };
+  }
+
+  /**
+   * Read events in handoff view with invocation-level pagination.
+   *
+   * Unlike readEvents() which paginates raw events, this method:
+   * 1. Reads ALL events from the sealed session
+   * 2. Groups them into complete invocation summaries
+   * 3. Paginates by raw-event budget, accumulating complete invocations
+   *
+   * The cursor and total use raw eventNo units — same as raw/chat views —
+   * so the external API contract (nextCursor.eventNo) is preserved.
+   * Each invocation appears exactly once with complete tool calls,
+   * error counts, and key messages.
+   *
+   * If a single invocation exceeds the limit, the page overflows to
+   * include it (at least one complete summary per page).
+   */
+  async readEventsHandoff(
+    sessionId: string,
+    threadId: string,
+    catId: string,
+    cursor?: { eventNo: number },
+    limit = 50,
+  ): Promise<ReadEventsHandoffResult> {
+    const allEvents = await this.readAllEvents(sessionId, threadId, catId);
+    if (allEvents.length === 0) {
+      return { invocations: [], total: 0 };
+    }
+
+    // Group events by invocationId, preserving insertion order
+    const groups = new Map<string, TranscriptEvent[]>();
+    for (const evt of allEvents) {
+      const key = evt.invocationId ?? '_unknown';
+      let group = groups.get(key);
+      if (!group) {
+        group = [];
+        groups.set(key, group);
+      }
+      group.push(evt);
+    }
+
+    // Build ordered invocation metadata with first/last eventNo
+    const invocationMeta: Array<{ firstEventNo: number; lastEventNo: number; eventCount: number }> = [];
+    for (const [, events] of groups) {
+      invocationMeta.push({
+        firstEventNo: events[0].eventNo,
+        lastEventNo: events[events.length - 1].eventNo,
+        eventCount: events.length,
+      });
+    }
+
+    // Format all events into summaries (same insertion order as groups)
+    const allSummaries = formatEventsHandoff(allEvents);
+
+    // Find starting invocation: first whose lastEventNo >= cursor.
+    // This correctly hits the invocation *containing* cursor.eventNo
+    // (e.g. cursor=55 inside inv-A spanning 0-59 → returns inv-A).
+    let startIdx = 0;
+    if (cursor) {
+      startIdx = invocationMeta.findIndex((m) => m.lastEventNo >= cursor.eventNo);
+      if (startIdx === -1) {
+        return { invocations: [], total: allEvents.length };
+      }
+    }
+
+    // Accumulate complete invocations by raw-event budget.
+    // Always include at least one invocation even if it exceeds the limit.
+    let eventBudget = 0;
+    let endIdx = startIdx;
+    while (endIdx < invocationMeta.length) {
+      const invEventCount = invocationMeta[endIdx].eventCount;
+      if (eventBudget > 0 && eventBudget + invEventCount > limit) break;
+      eventBudget += invEventCount;
+      endIdx++;
+    }
+
+    const pageSummaries = allSummaries.slice(startIdx, endIdx).map((summary, index) => ({
+      ...summary,
+      startEventNo: invocationMeta[startIdx + index].firstEventNo,
+    }));
+    const hasMore = endIdx < invocationMeta.length;
+
+    return {
+      invocations: pageSummaries,
+      ...(hasMore ? { nextCursor: { eventNo: invocationMeta[endIdx].firstEventNo } } : {}),
+      total: allEvents.length,
     };
   }
 
@@ -220,7 +324,8 @@ export class TranscriptReader {
               if (hits.length >= limit) break;
               if (line.toLowerCase().includes(needle)) {
                 try {
-                  const evt = JSON.parse(line) as TranscriptEvent;
+                  const evt = normalizeTranscriptEvent(JSON.parse(line));
+                  if (!evt) continue;
                   hits.push({
                     score: 0.8,
                     sessionId,
@@ -255,35 +360,67 @@ export class TranscriptReader {
     threadId: string,
     catId: string,
     invocationId: string,
+    signal?: AbortSignal,
   ): Promise<TranscriptEvent[] | null> {
-    const sessionDir = this.sessionDir(threadId, catId, sessionId);
-    const jsonlPath = join(sessionDir, 'events.jsonl');
+    const pages = await this.readInvocationEventsForSessions(
+      [{ id: sessionId, threadId, catId, seq: 0, status: 'sealed' }],
+      invocationId,
+      signal,
+    );
+    const events = pages.get(sessionId) ?? [];
+    return events.length > 0 ? events : null;
+  }
+
+  /** Batched canonical resolution avoids one worker and one whole-file scan per session. */
+  async readInvocationEventsForSessions(
+    sessions: readonly IndexedSession[],
+    invocationId: string,
+    signal?: AbortSignal,
+  ): Promise<Map<string, TranscriptEvent[]>> {
+    const pages = await new TranscriptInvocationReader(this).readInvocation(sessions, invocationId, {}, signal);
+    return new Map([...pages].map(([id, page]) => [id, page.events]));
+  }
+
+  /**
+   * Visit a transcript incrementally without retaining the full JSONL payload.
+   * Consumers that aggregate across many sessions must prefer this boundary to
+   * readAllEvents(), whose returned array scales with the entire transcript.
+   */
+  async scanEvents(
+    sessionId: string,
+    threadId: string,
+    catId: string,
+    visitor: (event: TranscriptEvent) => void | Promise<void>,
+    signal?: AbortSignal,
+  ): Promise<ScanEventsResult> {
+    signal?.throwIfAborted();
+    const jsonlPath = join(this.sessionDir(threadId, catId, sessionId), 'events.jsonl');
 
     try {
       await stat(jsonlPath);
     } catch {
-      return null;
+      return { present: false, eventCount: 0 };
     }
 
-    const events: TranscriptEvent[] = [];
+    let eventCount = 0;
     const rl = createInterface({
-      input: createReadStream(jsonlPath, 'utf-8'),
+      input: createReadStream(jsonlPath, { encoding: 'utf-8', signal }),
       crlfDelay: Infinity,
     });
-
     for await (const line of rl) {
+      signal?.throwIfAborted();
       if (line.trim().length === 0) continue;
+      let event: TranscriptEvent | undefined;
       try {
-        const evt = JSON.parse(line) as TranscriptEvent;
-        if (evt.invocationId === invocationId) {
-          events.push(evt);
-        }
+        event = normalizeTranscriptEvent(JSON.parse(line));
       } catch {
-        /* skip malformed */
+        /* skip malformed lines */
       }
+      if (!event) continue;
+      eventCount += 1;
+      await visitor(event);
     }
-
-    return events.length > 0 ? events : null;
+    return { present: true, eventCount };
   }
 
   /**
@@ -304,7 +441,13 @@ export class TranscriptReader {
    * Read ALL events from a sealed session transcript (no limit).
    * F065 Phase C: needed for handoff digest generation on long sessions.
    */
-  async readAllEvents(sessionId: string, threadId: string, catId: string): Promise<TranscriptEvent[]> {
+  async readAllEvents(
+    sessionId: string,
+    threadId: string,
+    catId: string,
+    signal?: AbortSignal,
+  ): Promise<TranscriptEvent[]> {
+    signal?.throwIfAborted();
     const jsonlPath = join(this.sessionDir(threadId, catId, sessionId), 'events.jsonl');
 
     try {
@@ -315,14 +458,16 @@ export class TranscriptReader {
 
     const events: TranscriptEvent[] = [];
     const rl = createInterface({
-      input: createReadStream(jsonlPath, 'utf-8'),
+      input: createReadStream(jsonlPath, { encoding: 'utf-8', signal }),
       crlfDelay: Infinity,
     });
 
     for await (const line of rl) {
+      signal?.throwIfAborted();
       if (line.trim().length === 0) continue;
       try {
-        events.push(JSON.parse(line) as TranscriptEvent);
+        const event = normalizeTranscriptEvent(JSON.parse(line));
+        if (event) events.push(event);
       } catch {
         /* skip malformed */
       }

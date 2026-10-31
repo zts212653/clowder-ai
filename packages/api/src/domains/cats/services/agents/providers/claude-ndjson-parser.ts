@@ -6,6 +6,8 @@
 
 import type { CatId } from '@cat-cafe/shared';
 import type { AgentMessage, TokenUsage } from '../../types.js';
+import { extractClaudeMcpStatusSnapshot } from './claude-mcp-status.js';
+import { type ClaudeTextBoundaryState, withClaudeMessageBoundary } from './claude-text-boundaries.js';
 
 /**
  * Transform a raw Claude CLI NDJSON event into AgentMessage(s).
@@ -21,6 +23,7 @@ export function transformClaudeEvent(
     lastTurnInputTokens: number | undefined;
     /** F045: Accumulate thinking_delta chunks until content_block_stop */
     thinkingBuffer: string;
+    textBoundaryState?: ClaudeTextBoundaryState;
   },
 ): AgentMessage | AgentMessage[] | null {
   if (typeof event !== 'object' || event === null) return null;
@@ -83,7 +86,9 @@ export function transformClaudeEvent(
 
     if (s.type === 'message_stop') {
       streamState.currentMessageId = undefined;
-      return null;
+      // F153 Phase I: emit telemetry-only agent_loop marker (provider-agnostic anchor at LLM call boundary,
+      // per KD-31/KD-33). invoke-single-cat consumes this to increment recordAgentLoop; never reaches outputs.
+      return { type: 'agent_loop' as const, catId, timestamp: Date.now() };
     }
 
     // F045: Reset thinking buffer when a thinking block starts
@@ -119,10 +124,11 @@ export function transformClaudeEvent(
       if (streamState.currentMessageId) {
         streamState.partialTextMessageIds.add(streamState.currentMessageId);
       }
+      streamState.textBoundaryState ??= {};
       return {
         type: 'text',
         catId,
-        content: d.text,
+        content: withClaudeMessageBoundary(d.text, streamState.currentMessageId, streamState.textBoundaryState),
         timestamp: Date.now(),
       };
     }
@@ -149,23 +155,47 @@ export function transformClaudeEvent(
   if (e.type === 'system' && e.subtype === 'init') {
     const sessionId = e.session_id;
     if (typeof sessionId === 'string') {
-      return {
+      const sessionInit = {
         type: 'session_init',
         catId,
         sessionId,
         timestamp: Date.now(),
-      };
+      } satisfies AgentMessage;
+      const mcpStatus = extractClaudeMcpStatusSnapshot(e.mcp_servers);
+      if (!mcpStatus) return sessionInit;
+      return [
+        sessionInit,
+        {
+          type: 'system_info',
+          catId,
+          content: JSON.stringify({
+            type: 'mcp_server_status',
+            provider: 'claude',
+            catId,
+            sessionId,
+            pendingMeaning: 'deferred_tool_loading',
+            ...mcpStatus,
+          }),
+          timestamp: Date.now(),
+        },
+      ];
     }
     return null;
   }
 
-  // F045: system/compact_boundary → system_info
+  // F296 B3b-3: system/compact_boundary → typed provider signal. The JSON
+  // content stays for UI diagnostics, but epoch consumers use the structural
+  // field below and never parse a marker substring.
   if (e.type === 'system' && e.subtype === 'compact_boundary') {
     const preTokens = typeof e.pre_tokens === 'number' ? e.pre_tokens : undefined;
     return {
-      type: 'system_info',
+      type: 'provider_signal',
       catId,
       content: JSON.stringify({ type: 'compact_boundary', catId, preTokens }),
+      contextCompaction: {
+        eventSource: 'claude_compact_boundary',
+        ...(preTokens !== undefined ? { preTokens } : {}),
+      },
       timestamp: Date.now(),
     };
   }
@@ -177,32 +207,91 @@ export function transformClaudeEvent(
     const skipFinalText = Boolean(messageId && streamState.partialTextMessageIds.has(messageId));
     const content = message?.content;
     if (!Array.isArray(content)) return null;
+    const hasTextBlock = content.some((block) => {
+      if (typeof block !== 'object' || block === null) return false;
+      const candidate = block as Record<string, unknown>;
+      return candidate.type === 'text' && typeof candidate.text === 'string' && candidate.text.length > 0;
+    });
+
+    // F230: Claude CLI can synthesize local assistant entries without an LLM
+    // response. Keep that provider provenance structured here, before ordinary
+    // assistant text is emitted:
+    //   - API/Error payloads become error events;
+    //   - "No response requested." and future synthetic variants produce no cat
+    //     output.
+    // Consumers must not infer this boundary from punctuation inside raw text.
+    if (message?.model === '<synthetic>') {
+      const syntheticText = content.find(
+        (block) =>
+          typeof block === 'object' &&
+          block !== null &&
+          (block as Record<string, unknown>).type === 'text' &&
+          typeof (block as Record<string, unknown>).text === 'string',
+      ) as { text?: string } | undefined;
+      const text = syntheticText?.text ?? '';
+      if (text.startsWith('API Error:') || text.startsWith('Error:')) {
+        return {
+          type: 'error',
+          catId,
+          error: text,
+          errorDisposition: 'transient',
+          timestamp: Date.now(),
+        };
+      }
+      return null;
+    }
 
     const messages: AgentMessage[] = [];
     for (const block of content) {
       if (typeof block !== 'object' || block === null) continue;
       const b = block as Record<string, unknown>;
 
-      if (b.type === 'text' && typeof b.text === 'string') {
+      if (b.type === 'text' && typeof b.text === 'string' && b.text.length > 0) {
         if (skipFinalText) continue;
+        streamState.textBoundaryState ??= {};
         messages.push({
           type: 'text',
           catId,
-          content: b.text,
+          content: withClaudeMessageBoundary(b.text, messageId, streamState.textBoundaryState),
           timestamp: Date.now(),
         });
       } else if (b.type === 'tool_use' && typeof b.name === 'string') {
-        messages.push({
+        const msg: AgentMessage = {
           type: 'tool_use',
           catId,
           toolName: b.name,
           toolInput: (b.input as Record<string, unknown>) ?? {},
           timestamp: Date.now(),
-        });
+        };
+        if (typeof b.id === 'string') msg.toolUseId = b.id;
+        messages.push(msg);
       }
     }
-    if (messageId && skipFinalText) {
+    // #1272: Claude can split one message ID across thinking/text/tool assistant
+    // envelopes. A thinking-only or tool-only envelope is not proof that the
+    // text-bearing final snapshot has arrived; clearing here makes that later
+    // snapshot look new and re-emits text already delivered by text_delta.
+    if (messageId && skipFinalText && hasTextBlock) {
       streamState.partialTextMessageIds.delete(messageId);
+    }
+    // #778: thinking-only final message — emit thinking as system_info so the
+    // frontend can attach it to a message bubble. Streaming thinking_delta
+    // normally captures content; this is a safety net for edge cases
+    // (network loss, non-streaming mode, lost deltas).
+    if (messages.length === 0) {
+      const thinkingBlock = content.find(
+        (b) => typeof b === 'object' && b !== null && (b as Record<string, unknown>).type === 'thinking',
+      ) as { thinking?: string; text?: string } | undefined;
+      if (thinkingBlock) {
+        // Claude thinking blocks use `thinking` field; fall back to `text` for safety
+        const thinkingText = thinkingBlock.thinking ?? thinkingBlock.text ?? '';
+        return {
+          type: 'system_info' as AgentMessage['type'],
+          catId,
+          content: JSON.stringify({ type: 'thinking', catId, text: thinkingText }),
+          timestamp: Date.now(),
+        };
+      }
     }
     return messages.length > 0 ? messages : null;
   }
@@ -219,24 +308,33 @@ export function transformClaudeEvent(
     };
   }
 
+  // #1272: result is the invocation terminal boundary. Clear any IDs that had
+  // partial text but no later text-bearing assistant envelope so state cannot
+  // leak into a subsequent invocation/session.
+  if (e.type === 'result') {
+    streamState.partialTextMessageIds.clear();
+  }
+
   // result/error → error message (F045: include errorSubtype)
   // Issue #24: Use subtype as fallback when errors array is empty
-  if (e.type === 'result' && e.subtype !== 'success') {
+  if (isResultErrorEvent(e)) {
     const rawErrors = Array.isArray(e.errors) ? e.errors : [];
     const errors = rawErrors.filter((item): item is string => typeof item === 'string').join('; ');
+    const resultText = typeof e.result === 'string' ? e.result : '';
     const subtype = typeof e.subtype === 'string' ? e.subtype : undefined;
     const subtypeLabels: Record<string, string> = {
       error_max_turns: 'Max turns exceeded',
       error_max_budget_usd: 'Budget limit reached',
       error_during_execution: 'Execution error',
       error_max_structured_output_retries: 'Structured output retries exceeded',
+      success: 'Claude result error',
     };
     const fallbackError = subtype ? (subtypeLabels[subtype] ?? `Agent error (${subtype})`) : 'Unknown error';
     return {
       type: 'error',
       catId,
-      error: errors || fallbackError,
-      content: JSON.stringify({ errorSubtype: subtype }),
+      error: errors || resultText || fallbackError,
+      content: JSON.stringify({ errorSubtype: subtype, isError: e.is_error === true }),
       timestamp: Date.now(),
     };
   }
@@ -248,7 +346,7 @@ export function transformClaudeEvent(
 export function isResultErrorEvent(event: unknown): boolean {
   if (typeof event !== 'object' || event === null) return false;
   const e = event as Record<string, unknown>;
-  return e.type === 'result' && e.subtype !== 'success';
+  return e.type === 'result' && (e.is_error === true || e.subtype !== 'success');
 }
 
 /** F8: Extract token usage from Claude result/success event.

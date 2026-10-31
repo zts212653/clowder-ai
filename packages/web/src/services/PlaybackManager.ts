@@ -1,6 +1,17 @@
 import type { VoiceChunkEvent, VoiceStreamEndEvent, VoiceStreamStartEvent } from '@cat-cafe/shared';
 
 export type PlaybackManagerState = 'idle' | 'playing' | 'paused';
+export type PlaybackSource = 'voice' | 'podcast' | 'listen';
+export type EnqueueUrlResult = 'enqueued' | 'failed' | 'cancelled';
+
+export interface PlaybackSnapshot {
+  state: PlaybackManagerState;
+  source: PlaybackSource | null;
+  itemIndex: number;
+  currentTime: number;
+  duration: number;
+  playbackRate: number;
+}
 
 export interface PlaybackManagerCallbacks {
   onStateChange: (state: PlaybackManagerState) => void;
@@ -9,6 +20,12 @@ export interface PlaybackManagerCallbacks {
 }
 
 let domAudio: HTMLAudioElement | null = null;
+
+interface PlaybackEntry {
+  url: string;
+  completesItem: boolean;
+  durationSec?: number;
+}
 
 function getDomAudio(): HTMLAudioElement {
   if (domAudio) return domAudio;
@@ -22,13 +39,19 @@ function getDomAudio(): HTMLAudioElement {
 }
 
 export class PlaybackManager {
-  private queue: string[] = [];
+  private queue: PlaybackEntry[] = [];
   private blobUrls: string[] = [];
+  private activeEntry: PlaybackEntry | null = null;
+  private itemElapsed = 0;
   private state: PlaybackManagerState = 'idle';
   private activeInvocationId: string | null = null;
   private streamDone = false;
   private firstChunkPlayed = false;
   private callbacks: PlaybackManagerCallbacks;
+  private source: PlaybackSource | null = null;
+  private playbackRate = 1;
+  private pendingSeekSeconds: number | null = null;
+  private listeners = new Set<(snapshot: PlaybackSnapshot) => void>();
   /** Track completed items within a batch (for podcast progress tracking). */
   private batchItemIndex = 0;
   private batchMode = false;
@@ -40,13 +63,15 @@ export class PlaybackManager {
   }
 
   handleStreamStart(event: VoiceStreamStartEvent): void {
-    if (this.activeInvocationId && this.activeInvocationId !== event.invocationId) {
+    if (this.source !== null && (this.source !== 'voice' || this.activeInvocationId !== event.invocationId)) {
       this.interrupt();
     }
+    this.source = 'voice';
     this.activeInvocationId = event.invocationId;
     this.streamDone = false;
     this.firstChunkPlayed = false;
     this.batchMode = false;
+    this.emitSnapshot();
   }
 
   handleChunk(event: VoiceChunkEvent): void {
@@ -64,11 +89,11 @@ export class PlaybackManager {
 
     if (!this.firstChunkPlayed && this.state !== 'paused') {
       this.firstChunkPlayed = true;
-      this.playUrl(blobUrl);
+      this.playEntry({ url: blobUrl, completesItem: true });
     } else if (this.state === 'idle') {
-      this.playUrl(blobUrl);
+      this.playEntry({ url: blobUrl, completesItem: true });
     } else {
-      this.queue.push(blobUrl);
+      this.queue.push({ url: blobUrl, completesItem: true });
       const audio = getDomAudio();
       if (audio.ended && this.state === 'playing') {
         this.playNext();
@@ -94,40 +119,52 @@ export class PlaybackManager {
   /**
    * Enqueue a remote audio URL for playback (e.g. podcast segment).
    * Fetches the URL, creates a blob URL, and adds to the playback queue.
-   * The returned promise resolves when the URL is fetched and enqueued (not when playback finishes).
+   * The returned promise distinguishes a successful enqueue, a transfer failure, and batch cancellation.
    * @param fetchFn - Fetch function that returns a Response (allows passing auth-aware fetchers like apiFetch).
    */
-  async enqueueUrl(url: string, fetchFn: (url: string) => Promise<Response> = fetch): Promise<void> {
+  async enqueueUrl(url: string, fetchFn: (url: string) => Promise<Response> = fetch): Promise<EnqueueUrlResult> {
     const capturedBatchId = this.batchId;
     let res: Response;
     try {
       res = await fetchFn(url);
     } catch (err) {
+      if (this.batchId !== capturedBatchId) return 'cancelled';
       console.error('[PlaybackManager] enqueueUrl fetch rejected:', err);
-      return;
+      return 'failed';
     }
-    if (this.batchId !== capturedBatchId) return;
+    if (this.batchId !== capturedBatchId) return 'cancelled';
     if (!res.ok) {
       console.error(`[PlaybackManager] enqueueUrl fetch failed: ${res.status}`);
-      return;
+      return 'failed';
     }
     let blob: Blob;
     try {
       blob = await res.blob();
     } catch (err) {
+      if (this.batchId !== capturedBatchId) return 'cancelled';
       console.error('[PlaybackManager] enqueueUrl blob() rejected:', err);
-      return;
+      return 'failed';
     }
-    if (this.batchId !== capturedBatchId) return;
+    if (this.batchId !== capturedBatchId) return 'cancelled';
     const blobUrl = URL.createObjectURL(blob);
     this.blobUrls.push(blobUrl);
+    this.enqueueEntry({ url: blobUrl, completesItem: true });
+    return 'enqueued';
+  }
 
-    const audio = getDomAudio();
-    if (this.state === 'idle' || (this.state === 'playing' && audio.ended)) {
-      this.playUrl(blobUrl);
-    } else {
-      this.queue.push(blobUrl);
-    }
+  /** Enqueue a native TTS stream chunk while preserving one logical sentence boundary. */
+  enqueueBase64(audioBase64: string, format: string, options: { completesItem: boolean; durationSec?: number }): void {
+    const binary = atob(audioBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    const mimeType = format === 'mp3' ? 'audio/mpeg' : 'audio/wav';
+    const blobUrl = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+    this.blobUrls.push(blobUrl);
+    this.enqueueEntry({
+      url: blobUrl,
+      completesItem: options.completesItem,
+      ...(options.durationSec != null ? { durationSec: options.durationSec } : {}),
+    });
   }
 
   /**
@@ -138,12 +175,8 @@ export class PlaybackManager {
    * @returns A promise that resolves when all URLs are enqueued (playback may still be ongoing).
    */
   async startBatch(urls: string[], fetchFn: (url: string) => Promise<Response> = fetch): Promise<void> {
-    this.interrupt();
-    this.batchId++;
+    this.beginBatch('podcast');
     const capturedBatchId = this.batchId;
-    this.batchMode = true;
-    this.batchItemIndex = 0;
-    this.streamDone = false;
     for (const url of urls) {
       if (this.batchId !== capturedBatchId) return;
       await this.enqueueUrl(url, fetchFn);
@@ -156,9 +189,22 @@ export class PlaybackManager {
     }
   }
 
+  /** Begin an incrementally-filled batch owned by one audio source. */
+  beginBatch(source: Exclude<PlaybackSource, 'voice'>): void {
+    this.interrupt();
+    this.batchId++;
+    this.source = source;
+    this.batchMode = true;
+    this.batchItemIndex = 0;
+    this.itemElapsed = 0;
+    this.activeEntry = null;
+    this.streamDone = false;
+    this.emitSnapshot();
+  }
+
   /** Whether a batch playback is currently active. */
   isBatchActive(): boolean {
-    return this.batchMode && this.state !== 'idle';
+    return this.batchMode;
   }
 
   /** Register a temporary onItemEnd callback (returns unsubscribe fn). */
@@ -190,6 +236,17 @@ export class PlaybackManager {
     this.streamDone = true;
   }
 
+  setPlaybackRate(rate: number): void {
+    this.playbackRate = rate;
+    getDomAudio().playbackRate = rate;
+    this.emitSnapshot();
+  }
+
+  seek(seconds: number): void {
+    this.pendingSeekSeconds = Math.max(0, seconds);
+    this.applyPendingSeek();
+  }
+
   pause(): void {
     if (this.state !== 'playing') return;
     const audio = getDomAudio();
@@ -215,6 +272,9 @@ export class PlaybackManager {
     audio.pause();
     audio.removeAttribute('src');
     audio.onended = null;
+    audio.ontimeupdate = null;
+    audio.ondurationchange = null;
+    audio.onloadedmetadata = null;
     if (this.queue.length > 0) {
       this.playNext();
     } else if (this.streamDone) {
@@ -240,7 +300,12 @@ export class PlaybackManager {
     this.firstChunkPlayed = false;
     this.batchMode = false;
     this.batchItemIndex = 0;
+    this.itemElapsed = 0;
+    this.activeEntry = null;
+    this.source = null;
+    this.pendingSeekSeconds = null;
     this.setState('idle');
+    this.emitSnapshot();
   }
 
   destroy(): void {
@@ -255,20 +320,60 @@ export class PlaybackManager {
     return this.activeInvocationId;
   }
 
-  private playUrl(url: string): void {
+  getSnapshot(): PlaybackSnapshot {
     const audio = getDomAudio();
-    audio.src = url;
+    const currentTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+    const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+    return {
+      state: this.state,
+      source: this.source,
+      itemIndex: this.batchItemIndex,
+      currentTime: this.batchMode ? this.itemElapsed + currentTime : currentTime,
+      duration: this.batchMode ? this.logicalItemDuration(duration) : duration,
+      playbackRate: this.playbackRate,
+    };
+  }
+
+  subscribe(listener: (snapshot: PlaybackSnapshot) => void): () => void {
+    this.listeners.add(listener);
+    listener(this.getSnapshot());
+    return () => this.listeners.delete(listener);
+  }
+
+  private enqueueEntry(entry: PlaybackEntry): void {
+    const audio = getDomAudio();
+    if (this.state === 'idle' || (this.state === 'playing' && audio.ended)) this.playEntry(entry);
+    else this.queue.push(entry);
+  }
+
+  private playEntry(entry: PlaybackEntry): void {
+    const audio = getDomAudio();
+    this.activeEntry = entry;
+    audio.src = entry.url;
+    audio.currentTime = 0;
+    audio.playbackRate = this.playbackRate;
+    audio.onloadedmetadata = () => this.applyPendingSeek();
+    audio.ontimeupdate = () => this.emitSnapshot();
+    audio.ondurationchange = () => this.emitSnapshot();
     audio.onended = () => {
       if (this.batchMode) {
-        this.callbacks.onItemEnd?.(this.batchItemIndex);
-        this.batchItemIndex++;
+        if (entry.completesItem) {
+          this.callbacks.onItemEnd?.(this.batchItemIndex);
+          this.batchItemIndex++;
+          this.itemElapsed = 0;
+        } else {
+          this.itemElapsed += this.entryDuration(entry, audio.duration);
+        }
+        this.emitSnapshot();
       }
       this.playNext();
     };
     audio.onerror = () => {
       console.error('[PlaybackManager] Audio playback error');
-      if (this.batchMode) {
+      if (this.batchMode && entry.completesItem) {
         this.batchItemIndex++;
+        this.itemElapsed = 0;
+        this.emitSnapshot();
       }
       this.playNext();
     };
@@ -282,12 +387,20 @@ export class PlaybackManager {
   private playNext(): void {
     const next = this.queue.shift();
     if (next) {
-      this.playUrl(next);
+      this.playEntry(next);
     } else if (this.streamDone) {
+      this.activeEntry = null;
       if (this.batchMode) {
         this.batchMode = false;
         this.batchItemIndex = 0;
+        this.source = null;
       }
+      this.setState('idle');
+    } else {
+      this.activeEntry = null;
+      // The current item ended before the next streamed/batch item arrived.
+      // Retain source ownership, but report the audible truth: nothing is
+      // playing until enqueueUrl()/handleChunk() resumes the batch.
       this.setState('idle');
     }
   }
@@ -296,6 +409,46 @@ export class PlaybackManager {
     if (this.state === newState) return;
     this.state = newState;
     this.callbacks.onStateChange(newState);
+    this.emitSnapshot();
+  }
+
+  private emitSnapshot(): void {
+    if (this.listeners.size === 0) return;
+    const snapshot = this.getSnapshot();
+    for (const listener of this.listeners) listener(snapshot);
+  }
+
+  private applyPendingSeek(): void {
+    if (this.pendingSeekSeconds == null) return;
+    const audio = getDomAudio();
+    if (audio.readyState < 1) return;
+    const entryDuration = this.entryDuration(this.activeEntry, audio.duration);
+    const remaining = Math.max(0, this.pendingSeekSeconds - this.itemElapsed);
+    if (this.batchMode && this.activeEntry && !this.activeEntry.completesItem && remaining >= entryDuration) {
+      this.itemElapsed += entryDuration;
+      audio.pause();
+      audio.removeAttribute('src');
+      this.playNext();
+      return;
+    }
+    audio.currentTime = Math.min(remaining, entryDuration || remaining);
+    this.pendingSeekSeconds = null;
+    this.emitSnapshot();
+  }
+
+  private entryDuration(entry: PlaybackEntry | null, audioDuration: number): number {
+    if (entry?.durationSec != null) return entry.durationSec;
+    return Number.isFinite(audioDuration) && audioDuration > 0 ? audioDuration : 0;
+  }
+
+  private logicalItemDuration(audioDuration: number): number {
+    let duration = this.itemElapsed + this.entryDuration(this.activeEntry, audioDuration);
+    if (this.activeEntry?.completesItem) return duration;
+    for (const entry of this.queue) {
+      duration += entry.durationSec ?? 0;
+      if (entry.completesItem) break;
+    }
+    return duration;
   }
 
   private cleanupBlobUrls(): void {

@@ -6,15 +6,21 @@ const apiFetchMock = vi.hoisted(() => vi.fn());
 const getUserIdMock = vi.hoisted(() => vi.fn(() => 'alice'));
 const confirmDialogSpy = vi.hoisted(() => vi.fn());
 const pushMock = vi.fn();
-const removeMessageMock = vi.fn();
+const removeThreadMessageMock = vi.fn();
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
 }));
 
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: (selector: (state: { removeMessage: typeof removeMessageMock }) => unknown) =>
-    selector({ removeMessage: removeMessageMock }),
+  useChatStore: (selector: (state: { removeThreadMessage: typeof removeThreadMessageMock }) => unknown) =>
+    selector({ removeThreadMessage: removeThreadMessageMock }),
+}));
+
+vi.mock('@/stores/toastStore', () => ({
+  useToastStore: {
+    getState: () => ({ addToast: vi.fn() }),
+  },
 }));
 
 vi.mock('@/utils/api-client', () => ({
@@ -43,7 +49,7 @@ describe('MessageActions identity source', () => {
 
   beforeEach(() => {
     pushMock.mockReset();
-    removeMessageMock.mockReset();
+    removeThreadMessageMock.mockReset();
     window.history.pushState({}, '', '/?userId=alice');
 
     container = document.createElement('div');
@@ -76,44 +82,44 @@ describe('MessageActions identity source', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('uses current user identity instead of hardcoded default-user for direct branch', async () => {
+  it('uses current user identity instead of hardcoded default-user for the unified branch action', async () => {
     const { MessageActions } = await import('@/components/MessageActions');
 
     await act(async () => {
       root.render(
-        React.createElement(
-          MessageActions,
-          {
-            message: {
-              id: 'msg-1',
-              type: 'assistant',
-              catId: 'codex',
-              content: 'hello',
-              timestamp: Date.now(),
-            },
-            threadId: 'thread-1',
+        // eslint-disable-next-line react/no-children-prop -- createElement in test
+        React.createElement(MessageActions, {
+          message: {
+            id: 'msg-1',
+            type: 'assistant',
+            catId: 'codex',
+            content: 'hello',
+            timestamp: Date.now(),
           },
-          React.createElement('div', null, 'assistant message'),
-        ),
+          threadId: 'thread-1',
+          // biome-ignore lint/correctness/noChildrenProp: createElement in test
+          children: React.createElement('div', null, 'assistant message'),
+        }),
       );
     });
 
-    const branchButton = container.querySelector('button[title="从这里分支"]') as HTMLButtonElement | null;
+    const branchButton = container.querySelector(
+      'button[aria-label="创建分支"], button[aria-label="从这里分支"]',
+    ) as HTMLButtonElement | null;
     expect(branchButton).not.toBeNull();
-
     await act(async () => {
       branchButton?.click();
     });
 
-    const directDialogProps = confirmDialogSpy.mock.calls
-      .map(([props]) => props as { title?: string; open?: boolean; onConfirm?: () => Promise<void> | void })
-      .find((props) => props.title === '从这里分支' && props.open === true);
-
-    expect(directDialogProps).toBeTruthy();
-    expect(directDialogProps?.onConfirm).toBeTypeOf('function');
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement | null;
+    expect(textarea?.value).toBe('hello');
+    const confirmBranch = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '创建分支',
+    );
+    expect(confirmBranch).toBeTruthy();
 
     await act(async () => {
-      await directDialogProps?.onConfirm?.();
+      confirmBranch?.click();
     });
 
     expect(apiFetchMock).toHaveBeenCalledTimes(1);
@@ -121,5 +127,46 @@ describe('MessageActions identity source', () => {
     const body = JSON.parse(init.body ?? '{}') as { userId?: string };
 
     expect(body.userId).toBe('alice');
+  });
+
+  it('does not expose a legacy review settlement action', async () => {
+    const { MessageActions } = await import('@/components/MessageActions');
+
+    await act(async () => {
+      root.render(
+        // eslint-disable-next-line react/no-children-prop -- createElement in test
+        React.createElement(MessageActions, {
+          message: {
+            id: 'legacy-terminal-1',
+            type: 'assistant',
+            catId: 'codex-terra',
+            content: 'Review 完成（旧消息没有 typed verdict）',
+            timestamp: Date.now(),
+            extra: {
+              crossPost: { sourceThreadId: 'thread-reviewer' },
+              coordination: {
+                id: 'coord-review-1',
+                phase: 'terminal',
+                hop: 1,
+                subjectRef: 'pr:owner/repo#4074',
+              },
+            },
+          },
+          threadId: 'thread-author',
+          // biome-ignore lint/correctness/noChildrenProp: createElement in test
+          children: React.createElement('div', null, 'review terminal'),
+        }),
+      );
+    });
+
+    const moreButton = container.querySelector('button[aria-label="更多消息操作"]') as HTMLButtonElement | null;
+    await act(async () => {
+      moreButton?.click();
+    });
+    const settleAction = document.querySelector<HTMLButtonElement>(
+      '[data-testid="legacy-local-review-disposition-action"]',
+    );
+    expect(settleAction).toBeNull();
+    expect(apiFetchMock).not.toHaveBeenCalled();
   });
 });

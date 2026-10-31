@@ -79,8 +79,8 @@ describe('transformOpenCodeEvent', () => {
     assert.strictEqual(result.toolName, 'read');
   });
 
-  // ── step_finish → null ──
-  test('maps step_finish → null (metadata only)', () => {
+  // ── step_finish → agent_loop + usage metadata (clowder#915 fix) ──
+  test('maps step_finish → agent_loop carrying metadata.usage (clowder#915)', () => {
     const event = {
       type: 'step_finish',
       timestamp: 1773304958508,
@@ -93,7 +93,126 @@ describe('transformOpenCodeEvent', () => {
       },
     };
     const result = transformOpenCodeEvent(event, catId);
-    assert.strictEqual(result, null);
+    // Must NOT be null — previously usage was discarded so contextHealth never fired,
+    // handoff never triggered, and opencode crashed at context limit (clowder#915).
+    assert.ok(result, 'step_finish must emit a message so downstream contextHealth path lights up');
+    assert.strictEqual(result.type, 'agent_loop', 'use telemetry-only type (no user-visible bubble)');
+    assert.strictEqual(result.catId, catId);
+    assert.ok(result.metadata, 'metadata must be set so invoke-single-cat F8/F24 block fires');
+    assert.strictEqual(result.metadata.provider, 'opencode');
+    assert.ok(result.metadata.usage, 'usage must be set so contextHealth can compute fillRatio');
+    assert.strictEqual(result.metadata.usage.inputTokens, 36928);
+    assert.strictEqual(result.metadata.usage.outputTokens, 9);
+    assert.strictEqual(result.metadata.usage.totalTokens, 36937);
+    assert.strictEqual(result.metadata.usage.costUsd, 0.036973);
+    // lastTurnInputTokens is the per-call signal used by F24 for accurate context fill.
+    // step_finish reports per-step input which IS per-API-call from opencode's perspective.
+    assert.strictEqual(result.metadata.usage.lastTurnInputTokens, 36928);
+    // clowder#915 R5 cloud P2: transformer must NOT attach a default
+    // contextWindowSize — the invocation-owned member capacity snapshot is the
+    // only denominator, and unknown bindings remain unresolved.
+    assert.strictEqual(result.metadata.usage.contextWindowSize, undefined);
+  });
+
+  test('clowder#915 R4 cloud P1 #1: step_finish includes cache.read/cache.write in inputTokens', () => {
+    // opencode CLI reports cached prompt tokens under tokens.cache.{read,write}
+    // SEPARATELY from tokens.input (which is only fresh-this-step). Per shared
+    // TokenUsage contract, inputTokens/lastTurnInputTokens MUST represent the
+    // TOTAL input (fresh + cached) since F24 uses lastTurnInputTokens as the
+    // context-fill numerator. Cloud's failing scenario: 671 fresh + 21k cached
+    // would look like 671 tokens → fillRatio ≈ 0 → handoff never fires.
+    const event = {
+      type: 'step_finish',
+      timestamp: 1773304958508,
+      sessionID: 'ses_xxx',
+      part: {
+        type: 'step-finish',
+        reason: 'stop',
+        cost: 0.012,
+        tokens: {
+          total: 21_680, // 671 + 21_000 + 9 = 21_680 (sanity)
+          input: 671, // fresh this step
+          output: 9,
+          cache: {
+            read: 21_000, // resumed-context reuse
+            write: 0,
+          },
+        },
+      },
+    };
+    const result = transformOpenCodeEvent(event, catId);
+    assert.ok(result);
+    assert.strictEqual(result.type, 'agent_loop');
+    // inputTokens MUST be total (fresh + cache.read + cache.write), NOT just 671
+    assert.strictEqual(result.metadata.usage.inputTokens, 21_671);
+    assert.strictEqual(result.metadata.usage.lastTurnInputTokens, 21_671);
+    // Observability: cache breakdown surfaces on TokenUsage
+    assert.strictEqual(result.metadata.usage.cacheReadTokens, 21_000);
+    // cacheCreationTokens absent because cache.write was 0 (we skip zero-valued)
+    assert.strictEqual(result.metadata.usage.cacheCreationTokens, undefined);
+  });
+
+  test('clowder#915 R4 cloud P1 #1: step_finish with cache.write only (first-time cache population)', () => {
+    // Edge case: cache.write reports prompt tokens being CACHED for first time
+    // (paid as fresh input + cached for next step). MUST also count toward
+    // inputTokens for accurate fillRatio.
+    const event = {
+      type: 'step_finish',
+      timestamp: 1773304958508,
+      sessionID: 'ses_xxx',
+      part: {
+        type: 'step-finish',
+        cost: 0.05,
+        tokens: {
+          total: 10_500,
+          input: 500,
+          output: 0,
+          cache: { read: 0, write: 10_000 },
+        },
+      },
+    };
+    const result = transformOpenCodeEvent(event, catId);
+    assert.ok(result);
+    assert.strictEqual(result.metadata.usage.inputTokens, 10_500); // 500 + 0 + 10_000
+    assert.strictEqual(result.metadata.usage.lastTurnInputTokens, 10_500);
+    assert.strictEqual(result.metadata.usage.cacheCreationTokens, 10_000);
+  });
+
+  test('#1208: transformer leaves contextWindowSize blank for the invocation-owned resolver', () => {
+    // The transformer contributes usage only. The single member capacity
+    // resolver owns catalog/manual/runtime window selection.
+    const event = {
+      type: 'step_finish',
+      timestamp: 1773304958508,
+      sessionID: 'ses_xxx',
+      part: {
+        type: 'step-finish',
+        reason: 'tool-calls',
+        cost: 0.02,
+        tokens: { total: 109_000, input: 109_000, output: 0 },
+      },
+    };
+    const result = transformOpenCodeEvent(event, catId);
+    assert.ok(result);
+    // contextWindowSize MUST be undefined — leaving it for the bound snapshot
+    assert.strictEqual(result.metadata.usage.contextWindowSize, undefined);
+    // Usage data still surfaces correctly
+    assert.strictEqual(result.metadata.usage.inputTokens, 109_000);
+    assert.strictEqual(result.metadata.usage.lastTurnInputTokens, 109_000);
+  });
+
+  test('step_finish with no tokens still returns a message but with empty usage', () => {
+    // Defensive: opencode may emit step_finish without token data (e.g. cached responses).
+    // Don't crash — return null in that degenerate case so we don't litter agent_loop
+    // events that have no telemetry value.
+    const event = {
+      type: 'step_finish',
+      timestamp: 1773304958508,
+      sessionID: 'ses_xxx',
+      part: { type: 'step-finish', reason: 'stop' },
+    };
+    const result = transformOpenCodeEvent(event, catId);
+    assert.strictEqual(result, null, 'no tokens → nothing to telemeter → skip');
   });
 
   // ── error → error ──
@@ -109,6 +228,61 @@ describe('transformOpenCodeEvent', () => {
     assert.strictEqual(result.type, 'error');
     assert.ok(result.error);
     assert.ok(result.error.includes('Rate limit exceeded'));
+  });
+
+  // ── reasoning → system_info(thinking) (F161) ──
+  test('F161: maps reasoning event → system_info(thinking)', () => {
+    const event = {
+      type: 'reasoning',
+      timestamp: 1773304958495,
+      sessionID: 'ses_xxx',
+      part: { type: 'reasoning', text: 'Let me think about this...' },
+    };
+    const result = transformOpenCodeEvent(event, catId);
+    assert.ok(result, 'reasoning event must not be dropped');
+    assert.strictEqual(result.type, 'system_info');
+    const parsed = JSON.parse(result.content);
+    assert.strictEqual(parsed.type, 'thinking');
+    assert.strictEqual(parsed.text, 'Let me think about this...');
+  });
+
+  test('F161: reasoning event with empty text returns null', () => {
+    const event = {
+      type: 'reasoning',
+      timestamp: 1773304958495,
+      sessionID: 'ses_xxx',
+      part: { type: 'reasoning', text: '' },
+    };
+    const result = transformOpenCodeEvent(event, catId);
+    assert.strictEqual(result, null);
+  });
+
+  test('F161: text event with part.type=reasoning routes to thinking, not CLI Output', () => {
+    const event = {
+      type: 'text',
+      timestamp: 1773304958496,
+      sessionID: 'ses_xxx',
+      part: { type: 'reasoning', text: 'Analyzing the problem...' },
+    };
+    const result = transformOpenCodeEvent(event, catId);
+    assert.ok(result, 'reasoning-in-text must not be dropped');
+    assert.strictEqual(result.type, 'system_info', 'must route to thinking block, not CLI Output');
+    const parsed = JSON.parse(result.content);
+    assert.strictEqual(parsed.type, 'thinking');
+    assert.strictEqual(parsed.text, 'Analyzing the problem...');
+  });
+
+  test('F161: text event with normal part.type=text still maps to text', () => {
+    const event = {
+      type: 'text',
+      timestamp: 1773304958497,
+      sessionID: 'ses_xxx',
+      part: { type: 'text', text: 'Here is the answer' },
+    };
+    const result = transformOpenCodeEvent(event, catId);
+    assert.ok(result);
+    assert.strictEqual(result.type, 'text');
+    assert.strictEqual(result.content, 'Here is the answer');
   });
 
   // ── unknown → null ──

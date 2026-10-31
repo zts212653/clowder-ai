@@ -22,9 +22,27 @@ cd clowder-ai
 # 2. Create a feature branch
 git checkout -b feat/your-feature-name
 
-# 3. Install and verify
+# 3. Install, build, and verify
 pnpm install
+pnpm build
 pnpm check
+
+# (Optional dev mode) Mount cat-cafe-skills/ symlinks at the project level
+# (.{claude,codex,gemini,kimi}/skills/ inside the repo and all worktrees) so
+# local agent CLIs see this repo's skills while developing. End users don't
+# need this — runtime governance bootstrap (POST /api/projects/setup) creates
+# project-level skill links automatically per ADR-025.
+#
+# Default writes only project-level links for the invoking worktree.
+# Use --all only when you intentionally need fleet-wide mount repair; use
+# --verbose when you need per-target diagnostics instead of the normal summary.
+# Add `--user` to also mount HOME-level (~/.{claude,codex,gemini,kimi}/skills/)
+# so agent CLIs running outside this repo can find these skills (opt-in per
+# ADR-025 section 3: user-level directories do not carry official skills by default).
+pnpm sync:skills                     # current worktree only (recommended)
+# pnpm sync:skills --all             # explicit fleet-wide project repair
+# pnpm sync:skills --verbose          # expand per-target diagnostics
+# pnpm sync:skills --user             # also mount HOME-level (opt-in)
 
 # 4. Make your changes, then run checks
 pnpm check          # Biome lint
@@ -61,6 +79,16 @@ Feature IDs (`F001`, `F002`, ...) are assigned by **maintainers**, not by contri
 ### Runtime ports
 
 The default ports are `3003` (API) and `3004` (Frontend). See [SETUP.md](SETUP.md) for full configuration.
+
+---
+
+## Design Principles (Contributor Guardrails)
+
+Before contributing new features, please align with our core aesthetic and architectural boundaries. Clowder is a cozy, collaborative space, and our features reflect that:
+
+1. **Cozy Café, not RPG**: Growth and progression should feel like a shared memory (e.g., sticker walls, cat trees, shared albums, and emergent knowledge). We do not build hardcore RPG systems, skill trees, or raw XP stats.
+2. **Extend, don't parallel**: New features should extend existing domains (like the Memory Hub `F102` or Expeditions `F152`) rather than creating isolated, parallel systems.
+3. **CatRegistry is the truth**: All identities must flow through the central `catRegistry` and our identity model. Do not hardcode fake `catId`s to represent co-creators or system events.
 
 ---
 
@@ -203,9 +231,14 @@ Every contribution should respect these:
 - **TypeScript** with strict mode
 - **Biome** for formatting and linting (`pnpm check` / `pnpm check:fix`)
 - **pnpm** for package management
-- Files under 350 lines (warning at 200)
+- Review responsibilities and coupling at 200 lines; split at 350 by default or explain the structural reason to keep the unit together. Do not add per-file line-count unit tests.
 - No `any` types
 - Run `pnpm lint` before submitting
+
+For test changes, explain the real failure, the lowest sufficient layer, the gap in existing coverage, and added cost.
+Reuse precise existing checks; do not copy production logic into a test or treat decorative source strings as product behavior.
+Collect cleanup candidates and edit a batch before running affected checks. A full gate needs a concrete uncovered risk,
+not another small deletion; record failed attempts as well as the final successful run.
 
 ---
 
@@ -365,6 +398,10 @@ Review PR 时的优先级：
 - **TypeScript** 严格模式
 - **Biome** 格式化和 lint（`pnpm check` / `pnpm check:fix`）
 - **pnpm** 包管理
-- 文件不超过 350 行（200 行开始警告）
+- 200 行审查职责与耦合，350 行默认拆分，保留须说明结构理由；不为单个文件另写数行 UT。
 - 禁止 `any` 类型
 - 提交前跑 `pnpm lint`
+
+测试增量说明真实失败、最低足够层级、已有覆盖缺口与新增成本。已有精准检查足够就复用，
+不复制生产逻辑来测自己，也不把装饰源码字串当产品行为。清理先收齐候选、成批修改，再集中跑受影响检查；
+全量门禁须有具体未覆盖风险，不因又删几条测试而重跑。失败尝试与最后一次成功都计入总账。

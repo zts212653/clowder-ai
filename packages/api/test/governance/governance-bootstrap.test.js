@@ -1,25 +1,26 @@
 import assert from 'node:assert/strict';
-import { lstat, mkdir, mkdtemp, readFile, readlink, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-
-import { GovernanceBootstrapService } from '../../dist/config/governance/governance-bootstrap.js';
 import {
-  GOVERNANCE_PACK_VERSION,
-  MANAGED_BLOCK_END,
-  MANAGED_BLOCK_START,
-} from '../../dist/config/governance/governance-pack.js';
+  GovernanceBootstrapService,
+  GovernancePreviewConflictError,
+} from '../../dist/config/governance/governance-bootstrap.js';
 
-describe('GovernanceBootstrapService', () => {
+describe('GovernanceBootstrapService F302', () => {
   let catCafeRoot;
   let targetProject;
 
   beforeEach(async () => {
     catCafeRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-root-'));
     targetProject = await mkdtemp(join(tmpdir(), 'target-project-'));
-    // Create cat-cafe-skills source directory (bootstrap symlinks to it)
-    await mkdir(join(catCafeRoot, 'cat-cafe-skills'), { recursive: true });
+    for (const name of ['tdd', 'worktree']) {
+      await mkdir(join(catCafeRoot, 'cat-cafe-skills', name), { recursive: true });
+      await writeFile(join(catCafeRoot, 'cat-cafe-skills', name, 'SKILL.md'), `# ${name}\n`);
+    }
+    await mkdir(join(catCafeRoot, 'cat-cafe-skills', 'refs'), { recursive: true });
+    await writeFile(join(catCafeRoot, 'cat-cafe-skills', 'refs', 'shared-rules.md'), '# rules\n');
   });
 
   afterEach(async () => {
@@ -27,169 +28,236 @@ describe('GovernanceBootstrapService', () => {
     await rm(targetProject, { recursive: true, force: true });
   });
 
-  it('bootstraps empty project with all governance files', async () => {
-    const svc = new GovernanceBootstrapService(catCafeRoot);
-    const report = await svc.bootstrap(targetProject, { dryRun: false });
+  async function install(selection) {
+    const service = new GovernanceBootstrapService(catCafeRoot);
+    const preview = await service.bootstrap(targetProject, { dryRun: true, selection });
+    const report = await service.bootstrap(targetProject, {
+      dryRun: false,
+      selection,
+      expectedPreviewChecksum: preview.previewChecksum,
+    });
+    return { service, preview, report };
+  }
 
-    assert.equal(report.dryRun, false);
-    assert.equal(report.packVersion, GOVERNANCE_PACK_VERSION);
-    assert.ok(report.actions.length > 0);
-
-    // Should create CLAUDE.md, AGENTS.md, GEMINI.md
-    for (const f of ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md']) {
-      const content = await readFile(join(targetProject, f), 'utf-8');
-      assert.ok(content.includes(MANAGED_BLOCK_START), `${f} should have managed block start`);
-      assert.ok(content.includes(MANAGED_BLOCK_END), `${f} should have managed block end`);
-    }
-
-    // Should create methodology skeleton
-    const backlog = await readFile(join(targetProject, 'BACKLOG.md'), 'utf-8');
-    assert.ok(backlog.includes('doc_kind:'));
-
-    const sop = await readFile(join(targetProject, 'docs/SOP.md'), 'utf-8');
-    assert.ok(sop.includes('worktree'));
+  it('treats missing or empty selection as zero actions and zero state', async () => {
+    const service = new GovernanceBootstrapService(catCafeRoot);
+    const preview = await service.bootstrap(targetProject, { dryRun: true });
+    assert.deepStrictEqual(preview.selection, {});
+    assert.deepStrictEqual(preview.actions, []);
+    await service.bootstrap(targetProject, {
+      dryRun: false,
+      expectedPreviewChecksum: preview.previewChecksum,
+    });
+    assert.deepStrictEqual(await readdir(targetProject), []);
+    assert.equal(await service.getRegistry().get(targetProject), undefined);
   });
 
-  it('creates skills symlinks for all 3 providers', async () => {
-    const svc = new GovernanceBootstrapService(catCafeRoot);
-    await svc.bootstrap(targetProject, { dryRun: false });
+  it('writes one AGENTS.md body and only selected Claude/Gemini thin entries', async () => {
+    await writeFile(join(targetProject, 'CLAUDE.md'), '# existing Claude instructions\n');
+    const selection = { projectGuide: { thinEntrypoints: ['gemini', 'claude'] } };
+    const { preview } = await install(selection);
 
-    const sourcePath = resolve(catCafeRoot, 'cat-cafe-skills');
-    for (const dir of ['.claude/skills', '.codex/skills', '.gemini/skills']) {
-      const linkPath = join(targetProject, dir);
-      const stat = await lstat(linkPath);
-      assert.ok(stat.isSymbolicLink(), `${dir} should be a symlink`);
-      const target = await readlink(linkPath);
-      const resolved = resolve(dirname(linkPath), target);
-      assert.equal(resolved, sourcePath, `${dir} should point to cat-cafe-skills`);
-    }
+    assert.equal((await readFile(join(targetProject, 'CLAUDE.md'), 'utf8')).trim(), '# existing Claude instructions');
+    assert.equal(await readFile(join(targetProject, 'GEMINI.md'), 'utf8'), '@AGENTS.md\n');
+    assert.match(await readFile(join(targetProject, 'AGENTS.md'), 'utf8'), /project instructions/);
+    await assert.rejects(lstat(join(targetProject, 'KIMI.md')), { code: 'ENOENT' });
+    assert.equal(preview.actions.find((action) => action.file === 'CLAUDE.md')?.action, 'skipped');
   });
 
-  it('appends managed block to existing CLAUDE.md', async () => {
-    const existing = '# My Project\n\nSome existing content.\n';
-    await writeFile(join(targetProject, 'CLAUDE.md'), existing, 'utf-8');
-
-    const svc = new GovernanceBootstrapService(catCafeRoot);
-    await svc.bootstrap(targetProject, { dryRun: false });
-
-    const content = await readFile(join(targetProject, 'CLAUDE.md'), 'utf-8');
-    assert.ok(content.startsWith('# My Project'), 'existing content preserved');
-    assert.ok(content.includes('Some existing content.'), 'existing content preserved');
-    assert.ok(content.includes(MANAGED_BLOCK_START), 'managed block appended');
-  });
-
-  it('replaces existing managed block on re-bootstrap', async () => {
-    // First bootstrap
-    const svc = new GovernanceBootstrapService(catCafeRoot);
-    await svc.bootstrap(targetProject, { dryRun: false });
-
-    const _contentBefore = await readFile(join(targetProject, 'CLAUDE.md'), 'utf-8');
-
-    // Second bootstrap — should replace, not duplicate
-    await svc.bootstrap(targetProject, { dryRun: false });
-    const contentAfter = await readFile(join(targetProject, 'CLAUDE.md'), 'utf-8');
-
-    // Count managed block markers — should be exactly 1 pair
-    const startCount = (contentAfter.match(new RegExp(MANAGED_BLOCK_START, 'g')) || []).length;
-    const endCount = (contentAfter.match(new RegExp(MANAGED_BLOCK_END, 'g')) || []).length;
-    assert.equal(startCount, 1, 'should have exactly 1 start marker');
-    assert.equal(endCount, 1, 'should have exactly 1 end marker');
-  });
-
-  it('does not overwrite existing methodology files', async () => {
-    const customBacklog = '# My Custom Backlog\n';
-    await writeFile(join(targetProject, 'BACKLOG.md'), customBacklog, 'utf-8');
-
-    const svc = new GovernanceBootstrapService(catCafeRoot);
-    const report = await svc.bootstrap(targetProject, { dryRun: false });
-
-    // BACKLOG.md should be untouched
-    const content = await readFile(join(targetProject, 'BACKLOG.md'), 'utf-8');
-    assert.equal(content, customBacklog, 'existing BACKLOG.md should not be overwritten');
-
-    // The action should say 'skipped'
-    const backlogAction = report.actions.find((a) => a.file === 'BACKLOG.md');
-    assert.ok(backlogAction);
-    assert.equal(backlogAction.action, 'skipped');
-  });
-
-  it('is idempotent — second run produces no created actions', async () => {
-    const svc = new GovernanceBootstrapService(catCafeRoot);
-    await svc.bootstrap(targetProject, { dryRun: false });
-
-    const report2 = await svc.bootstrap(targetProject, { dryRun: false });
-    const created = report2.actions.filter((a) => a.action === 'created');
-    assert.equal(created.length, 0, 'no files should be created on second run');
-  });
-
-  it('dry-run writes nothing to disk', async () => {
-    const svc = new GovernanceBootstrapService(catCafeRoot);
-    const report = await svc.bootstrap(targetProject, { dryRun: true });
-
-    assert.equal(report.dryRun, true);
-    assert.ok(report.actions.length > 0);
-
-    // No files should exist
-    for (const f of ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md', 'BACKLOG.md']) {
-      await assert.rejects(lstat(join(targetProject, f)), { code: 'ENOENT' });
+  it('renders only repository scripts with its detected package manager', async () => {
+    await writeFile(
+      join(targetProject, 'package.json'),
+      JSON.stringify({
+        name: 'community-plugin',
+        packageManager: 'pnpm@10.0.0',
+        scripts: { build: 'tsc', test: 'vitest' },
+      }),
+    );
+    await writeFile(join(targetProject, 'yarn.lock'), '# conflicting lockfile\n');
+    await writeFile(join(targetProject, 'package-lock.json'), '{}\n');
+    await install({ projectGuide: { thinEntrypoints: [] }, docsLifecycle: true });
+    const guide = await readFile(join(targetProject, 'AGENTS.md'), 'utf8');
+    const sop = await readFile(join(targetProject, 'docs/SOP.md'), 'utf8');
+    for (const text of [guide, sop]) {
+      assert.match(text, /pnpm run build/);
+      assert.match(text, /pnpm run test/);
+      assert.doesNotMatch(text, /pnpm gate|pnpm check|pnpm lint/);
     }
   });
 
-  it('saves bootstrap report to .cat-cafe/', async () => {
-    const svc = new GovernanceBootstrapService(catCafeRoot);
-    await svc.bootstrap(targetProject, { dryRun: false });
-
-    const reportPath = join(targetProject, '.cat-cafe/governance-bootstrap-report.json');
-    const raw = await readFile(reportPath, 'utf-8');
-    const report = JSON.parse(raw);
-    assert.equal(report.projectPath, targetProject);
-    assert.equal(report.packVersion, GOVERNANCE_PACK_VERSION);
-    assert.ok(Array.isArray(report.actions));
+  it('uses unknown when package scripts exist but the runner is not discoverable', async () => {
+    await writeFile(join(targetProject, 'package.json'), JSON.stringify({ scripts: { verify: 'custom-tool' } }));
+    await install({ projectGuide: { thinEntrypoints: [] } });
+    assert.match(await readFile(join(targetProject, 'AGENTS.md'), 'utf8'), /unknown \(package\.json script: verify\)/);
   });
 
-  it('registers project in governance registry', async () => {
-    const svc = new GovernanceBootstrapService(catCafeRoot);
-    await svc.bootstrap(targetProject, { dryRun: false });
-
-    const registry = svc.getRegistry();
-    const entry = await registry.get(targetProject);
-    assert.ok(entry);
-    assert.equal(entry.packVersion, GOVERNANCE_PACK_VERSION);
-    assert.equal(entry.confirmedByUser, true);
+  it('materializes only selected Skills and providers without capabilities or target reports', async () => {
+    await install({ projectSkills: { skillIds: ['tdd'], providers: ['codex'] } });
+    const skillPath = join(targetProject, '.codex/skills/tdd');
+    assert.equal(resolve(dirname(skillPath), await readlink(skillPath)), join(catCafeRoot, 'cat-cafe-skills', 'tdd'));
+    const refsPath = join(targetProject, '.codex/skills/.cat-cafe-shared-refs');
+    assert.equal(resolve(dirname(refsPath), await readlink(refsPath)), join(catCafeRoot, 'cat-cafe-skills', 'refs'));
+    await assert.rejects(lstat(join(targetProject, '.claude')), { code: 'ENOENT' });
+    await assert.rejects(lstat(join(targetProject, '.cat-cafe')), { code: 'ENOENT' });
   });
 
-  it('skips symlink if already correct', async () => {
-    const svc = new GovernanceBootstrapService(catCafeRoot);
-    await svc.bootstrap(targetProject, { dryRun: false });
+  it('returns a fresh preview and writes nothing when the target changes after preview', async () => {
+    const service = new GovernanceBootstrapService(catCafeRoot);
+    const selection = { projectGuide: { thinEntrypoints: ['claude'] }, docsLifecycle: true };
+    const preview = await service.bootstrap(targetProject, { dryRun: true, selection });
+    await writeFile(join(targetProject, 'AGENTS.md'), '# arrived after preview\n');
 
-    const report2 = await svc.bootstrap(targetProject, { dryRun: false });
-    const symlinkActions = report2.actions.filter((a) => a.file.includes('skills'));
-    for (const a of symlinkActions) {
-      assert.equal(a.action, 'skipped', `${a.file} should be skipped on second run`);
+    await assert.rejects(
+      service.bootstrap(targetProject, {
+        dryRun: false,
+        selection,
+        expectedPreviewChecksum: preview.previewChecksum,
+      }),
+      (error) =>
+        error instanceof GovernancePreviewConflictError &&
+        error.freshPreview.previewChecksum !== preview.previewChecksum,
+    );
+    await assert.rejects(lstat(join(targetProject, 'CLAUDE.md')), { code: 'ENOENT' });
+    await assert.rejects(lstat(join(targetProject, 'docs')), { code: 'ENOENT' });
+  });
+
+  it('normalizes duplicate selection coordinates into one checksum and one action', async () => {
+    const service = new GovernanceBootstrapService(catCafeRoot);
+    const first = await service.bootstrap(targetProject, {
+      dryRun: true,
+      selection: { projectSkills: { skillIds: ['tdd', 'tdd'], providers: ['codex', 'codex'] } },
+    });
+    const second = await service.bootstrap(targetProject, {
+      dryRun: true,
+      selection: { projectSkills: { skillIds: ['tdd'], providers: ['codex'] } },
+    });
+    assert.equal(first.previewChecksum, second.previewChecksum);
+    assert.equal(first.actions.filter((action) => action.file.endsWith('/tdd')).length, 1);
+  });
+
+  it('skips writes through a symlinked provider directory', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'governance-outside-'));
+    try {
+      await symlink(outside, join(targetProject, '.codex'));
+      const service = new GovernanceBootstrapService(catCafeRoot);
+      const preview = await service.bootstrap(targetProject, {
+        dryRun: true,
+        selection: { projectSkills: { skillIds: ['tdd'], providers: ['codex'] } },
+      });
+      assert.ok(preview.actions.every((action) => action.action === 'skipped'));
+      assert.deepStrictEqual(await readdir(outside), []);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
     }
   });
 
-  it('creates hooks symlink for claude provider', async () => {
-    // Create source hooks dir in catCafeRoot
-    await mkdir(join(catCafeRoot, '.claude', 'hooks'), { recursive: true });
-
-    const svc = new GovernanceBootstrapService(catCafeRoot);
-    await svc.bootstrap(targetProject, { dryRun: false });
-
-    const hooksPath = join(targetProject, '.claude', 'hooks');
-    const stat = await lstat(hooksPath);
-    assert.ok(stat.isSymbolicLink(), '.claude/hooks should be a symlink');
+  it('undo deletes matching generated files and symlinks from the registry ledger', async () => {
+    const { service } = await install({
+      projectGuide: { thinEntrypoints: ['claude'] },
+      projectSkills: { skillIds: ['tdd'], providers: ['codex'] },
+    });
+    const preview = await service.cleanup(targetProject, { dryRun: true });
+    assert.ok(preview.actions.some((action) => action.action === 'deleted'));
+    await service.cleanup(targetProject, {
+      dryRun: false,
+      expectedPreviewChecksum: preview.previewChecksum,
+    });
+    for (const file of ['AGENTS.md', 'CLAUDE.md', '.codex/skills/tdd', '.codex/skills/.cat-cafe-shared-refs']) {
+      await assert.rejects(lstat(join(targetProject, file)), { code: 'ENOENT' });
+    }
   });
 
-  it('skips hooks symlink when source hooks dir does not exist', async () => {
-    // Don't create .claude/hooks in catCafeRoot
-    const svc = new GovernanceBootstrapService(catCafeRoot);
-    const report = await svc.bootstrap(targetProject, { dryRun: false });
+  it('undo skips edited generated files and keeps capabilities.json byte-identical', async () => {
+    const { service } = await install({ projectGuide: { thinEntrypoints: [] } });
+    await writeFile(join(targetProject, 'AGENTS.md'), '# user edit\n');
+    await mkdir(join(targetProject, '.cat-cafe'), { recursive: true });
+    const capabilities = '{"version":2,"user":"sentinel"}\n';
+    await writeFile(join(targetProject, '.cat-cafe/capabilities.json'), capabilities);
+    const preview = await service.cleanup(targetProject, { dryRun: true });
+    assert.equal(preview.actions.find((action) => action.file === 'AGENTS.md')?.action, 'skipped');
+    await service.cleanup(targetProject, {
+      dryRun: false,
+      expectedPreviewChecksum: preview.previewChecksum,
+    });
+    assert.equal(await readFile(join(targetProject, 'AGENTS.md'), 'utf8'), '# user edit\n');
+    assert.equal(await readFile(join(targetProject, '.cat-cafe/capabilities.json'), 'utf8'), capabilities);
+  });
 
-    // Should have no hooks action (symlinkHooks returns null when source missing)
-    const hooksAction = report.actions.find((a) => a.file.includes('hooks'));
-    assert.equal(hooksAction, undefined, 'no hooks action when source hooks dir missing');
-    // hooks dir should not exist in target
-    await assert.rejects(lstat(join(targetProject, '.claude', 'hooks')), { code: 'ENOENT' });
+  it('legacy cleanup removes only a still-matching symlink and never trusts hashless files', async () => {
+    const legacySource = join(catCafeRoot, 'cat-cafe-skills', 'tdd');
+    await mkdir(join(targetProject, '.claude/skills'), { recursive: true });
+    await symlink(legacySource, join(targetProject, '.claude/skills/tdd'));
+    await writeFile(join(targetProject, 'CLAUDE.md'), '# legacy but user-editable\n');
+    await mkdir(join(targetProject, '.cat-cafe'), { recursive: true });
+    const capabilities = '{"version":2}\n';
+    await writeFile(join(targetProject, '.cat-cafe/capabilities.json'), capabilities);
+    await writeFile(
+      join(targetProject, '.cat-cafe/governance-bootstrap-report.json'),
+      JSON.stringify({
+        projectPath: targetProject,
+        timestamp: 1,
+        packVersion: '1.4.1',
+        dryRun: false,
+        actions: [
+          { file: 'CLAUDE.md', action: 'created', reason: 'legacy file' },
+          { file: '.claude/skills/tdd', action: 'symlinked', reason: `linked to ${legacySource}` },
+          { file: '.cat-cafe/capabilities.json', action: 'created', reason: 'legacy shared state' },
+        ],
+      }),
+    );
+    const service = new GovernanceBootstrapService(catCafeRoot);
+    const preview = await service.cleanup(targetProject, { dryRun: true });
+    assert.equal(preview.actions.find((action) => action.file === 'CLAUDE.md')?.action, 'skipped');
+    assert.equal(preview.actions.find((action) => action.file === '.claude/skills/tdd')?.action, 'deleted');
+    assert.equal(
+      preview.actions.find((action) => action.file === '.cat-cafe/capabilities.json')?.reason,
+      'protected shared config',
+    );
+    await service.cleanup(targetProject, {
+      dryRun: false,
+      expectedPreviewChecksum: preview.previewChecksum,
+    });
+    await assert.rejects(lstat(join(targetProject, '.claude/skills/tdd')), { code: 'ENOENT' });
+    assert.equal(await readFile(join(targetProject, 'CLAUDE.md'), 'utf8'), '# legacy but user-editable\n');
+    assert.equal(await readFile(join(targetProject, '.cat-cafe/capabilities.json'), 'utf8'), capabilities);
+    assert.ok(await readFile(join(targetProject, '.cat-cafe/governance-bootstrap-report.json'), 'utf8'));
+    assert.ok(await service.getRegistry().get(targetProject), 'confirmed legacy cleanup is recorded in Clowder AI');
+  });
+
+  it('legacy cleanup removes its report last when every generated candidate is disposed', async () => {
+    const legacySource = join(catCafeRoot, 'cat-cafe-skills', 'tdd');
+    await mkdir(join(targetProject, '.claude/skills'), { recursive: true });
+    await symlink(legacySource, join(targetProject, '.claude/skills/tdd'));
+    await mkdir(join(targetProject, '.cat-cafe'), { recursive: true });
+    const legacyReport = join(targetProject, '.cat-cafe/governance-bootstrap-report.json');
+    await writeFile(
+      legacyReport,
+      JSON.stringify({
+        projectPath: targetProject,
+        timestamp: 1,
+        packVersion: '1.4.1',
+        dryRun: false,
+        actions: [
+          { file: '.claude/skills/tdd', action: 'symlinked', reason: `linked to ${legacySource}` },
+          { file: 'already-gone.md', action: 'created', reason: 'legacy file' },
+        ],
+      }),
+    );
+
+    const service = new GovernanceBootstrapService(catCafeRoot);
+    const preview = await service.cleanup(targetProject, { dryRun: true });
+    assert.equal(
+      preview.actions.at(-1)?.file,
+      '.cat-cafe/governance-bootstrap-report.json',
+      'legacy report must be the final visible action',
+    );
+    assert.equal(preview.actions.at(-1)?.action, 'deleted');
+    await service.cleanup(targetProject, {
+      dryRun: false,
+      expectedPreviewChecksum: preview.previewChecksum,
+    });
+    await assert.rejects(lstat(legacyReport), { code: 'ENOENT' });
+    const registry = await service.getRegistry().get(targetProject);
+    assert.equal(registry?.lastCleanupReport?.dryRun, false);
   });
 });

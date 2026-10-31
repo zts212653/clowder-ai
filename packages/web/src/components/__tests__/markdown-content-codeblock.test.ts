@@ -24,19 +24,20 @@ describe('MarkdownContent code block copy button', () => {
 });
 
 describe('MarkdownContent file path linking', () => {
-  it('converts absolute paths to vscode:// links', () => {
-    // Bare path (not in backticks) — linkified by withMentionsAndLinks in <p>
-    const html = render('See /packages/api/src/routes/messages.ts:42 for details');
-    expect(html).toContain('vscode://file/packages/api/src/routes/messages.ts:42');
-    expect(html).toContain('text-blue-400');
+  it.each([
+    'See /packages/api/src/routes/messages.ts:42 for details',
+    'Check packages/web/src/app/page.tsx:10 for the fix',
+    '入口验收：/home/user/projects/f309-dogfood-scratch/drinks.md',
+    '改好了（/home/user/projects/f309-dogfood-scratch/desserts.md:3）',
+  ])('keeps an unverified path literal without borrowing a project or inventing an editor link: %s', (content) => {
+    const html = render(content);
+    expect(html).toContain(content);
+    expect(html).not.toContain('vscode://file');
+    expect(html).not.toContain('data-chat-reference-kind=');
   });
 
-  it('renders relative paths as styled span when PROJECT_ROOT is not set', () => {
-    // Bare path (not in backticks) for linkifyFilePaths to detect
-    const html = render('Check packages/web/src/app/page.tsx:10 for the fix');
-    // Without PROJECT_ROOT, relative paths become styled <span>, not <a> links
-    expect(html).toContain('packages/web/src/app/page.tsx:10');
+  it('still leaves URLs and non-path slashes alone after full-width punctuation', () => {
+    const html = render('链接：https://example.com/a/b.png，比例：16/9.5');
     expect(html).not.toContain('vscode://file');
-    expect(html).toContain('text-blue-400');
   });
 });

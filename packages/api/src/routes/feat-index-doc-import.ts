@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { parse as parseYaml } from 'yaml';
 import { parseActiveFeaturesFromBacklog } from './backlog-doc-import.js';
 
@@ -8,6 +9,7 @@ export interface FeatIndexEntry {
   featId: string;
   name: string;
   status: string;
+  owner?: string;
   keyDecisions?: string[];
 }
 
@@ -15,6 +17,7 @@ interface FeatureDocEntry {
   featId: string;
   name?: string;
   status?: string;
+  owner?: string;
   keyDecisions?: string[];
 }
 
@@ -62,10 +65,18 @@ function extractHeadingTitle(body: string): string | undefined {
   return heading.replace(/^F\d{3}\s*:\s*/i, '').trim();
 }
 
-function extractStatusFromBody(body: string): string | undefined {
-  const match = body.match(/^>\s*\*\*Status\*\*:\s*(.+)$/im)?.[1]?.trim();
+function extractQuotedMetadataField(body: string, field: 'Status' | 'Owner'): string | undefined {
+  const match = body.match(new RegExp(`^>\\s*.*?\\*\\*${field}\\*\\*:\\s*([^|\\n]+)`, 'im'))?.[1]?.trim();
   if (!match) return undefined;
   return match.replace(/^`|`$/g, '').trim();
+}
+
+function extractStatusFromBody(body: string): string | undefined {
+  return extractQuotedMetadataField(body, 'Status');
+}
+
+function extractOwnerFromBody(body: string): string | undefined {
+  return extractQuotedMetadataField(body, 'Owner');
 }
 
 function extractFeatureIds(frontmatter: Record<string, unknown>, fallbackFileName: string): string[] {
@@ -117,6 +128,7 @@ async function readFeatureDocEntries(featuresDir: string): Promise<FeatureDocEnt
 
     const name = pickString(frontmatter, ['name', 'title']) ?? extractHeadingTitle(body);
     const status = pickString(frontmatter, ['status']) ?? extractStatusFromBody(body);
+    const owner = pickString(frontmatter, ['owner']) ?? extractOwnerFromBody(body);
     const keyDecisions = extractKeyDecisions(frontmatter);
 
     for (const featId of featureIds) {
@@ -124,6 +136,7 @@ async function readFeatureDocEntries(featuresDir: string): Promise<FeatureDocEnt
         featId,
         ...(name ? { name } : {}),
         ...(status ? { status } : {}),
+        ...(owner ? { owner } : {}),
         ...(keyDecisions ? { keyDecisions } : {}),
       });
     }
@@ -143,7 +156,7 @@ function toSortedEntries(entries: FeatIndexEntry[]): FeatIndexEntry[] {
 export async function readFeatIndexEntries(): Promise<FeatIndexEntry[]> {
   const root = findMonorepoRoot();
   const featuresDir = join(root, 'docs', 'features');
-  const backlogPath = join(root, 'docs', 'ROADMAP.md');
+  const backlogPath = join(root, deploymentDefaults.roadmapPath);
 
   const docEntries = await readFeatureDocEntries(featuresDir);
   const map = new Map<string, FeatureDocEntry>();
@@ -152,6 +165,7 @@ export async function readFeatIndexEntries(): Promise<FeatIndexEntry[]> {
       featId: entry.featId,
       ...(entry.name ? { name: entry.name } : {}),
       ...(entry.status ? { status: entry.status } : {}),
+      ...(entry.owner ? { owner: entry.owner } : {}),
       ...(entry.keyDecisions ? { keyDecisions: entry.keyDecisions } : {}),
     });
   }
@@ -159,7 +173,7 @@ export async function readFeatIndexEntries(): Promise<FeatIndexEntry[]> {
   if (existsSync(backlogPath)) {
     try {
       const backlog = await readFile(backlogPath, 'utf-8');
-      const backlogRows = parseActiveFeaturesFromBacklog(backlog);
+      const backlogRows = parseActiveFeaturesFromBacklog(backlog, deploymentDefaults.roadmapPath);
       for (const row of backlogRows) {
         const current = map.get(row.id);
         if (!current) {
@@ -167,6 +181,7 @@ export async function readFeatIndexEntries(): Promise<FeatIndexEntry[]> {
             featId: row.id,
             name: row.name,
             status: row.status,
+            owner: row.owner,
           });
           continue;
         }
@@ -175,11 +190,12 @@ export async function readFeatIndexEntries(): Promise<FeatIndexEntry[]> {
           featId: row.id,
           ...(current.name ? { name: current.name } : { name: row.name }),
           ...(current.status ? { status: current.status } : { status: row.status }),
+          ...(current.owner ? { owner: current.owner } : { owner: row.owner }),
           ...(current.keyDecisions ? { keyDecisions: current.keyDecisions } : {}),
         });
       }
     } catch {
-      // Ignore unreadable BACKLOG.md and keep feature-doc-only entries.
+      // Ignore an unreadable configured roadmap and keep feature-doc-only entries.
     }
   }
 
@@ -189,6 +205,7 @@ export async function readFeatIndexEntries(): Promise<FeatIndexEntry[]> {
       featId,
       name: entry.name ?? featId,
       status: entry.status ?? 'spec',
+      ...(entry.owner ? { owner: entry.owner } : {}),
       ...(entry.keyDecisions ? { keyDecisions: entry.keyDecisions } : {}),
     });
   }

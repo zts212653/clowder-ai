@@ -1,16 +1,246 @@
+import { revealFoldedSourceAnchor } from './folded-source-navigation';
+
+export const MOUNT_DEFERRED_MESSAGE_EVENT = 'cat-cafe:mount-deferred-message';
+export const MESSAGE_VIEWPORT_MOUNTED_EVENT = 'cat-cafe:message-viewport-mounted';
+const MESSAGE_JUMP_FOCUS_DURATION_MS = 3200;
+const messageJumpFocusTimers = new WeakMap<HTMLElement, number>();
+
+export interface MessageScrollAnchor {
+  messageId: string;
+  viewportOffsetPx: number;
+  /** Paragraph/tool header inside a long card; absent for collapsed/deferred cards. */
+  blockIndex?: number;
+  blockFingerprint?: string;
+  blockViewportOffsetPx?: number;
+  /** Existing timeline-owner score bounds history lookup without retaining a body. */
+  timelineOrderAt?: number;
+}
+
+export type TimelineScrollAnchor = { kind: 'bottom' } | { kind: 'message'; messageAnchor: MessageScrollAnchor };
+
+function messageBoundaries(root: ParentNode): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>('[data-message-viewport-id]')];
+}
+
+const READING_BLOCK_SELECTOR = 'p, li, pre, blockquote, h1, h2, h3, h4, h5, h6, [data-reading-disclosure]';
+
+function readingBlocks(boundary: HTMLElement): HTMLElement[] {
+  return [...boundary.querySelectorAll<HTMLElement>(READING_BLOCK_SELECTOR)];
+}
+
+function readingBlockFingerprint(block: HTMLElement): string | undefined {
+  const text = block.textContent?.replace(/\s+/g, ' ').trim().slice(0, 40);
+  return text ? `${block.tagName.toLowerCase()}:${text}` : undefined;
+}
+
+function resolveReadingBlock(boundary: HTMLElement, anchor: MessageScrollAnchor): HTMLElement | undefined {
+  if (anchor.blockIndex === undefined || !anchor.blockFingerprint) return undefined;
+  const savedIndex = anchor.blockIndex;
+  const blocks = readingBlocks(boundary);
+  const indexed = blocks[savedIndex];
+  if (indexed && readingBlockFingerprint(indexed) === anchor.blockFingerprint) return indexed;
+
+  let nearest: HTMLElement | undefined;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  blocks.forEach((block, index) => {
+    if (readingBlockFingerprint(block) !== anchor.blockFingerprint) return;
+    const distance = Math.abs(index - savedIndex);
+    if (distance < nearestDistance) {
+      nearest = block;
+      nearestDistance = distance;
+    }
+  });
+  return nearest;
+}
+
+function anchorForBoundary(
+  container: HTMLElement,
+  boundary: HTMLElement,
+  preferredBlock?: HTMLElement,
+): MessageScrollAnchor | undefined {
+  const messageId = boundary.dataset.messageViewportId;
+  if (!messageId) return undefined;
+  const viewport = container.getBoundingClientRect();
+  const blocks = readingBlocks(boundary);
+  const block =
+    preferredBlock ??
+    blocks.find((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return rect.bottom > viewport.top && rect.top < viewport.bottom;
+    });
+  const blockIndex = block ? blocks.indexOf(block) : -1;
+  const blockFingerprint = block ? readingBlockFingerprint(block) : undefined;
+  return {
+    messageId,
+    viewportOffsetPx: boundary.getBoundingClientRect().top - viewport.top,
+    ...(block && blockIndex >= 0 && blockFingerprint
+      ? { blockIndex, blockFingerprint, blockViewportOffsetPx: block.getBoundingClientRect().top - viewport.top }
+      : {}),
+  };
+}
+
+/** Project the top visible message into stable identity + viewport-relative geometry. */
+export function captureMessageScrollAnchor(container: HTMLElement): MessageScrollAnchor | undefined {
+  const viewport = container.getBoundingClientRect();
+  const boundary = messageBoundaries(container).find((candidate) => {
+    const rect = candidate.getBoundingClientRect();
+    return rect.bottom > viewport.top && rect.top < viewport.bottom;
+  });
+  return boundary ? anchorForBoundary(container, boundary) : undefined;
+}
+
+/** A deliberate disclosure click makes the clicked control the reading focus before layout changes. */
+export function captureMessageScrollAnchorForElement(
+  container: HTMLElement,
+  element: HTMLElement,
+): MessageScrollAnchor | undefined {
+  const boundary = element.closest<HTMLElement>('[data-message-viewport-id]');
+  if (!boundary) return undefined;
+  const visible = anchorForBoundary(container, boundary);
+  return visible?.blockIndex === undefined
+    ? anchorForBoundary(container, boundary, element.closest<HTMLElement>(READING_BLOCK_SELECTOR) ?? element)
+    : visible;
+}
+
+/** Capture one explicit navigation target without substituting another visible row. */
+export function captureMessageScrollAnchorForMessage(
+  container: HTMLElement,
+  messageId: string,
+): MessageScrollAnchor | undefined {
+  const target = resolveMessageElements([messageId], container)[0];
+  if (!target) return undefined;
+  const boundary = target.closest<HTMLElement>('[data-message-viewport-id]') ?? target;
+  return {
+    messageId,
+    viewportOffsetPx: boundary.getBoundingClientRect().top - container.getBoundingClientRect().top,
+  };
+}
+
+/** Mount deferred targets synchronously, then return their real message nodes in DOM order. */
+export function resolveMessageElements(messageIds: Iterable<string>, root: ParentNode = document): HTMLElement[] {
+  if (typeof document === 'undefined') return [];
+  const targetIds = new Set(messageIds);
+  if (targetIds.size === 0) return [];
+
+  const mountedIds = new Set(
+    [...root.querySelectorAll<HTMLElement>('[data-message-id]')]
+      .map((candidate) => candidate.dataset.messageId)
+      .filter((messageId): messageId is string => Boolean(messageId)),
+  );
+  const deferredIds = new Set([...targetIds].filter((messageId) => !mountedIds.has(messageId)));
+  if (deferredIds.size > 0) {
+    for (const placeholder of root.querySelectorAll<HTMLElement>('[data-deferred-message-id]')) {
+      const messageId = placeholder.dataset.deferredMessageId;
+      if (messageId && deferredIds.has(messageId)) {
+        placeholder.dispatchEvent(new Event(MOUNT_DEFERRED_MESSAGE_EVENT));
+      }
+    }
+  }
+
+  return [...root.querySelectorAll<HTMLElement>('[data-message-id]')].filter((candidate) => {
+    const messageId = candidate.dataset.messageId;
+    return messageId ? targetIds.has(messageId) : false;
+  });
+}
+
+/** The existing scroll writer accepts the browser's one-pixel quantization; confirmation uses the same contract. */
+export function matchesMessageScrollAnchor(container: HTMLElement, anchor: MessageScrollAnchor): boolean {
+  const target = resolveReadingAnchor(container, anchor);
+  return (
+    target !== undefined &&
+    Math.abs(target.node.getBoundingClientRect().top - container.getBoundingClientRect().top - target.offset) <= 1
+  );
+}
+
+/** Both restoration and its receipt must measure the same surviving paragraph or message boundary. */
+function resolveReadingAnchor(container: HTMLElement, anchor: MessageScrollAnchor) {
+  const target = resolveMessageElements([anchor.messageId], container)[0];
+  if (!target) return;
+  const boundary = target.closest<HTMLElement>('[data-message-viewport-id]') ?? target;
+  const block = resolveReadingBlock(boundary, anchor);
+  return {
+    node: block ?? boundary,
+    offset: block ? (anchor.blockViewportOffsetPx ?? anchor.viewportOffsetPx) : anchor.viewportOffsetPx,
+  };
+}
+
+/** Reapply a saved message anchor after placeholder or content geometry changes. */
+export function restoreMessageScrollAnchor(container: HTMLElement, anchor: MessageScrollAnchor): boolean {
+  const target = resolveReadingAnchor(container, anchor);
+  if (!target) return false;
+  const anchorNode = target.node;
+  const desiredOffset = target.offset;
+  const currentOffset = anchorNode.getBoundingClientRect().top - container.getBoundingClientRect().top;
+  const targetTop = Math.max(0, container.scrollTop + currentOffset - desiredOffset);
+  // Even an unchanged scrollTop assignment can cancel an ongoing native
+  // keyboard/wheel animation. An aligned anchor needs no new scroll operation.
+  if (Math.abs(container.scrollTop - targetTop) > 1) container.scrollTop = targetTop;
+  // A mounted row can still sit behind a temporarily short layout. Do not
+  // declare restoration complete when the browser clamps the requested offset.
+  const restoredOffset = anchorNode.getBoundingClientRect().top - container.getBoundingClientRect().top;
+  return Math.abs(container.scrollTop - targetTop) <= 1 && Math.abs(restoredOffset - desiredOffset) <= 1;
+}
+
+/** Start one complete message-jump interval, scoped to this exact activation. */
+export function highlightMessage(messageId: string, root: ParentNode = document): (() => void) | undefined {
+  const el = resolveMessageElements([messageId], root)[0];
+  return el ? markMessageJumpTarget(el) : undefined;
+}
+
+/** Restore the user's viewing intent after the same messages change timeline order. */
+export function restoreTimelineScrollAnchor(container: HTMLElement, anchor: TimelineScrollAnchor): boolean {
+  if (anchor.kind === 'bottom') {
+    container.scrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    return true;
+  }
+  return restoreMessageScrollAnchor(container, anchor.messageAnchor);
+}
+
+/** Give every message-navigation path the same temporary, presentation-only target marker. */
+export function markMessageJumpTarget(node: HTMLElement): () => void {
+  const existingTimer = messageJumpFocusTimers.get(node);
+  if (existingTimer !== undefined) window.clearTimeout(existingTimer);
+
+  node.dataset.messageJumpFocus = 'true';
+  const timer = window.setTimeout(() => {
+    delete node.dataset.messageJumpFocus;
+    messageJumpFocusTimers.delete(node);
+  }, MESSAGE_JUMP_FOCUS_DURATION_MS);
+  messageJumpFocusTimers.set(node, timer);
+  return () => {
+    if (messageJumpFocusTimers.get(node) !== timer) return;
+    window.clearTimeout(timer);
+    messageJumpFocusTimers.delete(node);
+    delete node.dataset.messageJumpFocus;
+  };
+}
+
 /**
  * Scroll to a message by ID with smooth animation and temporary highlight.
+ * Returns true when the target element was found (so callers can retry on a
+ * raf loop until the message DOM has rendered after a thread switch).
  */
-export function scrollToMessage(messageId: string): void {
-  const escaped = CSS.escape(messageId);
-  const el = document.querySelector(`[data-message-id="${escaped}"]`);
-  if (!el) return;
+export function scrollToMessage(
+  messageId: string,
+  root: ParentNode = document,
+  behavior: ScrollBehavior = 'smooth',
+  highlight = true,
+): boolean {
+  const el = resolveMessageElements([messageId], root)[0];
+  if (!el) return false;
 
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  revealFoldedSourceAnchor(el);
+  const enclosingDetails = el.closest('details');
+  if (enclosingDetails) enclosingDetails.open = true;
+  // The owner passes its reading viewport. Default-document callers use the
+  // nearest scrolling ancestor, so a tall reply never hides its author header.
+  let viewport = root instanceof HTMLElement ? root : el.parentElement;
+  while (viewport && !(root instanceof HTMLElement) && !/(auto|scroll)/.test(getComputedStyle(viewport).overflowY))
+    viewport = viewport.parentElement;
+  const viewportHeight = viewport?.clientHeight ?? document.documentElement.clientHeight;
+  const block = el.getBoundingClientRect().height > viewportHeight && viewportHeight > 0 ? 'start' : 'center';
+  el.scrollIntoView({ behavior, block });
 
-  // Temporary blue ring highlight
-  el.classList.add('ring-2', 'ring-blue-400', 'transition-all');
-  setTimeout(() => {
-    el.classList.remove('ring-2', 'ring-blue-400');
-  }, 1500);
+  if (highlight) markMessageJumpTarget(el);
+  return true;
 }

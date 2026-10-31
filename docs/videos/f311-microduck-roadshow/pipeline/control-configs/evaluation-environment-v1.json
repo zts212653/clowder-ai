@@ -1,0 +1,68 @@
+{
+  "actuator": {
+    "bamCommit": "62bd8ce12154340be97e06f7f41a0ca8f116d967",
+    "bamModel": "m6",
+    "currentLimitAmp": null,
+    "kpFirmware": 200,
+    "motor": "xl330",
+    "vinDropGain": 0.1,
+    "vinMin": 6,
+    "vinVolts": 7.4
+  },
+  "command": {
+    "angularZRadiansPerSecond": 0,
+    "linearXMetersPerSecond": 0.25,
+    "linearYMetersPerSecond": 0
+  },
+  "episode": {
+    "controlHz": 50,
+    "durationSeconds": 8,
+    "measurementStartSeconds": 1,
+    "physicsSubstepsPerControl": 4,
+    "physicsTimestepSeconds": 0.005
+  },
+  "fall": {
+    "debounceControlSteps": 10,
+    "projectedGravityZGreaterThan": -0.5,
+    "trunkHeightMetersLessThan": 0.02
+  },
+  "initialState": {
+    "jointPose": "infer_policy.DEFAULT_POSE",
+    "trunkHeightMeters": 0.125,
+    "trunkQuaternionWxyz": [1, 0, 0, 0]
+  },
+  "metrics": {
+    "meanAbsVelocityErrorMps": "mean(abs(bodyForwardVelocity-commandX)) over every measurement control tick; fallen remainder is command-error",
+    "meanForwardDistanceM": "worldX at episode end or fall minus worldX at measurement start",
+    "survivalRate": "mean of per-episode no-debounced-fall indicators"
+  },
+  "perturbation": {
+    "distribution": "independent_uniform_additive_world_xy_velocity",
+    "maximumMetersPerSecond": 0.3,
+    "minimumMetersPerSecond": -0.3,
+    "numpyBitGenerator": "PCG64",
+    "timesSeconds": [3, 6]
+  },
+  "policyObservation": {
+    "commandDimensions": 13,
+    "lastAction": "raw_onnx_output_before_action_scale",
+    "totalDimensions": 61,
+    "useProjectedGravity": true
+  },
+  "runtimeDependencies": {
+    "better-actuator-models": "1.0.1",
+    "mujoco": "3.10.0",
+    "numpy": "2.4.1",
+    "onnxruntime": "1.24.4",
+    "pythonSeries": "3.12"
+  },
+  "schemaVersion": 1,
+  "source": {
+    "inferPolicyPath": "scripts/infer_policy.py",
+    "inferPolicySha256": "bfeb91fb477490c932754eb7726207697628629229b9495fde1f56232acb1b45",
+    "repository": "pollen-robotics/microduck_rl",
+    "revision": "29e887ecfbf5d37144759e5a9f8a176dfb83d547",
+    "scenePath": "src/mjlab_microduck/robot/microduck/scene.xml",
+    "sceneSha256": "9a85461121ba8273083c482c166f27e143ca386993b3ec8f8d97eb09aa257d31"
+  }
+}

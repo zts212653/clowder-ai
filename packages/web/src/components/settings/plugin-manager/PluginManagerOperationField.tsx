@@ -1,0 +1,42 @@
+'use client';
+
+import type { PluginManagerConfigField } from '@cat-cafe/shared';
+import { useMemo } from 'react';
+import type { PlatformOperationStatus } from '../../HubConfigIcons';
+import { ActionRenderer } from '../primitives/ActionRenderer';
+
+export function PluginManagerOperationField({
+  pluginId,
+  field,
+  pendingConfigValues,
+  onStatusChange,
+}: {
+  pluginId: string;
+  field: PluginManagerConfigField;
+  pendingConfigValues: Readonly<Record<string, string>>;
+  onStatusChange?: () => void;
+}) {
+  const operation = useMemo<PlatformOperationStatus>(
+    () => ({
+      name: field.key,
+      label: field.label,
+      actions: field.actions ?? [],
+      ...(field.rowActions === undefined ? {} : { rowActions: field.rowActions }),
+      ...(field.operationState?.currentAction === undefined
+        ? {}
+        : { currentAction: field.operationState.currentAction }),
+      ...(field.operationState?.updatedAt === undefined ? {} : { updatedAt: field.operationState.updatedAt }),
+    }),
+    [field],
+  );
+  if (field.kind !== 'operation' || !field.actions?.length) return null;
+  return (
+    <ActionRenderer
+      target={{ kind: 'plugin', id: pluginId }}
+      operation={operation}
+      configured={field.configured}
+      pendingConfigValues={pendingConfigValues}
+      onStatusChange={onStatusChange}
+    />
+  );
+}

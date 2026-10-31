@@ -1,3 +1,4 @@
+import { coCreatorDisplay } from '@cat-cafe/shared';
 /**
  * Export Route Tests
  * 测试聊天记录导出为 Markdown / 纯文本
@@ -5,6 +6,9 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { getCoCreatorConfig } from '../dist/config/cat-config-loader.js';
+import './helpers/setup-cat-registry.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { formatThreadAsMarkdown, formatThreadAsText } = await import('../dist/routes/export.js');
 
@@ -24,7 +28,7 @@ function makeThread(overrides = {}) {
 
 /** Helper to create a stored message */
 function makeMessage(overrides = {}) {
-  return {
+  return canonicalTestMessageInput({
     id: 'msg-1',
     threadId: 'thread-1',
     userId: 'user-1',
@@ -33,7 +37,7 @@ function makeMessage(overrides = {}) {
     mentions: [],
     timestamp: new Date('2026-02-07T10:30:00').getTime(),
     ...overrides,
-  };
+  });
 }
 
 describe('formatThreadAsMarkdown', () => {
@@ -43,7 +47,7 @@ describe('formatThreadAsMarkdown', () => {
       makeMessage({ content: '你好布偶猫', timestamp: new Date('2026-02-07T10:30:00').getTime() }),
       makeMessage({
         catId: 'opus',
-        content: '你好铲屎官！',
+        content: '你好co-creator！',
         timestamp: new Date('2026-02-07T10:31:00').getTime(),
         id: 'msg-2',
       }),
@@ -55,8 +59,32 @@ describe('formatThreadAsMarkdown', () => {
     assert.ok(md.includes('thread-1'));
     assert.ok(md.includes('布偶猫'));
     assert.ok(md.includes('你好布偶猫'));
-    assert.ok(md.includes('你好铲屎官！'));
-    assert.ok(md.includes('铲屎官'));
+    assert.ok(md.includes('你好co-creator！'));
+    const coCreator = getCoCreatorConfig();
+    assert.ok(md.includes(` ${coCreator.nickname ?? coCreatorDisplay(coCreator).nickname}]`));
+  });
+
+  test('uses consistent timezone basis across header and message body', () => {
+    // P1 fix (砚砚 review 2026-05-29): formatMessage was hardcoded to UTC for
+    // prompt-side cats, but export's header/footer use local time via
+    // formatDatetime() — producing a single export file with the header in
+    // local time and the body in UTC ("[03:00 UTC ...]"), a 7h gap on PDT
+    // hosts. Pin the contract: header and body must share the same timezone
+    // basis (export is human-facing, so both should be local).
+    const ts = new Date('2026-05-29T03:00:00Z').getTime();
+    const thread = makeThread({ participants: [] });
+    const messages = [makeMessage({ content: 'hi', timestamp: ts })];
+
+    const md = formatThreadAsMarkdown(thread, messages);
+
+    const d = new Date(ts);
+    const pad = (n) => n.toString().padStart(2, '0');
+    const localHm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+    // Body line `[HH:mm sender] content` must use the same local basis as the header.
+    assert.ok(md.includes(localHm), `body should use local time matching header; got:\n${md.slice(0, 400)}`);
+    // And must not mix in UTC-tagged body times alongside the local header/footer.
+    assert.ok(!/\d\d:\d\d UTC/.test(md), 'export must not mix UTC-tagged body times with local header/footer');
   });
 
   test('handles empty messages with only header', () => {
@@ -85,7 +113,8 @@ describe('formatThreadAsMarkdown', () => {
 
     const md = formatThreadAsMarkdown(thread, messages);
 
-    assert.ok(md.includes('铲屎官'));
+    const coCreator = getCoCreatorConfig();
+    assert.ok(md.includes(` ${coCreator.nickname ?? coCreatorDisplay(coCreator).nickname}]`));
     assert.ok(md.includes('布偶猫'));
     assert.ok(md.includes('缅因猫'));
     assert.ok(md.includes('请问一下'));
@@ -126,7 +155,7 @@ describe('formatThreadAsText', () => {
       makeMessage({ content: '你好布偶猫', timestamp: new Date('2026-02-07T10:30:00').getTime() }),
       makeMessage({
         catId: 'opus',
-        content: '你好铲屎官！',
+        content: '你好co-creator！',
         timestamp: new Date('2026-02-07T10:31:00').getTime(),
         id: 'msg-2',
       }),
@@ -144,7 +173,7 @@ describe('formatThreadAsText', () => {
 
     // Should include message content
     assert.ok(txt.includes('你好布偶猫'));
-    assert.ok(txt.includes('你好铲屎官！'));
+    assert.ok(txt.includes('你好co-creator！'));
   });
 
   test('handles empty messages', () => {
@@ -190,6 +219,8 @@ describe('formatThreadAsText', () => {
 });
 
 describe('Export Route (endpoint)', () => {
+  const authHeaders = { 'x-cat-cafe-user': 'user-1' };
+
   // Route-level test using Fastify inject
   async function buildApp(threadStore, messageStore) {
     const Fastify = (await import('fastify')).default;
@@ -226,7 +257,10 @@ describe('Export Route (endpoint)', () => {
       }),
       getRecent: () => [],
       getByThread: async () => messages,
-      getById: async () => null,
+      // Whole-message selection resolves the canonical bubble group, so the store must expose the
+      // same timeline the browser projected from.
+      getByThreadAfter: async (threadId) => messages.filter((message) => message.threadId === threadId),
+      getById: async (id) => messages.find((message) => message.id === id) ?? null,
       getPendingMentions: async () => [],
     };
   }
@@ -239,6 +273,7 @@ describe('Export Route (endpoint)', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/export/thread/thread-1?format=md',
+      headers: authHeaders,
     });
 
     assert.equal(res.statusCode, 200);
@@ -247,12 +282,43 @@ describe('Export Route (endpoint)', () => {
     assert.ok(res.body.includes('hello'));
   });
 
+  test('GET export includes published queued cat speech but excludes queued internal work', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const thread = makeThread();
+    const messageStore = new MessageStore();
+    messageStore.append(
+      canonicalTestMessageInput({
+        ...makeMessage({ catId: 'codex-sol', content: 'published source-cat seed' }),
+        deliveryStatus: 'queued',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        ...makeMessage({ id: 'msg-system', userId: 'system', catId: 'system', content: 'queued internal event' }),
+        deliveryStatus: 'queued',
+      }),
+    );
+    const app = await buildApp(mockThreadStore({ 'thread-1': thread }), messageStore);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/export/thread/thread-1?format=md',
+      headers: authHeaders,
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body, /published source-cat seed/);
+    assert.doesNotMatch(res.body, /queued internal event/);
+    await app.close();
+  });
+
   test('GET non-existent thread returns 404', async () => {
     const app = await buildApp(mockThreadStore(), mockMessageStore());
 
     const res = await app.inject({
       method: 'GET',
       url: '/api/export/thread/nope?format=md',
+      headers: authHeaders,
     });
 
     assert.equal(res.statusCode, 404);
@@ -267,6 +333,7 @@ describe('Export Route (endpoint)', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/export/thread/thread-1?format=json',
+      headers: authHeaders,
     });
 
     assert.equal(res.statusCode, 400);
@@ -282,6 +349,7 @@ describe('Export Route (endpoint)', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/export/thread/thread-1?format=txt',
+      headers: authHeaders,
     });
 
     assert.equal(res.statusCode, 200);
@@ -299,9 +367,151 @@ describe('Export Route (endpoint)', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/export/thread/thread-1',
+      headers: authHeaders,
     });
 
     assert.equal(res.statusCode, 200);
     assert.ok(res.headers['content-type'].includes('text/markdown'));
+  });
+
+  test('GET requires authenticated ownership and rejects a foreign owner', async () => {
+    const thread = makeThread();
+    const app = await buildApp(mockThreadStore({ 'thread-1': thread }), mockMessageStore());
+
+    const missingIdentity = await app.inject({ method: 'GET', url: '/api/export/thread/thread-1' });
+    assert.equal(missingIdentity.statusCode, 401);
+
+    const foreignOwner = await app.inject({
+      method: 'GET',
+      url: '/api/export/thread/thread-1',
+      headers: { 'x-cat-cafe-user': 'user-2' },
+    });
+    assert.equal(foreignOwner.statusCode, 403);
+  });
+
+  test('GET allows authenticated export of a system-created shared thread', async () => {
+    const thread = makeThread({ createdBy: 'system' });
+    const app = await buildApp(
+      mockThreadStore({ 'thread-1': thread }),
+      mockMessageStore([makeMessage({ content: 'shared source' })]),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/export/thread/thread-1?format=md',
+      headers: authHeaders,
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body, /shared source/);
+  });
+
+  test('POST selection exports only normalized selected messages with rich fallbacks', async () => {
+    const thread = makeThread();
+    const messages = [
+      makeMessage({ id: 'message-unselected', timestamp: 50, content: 'must stay out' }),
+      makeMessage({ id: 'message-later', timestamp: 200, catId: 'codex-sol', content: 'later selected' }),
+      makeMessage({
+        id: 'message-earlier',
+        timestamp: 100,
+        content: 'earlier selected',
+        contentBlocks: [{ type: 'image', url: '/uploads/diagram.png', alt: 'queue topology' }],
+      }),
+    ];
+    const app = await buildApp(mockThreadStore({ 'thread-1': thread }), mockMessageStore(messages));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/export/thread/thread-1/selection',
+      headers: authHeaders,
+      payload: {
+        format: 'md',
+        items: [
+          { kind: 'message', messageId: 'message-later' },
+          { kind: 'message', messageId: 'message-earlier' },
+        ],
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.headers['content-type'].includes('text/markdown'));
+    assert.match(res.body, /earlier selected/);
+    assert.match(res.body, /\[图片: queue topology\]/);
+    assert.match(res.body, /later selected/);
+    assert.doesNotMatch(res.body, /must stay out/);
+    assert.ok(res.body.indexOf('earlier selected') < res.body.indexOf('later selected'));
+  });
+
+  test('POST selection preserves Quote comments and supports TXT', async () => {
+    const thread = makeThread();
+    const messages = [makeMessage({ id: 'message-quote', content: 'alpha beta gamma' })];
+    const app = await buildApp(mockThreadStore({ 'thread-1': thread }), mockMessageStore(messages));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/export/thread/thread-1/selection',
+      headers: authHeaders,
+      payload: {
+        format: 'txt',
+        items: [
+          {
+            kind: 'quote',
+            messageId: 'message-quote',
+            text: 'beta',
+            renderedOccurrences: 1,
+            selectionStart: 6,
+            selectionEnd: 10,
+            comment: '重点看这里',
+          },
+        ],
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.headers['content-type'].includes('text/plain'));
+    assert.match(res.body, /beta/);
+    assert.match(res.body, /Comment: 重点看这里/);
+    assert.doesNotMatch(res.body, /alpha beta gamma/);
+  });
+
+  test('POST selection fails closed for malformed, duplicate, foreign, forged, and unauthorized input', async () => {
+    const thread = makeThread();
+    const messages = [makeMessage({ id: 'message-1' })];
+    const app = await buildApp(mockThreadStore({ 'thread-1': thread }), mockMessageStore(messages));
+
+    const invalidPayloads = [
+      { format: 'md', items: [] },
+      {
+        format: 'md',
+        items: [
+          { kind: 'message', messageId: 'message-1' },
+          { kind: 'message', messageId: 'message-1' },
+        ],
+      },
+      { format: 'md', items: [{ kind: 'message', messageId: 'missing' }] },
+      { format: 'md', items: [{ kind: 'message', messageId: 'message-1', body: 'forged copy' }] },
+      {
+        format: 'md',
+        items: Array.from({ length: 51 }, (_, index) => ({ kind: 'message', messageId: `message-${index}` })),
+      },
+    ];
+
+    for (const payload of invalidPayloads) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/export/thread/thread-1/selection',
+        headers: authHeaders,
+        payload,
+      });
+      assert.equal(res.statusCode, 400);
+    }
+
+    const unauthorized = await app.inject({
+      method: 'POST',
+      url: '/api/export/thread/thread-1/selection',
+      headers: { 'x-cat-cafe-user': 'user-2' },
+      payload: { format: 'md', items: [{ kind: 'message', messageId: 'message-1' }] },
+    });
+    assert.equal(unauthorized.statusCode, 403);
   });
 });

@@ -135,7 +135,9 @@ describe('Session bind history import', () => {
       assert.equal(stored.length, 1);
       assert.equal(stored[0]?.catId, 'opus');
       assert.equal(stored[0]?.content, '历史里的布偶猫回答');
-      assert.deepEqual(stored[0]?.extra?.stream, { invocationId: 'inv-1' });
+      // F194 Phase Z9 AC-Z25 (KD-28): history import now stamps turnInvocationId
+      // explicitly (= invocationId for history records — they have only one identity).
+      assert.deepEqual(stored[0]?.extra?.stream, { invocationId: 'inv-1', turnInvocationId: 'inv-1' });
 
       const historyRes = await app.inject({
         method: 'GET',
@@ -149,6 +151,45 @@ describe('Session bind history import', () => {
     } finally {
       await app.close();
     }
+  });
+
+  test('#1329 backfill inspects only the requesting owner session chain', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { backfillBoundSessionHistory } = await import(
+      '../dist/domains/cats/services/session/BoundSessionHistoryImporter.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const ownerA = sessionChainStore.create({
+      cliSessionId: 'cli-owner-a',
+      threadId: 'default',
+      catId: 'opus',
+      userId: 'user-a',
+    });
+    const ownerB = sessionChainStore.create({
+      cliSessionId: 'cli-owner-b',
+      threadId: 'default',
+      catId: 'opus',
+      userId: 'user-b',
+    });
+    sessionChainStore.update(ownerA.id, { status: 'sealed' });
+    sessionChainStore.update(ownerB.id, { status: 'sealed' });
+    const inspected = [];
+    const result = await backfillBoundSessionHistory({
+      sessionChainStore,
+      transcriptReader: {
+        hasTranscript: async (sessionId) => {
+          inspected.push(sessionId);
+          return false;
+        },
+      },
+      messageStore: { getByThread: async () => [], append: async () => {} },
+      threadId: 'default',
+      catId: 'opus',
+      userId: 'user-a',
+    });
+
+    assert.equal(result.reason, 'no_transcript_found');
+    assert.deepEqual(inspected, [ownerA.id]);
   });
 
   test('bind reports no_transcript_found when there is nothing importable yet', async () => {

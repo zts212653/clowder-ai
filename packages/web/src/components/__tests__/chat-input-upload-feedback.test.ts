@@ -15,6 +15,9 @@ vi.mock('@/components/icons/AttachIcon', () => ({
 vi.mock('@/components/ImagePreview', () => ({
   ImagePreview: () => null,
 }));
+vi.mock('@/components/AttachmentPreview', () => ({
+  AttachmentPreview: () => null,
+}));
 vi.mock('@/utils/compressImage', () => ({
   compressImage: (f: File) => Promise.resolve(f),
 }));
@@ -52,11 +55,11 @@ function render(props: Partial<React.ComponentProps<typeof ChatInput>> = {}) {
 describe('ChatInput upload feedback', () => {
   it('shows uploading hint while image request is in progress', () => {
     render({ uploadStatus: 'uploading' });
-    expect(container.textContent).toContain('图片上传中，请稍候...');
+    expect(container.textContent).toContain('附件上传中，请稍候...');
   });
 
   it('shows visible error hint when image send fails', () => {
     render({ uploadStatus: 'failed', uploadError: '上传超时' });
-    expect(container.textContent).toContain('图片发送失败：上传超时');
+    expect(container.textContent).toContain('附件发送失败：上传超时');
   });
 });

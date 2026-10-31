@@ -1,0 +1,167 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * Bare POST through Cloudflare Tunnel → Fastify returns 415.
+ * apiFetch should auto-add content-type + empty body for mutating
+ * requests that omit a body. (Bug-12 root cause)
+ */
+describe('apiFetch body normalization for mutating requests', () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.unstubAllGlobals();
+  });
+
+  async function loadApiFetch() {
+    vi.resetModules();
+    vi.stubGlobal('location', {
+      hostname: 'localhost',
+      port: '3001',
+      protocol: 'http:',
+    });
+    const mod = await import('../api-client');
+    return mod.apiFetch;
+  }
+
+  it('adds content-type and empty body to bare POST', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    globalThis.fetch = mockFetch;
+
+    const apiFetch = await loadApiFetch();
+    await apiFetch('/api/threads/t1/read/latest', { method: 'POST' });
+
+    // Skip session call, check the data call
+    const dataCalls = mockFetch.mock.calls.filter((call) => !(call[0] as string).includes('/api/session'));
+    expect(dataCalls.length).toBe(1);
+    const init = dataCalls[0][1] as RequestInit;
+    expect((init.headers as Record<string, string>)['content-type']).toBe('application/json');
+    expect(init.body).toBe('{}');
+  });
+
+  it('adds content-type and empty body to bare DELETE', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    globalThis.fetch = mockFetch;
+
+    const apiFetch = await loadApiFetch();
+    await apiFetch('/api/threads/t1', { method: 'DELETE' });
+
+    const dataCalls = mockFetch.mock.calls.filter((call) => !(call[0] as string).includes('/api/session'));
+    const init = dataCalls[0][1] as RequestInit;
+    expect((init.headers as Record<string, string>)['content-type']).toBe('application/json');
+    expect(init.body).toBe('{}');
+  });
+
+  it('does NOT override body when caller provides one', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    globalThis.fetch = mockFetch;
+
+    const apiFetch = await loadApiFetch();
+    await apiFetch('/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'hello' }),
+    });
+
+    const dataCalls = mockFetch.mock.calls.filter((call) => !(call[0] as string).includes('/api/session'));
+    const init = dataCalls[0][1] as RequestInit;
+    expect(init.body).toBe(JSON.stringify({ text: 'hello' }));
+  });
+
+  it('does NOT override FormData body (voice upload)', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    globalThis.fetch = mockFetch;
+
+    const formData = new FormData();
+    formData.append('file', new Blob(['audio']), 'recording.webm');
+
+    const apiFetch = await loadApiFetch();
+    await apiFetch('/api/whisper', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const dataCalls = mockFetch.mock.calls.filter((call) => !(call[0] as string).includes('/api/session'));
+    const init = dataCalls[0][1] as RequestInit;
+    expect(init.body).toBeInstanceOf(FormData);
+  });
+
+  it('does NOT add body to GET requests', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    globalThis.fetch = mockFetch;
+
+    const apiFetch = await loadApiFetch();
+    await apiFetch('/api/threads');
+
+    const dataCalls = mockFetch.mock.calls.filter((call) => !(call[0] as string).includes('/api/session'));
+    const init = dataCalls[0][1] as RequestInit;
+    expect(init.body).toBeUndefined();
+  });
+
+  it('preserves caller headers while adding content-type for bare POST', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    globalThis.fetch = mockFetch;
+
+    const apiFetch = await loadApiFetch();
+    await apiFetch('/api/mark-all', {
+      method: 'POST',
+      headers: { 'x-custom': 'value' },
+    });
+
+    const dataCalls = mockFetch.mock.calls.filter((call) => !(call[0] as string).includes('/api/session'));
+    const init = dataCalls[0][1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers['content-type']).toBe('application/json');
+    expect(headers['x-custom']).toBe('value');
+  });
+
+  it('keeps confirmed owner intent through real body normalization and session CSRF', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockImplementation((url: string) =>
+        Promise.resolve(
+          url.includes('/api/session') ? Response.json({ csrfToken: 'session-csrf' }) : Response.json({ ok: true }),
+        ),
+      );
+    const apiFetch = await loadApiFetch();
+    const { confirmedActionRequest } = await import('../../components/settings/primitives/actionConfirmation');
+    await apiFetch(
+      '/api/plugins/chrome/actions/hostChromeSetup/install',
+      confirmedActionRequest({ method: 'POST' }, 'Confirm local setup', true),
+    );
+    const calls = vi.mocked(globalThis.fetch).mock.calls.filter((call) => !String(call[0]).includes('/api/session'));
+    const request = calls[0][1]!;
+    const headers = new Headers(request.headers);
+    expect(headers.get('x-cat-cafe-owner-confirmed')).toBe('true');
+    expect(headers.get('x-csrf-token')).toBe('session-csrf');
+    expect(headers.get('content-type')).toBe('application/json');
+    expect(request.body).toBe('{}');
+  });
+
+  it('attaches the server-issued session CSRF token to mutations without adding it to reads', async () => {
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/session')) {
+        return Promise.resolve(Response.json({ csrfToken: 'csrf-from-session-bootstrap' }));
+      }
+      return Promise.resolve(new Response('{}', { status: 200 }));
+    });
+    globalThis.fetch = mockFetch;
+
+    const apiFetch = await loadApiFetch();
+    await apiFetch('/api/memory/people/person_1/actions', {
+      method: 'POST',
+      body: '{}',
+    });
+    await apiFetch('/api/memory/people/person_1');
+
+    const dataCalls = mockFetch.mock.calls.filter((call) => !(call[0] as string).includes('/api/session'));
+    expect(new Headers((dataCalls[0][1] as RequestInit).headers).get('x-csrf-token')).toBe(
+      'csrf-from-session-bootstrap',
+    );
+    expect(new Headers((dataCalls[1][1] as RequestInit).headers).has('x-csrf-token')).toBe(false);
+  });
+});

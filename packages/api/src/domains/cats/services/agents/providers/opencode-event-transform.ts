@@ -6,16 +6,24 @@
  *   { type, timestamp, sessionID, part: { type, ... } }
  *
  * Event mapping:
- *   step_start → session_init (first occurrence establishes session)
- *   text       → text (part.text)
- *   tool_use   → tool_use (part.tool, part.state.input)
- *   error      → error (error.data.message or error.name)
- *   step_finish → null (cost/token metadata, skipped)
- *   Others     → null
+ *   step_start  → session_init (first occurrence establishes session)
+ *   text        → text (part.text) — but if part.type='reasoning', routes to system_info(thinking)
+ *   reasoning   → system_info(thinking) (F161: previously dropped by default case)
+ *   tool_use    → tool_use (part.tool, part.state.input)
+ *   error       → error (error.data.message or error.name)
+ *   step_finish → agent_loop + metadata.usage (telemetry-only). Lights up
+ *                 invoke-single-cat's F8 token block + F24 contextHealth
+ *                 path so handoff can fire BEFORE context fills.
+ *                 Pre-clowder#915 this returned null → usage dropped →
+ *                 contextHealth never produced → handoff never triggered →
+ *                 opencode hung at context limit.
+ *   Others      → null
  */
 
 import type { CatId } from '@cat-cafe/shared';
+import { excerptSanitizedStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import type { AgentMessage } from '../../types.js';
+import { readOpenCodeError } from './opencode-error.js';
 
 interface OpenCodeEvent {
   type: string;
@@ -26,10 +34,32 @@ interface OpenCodeEvent {
     text?: string;
     tool?: string;
     callID?: string;
+    /** step_finish only: terminal reason — 'stop' = final answer (terminal),
+     *  'tool-calls' = LLM called tools, more steps follow (non-terminal),
+     *  'length'/'content-filter' = upstream halted mid-step (terminal). */
+    reason?: string;
     state?: {
       status?: string;
       input?: Record<string, unknown>;
       output?: string;
+    };
+    /** step_finish only: USD cost of this step from the upstream provider. */
+    cost?: number;
+    /** step_finish only: token counts for this step (per-API-call shape).
+     *  Note: opencode CLI reports cached prompt tokens under tokens.cache.{read,write}
+     *  SEPARATELY from tokens.input. The shared TokenUsage contract requires
+     *  inputTokens to be the TOTAL prompt (fresh + cached), so consumers must
+     *  sum input + cache.read + cache.write when emitting AgentMessage usage.
+     *  (clowder#915 R4 cloud P1 #1). */
+    tokens?: {
+      total?: number;
+      input?: number;
+      output?: number;
+      reasoning?: number;
+      cache?: {
+        read?: number;
+        write?: number;
+      };
     };
     [key: string]: unknown;
   };
@@ -66,10 +96,34 @@ export function transformOpenCodeEvent(event: unknown, catId: CatId | string): A
     case 'text': {
       const text = event.part?.text;
       if (typeof text !== 'string' || text.length === 0) return null;
+      // F161: OpenCode CLI may send reasoning/thinking as a text event with
+      // part.type = 'reasoning'. Route to thinking block instead of CLI Output.
+      if (event.part?.type === 'reasoning') {
+        return {
+          type: 'system_info',
+          catId: catId as CatId,
+          content: JSON.stringify({ type: 'thinking', text }),
+          timestamp: ts,
+        };
+      }
       return {
         type: 'text',
         catId: catId as CatId,
         content: text,
+        timestamp: ts,
+      };
+    }
+
+    // F161: OpenCode CLI sends dedicated reasoning events for thinking models.
+    // Previously these hit `default → null` and were silently dropped.
+    // Map to system_info(thinking) — same pattern as codex-event-transform.
+    case 'reasoning': {
+      const reasoningText = event.part?.text;
+      if (typeof reasoningText !== 'string' || reasoningText.length === 0) return null;
+      return {
+        type: 'system_info',
+        catId: catId as CatId,
+        content: JSON.stringify({ type: 'thinking', text: reasoningText }),
         timestamp: ts,
       };
     }
@@ -88,17 +142,91 @@ export function transformOpenCodeEvent(event: unknown, catId: CatId | string): A
     }
 
     case 'error': {
-      const errorMsg = event.error?.data?.message ?? event.error?.name ?? 'opencode error';
+      const errorMsg = readOpenCodeError(event).message ?? 'opencode error';
       return {
         type: 'error',
         catId: catId as CatId,
-        error: errorMsg,
+        error: excerptSanitizedStderr(errorMsg, { edge: 'head', maxLength: 2048 }),
         timestamp: ts,
       };
     }
 
-    case 'step_finish':
-      return null;
+    case 'step_finish': {
+      // clowder#915: surface token usage so invoke-single-cat's F8 token block
+      // and F24 contextHealth path can compute fillRatio and trigger handoff
+      // before context fills. Without this, opencode's session-chain machinery
+      // sees zero usage signal and never seals → CLI hangs at context limit.
+      //
+      // 砚砚 R1 P1: don't set provider/model here — the transformer can't see
+      // variant.defaultModel, and a `model: ''` here would break OTel
+      // normalizeModel and the invocation-owned capacity binding downstream. OpenCodeAgentService
+      // merges this `usage` onto its own `metadata: { provider, model: effectiveModel }`
+      // when yielding (see merge logic in OpenCodeAgentService.ts), so we emit a
+      // partial metadata that the service layer completes.
+      const tokens = event.part?.tokens;
+      const freshInput = typeof tokens?.input === 'number' ? tokens.input : undefined;
+      const cacheRead = typeof tokens?.cache?.read === 'number' ? tokens.cache.read : undefined;
+      const cacheWrite = typeof tokens?.cache?.write === 'number' ? tokens.cache.write : undefined;
+      const outputTokens = typeof tokens?.output === 'number' ? tokens.output : undefined;
+      const totalTokens = typeof tokens?.total === 'number' ? tokens.total : undefined;
+      const costUsd = typeof event.part?.cost === 'number' ? event.part.cost : undefined;
+
+      // clowder#915 R4 cloud P1 #1: opencode CLI reports cached prompt tokens
+      // (cache.read for resumed-context reuse, cache.write for first-time cache
+      // population) SEPARATELY from tokens.input (fresh tokens this step).
+      // The shared TokenUsage contract says inputTokens/lastTurnInputTokens
+      // represent the TOTAL input including cached, and F24's context-fill
+      // numerator reads lastTurnInputTokens. If we copied only tokens.input,
+      // a long cached session (e.g. 671 fresh + 21k cached) would look like
+      // 671 → fillRatio underflow → handoff never fires before context wall.
+      const totalInputTokens =
+        freshInput != null || cacheRead != null || cacheWrite != null
+          ? (freshInput ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0)
+          : undefined;
+
+      // Defensive: opencode may emit step_finish without token data (cached responses,
+      // pre-flight steps, etc.). With no telemetry there's nothing to surface; emit
+      // nothing instead of an empty agent_loop marker.
+      if (totalInputTokens == null && outputTokens == null && totalTokens == null) return null;
+
+      // OpenCode step_finish does not report a runtime context window. It contributes
+      // only the authoritative numerator; the invocation-owned capacity snapshot
+      // supplies the denominator from the member binding.
+
+      // clowder#915 R4 cloud P1 #3 (defer seal): handled in invoke-single-cat
+      // by ALWAYS deferring opencode agent_loop seals to the `done` event,
+      // regardless of step_finish.reason ('stop' vs 'tool-calls'). Since
+      // `done` arrives after the CLI's final step, "defer to done" achieves
+      // the same effect as "defer to terminal step" without the transformer
+      // needing to leak step_finish.reason into TokenUsage shape.
+      return {
+        type: 'agent_loop',
+        catId: catId as CatId,
+        timestamp: ts,
+        // Provider/model intentionally placeholders — OpenCodeAgentService overrides
+        // them with effectiveModel + 'opencode' on yield. Only `usage` is the
+        // transformer's contribution.
+        metadata: {
+          provider: 'opencode',
+          model: '',
+          usage: {
+            ...(totalInputTokens != null
+              ? { inputTokens: totalInputTokens, lastTurnInputTokens: totalInputTokens }
+              : {}),
+            ...(outputTokens != null ? { outputTokens } : {}),
+            ...(totalTokens != null ? { totalTokens } : {}),
+            // Skip zero-valued cache fields: 0 means "no cache activity this step",
+            // emitting an explicit 0 is noise. Truthy check is enough (we already
+            // confirmed type === 'number' above).
+            ...(cacheRead ? { cacheReadTokens: cacheRead } : {}),
+            ...(cacheWrite ? { cacheCreationTokens: cacheWrite } : {}),
+            ...(costUsd != null ? { costUsd } : {}),
+            // Never attach a guessed contextWindowSize. Unknown bindings remain
+            // unresolved until the member resolver has trusted catalog/manual/runtime evidence.
+          },
+        },
+      };
+    }
 
     default:
       return null;

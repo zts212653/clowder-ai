@@ -19,13 +19,25 @@ const CONFIG: ConfigData & {
     color: { primary: '#E29578', secondary: '#FFE4D6' },
   },
   cats: {
-    opus: { displayName: '布偶猫', provider: 'anthropic', model: 'claude-opus-4-5-20250214', mcpSupport: true },
-    codex: { displayName: '缅因猫', provider: 'openai', model: 'codex-2025-03', mcpSupport: false },
-    antigravity: { displayName: '孟加拉猫', provider: 'antigravity', model: 'gemini-bridge', mcpSupport: false },
+    opus: { displayName: '布偶猫', clientId: 'anthropic', model: 'claude-opus-4-5-20250214', mcpSupport: true },
+    codex: { displayName: '缅因猫', clientId: 'openai', model: 'codex-2025-03', mcpSupport: false },
+    antigravity: { displayName: '孟加拉猫', clientId: 'antigravity', model: 'gemini-bridge', mcpSupport: true },
   },
-  perCatBudgets: {
-    opus: { maxPromptTokens: 150000, maxContextTokens: 200000, maxMessages: 50, maxContentLengthPerMsg: 64000 },
-    codex: { maxPromptTokens: 100000, maxContextTokens: 128000, maxMessages: 30, maxContentLengthPerMsg: 32000 },
+  perCatCapacities: {
+    opus: {
+      windowTokens: 200000,
+      inputCeilingTokens: 184000,
+      source: 'manual',
+      actionable: true,
+      provenance: 'manual',
+    },
+    codex: {
+      windowTokens: 128000,
+      inputCeilingTokens: 112000,
+      source: 'catalog',
+      actionable: false,
+      provenance: 'catalog',
+    },
   },
   a2a: { enabled: true, maxDepth: 2 },
   memory: { enabled: true, maxKeysPerThread: 50 },
@@ -38,7 +50,8 @@ const CATS: CatData[] = [
     displayName: '布偶猫 Opus',
     breedDisplayName: '布偶猫',
     nickname: '宪宪',
-    provider: 'anthropic',
+    clientId: 'anthropic',
+    carrier: 'cli',
     accountRef: 'claude',
     defaultModel: 'claude-opus-4-5',
     color: { primary: '#6366f1', secondary: '#818cf8' },
@@ -46,7 +59,6 @@ const CATS: CatData[] = [
     avatar: '',
     roleDescription: '',
     personality: '',
-    source: 'seed',
     roster: {
       family: 'ragdoll',
       roles: ['architect', 'peer-reviewer'],
@@ -60,7 +72,8 @@ const CATS: CatData[] = [
     displayName: '缅因猫 Codex',
     breedDisplayName: '缅因猫',
     nickname: '砚砚',
-    provider: 'openai',
+    clientId: 'openai',
+    carrier: 'cli',
     accountRef: 'sponsor1',
     defaultModel: 'codex',
     color: { primary: '#22c55e', secondary: '#4ade80' },
@@ -68,7 +81,6 @@ const CATS: CatData[] = [
     avatar: '',
     roleDescription: '',
     personality: '',
-    source: 'seed',
     roster: {
       family: 'maine-coon',
       roles: ['peer-reviewer', 'security'],
@@ -81,8 +93,9 @@ const CATS: CatData[] = [
     id: 'antigravity',
     displayName: '孟加拉猫 Antigravity',
     breedDisplayName: '孟加拉猫',
-    nickname: '阿吉',
-    provider: 'antigravity',
+    nickname: '斑斑',
+    clientId: 'antigravity',
+    carrier: 'cli',
     defaultModel: 'gemini-bridge',
     commandArgs: ['npx', 'antigravity', '--bridge'],
     color: { primary: '#f59e0b', secondary: '#fcd34d' },
@@ -90,7 +103,6 @@ const CATS: CatData[] = [
     avatar: '',
     roleDescription: '',
     personality: '',
-    source: 'runtime',
     roster: {
       family: 'bengal',
       roles: ['creative', 'visual', 'browser-agent'],
@@ -109,27 +121,31 @@ describe('CatOverviewTab', () => {
         cats: CATS,
         onAddMember: () => {},
         onEditMember: () => {},
+        onToggleAvailability: () => {},
       }),
     );
     expect(html).toContain('Co-worker');
-    expect(html).toContain('🔒 Owner');
+    expect(html).toContain('Owner');
     expect(html).toContain('#E29578');
     expect(html).toContain('/avatars/owner-custom.png');
-    expect(html.indexOf('Co-worker')).toBeLessThan(html.indexOf('布偶猫 · 宪宪'));
-    expect(html).toContain('全部');
-    expect(html).toContain('订阅');
-    expect(html).toContain('API Key');
-    expect(html).toContain('未启用');
-    expect(html.indexOf('+ 添加成员')).toBeLessThan(html.indexOf('布偶猫 · 宪宪'));
-    expect(html).toContain('布偶猫 · 宪宪');
-    expect(html).toContain('缅因猫 · 砚砚');
-    expect(html).toContain('孟加拉猫 · 阿吉');
-    expect(html).toContain('内置 OAuth 账号');
-    expect(html).toContain('API Key · sponsor1');
+    expect(html.indexOf('Co-worker')).toBeLessThan(html.indexOf('data-testid="cat-card-opus"'));
+    expect(html).toContain('CLI（OAuth）');
+    expect(html).toContain('CLI（配置）');
+    expect(html).toContain('已停用');
+    expect(html.indexOf('+ 添加成员')).toBeLessThan(html.indexOf('data-testid="cat-card-opus"'));
+    expect(html).toContain('布偶猫 Opus');
+    expect(html).toContain('缅因猫 Codex');
+    expect(html).toContain('昵称：砚砚');
+    expect(html).toContain('孟加拉猫 Antigravity');
+    expect(html).toContain('昵称：斑斑');
+    expect(html).toContain('CLI（OAuth）账号');
+    expect(html).toContain('CLI（配置） · sponsor1');
     expect(html).toContain('已启用');
+    expect(html).toContain('停用成员');
+    expect(html).toContain('启用成员');
     expect(html).toContain('@布偶猫');
     expect(html).toContain('只能编辑，不能新增或删除');
-    expect(html).toContain('点击任意卡片进入成员配置');
+    expect(html).toContain('点击卡片进入成员配置');
     expect(html).toContain('gemini-bridge');
     expect(html).toContain('添加成员');
     expect(html).not.toContain('Owner 信息独立维护');
@@ -147,6 +163,64 @@ describe('CatOverviewTab', () => {
     expect(html).not.toContain('编辑成员');
     expect(html).not.toContain('Lead');
     expect(html).not.toContain('npx antigravity --bridge');
+  });
+
+  it('anchors the first-member guide target to the edit-only control, not the whole card', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(CatOverviewTab, {
+        config: CONFIG,
+        cats: CATS,
+        onEditMember: () => {},
+      }),
+    );
+    const root = document.createElement('div');
+    root.innerHTML = html;
+
+    const guideTarget = root.querySelector('[data-guide-id="cats.first-member"]');
+
+    expect(guideTarget).toBeTruthy();
+    expect(guideTarget?.getAttribute('role')).toBe('button');
+    expect(guideTarget?.textContent).toContain('布偶猫 Opus');
+  });
+
+  it('does not offer deletion for a protected built-in cloud identity', () => {
+    const protectedCloudCat = {
+      id: 'gpt-pro',
+      displayName: '缅因猫Pro',
+      nickname: '砚砚Pro',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-pro',
+      provider: 'openai-chatgpt-pro',
+      carrier: 'cli',
+      mcpSupport: true,
+      color: { primary: '#2196F3', secondary: '#90CAF9' },
+      mentionPatterns: ['@gpt-pro'],
+      avatar: '/avatars/gpt-pro.png',
+      roleDescription: '云端 ChatGPT Pro 砚砚',
+      personality: '温柔、较真',
+      identityProtection: {
+        kind: 'builtin-cloud' as const,
+        state: 'healthy' as const,
+        lockedFields: ['clientId'],
+        driftedFields: [],
+      },
+    } satisfies CatData & { identityProtection: Record<string, unknown> };
+    const html = renderToStaticMarkup(
+      React.createElement(CatOverviewTab, {
+        config: CONFIG,
+        cats: [...CATS, protectedCloudCat],
+        onEditMember: () => {},
+        onDeleteMember: () => {},
+      }),
+    );
+    const root = document.createElement('div');
+    root.innerHTML = html;
+    const protectedCard = root.querySelector('[data-testid="cat-card-gpt-pro"]');
+
+    expect(protectedCard).toBeTruthy();
+    expect(protectedCard?.querySelector('[aria-label="删除成员"]')).toBeNull();
+    expect(protectedCard?.textContent).toContain('云端身份');
   });
 });
 

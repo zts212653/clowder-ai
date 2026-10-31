@@ -1,0 +1,333 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { describe, it } from 'node:test';
+
+import {
+  derivePluginManagerActions,
+  pluginManagerContributionsFromManifest,
+  projectPluginManagerCatalogCandidate,
+} from '../dist/domains/plugin/manager/plugin-manager-projection.js';
+
+function digest(value) {
+  return `sha512-${createHash('sha512').update(value).digest('base64')}`;
+}
+
+const candidate = {
+  catalogId: 'video-analysis',
+  pluginId: 'official.video-analysis',
+  packageName: '@clowder-ai/video-analysis',
+  version: '0.1.0-alpha.1',
+  packageDigest: digest('video-analysis'),
+  displayName: 'Video Analysis',
+  description: 'Analyze an explicitly selected video.',
+  publisher: 'Clowder AI',
+  ownerAuthRequired: false,
+  capabilities: [
+    {
+      id: 'messaging.send',
+      kind: 'messaging',
+      name: 'Send messages',
+    },
+  ],
+};
+
+function installedSnapshot(overrides = {}) {
+  const packageRecord = {
+    provenance: { kind: 'catalog', catalogId: candidate.catalogId, packageName: candidate.packageName },
+    packageDigest: candidate.packageDigest,
+    pluginId: candidate.pluginId,
+    version: candidate.version,
+    contractVersion: '0.1.0',
+    manifest: {
+      pluginId: candidate.pluginId,
+      version: candidate.version,
+      contractVersion: '0.1.0',
+      name: candidate.displayName,
+      description: candidate.description,
+      features: [
+        {
+          id: 'events',
+          name: 'Events',
+          resources: [],
+          capabilities: ['messaging.send'],
+        },
+      ],
+      runtime: { transport: 'stdio', entrypoint: 'dist/entrypoint.js' },
+    },
+    signalSchemas: {},
+    packageState: 'installed',
+    verifiedAt: 1_000,
+    updatedAt: 1_000,
+  };
+  const instance = {
+    pluginInstanceId: 'pi_video',
+    pluginId: candidate.pluginId,
+    packageDigest: candidate.packageDigest,
+    lifecycleState: 'installed',
+    configReadiness: 'ready',
+    activationState: 'enabled',
+    runtimeState: 'healthy',
+    lifecycleRevision: 4,
+    installedAt: 1_000,
+    updatedAt: 1_100,
+    ...overrides,
+  };
+  return {
+    schemaVersion: 1,
+    packages: [packageRecord],
+    instances: [instance],
+  };
+}
+
+const emptySnapshot = { schemaVersion: 1, packages: [], instances: [] };
+
+describe('client source trust is descriptive, not an install or enable gate', () => {
+  it('retains trusted catalog provenance recorded at installation', () => {
+    const snapshot = installedSnapshot();
+    snapshot.packages[0].provenance = {
+      kind: 'catalog',
+      catalogId: candidate.catalogId,
+      packageName: candidate.packageName,
+    };
+    assert.equal(projectPluginManagerCatalogCandidate(candidate, snapshot).source.trust, 'official');
+  });
+  for (const kind of ['local-directory', 'local-archive', 'git']) {
+    it(`${kind} remains usable and is not labeled trusted even when its identity matches the catalog`, () => {
+      const snapshot = installedSnapshot();
+      snapshot.packages[0].provenance = {
+        kind,
+        packageName: candidate.packageName,
+        ...(kind === 'git' ? { url: 'https://example.com/plugin.git' } : {}),
+      };
+      const result = projectPluginManagerCatalogCandidate(candidate, snapshot);
+      assert.equal(result.source.trust, 'unverified');
+      assert.equal(result.actions.setEnabled, true);
+    });
+  }
+  it('a missing admission origin cannot borrow a current catalog identity', () => {
+    const snapshot = installedSnapshot();
+    const admitted = projectPluginManagerCatalogCandidate(candidate, snapshot);
+    delete snapshot.packages[0].provenance;
+    const before = structuredClone(snapshot);
+    const result = projectPluginManagerCatalogCandidate(candidate, snapshot);
+    assert.deepEqual(result.source, { kind: 'unknown', packageName: null, trust: 'unknown' });
+    const { source: _admittedSource, ...admittedFacts } = admitted;
+    const { source: _unknownSource, ...legacyFacts } = result;
+    assert.deepEqual(legacyFacts, admittedFacts, 'origin labels do not change existing Host facts or actions');
+    assert.deepEqual(snapshot, before, 'reading cannot manufacture admission provenance');
+  });
+});
+
+describe('F202 terminal Plugin Manager projection', () => {
+  it('projects declared contributions as tools', () => {
+    const manifest = {
+      ...installedSnapshot().packages[0].manifest,
+      contributions: [
+        {
+          type: 'mcp',
+          id: 'video-analysis-toolset',
+          runtime: { transport: 'stdio', entrypoint: 'dist/mcp-entrypoint.js' },
+        },
+        {
+          type: 'tool',
+          id: 'summarize-video',
+          name: 'summarize_video',
+          description: 'Summarize an explicitly selected video.',
+          inputSchema: { type: 'object' },
+          action: { method: 'video.summarize' },
+        },
+        {
+          type: 'schedule',
+          id: 'daily-video-summary',
+          schedule: { kind: 'interval', everyMs: 86_400_000 },
+          action: { method: 'video.summarize' },
+          policy: { overlap: 'skip', timeoutMs: 60_000 },
+        },
+        { type: 'skill', id: 'video-analysis-guide', path: 'skills/video-analysis/SKILL.md' },
+        {
+          type: 'content-editor-provider',
+          id: 'docx-editor',
+          mediaTypes: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+          surface: {
+            entrypoint: 'dist/editor.js',
+            integrity: 'sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+            sandbox: 'dedicated-origin-iframe',
+            navigationPolicy: 'navigation-api-deny',
+          },
+          bridgeVersion: '1.0.0',
+          operations: ['load', 'settle', 'comment', 'tracked-change'],
+        },
+        {
+          type: 'desktop-window',
+          id: 'companion-window',
+          role: 'companion',
+          surface: {
+            entrypoint: 'dist/window.html',
+            integrity: 'sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+          },
+          bridgeVersion: '1.0.0',
+          presentation: {
+            width: 420,
+            height: 720,
+            transparent: true,
+            frame: false,
+            alwaysOnTop: true,
+            skipTaskbar: true,
+          },
+        },
+      ],
+    };
+
+    assert.deepEqual(pluginManagerContributionsFromManifest(manifest), [
+      { id: 'video-analysis-toolset', kind: 'mcp', name: 'video-analysis-toolset' },
+      {
+        id: 'summarize-video',
+        kind: 'direct-tool',
+        name: 'summarize_video',
+        description: 'Summarize an explicitly selected video.',
+      },
+      { id: 'daily-video-summary', kind: 'schedule', name: 'daily-video-summary' },
+      { id: 'video-analysis-guide', kind: 'skill', name: 'video-analysis-guide' },
+      { id: 'docx-editor', kind: 'content-editor-provider', name: 'docx-editor' },
+      { id: 'companion-window', kind: 'desktop-window', name: 'companion-window' },
+    ]);
+  });
+
+  it('expresses an uninstalled catalog candidate only through the install action', () => {
+    const projected = projectPluginManagerCatalogCandidate(candidate, emptySnapshot);
+
+    assert.equal(projected.artifact, 'absent');
+    assert.equal(projected.pluginInstanceId, null);
+    assert.equal(projected.packageDigest, candidate.packageDigest);
+    assert.deepEqual(projected.actions, {
+      install: true,
+      setEnabled: false,
+      uninstall: false,
+      blockingReasons: [],
+    });
+    assert.equal(projected.auth, 'not-required');
+    assert.equal(projected.intent, 'disabled');
+    assert.equal(projected.live, 'stopped');
+  });
+
+  it('joins an installed instance without an update or repair affordance', () => {
+    const projected = projectPluginManagerCatalogCandidate(candidate, installedSnapshot(), {
+      authState: 'not-required',
+    });
+
+    assert.equal(projected.pluginInstanceId, 'pi_video');
+    assert.equal(projected.artifact, 'installed');
+    assert.equal(projected.config, 'ready');
+    assert.equal(projected.intent, 'enabled');
+    assert.equal(projected.live, 'running');
+    assert.deepEqual(projected.actions, {
+      install: false,
+      setEnabled: true,
+      uninstall: true,
+      blockingReasons: [],
+    });
+    assert.equal(Object.hasOwn(projected.actions, 'update'), false);
+    assert.equal(Object.hasOwn(projected.actions, 'repair'), false);
+  });
+
+  it('projects owner dependency closure provenance for shipped and materialized packages', () => {
+    for (const dependencyClosure of ['shipped', 'materialized']) {
+      const snapshot = installedSnapshot();
+      snapshot.packages[0].provenance = {
+        kind: 'local-archive',
+        packageName: candidate.packageName,
+        dependencyClosure,
+      };
+
+      const projected = projectPluginManagerCatalogCandidate(candidate, snapshot);
+
+      assert.deepEqual(projected.source, {
+        kind: 'local-archive',
+        packageName: candidate.packageName,
+        trust: 'unverified',
+        dependencyClosure,
+      });
+    }
+  });
+
+  it('allows explicit repair alongside disable and uninstall after a crash', () => {
+    const projected = projectPluginManagerCatalogCandidate(candidate, installedSnapshot({ runtimeState: 'crashed' }), {
+      activeCapabilityIds: [],
+    });
+
+    assert.equal(projected.intent, 'enabled');
+    assert.equal(projected.live, 'crashed');
+    assert.equal(projected.actions.setEnabled, true);
+    assert.equal(projected.actions.uninstall, true);
+    assert.equal(projected.actions.repair, true);
+  });
+
+  it('exposes current activation failure independently of intent and historical diagnostics', () => {
+    const lastRuntimeError = { code: 'UNEXPECTED_RUNTIME_FAILURE', occurredAt: 1_050, exitCode: null, signal: null };
+    for (const activationState of ['error', 'disabled', 'enabled']) {
+      const projected = projectPluginManagerCatalogCandidate(
+        candidate,
+        installedSnapshot({
+          activationState,
+          runtimeState: activationState === 'enabled' ? 'healthy' : 'stopped',
+          lastRuntimeError,
+        }),
+      );
+      assert.equal(projected.activationFailed, activationState === 'error' ? true : undefined);
+      assert.equal(projected.intent, activationState === 'enabled' ? 'enabled' : 'disabled');
+      assert.equal(projected.diagnostic.code, lastRuntimeError.code);
+      assert.equal(projected.actions.setEnabled, true);
+    }
+    const withIntentOverride = projectPluginManagerCatalogCandidate(
+      candidate,
+      installedSnapshot({ activationState: 'error', runtimeState: 'stopped' }),
+      { intentState: 'enabled' },
+    );
+    assert.equal(withIntentOverride.activationFailed, true);
+    assert.equal(withIntentOverride.intent, 'enabled');
+  });
+
+  it('blocks enable until config and typed owner auth are ready', () => {
+    assert.deepEqual(
+      derivePluginManagerActions({
+        artifact: 'installed',
+        config: 'incomplete',
+        auth: 'disconnected',
+        intent: 'disabled',
+        activationTransition: false,
+      }),
+      {
+        install: false,
+        setEnabled: false,
+        uninstall: true,
+        blockingReasons: ['config-incomplete', 'auth-disconnected'],
+      },
+    );
+  });
+
+  it('keeps a quarantined catalog artifact visible but exposes no executable lifecycle action', () => {
+    const snapshot = installedSnapshot();
+    snapshot.packages[0].packageState = 'quarantined';
+    snapshot.instances = [];
+
+    const projected = projectPluginManagerCatalogCandidate(candidate, snapshot);
+
+    assert.equal(projected.artifact, 'quarantined');
+    assert.equal(projected.pluginInstanceId, null);
+    assert.deepEqual(projected.actions, {
+      install: false,
+      setEnabled: false,
+      uninstall: false,
+      blockingReasons: ['package-quarantined'],
+    });
+  });
+
+  it('does not infer owner authentication from a healthy process', () => {
+    const authCandidate = { ...candidate, ownerAuthRequired: true };
+    const projected = projectPluginManagerCatalogCandidate(authCandidate, installedSnapshot());
+
+    assert.equal(projected.live, 'running');
+    assert.equal(projected.auth, 'disconnected');
+    assert.equal(projected.actions.setEnabled, true, 'an already-enabled plugin must remain disable-able');
+  });
+});

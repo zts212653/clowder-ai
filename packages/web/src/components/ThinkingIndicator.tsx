@@ -1,9 +1,13 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useCatData } from '@/hooks/useCatData';
+import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
+import { resolveCatDisplayName } from '@/lib/cat-display-name';
+import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import type { CatStatusType, LivenessWarningSnapshot } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
-import { PawIcon } from './icons/PawIcon';
+import { useShellPresentation } from './shell/shell-presentation';
 
 function formatDuration(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -11,6 +15,16 @@ function formatDuration(ms: number): string {
   const sec = totalSec % 60;
   if (min > 0) return `${min}m ${sec}s`;
   return `${sec}s`;
+}
+
+function livenessDetail(warning: LivenessWarningSnapshot, fallback: string): string {
+  if (warning.firstEventAt === null) {
+    return 'CLI 进程已启动，但尚未返回任何事件；可能卡在客户端初始化';
+  }
+  if (warning.lastEventType === 'turn.started' || warning.lastEventType === 'thread.started') {
+    return 'CLI 已开始回合，但之后没有模型或工具事件；可能卡在客户端初始化或上游连接';
+  }
+  return fallback;
 }
 
 /** Lucide timer icon (inline SVG to avoid emoji per design spec) */
@@ -25,6 +39,7 @@ function TimerIcon({ className, style }: { className?: string; style?: React.CSS
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      aria-hidden="true"
     >
       <line x1="10" x2="14" y1="2" y2="2" />
       <line x1="12" x2="12" y1="14" y2="10" />
@@ -45,6 +60,7 @@ function TriangleAlertIcon({ className, style }: { className?: string; style?: R
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      aria-hidden="true"
     >
       <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
       <line x1="12" x2="12" y1="9" y2="13" />
@@ -53,25 +69,63 @@ function TriangleAlertIcon({ className, style }: { className?: string; style?: R
   );
 }
 
-/** Lucide square icon */
-function SquareIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect width="18" height="18" x="3" y="3" rx="2" />
-    </svg>
-  );
+interface ThinkingIndicatorProps {
+  onCancel?: (threadId: string, catId?: string) => void;
+  threadId?: string;
 }
 
-interface ThinkingIndicatorProps {
-  onCancel?: (threadId: string) => void;
+function LivenessWarningBanner({
+  status,
+  warning,
+  name,
+}: {
+  status: CatStatusType;
+  warning?: LivenessWarningSnapshot;
+  name: string;
+}) {
+  if (!warning || (status !== 'alive_but_silent' && status !== 'suspected_stall')) return null;
+  const stalled = status === 'suspected_stall';
+  const elapsed = formatDuration(warning.silenceDurationMs);
+  const detail = stalled
+    ? livenessDetail(
+        warning,
+        warning.state === 'idle-silent' ? '进程存活但 CPU 平坦，未检测到工具执行或 API 活动' : '进程可能无响应',
+      )
+    : livenessDetail(
+        warning,
+        warning.state === 'busy-silent'
+          ? '进程存活且 CPU 活跃，可能正在执行工具或等待 API 响应'
+          : '进程存活，等待响应中',
+      );
+  const color = stalled ? 'var(--semantic-critical)' : 'var(--semantic-warning)';
+  return (
+    <div
+      data-testid="liveness-warning"
+      className="px-5 py-3 border-b"
+      style={{
+        backgroundColor: stalled ? 'var(--semantic-critical-surface)' : 'var(--semantic-warning-surface)',
+        borderColor: `color-mix(in srgb, ${color} 20%, transparent)`,
+      }}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          {stalled ? (
+            <TriangleAlertIcon className="w-4 h-4 flex-shrink-0" style={{ color }} />
+          ) : (
+            <TimerIcon className="w-4 h-4 animate-pulse flex-shrink-0" style={{ color }} />
+          )}
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-sm font-semibold" style={{ color: 'var(--cafe-text)' }}>
+              {stalled ? `${name} 可能卡住了 — ${elapsed} 无输出` : `${name} 静默等待中… ${elapsed}`}
+            </span>
+            <span className="text-xs" style={{ color: 'var(--cafe-text-secondary)' }}>
+              {detail}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -79,95 +133,85 @@ interface ThinkingIndicatorProps {
  * Shows a simple banner when only one cat is being invoked (execute mode).
  * F118 Phase C: Extended with liveness warning states.
  */
-export function ThinkingIndicator({ onCancel }: ThinkingIndicatorProps = {}) {
-  const targetCats = useChatStore((s) => s.targetCats);
-  const catStatuses = useChatStore((s) => s.catStatuses);
-  const catInvocations = useChatStore((s) => s.catInvocations);
+export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps) {
+  void onCancel;
   const currentThreadId = useChatStore((s) => s.currentThreadId);
+  const effectiveThreadId = threadId ?? currentThreadId;
+  const { catStatuses, catStatusDetails, catInvocations } = useThreadLiveness(effectiveThreadId);
+  const executionsByKey = useActiveExecutionStore((state) => state.executionsByKey);
   const { getCatById } = useCatData();
+  const shellV2 = useShellPresentation() === 'v2';
 
-  if (targetCats.length !== 1) return null;
-  const catId = targetCats[0];
+  const executions = useMemo(
+    () =>
+      Object.values(executionsByKey).filter(
+        (execution) => execution.threadId === effectiveThreadId && execution.kind === 'live_invocation',
+      ),
+    [effectiveThreadId, executionsByKey],
+  );
+  // New shell (v2) only: the one execution row above the composer already says who is running, for how long and how to
+  // stop it, and it carries the silent/stalled state (same isStreamingTipSuppressed signal) with 强制重置. A second
+  // "replying…" line at the top of the conversation would say the same thing twice. Classic is unchanged.
+  if (shellV2) return null;
+  if (executions.length !== 1) return null;
+  const execution = executions[0];
+  if (!execution) return null;
+  const catId = execution.catId;
   const status: CatStatusType = catStatuses[catId] ?? 'pending';
   if (status === 'done') return null;
 
-  const catData = getCatById(catId);
-  const name = catData?.displayName ?? catId;
+  const name = resolveCatDisplayName(catId, getCatById);
   const warning: LivenessWarningSnapshot | undefined = catInvocations?.[catId]?.livenessWarning;
 
-  // F118: alive_but_silent — amber warning banner
-  if (status === 'alive_but_silent' && warning) {
-    const elapsed = formatDuration(warning.silenceDurationMs);
+  // F118 D2: spawning — CLI not yet connected, earliest signal
+  if (status === 'spawning') {
     return (
-      <div
-        data-testid="liveness-warning"
-        className="px-5 py-3 border-b"
-        style={{ backgroundColor: '#FFF8E7', borderColor: '#D4A64A33' }}
-      >
-        <div className="flex items-center gap-2.5">
-          <TimerIcon className="w-4 h-4 animate-pulse" style={{ color: '#D4A64A' }} />
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[13px] font-semibold" style={{ color: '#1A1918' }}>
-              {name} 静默等待中… {elapsed}
-            </span>
-            <span className="text-xs" style={{ color: '#6D6C6A' }}>
-              {warning.state === 'busy-silent'
-                ? '进程存活且 CPU 活跃，可能正在执行工具或等待 API 响应'
-                : '进程存活，等待响应中'}
-            </span>
-          </div>
+      <div className="px-5 py-2 border-b border-cafe bg-cafe-surface-elevated">
+        <div className="flex items-center gap-2">
+          <span className="text-sm leading-none animate-bounce">🐾</span>
+          <span className="text-sm text-cafe-secondary">
+            {name} · {execution.threadTitle ?? execution.threadId} · 实时回合启动中
+          </span>
+          <span className="flex items-center gap-0.5">
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className="inline-block w-1 h-1 rounded-full bg-cafe-secondary animate-bounce"
+                style={{ animationDelay: `${i * 150}ms`, animationDuration: '0.8s' }}
+              />
+            ))}
+          </span>
         </div>
       </div>
     );
   }
 
-  // F118: suspected_stall — orange warning banner with cancel button
-  if (status === 'suspected_stall' && warning) {
-    const elapsed = formatDuration(warning.silenceDurationMs);
-    return (
-      <div
-        data-testid="liveness-warning"
-        className="px-5 py-3 border-b"
-        style={{ backgroundColor: '#FFF0ED', borderColor: '#D0806833' }}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <TriangleAlertIcon className="w-4 h-4 flex-shrink-0" style={{ color: '#D08068' }} />
-            <div className="flex flex-col gap-0.5 min-w-0">
-              <span className="text-[13px] font-semibold" style={{ color: '#1A1918' }}>
-                {name} 可能卡住了 — {elapsed} 无输出
-              </span>
-              <span className="text-xs" style={{ color: '#6D6C6A' }}>
-                {warning.state === 'idle-silent'
-                  ? '进程存活但 CPU 平坦，未检测到工具执行或 API 活动'
-                  : '进程可能无响应'}
-              </span>
-            </div>
-          </div>
-          {onCancel && currentThreadId && (
-            <button
-              data-testid="cancel-btn"
-              onClick={() => onCancel(currentThreadId)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-[10px] text-[13px] font-semibold text-white flex-shrink-0 transition-opacity hover:opacity-90"
-              style={{ backgroundColor: '#D08068' }}
-            >
-              <SquareIcon className="w-3.5 h-3.5" />
-              取消
-            </button>
-          )}
-        </div>
-      </div>
-    );
+  if (warning && (status === 'alive_but_silent' || status === 'suspected_stall')) {
+    return <LivenessWarningBanner status={status} warning={warning} name={name} />;
   }
 
-  // Default: normal thinking/streaming indicator
+  // Default: normal thinking/streaming indicator.
+  // F210 H3: agy trajectory 进度（catStatusDetails）覆盖默认"回复中/思考中"，让 agy 长任务过程在
+  // chat 区单行可见（折叠，不刷屏；done 后该 cat 不在 streaming/pending → 此分支不渲染）。
+  const agyProgress = catStatusDetails?.[catId];
   return (
-    <div className="px-5 py-2 border-b border-gray-200 bg-gray-50">
+    <div className="px-5 py-2 border-b border-cafe bg-cafe-surface-elevated">
       <div className="flex items-center gap-2">
-        <PawIcon className="w-4 h-4 text-gray-500 animate-pulse" />
-        <span className="text-sm text-gray-500">
+        <span className="text-sm leading-none animate-bounce">🐾</span>
+        <span className="text-sm text-cafe-secondary">
           {name}
-          {status === 'streaming' ? '回复中...' : '思考中...'}
+          {agyProgress ? ` · ${agyProgress}` : status === 'streaming' ? '回复中' : '思考中'}
+          {` · ${execution.threadTitle ?? execution.threadId} · 实时回合`}
+        </span>
+        {/* #738: animated typing dots */}
+        <span className="flex items-center gap-0.5">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="inline-block w-1 h-1 rounded-full bg-cafe-secondary animate-bounce"
+              style={{ animationDelay: `${i * 150}ms`, animationDuration: '0.8s' }}
+            />
+          ))}
         </span>
       </div>
     </div>

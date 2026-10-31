@@ -1,0 +1,25 @@
+{
+  "fontSize": {
+    "display-sm": ["22px", { "lineHeight": "1.25" }],
+    "micro": ["10px", { "lineHeight": "14px" }],
+    "label": ["11px", { "lineHeight": "16px" }],
+    "compact": ["13px", { "lineHeight": "20px" }],
+    "reading": ["15px", { "lineHeight": "1.7" }]
+  },
+  "fontSizePx": {
+    "display-sm": 22,
+    "micro": 10,
+    "label": 11,
+    "xs": 12,
+    "compact": 13,
+    "sm": 14,
+    "reading": 15,
+    "base": 16,
+    "lg": 18,
+    "xl": 20,
+    "2xl": 24,
+    "3xl": 30,
+    "4xl": 36,
+    "leaderboardMedal": 28
+  }
+}

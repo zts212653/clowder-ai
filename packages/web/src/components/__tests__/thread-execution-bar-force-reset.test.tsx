@@ -1,0 +1,104 @@
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
+import type { CatStatusType } from '@/stores/chat-types';
+import { useChatStore } from '@/stores/chatStore';
+import { ThreadExecutionBar } from '../ThreadExecutionBar';
+
+function setActive(catId: string, status: CatStatusType) {
+  const request = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
+  useActiveExecutionStore.getState().applySnapshot('thread-a', request, {
+    projectPath: '/project/cafe',
+    executions: [
+      {
+        executionId: 'inv-a',
+        threadId: 'thread-a',
+        threadTitle: 'Alpha',
+        catId,
+        kind: 'live_invocation',
+        startedAt: Date.now(),
+        cancelability: {
+          state: 'cancelable',
+          target: { kind: 'live_invocation', threadId: 'thread-a', catId, executionId: 'inv-a' },
+        },
+      },
+    ],
+  });
+  useChatStore.setState({
+    currentThreadId: 'thread-a',
+    activeInvocations: { 'inv-a': { catId, mode: 'execute', startedAt: 1000 } },
+    hasActiveInvocation: true,
+    catStatuses: { [catId]: status },
+    catInvocations: {
+      [catId]: {
+        activeRun: {
+          threadId: 'thread-a',
+          targetId: catId,
+          invocationId: 'inv-a',
+          responseMessageId: 'response-inv-a',
+          inputEntryIds: [],
+          inputMessageIds: [],
+          privateInputEntryIds: [],
+          startedAt: 1000,
+        },
+      },
+    },
+    threadStates: {},
+  });
+}
+
+describe('ThreadExecutionBar Stop surface', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeAll(() => {
+    (globalThis as { React?: typeof React }).React = React;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+  afterAll(() => {
+    delete (globalThis as { React?: typeof React }).React;
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+  beforeEach(() => {
+    useActiveExecutionStore.getState().reset();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it('keeps the canonical running slot and Stop visible when the chat cache is absent, then retires on server truth', () => {
+    setActive('opus', 'streaming');
+    act(() => {
+      useChatStore.setState({ catInvocations: {} });
+      root.render(React.createElement(ThreadExecutionBar, { threadId: 'thread-a' }));
+    });
+    expect(container.textContent).toContain('执行中');
+    expect(container.querySelector('button[aria-label="Stop opus live_invocation inv-a"]')).not.toBeNull();
+    act(() => {
+      const store = useActiveExecutionStore.getState();
+      store.applySnapshot('thread-a', store.beginHydration('thread-a', '/project/cafe'), {
+        projectPath: '/project/cafe',
+        executions: [],
+      });
+    });
+    expect(container.textContent).toBe('');
+  });
+
+  it.each<CatStatusType>([
+    'streaming',
+    'suspected_stall',
+  ])('keeps the exact Stop and the classic recovery entry for %s', (status) => {
+    setActive('opus', status);
+    act(() => root.render(React.createElement(ThreadExecutionBar, { threadId: 'thread-a' })));
+
+    expect(container.querySelector('button[aria-label="Stop opus live_invocation inv-a"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="force-reset-entry"]')).not.toBeNull();
+    expect(container.textContent).toContain('强制重置');
+    expect(container.textContent).toContain('Alpha');
+  });
+});

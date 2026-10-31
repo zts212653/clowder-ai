@@ -1,0 +1,1013 @@
+{
+  "schemaVersion": 2,
+  "status": "source-backed-evolution-story",
+  "snapshotCommit": "0000000000000000000000000000000000000191",
+  "ownerReviewCommit": "0000000000000000000000000000000000000192",
+  "ownerReviewRef": "docs/VISION.md",
+  "since": "2026-01-01",
+  "members": {
+    "contract-fixture": ["packages/shared/src/__tests__/fixtures/f314-history-publication-contract.json"]
+  },
+  "releases": [
+    {
+      "id": "H01",
+      "date": "2026-01-01",
+      "parent": null,
+      "version": "sha256:00000000000000000000000000000000000000000000000000000000000003e9",
+      "members": ["contract-fixture"],
+      "commits": [
+        {
+          "sha": "00000000000000000000000000000000000007d1",
+          "authoredAt": "2026-01-01T10:00:00+00:00",
+          "subject": "contract fixture step 01",
+          "members": ["contract-fixture"]
+        }
+      ]
+    },
+    {
+      "id": "H02",
+      "date": "2026-01-02",
+      "parent": null,
+      "version": "sha256:00000000000000000000000000000000000000000000000000000000000003ea",
+      "members": ["contract-fixture"],
+      "commits": [
+        {
+          "sha": "00000000000000000000000000000000000007d2",
+          "authoredAt": "2026-01-02T10:00:00+00:00",
+          "subject": "contract fixture step 02",
+          "members": ["contract-fixture"]
+        }
+      ]
+    },
+    {
+      "id": "H03",
+      "date": "2026-01-03",
+      "parent": null,
+      "version": "sha256:00000000000000000000000000000000000000000000000000000000000003eb",
+      "members": ["contract-fixture"],
+      "commits": [
+        {
+          "sha": "00000000000000000000000000000000000007d3",
+          "authoredAt": "2026-01-03T10:00:00+00:00",
+          "subject": "contract fixture step 03",
+          "members": ["contract-fixture"]
+        }
+      ]
+    },
+    {
+      "id": "H04",
+      "date": "2026-01-04",
+      "parent": null,
+      "version": "sha256:00000000000000000000000000000000000000000000000000000000000003ec",
+      "members": ["contract-fixture"],
+      "commits": [
+        {
+          "sha": "00000000000000000000000000000000000007d4",
+          "authoredAt": "2026-01-04T10:00:00+00:00",
+          "subject": "contract fixture step 04",
+          "members": ["contract-fixture"]
+        }
+      ]
+    },
+    {
+      "id": "H05",
+      "date": "2026-01-05",
+      "parent": null,
+      "version": "sha256:00000000000000000000000000000000000000000000000000000000000003ed",
+      "members": ["contract-fixture"],
+      "commits": [
+        {
+          "sha": "00000000000000000000000000000000000007d5",
+          "authoredAt": "2026-01-05T10:00:00+00:00",
+          "subject": "contract fixture step 05",
+          "members": ["contract-fixture"]
+        }
+      ]
+    },
+    {
+      "id": "H06",
+      "date": "2026-01-06",
+      "parent": null,
+      "version": "sha256:00000000000000000000000000000000000000000000000000000000000003ee",
+      "members": ["contract-fixture"],
+      "commits": [
+        {
+          "sha": "00000000000000000000000000000000000007d6",
+          "authoredAt": "2026-01-06T10:00:00+00:00",
+          "subject": "contract fixture step 06",
+          "members": ["contract-fixture"]
+        }
+      ]
+    },
+    {
+      "id": "H07",
+      "date": "2026-01-07",
+      "parent": null,
+      "version": "sha256:00000000000000000000000000000000000000000000000000000000000003ef",
+      "members": ["contract-fixture"],
+      "commits": [
+        {
+          "sha": "00000000000000000000000000000000000007d7",
+          "authoredAt": "2026-01-07T10:00:00+00:00",
+          "subject": "contract fixture step 07",
+          "members": ["contract-fixture"]
+        }
+      ]
+    },
+    {
+      "id": "H08",
+      "date": "2026-01-08",
+      "parent": null,
+      "version": "sha256:00000000000000000000000000000000000000000000000000000000000003f0",
+      "members": ["contract-fixture"],
+      "commits": [
+        {
+          "sha": "00000000000000000000000000000000000007d8",
+          "authoredAt": "2026-01-08T10:00:00+00:00",
+          "subject": "contract fixture step 08",
+          "members": ["contract-fixture"]
+        }
+      ]
+    },
+    {
+      "id": "H09",
+      "date": "2026-01-09",
+      "parent": null,
+      "version": "sha256:00000000000000000000000000000000000000000000000000000000000003f1",
+      "members": ["contract-fixture"],
+      "commits": [
+        {
+          "sha": "00000000000000000000000000000000000007d9",
+          "authoredAt": "2026-01-09T10:00:00+00:00",
+          "subject": "contract fixture step 09",
+          "members": ["contract-fixture"]
+        }
+      ]
+    },
+    {
+      "id": "H10",
+      "date": "2026-01-10",
+      "parent": null,
+      "version": "sha256:00000000000000000000000000000000000000000000000000000000000003f2",
+      "members": ["contract-fixture"],
+      "commits": [
+        {
+          "sha": "00000000000000000000000000000000000007da",
+          "authoredAt": "2026-01-10T10:00:00+00:00",
+          "subject": "contract fixture step 10",
+          "members": ["contract-fixture"]
+        }
+      ]
+    },
+    {
+      "id": "H11",
+      "date": "2026-01-11",
+      "parent": null,
+      "version": "sha256:00000000000000000000000000000000000000000000000000000000000003f3",
+      "members": ["contract-fixture"],
+      "commits": [
+        {
+          "sha": "00000000000000000000000000000000000007db",
+          "authoredAt": "2026-01-11T10:00:00+00:00",
+          "subject": "contract fixture step 11",
+          "members": ["contract-fixture"]
+        }
+      ]
+    },
+    {
+      "id": "H12",
+      "date": "2026-01-12",
+      "parent": null,
+      "version": "sha256:00000000000000000000000000000000000000000000000000000000000003f4",
+      "members": ["contract-fixture"],
+      "commits": [
+        {
+          "sha": "00000000000000000000000000000000000007dc",
+          "authoredAt": "2026-01-12T10:00:00+00:00",
+          "subject": "contract fixture step 12",
+          "members": ["contract-fixture"]
+        }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "documentedOn": "2026-02-01",
+      "occurredOn": "2026-01-01",
+      "kind": "incident",
+      "summary": "公开合约样本 01（纯合成数据）",
+      "link": "README.md#contract-case-01",
+      "caseId": "contract-case-01",
+      "browsingBucket": "H01",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bb9",
+      "citedMemberCommits": [
+        {
+          "sha": "00000007d1",
+          "fullSha": "00000000000000000000000000000000000007d1",
+          "authoredAt": "2026-01-01T10:00:00+00:00",
+          "subject": "synthetic contract citation",
+          "members": ["contract-fixture"],
+          "relation": "method_reference"
+        }
+      ]
+    },
+    {
+      "documentedOn": "2026-02-02",
+      "occurredOn": "2026-01-02",
+      "kind": "incident",
+      "summary": "公开合约样本 02（纯合成数据）",
+      "link": "README.md#contract-save-readback",
+      "caseId": "contract-save-readback",
+      "browsingBucket": "H02",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bba",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-03",
+      "occurredOn": "2026-01-03",
+      "kind": "incident",
+      "summary": "公开合约样本 03（纯合成数据）",
+      "link": "README.md#contract-selected-case",
+      "caseId": "contract-selected-case",
+      "browsingBucket": "H02",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bbb",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-04",
+      "occurredOn": "2026-01-04",
+      "kind": "incident",
+      "summary": "公开合约样本 04（纯合成数据）",
+      "link": "README.md#contract-addition-source",
+      "caseId": "contract-addition-source",
+      "browsingBucket": "H03",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bbc",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-05",
+      "occurredOn": "2026-01-05",
+      "kind": "incident",
+      "summary": "公开合约样本 05（纯合成数据）",
+      "link": "README.md#contract-case-05",
+      "caseId": "contract-case-05",
+      "browsingBucket": "H04",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bbd",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-06",
+      "occurredOn": "2026-01-06",
+      "kind": "incident",
+      "summary": "公开合约样本 06（纯合成数据）",
+      "link": "README.md#contract-case-06",
+      "caseId": "contract-case-06",
+      "browsingBucket": "H04",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bbe",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-07",
+      "occurredOn": "2026-01-07",
+      "kind": "incident",
+      "summary": "公开合约样本 07（纯合成数据）",
+      "link": "README.md#contract-case-07",
+      "caseId": "contract-case-07",
+      "browsingBucket": "H04",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bbf",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-08",
+      "occurredOn": "2026-01-08",
+      "kind": "incident",
+      "summary": "公开合约样本 08（纯合成数据）",
+      "link": "README.md#contract-case-08",
+      "caseId": "contract-case-08",
+      "browsingBucket": "H05",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bc0",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-09",
+      "occurredOn": "2026-01-09",
+      "kind": "incident",
+      "summary": "公开合约样本 09（纯合成数据）",
+      "link": "README.md#contract-case-09",
+      "caseId": "contract-case-09",
+      "browsingBucket": "H05",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bc1",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-10",
+      "occurredOn": "2026-01-10",
+      "kind": "incident",
+      "summary": "公开合约样本 10（纯合成数据）",
+      "link": "README.md#contract-case-10",
+      "caseId": "contract-case-10",
+      "browsingBucket": "H05",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bc2",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-11",
+      "occurredOn": "2026-01-11",
+      "kind": "incident",
+      "summary": "公开合约样本 11（纯合成数据）",
+      "link": "README.md#contract-case-11",
+      "caseId": "contract-case-11",
+      "browsingBucket": "H06",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bc3",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-12",
+      "occurredOn": "2026-01-12",
+      "kind": "incident",
+      "summary": "公开合约样本 12（纯合成数据）",
+      "link": "README.md#contract-case-12",
+      "caseId": "contract-case-12",
+      "browsingBucket": "H06",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bc4",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-13",
+      "occurredOn": "2026-01-13",
+      "kind": "incident",
+      "summary": "公开合约样本 13（纯合成数据）",
+      "link": "README.md#contract-case-13",
+      "caseId": "contract-case-13",
+      "browsingBucket": "H06",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bc5",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-14",
+      "occurredOn": "2026-01-14",
+      "kind": "incident",
+      "summary": "公开合约样本 14（纯合成数据）",
+      "link": "README.md#contract-case-14",
+      "caseId": "contract-case-14",
+      "browsingBucket": "H07",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bc6",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-15",
+      "occurredOn": "2026-01-15",
+      "kind": "incident",
+      "summary": "公开合约样本 15（纯合成数据）",
+      "link": "README.md#contract-case-15",
+      "caseId": "contract-case-15",
+      "browsingBucket": "H07",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bc7",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-16",
+      "occurredOn": "2026-01-16",
+      "kind": "incident",
+      "summary": "公开合约样本 16（纯合成数据）",
+      "link": "README.md#contract-case-16",
+      "caseId": "contract-case-16",
+      "browsingBucket": "H07",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bc8",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-17",
+      "occurredOn": "2026-01-17",
+      "kind": "incident",
+      "summary": "公开合约样本 17（纯合成数据）",
+      "link": "README.md#contract-case-17",
+      "caseId": "contract-case-17",
+      "browsingBucket": "H08",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bc9",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-18",
+      "occurredOn": "2026-01-18",
+      "kind": "incident",
+      "summary": "公开合约样本 18（纯合成数据）",
+      "link": "README.md#contract-case-18",
+      "caseId": "contract-case-18",
+      "browsingBucket": "H08",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bca",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-19",
+      "occurredOn": "2026-01-19",
+      "kind": "incident",
+      "summary": "公开合约样本 19（纯合成数据）",
+      "link": "README.md#contract-case-19",
+      "caseId": "contract-case-19",
+      "browsingBucket": "H08",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bcb",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-20",
+      "occurredOn": "2026-01-20",
+      "kind": "incident",
+      "summary": "公开合约样本 20（纯合成数据）",
+      "link": "README.md#contract-case-20",
+      "caseId": "contract-case-20",
+      "browsingBucket": "H09",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bcc",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-21",
+      "occurredOn": "2026-01-21",
+      "kind": "incident",
+      "summary": "公开合约样本 21（纯合成数据）",
+      "link": "README.md#contract-case-21",
+      "caseId": "contract-case-21",
+      "browsingBucket": "H09",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bcd",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-22",
+      "occurredOn": "2026-01-22",
+      "kind": "incident",
+      "summary": "公开合约样本 22（纯合成数据）",
+      "link": "README.md#contract-case-22",
+      "caseId": "contract-case-22",
+      "browsingBucket": "H10",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bce",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-23",
+      "occurredOn": "2026-01-23",
+      "kind": "incident",
+      "summary": "公开合约样本 23（纯合成数据）",
+      "link": "README.md#contract-case-23",
+      "caseId": "contract-case-23",
+      "browsingBucket": "H10",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bcf",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-24",
+      "occurredOn": "2026-01-24",
+      "kind": "incident",
+      "summary": "公开合约样本 24（纯合成数据）",
+      "link": "README.md#contract-case-24",
+      "caseId": "contract-case-24",
+      "browsingBucket": "H11",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bd0",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-25",
+      "occurredOn": "2026-01-25",
+      "kind": "incident",
+      "summary": "公开合约样本 25（纯合成数据）",
+      "link": "README.md#contract-case-25",
+      "caseId": "contract-case-25",
+      "browsingBucket": "H11",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bd1",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-26",
+      "occurredOn": "2026-01-26",
+      "kind": "incident",
+      "summary": "公开合约样本 26（纯合成数据）",
+      "link": "README.md#contract-case-26",
+      "caseId": "contract-case-26",
+      "browsingBucket": "H12",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bd2",
+      "citedMemberCommits": []
+    },
+    {
+      "documentedOn": "2026-02-27",
+      "occurredOn": "2026-01-27",
+      "kind": "incident",
+      "summary": "公开合约样本 27（纯合成数据）",
+      "link": "README.md#contract-case-27",
+      "caseId": "contract-case-27",
+      "browsingBucket": "H12",
+      "actualUseStatus": "unconfirmed",
+      "sourceTextSha256": "0000000000000000000000000000000000000000000000000000000000000bd3",
+      "citedMemberCommits": []
+    }
+  ],
+  "story": {
+    "updated": "2026-02-27",
+    "overview": "这是用于验证历史读取、发布和恢复的纯合成合约样本，不描述任何真实成员、项目或事故。",
+    "sources": [
+      {
+        "id": "contract-source",
+        "label": "公开合约样本来源",
+        "path": "docs/VISION.md"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "contract-step-01",
+        "title": "合约阅读步骤 01",
+        "when": "1月1日",
+        "summary": "这是不含真实人物、项目和事故内容的合约步骤 01。",
+        "parents": [],
+        "changes": [
+          {
+            "label": "合约动作",
+            "detail": "验证步骤 01 的标题、正文、来源和关系投影。",
+            "sourceId": "contract-source"
+          }
+        ]
+      },
+      {
+        "id": "contract-step-02",
+        "title": "合约阅读步骤 02",
+        "when": "1月2日",
+        "summary": "这是不含真实人物、项目和事故内容的合约步骤 02。",
+        "parents": [
+          {
+            "nodeId": "contract-step-01",
+            "sourceId": "contract-source",
+            "reason": "第一步直接支持第二步。"
+          }
+        ],
+        "changes": [
+          {
+            "label": "合约动作",
+            "detail": "验证步骤 02 的标题、正文、来源和关系投影。",
+            "sourceId": "contract-source"
+          }
+        ]
+      },
+      {
+        "id": "contract-step-03",
+        "title": "合约阅读步骤 03",
+        "when": "1月3日",
+        "summary": "这是不含真实人物、项目和事故内容的合约步骤 03。",
+        "parents": [],
+        "changes": [
+          {
+            "label": "合约动作",
+            "detail": "验证步骤 03 的标题、正文、来源和关系投影。",
+            "sourceId": "contract-source"
+          }
+        ]
+      },
+      {
+        "id": "contract-step-04",
+        "title": "合约阅读步骤 04",
+        "when": "1月4日",
+        "summary": "这是不含真实人物、项目和事故内容的合约步骤 04。",
+        "parents": [
+          {
+            "nodeId": "contract-step-02",
+            "sourceId": "contract-source",
+            "reason": "第二步直接支持第四步；第三步是独立反例。"
+          }
+        ],
+        "changes": [
+          {
+            "label": "合约动作",
+            "detail": "验证步骤 04 的标题、正文、来源和关系投影。",
+            "sourceId": "contract-source"
+          }
+        ]
+      },
+      {
+        "id": "contract-step-05",
+        "title": "合约阅读步骤 05",
+        "when": "1月5日",
+        "summary": "这是不含真实人物、项目和事故内容的合约步骤 05。",
+        "parents": [
+          {
+            "nodeId": "contract-step-04",
+            "sourceId": "contract-source",
+            "reason": "第四步直接支持第五步。"
+          }
+        ],
+        "changes": [
+          {
+            "label": "合约动作",
+            "detail": "验证步骤 05 的标题、正文、来源和关系投影。",
+            "sourceId": "contract-source"
+          }
+        ]
+      },
+      {
+        "id": "contract-step-06",
+        "title": "合约阅读步骤 06",
+        "when": "1月6日",
+        "summary": "这是不含真实人物、项目和事故内容的合约步骤 06。",
+        "parents": [
+          {
+            "nodeId": "contract-step-02",
+            "sourceId": "contract-source",
+            "reason": "第二步也直接支持第六步，中间步骤不构成父子关系。"
+          }
+        ],
+        "changes": [
+          {
+            "label": "合约动作",
+            "detail": "验证步骤 06 的标题、正文、来源和关系投影。",
+            "sourceId": "contract-source"
+          }
+        ]
+      },
+      {
+        "id": "contract-step-07",
+        "title": "合约阅读步骤 07",
+        "when": "1月7日",
+        "summary": "这是不含真实人物、项目和事故内容的合约步骤 07。",
+        "parents": [],
+        "changes": [
+          {
+            "label": "合约动作",
+            "detail": "验证步骤 07 的标题、正文、来源和关系投影。",
+            "sourceId": "contract-source"
+          }
+        ]
+      },
+      {
+        "id": "contract-step-08",
+        "title": "合约阅读步骤 08",
+        "when": "1月8日",
+        "summary": "这是不含真实人物、项目和事故内容的合约步骤 08。",
+        "parents": [
+          {
+            "nodeId": "contract-step-06",
+            "sourceId": "contract-source",
+            "reason": "第六步直接支持第八步；第七步是独立反例。"
+          }
+        ],
+        "changes": [
+          {
+            "label": "合约动作",
+            "detail": "验证步骤 08 的标题、正文、来源和关系投影。",
+            "sourceId": "contract-source"
+          }
+        ]
+      },
+      {
+        "id": "contract-step-09",
+        "title": "合约阅读步骤 09",
+        "when": "1月9日",
+        "summary": "这是不含真实人物、项目和事故内容的合约步骤 09。",
+        "parents": [
+          {
+            "nodeId": "contract-step-08",
+            "sourceId": "contract-source",
+            "reason": "第八步直接支持第九步。"
+          }
+        ],
+        "changes": [
+          {
+            "label": "合约动作",
+            "detail": "验证步骤 09 的标题、正文、来源和关系投影。",
+            "sourceId": "contract-source"
+          }
+        ]
+      },
+      {
+        "id": "contract-step-10",
+        "title": "合约阅读步骤 10",
+        "when": "1月10日",
+        "summary": "这是不含真实人物、项目和事故内容的合约步骤 10。",
+        "parents": [
+          {
+            "nodeId": "contract-step-04",
+            "sourceId": "contract-source",
+            "reason": "第四步直接支持第十步，中间步骤只表示时间顺序。"
+          }
+        ],
+        "changes": [
+          {
+            "label": "合约动作",
+            "detail": "验证步骤 10 的标题、正文、来源和关系投影。",
+            "sourceId": "contract-source"
+          }
+        ]
+      },
+      {
+        "id": "contract-step-11",
+        "title": "合约阅读步骤 11",
+        "when": "1月11日",
+        "summary": "这是不含真实人物、项目和事故内容的合约步骤 11。",
+        "parents": [
+          {
+            "nodeId": "contract-step-10",
+            "sourceId": "contract-source",
+            "reason": "第十步直接支持第十一步。"
+          }
+        ],
+        "changes": [
+          {
+            "label": "合约动作",
+            "detail": "验证步骤 11 的标题、正文、来源和关系投影。",
+            "sourceId": "contract-source"
+          }
+        ]
+      },
+      {
+        "id": "contract-step-12",
+        "title": "合约阅读步骤 12",
+        "when": "1月12日",
+        "summary": "这是不含真实人物、项目和事故内容的合约步骤 12。",
+        "parents": [
+          {
+            "nodeId": "contract-step-06",
+            "sourceId": "contract-source",
+            "reason": "第六步提供第一条直接依据。"
+          },
+          {
+            "nodeId": "contract-step-10",
+            "sourceId": "contract-source",
+            "reason": "第十步提供第二条直接依据。"
+          }
+        ],
+        "changes": [
+          {
+            "label": "合约动作",
+            "detail": "验证步骤 12 的标题、正文、来源和关系投影。",
+            "sourceId": "contract-source"
+          }
+        ]
+      }
+    ],
+    "cases": [
+      {
+        "caseId": "contract-case-01",
+        "nodeId": "contract-step-01",
+        "title": "合约错题 01",
+        "problem": "合约样本 01 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 01 的选择、切换与恢复。",
+        "outcome": "样本 01 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-save-readback",
+        "nodeId": "contract-step-02",
+        "title": "保存后必须真实回读",
+        "problem": "保存后读取失败，界面却复用了旧缓存；向下滚很远时保存区离开了可见范围。",
+        "response": "区分真实读取与缓存，并把深滚后的保存入口纳入同一条验证。",
+        "outcome": "正式流程的合约样本已经通过；人的自然使用结果仍待观察。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-selected-case",
+        "nodeId": "contract-step-02",
+        "title": "合约错题 03",
+        "problem": "合约样本 03 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 03 的选择、切换与恢复。",
+        "outcome": "样本 03 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-addition-source",
+        "nodeId": "contract-step-03",
+        "title": "合约错题 04",
+        "problem": "合约样本 04 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 04 的选择、切换与恢复。",
+        "outcome": "样本 04 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-05",
+        "nodeId": "contract-step-04",
+        "title": "合约错题 05",
+        "problem": "合约样本 05 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 05 的选择、切换与恢复。",
+        "outcome": "样本 05 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-06",
+        "nodeId": "contract-step-04",
+        "title": "合约错题 06",
+        "problem": "合约样本 06 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 06 的选择、切换与恢复。",
+        "outcome": "样本 06 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-07",
+        "nodeId": "contract-step-04",
+        "title": "合约错题 07",
+        "problem": "合约样本 07 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 07 的选择、切换与恢复。",
+        "outcome": "样本 07 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-08",
+        "nodeId": "contract-step-05",
+        "title": "合约错题 08",
+        "problem": "合约样本 08 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 08 的选择、切换与恢复。",
+        "outcome": "样本 08 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-09",
+        "nodeId": "contract-step-05",
+        "title": "合约错题 09",
+        "problem": "合约样本 09 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 09 的选择、切换与恢复。",
+        "outcome": "样本 09 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-10",
+        "nodeId": "contract-step-05",
+        "title": "合约错题 10",
+        "problem": "合约样本 10 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 10 的选择、切换与恢复。",
+        "outcome": "样本 10 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-11",
+        "nodeId": "contract-step-06",
+        "title": "合约错题 11",
+        "problem": "合约样本 11 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 11 的选择、切换与恢复。",
+        "outcome": "样本 11 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-12",
+        "nodeId": "contract-step-06",
+        "title": "合约错题 12",
+        "problem": "合约样本 12 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 12 的选择、切换与恢复。",
+        "outcome": "样本 12 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-13",
+        "nodeId": "contract-step-06",
+        "title": "合约错题 13",
+        "problem": "合约样本 13 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 13 的选择、切换与恢复。",
+        "outcome": "样本 13 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-14",
+        "nodeId": "contract-step-07",
+        "title": "合约错题 14",
+        "problem": "合约样本 14 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 14 的选择、切换与恢复。",
+        "outcome": "样本 14 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-15",
+        "nodeId": "contract-step-07",
+        "title": "合约错题 15",
+        "problem": "合约样本 15 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 15 的选择、切换与恢复。",
+        "outcome": "样本 15 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-16",
+        "nodeId": "contract-step-07",
+        "title": "合约错题 16",
+        "problem": "合约样本 16 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 16 的选择、切换与恢复。",
+        "outcome": "样本 16 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-17",
+        "nodeId": "contract-step-08",
+        "title": "合约错题 17",
+        "problem": "合约样本 17 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 17 的选择、切换与恢复。",
+        "outcome": "样本 17 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-18",
+        "nodeId": "contract-step-08",
+        "title": "合约错题 18",
+        "problem": "合约样本 18 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 18 的选择、切换与恢复。",
+        "outcome": "样本 18 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-19",
+        "nodeId": "contract-step-08",
+        "title": "合约错题 19",
+        "problem": "合约样本 19 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 19 的选择、切换与恢复。",
+        "outcome": "样本 19 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-20",
+        "nodeId": "contract-step-09",
+        "title": "合约错题 20",
+        "problem": "合约样本 20 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 20 的选择、切换与恢复。",
+        "outcome": "样本 20 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-21",
+        "nodeId": "contract-step-09",
+        "title": "合约错题 21",
+        "problem": "合约样本 21 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 21 的选择、切换与恢复。",
+        "outcome": "样本 21 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-22",
+        "nodeId": "contract-step-10",
+        "title": "合约错题 22",
+        "problem": "合约样本 22 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 22 的选择、切换与恢复。",
+        "outcome": "样本 22 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-23",
+        "nodeId": "contract-step-10",
+        "title": "合约错题 23",
+        "problem": "合约样本 23 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 23 的选择、切换与恢复。",
+        "outcome": "样本 23 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-24",
+        "nodeId": "contract-step-11",
+        "title": "合约错题 24",
+        "problem": "合约样本 24 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 24 的选择、切换与恢复。",
+        "outcome": "样本 24 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-25",
+        "nodeId": "contract-step-11",
+        "title": "合约错题 25",
+        "problem": "合约样本 25 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 25 的选择、切换与恢复。",
+        "outcome": "样本 25 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-26",
+        "nodeId": "contract-step-12",
+        "title": "合约错题 26",
+        "problem": "合约样本 26 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 26 的选择、切换与恢复。",
+        "outcome": "样本 26 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      },
+      {
+        "caseId": "contract-case-27",
+        "nodeId": "contract-step-12",
+        "title": "合约错题 27",
+        "problem": "合约样本 27 的旧行为没有保留完整阅读语义。",
+        "response": "用合成来源验证样本 27 的选择、切换与恢复。",
+        "outcome": "样本 27 只证明读取合约，不代表真实项目采用或效果。",
+        "sourceIds": ["contract-source"]
+      }
+    ]
+  }
+}

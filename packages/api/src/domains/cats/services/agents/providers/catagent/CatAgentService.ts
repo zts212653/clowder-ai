@@ -1,0 +1,454 @@
+/**
+ * CatAgent Native Provider — F159 Phase E: SSE Streaming + Agentic Loop
+ *
+ * Calls Anthropic Messages API directly with SSE streaming.
+ * Phase E adds: per-token text streaming, streaming tool collection,
+ * proper EOF validation. Strict streaming fail-closed — no non-streaming fallback.
+ */
+
+import type { CatConfig, CatId } from '@cat-cafe/shared';
+import { getCatModel } from '../../../../../../config/cat-models.js';
+import { buildProviderEndpoint } from '../../../../../../config/provider-endpoint.js';
+import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import type {
+  AgentMessage,
+  AgentService,
+  AgentServiceOptions,
+  MessageMetadata,
+  PreparedProviderRequestV1,
+  TokenUsage,
+} from '../../../types.js';
+import { mergeTokenUsage } from '../../../types.js';
+import { resolveApiCredentials } from './catagent-credentials.js';
+import type { AnthropicContentBlock, AnthropicToolUseBlock } from './catagent-event-bridge.js';
+import { mapAnthropicError, mapAnthropicUsage, TERMINAL_STOP_REASONS } from './catagent-event-bridge.js';
+import { buildToolRegistry, findTool, getToolSchemas } from './catagent-read-tools.js';
+import type { CatAgentStreamEvent } from './catagent-stream-parser.js';
+import { parseAnthropicSSE } from './catagent-stream-parser.js';
+import { validateToolInput } from './catagent-tool-guard.js';
+import type { CatAgentTool } from './catagent-tools.js';
+
+const log = createModuleLogger('catagent');
+
+const ANTHROPIC_API_VERSION = '2023-06-01';
+const DEFAULT_BASE_URL = 'https://api.anthropic.com';
+const DEFAULT_MAX_TOKENS = 4096;
+const MAX_TOOL_TURNS = 15;
+const TOOL_RESULT_DIGEST_LIMIT = 500;
+
+interface CatAgentServiceOptions {
+  catId: CatId;
+  projectRoot: string;
+  catConfig: CatConfig | null;
+}
+
+/** Per-turn result accumulated from stream events. */
+interface TurnResult {
+  contentBlocks: AnthropicContentBlock[];
+  stopReason: string | null;
+  turnUsage: TokenUsage;
+  hadStreamError: boolean;
+}
+
+/**
+ * F153 Phase J AC-J2 (R1 P2 fix): structured tool execution outcome.
+ * `status` is set from the execution-edge branch, NOT from content-string
+ * heuristics — so a successful tool legitimately returning "Error: 200 OK"
+ * style content does not get mis-marked as `error` (KD-38 honesty).
+ */
+export interface CatAgentToolExecResult {
+  id: string;
+  name: string;
+  content: string;
+  status: 'ok' | 'error';
+}
+
+/**
+ * Execute Anthropic tool_use blocks against the local tool registry.
+ * Exported (vs the previous private method) so unit tests can verify the
+ * status mapping without standing up the full streaming HTTP pipeline.
+ *
+ * Branches:
+ * - unknown tool → `status: 'error'`, content prefixed with "Error: unknown tool"
+ * - successful execution → `status: 'ok'` regardless of returned text content
+ * - thrown error (schema validation, tool.execute reject) → `status: 'error'`
+ */
+export async function executeCatAgentTools(
+  blocks: AnthropicToolUseBlock[],
+  tools: CatAgentTool[],
+): Promise<CatAgentToolExecResult[]> {
+  const results: CatAgentToolExecResult[] = [];
+  for (const block of blocks) {
+    const tool = findTool(tools, block.name);
+    if (!tool) {
+      results.push({
+        id: block.id,
+        name: block.name,
+        content: `Error: unknown tool "${block.name}"`,
+        status: 'error',
+      });
+      continue;
+    }
+    try {
+      validateToolInput(tool.schema, block.input);
+      const output = await tool.execute(block.input);
+      // Status comes from the execution edge (no exception thrown), not from
+      // content inspection — a tool may legitimately return text starting
+      // with "Error:" (e.g. log/file content).
+      results.push({ id: block.id, name: block.name, content: output, status: 'ok' });
+    } catch (err: unknown) {
+      results.push({
+        id: block.id,
+        name: block.name,
+        content: `Error: ${err instanceof Error ? err.message : String(err)}`,
+        status: 'error',
+      });
+    }
+  }
+  return results;
+}
+
+export class CatAgentService implements AgentService {
+  readonly catId: CatId;
+  private readonly projectRoot: string;
+  private readonly catConfig: CatConfig | null;
+
+  constructor(options: CatAgentServiceOptions) {
+    this.catId = options.catId;
+    this.projectRoot = options.projectRoot;
+    this.catConfig = options.catConfig;
+  }
+
+  contextCapability(): import('../../../types.js').AgentContextCapability {
+    return {
+      provider: 'catagent',
+      carrier: 'direct_api',
+      reportsRuntimeWindow: false,
+      authoritativeUsage: true,
+      usageTelemetry: 'available',
+      nativeWindowControl: false,
+      nativeCompressionControl: false,
+      observesCompression: false,
+      reason: 'Direct API loop reports per-request input usage but no runtime window',
+    };
+  }
+
+  async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const now = Date.now();
+    let model: string;
+    try {
+      model = getCatModel(this.catId as string);
+    } catch {
+      yield* emitError('Model resolution failed — no configured model', this.catId, 'unknown', now);
+      return;
+    }
+    let credentials: ReturnType<typeof resolveApiCredentials>;
+    try {
+      credentials = resolveApiCredentials(this.projectRoot, this.catId as string, this.catConfig);
+    } catch (error) {
+      yield* emitError(
+        `Credential resolution failed — ${error instanceof Error ? error.message : String(error)}`,
+        this.catId,
+        model,
+        now,
+      );
+      return;
+    }
+    if (!credentials) {
+      yield* emitError('Credential resolution failed — no bound account', this.catId, model, now);
+      return;
+    }
+    const sessionId = `catagent-${now}-${Math.random().toString(36).slice(2, 8)}`;
+    const metadata: MessageMetadata = { provider: 'catagent', model, sessionId };
+    yield { type: 'session_init', catId: this.catId, sessionId, metadata, timestamp: now };
+    yield* this.agenticLoop(prompt, model, metadata, credentials, options);
+  }
+
+  /** Agentic loop: stream API → yield text deltas → execute tools → repeat. */
+  private async *agenticLoop(
+    prompt: string,
+    model: string,
+    metadata: MessageMetadata,
+    credentials: { apiKey: string; baseURL?: string },
+    options?: AgentServiceOptions,
+  ): AsyncIterable<AgentMessage> {
+    const workDir = options?.workingDirectory;
+    const tools = workDir ? await buildToolRegistry(workDir) : [];
+    const toolSchemas = getToolSchemas(tools);
+    const messages: Array<{ role: string; content: unknown }> = [{ role: 'user', content: prompt }];
+    let totalUsage: TokenUsage | undefined;
+
+    for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+      let resp: Response;
+      try {
+        resp = await this.fetchApi(messages, toolSchemas, model, credentials, options, turn);
+      } catch (err: unknown) {
+        yield* this.handleFetchError(err, metadata, model, totalUsage);
+        return;
+      }
+
+      const result = yield* this.consumeTurn(resp, metadata, options?.signal);
+      totalUsage = mergeObservedTurnUsage(totalUsage, result.turnUsage);
+
+      if (result.hadStreamError) {
+        const orphanTools = result.contentBlocks.filter((b): b is AnthropicToolUseBlock => b.type === 'tool_use');
+        for (const t of orphanTools) {
+          // F153 Phase J AC-J2: carry native tool_use_id + structured error status.
+          yield {
+            type: 'tool_result',
+            catId: this.catId,
+            content: 'Error: stream interrupted before tool execution',
+            toolName: t.name,
+            toolUseId: t.id,
+            toolResultStatus: 'error',
+            metadata,
+            timestamp: Date.now(),
+          };
+        }
+        yield* emitDone(this.catId, metadata, totalUsage);
+        return;
+      }
+
+      const isTerminal = result.stopReason != null && TERMINAL_STOP_REASONS.has(result.stopReason);
+      if (isTerminal) {
+        yield { type: 'done', catId: this.catId, metadata: { ...metadata, usage: totalUsage }, timestamp: Date.now() };
+        return;
+      }
+
+      const toolBlocks = result.contentBlocks.filter((b): b is AnthropicToolUseBlock => b.type === 'tool_use');
+      if (toolBlocks.length === 0) {
+        const reason = result.stopReason ?? 'unknown';
+        log.warn(`[${this.catId}] Non-terminal stop_reason "${reason}" with no tool calls`);
+        yield {
+          type: 'error',
+          catId: this.catId,
+          error: `Unexpected non-terminal response (stop_reason: ${reason}) with no tool calls`,
+          metadata,
+          timestamp: Date.now(),
+        };
+        yield* emitDone(this.catId, metadata, totalUsage);
+        return;
+      }
+
+      // Execute tools and build next turn
+      const toolResults = await this.executeTools(toolBlocks, tools, metadata);
+      for (const r of toolResults) {
+        // F153 Phase J AC-J2 (R1 P2 fix): status comes from executeTools execution
+        // edge — not from content inspection. A tool legitimately returning text
+        // starting with "Error:" is still `ok` per KD-38 honesty.
+        yield {
+          type: 'tool_result',
+          catId: this.catId,
+          content: r.content.slice(0, TOOL_RESULT_DIGEST_LIMIT),
+          toolName: r.name,
+          toolUseId: r.id,
+          toolResultStatus: r.status,
+          metadata,
+          timestamp: Date.now(),
+        };
+      }
+      messages.push({ role: 'assistant', content: result.contentBlocks });
+      messages.push({
+        role: 'user',
+        content: toolResults.map((r) => ({ type: 'tool_result', tool_use_id: r.id, content: r.content })),
+      });
+    }
+
+    log.warn(`[${this.catId}] Tool loop exceeded ${MAX_TOOL_TURNS} turns`);
+    yield {
+      type: 'error',
+      catId: this.catId,
+      error: `Tool loop exceeded ${MAX_TOOL_TURNS} turns`,
+      metadata,
+      timestamp: Date.now(),
+    };
+    yield* emitDone(this.catId, metadata, totalUsage);
+  }
+
+  /** Consume one streaming turn, yielding text deltas and tool_use events. */
+  private async *consumeTurn(
+    resp: Response,
+    metadata: MessageMetadata,
+    signal?: AbortSignal,
+  ): AsyncGenerator<AgentMessage, TurnResult> {
+    const contentBlocks: AnthropicContentBlock[] = [];
+    const blocksByIndex = new Map<number, AnthropicContentBlock>();
+    let stopReason: string | null = null;
+    let inputUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+    let outputTokens = 0;
+    let hadStreamError = false;
+
+    if (!resp.body) {
+      yield { type: 'error', catId: this.catId, error: 'Response has no body', metadata, timestamp: Date.now() };
+      return { contentBlocks, stopReason, turnUsage: inputUsage, hadStreamError: true };
+    }
+
+    for await (const evt of parseAnthropicSSE(resp.body, signal)) {
+      yield* this.mapStreamEvent(evt, metadata, blocksByIndex);
+
+      if (evt.type === 'usage_update') {
+        if (evt.inputUsage) inputUsage = mapAnthropicUsage(evt.inputUsage);
+        if (evt.outputTokens !== undefined) outputTokens = evt.outputTokens;
+      } else if (evt.type === 'stop') {
+        stopReason = evt.stopReason;
+      } else if (evt.type === 'stream_error') {
+        hadStreamError = true;
+      }
+    }
+
+    // Rebuild content blocks sorted by index (P1: preserve full assistant content)
+    const sortedIndices = [...blocksByIndex.keys()].sort((a, b) => a - b);
+    for (const idx of sortedIndices) contentBlocks.push(blocksByIndex.get(idx)!);
+
+    const turnUsage: TokenUsage = { ...inputUsage, outputTokens };
+    return { contentBlocks, stopReason, turnUsage, hadStreamError };
+  }
+
+  /** Map a single stream event to AgentMessage(s). */
+  private *mapStreamEvent(
+    evt: CatAgentStreamEvent,
+    metadata: MessageMetadata,
+    blocksByIndex: Map<number, AnthropicContentBlock>,
+  ): Iterable<AgentMessage> {
+    if (evt.type === 'text_delta') {
+      yield { type: 'text', catId: this.catId, content: evt.text, metadata, timestamp: Date.now() };
+    } else if (evt.type === 'content_block_complete') {
+      blocksByIndex.set(evt.blockIndex, evt.block);
+      if (evt.block.type === 'tool_use') {
+        // F153 Phase J AC-J2: carry native Anthropic tool_use.id (from stream parser).
+        yield {
+          type: 'tool_use',
+          catId: this.catId,
+          toolName: evt.block.name,
+          toolInput: evt.block.input,
+          toolUseId: evt.block.id,
+          metadata,
+          timestamp: Date.now(),
+        };
+      }
+    } else if (evt.type === 'stream_error') {
+      yield { type: 'error', catId: this.catId, error: evt.error, metadata, timestamp: Date.now() };
+    }
+  }
+
+  private async fetchApi(
+    messages: Array<{ role: string; content: unknown }>,
+    tools: Array<{ name: string; description: string; input_schema: unknown }>,
+    model: string,
+    credentials: { apiKey: string; baseURL?: string },
+    options?: AgentServiceOptions,
+    turn = 0,
+  ): Promise<Response> {
+    const url = buildProviderEndpoint({ protocol: 'anthropic', baseUrl: credentials.baseURL ?? DEFAULT_BASE_URL });
+    const body: Record<string, unknown> = { model, max_tokens: DEFAULT_MAX_TOKENS, messages, stream: true };
+    if (tools.length > 0) body.tools = tools;
+    if (options?.systemPrompt) body.system = options.systemPrompt;
+    const serializedBody = JSON.stringify(body);
+
+    const initialMessage = turn === 0 && messages.length === 1 ? messages[0]?.content : undefined;
+    const preparedRequest: PreparedProviderRequestV1 = Object.freeze({
+      v: 1,
+      ...(turn > 0 ? { boundaryReason: 'provider_continuation' as const } : {}),
+      message:
+        typeof initialMessage === 'string'
+          ? Object.freeze({ body: initialMessage })
+          : Object.freeze({
+              accuracy: 'unsupported' as const,
+              injectionDecision: 'tool_payload_excluded_by_contract',
+            }),
+      nativeInstructions: Object.freeze(
+        options?.systemPrompt
+          ? [Object.freeze({ body: options.systemPrompt, injectionDecision: 'anthropic_system_field' })]
+          : [],
+      ),
+      runtime: Object.freeze({ provider: 'catagent', carrier: 'direct_api', model, protocol: 'anthropic_sse' }),
+      tools: Object.freeze({
+        finalSurface: 'exact' as const,
+        catCafeSchemas: Object.freeze(tools.map((tool) => Object.freeze({ ...tool }))),
+      }),
+      providerNativeVisibility: 'unknown' as const,
+    });
+    log.info(`[${this.catId}] API call: model=${model}, turns=${messages.length}, stream=true`);
+    await options?.beforeProviderLaunch?.(preparedRequest);
+    const resp = await fetch(url, {
+      method: 'POST',
+      redirect: 'error',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': credentials.apiKey,
+        'anthropic-version': ANTHROPIC_API_VERSION,
+      },
+      body: serializedBody,
+      signal: options?.signal,
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => 'unknown error');
+      throw Object.assign(new Error(text), { httpStatus: resp.status });
+    }
+    return resp;
+  }
+
+  private executeTools(
+    blocks: AnthropicToolUseBlock[],
+    tools: CatAgentTool[],
+    _metadata: MessageMetadata,
+  ): Promise<CatAgentToolExecResult[]> {
+    return executeCatAgentTools(blocks, tools);
+  }
+
+  private *handleFetchError(
+    err: unknown,
+    metadata: MessageMetadata,
+    model: string,
+    totalUsage: TokenUsage | undefined,
+  ): Iterable<AgentMessage> {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      log.info(`[${this.catId}] Request aborted`);
+      yield { type: 'error', catId: this.catId, error: 'Request aborted', metadata, timestamp: Date.now() };
+      yield* emitDone(this.catId, metadata, totalUsage);
+      return;
+    }
+    const httpStatus = (err as { httpStatus?: number }).httpStatus;
+    const message = err instanceof Error ? err.message : String(err);
+    if (httpStatus) {
+      log.warn(`[${this.catId}] API error ${httpStatus}: ${message.slice(0, 200)}`);
+    } else {
+      log.error(`[${this.catId}] Unexpected error: ${message}`);
+    }
+    for (const msg of mapAnthropicError({ status: httpStatus ?? 0, message }, this.catId, 'catagent', model)) {
+      const usage = totalUsage ?? msg.metadata?.usage;
+      yield { ...msg, metadata: { ...metadata, ...msg.metadata, usage } };
+    }
+  }
+}
+
+function mergeObservedTurnUsage(totalUsage: TokenUsage | undefined, turnUsage: TokenUsage): TokenUsage {
+  const merged = mergeTokenUsage(totalUsage, turnUsage);
+  if (turnUsage.lastTurnInputTokens == null) {
+    // A new request without input telemetry invalidates the prior contextual
+    // snapshot; aggregate inputTokens remains available for accounting.
+    delete merged.lastTurnInputTokens;
+  }
+  return merged;
+}
+
+function emitError(message: string, catId: CatId, model: string, timestamp: number): AgentMessage[] {
+  const metadata: MessageMetadata = { provider: 'catagent', model };
+  return [
+    { type: 'error', catId, error: message, metadata, timestamp },
+    { type: 'done', catId, metadata: { ...metadata, usage: { inputTokens: 0, outputTokens: 0 } }, timestamp },
+  ];
+}
+
+function* emitDone(
+  catId: CatId,
+  metadata: MessageMetadata,
+  totalUsage: TokenUsage | undefined,
+): Iterable<AgentMessage> {
+  yield {
+    type: 'done',
+    catId,
+    metadata: { ...metadata, usage: totalUsage ?? { inputTokens: 0, outputTokens: 0 } },
+    timestamp: Date.now(),
+  };
+}

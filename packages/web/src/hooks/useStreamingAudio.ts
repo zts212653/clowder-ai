@@ -136,6 +136,13 @@ export function useStreamingAudio() {
               if (audioElement.ended) playNext();
             }
           }
+
+          if (event.type === 'done' && event.total !== undefined) {
+            setState((s) => ({
+              ...s,
+              totalChunks: event.total ?? s.totalChunks,
+            }));
+          }
         }
 
         streamDoneRef.current = true;

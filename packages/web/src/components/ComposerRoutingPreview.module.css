@@ -1,0 +1,52 @@
+.root {
+  flex: 0 1 auto;
+  inline-size: fit-content;
+  max-inline-size: min(15rem, 100%);
+  min-inline-size: 3.5rem;
+  margin-inline-start: auto;
+}
+
+.button {
+  inline-size: 100%;
+  justify-content: flex-start;
+}
+
+.readyName {
+  flex: 0 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.readyNameContent {
+  display: inline-flex;
+  white-space: nowrap;
+}
+
+.stateName {
+  flex: 0 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 639px) {
+  .compactRoot {
+    flex: 1 0 auto;
+    inline-size: auto;
+    max-inline-size: 100%;
+    min-inline-size: 0;
+    margin-inline-start: 0;
+    overflow: hidden;
+  }
+
+  .compactButton {
+    column-gap: 0.125rem;
+    justify-content: flex-start;
+    overflow: hidden;
+    padding-inline: 0;
+    white-space: nowrap;
+  }
+}

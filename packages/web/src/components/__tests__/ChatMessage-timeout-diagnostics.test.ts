@@ -60,6 +60,57 @@ describe('F118 TimeoutDiagnosticsPanel (AC-C3)', () => {
     expect(el?.textContent).toContain('Diagnostics');
   });
 
+  it('a standalone timeout retains its error and folded diagnostics', async () => {
+    const { TerminalDiagnosticsPanel } = await import('../TerminalDiagnosticsPanel');
+    act(() => {
+      root.render(
+        React.createElement(TerminalDiagnosticsPanel, {
+          selected: {
+            kind: 'timeout',
+            diagnostics: { silenceDurationMs: 1846576, processAlive: true, invocationId: 'timed-out-turn' },
+          },
+          errorMessage: '回复失败。',
+        }),
+      );
+    });
+    const panel = container.querySelector('[data-testid="timeout-diagnostics"]');
+    expect(panel?.textContent).toContain('回复失败。');
+    expect(panel?.textContent).toContain('Diagnostics');
+    expect(container.querySelector('[data-testid="diagnostics-panel"]')).toBeNull();
+    const toggle = container.querySelector('[data-testid="diagnostics-toggle"]') as HTMLButtonElement;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    act(() => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(panel?.textContent).toContain('timed-out-turn');
+    expect(panel?.textContent).toContain('1846576ms');
+    expect(panel?.textContent).toContain('true (at timeout)');
+    expect(panel?.textContent).toContain('回复失败。');
+  });
+
+  it('a standalone classified CLI error retains its actionable cause and hint', async () => {
+    const { TerminalDiagnosticsPanel } = await import('../TerminalDiagnosticsPanel');
+    act(() => {
+      root.render(
+        React.createElement(TerminalDiagnosticsPanel, {
+          selected: {
+            kind: 'cli',
+            diagnostics: {
+              reasonCode: 'auth_failed',
+              publicSummary: 'API 认证失败',
+              publicHint: '检查 API key',
+              debugRef: { command: 'codex', exitCode: 1, signal: null },
+            },
+          },
+          errorMessage: '回复失败。',
+        }),
+      );
+    });
+    expect(container.querySelector('[data-testid="cli-diagnostics-banner"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="cli-diagnostics"]')?.textContent).toContain('API 认证失败');
+    expect(container.querySelector('[data-testid="cli-diagnostics"]')?.textContent).toContain('检查 API key');
+    expect(container.querySelector('[data-testid="timeout-diagnostics"]')).toBeNull();
+  });
+
   it('expands diagnostics on click', async () => {
     const { TimeoutDiagnosticsPanel } = await import('../TimeoutDiagnosticsPanel');
 

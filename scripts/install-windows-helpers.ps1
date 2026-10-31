@@ -1,43 +1,6 @@
 . (Join-Path $PSScriptRoot "windows-command-helpers.ps1")
 . (Join-Path $PSScriptRoot "windows-installer-ui.ps1")
 
-function Mount-InstallerSkills {
-    param([string]$ProjectRoot)
-
-    $skillsSource = Join-Path $ProjectRoot "cat-cafe-skills"
-    $cliDirs = @("$env:USERPROFILE\.claude", "$env:USERPROFILE\.codex", "$env:USERPROFILE\.gemini")
-    if (-not (Test-Path $skillsSource)) {
-        Write-Warn "cat-cafe-skills/ not found - skills mount skipped"
-        return
-    }
-
-    $skillItems = Get-ChildItem $skillsSource -Directory | Where-Object { $_.Name -ne "refs" }
-    foreach ($cliDir in $cliDirs) {
-        $skillsRoot = Join-Path $cliDir "skills"
-        if (-not (Test-Path $skillsRoot)) {
-            New-Item -Path $skillsRoot -ItemType Directory -Force | Out-Null
-        }
-        foreach ($skill in $skillItems) {
-            $skillTarget = Join-Path $skillsRoot $skill.Name
-            if (Test-Path $skillTarget) {
-                Write-Ok "Skill already mounted: $skillTarget"
-                continue
-            }
-            try {
-                cmd /c mklink /J "$skillTarget" "$($skill.FullName)" 2>$null | Out-Null
-                if (Test-Path $skillTarget) {
-                    Write-Ok "Skill mounted: $skillTarget"
-                } else {
-                    throw "junction failed"
-                }
-            } catch {
-                Write-Warn "Could not create junction for $skillTarget"
-                Write-Warn "Run manually: mklink /J `"$skillTarget`" `"$($skill.FullName)`""
-            }
-        }
-    }
-}
-
 function Add-ProcessPathPrefix {
     param([string]$Directory)
     if (-not $Directory -or -not (Test-Path $Directory)) {
@@ -69,12 +32,12 @@ function Resolve-PortableRedisBinaries {
     if (-not (Test-Path $layout.Current)) { return $null }
     $redisServer = Get-ChildItem $layout.Current -Recurse -Filter "redis-server.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
     $redisCli = Get-ChildItem $layout.Current -Recurse -Filter "redis-cli.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $redisServer -or -not $redisCli) { return $null }
+    if (-not $redisServer) { return $null }
     Add-ProcessPathPrefix -Directory $redisServer.Directory.FullName
     [pscustomobject]@{
         Source = "project-local"
         ServerPath = $redisServer.FullName
-        CliPath = $redisCli.FullName
+        CliPath = if ($redisCli) { $redisCli.FullName } else { $null }
         BinDir = $redisServer.Directory.FullName
     }
 }
@@ -82,11 +45,11 @@ function Resolve-PortableRedisBinaries {
 function Resolve-GlobalRedisBinaries {
     $redisServer = Get-Command redis-server -ErrorAction SilentlyContinue
     $redisCli = Get-Command redis-cli -ErrorAction SilentlyContinue
-    if (-not $redisServer -or -not $redisCli) { return $null }
+    if (-not $redisServer) { return $null }
     [pscustomobject]@{
         Source = "global"
         ServerPath = $redisServer.Source
-        CliPath = $redisCli.Source
+        CliPath = if ($redisCli) { $redisCli.Source } else { $null }
         BinDir = Split-Path -Parent $redisServer.Source
     }
 }
@@ -103,7 +66,13 @@ function Test-LocalRedisUrl {
         return $false
     }
 
-    if ($uri.Host -notin @("localhost", "127.0.0.1")) {
+    $isLoopbackHost = $uri.Host -eq "localhost"
+    $ipAddress = $null
+    if (-not $isLoopbackHost -and [System.Net.IPAddress]::TryParse($uri.Host, [ref]$ipAddress)) {
+        $isLoopbackHost = [System.Net.IPAddress]::IsLoopback($ipAddress)
+    }
+
+    if (-not $isLoopbackHost) {
         return $false
     }
 
@@ -180,6 +149,9 @@ function Get-RedactedRedisUrl {
     }
 }
 
+# Legacy: formats auth args for redis-cli CLI invocation (--user, -a).
+# RESP-based functions (Test-RedisReachable, Send-RedisShutdown) parse
+# credentials directly from the URL and do NOT use this function.
 function Get-RedisAuthArgs {
     param([string]$RedisUrl)
     if (-not $RedisUrl) { return @() }
@@ -198,6 +170,154 @@ function Get-RedisAuthArgs {
         return $authArgs
     } catch {}
     return @()
+}
+
+function Format-RedisRespCommand {
+    param([string[]]$CommandArgs)
+
+    $parts = "*$($CommandArgs.Count)`r`n"
+    foreach ($arg in $CommandArgs) {
+        $byteLength = [System.Text.Encoding]::UTF8.GetByteCount($arg)
+        $parts += "`$$byteLength`r`n$arg`r`n"
+    }
+    return $parts
+}
+
+function Write-RedisRespCommand {
+    param(
+        [System.IO.Stream]$Stream,
+        [string]$Command
+    )
+
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    $commandBytes = $utf8NoBom.GetBytes($Command)
+    $Stream.Write($commandBytes, 0, $commandBytes.Length)
+}
+
+function Get-RedisAuthRespCommand {
+    param([System.Uri]$Uri)
+
+    if (-not $Uri.UserInfo) {
+        return ""
+    }
+
+    $parts = $Uri.UserInfo -split ":", 2
+    $username = [System.Uri]::UnescapeDataString($parts[0])
+    $password = if ($parts.Count -ge 2) { [System.Uri]::UnescapeDataString($parts[1]) } else { "" }
+
+    if ($parts.Count -ge 2 -and $username) {
+        return Format-RedisRespCommand -CommandArgs @("AUTH", $username, $password)
+    } elseif ($username) {
+        return Format-RedisRespCommand -CommandArgs @("AUTH", $username)
+    }
+    return Format-RedisRespCommand -CommandArgs @("AUTH", $password)
+}
+
+# Pure-PowerShell Redis connectivity check via TCP + RESP PING/PONG.
+# Replaces redis-cli dependency for local and WSL-based Redis instances.
+function Test-RedisReachable {
+    param(
+        [string]$RedisUrl,
+        [int]$TimeoutMs = 3000
+    )
+
+    if (-not $RedisUrl) {
+        return $false
+    }
+
+    $uri = $null
+    if (-not [System.Uri]::TryCreate($RedisUrl, [System.UriKind]::Absolute, [ref]$uri)) {
+        return $false
+    }
+
+    $hostName = $uri.Host
+    $port = if ($uri.Port -gt 0) { $uri.Port } else { 6379 }
+
+    $client = $null
+    try {
+        $client = [System.Net.Sockets.TcpClient]::new()
+        $connectTask = $client.ConnectAsync($hostName, $port)
+        if (-not $connectTask.Wait($TimeoutMs) -or -not $client.Connected) {
+            return $false
+        }
+
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = $TimeoutMs
+        $stream.WriteTimeout = $TimeoutMs
+        $reader = [System.IO.StreamReader]::new($stream, [System.Text.UTF8Encoding]::new($false))
+
+        # AUTH if credentials embedded in URL
+        $authCmd = Get-RedisAuthRespCommand -Uri $uri
+        if ($authCmd) {
+            Write-RedisRespCommand -Stream $stream -Command $authCmd
+            $authLine = $reader.ReadLine()
+            if ($authLine -notmatch '^\+OK') {
+                return $false
+            }
+        }
+
+        # PING
+        Write-RedisRespCommand -Stream $stream -Command (Format-RedisRespCommand -CommandArgs @("PING"))
+        $pingLine = $reader.ReadLine()
+        return $pingLine -eq '+PONG'
+    } catch {
+        return $false
+    } finally {
+        if ($client) { $client.Dispose() }
+    }
+}
+
+# Send SHUTDOWN SAVE via RESP, replacing redis-cli shutdown save.
+function Send-RedisShutdown {
+    param(
+        [string]$RedisUrl,
+        [int]$TimeoutMs = 3000
+    )
+
+    if (-not $RedisUrl) {
+        return $false
+    }
+
+    $uri = $null
+    if (-not [System.Uri]::TryCreate($RedisUrl, [System.UriKind]::Absolute, [ref]$uri)) {
+        return $false
+    }
+
+    $hostName = $uri.Host
+    $port = if ($uri.Port -gt 0) { $uri.Port } else { 6379 }
+
+    $client = $null
+    try {
+        $client = [System.Net.Sockets.TcpClient]::new()
+        $connectTask = $client.ConnectAsync($hostName, $port)
+        if (-not $connectTask.Wait($TimeoutMs) -or -not $client.Connected) {
+            return $false
+        }
+
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = $TimeoutMs
+        $stream.WriteTimeout = $TimeoutMs
+        $reader = [System.IO.StreamReader]::new($stream, [System.Text.UTF8Encoding]::new($false))
+
+        # AUTH if needed
+        $authCmd = Get-RedisAuthRespCommand -Uri $uri
+        if ($authCmd) {
+            Write-RedisRespCommand -Stream $stream -Command $authCmd
+            $authLine = $reader.ReadLine()
+            if ($authLine -notmatch '^\+OK') {
+                return $false
+            }
+        }
+
+        # SHUTDOWN SAVE
+        Write-RedisRespCommand -Stream $stream -Command (Format-RedisRespCommand -CommandArgs @("SHUTDOWN", "SAVE"))
+        $reader.ReadLine() | Out-Null
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if ($client) { $client.Dispose() }
+    }
 }
 
 function Get-RedisServerAuthArgs {
@@ -412,34 +532,41 @@ function Invoke-InstallerAuthHelper {
     }
 }
 
+# #340 P6: Codex/Gemini auth now uses unified accounts system (accounts.json + credentials.json)
+# via install-auth-config.mjs client-auth set, mirroring the Claude path.
 function Set-CodexOAuthMode {
     param($State)
-    Set-InstallerEnvValue $State "CODEX_AUTH_MODE" "oauth"
-    Add-InstallerEnvDelete $State "OPENAI_API_KEY"
-    Add-InstallerEnvDelete $State "OPENAI_BASE_URL"
-    Add-InstallerEnvDelete $State "CAT_CODEX_MODEL"
+    # Do not auto-delete installer API-key profiles here: accounts are global and
+    # another project may still be bound to installer-openai.
+    $args = @("client-auth", "set", "--project-dir", $State.ProjectRoot, "--client", "codex", "--mode", "oauth")
+    Invoke-InstallerAuthHelper $State $args
 }
 
 function Set-CodexApiKeyMode {
     param($State, [string]$ApiKey, [string]$BaseUrl, [string]$Model)
-
-    Set-InstallerEnvValue $State "CODEX_AUTH_MODE" "api_key"
-    Set-InstallerEnvValue $State "OPENAI_API_KEY" $ApiKey
-    if ($BaseUrl) { Set-InstallerEnvValue $State "OPENAI_BASE_URL" $BaseUrl } else { Add-InstallerEnvDelete $State "OPENAI_BASE_URL" }
-    if ($Model) { Set-InstallerEnvValue $State "CAT_CODEX_MODEL" $Model } else { Add-InstallerEnvDelete $State "CAT_CODEX_MODEL" }
+    $args = @("client-auth", "set", "--project-dir", $State.ProjectRoot, "--client", "codex", "--mode", "api_key")
+    if ($BaseUrl) { $args += @("--base-url", $BaseUrl) }
+    if ($Model) { $args += @("--model", $Model) }
+    $env:_INSTALLER_API_KEY = $ApiKey
+    try { Invoke-InstallerAuthHelper $State $args }
+    finally { Remove-Item Env:\_INSTALLER_API_KEY -ErrorAction SilentlyContinue }
 }
 
 function Set-GeminiOAuthMode {
     param($State)
-    Add-InstallerEnvDelete $State "GEMINI_API_KEY"
-    Add-InstallerEnvDelete $State "CAT_GEMINI_MODEL"
+    # Do not auto-delete installer API-key profiles here: accounts are global and
+    # another project may still be bound to installer-gemini.
+    $args = @("client-auth", "set", "--project-dir", $State.ProjectRoot, "--client", "gemini", "--mode", "oauth")
+    Invoke-InstallerAuthHelper $State $args
 }
 
 function Set-GeminiApiKeyMode {
     param($State, [string]$ApiKey, [string]$Model)
-
-    Set-InstallerEnvValue $State "GEMINI_API_KEY" $ApiKey
-    if ($Model) { Set-InstallerEnvValue $State "CAT_GEMINI_MODEL" $Model } else { Add-InstallerEnvDelete $State "CAT_GEMINI_MODEL" }
+    $args = @("client-auth", "set", "--project-dir", $State.ProjectRoot, "--client", "gemini", "--mode", "api_key")
+    if ($Model) { $args += @("--model", $Model) }
+    $env:_INSTALLER_API_KEY = $ApiKey
+    try { Invoke-InstallerAuthHelper $State $args }
+    finally { Remove-Item Env:\_INSTALLER_API_KEY -ErrorAction SilentlyContinue }
 }
 
 function Set-ClaudeInstallerProfile {
@@ -465,45 +592,44 @@ function Remove-ClaudeInstallerProfile {
 function Read-InstallerSecret {
     param([string]$Prompt)
 
-    Write-Host -NoNewline "$Prompt"
-    $input = ""
-    while ($true) {
-        $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        if ($key.VirtualKeyCode -eq 13) {
-            # Enter pressed
-            Write-Host ""
-            break
-        } elseif ($key.VirtualKeyCode -eq 8) {
-            # Backspace
-            if ($input.Length -gt 0) {
-                $input = $input.Substring(0, $input.Length - 1)
-                Write-Host -NoNewline "`b `b"
-            }
-        } elseif ($key.Character -ne [char]0) {
-            $input += $key.Character
-            Write-Host -NoNewline "*"
+    $secureValue = Read-Host $Prompt -AsSecureString
+    if ($null -eq $secureValue) {
+        return ""
+    }
+
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureValue)
+    try {
+        return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    } finally {
+        if ($bstr -ne [IntPtr]::Zero) {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
         }
     }
-    return $input
 }
 
 function Configure-InstallerAuth {
-    param([string]$ProjectRoot, $State)
+    param([string]$ProjectRoot, $State, [string[]]$SelectedCliCommands = @())
 
     $hasClaude = $null -ne (Resolve-ToolCommandWithRetry -Name "claude" -Attempts 6)
     $hasCodex = $null -ne (Resolve-ToolCommandWithRetry -Name "codex" -Attempts 6)
     $hasGemini = $null -ne (Resolve-ToolCommandWithRetry -Name "gemini" -Attempts 6)
+    $hasKimi = $null -ne (Resolve-ToolCommandWithRetry -Name "kimi" -Attempts 6)
+    $shouldOfferClaude = $hasClaude -or ($SelectedCliCommands -contains "claude")
+    $shouldOfferCodex = $hasCodex -or ($SelectedCliCommands -contains "codex")
+    $shouldOfferGemini = $hasGemini -or ($SelectedCliCommands -contains "gemini")
+    $shouldOfferKimi = $hasKimi -or ($SelectedCliCommands -contains "kimi")
     $isInteractive = [Environment]::UserInteractive -and -not $env:CI
 
     if (-not $isInteractive) {
-        Write-Warn "Non-interactive mode - skipping auth prompts. Run claude / codex / gemini manually after install."
+        Write-Warn "Non-interactive mode - skipping auth prompts. Run claude / codex / gemini / kimi manually after install."
         return
     }
 
-    if ($hasClaude) {
+    if ($shouldOfferClaude) {
         Write-Host ""
         Write-Host "  Claude (claude):"
-        $hasExistingProfile = Test-Path (Join-Path $ProjectRoot ".cat-cafe/provider-profiles.json")
+        $globalCatCafe = if ($env:CAT_CAFE_GLOBAL_CONFIG_ROOT) { $env:CAT_CAFE_GLOBAL_CONFIG_ROOT } else { $env:USERPROFILE }
+        $hasExistingProfile = Test-Path (Join-Path $globalCatCafe ".cat-cafe/accounts.json")
         $claudeOptions = @()
         if ($hasExistingProfile) {
             $claudeOptions += @{ Label = "&Keep existing"; Help = "Keep the current Claude auth configuration"; Value = "keep" }
@@ -535,17 +661,19 @@ function Configure-InstallerAuth {
         }
     }
 
-    if ($hasCodex) {
+    if ($shouldOfferCodex) {
         Write-Host ""
         Write-Host "  Codex (codex):"
-        $existingCodexKey = Get-InstallerEnvValueFromFile -EnvFile (Join-Path $ProjectRoot ".env") -Key "OPENAI_API_KEY"
+        $globalCatCafeCodex = if ($env:CAT_CAFE_GLOBAL_CONFIG_ROOT) { $env:CAT_CAFE_GLOBAL_CONFIG_ROOT } else { $env:USERPROFILE }
+        $codexAccountsPath = Join-Path $globalCatCafeCodex ".cat-cafe/accounts.json"
+        $hasExistingCodex = (Test-Path $codexAccountsPath) -and ((Get-Content $codexAccountsPath -Raw -ErrorAction SilentlyContinue) -match '"codex"')
         $codexOptions = @()
-        if ($existingCodexKey) {
+        if ($hasExistingCodex) {
             $codexOptions += @{ Label = "&Keep existing"; Help = "Keep the current Codex auth configuration"; Value = "keep" }
         }
         $codexOptions += @(
-            @{ Label = if ($existingCodexKey) { "&OAuth" } else { "&OAuth (recommended)" }; Help = "Use Codex OAuth / subscription"; Value = "oauth" },
-            @{ Label = "&API Key"; Help = "Store OpenAI API settings in .env"; Value = "api_key" },
+            @{ Label = if ($hasExistingCodex) { "&OAuth" } else { "&OAuth (recommended)" }; Help = "Use Codex OAuth / subscription"; Value = "oauth" },
+            @{ Label = "&API Key"; Help = "Store OpenAI API key in accounts system"; Value = "api_key" },
             @{ Label = "&Skip"; Help = "Skip Codex auth setup for now"; Value = "skip" }
         )
         $choice = Select-InstallerChoice -Title "Codex auth" -Prompt "Choose how to configure Codex" -Options $codexOptions
@@ -557,7 +685,7 @@ function Configure-InstallerAuth {
             $model = Read-Host "    Model (Enter = default)"
             if ($apiKey) {
                 Set-CodexApiKeyMode $State $apiKey $baseUrl $model
-                Write-Ok "Codex API key collected for .env"
+                Write-Ok "Codex API key profile written to .cat-cafe/"
             } else {
                 Set-CodexOAuthMode $State
                 Write-Warn "Codex API key empty - keeping OAuth"
@@ -570,17 +698,19 @@ function Configure-InstallerAuth {
         }
     }
 
-    if ($hasGemini) {
+    if ($shouldOfferGemini) {
         Write-Host ""
         Write-Host "  Gemini (gemini):"
-        $existingGeminiKey = Get-InstallerEnvValueFromFile -EnvFile (Join-Path $ProjectRoot ".env") -Key "GEMINI_API_KEY"
+        $globalCatCafeGemini = if ($env:CAT_CAFE_GLOBAL_CONFIG_ROOT) { $env:CAT_CAFE_GLOBAL_CONFIG_ROOT } else { $env:USERPROFILE }
+        $geminiAccountsPath = Join-Path $globalCatCafeGemini ".cat-cafe/accounts.json"
+        $hasExistingGemini = (Test-Path $geminiAccountsPath) -and ((Get-Content $geminiAccountsPath -Raw -ErrorAction SilentlyContinue) -match '"gemini"')
         $geminiOptions = @()
-        if ($existingGeminiKey) {
+        if ($hasExistingGemini) {
             $geminiOptions += @{ Label = "&Keep existing"; Help = "Keep the current Gemini auth configuration"; Value = "keep" }
         }
         $geminiOptions += @(
-            @{ Label = if ($existingGeminiKey) { "&OAuth" } else { "&OAuth (recommended)" }; Help = "Use Gemini OAuth / subscription"; Value = "oauth" },
-            @{ Label = "&API Key"; Help = "Store Gemini API settings in .env"; Value = "api_key" },
+            @{ Label = if ($hasExistingGemini) { "&OAuth" } else { "&OAuth (recommended)" }; Help = "Use Gemini OAuth / subscription"; Value = "oauth" },
+            @{ Label = "&API Key"; Help = "Store Gemini API key in accounts system"; Value = "api_key" },
             @{ Label = "&Skip"; Help = "Skip Gemini auth setup for now"; Value = "skip" }
         )
         $choice = Select-InstallerChoice -Title "Gemini auth" -Prompt "Choose how to configure Gemini" -Options $geminiOptions
@@ -591,7 +721,7 @@ function Configure-InstallerAuth {
             $model = Read-Host "    Model (Enter = default)"
             if ($apiKey) {
                 Set-GeminiApiKeyMode $State $apiKey $model
-                Write-Ok "Gemini API key collected for .env"
+                Write-Ok "Gemini API key profile written to .cat-cafe/"
             } else {
                 Set-GeminiOAuthMode $State
                 Write-Warn "Gemini API key empty - keeping OAuth"
@@ -603,6 +733,43 @@ function Configure-InstallerAuth {
             Write-Warn "Gemini auth setup skipped"
         }
     }
+
+    if ($shouldOfferKimi) {
+        Write-Host ""
+        Write-Host "  Kimi (kimi):"
+        $kimiOptions = @(
+            @{ Label = "&OAuth (recommended)"; Help = "Use official Kimi CLI login"; Value = "oauth" },
+            @{ Label = "&API Key"; Help = "Create installer-managed Kimi API key binding"; Value = "api_key" },
+            @{ Label = "&Skip"; Help = "Skip Kimi auth setup for now"; Value = "skip" }
+        )
+        $choice = Select-InstallerChoice -Title "Kimi auth" -Prompt "Choose how to configure Kimi" -Options $kimiOptions
+        if ($choice -eq "api_key") {
+            $apiKey = Read-InstallerSecret "    API Key"
+            $baseUrl = Read-Host "    Base URL (Enter = default)"
+            $model = Read-Host "    Model (Enter = default)"
+            if ($apiKey) {
+                $args = @("client-auth", "set", "--project-dir", $ProjectRoot, "--client", "kimi", "--mode", "api_key")
+                if ($baseUrl) { $args += @("--base-url", $baseUrl) }
+                if ($model) { $args += @("--model", $model) }
+                $env:_INSTALLER_API_KEY = $apiKey
+                try {
+                    Invoke-InstallerAuthHelper $State $args
+                } finally {
+                    Remove-Item Env:\_INSTALLER_API_KEY -ErrorAction SilentlyContinue
+                }
+                Write-Ok "Kimi API key profile written to .cat-cafe/"
+            } else {
+                Invoke-InstallerAuthHelper $State @("client-auth", "set", "--project-dir", $ProjectRoot, "--client", "kimi", "--mode", "oauth")
+                Write-Warn "Kimi API key empty - keeping OAuth"
+            }
+        } elseif ($choice -eq "oauth") {
+            Invoke-InstallerAuthHelper $State @("client-auth", "set", "--project-dir", $ProjectRoot, "--client", "kimi", "--mode", "oauth")
+            Write-Ok "Kimi: OAuth mode"
+        } else {
+            Write-Warn "Kimi auth setup skipped"
+        }
+    }
+
 }
 
 function Apply-InstallerAuthEnv {

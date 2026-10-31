@@ -1,0 +1,420 @@
+// F186 Phase B Task 4: CollectionIndexBuilder — wires scanner to evidence store
+// Orchestrates: scanner.discover() → hash dedup → store.upsert() → stale cleanup
+
+import assert from 'node:assert/strict';
+import { mkdtempSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+
+describe('CollectionIndexBuilder', () => {
+  let CollectionIndexBuilder, FlatScanner, StructuredScanner, SqliteEvidenceStore;
+  let store, dbPath;
+
+  beforeEach(async () => {
+    ({ CollectionIndexBuilder } = await import('../../dist/domains/memory/CollectionIndexBuilder.js'));
+    ({ FlatScanner } = await import('../../dist/domains/memory/FlatScanner.js'));
+    ({ StructuredScanner } = await import('../../dist/domains/memory/StructuredScanner.js'));
+    ({ SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js'));
+    dbPath = join(mkdtempSync(join(tmpdir(), 'col-idx-')), 'test.sqlite');
+    store = new SqliteEvidenceStore(dbPath);
+    await store.initialize();
+  });
+
+  afterEach(() => {
+    try {
+      unlinkSync(dbPath);
+    } catch {}
+  });
+
+  const makeManifest = (root) => ({
+    id: 'test:col',
+    kind: 'domain',
+    name: 'col',
+    displayName: 'Col',
+    root,
+    sensitivity: 'internal',
+    scannerLevel: 0,
+    indexPolicy: { autoRebuild: true },
+    reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: false },
+    createdAt: '2026-05-04',
+    updatedAt: '2026-05-04',
+  });
+
+  it('indexes markdown files into evidence store', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'col-docs-'));
+    writeFileSync(join(dir, 'readme.md'), '# README\n\nProject overview.');
+    writeFileSync(join(dir, 'guide.md'), '# Guide\n\nHow to use.');
+
+    const manifest = makeManifest(dir);
+    const scanner = new FlatScanner('test:col');
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+    const result = await builder.rebuild();
+
+    assert.equal(result.indexed, 2);
+    const item = await store.getByAnchor('test:col:doc/readme');
+    assert.ok(item);
+    assert.equal(item.title, 'README');
+  });
+
+  it('skips unchanged files on rebuild (hash dedup)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'col-dedup-'));
+    writeFileSync(join(dir, 'doc.md'), '# Doc\n\nContent.');
+
+    const manifest = makeManifest(dir);
+    const scanner = new FlatScanner('test:col');
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+
+    const r1 = await builder.rebuild();
+    assert.equal(r1.indexed, 1);
+
+    const r2 = await builder.rebuild();
+    assert.equal(r2.skipped, 1);
+    assert.equal(r2.indexed, 0);
+  });
+
+  it('cleans stale anchors when file removed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'col-stale-'));
+    const file = join(dir, 'temp.md');
+    writeFileSync(file, '# Temp\n\nWill be removed.');
+
+    const manifest = makeManifest(dir);
+    const scanner = new FlatScanner('test:col');
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+
+    await builder.rebuild();
+    assert.ok(await store.getByAnchor('test:col:doc/temp'));
+
+    unlinkSync(file);
+    await builder.rebuild();
+    assert.equal(await store.getByAnchor('test:col:doc/temp'), null);
+  });
+
+  it('force rebuild re-indexes all files regardless of hash', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'col-force-'));
+    writeFileSync(join(dir, 'doc.md'), '# Doc\n\nContent.');
+
+    const manifest = makeManifest(dir);
+    const scanner = new FlatScanner('test:col');
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+
+    await builder.rebuild();
+    const r2 = await builder.rebuild({ force: true });
+    assert.equal(r2.indexed, 1);
+    assert.equal(r2.skipped, 0);
+  });
+
+  it('re-indexes when file content changes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'col-update-'));
+    const file = join(dir, 'doc.md');
+    writeFileSync(file, '# Original\n\nFirst version.');
+
+    const manifest = makeManifest(dir);
+    const scanner = new FlatScanner('test:col');
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+
+    await builder.rebuild();
+    assert.equal((await store.getByAnchor('test:col:doc/doc'))?.title, 'Original');
+
+    writeFileSync(file, '# Updated\n\nSecond version.');
+    const r2 = await builder.rebuild();
+    assert.equal(r2.indexed, 1);
+    assert.equal((await store.getByAnchor('test:col:doc/doc'))?.title, 'Updated');
+  });
+
+  it('only cleans anchors with matching collection prefix', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'col-prefix-'));
+    writeFileSync(join(dir, 'doc.md'), '# Doc');
+
+    // Insert a foreign anchor that should NOT be cleaned
+    store.upsert([
+      {
+        anchor: 'other:col:doc/foreign',
+        kind: 'research',
+        status: 'active',
+        title: 'Foreign',
+        sourceHash: 'abc',
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+
+    const manifest = makeManifest(dir);
+    const scanner = new FlatScanner('test:col');
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+    await builder.rebuild();
+
+    assert.ok(await store.getByAnchor('other:col:doc/foreign'), 'foreign anchor should survive');
+    assert.ok(await store.getByAnchor('test:col:doc/doc'), 'own anchor should exist');
+  });
+
+  it('incrementalUpdate indexes a single materialized file into collection store', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'col-incr-'));
+    const { mkdirSync } = await import('node:fs');
+    mkdirSync(join(dir, 'lessons'), { recursive: true });
+
+    const filePath = join(dir, 'lessons', 'lesson-marker-1.md');
+    writeFileSync(
+      filePath,
+      [
+        '---',
+        'anchor: lesson-marker-1',
+        'doc_kind: lesson',
+        'materialized_from: marker-1',
+        'created: 2026-05-19',
+        '---',
+        '',
+        'Redis 6399 is sacred — never touch it in dev.',
+        '',
+      ].join('\n'),
+    );
+
+    const manifest = makeManifest(dir);
+    const scanner = new FlatScanner('test:col');
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+
+    await builder.incrementalUpdate([filePath]);
+
+    const anchor = 'test:col:doc/lessons/lesson-marker-1';
+    const item = await store.getByAnchor(anchor);
+    assert.ok(item, 'evidence row should exist after incrementalUpdate');
+    assert.equal(item.authority, 'validated');
+  });
+
+  it('cleans frontmatter-anchored items when source file removed (P1-1)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'col-fm-stale-'));
+    const file = join(dir, 'adr.md');
+    writeFileSync(file, '---\nanchor: ADR-099\ndoc_kind: decision\n---\n# ADR 99\n\nDecision.');
+
+    const manifest = makeManifest(dir);
+    const scanner = new StructuredScanner('test:col');
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+
+    await builder.rebuild();
+    const adr = await store.getByAnchor('test:col:ADR-099');
+    assert.ok(adr, 'frontmatter-anchored item should be indexed with collection prefix');
+
+    unlinkSync(file);
+    await builder.rebuild();
+    assert.equal(
+      await store.getByAnchor('test:col:ADR-099'),
+      null,
+      'frontmatter anchor should be cleaned after file removal',
+    );
+  });
+
+  it('creates supersedes edges from structured collection frontmatter', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'col-supersedes-'));
+    writeFileSync(
+      join(dir, 'a.md'),
+      [
+        '---',
+        'anchor: S4-DECISION-A',
+        'doc_kind: decision',
+        'status: superseded',
+        '---',
+        '# S4 Decision A',
+        '',
+        'Old SQLite cache layer.',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(dir, 'b.md'),
+      [
+        '---',
+        'anchor: S4-DECISION-B',
+        'doc_kind: decision',
+        'supersedes: S4-DECISION-A # inline YAML comment should not become part of the anchor',
+        '---',
+        '# S4 Decision B',
+        '',
+        'Redis migration replaces S4-DECISION-A.',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(dir, 'c.md'),
+      [
+        '---',
+        'anchor: S4-DECISION-C',
+        'doc_kind: decision',
+        'supersedes: null',
+        '---',
+        '# S4 Decision C',
+        '',
+        'No supersedes target yet.',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(dir, 'd.md'),
+      [
+        '---',
+        'anchor: S4-DECISION-D',
+        'doc_kind: decision',
+        'supersedes: [] # explicit empty list',
+        '---',
+        '# S4 Decision D',
+        '',
+        'Explicitly no supersedes target.',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(dir, 'e.md'),
+      [
+        '---',
+        'anchor: S4-DECISION-E',
+        'doc_kind: decision',
+        'supersedes:',
+        '  - S4-DECISION-A',
+        '  - S4-DECISION-B',
+        '---',
+        '# S4 Decision E',
+        '',
+        'Supersedes two earlier decisions.',
+      ].join('\n'),
+    );
+
+    const manifest = makeManifest(dir);
+    const scanner = new StructuredScanner('test:col');
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+
+    await builder.rebuild({ force: true });
+
+    const edges = await store.getRelated('test:col:S4-DECISION-B');
+    assert.ok(
+      edges.find(
+        (e) => e.anchor === 'test:col:S4-DECISION-A' && e.relation === 'supersedes' && e.provenance === 'frontmatter',
+      ),
+      'collection frontmatter supersedes should produce collection-scoped graph edge',
+    );
+    assert.equal(
+      edges.some((e) => e.relation === 'supersedes' && e.anchor.includes('#')),
+      false,
+      'inline YAML comments must not become part of collection supersedes anchors',
+    );
+
+    assert.equal(
+      (await store.getRelated('test:col:S4-DECISION-C')).some((e) => e.relation === 'supersedes'),
+      false,
+      'collection supersedes: null should not produce graph edges',
+    );
+    assert.equal(
+      (await store.getRelated('test:col:S4-DECISION-D')).some((e) => e.relation === 'supersedes'),
+      false,
+      'collection supersedes: [] should not produce graph edges',
+    );
+
+    const blockListEdges = await store.getRelated('test:col:S4-DECISION-E');
+    assert.ok(
+      blockListEdges.find(
+        (e) => e.anchor === 'test:col:S4-DECISION-A' && e.relation === 'supersedes' && e.provenance === 'frontmatter',
+      ),
+      'collection block-list supersedes should produce first graph edge',
+    );
+    assert.ok(
+      blockListEdges.find(
+        (e) => e.anchor === 'test:col:S4-DECISION-B' && e.relation === 'supersedes' && e.provenance === 'frontmatter',
+      ),
+      'collection block-list supersedes should produce second graph edge',
+    );
+  });
+
+  it('incrementalUpdate refreshes collection frontmatter supersedes graph edges', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'col-incr-supersedes-'));
+    writeFileSync(
+      join(dir, 'a.md'),
+      [
+        '---',
+        'anchor: S4-DECISION-A',
+        'doc_kind: decision',
+        '---',
+        '# S4 Decision A',
+        '',
+        'First collection decision.',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(dir, 'c.md'),
+      [
+        '---',
+        'anchor: S4-DECISION-C',
+        'doc_kind: decision',
+        '---',
+        '# S4 Decision C',
+        '',
+        'Replacement collection decision.',
+      ].join('\n'),
+    );
+    const filePath = join(dir, 'b.md');
+    writeFileSync(
+      filePath,
+      [
+        '---',
+        'anchor: S4-DECISION-B',
+        'doc_kind: decision',
+        'supersedes: S4-DECISION-A',
+        '---',
+        '# S4 Decision B',
+        '',
+        'Initially supersedes A.',
+      ].join('\n'),
+    );
+
+    const manifest = makeManifest(dir);
+    const scanner = new StructuredScanner('test:col');
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+
+    await builder.rebuild({ force: true });
+
+    let related = await store.getRelated('test:col:S4-DECISION-B');
+    assert.ok(
+      related.some((edge) => edge.anchor === 'test:col:S4-DECISION-A' && edge.relation === 'supersedes'),
+      'rebuild should create initial collection supersedes edge',
+    );
+
+    writeFileSync(
+      filePath,
+      [
+        '---',
+        'anchor: S4-DECISION-B',
+        'doc_kind: decision',
+        'supersedes: S4-DECISION-C',
+        '---',
+        '# S4 Decision B',
+        '',
+        'Now supersedes C.',
+      ].join('\n'),
+    );
+    await builder.incrementalUpdate([filePath]);
+
+    related = await store.getRelated('test:col:S4-DECISION-B');
+    assert.equal(
+      related.some((edge) => edge.anchor === 'test:col:S4-DECISION-A' && edge.relation === 'supersedes'),
+      false,
+      'incrementalUpdate should remove stale collection supersedes edge',
+    );
+    assert.ok(
+      related.some((edge) => edge.anchor === 'test:col:S4-DECISION-C' && edge.relation === 'supersedes'),
+      'incrementalUpdate should create updated collection supersedes edge',
+    );
+
+    writeFileSync(
+      filePath,
+      [
+        '---',
+        'anchor: S4-DECISION-B',
+        'doc_kind: decision',
+        '---',
+        '# S4 Decision B',
+        '',
+        'No supersedes target remains.',
+      ].join('\n'),
+    );
+    await builder.incrementalUpdate([filePath]);
+
+    related = await store.getRelated('test:col:S4-DECISION-B');
+    assert.equal(
+      related.some((edge) => edge.relation === 'supersedes'),
+      false,
+      'incrementalUpdate should remove collection supersedes edges when frontmatter drops supersedes',
+    );
+  });
+});

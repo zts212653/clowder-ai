@@ -1,0 +1,2184 @@
+/**
+ * AcpClient unit tests using mock child process.
+ */
+
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
+import { afterEach, describe, it, mock } from 'node:test';
+
+const { AcpClient, AcpProtocolError, buildAcpSpawnLogFields } = await import(
+  '../../dist/domains/cats/services/agents/providers/acp/AcpClient.js'
+);
+
+/** Create a minimal mock child process */
+function createMockChild() {
+  const clientStdin = new PassThrough();
+  const agentStdout = new PassThrough();
+  const agentStderr = new PassThrough();
+
+  const ee = new EventEmitter();
+  const child = {
+    pid: 12345,
+    stdin: clientStdin,
+    stdout: agentStdout,
+    stderr: agentStderr,
+    killed: false,
+    kill: mock.fn(() => {
+      child.killed = true;
+      // Close streams to prevent hanging
+      agentStdout.end();
+      agentStderr.end();
+      ee.emit('exit', 0, null);
+      return true;
+    }),
+    on: ee.on.bind(ee),
+    once: ee.once.bind(ee),
+    removeListener: ee.removeListener.bind(ee),
+  };
+
+  return { child, clientStdin, agentStdout };
+}
+
+/** Respond async — readline needs an event loop tick to process buffered data */
+function agentRespond(agentStdout, id, result) {
+  setImmediate(() => agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n'));
+}
+
+function agentNotify(agentStdout, method, params) {
+  setImmediate(() => agentStdout.write(JSON.stringify({ jsonrpc: '2.0', method, params }) + '\n'));
+}
+
+const INIT_RESULT = {
+  protocolVersion: 1,
+  authMethods: [],
+  agentInfo: { name: 'test', title: 'Test Agent', version: '1.0.0' },
+  agentCapabilities: { loadSession: true },
+};
+
+describe('AcpClient', () => {
+  // Upstream regression from whutzefengxie-ops/clowder-ai@c7a67cc55f915dc225f587ae0ed4b35e91120395.
+  it('closes an initialized carrier without agentInfo and awaits its exit once', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    clientStdin.on('data', (chunk) => {
+      const msg = JSON.parse(chunk.toString());
+      agentRespond(agentStdout, msg.id, { protocolVersion: 1, agentCapabilities: {} });
+    });
+    const nativeClient = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await nativeClient.initialize();
+    const closing = nativeClient.close();
+    assert.equal(nativeClient.close(), closing, 'concurrent closes share the same retirement');
+    await closing;
+    assert.equal(child.kill.mock.callCount(), 1);
+    assert.equal(nativeClient.isAlive, false);
+  });
+  it('uses advertised session/resume and preserves id omitted by the agent', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const methods = [];
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        methods.push(msg.method);
+        agentRespond(
+          agentStdout,
+          msg.id,
+          msg.method === 'initialize'
+            ? { ...INIT_RESULT, agentCapabilities: { sessionCapabilities: { resume: {} } } }
+            : { configOptions: [] },
+        );
+      }
+    });
+    const nativeClient = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    try {
+      await nativeClient.initialize();
+      const resumed = await nativeClient.loadSession('native-session');
+      assert.equal(resumed.sessionId, 'native-session');
+      assert.ok(methods.includes('session/resume'));
+      assert.equal(methods.includes('session/load'), false);
+      await nativeClient.loadSession('native-session');
+      assert.equal(
+        methods.filter((method) => method === 'session/resume').length,
+        1,
+        'an active resume-only session is reused',
+      );
+    } finally {
+      await nativeClient.close();
+    }
+  });
+  it('preserves opaque empty values and returns the adopted config options', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const sent = [];
+    const options = [{ id: 'model', currentValue: '' }];
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        sent.push(msg);
+        agentRespond(agentStdout, msg.id, msg.method === 'initialize' ? INIT_RESULT : { configOptions: options });
+      }
+    });
+    const nativeClient = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    try {
+      await nativeClient.initialize();
+      const response = await nativeClient.setSessionConfigOption('native-session', 'model', '');
+      assert.equal(sent.find((m) => m.method === 'session/set_config_option').params.value, '');
+      assert.deepEqual(response.configOptions, options);
+    } finally {
+      await nativeClient.close();
+    }
+  });
+
+  let client = null;
+
+  afterEach(async () => {
+    if (client) {
+      await client.close();
+      client = null;
+    }
+  });
+
+  it('redacts startup args from initialize spawn log metadata', () => {
+    const fields = buildAcpSpawnLogFields({
+      command: 'custom-acp',
+      args: ['--api-key', 'sk-secret', '--token=tok-secret', '--acp'],
+      cwd: '/tmp/project',
+      pid: 12345,
+      env: { CUSTOM_API_KEY: 'env-secret' },
+    });
+
+    assert.equal(fields.argCount, 4);
+    assert.equal(fields.envKeyCount, 1);
+    assert.equal(Object.hasOwn(fields, 'args'), false);
+    assert.doesNotMatch(JSON.stringify(fields), /sk-secret|tok-secret|env-secret/);
+  });
+
+  it('initialize sends protocolVersion and parses response', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+    });
+
+    const result = await client.initialize();
+    assert.equal(result.protocolVersion, 1);
+    assert.equal(result.agentInfo.name, 'test');
+    assert.ok(client.isAlive);
+  });
+
+  it('isCwdIntact detects deletion and delete→recreate of the bootstrap cwd (#1203)', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        }
+      }
+    });
+
+    const cwd = mkdtempSync(join(tmpdir(), 'acp-cwd-identity-'));
+    client = new AcpClient({ command: 'fake', args: [], cwd, spawnFn: () => child });
+    await client.initialize();
+
+    assert.equal(client.isCwdIntact, true, 'untouched cwd must be intact');
+
+    rmSync(cwd, { recursive: true, force: true });
+    assert.equal(client.isCwdIntact, false, 'deleted cwd must be reported as lost');
+
+    // A later cold start recreates the same path — but the pooled child still
+    // holds the dead inode, so getcwd() inside it keeps failing. Existence is
+    // not enough; the directory identity must mismatch.
+    mkdirSync(cwd);
+    assert.equal(client.isCwdIntact, false, 'recreated cwd at same path is a different inode — still lost');
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('newSession sends cwd and mcpServers', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    let capturedCwd = null;
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          capturedCwd = msg.params.cwd;
+          agentRespond(agentStdout, msg.id, { sessionId: 'sess-456' });
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/my/project',
+      spawnFn: () => child,
+    });
+
+    await client.initialize();
+    const session = await client.newSession();
+    assert.equal(session.sessionId, 'sess-456');
+    assert.equal(capturedCwd, '/my/project');
+  });
+
+  it('setSessionConfigOption sends session/set_config_option with config value', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    let captured = null;
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/set_config_option') {
+          captured = msg;
+          agentRespond(agentStdout, msg.id, { configOptions: [] });
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/my/project',
+      spawnFn: () => child,
+    });
+
+    await client.initialize();
+    await client.setSessionConfigOption('sess-123', 'model', 'anthropic/claude-opus-4-6');
+
+    assert.ok(captured, 'Expected session/set_config_option request');
+    assert.equal(captured.params.sessionId, 'sess-123');
+    assert.equal(captured.params.configId, 'model');
+    assert.equal(captured.params.value, 'anthropic/claude-opus-4-6');
+  });
+
+  it('iCode: setSessionModel and closeSession use the standard ACP methods', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const captured = [];
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, {
+            ...INIT_RESULT,
+            agentCapabilities: { loadSession: true, sessionCapabilities: { close: {} } },
+          });
+        } else if (msg.method === 'session/set_model' || msg.method === 'session/close') {
+          captured.push(msg);
+          agentRespond(agentStdout, msg.id, {});
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.setSessionModel('icode-session', 'profile-model-id');
+    await client.closeSession('icode-session');
+
+    assert.deepEqual(
+      captured.map(({ method, params }) => ({ method, params })),
+      [
+        { method: 'session/set_model', params: { sessionId: 'icode-session', modelId: 'profile-model-id' } },
+        { method: 'session/close', params: { sessionId: 'icode-session' } },
+      ],
+    );
+  });
+
+  it('closeSession is a no-op when the agent does not advertise session/close', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const methods = [];
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        methods.push(msg.method);
+        if (msg.method === 'initialize') agentRespond(agentStdout, msg.id, INIT_RESULT);
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.closeSession('session-without-close-capability');
+
+    assert.equal(methods.includes('session/close'), false, 'close must follow the advertised capability');
+  });
+
+  it('successful close invalidates the live-session cache so the next load re-issues the request', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const methods = [];
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        methods.push(msg.method);
+        agentRespond(
+          agentStdout,
+          msg.id,
+          msg.method === 'initialize'
+            ? { ...INIT_RESULT, agentCapabilities: { sessionCapabilities: { resume: {}, close: {} } } }
+            : { configOptions: [] },
+        );
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.loadSession('resume-session');
+    await client.loadSession('resume-session');
+    assert.equal(methods.filter((method) => method === 'session/resume').length, 1, 'active session is reused');
+    await client.closeSession('resume-session');
+    await client.loadSession('resume-session');
+
+    assert.equal(
+      methods.filter((method) => method === 'session/resume').length,
+      2,
+      'a closed session must reload instead of reusing the stale cache entry',
+    );
+  });
+
+  it('promptCollect collects events and returns stopReason', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'sess-789' });
+        } else if (msg.method === 'session/prompt') {
+          agentNotify(agentStdout, 'session/update', {
+            sessionId: 'sess-789',
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'PONG' } },
+          });
+          agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' });
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+    });
+
+    await client.initialize();
+    await client.newSession();
+    const { events, stopReason } = await client.promptCollect('sess-789', 'hello');
+
+    assert.equal(stopReason, 'end_turn');
+    assert.ok(events.length >= 1, `Expected >=1 event, got ${events.length}`);
+  });
+
+  it('handles protocol errors', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          setImmediate(() =>
+            agentStdout.write(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                id: msg.id,
+                error: { code: -32000, message: 'Auth required' },
+              }) + '\n',
+            ),
+          );
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+    });
+
+    await assert.rejects(
+      () => client.initialize(),
+      (err) => {
+        assert.ok(err instanceof AcpProtocolError);
+        assert.equal(err.code, -32000);
+        return true;
+      },
+    );
+    // End mock streams to prevent hanging during afterEach cleanup
+    agentStdout.end();
+  });
+
+  it('P1-1: spawn ENOENT rejects initialize instead of crashing', async () => {
+    const ee = new EventEmitter();
+    const child = {
+      pid: undefined,
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      killed: false,
+      kill: mock.fn(() => {
+        child.killed = true;
+        return true;
+      }),
+      on: ee.on.bind(ee),
+      once: ee.once.bind(ee),
+      removeListener: ee.removeListener.bind(ee),
+    };
+
+    client = new AcpClient({
+      command: 'definitely-not-a-real-bin-xyz',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => {
+        // Simulate what Node does on ENOENT: emit 'error' async
+        setImmediate(() => ee.emit('error', new Error('spawn definitely-not-a-real-bin-xyz ENOENT')));
+        return child;
+      },
+    });
+
+    await assert.rejects(
+      () => client.initialize(),
+      (err) => {
+        assert.ok(err.message.includes('ENOENT'));
+        return true;
+      },
+    );
+    // Cleanup: end streams
+    child.stdout.end();
+  });
+
+  it('P1-2: isAlive returns false after child exits naturally', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const ee = child; // child.on is ee.on.bind(ee), we need the real ee to emit exit
+    // We need access to the raw EventEmitter to emit exit without kill
+    const rawEe = new EventEmitter();
+    const childWithRawEe = {
+      ...child,
+      on: rawEe.on.bind(rawEe),
+      once: rawEe.once.bind(rawEe),
+      removeListener: rawEe.removeListener.bind(rawEe),
+    };
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => childWithRawEe,
+    });
+
+    await client.initialize();
+    assert.ok(client.isAlive, 'should be alive after initialize');
+
+    // Simulate natural exit (not via kill)
+    rawEe.emit('exit', 0, null);
+    agentStdout.end();
+
+    assert.ok(!client.isAlive, 'should NOT be alive after natural exit');
+  });
+
+  it('P2: custom permission handler is called instead of auto-approve', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const permissionCalls = [];
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+      permissionHandler: (req, respond) => {
+        permissionCalls.push(req);
+        respond({ optionId: 'deny' });
+      },
+    });
+
+    await client.initialize();
+
+    // Simulate an agent permission request
+    setImmediate(() =>
+      agentStdout.write(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'session/request_permission',
+          id: 'perm-001',
+          params: { description: 'Write file', options: [{ optionId: 'allow_once', kind: 'allow_once' }] },
+        }) + '\n',
+      ),
+    );
+
+    // Give the event loop a chance to process
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.equal(permissionCalls.length, 1, 'custom handler should be called');
+    assert.equal(permissionCalls[0].params.description, 'Write file');
+  });
+
+  it('P1-cloud: throwing permissionHandler does not crash host', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let errorResponseSent = false;
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        }
+        // Capture any error response sent back for the permission request
+        if (msg.id === 'perm-boom' && msg.error) {
+          errorResponseSent = true;
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+      permissionHandler: () => {
+        throw new Error('boom');
+      },
+    });
+
+    await client.initialize();
+
+    // Feed a permission request — should NOT crash the process
+    setImmediate(() =>
+      agentStdout.write(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'session/request_permission',
+          id: 'perm-boom',
+          params: { description: 'Dangerous op', options: [{ optionId: 'allow_once', kind: 'allow_once' }] },
+        }) + '\n',
+      ),
+    );
+
+    // Give the event loop a chance to process
+    await new Promise((r) => setTimeout(r, 50));
+
+    // The process should still be alive (not crashed)
+    assert.ok(client.isAlive, 'host should not crash from handler error');
+    // The client should have sent a JSON-RPC error response back to the agent
+    assert.ok(errorResponseSent, 'should send JSON-RPC error response when handler throws');
+  });
+
+  it('F148: permission response wraps in ACP outcome envelope', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let capturedResponse = null;
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        }
+        // Capture auto-approve response
+        if (msg.id === 'perm-acp' && msg.result) {
+          capturedResponse = msg.result;
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+      // No permissionHandler → auto-approve path
+    });
+
+    await client.initialize();
+
+    setImmediate(() =>
+      agentStdout.write(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'session/request_permission',
+          id: 'perm-acp',
+          params: { description: 'Read file', options: [{ optionId: 'allow_once', kind: 'allow_once' }] },
+        }) + '\n',
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.ok(capturedResponse, 'should have sent a permission response');
+    assert.ok(capturedResponse.outcome, 'response must have outcome wrapper');
+    assert.equal(capturedResponse.outcome.outcome, 'selected');
+    assert.equal(capturedResponse.outcome.optionId, 'allow_once');
+  });
+
+  it('iCode: reject permission policy fails closed instead of auto-approving flagged native effects', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let capturedResponse = null;
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') agentRespond(agentStdout, msg.id, INIT_RESULT);
+        if (msg.id === 'perm-icode' && msg.result) capturedResponse = msg.result;
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+      defaultPermissionDecision: 'reject',
+    });
+    await client.initialize();
+
+    agentStdout.write(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'session/request_permission',
+        id: 'perm-icode',
+        params: {
+          sessionId: 'icode-session',
+          options: [
+            { optionId: 'allow', kind: 'allow_once', name: 'Allow' },
+            { optionId: 'reject', kind: 'reject_once', name: 'Reject' },
+          ],
+        },
+      }) + '\n',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(capturedResponse?.outcome?.outcome, 'selected');
+    assert.equal(capturedResponse?.outcome?.optionId, 'reject');
+  });
+
+  it('iCode: dispatches private request_input to a session-scoped request handler', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let capturedResponse = null;
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') agentRespond(agentStdout, msg.id, INIT_RESULT);
+        if (msg.id === 'ask-icode' && (msg.result || msg.error)) capturedResponse = msg;
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    const requests = [];
+    client.setSessionRequestHandler('icode-session', async (request) => {
+      requests.push(request);
+      return { answers: [{ values: ['A'], note: '' }], cancelled: false };
+    });
+
+    agentStdout.write(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: '_chrys/request_input',
+        id: 'ask-icode',
+        params: { sessionId: 'icode-session', questions: [{ header: 'Choice', question: 'Pick one' }] },
+      }) + '\n',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(requests.length, 1);
+    assert.deepEqual(capturedResponse?.result, {
+      answers: [{ values: ['A'], note: '' }],
+      cancelled: false,
+    });
+
+    client.setSessionRequestHandler('icode-session', undefined);
+  });
+
+  it('promptStream yields events as they arrive and returns stopReason', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'stream-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Send 3 notifications with delays, then the response
+          agentNotify(agentStdout, 'session/update', {
+            sessionId: 'stream-sess',
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hello' } },
+          });
+          setTimeout(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'stream-sess',
+              update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'thinking...' } },
+            });
+          }, 10);
+          setTimeout(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'stream-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: ' World' } },
+            });
+          }, 20);
+          setTimeout(() => {
+            agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' });
+          }, 30);
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+    });
+
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    const gen = client.promptStream('stream-sess', 'hello');
+    for await (const event of gen) {
+      events.push(event);
+    }
+
+    assert.equal(events.length, 3, `Expected 3 events, got ${events.length}`);
+    assert.equal(events[0].update.sessionUpdate, 'agent_message_chunk');
+    assert.equal(events[0].update.content.text, 'Hello');
+    assert.equal(events[1].update.sessionUpdate, 'agent_thought_chunk');
+    assert.equal(events[2].update.content.text, ' World');
+  });
+
+  it('promptStream filters events by sessionId', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'my-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Notification for a DIFFERENT session — should be ignored
+          agentNotify(agentStdout, 'session/update', {
+            sessionId: 'other-sess',
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'wrong' } },
+          });
+          // Notification for OUR session
+          agentNotify(agentStdout, 'session/update', {
+            sessionId: 'my-sess',
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'right' } },
+          });
+          setTimeout(() => {
+            agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' });
+          }, 20);
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+    });
+
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    for await (const event of client.promptStream('my-sess', 'hi')) {
+      events.push(event);
+    }
+
+    assert.equal(events.length, 1, 'Should only get events for my-sess');
+    assert.equal(events[0].update.content.text, 'right');
+  });
+
+  it('close kills the process', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+    });
+
+    await client.initialize();
+    assert.ok(client.isAlive);
+
+    await client.close();
+    assert.ok(!client.isAlive);
+    client = null;
+  });
+
+  it('emits capacity signal to registered onCapacity listeners', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+    });
+
+    await client.initialize();
+
+    let captured = null;
+    client.onCapacity((signal) => {
+      captured = signal;
+    });
+
+    // Simulate stderr from Gemini CLI with 429/capacity error
+    child.stderr.write(
+      'Attempt 1 failed with status 429. Retrying with backoff... ' +
+        'No capacity available for model gemini-3.1-pro-preview on the server\n',
+    );
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.ok(captured, 'listener should receive capacity signal');
+    assert.match(captured.message, /No capacity available/);
+    assert.ok(captured.timestamp > 0);
+  });
+
+  it('sends session/cancel when session/prompt times out', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const sentMessages = [];
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        sentMessages.push(msg);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'timeout-sess' });
+        }
+        // Don't respond to session/prompt — let it timeout
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+    });
+
+    await client.initialize();
+    await client.newSession('/tmp');
+
+    // Use a very short timeout so test doesn't wait 120s
+    await assert.rejects(
+      () => client.promptCollect('timeout-sess', 'hello', { timeoutMs: 50 }),
+      (err) => err.name === 'AcpTimeoutError',
+    );
+
+    // Verify session/cancel was sent after timeout
+    const cancelMsg = sentMessages.find((m) => m.method === 'session/cancel');
+    assert.ok(cancelMsg, 'session/cancel should be sent after prompt timeout');
+    assert.equal(cancelMsg.params.sessionId, 'timeout-sess');
+  });
+
+  it('offCapacity prevents receiving signals after unregistration', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+    });
+
+    await client.initialize();
+
+    let captured = null;
+    const fn = (signal) => {
+      captured = signal;
+    };
+    client.onCapacity(fn);
+
+    // Signal while registered → captured
+    child.stderr.write('No capacity available for model gemini-3.1-pro-preview\n');
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(captured, 'should receive signal while registered');
+
+    // Unregister and reset
+    client.offCapacity(fn);
+    captured = null;
+
+    // Signal after unregister → NOT captured
+    child.stderr.write('No capacity available for model gemini-3.1-pro-preview again\n');
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(captured, null, 'should NOT receive signals after offCapacity');
+  });
+
+  it('recentCapacitySignal persists even without registered listeners', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+    });
+
+    await client.initialize();
+
+    // No listener registered — but recentCapacitySignal should still capture
+    assert.equal(client.recentCapacitySignal, null, 'initially null');
+
+    child.stderr.write('No capacity available for model gemini-3.1-pro-preview on the server\n');
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.ok(client.recentCapacitySignal, 'should capture signal without listeners');
+    assert.match(client.recentCapacitySignal.message, /No capacity available/);
+    assert.ok(client.recentCapacitySignal.timestamp > 0);
+  });
+
+  // ─── F149: Stream Idle Watchdog Tests ─────────────────────────
+
+  it('F149: idle watchdog injects stream_idle_warning after idle threshold', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'idle-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Send one real event, then go silent for longer than idleWarningMs
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'idle-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'first chunk' } },
+            });
+          });
+          // Complete after a delay (longer than warning but shorter than stall)
+          setTimeout(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'idle-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'resumed' } },
+            });
+            agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' });
+          }, 200);
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    for await (const event of client.promptStream('idle-sess', 'hello', {
+      idleWarningMs: 50,
+      idleStallMs: 500,
+    })) {
+      events.push(event);
+    }
+
+    const warningEvents = events.filter((e) => e.update?.sessionUpdate === 'stream_idle_warning');
+    assert.equal(warningEvents.length, 1, `Expected 1 stream_idle_warning, got ${warningEvents.length}`);
+    assert.ok(warningEvents[0].update.idleSinceMs >= 50, 'idleSinceMs should be >= warning threshold');
+    assert.ok(warningEvents[0].update.eventCount >= 1, 'eventCount should be >= 1');
+
+    // Real events should still be present
+    const realEvents = events.filter((e) => e.update?.sessionUpdate === 'agent_message_chunk');
+    assert.equal(realEvents.length, 2, `Expected 2 real events, got ${realEvents.length}`);
+  });
+
+  it('F149: idle watchdog injects stream_idle_stall and terminates stream', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'stall-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Send one event, then go completely silent (never complete)
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'stall-sess',
+              update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'thinking...' } },
+            });
+          });
+          // Never send response — simulate full stall
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    try {
+      for await (const event of client.promptStream('stall-sess', 'hello', {
+        idleWarningMs: 30,
+        idleStallMs: 100,
+        timeoutMs: 5000, // Keep outer timeout high so idle stall fires first
+      })) {
+        events.push(event);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    // Should have warning event before stall
+    const warningEvents = events.filter((e) => e.update?.sessionUpdate === 'stream_idle_warning');
+    assert.ok(warningEvents.length >= 1, `Expected at least 1 warning, got ${warningEvents.length}`);
+
+    // Should throw with stream idle stall
+    assert.ok(thrownError, 'Should throw an error on stall');
+    assert.match(thrownError.message, /[Ss]tream idle|STREAM_IDLE/);
+  });
+
+  it('#1186: delayed warning drain preserves the watchdog idle error', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'delayed-drain-sess' });
+        } else if (msg.method === 'session/prompt') {
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'delayed-drain-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start' } },
+            });
+          });
+          // Leave the prompt pending so the watchdog owns termination.
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const iter = client.promptStream('delayed-drain-sess', 'hello', {
+      idleWarningMs: 30,
+      idleStallMs: 100,
+      timeoutMs: 5000,
+    });
+    const first = await iter.next();
+    assert.equal(first.value?.update?.sessionUpdate, 'agent_message_chunk');
+
+    // Let both warning and stall fire while the async generator is paused at the
+    // first yield. The pending request rejection must not replace the watchdog's
+    // structured terminal error before the consumer drains the queued warning.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    const remainingEvents = [];
+    let thrownError = null;
+    try {
+      for (;;) {
+        const result = await iter.next();
+        if (result.done) break;
+        remainingEvents.push(result.value);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    assert.ok(
+      remainingEvents.some((event) => event.update?.sessionUpdate === 'stream_idle_warning'),
+      'queued idle warning should still be delivered',
+    );
+    assert.ok(thrownError, 'watchdog stall should terminate the stream');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL');
+    assert.equal(thrownError.configuredIdleStallMs, 100);
+  });
+
+  // #1186: Zero-first-event now produces AcpStreamIdleError at the configured TTL,
+  // not AcpTimeoutError at the later budget. The idle watchdog starts at prompt start.
+  it('#1186: zero-first-event produces AcpStreamIdleError at configured idleStallMs', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'zero-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Never send any events — zero-first-event scenario
+          // promptResponse stays pending — idle stall should terminate
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    try {
+      for await (const event of client.promptStream('zero-sess', 'hello', {
+        idleWarningMs: 30,
+        idleStallMs: 100,
+        timeoutMs: 5000, // Budget much higher — must NOT fire first
+      })) {
+        events.push(event);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    // Idle warning should fire even with zero events
+    const warningEvents = events.filter((e) => e.update?.sessionUpdate === 'stream_idle_warning');
+    assert.ok(warningEvents.length >= 1, `Expected at least 1 idle warning, got ${warningEvents.length}`);
+
+    // Should throw AcpStreamIdleError, NOT AcpTimeoutError
+    assert.ok(thrownError, 'Should throw an error on zero-event stall');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+    assert.equal(thrownError.configuredIdleStallMs, 100, 'Should carry configured idleStallMs');
+  });
+
+  it('F117: zero ACP prompt limits wait for explicit cancellation without inventing an idle failure', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') agentRespond(agentStdout, msg.id, INIT_RESULT);
+        if (msg.method === 'session/new') agentRespond(agentStdout, msg.id, { sessionId: 'f117-zero-sess' });
+      }
+    });
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+    const timer = setTimeout(() => client.cancelSession('f117-zero-sess'), 100);
+    const events = [];
+    let error;
+    try {
+      for await (const event of client.promptStream('f117-zero-sess', 'hello', {
+        timeoutMs: 0,
+        idleStallMs: 0,
+        idleWarningMs: 10,
+      }))
+        events.push(event);
+    } catch (caught) {
+      error = caught;
+    } finally {
+      clearTimeout(timer);
+    }
+    assert.ok(error, 'explicit cancellation settles the prompt');
+    assert.equal(error.code, 'SESSION_CANCELLED', 'explicit cancellation must not invent an idle timeout');
+    assert.match(error.message, /provider termination is unconfirmed/);
+    assert.ok(!events.some((event) => event.update?.sessionUpdate === 'stream_idle_warning'));
+  });
+
+  it('#1186: cancel settles prompt stream via sessionCancelCallbacks (real transport)', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'cancel-cb-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Send one event, then go silent — provider never responds to cancel
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'cancel-cb-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start' } },
+            });
+          });
+          // Deliberately never complete — cancel must break us out
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    const startMs = Date.now();
+
+    // Start streaming
+    const iter = client.promptStream('cancel-cb-sess', 'hello', {
+      idleWarningMs: 500,
+      idleStallMs: 5000, // Very high — cancel must fire before this
+      timeoutMs: 10000,
+    });
+
+    try {
+      // Get the first real event
+      const first = await iter.next();
+      if (!first.done) events.push(first.value);
+
+      // Cancel the session — this should settle promptStream immediately
+      client.cancelSession('cancel-cb-sess');
+
+      // The next .next() should resolve promptly (not wait for idle/budget)
+      for (;;) {
+        const result = await iter.next();
+        if (result.done) break;
+        events.push(result.value);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    const elapsed = Date.now() - startMs;
+
+    assert.ok(thrownError, 'Should throw after cancel');
+    assert.equal(thrownError.code, 'SESSION_CANCELLED', `Expected SESSION_CANCELLED, got ${thrownError.code}`);
+    assert.equal(
+      client.isSafeForSingleFlightReuse,
+      false,
+      'cancelled stdio prompt must mark a single-flight carrier unsafe for warm reuse',
+    );
+    assert.equal(client.isSessionSafeForReuse('cancel-cb-sess'), false);
+    assert.equal(client.isSessionSafeForReuse('unrelated-sess'), true);
+
+    // Should settle promptly — not wait for idle stall (5000ms) or budget (10000ms)
+    assert.ok(elapsed < 2000, `Cancel should settle within 2s, took ${elapsed}ms`);
+  });
+
+  it('#1186: short TTL regression — idleStallMs < idleWarningMs terminates at stall threshold (stdio)', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'short-ttl-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Never send events — zero-first-event with short TTL
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const startMs = Date.now();
+    let thrownError = null;
+    try {
+      // idleStallMs (100ms) < idleWarningMs (20_000ms default).
+      // Without Math.min fix, initial check schedules at 20_000ms — way too late.
+      // With fix, initial check schedules at Math.min(20_000, 100) = 100ms.
+      for await (const _event of client.promptStream('short-ttl-sess', 'hello', {
+        idleStallMs: 100,
+        // idleWarningMs defaults to 20_000
+        timeoutMs: 30_000,
+      })) {
+        // Should not receive any events
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+    const elapsed = Date.now() - startMs;
+
+    assert.ok(thrownError, 'Should throw on short-TTL zero-event stall');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+    assert.equal(thrownError.configuredIdleStallMs, 100, 'Error should carry configured 100ms threshold');
+    // Must terminate near 100ms, not at 20_000ms (the warning interval)
+    assert.ok(elapsed < 2000, `Should terminate near 100ms, took ${elapsed}ms`);
+  });
+
+  it('#1186: cancel settles pending sendRequest — no stale entries in pending map (stdio)', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'pending-check-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Emit one event, then go silent — never resolve prompt
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'pending-check-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hello' } },
+            });
+          });
+          // Provider ignores cancel, never resolves prompt
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const iter = client.promptStream('pending-check-sess', 'test', {
+      idleWarningMs: 500,
+      idleStallMs: 5000,
+      timeoutMs: 10000,
+    });
+
+    // Get the first event
+    const first = await iter.next();
+    assert.ok(!first.done, 'Should receive first event');
+
+    // Before cancel: there should be a pending prompt request
+    assert.ok(
+      client.pendingRequestCount >= 1,
+      `Should have pending request before cancel, got ${client.pendingRequestCount}`,
+    );
+
+    // Cancel — should settle both the generator AND the pending request
+    client.cancelSession('pending-check-sess');
+
+    // Drain the iterator
+    try {
+      for (;;) {
+        const result = await iter.next();
+        if (result.done) break;
+      }
+    } catch (_err) {
+      // Expected — cancel throws AcpStreamIdleError
+    }
+
+    // After cancel: no stale entries should remain
+    assert.equal(
+      client.pendingRequestCount,
+      0,
+      `No pending requests should remain after cancel, got ${client.pendingRequestCount}`,
+    );
+  });
+
+  // ─── pendingTool: suppress stall during MCP tool execution ──
+
+  it('pendingTool: tool_call suppresses stall, resumes watchdog on non-tool event', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const capturedMessages = [];
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        capturedMessages.push(msg);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'tool-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // 1. Send a tool_call event → enters pendingTool
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'tool-sess',
+              update: { sessionUpdate: 'tool_call', content: { type: 'text', text: 'search_evidence' } },
+            });
+          });
+          // 2. Wait past both idleWarningMs and idleStallMs while in pendingTool
+          //    (stall should NOT fire)
+          // 3. Then send a non-tool event → exits pendingTool, completes
+          setTimeout(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'tool-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'result' } },
+            });
+            agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' });
+          }, 250); // Well past idleWarningMs(30) + idleStallMs(100)
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    try {
+      for await (const event of client.promptStream('tool-sess', 'hello', {
+        idleWarningMs: 30,
+        idleStallMs: 500, // #1186: must exceed tool execution time (250ms) since ceiling now follows idleStallMs
+        timeoutMs: 5000,
+      })) {
+        events.push(event);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    // Should NOT throw — pendingTool suppresses stall
+    assert.equal(thrownError, null, `Should not throw during tool wait, got: ${thrownError?.message}`);
+
+    // Should have stream_tool_wait_warning (not stream_idle_warning)
+    const toolWaits = events.filter((e) => e.update?.sessionUpdate === 'stream_tool_wait_warning');
+    assert.ok(toolWaits.length >= 1, `Expected stream_tool_wait_warning, got ${toolWaits.length}`);
+
+    // Should NOT have stream_idle_warning or stall
+    const idleWarnings = events.filter((e) => e.update?.sessionUpdate === 'stream_idle_warning');
+    assert.equal(idleWarnings.length, 0, `Expected 0 stream_idle_warning during tool wait, got ${idleWarnings.length}`);
+
+    // Should NOT have sent session/cancel
+    const cancelMsgs = capturedMessages.filter((m) => m.method === 'session/cancel');
+    assert.equal(cancelMsgs.length, 0, 'Should not send session/cancel during tool wait');
+
+    // Real events present
+    const toolEvents = events.filter((e) => e.update?.sessionUpdate === 'tool_call');
+    assert.equal(toolEvents.length, 1, 'Should have 1 tool_call event');
+    const textEvents = events.filter((e) => e.update?.sessionUpdate === 'agent_message_chunk');
+    assert.equal(textEvents.length, 1, 'Should have 1 text event after tool completes');
+  });
+
+  // ─── Flat format: Gemini CLI v0.35+ sends sessionUpdate at top level ───
+
+  it('pendingTool: flat-format tool_call (no update wrapper) suppresses stall', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'flat-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Flat format: sessionUpdate directly on params, no update wrapper
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'flat-sess',
+              sessionUpdate: 'tool_call',
+              content: { type: 'text', text: 'search_evidence' },
+            });
+          });
+          setTimeout(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'flat-sess',
+              sessionUpdate: 'agent_message_chunk',
+              content: { type: 'text', text: 'done' },
+            });
+            agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' });
+          }, 250);
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    try {
+      for await (const event of client.promptStream('flat-sess', 'hello', {
+        idleWarningMs: 30,
+        idleStallMs: 500, // #1186: must exceed tool execution time (250ms) since ceiling now follows idleStallMs
+        timeoutMs: 5000,
+      })) {
+        events.push(event);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    assert.equal(thrownError, null, `Should not stall on flat-format tool_call: ${thrownError?.message}`);
+    const toolWaits = events.filter((e) => e.update?.sessionUpdate === 'stream_tool_wait_warning');
+    assert.ok(toolWaits.length >= 1, 'Should emit stream_tool_wait_warning for flat-format tool_call');
+    const idleWarnings = events.filter((e) => e.update?.sessionUpdate === 'stream_idle_warning');
+    assert.equal(idleWarnings.length, 0, 'No stream_idle_warning during flat-format tool wait');
+  });
+
+  // ─── Permission notification: Gemini sends request_permission without id ───
+  // Gate-based test: mock agent only continues AFTER seeing a valid permission
+  // response on stdin. If AcpClient doesn't send one, agent stays silent → stall.
+
+  it('permission notification (no id) is auto-approved and does not block stream', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let promptId = null;
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'perm-sess' });
+        } else if (msg.method === 'session/prompt') {
+          promptId = msg.id;
+          // 1. tool_call → pendingTool=true
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'perm-sess',
+              update: { sessionUpdate: 'tool_call', content: { type: 'text', text: 'search' } },
+            });
+          });
+          setTimeout(() => {
+            // 2. thought_chunk during tool execution (should NOT reset pendingTool)
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'perm-sess',
+              update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: '{"limit":20}' } },
+            });
+            // 3. Permission notification (no id!) — should be auto-approved
+            const permNotif = JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'session/request_permission',
+              params: {
+                sessionId: 'perm-sess',
+                options: [
+                  { optionId: 'proceed_always', name: 'Always Allow', kind: 'allow_always' },
+                  { optionId: 'proceed_once', name: 'Allow', kind: 'allow_once' },
+                  { optionId: 'cancel', name: 'Reject', kind: 'reject_once' },
+                ],
+              },
+            });
+            agentStdout.push(permNotif + '\n');
+          }, 30);
+        } else if (
+          // GATE: mock agent only continues after seeing a valid permission response.
+          // If AcpClient doesn't send one, agent stays silent → stall → test fails.
+          !msg.method &&
+          msg.id?.toString().startsWith('synth-perm-') &&
+          msg.result?.outcome?.outcome === 'selected'
+        ) {
+          // Permission response accepted — now continue
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'perm-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'done' } },
+            });
+            agentRespond(agentStdout, promptId, { stopReason: 'end_turn' });
+          });
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    try {
+      for await (const event of client.promptStream('perm-sess', 'hello', {
+        idleWarningMs: 60,
+        idleStallMs: 500,
+        timeoutMs: 5000,
+      })) {
+        events.push(event);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    assert.equal(thrownError, null, `Should not stall — permission gate not unlocked: ${thrownError?.message}`);
+
+    // Stream should have completed with real events (gate was opened)
+    const msgChunks = events.filter((e) => e.update?.sessionUpdate === 'agent_message_chunk');
+    assert.ok(msgChunks.length >= 1, 'Agent must continue after permission response (gate-based)');
+
+    // Permission notification should NOT appear in stream events
+    const permEvents = events.filter((e) => e.options || (e.update && !e.update.sessionUpdate));
+    assert.equal(permEvents.length, 0, 'Permission notification should not pollute stream events');
+  });
+
+  // ─── permission_pending suppresses stall even without prior tool_call ───
+  // Runtime scenario: thought_chunk → request_permission (no tool_call first)
+
+  it('permission notification injects permission_pending to suppress stall', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let promptId = null;
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'perm-stall-sess' });
+        } else if (msg.method === 'session/prompt') {
+          promptId = msg.id;
+          // 1. thought_chunk (NOT tool_call) — pendingTool stays false
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'perm-stall-sess',
+              update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'thinking...' } },
+            });
+          });
+          setTimeout(() => {
+            // 2. Permission notification (no id, no prior tool_call)
+            agentStdout.push(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                method: 'session/request_permission',
+                params: {
+                  sessionId: 'perm-stall-sess',
+                  options: [
+                    { optionId: 'proceed_once', name: 'Allow', kind: 'allow_once' },
+                    { optionId: 'cancel', name: 'Reject', kind: 'reject_once' },
+                  ],
+                  toolCall: { toolCallId: 'shell-1', status: 'pending', title: 'echo hello' },
+                },
+              }) + '\n',
+            );
+          }, 20);
+          // 3. Wait past stall threshold, then complete
+          // If permission_pending doesn't suppress stall, this will never be reached
+          setTimeout(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'perm-stall-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'done' } },
+            });
+            agentRespond(agentStdout, promptId, { stopReason: 'end_turn' });
+          }, 250);
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    try {
+      for await (const event of client.promptStream('perm-stall-sess', 'hello', {
+        idleWarningMs: 60,
+        idleStallMs: 500, // #1186: must exceed tool execution time (250ms) since ceiling now follows idleStallMs
+        timeoutMs: 5000,
+      })) {
+        events.push(event);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    assert.equal(thrownError, null, `Stall should be suppressed during permission wait: ${thrownError?.message}`);
+    // permission_pending synthetic event should be in stream
+    const permPending = events.filter((e) => e.sessionUpdate === 'permission_pending');
+    assert.ok(permPending.length >= 1, 'permission_pending synthetic event should be emitted');
+    // tool_wait_warning should fire (pendingTool was set by permission_pending)
+    const toolWaits = events.filter((e) => e.update?.sessionUpdate === 'stream_tool_wait_warning');
+    assert.ok(toolWaits.length >= 1, 'Tool wait warning should fire during permission wait');
+  });
+
+  // ─── thought_chunk should not reset pendingTool during active tool execution ───
+
+  it('agent_thought_chunk during tool_call does not reset pendingTool', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'thought-tool-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // tool_call → thought_chunk → (wait past stall) → complete
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'thought-tool-sess',
+              update: { sessionUpdate: 'tool_call', content: { type: 'text', text: 'web_search' } },
+            });
+          });
+          setTimeout(() => {
+            // Thought chunk DURING tool execution — should not reset pendingTool
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'thought-tool-sess',
+              update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'processing' } },
+            });
+          }, 10);
+          // Complete well after stall threshold
+          setTimeout(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'thought-tool-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'result' } },
+            });
+            agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' });
+          }, 250);
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    try {
+      for await (const event of client.promptStream('thought-tool-sess', 'hello', {
+        idleWarningMs: 30,
+        idleStallMs: 500, // #1186: must exceed tool execution time (250ms) since ceiling now follows idleStallMs
+        timeoutMs: 5000,
+      })) {
+        events.push(event);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    // Should NOT stall — thought_chunk doesn't reset pendingTool during tool execution
+    assert.equal(thrownError, null, `Should not stall: ${thrownError?.message}`);
+    const toolWaits = events.filter((e) => e.update?.sessionUpdate === 'stream_tool_wait_warning');
+    assert.ok(toolWaits.length >= 1, 'Should emit tool_wait_warning (pendingTool stayed true through thought_chunk)');
+  });
+
+  // ─── P1 fixes from gpt52 review ─────────────────────────────
+
+  it('F149-P1: idle stall sends session/cancel to terminate upstream', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const capturedMessages = [];
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        capturedMessages.push(msg);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'cancel-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Send one event then go silent
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'cancel-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'partial' } },
+            });
+          });
+          // Never complete — force idle stall
+        } else if (msg.method === 'session/cancel') {
+          // After cancel, agent responds to the pending prompt (if stream still open)
+          const promptMsg = capturedMessages.find((m) => m.method === 'session/prompt');
+          if (promptMsg && agentStdout.writable) {
+            setImmediate(() => {
+              if (agentStdout.writable) {
+                agentRespond(agentStdout, promptMsg.id, { stopReason: 'cancelled' });
+              }
+            });
+          }
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    let thrownError = null;
+    try {
+      for await (const _ of client.promptStream('cancel-sess', 'hello', {
+        idleWarningMs: 30,
+        idleStallMs: 80,
+        timeoutMs: 5000,
+      })) {
+        // drain
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    // P1: session/cancel MUST be sent when idle stall fires
+    const cancelMsgs = capturedMessages.filter((m) => m.method === 'session/cancel');
+    assert.equal(cancelMsgs.length, 1, `Expected 1 session/cancel, got ${cancelMsgs.length}`);
+    assert.equal(cancelMsgs[0].params.sessionId, 'cancel-sess');
+    // #1186 P2: structured error carries configured threshold
+    assert.ok(thrownError, 'Should throw AcpStreamIdleError');
+    assert.equal(thrownError.configuredIdleStallMs, 80, 'Ordinary silence error carries configured threshold');
+  });
+
+  it('F149-P1: stall fires at ~idleStallMs total idle (not warning + stall)', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const originalSetTimeout = globalThis.setTimeout;
+    const scheduledDelays = [];
+    globalThis.setTimeout = (callback, delay, ...args) => {
+      if (delay === 50 || delay === 70 || delay === 120) {
+        scheduledDelays.push(delay);
+      }
+      return originalSetTimeout(callback, delay, ...args);
+    };
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'timing-sess' });
+        } else if (msg.method === 'session/prompt') {
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'timing-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'chunk' } },
+            });
+          });
+          // Never complete
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    let thrownError = null;
+    try {
+      for await (const _ of client.promptStream('timing-sess', 'hello', {
+        idleWarningMs: 50,
+        idleStallMs: 120, // Total ~120ms, NOT 50+120=170ms
+        timeoutMs: 5000,
+      })) {
+        // drain
+      }
+    } catch (err) {
+      thrownError = err;
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+
+    assert.ok(thrownError, 'Should throw AcpStreamIdleError');
+    // With correct implementation, the stall timer scheduled after the warning
+    // uses the remaining delay (120 - 50 = 70). The regression scheduled another
+    // full 120ms after warning, which is deterministic to detect without relying
+    // on wall-clock elapsed time under full-suite CPU load.
+    assert.deepEqual(
+      scheduledDelays.slice(-2),
+      [50, 70],
+      `Idle watchdog should schedule warning then remaining stall delay, got ${scheduledDelays.join(', ')}`,
+    );
+  });
+
+  // ─── #1186: Tool execution ceiling follows configured idleStallMs ───
+
+  it('#1186: pendingTool terminates at configured idleStallMs, not hardcoded 180s', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const capturedMessages = [];
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        capturedMessages.push(msg);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'tool-ceil-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Send tool_call event, then go silent — never complete
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'tool-ceil-sess',
+              update: { sessionUpdate: 'tool_call', content: { type: 'text', text: 'slow_tool' } },
+            });
+          });
+          // Never send response — tool stays pending forever
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    try {
+      for await (const event of client.promptStream('tool-ceil-sess', 'hello', {
+        idleWarningMs: 20,
+        idleStallMs: 150, // Configured idle TTL — tool ceiling must follow this
+        timeoutMs: 5000, // High outer timeout — should NOT fire first
+      })) {
+        events.push(event);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    // With fix: should throw AcpStreamIdleError at ~150ms (configured idleStallMs)
+    // Without fix: TOOL_EXECUTION_CEILING_MS=180_000 would never fire; timeoutMs would fire instead
+    assert.ok(thrownError, 'Should throw an error on tool execution exceeding idleStallMs');
+    assert.match(
+      thrownError.message,
+      /[Ss]tream idle|STREAM_IDLE/,
+      `Expected AcpStreamIdleError, got: ${thrownError.message}`,
+    );
+    // #1186 P2: structured error must include configured threshold
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL');
+    assert.equal(thrownError.configuredIdleStallMs, 150, 'Error must carry the configured idleStallMs');
+
+    // Should have tool_wait_warning before stall
+    const toolWaits = events.filter((e) => e.update?.sessionUpdate === 'stream_tool_wait_warning');
+    assert.ok(toolWaits.length >= 1, 'Should emit tool_wait_warning before termination');
+
+    // Should have sent session/cancel
+    const cancelMsgs = capturedMessages.filter((m) => m.method === 'session/cancel');
+    assert.equal(cancelMsgs.length, 1, 'Should send session/cancel when tool ceiling exceeded');
+  });
+
+  it('#1186: pendingTool does NOT terminate before configured idleStallMs', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'tool-safe-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Send tool_call, wait a while, then complete successfully
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'tool-safe-sess',
+              update: { sessionUpdate: 'tool_call', content: { type: 'text', text: 'slow_tool' } },
+            });
+          });
+          // Complete AFTER warning but BEFORE idleStallMs
+          setTimeout(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'tool-safe-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'result' } },
+            });
+            agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' });
+          }, 200); // 200ms: past warning (50ms) but before idleStallMs (400ms)
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    try {
+      for await (const event of client.promptStream('tool-safe-sess', 'hello', {
+        idleWarningMs: 50,
+        idleStallMs: 400, // Configured idle TTL — tool should survive within this
+        timeoutMs: 5000,
+      })) {
+        events.push(event);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    // Tool completed within idleStallMs — should NOT throw
+    assert.equal(thrownError, null, `Should not terminate tool within idleStallMs, got: ${thrownError?.message}`);
+
+    // Should have real events
+    const toolEvents = events.filter((e) => e.update?.sessionUpdate === 'tool_call');
+    assert.equal(toolEvents.length, 1, 'Should have 1 tool_call event');
+    const textEvents = events.filter((e) => e.update?.sessionUpdate === 'agent_message_chunk');
+    assert.equal(textEvents.length, 1, 'Should have 1 text event after tool completes');
+  });
+
+  it('#1186: stdio request ceiling stays above a configured activity budget over one hour', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'long-ttl-sess' });
+        } else if (msg.method === 'session/prompt') {
+          agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' });
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const idleStallMs = 2 * 60 * 60 * 1000;
+    const activityBudgetMs = idleStallMs + 60_000;
+    const expectedRequestCeilingMs = activityBudgetMs + 60_000;
+    const scheduledDelays = [];
+    const originalSetTimeout = globalThis.setTimeout;
+    const setTimeoutMock = mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
+      scheduledDelays.push(delay);
+      return originalSetTimeout(callback, delay, ...args);
+    });
+
+    try {
+      for await (const _event of client.promptStream('long-ttl-sess', 'hello', {
+        idleStallMs,
+        timeoutMs: activityBudgetMs,
+      })) {
+        // No updates expected; the provider acknowledges immediately.
+      }
+    } finally {
+      setTimeoutMock.mock.restore();
+    }
+
+    assert.ok(
+      scheduledDelays.includes(expectedRequestCeilingMs),
+      `session/prompt request ceiling must be ${expectedRequestCeilingMs}ms, got ${scheduledDelays.join(', ')}`,
+    );
+    assert.equal(
+      scheduledDelays.includes(3_600_000),
+      false,
+      'the legacy one-hour request ceiling must not precede a valid two-hour idle policy',
+    );
+  });
+
+  it('#1186: stdio request ceiling resets after real prompt activity', async (t) => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let promptRequestId = null;
+    let resolvePromptSeen;
+    const promptSeen = new Promise((resolve) => {
+      resolvePromptSeen = resolve;
+    });
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'sliding-ceiling-sess' });
+        } else if (msg.method === 'session/prompt') {
+          promptRequestId = msg.id;
+          resolvePromptSeen();
+          // Keep the provider request pending until the test has crossed the
+          // original-start request ceiling.
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const idleStallMs = 2 * 60 * 60 * 1000;
+    const activityBudgetMs = idleStallMs + 60_000;
+    const requestCeilingMs = activityBudgetMs + 60_000;
+    const eventAtMs = 90 * 60 * 1000;
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
+    t.after(() => t.mock.timers.reset());
+
+    const iterator = client.promptStream('sliding-ceiling-sess', 'hello', {
+      idleStallMs,
+      timeoutMs: activityBudgetMs,
+    });
+    const firstEventPromise = iterator.next();
+    await promptSeen;
+
+    t.mock.timers.tick(eventAtMs);
+    agentNotify(agentStdout, 'session/update', {
+      sessionId: 'sliding-ceiling-sess',
+      update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'still working' } },
+    });
+    const warningEvent = await firstEventPromise;
+    const activityEvent = await iterator.next();
+
+    t.mock.timers.tick(requestCeilingMs - eventAtMs + 1);
+    await Promise.resolve();
+    await Promise.resolve();
+    const pendingAtOriginalCeiling = client.pendingRequestCount;
+
+    agentRespond(agentStdout, promptRequestId, { stopReason: 'end_turn' });
+    await new Promise((resolve) => setImmediate(resolve));
+    const terminal = await (async () => {
+      try {
+        while (true) {
+          const next = await iterator.next();
+          if (next.done) return { value: next };
+        }
+      } catch (error) {
+        return { error };
+      }
+    })();
+
+    assert.equal(warningEvent.value?.update?.sessionUpdate, 'stream_idle_warning');
+    assert.equal(activityEvent.value?.update?.sessionUpdate, 'agent_thought_chunk');
+    assert.equal(
+      pendingAtOriginalCeiling,
+      1,
+      'real activity must rearm the request ceiling beyond its original-start deadline',
+    );
+    assert.equal(terminal.error, undefined);
+    assert.equal(terminal.value?.done, true);
+  });
+});

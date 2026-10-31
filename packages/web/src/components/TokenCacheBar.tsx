@@ -6,7 +6,6 @@ const CAT_GRADIENTS: Record<string, string> = {
   opus: 'linear-gradient(90deg, var(--color-opus-light), var(--color-opus-primary))',
   codex: 'linear-gradient(90deg, var(--color-codex-light), var(--color-codex-primary))',
   gemini: 'linear-gradient(90deg, var(--color-gemini-light), var(--color-gemini-primary))',
-  dare: 'linear-gradient(90deg, var(--color-dare-light), var(--color-dare-primary))',
 };
 
 export interface TokenCacheBarProps {
@@ -31,7 +30,7 @@ export function TokenCacheBar({ percent, catId }: TokenCacheBarProps) {
 
   return (
     <div className="flex items-center gap-1.5" data-testid={`cache-bar-${catId}`}>
-      <div className="flex-1 h-[3px] rounded-full bg-gray-200 overflow-hidden">
+      <div className="flex-1 h-[3px] rounded-full bg-cafe-surface overflow-hidden">
         <div
           className="h-full rounded-full"
           style={{
@@ -41,7 +40,7 @@ export function TokenCacheBar({ percent, catId }: TokenCacheBarProps) {
           }}
         />
       </div>
-      <span className="text-[10px] text-gray-400 tabular-nums w-7 text-right">{percent}%</span>
+      <span className="text-micro text-cafe-muted tabular-nums w-7 text-right">{percent}%</span>
     </div>
   );
 }

@@ -1,19 +1,21 @@
 'use client';
 
+import { AVATAR_RAW_FILE_LIMIT_BYTES } from '@cat-cafe/shared';
 import { apiFetch } from '@/utils/api-client';
 
 export async function uploadAvatarAsset(file: File): Promise<string> {
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ''));
-    reader.onerror = () => reject(new Error('头像读取失败'));
-    reader.readAsDataURL(file);
-  });
+  if (file.size > AVATAR_RAW_FILE_LIMIT_BYTES) {
+    const limitMiB = AVATAR_RAW_FILE_LIMIT_BYTES / (1024 * 1024);
+    const actualMiB = (file.size / (1024 * 1024)).toFixed(1);
+    throw new Error(`图片过大（${actualMiB} MiB），最大 ${limitMiB} MiB`);
+  }
 
-  const res = await apiFetch('/api/preview/screenshot', {
+  const formData = new FormData();
+  formData.append('file', file, file.name);
+
+  const res = await apiFetch('/api/uploads/avatar', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ dataUrl }),
+    body: formData,
   });
   if (!res.ok) {
     const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -22,6 +24,31 @@ export async function uploadAvatarAsset(file: File): Promise<string> {
   const payload = (await res.json()) as { url?: string };
   if (!payload.url) throw new Error('头像上传失败');
   return payload.url;
+}
+
+const REF_AUDIO_MAX_BYTES = 10 * 1024 * 1024;
+
+export async function uploadRefAudioAsset(file: File): Promise<{ url: string }> {
+  if (file.size > REF_AUDIO_MAX_BYTES) {
+    const limitMiB = REF_AUDIO_MAX_BYTES / (1024 * 1024);
+    const actualMiB = (file.size / (1024 * 1024)).toFixed(1);
+    throw new Error(`音频过大（${actualMiB} MiB），最大 ${limitMiB} MiB`);
+  }
+
+  const formData = new FormData();
+  formData.append('file', file, file.name);
+
+  const res = await apiFetch('/api/uploads/ref-audio', {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    throw new Error((payload.error as string) ?? `参考音频上传失败 (${res.status})`);
+  }
+  const payload = (await res.json()) as { url?: string };
+  if (!payload.url) throw new Error('参考音频上传失败');
+  return { url: payload.url };
 }
 
 export function buildEditorLoadingNote(flags: {

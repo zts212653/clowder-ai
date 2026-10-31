@@ -1,14 +1,67 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { RightStatusPanel, type RightStatusPanelProps } from '@/components/RightStatusPanel';
+
+const TEST_CATS = [
+  {
+    id: 'opus',
+    displayName: '布偶猫',
+    color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
+    mentionPatterns: ['@opus'],
+    clientId: 'anthropic',
+    defaultModel: 'claude-opus-4-6',
+    avatar: '',
+    roleDescription: '',
+    personality: '',
+  },
+  {
+    id: 'codex',
+    displayName: '缅因猫',
+    color: { primary: '#5B8C5A', secondary: '#D5E8D4' },
+    mentionPatterns: ['@codex'],
+    clientId: 'openai',
+    defaultModel: 'gpt-5.5',
+    avatar: '',
+    roleDescription: '',
+    personality: '',
+  },
+];
+
+vi.mock('@/hooks/useCatData', () => ({
+  formatCatName: (cat: { displayName: string; variantLabel?: string }) =>
+    cat.variantLabel ? `${cat.displayName}（${cat.variantLabel}）` : cat.displayName,
+  useCatData: () => ({
+    cats: TEST_CATS,
+    isLoading: false,
+    hasFetched: true,
+    getCatById: (id: string) => TEST_CATS.find((cat) => cat.id === id),
+    getCatsByBreed: () => new Map(),
+    refresh: async () => TEST_CATS,
+  }),
+}));
 
 function render(props: RightStatusPanelProps): string {
   return renderToStaticMarkup(React.createElement(RightStatusPanel, props));
 }
 
 describe('RightStatusPanel', () => {
-  it('renders status title, mode, and active cats', () => {
+  it('shows active session and invocation IDs directly without an ID disclosure', () => {
+    const html = render({
+      intentMode: 'execute',
+      targetCats: ['opus'],
+      catStatuses: { opus: 'streaming' },
+      catInvocations: { opus: { sessionId: 'full-visible-session-id', invocationId: 'full-visible-invocation-id' } },
+      activeInvocations: { 'active-opus': { catId: 'opus', mode: 'execute' } },
+      threadId: 'copyable-thread-id',
+      messageSummary: { total: 2, assistant: 1, system: 1, evidence: 0, followup: 0 },
+    });
+    expect(html).toContain('full-visible-session-id');
+    expect(html).toContain('full-visible-invocation-id');
+    expect(html).not.toContain('▸ IDs');
+  });
+
+  it('preserves persistent session tracking while retiring the permanent audit surface', () => {
     const html = render({
       intentMode: 'execute',
       targetCats: ['opus', 'codex'],
@@ -27,14 +80,76 @@ describe('RightStatusPanel', () => {
       },
     });
 
-    expect(html).toContain('状态栏');
+    expect(html).not.toContain('状态栏');
     expect(html).toContain('当前模式');
     expect(html).toContain('执行');
-    expect(html).toContain('当前调用');
+    expect(html).toContain('猫猫状态');
     expect(html).toContain('消息统计');
+    expect(html).toContain('会话记录');
+    expect(html).not.toContain('Audit Explorer');
+    expect(html).toContain('运行日志');
+    expect(html).toContain('对话 ID：');
+    expect(html).toContain('test-thread');
+    expect(html).toContain('ChatGPT 会话');
+    expect(html.indexOf('data-testid="cloud-conversation-link"')).toBeLessThan(html.indexOf('对话信息'));
     expect(html).toContain('布偶猫');
     expect(html).toContain('缅因猫');
     expect(html).toContain('12');
+  });
+
+  it('AC-Z15 R7: ideate mode preserves targetCats UNION across all panels (cloud Codex P2)', () => {
+    // co-creator alpha catch + cloud Codex round-3 P2: ideate 多猫场景下状态面板
+    // 用 UNION 显示，但状态面板若用 slot-first，cat 完成清 slot 后
+    // 卡片消失 → 跨 panel state coherence regression（顶部双卡，侧边/移动端单卡）。
+    // 修法：所有 panel 都把 intentMode 传给 deriveActiveCats，UNION 全程一致。
+    const html = render({
+      intentMode: 'ideate',
+      targetCats: ['opus', 'codex'],
+      catStatuses: { opus: 'streaming', codex: 'done' },
+      catInvocations: {},
+      activeInvocations: {
+        'inv-opus-1': { catId: 'opus', mode: 'ideate' },
+        // codex slot 已清（完成），但 ideate UNION 应保留卡片
+      },
+      hasActiveInvocation: true,
+      threadId: 'thread-z15-r7',
+      messageSummary: {
+        total: 4,
+        assistant: 2,
+        system: 1,
+        evidence: 1,
+        followup: 0,
+      },
+    });
+
+    // GREEN after R7: ideate UNION → 两只猫都在
+    // RED before R7: slot-first → 只剩 opus，codex 卡片掉了
+    expect(html).toContain('布偶猫');
+    expect(html).toContain('缅因猫');
+  });
+
+  it('prefers activeInvocations over stale targetCats when provided by ChatContainer', () => {
+    const html = render({
+      intentMode: 'execute',
+      targetCats: ['codex'],
+      catStatuses: { codex: 'pending', opus: 'streaming' },
+      catInvocations: {},
+      activeInvocations: {
+        'inv-opus-1': { catId: 'opus', mode: 'execute' },
+      },
+      hasActiveInvocation: true,
+      threadId: 'thread-slot-priority',
+      messageSummary: {
+        total: 2,
+        assistant: 1,
+        system: 1,
+        evidence: 0,
+        followup: 0,
+      },
+    });
+
+    expect(html).toContain('布偶猫');
+    expect(html).not.toContain('缅因猫');
   });
 
   it('shows "空闲" when no target cats', () => {
@@ -80,9 +195,11 @@ describe('RightStatusPanel', () => {
       },
     });
 
-    expect(html).toContain('当前调用');
+    expect(html).toContain('猫猫状态');
     // IDs are now behind a collapsible toggle (default collapsed in SSR)
-    expect(html).toContain('▸ IDs');
+    expect(html).not.toContain('▸ IDs');
+    expect(html).toContain('复制调用 ID');
+    expect(html).toContain('复制会话 ID');
     // The cat name and invocation section still render
     expect(html).toContain('缅因猫');
   });
@@ -106,12 +223,12 @@ describe('RightStatusPanel', () => {
       },
     });
 
-    expect(html).toContain('当前调用');
+    expect(html).toContain('猫猫状态');
     expect(html).toContain('历史参与');
     expect(html).toContain('布偶猫');
   });
 
-  it('shows non-target cat in 当前调用 when it has task progress', () => {
+  it('shows non-target cat in 猫猫状态 when it has task progress', () => {
     const html = render({
       intentMode: 'execute',
       targetCats: ['opus'],
@@ -137,14 +254,14 @@ describe('RightStatusPanel', () => {
       },
     });
 
-    expect(html).toContain('当前调用');
+    expect(html).toContain('猫猫状态');
     expect(html).toContain('缅因猫');
-    // F055: task progress now in 猫猫祟祟 panel, not in 当前调用
+    // F055: task progress now in 猫猫祟祟 panel, not in 猫猫状态
     expect(html).toContain('猫猫祟祟');
     expect(html).toContain('Reviewing PR');
   });
 
-  it('keeps completed snapshots out of 当前调用', () => {
+  it('keeps completed snapshots out of 猫猫状态', () => {
     const html = render({
       intentMode: 'execute',
       targetCats: ['opus'],
@@ -170,7 +287,7 @@ describe('RightStatusPanel', () => {
       },
     });
 
-    expect(html).toContain('当前调用');
+    expect(html).toContain('猫猫状态');
     expect(html).toContain('布偶猫');
     // F055: completed plan folds in 猫猫祟祟
     expect(html).toContain('猫猫祟祟');
@@ -269,6 +386,6 @@ describe('RightStatusPanel', () => {
       messageSummary: { total: 0, assistant: 0, system: 0, evidence: 0, followup: 0 },
     });
 
-    expect(html).toContain('width:288px');
+    expect(html).toContain('width:304px');
   });
 });

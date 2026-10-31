@@ -1,0 +1,53 @@
+import { defineShellCopy } from '../shell/shell-copy';
+
+export const managedJobCopy = defineShellCopy(
+  {
+    zh: {
+      title: '后台任务',
+      loading: '正在读取任务状态…',
+      unavailable: '暂时读不到任务状态',
+      reconnect: '连接恢复后会重新核验',
+      details: '输出与执行记录',
+      noOutput: '暂时没有输出',
+      stop: '停止任务',
+      stopping: '正在停止…',
+      trace: '执行记录',
+      state: {
+        queued: '待启动',
+        running: '正在运行',
+        cancelling: '正在停止',
+        succeeded: '已完成',
+        failed: '执行失败',
+        cancelled: '已停止',
+        timed_out: '已超时',
+        lost: '执行中断，未重跑',
+      },
+      elapsed: (seconds: number) => `耗时 ${seconds} 秒`,
+      exit: (code: number) => `退出码 ${code}`,
+    },
+    en: {
+      title: 'Background task',
+      loading: 'Reading task status…',
+      unavailable: 'Task status is temporarily unavailable',
+      reconnect: 'It will be checked again when the connection recovers',
+      details: 'Output and execution history',
+      noOutput: 'No output yet',
+      stop: 'Stop task',
+      stopping: 'Stopping…',
+      trace: 'Execution history',
+      state: {
+        queued: 'Queued',
+        running: 'Running',
+        cancelling: 'Stopping',
+        succeeded: 'Completed',
+        failed: 'Failed',
+        cancelled: 'Stopped',
+        timed_out: 'Timed out',
+        lost: 'Execution interrupted; not replayed',
+      },
+      elapsed: (seconds: number) => `${seconds} seconds`,
+      exit: (code: number) => `Exit code ${code}`,
+    },
+  },
+  { samples: { elapsed: [[0], [120]], exit: [[0], [7]] } },
+);

@@ -1,0 +1,4 @@
+name: growth-leak
+version: "1.0.0"
+description: Pack that leaks Growth data
+packType: domain

@@ -9,7 +9,7 @@
  * 前提条件:
  *   - `claude` CLI 已安装并登录 (Max plan)
  *   - `codex` CLI 已安装并登录 (ChatGPT Plus/Pro)
- *   - `gemini` CLI 已安装并登录 (Google AI)
+ *   - `agy` CLI 已安装；CAT_CAFE_INTEGRATION_AGY_PROFILE 指定隔离 OAuth profile JSON
  *
  * 不再需要 API keys — CLI 使用订阅额度。
  */
@@ -34,7 +34,10 @@ function hasCli(cmd) {
 
 const hasClaude = hasCli('claude');
 const hasCodex = hasCli('codex');
-const hasGemini = hasCli('gemini');
+const nativeProfile = process.env.CAT_CAFE_INTEGRATION_AGY_PROFILE
+  ? JSON.parse(process.env.CAT_CAFE_INTEGRATION_AGY_PROFILE)
+  : null;
+const hasGemini = hasCli('agy') && Boolean(nativeProfile);
 
 // Helper to conditionally skip tests
 const itOrSkip = shouldRunIntegrationTests ? test : test.skip;
@@ -52,8 +55,8 @@ async function createRealRouter() {
     '../../dist/domains/cats/services/agents/providers/ClaudeAgentService.js'
   );
   const { CodexAgentService } = await import('../../dist/domains/cats/services/agents/providers/CodexAgentService.js');
-  const { GeminiAgentService } = await import(
-    '../../dist/domains/cats/services/agents/providers/GeminiAgentService.js'
+  const { AgyNativeAgentService } = await import(
+    '../../dist/domains/cats/services/agents/providers/agy-native/AgyNativeAgentService.js'
   );
   const { AgentRouter } = await import('../../dist/domains/cats/services/agents/routing/AgentRouter.js');
   const { InvocationRegistry } = await import(
@@ -65,7 +68,7 @@ async function createRealRouter() {
     await migrateRouterOpts({
       claudeService: new ClaudeAgentService(),
       codexService: new CodexAgentService(),
-      geminiService: new GeminiAgentService(),
+      ...(hasGemini ? { geminiService: new AgyNativeAgentService({ catId: 'gemini', profile: nativeProfile }) } : {}),
       registry: new InvocationRegistry(),
       messageStore: new MessageStore(),
     }),
@@ -265,7 +268,7 @@ describe('Individual Service Integration Tests', { skip: !shouldRunIntegrationTe
     const service = new ClaudeAgentService();
     const messages = [];
 
-    for await (const msg of service.invoke('Say "test" in one word')) {
+    for await (const msg of service.invoke('Say "test" in one word', { workingDirectory: process.cwd() })) {
       messages.push(msg);
     }
 
@@ -295,7 +298,7 @@ describe('Individual Service Integration Tests', { skip: !shouldRunIntegrationTe
     const service = new CodexAgentService();
     const messages = [];
 
-    for await (const msg of service.invoke('Say "test" in one word')) {
+    for await (const msg of service.invoke('Say "test" in one word', { workingDirectory: process.cwd() })) {
       messages.push(msg);
     }
 
@@ -307,17 +310,17 @@ describe('Individual Service Integration Tests', { skip: !shouldRunIntegrationTe
   });
 
   /**
-   * Test: GeminiAgentService direct invocation
+   * Test: AgyNativeAgentService direct invocation
    */
-  itOrSkip('GeminiAgentService responds to prompt', { skip: !hasGemini, timeout: 60_000 }, async () => {
-    const { GeminiAgentService } = await import(
-      '../../dist/domains/cats/services/agents/providers/GeminiAgentService.js'
+  itOrSkip('AgyNativeAgentService responds to prompt', { skip: !hasGemini, timeout: 60_000 }, async () => {
+    const { AgyNativeAgentService } = await import(
+      '../../dist/domains/cats/services/agents/providers/agy-native/AgyNativeAgentService.js'
     );
 
-    const service = new GeminiAgentService();
+    const service = new AgyNativeAgentService({ catId: 'gemini', profile: nativeProfile });
     const messages = [];
 
-    for await (const msg of service.invoke('Say "test" in one word')) {
+    for await (const msg of service.invoke('Say "test" in one word', { workingDirectory: process.cwd() })) {
       messages.push(msg);
     }
 

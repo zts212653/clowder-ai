@@ -18,7 +18,16 @@ vi.mock('@/components/icons/AttachIcon', () => ({
   AttachIcon: () => React.createElement('span', null, 'attach'),
 }));
 vi.mock('@/components/ImagePreview', () => ({ ImagePreview: () => null }));
+vi.mock('@/components/AttachmentPreview', () => ({ AttachmentPreview: () => null }));
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
+vi.mock('@/hooks/useCoCreatorConfig', () => ({
+  useCoCreatorConfig: () => ({
+    name: 'ME',
+    aliases: [],
+    mentionPatterns: ['@co-creator'],
+    color: { primary: '#D4A76A', secondary: '#FFF8F0' },
+  }),
+}));
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({
     cats: [
@@ -27,7 +36,7 @@ vi.mock('@/hooks/useCatData', () => ({
         displayName: '布偶猫',
         color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
         mentionPatterns: ['布偶猫'],
-        provider: 'anthropic',
+        clientId: 'anthropic',
         defaultModel: 'opus',
         avatar: '/a.png',
         roleDescription: 'dev',
@@ -294,11 +303,10 @@ describe('ChatInput history completion', () => {
       searchInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
-    // Simulate Enter during IME composition
+    // Simulate Enter during IME composition: compositionstart → keydown(Enter)
     act(() => {
-      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
-      Object.defineProperty(event, 'isComposing', { value: true });
-      searchInput.dispatchEvent(event);
+      searchInput.dispatchEvent(new Event('compositionstart', { bubbles: true }));
+      searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
 
     // Search modal should still be open (not dismissed by IME Enter)

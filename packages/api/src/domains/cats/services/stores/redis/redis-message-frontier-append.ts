@@ -1,0 +1,198 @@
+import type { RedisClient } from '@cat-cafe/shared/utils';
+import type { AppendMessageInput, StoredMessage, ThreadObservedAppendResult } from '../ports/MessageStore.js';
+import { canonicalizeAppendMessageInput, DEFAULT_THREAD_ID, generateSortableId } from '../ports/MessageStore.js';
+import { MessageKeys } from '../redis-keys/message-keys.js';
+import { withOwnerUncertaintyIndex as withUncertaintyIndex } from './owner-uncertainty-lua.js';
+import { serializeExtra } from './redis-message-parsers.js';
+import { withUserMentionIndex } from './user-mention-index-lua.js';
+
+function withOwnerUncertaintyIndex(script: string, hashKey: number, indexExpression: string): string {
+  const fields = 'cjson.decode(ARGV[6])';
+  const prefix = `string.sub(KEYS[2], 1, #KEYS[2] - #${fields}.id - 4)`;
+  return withUserMentionIndex(
+    withUncertaintyIndex(script, hashKey, indexExpression),
+    hashKey,
+    `{${prefix} .. 'msg:user-requests:latest:' .. ${fields}.userId, ${prefix} .. 'msg:user-requests:pending:' .. ${fields}.userId, ${prefix} .. 'msg:user-requests:closed:' .. ${fields}.userId, ${prefix} .. 'msg:user-request-signals:' .. ${fields}.userId .. ':' .. ${fields}.threadId}`,
+  );
+}
+
+const APPEND_AND_OBSERVE_PRIOR_FRONTIER_LUA = withOwnerUncertaintyIndex(
+  `
+if ARGV[4] == '1' then
+  local existing = redis.call('GET', KEYS[5])
+  if existing then return {'existing', existing, ''} end
+end
+local latestRows = redis.call('ZREVRANGE', KEYS[1], 0, 0)
+local prior = latestRows[1] or ''
+local timelinePublished = ARGV[7] == '1'
+local seq = 0
+if timelinePublished then
+  local hwmRaw = redis.call('HGET', KEYS[7], 'hwm')
+  local hwm
+  if hwmRaw == false then
+    hwm = 0
+  else
+    hwm = tonumber(hwmRaw)
+    if hwm == nil then
+      return redis.error_reply('VISIBILITY_HWM_UNPARSEABLE: raw=' .. tostring(hwmRaw) .. ' metaKey=' .. KEYS[7])
+    end
+    if hwm ~= hwm then
+      return redis.error_reply('VISIBILITY_HWM_NAN: metaKey=' .. KEYS[7])
+    end
+    if hwm ~= math.floor(hwm) or hwm < 0 then
+      return redis.error_reply('VISIBILITY_HWM_INVALID: hwm=' .. tostring(hwm) .. ' metaKey=' .. KEYS[7])
+    end
+  end
+  local t = redis.call('TIME')
+  local now_ms = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+  seq = math.max(hwm + 1, now_ms)
+  if seq > 9007199254730991 then
+    return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(seq))
+  end
+end
+if ARGV[4] == '1' then redis.call('SET', KEYS[5], ARGV[1]) end
+local fields = cjson.decode(ARGV[6])
+local extra = {}
+if fields.extra and fields.extra ~= '' then extra = cjson.decode(fields.extra) end
+extra.freshness = {
+  priorFrontierMessageId = prior ~= '' and prior or cjson.null
+}
+fields.extra = cjson.encode(extra)
+for field, value in pairs(fields) do redis.call('HSET', KEYS[2], field, value) end
+redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+redis.call('ZADD', KEYS[3], ARGV[2], ARGV[1])
+redis.call('ZADD', KEYS[4], ARGV[2], ARGV[1])
+for index = 8, #KEYS do redis.call('ZADD', KEYS[index], ARGV[2], ARGV[1]) end
+if timelinePublished then
+  redis.call('ZADD', KEYS[6], seq, ARGV[1])
+  redis.call('HSET', KEYS[7], 'hwm', tostring(seq))
+  redis.call('HSETNX', KEYS[7], 'migrated', '1')
+  redis.call('HSET', KEYS[2], 'visibilitySeq', tostring(seq))
+end
+local ttl = tonumber(ARGV[5])
+if ttl and ttl > 0 then
+  redis.call('EXPIRE', KEYS[2], ttl)
+  redis.call('EXPIRE', KEYS[1], ttl)
+  redis.call('EXPIRE', KEYS[3], ttl)
+  redis.call('EXPIRE', KEYS[4], ttl)
+  if ARGV[4] == '1' then redis.call('EXPIRE', KEYS[5], ttl) end
+  for index = 8, #KEYS do redis.call('EXPIRE', KEYS[index], ttl) end
+end
+return {'committed', ARGV[1], prior}
+`,
+  2,
+  "string.sub(KEYS[1], 1, #KEYS[1] - #cjson.decode(ARGV[6]).threadId - 11) .. 'msg:owner-uncertainty:' .. cjson.decode(ARGV[6]).threadId",
+);
+
+const DELETE_IDEMPOTENCY_POINTER_IF_VALUE_LUA = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`;
+
+function readStoredPriorFrontier(message: StoredMessage): string | null {
+  const freshness = message.extra?.freshness;
+  return freshness && 'priorFrontierMessageId' in freshness ? freshness.priorFrontierMessageId : null;
+}
+
+function shouldPublishImmediately(message: AppendMessageInput): boolean {
+  if (message.lifecycle?.kind === 'response' && message.lifecycle.status === 'processing') return false;
+  if (message.deliveryStatus !== 'queued') return true;
+  return message.from.kind === 'agent' && message.origin !== 'briefing';
+}
+
+/**
+ * ADR-042 D5: append is unconditional. The Lua step records the raw thread
+ * frontier that existed immediately before the new row and stamps that exact
+ * boundary into message metadata. Idempotent retries return the first row and
+ * therefore the first boundary.
+ */
+export async function appendMessageAndObservePriorFrontier(input: {
+  redis: RedisClient;
+  message: AppendMessageInput;
+  ttlSeconds: number | null;
+  loadById: (messageId: string) => Promise<StoredMessage | null>;
+  onAppend?: (message: StoredMessage) => void | Promise<void>;
+}): Promise<ThreadObservedAppendResult> {
+  const { redis, ttlSeconds, loadById, onAppend } = input;
+  const message = canonicalizeAppendMessageInput(input.message);
+  const threadId = message.threadId ?? DEFAULT_THREAD_ID;
+  const id = generateSortableId(message.timestamp);
+  // F288: split pluginMessage from host extra — stored as independent hash field
+  const { pluginMessage: pm2, ...hostExtra2 } = message.extra ?? {};
+  const hasHostExtra2 = Object.keys(hostExtra2).length > 0;
+  const hashFields: Record<string, string> = {
+    id,
+    threadId,
+    userId: message.userId,
+    from: JSON.stringify(message.from),
+    catId: message.catId ?? '',
+    content: message.content,
+    ...(message.lifecycle ? { lifecycle: JSON.stringify(message.lifecycle) } : {}),
+    contentBlocks: message.contentBlocks ? JSON.stringify(message.contentBlocks) : '',
+    toolEvents: message.toolEvents ? JSON.stringify(message.toolEvents) : '',
+    metadata: message.metadata ? JSON.stringify(message.metadata) : '',
+    extra: hasHostExtra2 ? serializeExtra(hostExtra2) : '',
+    ...(pm2 ? { pluginMessage: JSON.stringify(pm2) } : {}),
+    mentions: JSON.stringify(message.mentions),
+    timestamp: String(message.timestamp),
+    ...(message.thinking ? { thinking: message.thinking } : {}),
+    ...(message.origin ? { origin: message.origin } : {}),
+    ...(message.visibility ? { visibility: message.visibility } : {}),
+    ...(message.whisperTo ? { whisperTo: JSON.stringify(message.whisperTo) } : {}),
+    ...(message.source ? { source: JSON.stringify(message.source) } : {}),
+    ...(message.mentionsUser ? { mentionsUser: '1' } : {}),
+    ...(message.deliveryStatus ? { deliveryStatus: message.deliveryStatus } : {}),
+    ...(message.replyTo ? { replyTo: message.replyTo } : {}),
+  };
+  const idempotencyRedisKey = message.idempotencyKey
+    ? MessageKeys.idempotency(message.userId, threadId, message.idempotencyKey)
+    : `msg:observed:no-idempotency:${id}`;
+  const keys = [
+    MessageKeys.thread(threadId),
+    MessageKeys.detail(id),
+    MessageKeys.TIMELINE,
+    MessageKeys.user(message.userId),
+    idempotencyRedisKey,
+    MessageKeys.threadVisibility(threadId),
+    MessageKeys.threadVisibilityMeta(threadId),
+    ...message.mentions.map((catId) => MessageKeys.mentions(catId)),
+  ];
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const [kind, value, prior] = (await redis.eval(
+      APPEND_AND_OBSERVE_PRIOR_FRONTIER_LUA,
+      keys.length,
+      ...keys,
+      id,
+      String(message.timestamp),
+      threadId,
+      message.idempotencyKey ? '1' : '0',
+      String(ttlSeconds ?? 0),
+      JSON.stringify(hashFields),
+      shouldPublishImmediately(message) ? '1' : '0',
+    )) as [string, string, string];
+    const stored = await loadById(value);
+    if (stored) {
+      if (kind === 'committed' && onAppend) {
+        try {
+          void Promise.resolve(onAppend(stored)).catch(() => {});
+        } catch {
+          // best-effort thread-index projection
+        }
+      }
+      return {
+        kind: 'committed',
+        message: stored,
+        priorFrontierMessageId: kind === 'existing' ? readStoredPriorFrontier(stored) : prior || null,
+        idempotent: kind === 'existing',
+      };
+    }
+    if (kind !== 'existing' || !message.idempotencyKey) {
+      throw new Error(`observed message append lost stored message: ${value}`);
+    }
+    await redis.eval(DELETE_IDEMPOTENCY_POINTER_IF_VALUE_LUA, 1, idempotencyRedisKey, value);
+  }
+  throw new Error('observed message append idempotency recovery exhausted');
+}

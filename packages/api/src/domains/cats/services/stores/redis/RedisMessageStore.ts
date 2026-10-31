@@ -1,3 +1,38 @@
+import { randomUUID } from 'node:crypto';
+import {
+  type CompanionDeliveryAcceptance,
+  companionDeliveryMatches,
+  readCompanionDraftSubmissions,
+  readStoredCompanionDelivery,
+} from '../companion-submission-state.js';
+import { type MessageEvidenceProjection, projectMessageEvidence } from '../message-evidence-projection.js';
+import type { UserMentionHandlingRef } from '../ports/MessageStore.js';
+import { messageIdempotencyScope } from '../ports/MessageStore.js';
+import {
+  type UserMentionHandlingMetadata,
+  type UserMentionHandlingReason,
+  userMentionEvent,
+} from '../user-mention-index.js';
+import { withOwnerUncertaintyIndex } from './owner-uncertainty-lua.js';
+import { readOwnerUncertainty } from './owner-uncertainty-read.js';
+import { recordRedisCompanionAcceptance } from './redis-companion-acceptance.js';
+import { artifactMessageHash, MESSAGE_ARTIFACT_FIELDS } from './redis-message-artifact-fields.js';
+import { readArtifactBeforeRange, readArtifactMessagePage } from './redis-message-artifact-page.js';
+import { evidenceMessageHash, MESSAGE_EVIDENCE_FIELDS } from './redis-message-evidence-fields.js';
+import { MESSAGE_RECIPIENT_FIELDS, recipientMessageHash } from './redis-message-recipient-fields.js';
+import {
+  HANDLE_USER_MENTIONS_LUA,
+  MIGRATE_HANDLED_USER_MENTIONS_LUA,
+  READ_LAST_USER_MENTION_HANDLING_LUA,
+  RESTORE_USER_MENTION_LUA,
+  UNDO_USER_MENTIONS_LUA,
+} from './user-mention-handling-lua.js';
+import {
+  READ_USER_MENTIONS_LUA,
+  RESOLVE_USER_MENTION_FROM_READ_LUA,
+  RESOLVE_USER_MENTION_LUA,
+  withUserMentionIndex,
+} from './user-mention-index-lua.js';
 /**
  * Redis Message Store
  * Redis-backed message storage with same interface as in-memory MessageStore.
@@ -12,172 +47,1978 @@
  * 消息 TTL 可配置 (默认 7 天)。
  */
 
-import type { CatId } from '@cat-cafe/shared';
+import { isDeepStrictEqual } from 'node:util';
+import type { CatId, CustodyOfferV1, LifecycleStoredMessageMetadata } from '@cat-cafe/shared';
+import {
+  custodyOfferV1Schema,
+  isLifecycleStoredMessageMetadata,
+  messageSearchAnswerBindingSchema,
+} from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import type { AppendMessageInput, StoredMessage } from '../ports/MessageStore.js';
-import { DEFAULT_THREAD_ID, generateSortableId, isDelivered } from '../ports/MessageStore.js';
+import {
+  type MessageReadObserver,
+  type MessageReadSpan,
+  measureMessageReadParser,
+} from '../../../../../infrastructure/message-read-diagnostics.js';
+import {
+  assertQueueLedgerEntry,
+  type QueueLedgerEntry,
+  type QueueLedgerStore,
+  queueLedgerAdmissionFingerprint,
+  queueLedgerAdmissionsMatch,
+} from '../../agents/invocation/queue-ledger/QueueLedger.js';
+import { QueueLedgerKeys } from '../../agents/invocation/queue-ledger/queue-ledger-keys.js';
+import { verifyRedisQueueLedgerReplay } from '../../agents/invocation/queue-ledger/RedisQueueLedgerReader.js';
+import {
+  hydrateQueueLedgerEntry,
+  RedisQueueLedgerStore,
+} from '../../agents/invocation/queue-ledger/RedisQueueLedgerStore.js';
+import { cursorFor, parseCursor } from '../cursor.js';
+import type { LifecycleAppendRecoveryInput, LifecycleAppendRecoveryResult } from '../lifecycle-append-recovery.js';
+import type { LifecycleWakeCoverageInput, LifecycleWakeCoverageResult } from '../lifecycle-wake-coverage.js';
+import { messageFrom } from '../message-from.js';
+import {
+  ATTACH_MESSAGE_SEARCH_ANSWER_LUA,
+  type MessageSearchAnswerAttachment,
+  messageSearchAnswerBlock,
+} from '../message-search-answer-binding.js';
+import { notifyMessageTimelineChange } from '../notify-message-timeline-change.js';
+import type {
+  AdvanceLifecycleInputDispatchResult,
+  AppendMessageInput,
+  BoundedOwnerMessagePage,
+  BoundedThreadMessagePage,
+  ClearOwnerComposerDraftResult,
+  CommitLifecycleAppendAdmissionResult,
+  CommitLifecyclePreAdmissionFailureResult,
+  CommitLifecycleResponseTerminalResult,
+  CustodyOfferTransitionInput,
+  CustodyOfferTransitionResult,
+  HostMessageExtra,
+  IdempotentAppendResult,
+  LifecycleAppendAdmissionInput,
+  LifecycleInputDispatchPatch,
+  LifecyclePreAdmissionFailureInput,
+  LifecycleResponseTerminalPatch,
+  MarkCanceledResult,
+  MarkDeliveredResult,
+  MessageAppendListener,
+  MessageIdScanPage,
+  MessageScanCursor,
+  OwnerComposerDraft,
+  PawFeelSourceMessageProjection,
+  PawFeelSourceProjectionRead,
+  PutOwnerComposerDraftInput,
+  PutOwnerComposerDraftResult,
+  QueueAdmissionPrepareResult,
+  QueueLedgerAdmissionFactory,
+  QueueLedgerLifecycleAdmissionResult,
+  QueueLedgerMessageAdmissionResult,
+  RecallMessageToComposerDraftInput,
+  RecallMessageToComposerDraftResult,
+  StoredMessage,
+  StoredPluginMessage,
+  StreamMetadataAugmentInput,
+  ThreadMessageReadOptions,
+  ThreadObservedAppendResult,
+  ThreadReplyProjection,
+  ThreadUnreadMessageProjection,
+  ThreadUnreadProjectionCursor,
+} from '../ports/MessageStore.js';
+import {
+  advanceLifecycleInputDispatchMetadata,
+  applyStreamMetadataAugment,
+  assertPrivateNoticeQueueAdmission,
+  assertQueueMessageReplay,
+  assertValidStoredMessageTimestamp,
+  assignLifecycleDispatchTargetsMetadata,
+  COORDINATION_TERMINAL_SCAN_PAGE_SIZE,
+  canonicalizeAppendMessageInput,
+  DEFAULT_THREAD_ID,
+  deriveGrowingSourceMessageRevision,
+  generateSortableId,
+  isDelivered,
+  isValidCustodyOfferTransition,
+  lifecycleInputIdentityForStoredMessage,
+  lifecycleResponseInputsChanged,
+  matchesLifecyclePreAdmissionFailure,
+  mergeMessageExtra,
+  preAdmissionFailureIdempotencyKey,
+  prepareLifecycleAppendAdmission,
+  prepareLifecycleResponseTerminalMessage,
+  prepareLifecycleResponseTerminalWithLedgerTargets,
+  prepareQueueLedgerMessageAdmission,
+  prepareQueueLedgerSourceLifecycle,
+  settleAssignedLifecycleDispatchFailureMetadata,
+} from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import {
-  safeParseConnectorSource,
+  isDurableOwnerReadEvidence,
+  isSystemUserMessage,
+  isTimelinePublished,
+  passesManagedHoldViewerBoundary,
+  resolveDeliveryTimelineScore,
+  resolveThreadMessageVisibility,
+} from '../visibility.js';
+import { HUMAN_SOURCE_HASH_LUA, humanSourceHash } from './redis-human-source-hash.js';
+import { commitRedisLifecycleAppendRecovery } from './redis-lifecycle-append-recovery.js';
+import { commitRedisLifecycleWakeCoverage } from './redis-lifecycle-wake-coverage.js';
+import { appendMessage } from './redis-message-append.js';
+import { CANCEL_LUA, REASSIGN_LUA } from './redis-message-delivery-lua-scripts.js';
+import { appendMessageAndObservePriorFrontier } from './redis-message-frontier-append.js';
+import {
+  parseConnectorSourceField,
   safeParseContentBlocks,
   safeParseExtra,
+  safeParseLegacyLifecycleMessageFrom,
+  safeParseLifecycleMetadata,
   safeParseMentions,
+  safeParseMessageFrom,
+  safeParseMessageRecall,
   safeParseMetadata,
+  safeParsePawFeelSourceExtra,
+  safeParsePluginMessage,
   safeParseToolEvents,
+  serializeExtra,
 } from './redis-message-parsers.js';
+import { parseRedisNumber } from './redis-number.js';
+import { readRecentMentionIds } from './redis-recent-mentions.js';
+import { readThreadReplyProjection } from './redis-thread-reply-projection.js';
+import { projectRedisUnreadSummaries } from './redis-unread-summary-projection.js';
+import {
+  APPEND_WITH_VISIBILITY_LUA,
+  CANCEL_WITH_VISIBILITY_LUA,
+  DELIVER_WITH_VISIBILITY_LUA,
+  ENSURE_VISIBILITY_MIGRATED_LUA,
+  MAX_BACKFILL_MEMBERS,
+} from './redis-visibility-lua-scripts.js';
 
 const log = createModuleLogger('redis-message-store');
 
 const DEFAULT_LIMIT = 50;
-const DEFAULT_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
+const PAW_FEEL_SOURCE_READ_BATCH_SIZE = 100;
+const PAW_FEEL_SOURCE_FIELDS = [
+  'id',
+  'threadId',
+  'userId',
+  'catId',
+  'content',
+  'timestamp',
+  'deliveredAt',
+  'timelineOrderAt',
+  'deliveryStatus',
+  'origin',
+  'source',
+  'extra',
+] as const;
+type PawFeelSourcePipelineResult = [Error | null, Array<string | null> | null];
+
+function parseRedisScoredIds(raw: readonly string[]): { ids: string[]; oldestTimestamp?: number } {
+  const ids: string[] = [];
+  let oldestTimestamp: number | undefined;
+  for (let offset = 0; offset + 1 < raw.length; offset += 2) {
+    const id = raw[offset];
+    const score = raw[offset + 1];
+    if (id === undefined || score === undefined) break;
+    ids.push(id);
+    oldestTimestamp = parseRedisNumber(score);
+  }
+  return { ids, oldestTimestamp };
+}
+
+function parseOptionalRedisNumber(raw: string | null): number | undefined {
+  return raw === null ? undefined : parseRedisNumber(raw);
+}
+
+function projectPawFeelSourceTiming(
+  deliveredAt: string | null,
+  timelineOrderAt: string | null,
+  deliveryStatus: string | null,
+  origin: string | null,
+): Pick<PawFeelSourceMessageProjection, 'deliveredAt' | 'timelineOrderAt' | 'deliveryStatus' | 'origin'> {
+  const projection: Pick<
+    PawFeelSourceMessageProjection,
+    'deliveredAt' | 'timelineOrderAt' | 'deliveryStatus' | 'origin'
+  > = {};
+  const parsedDeliveredAt = parseOptionalRedisNumber(deliveredAt);
+  const parsedTimelineOrderAt = parseOptionalRedisNumber(timelineOrderAt);
+  if (parsedDeliveredAt !== undefined) projection.deliveredAt = parsedDeliveredAt;
+  if (parsedTimelineOrderAt !== undefined) projection.timelineOrderAt = parsedTimelineOrderAt;
+  if (deliveryStatus) projection.deliveryStatus = deliveryStatus as StoredMessage['deliveryStatus'];
+  if (origin === 'stream' || origin === 'callback' || origin === 'briefing') projection.origin = origin;
+  return projection;
+}
+
+function hydratePawFeelSourceProjection(fields: readonly (string | null)[]): PawFeelSourceMessageProjection | null {
+  const [
+    id,
+    threadId,
+    userId,
+    catId,
+    content,
+    timestamp,
+    deliveredAt,
+    timelineOrderAt,
+    deliveryStatus,
+    origin,
+    source,
+    extra,
+  ] = fields;
+  if (!id) return null;
+  const parsedExtra = safeParsePawFeelSourceExtra(extra ?? undefined);
+  return {
+    id,
+    threadId: threadId || DEFAULT_THREAD_ID,
+    userId: userId ?? 'unknown',
+    catId: (catId || null) as CatId | null,
+    content: content ?? '',
+    timestamp: parseStoredMessageTimestamp(timestamp ?? undefined),
+    ...projectPawFeelSourceTiming(deliveredAt, timelineOrderAt, deliveryStatus, origin),
+    ...(parseConnectorSourceField(source ?? undefined).kind === 'valid' ? { source: true } : {}),
+    ...(parsedExtra ? { extra: parsedExtra } : {}),
+  };
+}
+
+type ReservedAppendResult =
+  | { outcome: 'stored'; message: StoredMessage; replayed: boolean; queueDeduped?: boolean }
+  | { outcome: 'queue_full' | 'queue_conflict' };
+
+interface QueueAppendOptions {
+  entries: readonly QueueLedgerEntry[];
+  maxQueuedUserEntries?: number;
+  /**
+   * `bound` (default) binds every row to this message's identity through the message-to-row index.
+   * `private` admits `private_input` work the message only announces: the rows bind nothing, and
+   * their replay verdict comes from the durable admission receipt instead.
+   */
+  admissionMode?: 'bound' | 'private';
+}
+
+const ENQUEUE_EXISTING_MESSAGE_WITH_LEDGER_LUA = `
+local messageKey = KEYS[1]
+local rowsKey = KEYS[2]
+local orderKey = KEYS[3]
+local messageIndexKey = KEYS[4]
+local messageId = ARGV[1]
+local maxUserSources = tonumber(ARGV[2])
+local count = tonumber(ARGV[3])
+if redis.call('HGET', messageKey, 'id') ~= messageId then return -2 end
+if not count or count < 1 then return redis.error_reply('QUEUE_ADMISSION_EMPTY') end
+
+local incoming = {}
+local entryIds = {}
+local existingCount = 0
+local incomingIds = {}
+local incomingTargets = {}
+local incomingUserSources = {}
+for i = 1, count do
+  local raw = ARGV[3 + i]
+  local row = cjson.decode(raw)
+  if row.status ~= 'queued' or row.payload.sourceRecordId ~= messageId or row.payload.messageId ~= messageId then
+    return redis.error_reply('QUEUE_ADMISSION_INVALID_ROW')
+  end
+  if incomingIds[row.id] then return redis.error_reply('QUEUE_ADMISSION_DUPLICATE_ID') end
+  incomingIds[row.id] = true
+  incoming[i] = { id = row.id, raw = raw, row = row }
+  entryIds[i] = row.id
+  for _, targetId in ipairs(row.targets or {}) do incomingTargets[targetId] = true end
+  if redis.call('HEXISTS', rowsKey, row.id) == 1 then existingCount = existingCount + 1 end
+  if row.from and row.from.kind == 'user' then incomingUserSources[row.payload.sourceRecordId] = true end
+end
+if existingCount > 0 and existingCount ~= count then return -1 end
+
+local incomingLifecycleRaw = ARGV[4 + count]
+local incomingLifecycleOk, incomingLifecycle = pcall(cjson.decode, incomingLifecycleRaw or '')
+if not incomingLifecycleOk or type(incomingLifecycle) ~= 'table' then
+  return redis.error_reply('QUEUE_ADMISSION_INVALID_LIFECYCLE')
+end
+local storedLifecycleRaw = redis.call('HGET', messageKey, 'lifecycle')
+local lifecycleNeedsSet = not storedLifecycleRaw or storedLifecycleRaw == ''
+if not lifecycleNeedsSet then
+  local storedLifecycleOk, storedLifecycle = pcall(cjson.decode, storedLifecycleRaw)
+  if
+    not storedLifecycleOk or
+    type(storedLifecycle) ~= 'table' or
+    storedLifecycle.kind == 'delivery_failure' or
+    storedLifecycle.orderKey ~= incomingLifecycle.orderKey or
+    storedLifecycle.producerInvocationId ~= incomingLifecycle.producerInvocationId
+  then
+    return -4
+  end
+  for _, dispatchRef in ipairs(storedLifecycle.dispatchRefs or {}) do
+    if incomingTargets[dispatchRef.targetId] then return -5 end
+  end
+end
+
+if existingCount == count then
+  if lifecycleNeedsSet then redis.call('HSET', messageKey, 'lifecycle', incomingLifecycleRaw) end
+  return 2
+end
+if redis.call('HEXISTS', messageIndexKey, messageId) == 1 then return -1 end
+
+local deliveryStatus = redis.call('HGET', messageKey, 'deliveryStatus')
+local preservePublishedAgent = false
+if not deliveryStatus or deliveryStatus == '' then
+  local rawFrom = redis.call('HGET', messageKey, 'from')
+  local decoded, storedFrom = pcall(cjson.decode, rawFrom or '')
+  if not decoded or type(storedFrom) ~= 'table' then return -3 end
+  preservePublishedAgent = storedFrom.kind == 'agent'
+elseif deliveryStatus ~= 'queued' then
+  return -3
+end
+
+if maxUserSources and maxUserSources >= 0 then
+  local queuedUserSources = {}
+  local activeIds = redis.call('LRANGE', orderKey, 0, -1)
+  for i = 1, #activeIds do
+    local currentRaw = redis.call('HGET', rowsKey, activeIds[i])
+    if not currentRaw then return redis.error_reply('QUEUE_ORDER_ROW_MISSING') end
+    local row = cjson.decode(currentRaw)
+    if row.status == 'queued' and row.from and row.from.kind == 'user' then
+      queuedUserSources[row.payload.sourceRecordId] = true
+    end
+  end
+  for sourceId, _ in pairs(incomingUserSources) do queuedUserSources[sourceId] = true end
+  local queuedUserCount = 0
+  for _, _ in pairs(queuedUserSources) do queuedUserCount = queuedUserCount + 1 end
+  if queuedUserCount > maxUserSources then return 0 end
+end
+
+if lifecycleNeedsSet then redis.call('HSET', messageKey, 'lifecycle', incomingLifecycleRaw) end
+if not preservePublishedAgent then redis.call('HSET', messageKey, 'deliveryStatus', 'queued') end
+for i = 1, count do
+  redis.call('HSET', rowsKey, incoming[i].id, incoming[i].raw)
+  redis.call('RPUSH', orderKey, incoming[i].id)
+end
+redis.call('HSET', messageIndexKey, messageId, cjson.encode(entryIds))
+return 1
+`;
+
+const HARD_DELETE_MESSAGE_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+if redis.call('HGET', KEYS[1], '_tombstone') == '1' then return 2 end
+redis.call('HSET', KEYS[1],
+  'content', '', 'contentBlocks', '', 'toolEvents', '', 'metadata', '',
+  'extra', '', 'pluginMessage', '', 'lifecycle', '', 'thinking', '', 'mentions', '[]',
+  'deletedAt', ARGV[1], 'deletedBy', ARGV[2], '_tombstone', '1')
+redis.call('HDEL', KEYS[1], 'from', 'routingFact', 'provenance')
+return 1
+`;
+
+function parseStoredMessageTimestamp(raw: string | undefined): number {
+  return parseRedisNumber(raw ?? '0');
+}
+const PREPARE_QUEUE_ADMISSION_LUA = withOwnerUncertaintyIndex(
+  `
+local messageId = redis.call('HGET', KEYS[1], 'id')
+if not messageId then
+  return -1
+end
+local deliveryStatus = redis.call('HGET', KEYS[1], 'deliveryStatus')
+if deliveryStatus == 'queued' then
+  return 0
+end
+if deliveryStatus then
+  return -2
+end
+redis.call('HSET', KEYS[1], 'deliveryStatus', 'queued')
+return 1
+`,
+  1,
+);
+
+const UPDATE_PLUGIN_MESSAGE_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+local current = nil
+local raw = redis.call('HGET', KEYS[1], 'pluginMessage')
+if raw and raw ~= '' then
+  local ok, decoded = pcall(cjson.decode, raw)
+  if ok then current = decoded end
+else
+  local legacyRaw = redis.call('HGET', KEYS[1], 'extra')
+  if legacyRaw and legacyRaw ~= '' then
+    local ok, decoded = pcall(cjson.decode, legacyRaw)
+    if ok then current = decoded.pluginMessage end
+  end
+end
+if not current or tonumber(current.revision) ~= tonumber(ARGV[2]) then return -1 end
+redis.call('HSET', KEYS[1], 'pluginMessage', ARGV[1])
+return 1
+`;
+
+const COMMIT_LIFECYCLE_RESPONSE_TERMINAL_LUA = withUserMentionIndex(`
+local messageKey = KEYS[1]
+if redis.call('EXISTS', messageKey) == 0 then return -1 end
+if redis.call('HGET', messageKey, 'recall') or redis.call('HGET', messageKey, '_tombstone') then return -2 end
+local existingRaw = redis.call('HGET', messageKey, 'lifecycle')
+if not existingRaw or existingRaw == '' then return -2 end
+local ok, existing = pcall(cjson.decode, existingRaw)
+if not ok or type(existing) ~= 'table' or existing.kind ~= 'response' then return -2 end
+if existing.invocationId ~= ARGV[1] then return -3 end
+
+local function sameField(field, expected)
+  local actual = redis.call('HGET', messageKey, field)
+  if actual == false then actual = '' end
+  return actual == expected
+end
+
+local lifecycleNeedsWrite = false
+if existing.status == 'processing' then
+  -- A child dispatch can settle while its parent response is still processing.
+  -- Never replace that newer lifecycle snapshot with a terminal state prepared
+  -- from an older read; make the caller re-read and preserve the child transition.
+  if existingRaw ~= ARGV[14] then return 0 end
+  lifecycleNeedsWrite = true
+elseif not (existingRaw == ARGV[2] and
+     sameField('content', ARGV[3]) and
+     sameField('contentBlocks', ARGV[4]) and
+     sameField('toolEvents', ARGV[5]) and
+     sameField('metadata', ARGV[6]) and
+     sameField('extra', ARGV[7]) and
+     sameField('thinking', ARGV[8]) and
+     sameField('origin', ARGV[9]) and
+     sameField('mentions', ARGV[10]) and
+     sameField('mentionsUser', ARGV[11]) and
+     sameField('replyTo', ARGV[12]) and
+     sameField('pluginMessage', ARGV[13])) then
+  return -4
+end
+
+-- Validate the visibility allocator before the first mutation. The response
+-- placeholder is intentionally absent from cursor reads until its terminal body
+-- is durable, so lifecycle + publication share this one linearization point.
+local seq = nil
+local existingVis = redis.call('HGET', messageKey, 'visibilitySeq')
+if not existingVis or existingVis == '' then
+  local hwmRaw = redis.call('HGET', KEYS[3], 'hwm')
+  local hwm = 0
+  if hwmRaw ~= false then
+    hwm = tonumber(hwmRaw)
+    if hwm == nil or hwm ~= hwm or hwm ~= math.floor(hwm) or hwm < 0 then
+      return redis.error_reply('VISIBILITY_HWM_INVALID: raw=' .. tostring(hwmRaw))
+    end
+  end
+  local timeArr = redis.call('TIME')
+  local nowMs = tonumber(timeArr[1]) * 1000 + math.floor(tonumber(timeArr[2]) / 1000)
+  seq = math.max(hwm + 1, nowMs)
+  if seq > 9007199254730991 then
+    return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(seq))
+  end
+end
+
+local function replaceOptional(field, value)
+  if value == '' then redis.call('HDEL', messageKey, field)
+  else redis.call('HSET', messageKey, field, value) end
+end
+if lifecycleNeedsWrite then
+  redis.call('HSET', messageKey,
+    'lifecycle', ARGV[2],
+    'content', ARGV[3],
+    'mentions', ARGV[10])
+  replaceOptional('contentBlocks', ARGV[4])
+  replaceOptional('toolEvents', ARGV[5])
+  replaceOptional('metadata', ARGV[6])
+  replaceOptional('extra', ARGV[7])
+  replaceOptional('thinking', ARGV[8])
+  replaceOptional('origin', ARGV[9])
+  replaceOptional('mentionsUser', ARGV[11])
+  replaceOptional('replyTo', ARGV[12])
+  replaceOptional('pluginMessage', ARGV[13])
+end
+if seq then
+  local messageId = redis.call('HGET', messageKey, 'id')
+  redis.call('ZADD', KEYS[2], seq, messageId)
+  redis.call('HSET', KEYS[3], 'hwm', tostring(seq))
+  redis.call('HSET', messageKey, 'visibilitySeq', tostring(seq))
+end
+return lifecycleNeedsWrite and 1 or 2
+`);
+
+/**
+ * Atomically terminalize an existing response and admit its complete outbound
+ * Queue fan-out. The caller supplies an exact pre-read ledger snapshot; a
+ * concurrent claim/commit makes the script return -10 before either key moves.
+ */
+const COMMIT_LIFECYCLE_RESPONSE_WITH_LEDGER_LUA = withUserMentionIndex(`
+local messageKey = KEYS[1]
+local rowsKey = KEYS[2]
+local orderKey = KEYS[3]
+local messageIndexKey = KEYS[4]
+local messageId = redis.call('HGET', messageKey, 'id')
+if not messageId then return -1 end
+if redis.call('HGET', messageKey, 'recall') or redis.call('HGET', messageKey, '_tombstone') then return -2 end
+
+local existingLifecycleRaw = redis.call('HGET', messageKey, 'lifecycle')
+if not existingLifecycleRaw or existingLifecycleRaw == '' then return -2 end
+local lifecycleOk, existingLifecycle = pcall(cjson.decode, existingLifecycleRaw)
+if not lifecycleOk or type(existingLifecycle) ~= 'table' or existingLifecycle.kind ~= 'response' then return -2 end
+if existingLifecycle.invocationId ~= ARGV[1] then return -3 end
+
+local maxUserSources = tonumber(ARGV[15])
+local count = tonumber(ARGV[16])
+local expectedMode = ARGV[17]
+if not count or count < 1 then return redis.error_reply('QUEUE_ADMISSION_EMPTY') end
+
+local incoming = {}
+local entryIds = {}
+local incomingIds = {}
+local incomingUserSources = {}
+for i = 1, count do
+  local raw = ARGV[17 + i]
+  local row = cjson.decode(raw)
+  if row.status ~= 'queued' or not row.payload or row.payload.sourceRecordId ~= messageId or
+     row.payload.messageId ~= messageId then
+    return redis.error_reply('QUEUE_ADMISSION_INVALID_ROW')
+  end
+  if incomingIds[row.id] then return redis.error_reply('QUEUE_ADMISSION_DUPLICATE_ID') end
+  incomingIds[row.id] = true
+  incoming[i] = { id = row.id, raw = raw, row = row }
+  entryIds[i] = row.id
+  if row.from and row.from.kind == 'user' then incomingUserSources[row.payload.sourceRecordId] = true end
+end
+
+for i = 1, count do
+  local currentRaw = redis.call('HGET', rowsKey, incoming[i].id)
+  if expectedMode == 'absent' then
+    if currentRaw then return -10 end
+  elseif expectedMode == 'present' then
+    local expectedRaw = ARGV[17 + count + i]
+    if not currentRaw or currentRaw ~= expectedRaw then return -10 end
+  else
+    return redis.error_reply('QUEUE_ADMISSION_EXPECTATION_INVALID')
+  end
+end
+
+if expectedMode == 'absent' and redis.call('HEXISTS', messageIndexKey, messageId) == 1 then return -10 end
+
+if expectedMode == 'absent' and maxUserSources and maxUserSources >= 0 then
+  local queuedUserSources = {}
+  local activeIds = redis.call('LRANGE', orderKey, 0, -1)
+  for i = 1, #activeIds do
+    local currentRaw = redis.call('HGET', rowsKey, activeIds[i])
+    if not currentRaw then return redis.error_reply('QUEUE_ORDER_ROW_MISSING') end
+    local row = cjson.decode(currentRaw)
+    if row.status == 'queued' and row.from and row.from.kind == 'user' then
+      queuedUserSources[row.payload.sourceRecordId] = true
+    end
+  end
+  for sourceId, _ in pairs(incomingUserSources) do queuedUserSources[sourceId] = true end
+  local queuedUserCount = 0
+  for _, _ in pairs(queuedUserSources) do queuedUserCount = queuedUserCount + 1 end
+  if queuedUserCount > maxUserSources then return 0 end
+end
+
+local function sameField(field, expected)
+  local actual = redis.call('HGET', messageKey, field)
+  if actual == false then actual = '' end
+  return actual == expected
+end
+
+local lifecycleNeedsWrite = false
+if existingLifecycle.status == 'processing' then
+  if existingLifecycleRaw ~= ARGV[14] then return -10 end
+  lifecycleNeedsWrite = true
+elseif not (existingLifecycleRaw == ARGV[2] and
+     sameField('content', ARGV[3]) and
+     sameField('contentBlocks', ARGV[4]) and
+     sameField('toolEvents', ARGV[5]) and
+     sameField('metadata', ARGV[6]) and
+     sameField('extra', ARGV[7]) and
+     sameField('thinking', ARGV[8]) and
+     sameField('origin', ARGV[9]) and
+     sameField('mentions', ARGV[10]) and
+     sameField('mentionsUser', ARGV[11]) and
+     sameField('replyTo', ARGV[12]) and
+     sameField('pluginMessage', ARGV[13])) then
+  return -4
+end
+
+-- Validate terminal-response publication before the first Message or Queue
+-- mutation. Processing placeholders have no cursor position until this commit.
+local visibilitySeq = nil
+local existingVisibility = redis.call('HGET', messageKey, 'visibilitySeq')
+if not existingVisibility or existingVisibility == '' then
+  local hwmRaw = redis.call('HGET', KEYS[6], 'hwm')
+  local hwm = 0
+  if hwmRaw ~= false then
+    hwm = tonumber(hwmRaw)
+    if hwm == nil or hwm ~= hwm or hwm ~= math.floor(hwm) or hwm < 0 then
+      return redis.error_reply('VISIBILITY_HWM_INVALID: raw=' .. tostring(hwmRaw))
+    end
+  end
+  local timeArr = redis.call('TIME')
+  local nowMs = tonumber(timeArr[1]) * 1000 + math.floor(tonumber(timeArr[2]) / 1000)
+  visibilitySeq = math.max(hwm + 1, nowMs)
+  if visibilitySeq > 9007199254730991 then
+    return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(visibilitySeq))
+  end
+end
+
+if lifecycleNeedsWrite then
+  redis.call('HSET', messageKey, 'lifecycle', ARGV[2], 'content', ARGV[3], 'mentions', ARGV[10])
+  local function replaceOptional(field, value)
+    if value == '' then redis.call('HDEL', messageKey, field)
+    else redis.call('HSET', messageKey, field, value) end
+  end
+  replaceOptional('contentBlocks', ARGV[4])
+  replaceOptional('toolEvents', ARGV[5])
+  replaceOptional('metadata', ARGV[6])
+  replaceOptional('extra', ARGV[7])
+  replaceOptional('thinking', ARGV[8])
+  replaceOptional('origin', ARGV[9])
+  replaceOptional('mentionsUser', ARGV[11])
+  replaceOptional('replyTo', ARGV[12])
+  replaceOptional('pluginMessage', ARGV[13])
+end
+if visibilitySeq then
+  redis.call('ZADD', KEYS[5], visibilitySeq, messageId)
+  redis.call('HSET', KEYS[6], 'hwm', tostring(visibilitySeq))
+  redis.call('HSET', messageKey, 'visibilitySeq', tostring(visibilitySeq))
+end
+
+if expectedMode == 'absent' then
+  for i = 1, count do
+    redis.call('HSET', rowsKey, incoming[i].id, incoming[i].raw)
+    redis.call('RPUSH', orderKey, incoming[i].id)
+  end
+  redis.call('HSET', messageIndexKey, messageId, cjson.encode(entryIds))
+end
+
+if lifecycleNeedsWrite and expectedMode == 'absent' then return 1 end
+if not lifecycleNeedsWrite and expectedMode == 'present' then return 2 end
+if not lifecycleNeedsWrite and expectedMode == 'absent' then return 3 end
+return 4
+`);
+
+/**
+ * Atomically publishes a queued input and its adjacent pre-admission failure.
+ * Every fail-closed guard runs before the first mutation because Redis Lua
+ * errors do not roll back writes performed earlier in the script.
+ *
+ * KEYS[1] source message hash (ioredis applies keyPrefix)
+ * ARGV: keyPrefix, failureId, threadId, sourceUserId, expectedEntryId,
+ * failedAt, expectedSourceLifecycleJson, settledSourceLifecycleJson,
+ * failureLifecycleJson, failureContent,
+ * failureContentBlocksJson, idempotencyRawKey, ttlSeconds, sourceMode,
+ * failureFromJson
+ *
+ * Returns { 1, failureId } on apply, { 2, failureId } on replay, or
+ * { negativeReasonCode, '' } on a guarded conflict.
+ */
+const COMMIT_LIFECYCLE_PRE_ADMISSION_FAILURE_LUA = `
+local sourceHash = KEYS[1]
+local kp = ARGV[1]
+local failureId = ARGV[2]
+local threadId = ARGV[3]
+local sourceUserId = ARGV[4]
+local expectedEntryId = ARGV[5]
+local failedAt = ARGV[6]
+local expectedSourceLifecycleRaw = ARGV[7]
+local settledSourceLifecycleRaw = ARGV[8]
+local failureLifecycleRaw = ARGV[9]
+local failureContent = ARGV[10]
+local failureContentBlocksRaw = ARGV[11]
+local idempotencyKey = kp .. ARGV[12]
+local ttlSec = tonumber(ARGV[13])
+local sourceMode = ARGV[14]
+local failureFromRaw = ARGV[15]
+
+if redis.call('EXISTS', sourceHash) == 0 then return {-1, ''} end
+if redis.call('HGET', sourceHash, 'threadId') ~= threadId or
+   redis.call('HGET', sourceHash, 'userId') ~= sourceUserId then
+  return {-3, ''}
+end
+
+-- A live idempotency winner proves the full transaction committed. Check it
+-- before queued-state guards so retries after the source became delivered replay.
+local existingFailureId = redis.call('GET', idempotencyKey)
+if existingFailureId and redis.call('EXISTS', kp .. 'msg:' .. existingFailureId) == 1 then
+  return {2, existingFailureId}
+end
+
+if redis.call('HGET', sourceHash, 'recall') or redis.call('HGET', sourceHash, '_tombstone') then
+  return {-4, ''}
+end
+
+local existingVisibility = redis.call('HGET', sourceHash, 'visibilitySeq')
+local existingLifecycle = redis.call('HGET', sourceHash, 'lifecycle')
+if existingLifecycle == false then existingLifecycle = '' end
+if sourceMode == 'queued_input' then
+  if redis.call('HGET', sourceHash, 'deliveryStatus') ~= 'queued' then return {-2, ''} end
+  if (existingVisibility and existingVisibility ~= '') or existingLifecycle ~= expectedSourceLifecycleRaw or
+     settledSourceLifecycleRaw == '' then
+    return {-4, ''}
+  end
+elseif sourceMode == 'delivered_input' then
+  if redis.call('HGET', sourceHash, 'deliveryStatus') ~= 'delivered' or
+     not existingVisibility or existingVisibility == '' or
+     existingLifecycle ~= expectedSourceLifecycleRaw or settledSourceLifecycleRaw == '' then
+    return {-4, ''}
+  end
+elseif sourceMode == 'public_wake' then
+  local deliveryStatus = redis.call('HGET', sourceHash, 'deliveryStatus')
+  local catId = redis.call('HGET', sourceHash, 'catId')
+  if (deliveryStatus and deliveryStatus ~= '') or
+     not existingVisibility or existingVisibility == '' or
+     not catId or catId == '' or catId == 'system' or
+     existingLifecycle ~= expectedSourceLifecycleRaw or settledSourceLifecycleRaw == '' then
+    return {-4, ''}
+  end
+else
+  return {-4, ''}
+end
+
+local failureHash = kp .. 'msg:' .. failureId
+if redis.call('EXISTS', failureHash) == 1 then return {-4, ''} end
+
+-- Validate both visibility positions before any write.
+local metaKey = kp .. 'msg:visibility-meta:' .. threadId
+local hwmRaw = redis.call('HGET', metaKey, 'hwm')
+local hwm = 0
+if hwmRaw ~= false then
+  hwm = tonumber(hwmRaw)
+  if hwm == nil or hwm ~= hwm or hwm ~= math.floor(hwm) or hwm < 0 then
+    return redis.error_reply('VISIBILITY_HWM_INVALID: raw=' .. tostring(hwmRaw) .. ' metaKey=' .. metaKey)
+  end
+end
+local timeArr = redis.call('TIME')
+local nowMs = tonumber(timeArr[1]) * 1000 + math.floor(tonumber(timeArr[2]) / 1000)
+local sourceSeq = nil
+local failureSeq = nil
+if sourceMode == 'queued_input' then
+  sourceSeq = math.max(hwm + 1, nowMs)
+  failureSeq = sourceSeq + 1
+else
+  failureSeq = math.max(hwm + 1, nowMs)
+end
+if failureSeq > 9007199254730991 then
+  return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(failureSeq))
+end
+
+-- All guards passed: publish a queued input, or preserve an already-public source.
+if sourceMode == 'queued_input' then
+  redis.call('HSET', sourceHash,
+    'deliveryStatus', 'delivered',
+    'deliveredAt', failedAt,
+    'timelineOrderAt', failedAt,
+    'lifecycle', settledSourceLifecycleRaw,
+    'visibilitySeq', tostring(sourceSeq))
+else
+  redis.call('HSET', sourceHash, 'lifecycle', settledSourceLifecycleRaw)
+end
+
+redis.call('HSET', failureHash,
+  'id', failureId,
+  'threadId', threadId,
+  'userId', 'system',
+  'from', failureFromRaw,
+  'catId', '',
+  'content', failureContent,
+  'lifecycle', failureLifecycleRaw,
+  'mentions', '[]',
+  'timestamp', failedAt,
+  'visibilitySeq', tostring(failureSeq))
+if failureContentBlocksRaw ~= '' then
+  redis.call('HSET', failureHash, 'contentBlocks', failureContentBlocksRaw)
+end
+
+local timelineKey = kp .. 'msg:timeline'
+local sourceUserKey = kp .. 'msg:user:' .. sourceUserId
+local systemUserKey = kp .. 'msg:user:system'
+local threadKey = kp .. 'msg:thread:' .. threadId
+local visibilityKey = kp .. 'msg:visibility:' .. threadId
+if sourceMode == 'queued_input' then
+  redis.call('ZADD', timelineKey, failedAt, redis.call('HGET', sourceHash, 'id'))
+  redis.call('ZADD', sourceUserKey, failedAt, redis.call('HGET', sourceHash, 'id'))
+  redis.call('ZADD', threadKey, failedAt, redis.call('HGET', sourceHash, 'id'))
+  redis.call('ZADD', visibilityKey, sourceSeq, redis.call('HGET', sourceHash, 'id'))
+end
+redis.call('ZADD', timelineKey, failedAt, failureId)
+redis.call('ZADD', systemUserKey, failedAt, failureId)
+redis.call('ZADD', threadKey, failedAt, failureId)
+redis.call('ZADD', visibilityKey, failureSeq, failureId)
+redis.call('HSET', metaKey, 'hwm', tostring(failureSeq), 'migrated', '1')
+redis.call('SET', idempotencyKey, failureId)
+
+if ttlSec > 0 then
+  redis.call('EXPIRE', failureHash, ttlSec)
+  redis.call('EXPIRE', idempotencyKey, ttlSec)
+  local cutoff = nowMs - ttlSec * 1000
+  redis.call('ZREMRANGEBYSCORE', timelineKey, '-inf', cutoff)
+  redis.call('ZREMRANGEBYSCORE', sourceUserKey, '-inf', cutoff)
+  redis.call('ZREMRANGEBYSCORE', systemUserKey, '-inf', cutoff)
+  redis.call('ZREMRANGEBYSCORE', threadKey, '-inf', cutoff)
+  redis.call('EXPIRE', timelineKey, ttlSec)
+  redis.call('EXPIRE', sourceUserKey, ttlSec)
+  redis.call('EXPIRE', systemUserKey, ttlSec)
+  redis.call('EXPIRE', threadKey, ttlSec)
+end
+
+return {1, failureId}
+`;
+
+const CAS_LIFECYCLE_METADATA_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+if redis.call('HGET', KEYS[1], 'recall') or redis.call('HGET', KEYS[1], '_tombstone') then return -2 end
+local current = redis.call('HGET', KEYS[1], 'lifecycle')
+if current == false then current = '' end
+if current ~= ARGV[1] then return 0 end
+redis.call('HSET', KEYS[1], 'lifecycle', ARGV[2])
+return 1
+`;
+
+const RELEASE_LIFECYCLE_DISPATCH_LOCK_LUA = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('DEL', KEYS[1]) end
+return 0
+`;
+
+const CAS_LIFECYCLE_APPEND_ADMISSION_LUA = `
+for index = 1, #KEYS do
+  if redis.call('EXISTS', KEYS[index]) == 0 then return -1 end
+  if redis.call('HGET', KEYS[index], 'recall') or redis.call('HGET', KEYS[index], '_tombstone') then return -2 end
+  local current = redis.call('HGET', KEYS[index], 'lifecycle')
+  if current == false then current = '' end
+  if current ~= ARGV[(index - 1) * 2 + 1] then return 0 end
+end
+for index = 1, #KEYS do
+  redis.call('HSET', KEYS[index], 'lifecycle', ARGV[(index - 1) * 2 + 2])
+end
+return 1
+`;
+
+const PUT_OWNER_COMPOSER_DRAFT_LUA = `
+local currentRevision = tonumber(redis.call('HGET', KEYS[1], 'revision') or '0')
+if currentRevision ~= tonumber(ARGV[1]) then
+  return {0, currentRevision}
+end
+local nextRevision = currentRevision + 1
+redis.call('HSET', KEYS[1],
+  'version', '1',
+  'ownerUserId', ARGV[2],
+  'threadId', ARGV[3],
+  'revision', tostring(nextRevision),
+  'text', ARGV[4],
+  'updatedAt', ARGV[7])
+redis.call('HDEL', KEYS[1], 'contentBlocks', 'replyTo')
+if ARGV[5] ~= '' then redis.call('HSET', KEYS[1], 'contentBlocks', ARGV[5]) end
+if ARGV[6] ~= '' then redis.call('HSET', KEYS[1], 'replyTo', ARGV[6]) end
+if ARGV[8] ~= '' then redis.call('HSET', KEYS[1], 'companionSubmissions', ARGV[8]) end
+redis.call('PERSIST', KEYS[1])
+return {1, nextRevision}
+`;
+
+const CLEAR_OWNER_COMPOSER_DRAFT_LUA = `
+local currentRevision = tonumber(redis.call('HGET', KEYS[1], 'revision') or '0')
+if currentRevision ~= tonumber(ARGV[1]) then
+  return {0, currentRevision}
+end
+local nextRevision = currentRevision + 1
+redis.call('HSET', KEYS[1],
+  'version', '1',
+  'ownerUserId', ARGV[2],
+  'threadId', ARGV[3],
+  'revision', tostring(nextRevision),
+  'text', '',
+  'updatedAt', ARGV[4])
+redis.call('HDEL', KEYS[1], 'contentBlocks', 'replyTo')
+return {1, nextRevision}
+`;
+
+/**
+ * F264 AC-44~46. Every validation happens before the first mutation: Redis does
+ * not roll back writes made before an error reply. The message hash remains the
+ * canonical identity/order row while its body moves exactly once into the
+ * owner+thread TTL=0 draft hash.
+ */
+const RECALL_MESSAGE_TO_COMPOSER_DRAFT_LUA = withOwnerUncertaintyIndex(
+  `
+if redis.call('EXISTS', KEYS[1]) == 0 then return {-1, 0} end
+if redis.call('HGET', KEYS[1], 'recall') then return {2, 0} end
+if redis.call('HGET', KEYS[1], 'userId') ~= ARGV[1] or redis.call('HGET', KEYS[1], 'threadId') ~= ARGV[2] then
+  return {-2, 0}
+end
+if redis.call('HGET', KEYS[1], 'catId') ~= '' or redis.call('HGET', KEYS[1], '_tombstone') then
+  return {-3, 0}
+end
+local deliveryStatus = redis.call('HGET', KEYS[1], 'deliveryStatus')
+if deliveryStatus ~= 'queued' then return {-3, 0} end
+
+local currentDraftRevision = tonumber(redis.call('HGET', KEYS[2], 'revision') or '0')
+if currentDraftRevision ~= tonumber(ARGV[3]) then return {0, currentDraftRevision} end
+
+local sourceText = redis.call('HGET', KEYS[1], 'content') or ''
+local existingText = redis.call('HGET', KEYS[2], 'text') or ''
+local nextText = sourceText
+if ARGV[4] == 'append' and existingText ~= '' then nextText = existingText .. '\\n\\n' .. sourceText end
+
+local existingBlocksRaw = redis.call('HGET', KEYS[2], 'contentBlocks')
+local sourceBlocksRaw = redis.call('HGET', KEYS[1], 'contentBlocks')
+local nextBlocks = nil
+if ARGV[4] == 'append' and existingBlocksRaw and existingBlocksRaw ~= '' then
+  local ok, parsed = pcall(cjson.decode, existingBlocksRaw)
+  if ok and type(parsed) == 'table' then nextBlocks = parsed end
+end
+if sourceBlocksRaw and sourceBlocksRaw ~= '' then
+  local ok, parsed = pcall(cjson.decode, sourceBlocksRaw)
+  if ok and type(parsed) == 'table' then
+    if not nextBlocks then nextBlocks = cjson.decode('[]') end
+    for _, block in ipairs(parsed) do table.insert(nextBlocks, block) end
+  end
+end
+
+local nextReplyTo = ''
+if ARGV[4] == 'append' then nextReplyTo = redis.call('HGET', KEYS[2], 'replyTo') or '' end
+if nextReplyTo == '' then nextReplyTo = redis.call('HGET', KEYS[1], 'replyTo') or '' end
+
+local recall = { version = 1, exposure = 'none', recalledAt = tonumber(ARGV[5]) }
+local nextDraftRevision = currentDraftRevision + 1
+
+-- All validation/derivation passed. Mutations below form the single terminal CAS.
+redis.call('HSET', KEYS[2],
+  'version', '1',
+  'ownerUserId', ARGV[1],
+  'threadId', ARGV[2],
+  'revision', tostring(nextDraftRevision),
+  'text', nextText,
+  'updatedAt', ARGV[5])
+redis.call('HDEL', KEYS[2], 'contentBlocks', 'replyTo')
+if nextBlocks and #nextBlocks > 0 then redis.call('HSET', KEYS[2], 'contentBlocks', cjson.encode(nextBlocks)) end
+if nextReplyTo ~= '' then redis.call('HSET', KEYS[2], 'replyTo', nextReplyTo) end
+
+redis.call('HSET', KEYS[1],
+  'content', '',
+  'mentions', '[]',
+  'deliveryStatus', 'canceled',
+  '_tombstone', '1',
+  'recall', cjson.encode(recall))
+local messageId = redis.call('HGET', KEYS[1], 'id')
+for keyIndex = 4, #KEYS do
+  redis.call('ZREM', KEYS[keyIndex], messageId)
+end
+redis.call('HDEL', KEYS[1], 'contentBlocks', 'toolEvents', 'metadata', 'extra', 'pluginMessage', 'lifecycle', 'thinking', 'replyTo', 'companionDeliveryReceipt')
+redis.call('ZREM', KEYS[3], redis.call('HGET', KEYS[1], 'id'))
+
+return {1, 0, sourceText, existingText, nextDraftRevision}
+`,
+  1,
+);
+
+const RESTORE_SOFT_DELETED_LUA = withOwnerUncertaintyIndex(
+  `
+if not redis.call('HGET', KEYS[1], 'id') or not redis.call('HGET', KEYS[1], 'deletedAt') then return 0 end
+if redis.call('HGET', KEYS[1], '_tombstone') then return 0 end
+redis.call('HDEL', KEYS[1], 'deletedAt', 'deletedBy')
+return redis.call('HGETALL', KEYS[1])
+`,
+  1,
+);
+
+const UPDATE_EXTRA_IF_NOT_RECALLED_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+if redis.call('HGET', KEYS[1], 'recall') or redis.call('HGET', KEYS[1], '_tombstone') then return 0 end
+local extra=cjson.decode(ARGV[1])
+local currentRaw=redis.call('HGET',KEYS[1],'extra')
+local current={}
+if currentRaw and currentRaw ~= '' then current=cjson.decode(currentRaw) end
+extra.messageSearchAnswer=current.messageSearchAnswer
+if current.messageSearchAnswer then
+  local binding=current.messageSearchAnswer
+  local blocks={}
+  if extra.rich and extra.rich.blocks then
+    for _,block in ipairs(extra.rich.blocks) do if block.id ~= binding.blockId then table.insert(blocks,block) end end
+  end
+  table.insert(blocks,{kind='card',v=1,id=binding.blockId,title='',meta={domain='message-search-answer',publicationRef=binding.publicationRef}})
+  extra.rich={v=1,blocks=blocks}
+end
+redis.call('HSET', KEYS[1], 'extra', cjson.encode(extra))
+if ARGV[2] ~= '' then redis.call('HSETNX', KEYS[1], 'pluginMessage', ARGV[2]) end
+return 1
+`;
+
+const COMPARE_AND_TRANSITION_CUSTODY_OFFER_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return {-1} end
+if redis.call('HGET', KEYS[1], 'recall') or redis.call('HGET', KEYS[1], '_tombstone') then return {-3} end
+local currentContent = redis.call('HGET', KEYS[1], 'content') or ''
+local currentBlocks = redis.call('HGET', KEYS[1], 'contentBlocks') or ''
+if currentContent ~= ARGV[1] or currentBlocks ~= ARGV[2] then return {-2} end
+local currentOffer = redis.call('HGET', KEYS[1], 'custodyOfferV1') or ''
+if currentOffer ~= ARGV[3] then return {0, currentOffer} end
+redis.call('HSET', KEYS[1], 'custodyOfferV1', ARGV[4])
+local fields = redis.call('HGETALL', KEYS[1])
+local result = {1}
+for _, field in ipairs(fields) do table.insert(result, field) end
+return result
+`;
+
+function splitMessageExtra(extra: StoredMessage['extra'] | undefined): {
+  hostExtra: HostMessageExtra;
+  pluginMessage: StoredPluginMessage | undefined;
+  custodyOfferV1: CustodyOfferV1 | undefined;
+} {
+  const { pluginMessage, custodyOfferV1, ...hostExtra } = extra ?? {};
+  return { hostExtra, pluginMessage, custodyOfferV1 };
+}
+
+function serializeHostExtra(extra: StoredMessage['extra'] | undefined): string {
+  const { hostExtra } = splitMessageExtra(extra);
+  return Object.keys(hostExtra).length > 0 ? serializeExtra(hostExtra) : '';
+}
+
+type PreparedRedisLifecycleResponseTerminal =
+  | { kind: 'write'; nextMessage: StoredMessage }
+  | { kind: 'result'; result: CommitLifecycleResponseTerminalResult };
+
+function prepareRedisLifecycleResponseTerminal(
+  current: StoredMessage,
+  patch: LifecycleResponseTerminalPatch,
+): PreparedRedisLifecycleResponseTerminal {
+  if (current.lifecycle?.kind !== 'response') {
+    return { kind: 'result', result: { kind: 'conflict', reason: 'not_response', message: current } };
+  }
+  if (current.lifecycle.invocationId !== patch.invocationId) {
+    return { kind: 'result', result: { kind: 'conflict', reason: 'invocation_mismatch', message: current } };
+  }
+  if (lifecycleResponseInputsChanged(current, patch))
+    return { kind: 'result', result: { kind: 'conflict', reason: 'inputs_changed', message: current } };
+  if (
+    !Number.isFinite(patch.completedAt) ||
+    patch.completedAt < current.lifecycle.startedAt ||
+    (patch.reason !== undefined && patch.reason.length === 0)
+  ) {
+    return { kind: 'result', result: { kind: 'conflict', reason: 'invalid_terminal', message: current } };
+  }
+  const nextMessage = prepareLifecycleResponseTerminalMessage(current, patch);
+  if (current.lifecycle.status === 'processing') return { kind: 'write', nextMessage };
+  return {
+    kind: 'result',
+    result: isDeepStrictEqual(current, nextMessage)
+      ? { kind: 'replayed', message: current }
+      : { kind: 'conflict', reason: 'different_terminal', message: current },
+  };
+}
+
+function lifecycleResponseTerminalLuaArgs(
+  patch: LifecycleResponseTerminalPatch,
+  nextMessage: StoredMessage,
+  expectedLifecycleRaw: string,
+): string[] {
+  const { pluginMessage } = splitMessageExtra(patch.extra);
+  return [
+    patch.invocationId,
+    JSON.stringify(nextMessage.lifecycle),
+    patch.content,
+    patch.contentBlocks === undefined ? '' : JSON.stringify(patch.contentBlocks),
+    patch.toolEvents === undefined ? '' : JSON.stringify(patch.toolEvents),
+    patch.metadata === undefined ? '' : JSON.stringify(patch.metadata),
+    patch.extra === undefined ? '' : serializeHostExtra(patch.extra),
+    patch.thinking ?? '',
+    patch.origin ?? '',
+    JSON.stringify(patch.mentions),
+    patch.mentionsUser ? '1' : '',
+    patch.replyTo ?? '',
+    pluginMessage ? JSON.stringify(pluginMessage) : '',
+    expectedLifecycleRaw,
+  ];
+}
+
+function lifecycleResponseTerminalResultFromRedis(
+  outcome: number,
+  message: StoredMessage,
+): CommitLifecycleResponseTerminalResult {
+  switch (outcome) {
+    case 1:
+      return { kind: 'applied', message };
+    case 2:
+      return { kind: 'replayed', message };
+    case -2:
+      return { kind: 'conflict', reason: 'not_response', message };
+    case -3:
+      return { kind: 'conflict', reason: 'invocation_mismatch', message };
+    default:
+      throw new Error(`unexpected lifecycle response terminal outcome: ${outcome}`);
+  }
+}
+
+type ParsedCustodyOffer = { kind: 'absent' } | { kind: 'valid'; offer: CustodyOfferV1 } | { kind: 'invalid' };
+
+function parseCustodyOfferRaw(raw: string | undefined | null): ParsedCustodyOffer {
+  if (!raw) return { kind: 'absent' };
+  try {
+    const parsed = custodyOfferV1Schema.safeParse(JSON.parse(raw));
+    return parsed.success ? { kind: 'valid', offer: parsed.data } : { kind: 'invalid' };
+  } catch {
+    return { kind: 'invalid' };
+  }
+}
+
+function hydrateExtra(
+  rawExtra: string | undefined,
+  rawPluginMessage: string | undefined,
+  rawCustodyOffer: string | undefined,
+): { extra: StoredMessage['extra']; custodyOfferParseFailure: boolean } {
+  const parsedExtra = safeParseExtra(rawExtra);
+  const { hostExtra, pluginMessage: legacyPluginMessage } = splitMessageExtra(parsedExtra);
+  const parsedCustody = parseCustodyOfferRaw(rawCustodyOffer);
+  const custodyOfferV1 = parsedCustody.kind === 'valid' ? parsedCustody.offer : undefined;
+  const custodyOfferParseFailure = parsedCustody.kind === 'invalid';
+  // Once the independent field exists it is authoritative, including when
+  // malformed (fail-closed); fall back only for pre-F288 embedded records.
+  if (rawPluginMessage === undefined) {
+    // Pre-F288 path: no independent field, fall back to legacy embedded record.
+    const extra =
+      Object.keys(hostExtra).length === 0 && legacyPluginMessage === undefined && custodyOfferV1 === undefined
+        ? undefined
+        : {
+            ...hostExtra,
+            ...(legacyPluginMessage ? { pluginMessage: legacyPluginMessage } : {}),
+            ...(custodyOfferV1 ? { custodyOfferV1 } : {}),
+          };
+    return { extra, custodyOfferParseFailure };
+  }
+  // F288 path: independent field exists. Preserve it even when invalid so
+  // projectEnvelope enters the plugin branch and fail-closes (codex P1 fix).
+  const pluginMessage = safeParsePluginMessage(rawPluginMessage);
+  // When pluginMessage parsed to undefined (malformed), keep an invalid marker
+  // object so `extra.pluginMessage !== undefined` remains true — projectEnvelope
+  // will detect the malformed payload via readPluginMessageExtra and return null.
+  const pluginValue = pluginMessage ?? ({} as StoredPluginMessage);
+  return {
+    extra: { ...hostExtra, pluginMessage: pluginValue, ...(custodyOfferV1 ? { custodyOfferV1 } : {}) },
+    custodyOfferParseFailure,
+  };
+}
+
+type CustodyOfferCasSnapshot =
+  | {
+      kind: 'ready';
+      content: string;
+      rawContentBlocks: string;
+      rawCurrentOffer: string;
+      currentOffer: CustodyOfferV1 | null;
+      actualSourceRevision: string;
+    }
+  | {
+      kind: 'failure';
+      result: Extract<CustodyOfferTransitionResult, { kind: 'not_found' | 'invalid_state' }>;
+    };
+
+async function readCustodyOfferCasSnapshot(redis: RedisClient, hashKey: string): Promise<CustodyOfferCasSnapshot> {
+  const [storedId, content, rawContentBlocks, rawCurrentOffer, recall, tombstone] = await redis.hmget(
+    hashKey,
+    'id',
+    'content',
+    'contentBlocks',
+    'custodyOfferV1',
+    'recall',
+    '_tombstone',
+  );
+  if (!storedId) return { kind: 'failure', result: { kind: 'not_found' } };
+  if (recall || tombstone) return { kind: 'failure', result: { kind: 'invalid_state' } };
+
+  const normalizedBlocks = rawContentBlocks ?? '';
+  const contentBlocks = normalizedBlocks ? safeParseContentBlocks(normalizedBlocks) : undefined;
+  if (normalizedBlocks && !contentBlocks) {
+    return { kind: 'failure', result: { kind: 'invalid_state' } };
+  }
+  const normalizedContent = content ?? '';
+  const actualSourceRevision = deriveGrowingSourceMessageRevision({
+    content: normalizedContent,
+    contentBlocks,
+  });
+  const parsedCustody = parseCustodyOfferRaw(rawCurrentOffer);
+  if (parsedCustody.kind === 'invalid') {
+    return { kind: 'failure', result: { kind: 'invalid_state' } };
+  }
+  const currentOffer = parsedCustody.kind === 'valid' ? parsedCustody.offer : null;
+  return {
+    kind: 'ready',
+    content: normalizedContent,
+    rawContentBlocks: normalizedBlocks,
+    rawCurrentOffer: rawCurrentOffer ?? '',
+    currentOffer,
+    actualSourceRevision,
+  };
+}
+
+type CustodyOfferCasReceipt =
+  | { kind: 'updated_hash'; fields: unknown[] }
+  | Exclude<CustodyOfferTransitionResult, { kind: 'updated' }>;
+
+function parseCustodyOfferCasReceipt(result: unknown): CustodyOfferCasReceipt {
+  if (!Array.isArray(result)) throw new Error('custody offer CAS returned malformed Redis receipt');
+  const code = Number(result[0]);
+  if (code === -1) return { kind: 'not_found' };
+  if (code === -2) return { kind: 'source_revision_mismatch' };
+  if (code === -3) return { kind: 'invalid_state' };
+  if (code === 1) return { kind: 'updated_hash', fields: result.slice(1) };
+  if (code !== 0) throw new Error('custody offer CAS returned unknown Redis receipt');
+
+  const concurrent = parseCustodyOfferRaw(typeof result[1] === 'string' ? result[1] : '');
+  if (concurrent.kind === 'invalid') return { kind: 'invalid_state' };
+  return {
+    kind: 'state_conflict',
+    currentOffer: concurrent.kind === 'valid' ? concurrent.offer : null,
+  };
+}
+
+const USER_MENTION_HANDLING_REASONS = new Set<UserMentionHandlingReason>(['viewed', 'replied', 'ignored']);
+
+function parseUserMentionHandlingMetadata(raw: string): UserMentionHandlingMetadata {
+  const parsed = JSON.parse(raw) as { reason?: unknown; handledAt?: unknown };
+  if (
+    typeof parsed.reason !== 'string' ||
+    !USER_MENTION_HANDLING_REASONS.has(parsed.reason as UserMentionHandlingReason) ||
+    typeof parsed.handledAt !== 'number' ||
+    !Number.isSafeInteger(parsed.handledAt) ||
+    parsed.handledAt < 0
+  ) {
+    throw new Error('Invalid user mention handling metadata');
+  }
+  return { reason: parsed.reason as UserMentionHandlingReason, handledAt: parsed.handledAt };
+}
 
 export class RedisMessageStore {
+  async getLastUserMentionHandling(userId: string) {
+    const result = (await this.redis.eval(
+      READ_LAST_USER_MENTION_HANDLING_LUA,
+      4,
+      `msg:user-requests:latest:${userId}`,
+      `msg:user-requests:pending:${userId}`,
+      `msg:user-requests:closed:${userId}`,
+      'msg:user-requests:last-handling',
+      userId,
+      this.keyPrefix,
+    )) as [string, number, number] | null;
+    return result ? { undoId: result[0], handled: Number(result[1]), remaining: Number(result[2]) } : null;
+  }
+
+  async getUserMentionStateRevisions(userId: string): Promise<Record<string, number>> {
+    const rows = await this.redis.hgetall(`msg:user-requests:revision:${userId}`);
+    return Object.fromEntries(
+      Object.entries(rows).map(([thread, raw]) => {
+        const revision = Number(raw);
+        if (!/^(0|[1-9]\d*)$/u.test(raw) || !Number.isSafeInteger(revision) || revision < 0)
+          throw new Error('Invalid mention revision');
+        return [thread, revision];
+      }),
+    );
+  }
+
+  async restoreUserMentionRequest(userId: string, threadId: string, messageId: string, expectedRevision: number) {
+    await this.listUserMentionRequests(userId);
+    await this.migrateHandledMentions(userId);
+    return (
+      Number(
+        await this.redis.eval(
+          RESTORE_USER_MENTION_LUA,
+          5,
+          `msg:user-requests:latest:${userId}`,
+          `msg:user-requests:pending:${userId}`,
+          `msg:user-requests:closed:${userId}`,
+          `msg:user-request-signals:${userId}:${threadId}`,
+          `msg:user-requests:handled:${userId}`,
+          this.keyPrefix,
+          userId,
+          threadId,
+          messageId,
+          String(expectedRevision),
+        ),
+      ) === 1
+    );
+  }
+
+  async initializeUserMentionInbox(startedAt: number): Promise<number> {
+    if (!Number.isSafeInteger(startedAt) || startedAt < 0) throw new Error('Invalid mention cutover');
+    await this.redis.set('msg:user-requests:cutover', String(startedAt), 'NX');
+    const saved = await this.redis.get('msg:user-requests:cutover');
+    const value = Number(saved);
+    if (saved === null || !Number.isSafeInteger(value) || value < 0) throw new Error('Invalid saved mention cutover');
+    let cursor = '0';
+    const prefix = `${this.keyPrefix}msg:user-requests:closed:`;
+    do {
+      const [next, keys] = await this.redis.scan(cursor, 'MATCH', `${prefix}*`, 'COUNT', 1000);
+      cursor = next;
+      for (const key of keys) {
+        if ((await this.redis.type(this.stripPrefix(key))) !== 'hash') continue;
+        const userId = key.slice(prefix.length);
+        await this.migrateHandledMentions(userId);
+      }
+    } while (cursor !== '0');
+    return value;
+  }
+
+  private async migrateHandledMentions(userId: string) {
+    await this.redis.eval(
+      MIGRATE_HANDLED_USER_MENTIONS_LUA,
+      3,
+      `msg:user-requests:closed:${userId}`,
+      `msg:user-requests:handled:${userId}`,
+      'msg:user-requests:handled-migrated',
+      this.keyPrefix,
+      userId,
+    );
+  }
+
+  async listHandledUserMentions(userId: string): Promise<StoredMessage[]> {
+    await this.migrateHandledMentions(userId);
+    const history = await this.redis.hgetall(`msg:user-requests:handled:${userId}`);
+    const messages = await Promise.all(Object.keys(history).map((id) => this.getById(id)));
+    return messages
+      .filter(
+        (m): m is StoredMessage =>
+          m !== null && m.userId === userId && m.threadId === history[m.id] && userMentionEvent(m) === 'request',
+      )
+      .sort((a, b) => b.id.localeCompare(a.id));
+  }
+
+  async getUserMentionHandlingMetadata(userId: string): Promise<Record<string, UserMentionHandlingMetadata>> {
+    await this.migrateHandledMentions(userId);
+    const rows = await this.redis.hgetall(`msg:user-requests:handled-meta:${userId}`);
+    return Object.fromEntries(Object.entries(rows).map(([id, raw]) => [id, parseUserMentionHandlingMetadata(raw)]));
+  }
+
+  async handleUserMentionRequests(userId: string, refs: UserMentionHandlingRef[]) {
+    const undoId = randomUUID();
+    const handled = await this.redis.eval(
+      HANDLE_USER_MENTIONS_LUA,
+      6,
+      `msg:user-requests:latest:${userId}`,
+      `msg:user-requests:pending:${userId}`,
+      `msg:user-requests:closed:${userId}`,
+      `msg:user-requests:undo:${userId}:${undoId}`,
+      `msg:user-requests:handled:${userId}`,
+      `msg:user-requests:last-handling`,
+      JSON.stringify(refs),
+      this.keyPrefix,
+      userId,
+      undoId,
+      String(Date.now()),
+    );
+    return handled === null ? null : { handled: Number(handled), undoId };
+  }
+
+  async undoUserMentionHandling(userId: string, undoId: string) {
+    const restored = await this.redis.eval(
+      UNDO_USER_MENTIONS_LUA,
+      6,
+      `msg:user-requests:latest:${userId}`,
+      `msg:user-requests:pending:${userId}`,
+      `msg:user-requests:closed:${userId}`,
+      `msg:user-requests:undo:${userId}:${undoId}`,
+      `msg:user-requests:handled:${userId}`,
+      `msg:user-requests:last-handling`,
+      this.keyPrefix,
+      userId,
+    );
+    return restored === null ? null : { restored: Number(restored) };
+  }
+
+  async listUserMentionRequests(userId: string): Promise<StoredMessage[]> {
+    let result: string[];
+    do {
+      result = (await this.redis.eval(
+        READ_USER_MENTIONS_LUA,
+        5,
+        MessageKeys.user(userId),
+        `msg:user-requests:latest:${userId}`,
+        `msg:user-requests:pending:${userId}`,
+        `msg:user-requests:version:${userId}`,
+        `msg:user-requests:closed:${userId}`,
+        this.keyPrefix,
+        userId,
+      )) as string[];
+    } while (result[0] === 'more');
+    const ids = result.slice(1);
+    const messages = await Promise.all(ids.map((id) => this.getById(id)));
+    return messages
+      .filter((message): message is StoredMessage => message !== null && message.userId === userId)
+      .sort((a, b) => b.id.localeCompare(a.id));
+  }
+
+  async resolveUserMentionRequest(
+    userId: string,
+    threadId: string,
+    expectedMessageId: string,
+    expectedRevision?: number,
+  ): Promise<boolean> {
+    return (
+      Number(
+        await this.redis.eval(
+          RESOLVE_USER_MENTION_LUA,
+          6,
+          `msg:user-requests:latest:${userId}`,
+          `msg:user-requests:pending:${userId}`,
+          `msg:user-requests:closed:${userId}`,
+          `msg:user-request-signals:${userId}:${threadId}`,
+          `msg:user-requests:handled:${userId}`,
+          MessageKeys.detail(expectedMessageId),
+          threadId,
+          expectedMessageId,
+          expectedRevision === undefined ? '' : String(expectedRevision),
+          userId,
+          String(Date.now()),
+        ),
+      ) === 1
+    );
+  }
+
+  async resolveUserMentionRequestFromRead(
+    userId: string,
+    threadId: string,
+    upToMessageId: string,
+    handledAt: number,
+  ): Promise<boolean> {
+    if (!Number.isSafeInteger(handledAt) || handledAt < 0) return false;
+    const target = await this.getById(upToMessageId);
+    if (
+      !target ||
+      target.threadId !== threadId ||
+      !isDurableOwnerReadEvidence(target) ||
+      !passesManagedHoldViewerBoundary(target, userId)
+    )
+      return false;
+    await this.ensureVisibilityMigrated(threadId);
+    return (
+      Number(
+        await this.redis.eval(
+          RESOLVE_USER_MENTION_FROM_READ_LUA,
+          8,
+          `msg:user-requests:latest:${userId}`,
+          `msg:user-requests:pending:${userId}`,
+          `msg:user-requests:closed:${userId}`,
+          `msg:user-request-signals:${userId}:${threadId}`,
+          `msg:user-requests:handled:${userId}`,
+          `msg:user-requests:handled-meta:${userId}`,
+          MessageKeys.detail(upToMessageId),
+          MessageKeys.threadVisibility(threadId),
+          threadId,
+          this.keyPrefix,
+          userId,
+          upToMessageId,
+          String(handledAt),
+        ),
+      ) === 1
+    );
+  }
+
+  onTimelineChanged?: MessageAppendListener;
   private readonly redis: RedisClient;
+  private readonly readDiagnostics?: MessageReadObserver;
   /** null means no expiration/pruning (persistent retention). */
   private readonly ttlSeconds: number | null;
   /** F102 KD-34: Listener called after every successful append (fire-and-forget) */
-  onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp' | 'content'>) => void;
+  onAppend?: MessageAppendListener;
 
   constructor(
     redis: RedisClient,
     options?: {
       ttlSeconds?: number;
-      onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp' | 'content'>) => void;
+      onAppend?: MessageAppendListener;
+      readDiagnostics?: MessageReadObserver;
     },
   ) {
     this.redis = redis;
+    this.readDiagnostics = options?.readDiagnostics;
     this.onAppend = options?.onAppend;
-    const ttl = options?.ttlSeconds;
-    if (ttl === undefined) {
-      this.ttlSeconds = DEFAULT_TTL_SECONDS;
-    } else if (!Number.isFinite(ttl)) {
-      this.ttlSeconds = DEFAULT_TTL_SECONDS;
-    } else if (ttl <= 0) {
+    const raw = options?.ttlSeconds ?? DEFAULT_TTL_SECONDS;
+    if (!Number.isFinite(raw) || raw <= 0) {
       this.ttlSeconds = null;
     } else {
-      this.ttlSeconds = Math.floor(ttl);
+      this.ttlSeconds = Math.floor(raw);
     }
   }
 
-  async append(msg: AppendMessageInput): Promise<StoredMessage> {
+  /** Resolve ioredis keyPrefix (SCAN doesn't auto-apply it) */
+  private get keyPrefix(): string {
+    return (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
+  }
+
+  /** Strip keyPrefix from a raw SCAN key for use with normal commands (which auto-prefix) */
+  private stripPrefix(rawKey: string): string {
+    const p = this.keyPrefix;
+    return p && rawKey.startsWith(p) ? rawKey.slice(p.length) : rawKey;
+  }
+
+  async append(input: AppendMessageInput): Promise<StoredMessage> {
+    const result = await this.appendWithReservedId(input);
+    if (result.outcome !== 'stored') throw new Error('plain message append returned a Queue admission outcome');
+    return result.message;
+  }
+
+  async appendIdempotent(input: AppendMessageInput): Promise<IdempotentAppendResult> {
+    const result = await this.appendWithReservedId(input);
+    if (result.outcome !== 'stored') throw new Error('idempotent message append returned a Queue admission outcome');
+    return { message: result.message, idempotent: result.replayed };
+  }
+
+  async appendWithQueueLedgerAdmission(
+    input: AppendMessageInput,
+    buildAdmission: QueueLedgerAdmissionFactory,
+    ledgerStore: QueueLedgerStore,
+    maxQueuedUserEntries?: number,
+  ): Promise<QueueLedgerMessageAdmissionResult> {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+      throw new Error('Redis message admission requires the matching Redis Queue ledger');
+    }
+    const messageId = input.reservedId ?? generateSortableId(input.timestamp);
+    const entries = [...buildAdmission(messageId)];
+    for (const entry of entries) {
+      assertQueueLedgerEntry(entry);
+      if (
+        entry.threadId !== (input.threadId ?? DEFAULT_THREAD_ID) ||
+        entry.payload.sourceRecordId !== messageId ||
+        entry.payload.messageId !== messageId
+      ) {
+        throw new Error('Queue admission row must be bound to its exact message identity');
+      }
+    }
+    const result = await this.appendWithReservedId(
+      prepareQueueLedgerMessageAdmission(input, messageId, entries),
+      messageId,
+      {
+        entries,
+        maxQueuedUserEntries,
+      },
+    );
+    if (result.outcome === 'queue_full') return { outcome: 'full' };
+    if (result.outcome === 'queue_conflict') {
+      throw new Error(`Queue admission identity conflict for message ${messageId}`);
+    }
+    if (result.outcome !== 'stored') throw new Error('unreachable Queue admission outcome');
+    if (!result.replayed) {
+      return { outcome: 'enqueued', message: result.message, entries, deduped: false };
+    }
+    assertQueueMessageReplay(result.message, input);
+    const identities = [...buildAdmission(result.message.id, undefined, result.message)];
+    const persisted = await Promise.all(identities.map((entry) => ledgerStore.get(entry.threadId, entry.id)));
+    // A receiver may retire pending work while this replay is resolving.
+    // The committed source remains the acknowledgement; never recreate its row.
+    if (persisted.every((entry) => entry === null)) {
+      return { outcome: 'enqueued', message: result.message, entries: [], deduped: true };
+    }
+    const replayEntries = [
+      ...buildAdmission(
+        result.message.id,
+        persisted.filter((entry): entry is QueueLedgerEntry => entry !== null),
+        result.message,
+      ),
+    ];
+    if (
+      persisted.some((entry) => entry === null) ||
+      !persisted.every((entry, index) => queueLedgerAdmissionsMatch(entry!, replayEntries[index]!))
+    ) {
+      throw new Error(`Queue admission identity conflict for replayed message ${result.message.id}`);
+    }
+    return {
+      outcome: 'enqueued',
+      message: result.message,
+      entries: persisted.filter((entry): entry is QueueLedgerEntry => entry !== null),
+      deduped: true,
+    };
+  }
+
+  async appendNoticeWithPrivateQueueAdmission(
+    notice: AppendMessageInput,
+    entries: readonly QueueLedgerEntry[],
+    ledgerStore: QueueLedgerStore,
+  ): Promise<QueueLedgerMessageAdmissionResult> {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+      throw new Error('Redis message admission requires the matching Redis Queue ledger');
+    }
+    assertPrivateNoticeQueueAdmission(entries);
+    const first = entries[0];
+    if (!first) throw new Error('visible-notice admission requires at least one private row');
+    // The same single atomic append+admit transition the bound variant uses, in its private mode:
+    // the rows stay unbound and their replay verdict comes from the admission receipt. One
+    // transition, so there is no window where a crash can publish the notice without the work, or
+    // admit work whose producer was handed an error.
+    const result = await this.appendWithReservedId(notice, undefined, { entries, admissionMode: 'private' });
+    if (result.outcome === 'queue_full') return { outcome: 'full' };
+    if (result.outcome === 'queue_conflict') {
+      throw new Error('Queue admission identity conflict for a visible-notice private input');
+    }
+    if (result.outcome !== 'stored') throw new Error('unreachable Queue admission outcome');
+    // `replayed` is the notice replaying on its own idempotency key; `queueDeduped` is the work
+    // behind it already being settled. Either one means this call admitted nothing new, and the
+    // settled rows must be reported as the ledger sees them — a retired identity hands back no
+    // entry at all, so the caller cannot mistake finished work for something to start.
+    const deduped = result.replayed || result.queueDeduped === true;
+    const settled = deduped ? await verifyRedisQueueLedgerReplay(this.redis, first.threadId, entries) : null;
+    if (settled?.outcome === 'conflict') {
+      throw new Error('Queue admission identity conflict for a visible-notice private input');
+    }
+    return {
+      outcome: 'enqueued',
+      message: result.message,
+      entries: settled ? settled.entries : [...entries],
+      deduped,
+    };
+  }
+
+  async enqueueExistingMessageWithQueueLedgerAdmission(
+    messageId: string,
+    entries: readonly QueueLedgerEntry[],
+    ledgerStore: QueueLedgerStore,
+    maxQueuedUserEntries?: number,
+  ): Promise<QueueLedgerMessageAdmissionResult> {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+      throw new Error('Redis message admission requires the matching Redis Queue ledger');
+    }
+    if (entries.length === 0) throw new Error('Queue admission requires at least one row');
+    const threadId = entries[0]?.threadId;
+    for (const entry of entries) {
+      assertQueueLedgerEntry(entry);
+      if (
+        entry.threadId !== threadId ||
+        entry.payload.sourceRecordId !== messageId ||
+        entry.payload.messageId !== messageId
+      ) {
+        throw new Error('Queue admission row must be bound to its exact existing message identity');
+      }
+    }
+    const source = await this.getById(messageId);
+    if (!source) throw new Error(`Queue source message does not exist: ${messageId}`);
+    const sourceLifecycle = prepareQueueLedgerSourceLifecycle(source, entries);
+    const outcome = Number(
+      await this.redis.eval(
+        ENQUEUE_EXISTING_MESSAGE_WITH_LEDGER_LUA,
+        4,
+        MessageKeys.detail(messageId),
+        QueueLedgerKeys.entries(threadId!),
+        QueueLedgerKeys.order(threadId!),
+        QueueLedgerKeys.messageIndex(threadId!),
+        messageId,
+        maxQueuedUserEntries === undefined ? '-1' : String(maxQueuedUserEntries),
+        String(entries.length),
+        ...entries.map((entry) => JSON.stringify(entry)),
+        JSON.stringify(sourceLifecycle),
+      ),
+    );
+    if (outcome === 0) return { outcome: 'full' };
+    if (outcome === -2) throw new Error(`Queue source message does not exist: ${messageId}`);
+    if (outcome === -3) throw new Error(`Queue source message already has delivery ownership: ${messageId}`);
+    if (outcome === -4) throw new Error(`Queue source message has conflicting lifecycle identity: ${messageId}`);
+    if (outcome === -5) throw new Error(`Queue source target was already dispatched: ${messageId}`);
+    if (outcome === -1) throw new Error(`Queue admission identity conflict for existing message ${messageId}`);
+    if (outcome !== 1 && outcome !== 2)
+      throw new Error(`unexpected existing Message/Queue admission result: ${outcome}`);
+    const message = await this.getById(messageId);
+    if (!message) throw new Error(`Queue source message disappeared after admission: ${messageId}`);
+    const persisted =
+      outcome === 1
+        ? entries.map((entry) => structuredClone(entry))
+        : await Promise.all(entries.map((entry) => ledgerStore.get(entry.threadId, entry.id)));
+    if (
+      persisted.some((entry) => entry === null) ||
+      !persisted.every((entry, index) => queueLedgerAdmissionsMatch(entry!, entries[index]!))
+    ) {
+      throw new Error(`Queue admission identity conflict for replayed existing message ${messageId}`);
+    }
+    return {
+      outcome: 'enqueued',
+      message,
+      entries: persisted.filter((entry): entry is QueueLedgerEntry => entry !== null),
+      deduped: outcome === 2,
+    };
+  }
+
+  async commitLifecycleResponseTerminalWithQueueLedgerAdmission(
+    messageId: string,
+    patch: LifecycleResponseTerminalPatch,
+    entries: readonly QueueLedgerEntry[],
+    ledgerStore: QueueLedgerStore,
+    maxQueuedUserEntries?: number,
+  ): Promise<QueueLedgerLifecycleAdmissionResult> {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+      throw new Error('Redis lifecycle admission requires the matching Redis Queue ledger');
+    }
+    if (entries.length === 0) throw new Error('lifecycle Queue admission requires at least one row');
+    const threadId = entries[0]?.threadId;
+    for (const entry of entries) {
+      assertQueueLedgerEntry(entry);
+      if (
+        entry.threadId !== threadId ||
+        entry.payload.sourceRecordId !== messageId ||
+        entry.payload.messageId !== messageId
+      ) {
+        throw new Error('lifecycle Queue admission row must bind its exact response message');
+      }
+    }
+    await this.ensureVisibilityMigrated(threadId!);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const key = MessageKeys.detail(messageId);
+      const expectedLifecycleRaw = (await this.redis.hget(key, 'lifecycle')) ?? '';
+      const current = await this.getById(messageId);
+      if (!current) return { kind: 'not_found' };
+      const prepared = prepareLifecycleResponseTerminalWithLedgerTargets(current, patch, entries);
+      if (prepared.kind !== 'prepared') return prepared;
+
+      if (prepared.entries.length === 0) {
+        const activeRows = await Promise.all(entries.map((entry) => ledgerStore.get(entry.threadId, entry.id)));
+        if (activeRows.some((entry) => entry !== null)) {
+          return { kind: 'conflict', reason: 'different_terminal', message: current };
+        }
+        return {
+          kind: prepared.lifecycleReplayed ? 'replayed' : 'applied',
+          message: prepared.message,
+          entries: [],
+          ledgerReplayed: true,
+        };
+      }
+
+      const currentRaws = await this.redis.hmget(
+        QueueLedgerKeys.entries(threadId!),
+        ...prepared.entries.map((entry) => entry.id),
+      );
+      const presentCount = currentRaws.filter((raw) => typeof raw === 'string').length;
+      if (presentCount !== 0 && presentCount !== prepared.entries.length) {
+        return { kind: 'conflict', reason: 'different_terminal', message: current };
+      }
+      if (presentCount === prepared.entries.length) {
+        const existing = currentRaws.map((raw) => hydrateQueueLedgerEntry(raw as string));
+        if (!existing.every((entry, index) => queueLedgerAdmissionsMatch(entry, prepared.entries[index]!))) {
+          return { kind: 'conflict', reason: 'different_terminal', message: current };
+        }
+      }
+
+      const expectedMode = presentCount === 0 ? 'absent' : 'present';
+      // A terminal replay is semantically equal even when object-property order
+      // differs after hydrate -> prepare. Redis stores lifecycle JSON verbatim,
+      // so use the exact hydrated ordering for the replay byte comparison.
+      const terminalMessageForLua = prepared.lifecycleReplayed ? current : prepared.message;
+      const outcome = Number(
+        await this.redis.eval(
+          COMMIT_LIFECYCLE_RESPONSE_WITH_LEDGER_LUA,
+          6,
+          key,
+          QueueLedgerKeys.entries(threadId!),
+          QueueLedgerKeys.order(threadId!),
+          QueueLedgerKeys.messageIndex(threadId!),
+          MessageKeys.threadVisibility(threadId!),
+          MessageKeys.threadVisibilityMeta(threadId!),
+          ...lifecycleResponseTerminalLuaArgs(patch, terminalMessageForLua, expectedLifecycleRaw),
+          maxQueuedUserEntries === undefined ? '-1' : String(maxQueuedUserEntries),
+          String(prepared.entries.length),
+          expectedMode,
+          ...prepared.entries.map((entry) => JSON.stringify(entry)),
+          ...currentRaws.map((raw) => raw ?? ''),
+        ),
+      );
+      if (outcome === -10) continue;
+      if (outcome === 0) return { kind: 'full' };
+      if (outcome === -1) return { kind: 'not_found' };
+      if (outcome === -2) return { kind: 'conflict', reason: 'not_response', message: current };
+      if (outcome === -3) return { kind: 'conflict', reason: 'invocation_mismatch', message: current };
+      // A concurrent source→target dispatch changes only lifecycle.dispatchRefs.
+      // Re-read so the next pass can subtract that target from Queue admission;
+      // a genuinely different terminal is rejected by the pure prepare step.
+      if (outcome === -4) continue;
+      if (outcome === -5) {
+        return { kind: 'conflict', reason: 'different_terminal', message: current };
+      }
+      if (![1, 2, 3, 4].includes(outcome)) {
+        throw new Error(`unexpected lifecycle Message/Queue admission result: ${outcome}`);
+      }
+      const message = await this.getById(messageId);
+      if (!message) throw new Error(`lifecycle response disappeared after Queue admission: ${messageId}`);
+      const persisted = await Promise.all(prepared.entries.map((entry) => ledgerStore.get(entry.threadId, entry.id)));
+      if (persisted.some((entry) => entry === null)) {
+        throw new Error(`lifecycle Queue admission rows disappeared after commit: ${messageId}`);
+      }
+      return {
+        kind: outcome === 1 || outcome === 4 ? 'applied' : 'replayed',
+        message,
+        entries: persisted.filter((entry): entry is QueueLedgerEntry => entry !== null),
+        ledgerReplayed: outcome === 2 || outcome === 4,
+      };
+    }
+    const message = await this.getById(messageId);
+    if (!message) return { kind: 'not_found' };
+    return { kind: 'conflict', reason: 'different_terminal', message };
+  }
+
+  private async appendWithReservedId(
+    input: AppendMessageInput,
+    reservedId?: string,
+    queue?: QueueAppendOptions,
+  ): Promise<ReservedAppendResult> {
+    const msg = canonicalizeAppendMessageInput(input);
     const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
-    const id = generateSortableId(msg.timestamp);
     const idempotencyIndexKey = msg.idempotencyKey
-      ? MessageKeys.idempotency(msg.userId, threadId, msg.idempotencyKey)
+      ? MessageKeys.idempotency(msg.userId, messageIdempotencyScope(msg), msg.idempotencyKey)
       : null;
 
+    // Keep the common replay path ahead of ID generation; the Lua check below
+    // remains the authoritative claim for concurrent callers.
     if (idempotencyIndexKey) {
       const existingId = await this.redis.get(idempotencyIndexKey);
       if (existingId) {
         const existingMessage = await this.getById(existingId);
         if (existingMessage) {
-          return existingMessage;
+          return { outcome: 'stored', message: existingMessage, replayed: true };
         }
-        await this.redis.del(idempotencyIndexKey);
       }
-
-      const claimed =
-        this.ttlSeconds === null
-          ? await this.redis.set(idempotencyIndexKey, id, 'NX')
-          : await this.redis.set(idempotencyIndexKey, id, 'EX', this.ttlSeconds, 'NX');
-
-      if (claimed !== 'OK') {
-        const claimedId = await this.redis.get(idempotencyIndexKey);
-        if (claimedId) {
-          const existingMessage = await this.getById(claimedId);
-          if (existingMessage) {
-            return existingMessage;
-          }
-        }
-        throw new Error('message idempotency key contention');
-      }
+      // Stale reference: do NOT delete here (avoids a check-then-act race).
+      // APPEND_WITH_VISIBILITY_LUA will reclaim it atomically (#1210).
     }
 
-    const { idempotencyKey, ...payload } = msg;
+    if (msg.reservedId !== undefined && !/^\d{16}-\d{6,}-[0-9a-f]{8}$/.test(msg.reservedId))
+      throw new TypeError('reserved message id has invalid shape');
+    if (reservedId !== undefined && msg.reservedId !== undefined && reservedId !== msg.reservedId)
+      throw new Error('reserved message id conflict');
+    const id = reservedId ?? msg.reservedId ?? generateSortableId(msg.timestamp);
+    const { idempotencyKey, reservedId: mediaReservedId, ...payload } = msg;
+    void mediaReservedId;
     void idempotencyKey;
-    const stored: StoredMessage = { ...payload, id, threadId };
-    const score = msg.timestamp;
-
-    const hashKey = MessageKeys.detail(id);
-    const pipeline = this.redis.multi();
-
-    // Store message hash (including threadId, contentBlocks, toolEvents, metadata)
-    pipeline.hset(hashKey, {
+    const stored: StoredMessage = {
+      ...payload,
       id,
       threadId,
-      userId: msg.userId,
-      catId: msg.catId ?? '',
-      content: msg.content,
-      contentBlocks: msg.contentBlocks ? JSON.stringify(msg.contentBlocks) : '',
-      toolEvents: msg.toolEvents ? JSON.stringify(msg.toolEvents) : '',
-      metadata: msg.metadata ? JSON.stringify(msg.metadata) : '',
-      extra: msg.extra ? JSON.stringify(msg.extra) : '',
-      mentions: JSON.stringify(msg.mentions),
-      timestamp: String(msg.timestamp),
-      ...(msg.thinking ? { thinking: msg.thinking } : {}),
-      ...(msg.origin ? { origin: msg.origin } : {}),
-      ...(msg.visibility ? { visibility: msg.visibility } : {}),
-      ...(msg.whisperTo ? { whisperTo: JSON.stringify(msg.whisperTo) } : {}),
-      ...(msg.source ? { source: JSON.stringify(msg.source) } : {}),
-      ...(msg.mentionsUser ? { mentionsUser: '1' } : {}),
-      ...(msg.deliveryStatus ? { deliveryStatus: msg.deliveryStatus } : {}),
-      ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
-    });
-    if (this.ttlSeconds !== null) {
-      pipeline.expire(hashKey, this.ttlSeconds);
+    };
+    const score = msg.timestamp;
+    const hashKey = MessageKeys.detail(id);
+    const { custodyOfferV1, ...appendExtra } = msg.extra ?? {};
+
+    // Build hash fields as flat key-value pairs for the Lua HSET
+    const hashFields: string[] = [
+      'id',
+      id,
+      'threadId',
+      threadId,
+      'userId',
+      msg.userId,
+      'from',
+      JSON.stringify(msg.from),
+      'catId',
+      msg.catId ?? '',
+      'content',
+      msg.content,
+      'lifecycle',
+      msg.lifecycle ? JSON.stringify(msg.lifecycle) : '',
+      'contentBlocks',
+      msg.contentBlocks ? JSON.stringify(msg.contentBlocks) : '',
+      'toolEvents',
+      msg.toolEvents ? JSON.stringify(msg.toolEvents) : '',
+      'metadata',
+      msg.metadata ? JSON.stringify(msg.metadata) : '',
+      'extra',
+      Object.keys(appendExtra).length > 0 ? serializeExtra(appendExtra) : '',
+      'mentions',
+      JSON.stringify(msg.mentions),
+      'timestamp',
+      String(msg.timestamp),
+    ];
+    if (msg.thinking) hashFields.push('thinking', msg.thinking);
+    if (msg.origin) hashFields.push('origin', msg.origin);
+    if (msg.visibility) hashFields.push('visibility', msg.visibility);
+    if (msg.whisperTo) hashFields.push('whisperTo', JSON.stringify(msg.whisperTo));
+    if (msg.source) hashFields.push('source', JSON.stringify(msg.source));
+    if (msg.mentionsUser) hashFields.push('mentionsUser', '1');
+    if (msg.deliveryStatus) hashFields.push('deliveryStatus', msg.deliveryStatus);
+    if (msg.replyTo) hashFields.push('replyTo', msg.replyTo);
+    // Mention catIds for ZADD into per-cat mention sets
+    const mentionCatIds = msg.mentions as readonly string[];
+    const ttlSec = this.ttlSeconds ?? 0;
+
+    // Shape (a) atomic append: all data writes + visibility writes + idempotency
+    // in one Lua linearization point. Combines #1200 visibility and #1210 atomic
+    // idempotency. See §8.6 of 1200-cursor-order-analysis.md.
+    //
+    // ARGV layout: kp, id, threadId, score, userId, isQueued, ttlSeconds,
+    //   idemKeyRaw, mentionCount, ...mentionCatIds, hashFieldPairCount, ...hashFieldPairs
+    const argv: (string | number)[] = [
+      this.keyPrefix, // [1] keyPrefix
+      id, // [2] msgId
+      threadId, // [3] threadId
+      String(score), // [4] score
+      msg.userId, // [5] userId
+      // #1269: timeline-published queued cat speech gets visibilitySeq at append
+      msg.deliveryStatus === 'queued' && !isTimelinePublished(stored) ? '1' : '', // [6] isQueued
+      String(ttlSec), // [7] ttlSeconds
+      idempotencyIndexKey ?? '', // [8] idemKeyRaw ('' if none)
+      String(mentionCatIds.length), // [9] mentionCount
+      ...mentionCatIds, // [10..9+N] mention catIds
+      String(hashFields.length / 2), // [10+N] hashFieldPairCount
+      ...hashFields, // [11+N..] hash field pairs
+      queue?.maxQueuedUserEntries === undefined ? '-1' : String(queue.maxQueuedUserEntries),
+      String(queue?.entries.length ?? 0),
+      ...(queue?.entries.map((entry) => JSON.stringify(entry)) ?? []),
+      ...(queue ? [queue.admissionMode ?? 'bound'] : []),
+      // Computed here, never in Lua: the receipt comparison must use the exact same bytes the
+      // in-memory store compares, or the two backends could disagree about what a replay is.
+      ...(queue?.admissionMode === 'private' ? queue.entries.map(queueLedgerAdmissionFingerprint) : []),
+    ];
+
+    // #1200/#1269: ensure visibility migration is complete BEFORE the append.
+    // Timeline-published messages (delivered + queued cat speech) need the index.
+    // Lua marks the thread as migrated via HSETNX. Without this, the first
+    // post-deploy append to a legacy thread would skip backfilling legacy members.
+    if (isTimelinePublished(stored)) {
+      await this.ensureVisibilityMigrated(threadId);
     }
 
-    // Add to global timeline
-    pipeline.zadd(MessageKeys.TIMELINE, String(score), id);
+    // Lua returns:
+    // - string (existing msgId) → idempotency replay, return existing message
+    // - number (visibilitySeq) → new message created, seq > 0 for non-queued
+    const queueKeys = queue
+      ? [
+          QueueLedgerKeys.entries(threadId),
+          QueueLedgerKeys.order(threadId),
+          QueueLedgerKeys.messageIndex(threadId),
+          // The receipt hash only participates in a private admission, but ioredis needs the key
+          // declared up front for cluster slot routing, so it is always passed alongside the rest.
+          ...(queue.admissionMode === 'private' ? [QueueLedgerKeys.privateAdmissions(threadId)] : []),
+        ]
+      : [];
+    const result = await this.redis.eval(
+      APPEND_WITH_VISIBILITY_LUA,
+      queue ? queueKeys.length + 1 : 1,
+      hashKey,
+      ...queueKeys,
+      ...argv,
+    );
 
-    // Add to user timeline
-    pipeline.zadd(MessageKeys.user(msg.userId), String(score), id);
-
-    // Add to thread timeline
-    pipeline.zadd(MessageKeys.thread(threadId), String(score), id);
-
-    // Add to per-cat mention sets
-    for (const catId of msg.mentions) {
-      pipeline.zadd(MessageKeys.mentions(catId), String(score), id);
-    }
-
-    if (this.ttlSeconds !== null) {
-      // Prune expired entries from sorted sets (score < now - TTL).
-      const cutoff = String(Date.now() - this.ttlSeconds * 1000);
-      pipeline.zremrangebyscore(MessageKeys.TIMELINE, '-inf', cutoff);
-      pipeline.zremrangebyscore(MessageKeys.user(msg.userId), '-inf', cutoff);
-      pipeline.zremrangebyscore(MessageKeys.thread(threadId), '-inf', cutoff);
-      for (const catId of msg.mentions) {
-        pipeline.zremrangebyscore(MessageKeys.mentions(catId), '-inf', cutoff);
+    if (queue) {
+      if (!Array.isArray(result)) throw new Error('invalid combined message/Queue admission reply');
+      const outcome = Number(result[0]);
+      if (outcome === 0) return { outcome: 'queue_full' };
+      if (outcome === -1) return { outcome: 'queue_conflict' };
+      if ((outcome !== 1 && outcome !== 2 && outcome !== 3) || typeof result[1] !== 'string') {
+        throw new Error('invalid combined message/Queue admission outcome');
       }
-
-      // Set EXPIRE on index zsets so "silent" keys eventually disappear
-      pipeline.expire(MessageKeys.TIMELINE, this.ttlSeconds);
-      pipeline.expire(MessageKeys.user(msg.userId), this.ttlSeconds);
-      pipeline.expire(MessageKeys.thread(threadId), this.ttlSeconds);
-      if (idempotencyIndexKey) {
-        pipeline.expire(idempotencyIndexKey, this.ttlSeconds);
-      }
-      for (const catId of msg.mentions) {
-        pipeline.expire(MessageKeys.mentions(catId), this.ttlSeconds);
-      }
-    }
-
-    try {
-      await pipeline.exec();
-    } catch (error) {
-      if (idempotencyIndexKey) {
-        const existingId = await this.redis.get(idempotencyIndexKey);
-        if (existingId === id) {
-          await this.redis.del(idempotencyIndexKey);
+      if (outcome === 2) {
+        const existingMessage = await this.getById(result[1]);
+        if (!existingMessage) {
+          throw new Error(`Idempotency winner ${result[1]} vanished before Queue replay hydration`);
         }
+        return { outcome: 'stored', message: existingMessage, replayed: true };
       }
-      throw error;
+    }
+
+    // #1210 idempotency: if Lua returned a string, a concurrent caller won.
+    if (typeof result === 'string' && result !== String(0)) {
+      const existingMessage = await this.getById(result);
+      if (existingMessage) {
+        return { outcome: 'stored', message: existingMessage, replayed: true };
+      }
+      // The concurrent winner's hash vanished (deleteByThread / TTL) between the
+      // Lua claim and this hydration. Do not fall through to the created path,
+      // which would fire onAppend for a message that was never persisted.
+      throw new Error(`Idempotency winner ${result} for key ${idempotencyKey} vanished before hydration`);
+    }
+
+    // #1200 P2-6: Lua returns allocated visibilitySeq (number) or 0 for queued.
+    // Inject into returned message so callers get canonical position without re-read.
+    const seqValue = queue && Array.isArray(result) ? result[1] : result;
+    const seq = typeof seqValue === 'number' ? seqValue : Number(seqValue);
+    if (seq > 0) {
+      stored.visibilitySeq = seq;
     }
 
     // F102 KD-34: fire-and-forget append listener for thread index updates
-    // P2 fix: wrap in try-catch to handle sync throws (Promise.resolve only catches async rejections)
     if (this.onAppend) {
       try {
         void Promise.resolve(this.onAppend(stored)).catch(() => {});
@@ -186,58 +2027,481 @@ export class RedisMessageStore {
       }
     }
 
-    return stored;
+    // Outcome 3: the notice is new, but every private identity behind it was already settled — the
+    // work must not be admitted twice, and the caller needs to know it was not.
+    const queueDeduped = queue && Array.isArray(result) && Number(result[0]) === 3;
+    return { outcome: 'stored', message: stored, replayed: false, ...(queueDeduped ? { queueDeduped } : {}) };
+  }
+
+  async getLatestThreadMessageIdIncludingQueued(threadId: string): Promise<string | null> {
+    const ids = await this.redis.zrevrange(MessageKeys.thread(threadId), 0, 0);
+    return ids[0] ?? null;
+  }
+
+  async getByIdempotencyKey(userId: string, threadId: string, idempotencyKey: string): Promise<StoredMessage | null> {
+    const messageId = await this.redis.get(MessageKeys.idempotency(userId, threadId, idempotencyKey));
+    return messageId ? this.getById(messageId) : null;
+  }
+
+  async appendAndObservePriorFrontier(msg: AppendMessageInput): Promise<ThreadObservedAppendResult> {
+    const canonical = canonicalizeAppendMessageInput(msg);
+    await this.ensureVisibilityMigrated(canonical.threadId ?? DEFAULT_THREAD_ID);
+    const result = await appendMessageAndObservePriorFrontier({
+      redis: this.redis,
+      message: msg,
+      ttlSeconds: this.ttlSeconds,
+      loadById: (messageId) => this.getById(messageId),
+      ...(this.onAppend ? { onAppend: this.onAppend } : {}),
+    });
+    return result;
   }
 
   async getById(id: string): Promise<StoredMessage | null> {
     const data = await this.redis.hgetall(MessageKeys.detail(id));
+    return this.hydrateHash(data);
+  }
+
+  async getArtifactById(id: string): Promise<StoredMessage | null> {
+    const messages = await this.hydrateMessages([id], { artifactOnly: true, strict: true, includeDeleted: true });
+    return messages[0] ?? null;
+  }
+
+  /** Read F278 marker sources in bounded, narrow Redis batches. */
+  async getPawFeelSourceProjections(ids: readonly string[]): Promise<Map<string, PawFeelSourceProjectionRead>> {
+    const reads = new Map<string, PawFeelSourceProjectionRead>();
+    const uniqueIds = [...new Set(ids)];
+    for (let start = 0; start < uniqueIds.length; start += PAW_FEEL_SOURCE_READ_BATCH_SIZE) {
+      await this.readPawFeelSourceProjectionBatch(
+        uniqueIds.slice(start, start + PAW_FEEL_SOURCE_READ_BATCH_SIZE),
+        reads,
+      );
+    }
+    return reads;
+  }
+
+  private async readPawFeelSourceProjectionBatch(
+    batch: readonly string[],
+    reads: Map<string, PawFeelSourceProjectionRead>,
+  ): Promise<void> {
+    const results = await this.executePawFeelSourceProjectionBatch(batch);
+    if (!results) {
+      for (const id of batch) reads.set(id, { kind: 'unavailable', reason: 'read_failed' });
+      return;
+    }
+    for (const [index, id] of batch.entries()) {
+      const result = results[index];
+      if (!result) {
+        reads.set(id, { kind: 'unavailable', reason: 'read_failed' });
+        continue;
+      }
+      const [error, fields] = result;
+      if (error || !fields) {
+        reads.set(id, { kind: 'unavailable', reason: 'read_failed' });
+        continue;
+      }
+      let message: PawFeelSourceMessageProjection | null;
+      try {
+        message = hydratePawFeelSourceProjection(fields);
+      } catch {
+        reads.set(id, { kind: 'unavailable', reason: 'read_failed' });
+        continue;
+      }
+      reads.set(id, message ? { kind: 'available', message } : { kind: 'unavailable', reason: 'not_found' });
+    }
+  }
+
+  private async executePawFeelSourceProjectionBatch(
+    batch: readonly string[],
+  ): Promise<PawFeelSourcePipelineResult[] | undefined> {
+    const pipeline = this.redis.pipeline();
+    for (const id of batch) pipeline.hmget(MessageKeys.detail(id), ...PAW_FEEL_SOURCE_FIELDS);
+    try {
+      return (await pipeline.exec()) as PawFeelSourcePipelineResult[];
+    } catch {
+      return undefined;
+    }
+  }
+
+  private hydrateOwnerComposerDraft(data: Record<string, string>): OwnerComposerDraft | null {
+    if (!data.ownerUserId || !data.threadId || data.version !== '1') return null;
+    const revision = Number(data.revision);
+    const updatedAt = Number(data.updatedAt);
+    if (!Number.isInteger(revision) || revision < 1 || !Number.isFinite(updatedAt)) return null;
+    const contentBlocks = safeParseContentBlocks(data.contentBlocks);
+    return {
+      version: 1,
+      ownerUserId: data.ownerUserId,
+      threadId: data.threadId,
+      revision,
+      text: data.text ?? '',
+      ...(contentBlocks ? { contentBlocks } : {}),
+      ...(data.replyTo ? { replyTo: data.replyTo } : {}),
+      ...(data.companionSubmissions
+        ? { companionSubmissions: readCompanionDraftSubmissions(JSON.parse(data.companionSubmissions)) }
+        : {}),
+      updatedAt,
+    };
+  }
+
+  async getOwnerComposerDraft(ownerUserId: string, threadId: string): Promise<OwnerComposerDraft | null> {
+    const data = await this.redis.hgetall(MessageKeys.ownerComposerDraft(ownerUserId, threadId));
+    return this.hydrateOwnerComposerDraft(data);
+  }
+
+  async putOwnerComposerDraft(
+    ownerUserId: string,
+    threadId: string,
+    input: PutOwnerComposerDraftInput,
+  ): Promise<PutOwnerComposerDraftResult> {
+    assertValidStoredMessageTimestamp(input.updatedAt);
+    if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 0) {
+      throw new RangeError('expected draft revision must be a non-negative integer');
+    }
+    const result = (await this.redis.eval(
+      PUT_OWNER_COMPOSER_DRAFT_LUA,
+      1,
+      MessageKeys.ownerComposerDraft(ownerUserId, threadId),
+      String(input.expectedRevision),
+      ownerUserId,
+      threadId,
+      input.text,
+      input.contentBlocks ? JSON.stringify(input.contentBlocks) : '',
+      input.replyTo ?? '',
+      String(input.updatedAt),
+      input.companionSubmissions === undefined
+        ? ''
+        : JSON.stringify(readCompanionDraftSubmissions(input.companionSubmissions)),
+    )) as [number, number];
+    if (Number(result[0]) === 0) return { kind: 'revision_mismatch', actualRevision: Number(result[1]) };
+    const draft = await this.getOwnerComposerDraft(ownerUserId, threadId);
+    if (!draft) throw new Error('composer draft CAS committed but hydration failed');
+    return { kind: 'updated', draft };
+  }
+
+  async clearOwnerComposerDraft(
+    ownerUserId: string,
+    threadId: string,
+    expectedRevision: number,
+    clearedAt: number,
+  ): Promise<ClearOwnerComposerDraftResult> {
+    assertValidStoredMessageTimestamp(clearedAt);
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+      throw new RangeError('expected draft revision must be a non-negative integer');
+    }
+    const result = (await this.redis.eval(
+      CLEAR_OWNER_COMPOSER_DRAFT_LUA,
+      1,
+      MessageKeys.ownerComposerDraft(ownerUserId, threadId),
+      String(expectedRevision),
+      ownerUserId,
+      threadId,
+      String(clearedAt),
+    )) as [number, number];
+    return Number(result[0]) === 1
+      ? { kind: 'cleared', revision: Number(result[1]) }
+      : { kind: 'revision_mismatch', actualRevision: Number(result[1]) };
+  }
+
+  async recallMessageToComposerDraft(
+    id: string,
+    input: RecallMessageToComposerDraftInput,
+  ): Promise<RecallMessageToComposerDraftResult> {
+    assertValidStoredMessageTimestamp(input.recalledAt);
+    if (!Number.isInteger(input.expectedDraftRevision) || input.expectedDraftRevision < 0) {
+      throw new RangeError('expected draft revision must be a non-negative integer');
+    }
+    const beforeRecall = await this.getById(id);
+    const mentionKeys = [...new Set(beforeRecall?.mentions ?? [])].map((catId) => MessageKeys.mentions(catId));
+    const result = (await this.redis.eval(
+      RECALL_MESSAGE_TO_COMPOSER_DRAFT_LUA,
+      3 + mentionKeys.length,
+      MessageKeys.detail(id),
+      MessageKeys.ownerComposerDraft(input.ownerUserId, input.threadId),
+      MessageKeys.threadVisibility(input.threadId),
+      ...mentionKeys,
+      input.ownerUserId,
+      input.threadId,
+      String(input.expectedDraftRevision),
+      input.merge,
+      String(input.recalledAt),
+    )) as [number, number, string?, string?, number?];
+    const outcome = Number(result[0]);
+    if (outcome === -1) return { kind: 'not_found' };
+    if (outcome === -2) return { kind: 'unauthorized' };
+    if (outcome === -3) return { kind: 'not_recallable' };
+    if (outcome === 0) return { kind: 'draft_revision_mismatch', actualRevision: Number(result[1]) };
+    if (outcome === 2) {
+      const message = await this.getById(id);
+      return message ? { kind: 'already_recalled', message } : { kind: 'not_found' };
+    }
+
+    const [message, draft] = await Promise.all([
+      this.getById(id),
+      this.getOwnerComposerDraft(input.ownerUserId, input.threadId),
+    ]);
+    if (!message || !draft) throw new Error('true recall CAS committed but terminal hydration failed');
+    const sourceText = result[2] ?? '';
+    const previousText = result[3] ?? '';
+    const insertedStart = input.merge === 'append' && previousText ? previousText.length + 2 : 0;
+    return {
+      kind: 'recalled',
+      verdict: 'zero_exposure',
+      message,
+      draft,
+      insertedRange: { start: insertedStart, end: insertedStart + sourceText.length },
+    };
+  }
+
+  /**
+   * Convert a Redis hash (Record<string, string> from HGETALL) into a StoredMessage.
+   * Shared by getById (direct HGETALL) and parseLuaHgetall (Lua-returned HGETALL).
+   */
+  private hydrateHash(data: Record<string, string>, span?: MessageReadSpan): StoredMessage | null {
     if (!data || !data.id) return null;
 
-    const contentBlocks = safeParseContentBlocks(data.contentBlocks);
-    const toolEvents = safeParseToolEvents(data.toolEvents);
+    const contentBlocks = span
+      ? measureMessageReadParser(span, 'contentBlocks', data.contentBlocks?.length ?? 0, () =>
+          safeParseContentBlocks(data.contentBlocks),
+        )
+      : safeParseContentBlocks(data.contentBlocks);
+    const lifecycle = safeParseLifecycleMetadata(data.lifecycle);
+    const toolEvents = span
+      ? measureMessageReadParser(span, 'toolEvents', data.toolEvents?.length ?? 0, () =>
+          safeParseToolEvents(data.toolEvents),
+        )
+      : safeParseToolEvents(data.toolEvents);
     const parsedMetadata = safeParseMetadata(data.metadata);
-    const parsedExtra = safeParseExtra(data.extra);
-    const parsedSource = safeParseConnectorSource(data.source);
+    const extraHydration = span
+      ? measureMessageReadParser(
+          span,
+          'extraHydration',
+          (data.extra?.length ?? 0) + (data.pluginMessage?.length ?? 0) + (data.custodyOfferV1?.length ?? 0),
+          () => hydrateExtra(data.extra, data.pluginMessage, data.custodyOfferV1),
+        )
+      : hydrateExtra(data.extra, data.pluginMessage, data.custodyOfferV1);
+    const sourceField = parseConnectorSourceField(data.source);
+    const parsedSource = sourceField.kind === 'valid' ? sourceField.source : undefined;
+    const parsedRecall = safeParseMessageRecall(data.recall);
+    const from =
+      safeParseMessageFrom(data.from) ??
+      safeParseLegacyLifecycleMessageFrom(data.lifecycle) ??
+      messageFrom({
+        userId: data.userId ?? 'unknown',
+        catId: (data.catId || null) as CatId | null,
+        ...(parsedSource ? { source: parsedSource } : {}),
+        ...(sourceField.kind === 'invalid' ? { sourceParseFailure: true as const } : {}),
+        ...(data.origin === 'stream' || data.origin === 'callback' || data.origin === 'briefing'
+          ? { origin: data.origin }
+          : {}),
+      });
     const deletedAt = data.deletedAt ? parseInt(data.deletedAt, 10) : undefined;
+    const companionDeliveryReceipt = readStoredCompanionDelivery(data.companionDeliveryReceipt);
     return {
       id: data.id,
       threadId: data.threadId || DEFAULT_THREAD_ID,
       userId: data.userId ?? 'unknown',
+      ...(from ? { from } : {}),
       catId: (data.catId || null) as CatId | null,
       content: data.content ?? '',
+      ...(companionDeliveryReceipt ? { companionDeliveryReceipt } : {}),
+      ...(lifecycle ? { lifecycle } : {}),
       ...(contentBlocks ? { contentBlocks } : {}),
       ...(toolEvents ? { toolEvents } : {}),
       ...(parsedMetadata ? { metadata: parsedMetadata } : {}),
-      ...(parsedExtra ? { extra: parsedExtra } : {}),
+      ...(extraHydration.extra ? { extra: extraHydration.extra } : {}),
+      ...(extraHydration.custodyOfferParseFailure ? { custodyOfferParseFailure: true as const } : {}),
       mentions: safeParseMentions(data.mentions),
-      timestamp: parseInt(data.timestamp ?? '0', 10),
+      timestamp: parseStoredMessageTimestamp(data.timestamp),
       ...(deletedAt ? { deletedAt, deletedBy: data.deletedBy ?? '' } : {}),
       ...(data._tombstone === '1' ? { _tombstone: true as const } : {}),
       ...(data.thinking ? { thinking: data.thinking } : {}),
-      ...(data.origin === 'stream' || data.origin === 'callback'
-        ? { origin: data.origin as 'stream' | 'callback' }
+      ...(data.origin === 'stream' || data.origin === 'callback' || data.origin === 'briefing'
+        ? { origin: data.origin as 'stream' | 'callback' | 'briefing' }
         : {}),
       ...(data.visibility === 'whisper' ? { visibility: 'whisper' as const } : {}),
       ...(data.whisperTo ? { whisperTo: safeParseMentions(data.whisperTo) } : {}),
       ...(data.revealedAt ? { revealedAt: parseInt(data.revealedAt, 10) } : {}),
-      ...(data.deliveredAt ? { deliveredAt: parseInt(data.deliveredAt, 10) } : {}),
+      ...(data.deliveredAt ? { deliveredAt: parseRedisNumber(data.deliveredAt) } : {}),
+      ...(data.timelineOrderAt !== undefined ? { timelineOrderAt: parseRedisNumber(data.timelineOrderAt) } : {}),
       ...(data.deliveryStatus ? { deliveryStatus: data.deliveryStatus as StoredMessage['deliveryStatus'] } : {}),
+      ...(parsedRecall ? { recall: parsedRecall } : {}),
       ...(parsedSource ? { source: parsedSource } : {}),
+      ...(sourceField.kind === 'invalid' ? { sourceParseFailure: true as const } : {}),
       ...(data.mentionsUser === '1' ? { mentionsUser: true } : {}),
       ...(data.replyTo ? { replyTo: data.replyTo } : {}),
+      ...(data.visibilitySeq ? { visibilitySeq: parseInt(data.visibilitySeq, 10) } : {}),
     };
+  }
+
+  /**
+   * Parse a Lua HGETALL return (flat [key, val, key, val, ...] array) into StoredMessage.
+   * Used by CAS methods (markDelivered, markCanceled, reassignUserId) to hydrate
+   * the winning hash state atomically — no separate getById round-trip needed,
+   * eliminating the gap where a transient failure could lose the CAS receipt.
+   */
+  private parseLuaHgetall(result: unknown): StoredMessage | null {
+    if (!Array.isArray(result)) return null;
+    const data: Record<string, string> = {};
+    for (let i = 0; i < result.length; i += 2) {
+      data[result[i] as string] = result[i + 1] as string;
+    }
+    return this.hydrateHash(data);
+  }
+
+  private parseLuaTransitionResult(result: unknown): { outcome: number; message: StoredMessage | null } {
+    if (!Array.isArray(result) || result.length < 1) {
+      throw new Error('unexpected Redis message transition result');
+    }
+    return {
+      outcome: Number(result[0]),
+      message: this.parseLuaHgetall(result[1]),
+    };
+  }
+
+  /** Scan all stored message hashes (Redis-only repair helper). */
+  async scanAll(): Promise<StoredMessage[]> {
+    const matchPattern = `${this.keyPrefix}${MessageKeys.detail('*')}`;
+    const messages: StoredMessage[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 100);
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        const pipeline = this.redis.pipeline();
+        for (const key of keys) {
+          pipeline.hgetall(this.stripPrefix(key));
+        }
+        const results = await pipeline.exec();
+        for (const entry of results ?? []) {
+          const [err, data] = entry!;
+          if (err || !data || typeof data !== 'object') continue;
+          const d = data as Record<string, string>;
+          if (!d.id) continue;
+          const msg = await this.getById(d.id);
+          if (msg) messages.push(msg);
+        }
+      }
+    } while (cursor !== '0');
+    return messages;
+  }
+
+  /**
+   * F233: List messages that carry cross-post metadata (extra.crossPost.sourceThreadId).
+   * Uses SCAN + pipeline HGET to check the `extra` field efficiently, then hydrates
+   * only matching messages. For the FeatTrajectoryCollectorScheduler's CrossPostCollector.
+   */
+  async listCrossPostMessages(): Promise<StoredMessage[]> {
+    const matchPattern = `${this.keyPrefix}${MessageKeys.detail('*')}`;
+    const results: StoredMessage[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 200);
+      cursor = nextCursor;
+      if (keys.length === 0) continue;
+      // Pipeline: fetch only the `extra` field to check for cross-post metadata
+      const pipeline = this.redis.pipeline();
+      for (const key of keys) pipeline.hget(this.stripPrefix(key), 'extra');
+      const extraResults = await pipeline.exec();
+      // Collect IDs of messages with cross-post metadata
+      const matchedIds: string[] = [];
+      for (let i = 0; i < (extraResults?.length ?? 0); i++) {
+        const [err, extraRaw] = extraResults![i]!;
+        if (err || !extraRaw || typeof extraRaw !== 'string') continue;
+        try {
+          const parsed = JSON.parse(extraRaw);
+          if (parsed?.crossPost?.sourceThreadId) {
+            // Extract ID from key: strip prefix, then strip "msg:" prefix
+            const stripped = this.stripPrefix(keys[i]);
+            const id = stripped.replace(/^msg:/, '');
+            matchedIds.push(id);
+          }
+        } catch {
+          // malformed JSON — skip
+        }
+      }
+      // Hydrate matched messages — only include delivered ones
+      for (const id of matchedIds) {
+        const msg = await this.getById(id);
+        if (msg && (!msg.deliveryStatus || msg.deliveryStatus === 'delivered')) {
+          results.push(msg);
+        }
+      }
+    } while (cursor !== '0');
+    return results;
+  }
+
+  /**
+   * Reassign a message to a different userId and move user-timeline membership.
+   * PR #1193: atomic Lua — derives currentUserId and effectiveOrder from the hash
+   * inside the script, eliminating stale-snapshot races with markDelivered.
+   */
+  async reassignUserId(id: string, nextUserId: string): Promise<StoredMessage | null> {
+    const hashKey = MessageKeys.detail(id);
+    const ttlArg = String(this.ttlSeconds ?? 0);
+    const raw = await this.redis.eval(REASSIGN_LUA, 1, hashKey, id, nextUserId, this.keyPrefix, ttlArg);
+    const { outcome, message } = this.parseLuaTransitionResult(raw);
+    if (outcome === -1) return null;
+    if (!message) throw new Error(`Redis reassignment lost canonical message: ${id}`);
+    return message;
   }
 
   async getRecent(limit?: number, userId?: string): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
     const key = userId ? MessageKeys.user(userId) : MessageKeys.TIMELINE;
-    return this.fetchDeliveredDesc(key, n);
+    return this.fetchVisibleDesc(key, n);
+  }
+
+  async listOwnerMessagesInWindow(
+    ownerUserId: string,
+    sinceInclusive: number,
+    untilInclusive: number,
+    options?: { humanOnly?: true },
+  ): Promise<StoredMessage[]> {
+    assertValidStoredMessageTimestamp(sinceInclusive);
+    assertValidStoredMessageTimestamp(untilInclusive);
+    if (sinceInclusive > untilInclusive) return [];
+
+    const ids = await this.redis.zrangebyscore(
+      MessageKeys.user(ownerUserId),
+      String(sinceInclusive),
+      String(untilInclusive),
+    );
+    const messages = await this.hydrateMessages(ids, options);
+    return messages.filter((message) => message.userId === ownerUserId && isDelivered(message));
+  }
+
+  async listOwnerMessageWindowSlice(
+    ownerUserId: string,
+    sinceInclusive: number,
+    untilInclusive: number,
+    limit: number,
+    options?: { humanOnly?: true },
+  ) {
+    assertValidStoredMessageTimestamp(sinceInclusive);
+    assertValidStoredMessageTimestamp(untilInclusive);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 5_000) throw new Error('Invalid message window limit');
+    if (sinceInclusive > untilInclusive) return { messages: [], hasMore: false };
+    const ids = await this.redis.zrangebyscore(
+      MessageKeys.user(ownerUserId),
+      String(sinceInclusive),
+      String(untilInclusive),
+      'LIMIT',
+      0,
+      limit + 1,
+    );
+    const messages = await this.hydrateMessages(ids.slice(0, limit), options);
+    return {
+      messages: messages.filter((message) => message.userId === ownerUserId && isDelivered(message)),
+      hasMore: ids.length > limit,
+    };
   }
 
   /**
    * Get mentions for a cat, ascending (oldest first after cursor).
-   * When afterMessageId is provided, only returns mentions after that ID.
-   * Cursor fallback: if afterMessageId not in sorted set (TTL/delete), falls back to full scan (#77 R2 P2).
+   * #1200 §8.7 migration: scans INSIDE the visibility relation with match-counted
+   * discipline — chunks visibility ZSET until `limit` MENTION matches collected or
+   * thread exhausted. Accepts v1 + v2 cursors. Per-cat mentions ZSET is NOT used
+   * for cursor advance (remains a time-domain display/backfill surface).
    */
   async getMentionsFor(
     catId: CatId,
@@ -246,57 +2510,121 @@ export class RedisMessageStore {
     threadId?: string,
     afterMessageId?: string,
   ): Promise<StoredMessage[]> {
+    if (!threadId) {
+      // Global mention query without threadId: fall back to mention ZSET scan.
+      // §8.7 audit: no cursor-advance call sites use the global path.
+      return this.getMentionsForLegacy(catId, limit, userId);
+    }
+    const n = limit ?? DEFAULT_LIMIT;
+    await this.ensureVisibilityMigrated(threadId);
+    const visKey = MessageKeys.threadVisibility(threadId);
+
+    // Parse cursor + resolve to visibility position (same as getByThreadAfter)
+    const cursor = parseCursor(afterMessageId);
+    let afterSeq: number | null = null;
+    let cursorId: string | null = null;
+
+    if (cursor) {
+      cursorId = cursor.id;
+      if (cursor.version === 2) {
+        afterSeq = cursor.seq;
+      } else {
+        const seqRaw = await this.redis.hget(MessageKeys.detail(cursor.id), 'visibilitySeq');
+        if (seqRaw) afterSeq = Number(seqRaw);
+        else {
+          const score = await this.redis.zscore(visKey, cursor.id);
+          if (score !== null) afterSeq = Number(score);
+        }
+      }
+    }
+
+    // Match-counted scan with mention predicate + soft-delete exclusion.
+    // #1200 Sol R2: hydrateAndFilter no longer filters deletedAt (tombstone-keep parity).
+    // Mention scan explicitly excludes deleted messages here.
+    const mentionFilter = (msg: StoredMessage) => !msg.deletedAt && msg.mentions.includes(catId);
+    const result: StoredMessage[] = [];
+    const staleIds: string[] = [];
+
+    // #1269: mention scans use isTimelinePublished — timeline-published cat speech
+    // is visible at append time (accepted contract: timeline-published = visible everywhere).
+    if (!cursor || afterSeq === null) {
+      await this.scanVisibilityChunked(
+        visKey,
+        '-inf',
+        '+inf',
+        n,
+        userId,
+        result,
+        staleIds,
+        isTimelinePublished,
+        mentionFilter,
+      );
+    } else {
+      const sameRaw = await this.redis.zrangebyscore(visKey, String(afterSeq), String(afterSeq));
+      const sameFiltered = sameRaw.filter((id) => id > cursorId!);
+      if (sameFiltered.length > 0) {
+        const sameScores = new Map(sameFiltered.map((id) => [id, afterSeq!]));
+        await this.hydrateAndFilter(
+          sameFiltered,
+          userId,
+          n,
+          result,
+          staleIds,
+          isTimelinePublished,
+          sameScores,
+          mentionFilter,
+        );
+      }
+      if (result.length < n) {
+        await this.scanVisibilityChunked(
+          visKey,
+          `(${afterSeq}`,
+          '+inf',
+          n,
+          userId,
+          result,
+          staleIds,
+          isTimelinePublished,
+          mentionFilter,
+        );
+      }
+    }
+
+    if (staleIds.length > 0) this.redis.zrem(visKey, ...staleIds).catch(() => {});
+    return result;
+  }
+
+  /** Legacy global mention scan (no threadId). Not used by cursor-advance paths. */
+  private async getMentionsForLegacy(catId: CatId, limit?: number, userId?: string): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
     const mentionKey = MessageKeys.mentions(catId);
 
-    // Cursor fallback: verify afterMessageId exists in the sorted set
-    let effectiveAfter = afterMessageId;
-    if (effectiveAfter) {
-      const rank = await this.redis.zrank(mentionKey, effectiveAfter);
-      if (rank === null) {
-        log.warn({ cursor: effectiveAfter, catId }, 'cursor not in mention set, falling back to full pending');
-        effectiveAfter = undefined;
-      }
-    }
-
-    // Ascending scan: collect oldest N mentions after cursor
+    // #1200 codex R5 P2: apply userId filtering (match getRecentMentionsFor behavior).
+    // Scan in chunks so filtered-out entries don't consume the limit.
     const CHUNK = 50;
-    const ids: string[] = [];
-    let startIndex = 0;
+    const eligible: string[] = [];
+    let offset = 0;
 
-    if (effectiveAfter) {
-      // Find the rank of afterMessageId and start scanning after it
-      const rank = await this.redis.zrank(mentionKey, effectiveAfter);
-      if (rank !== null) {
-        startIndex = rank + 1; // Start after the cursor
-      }
-    }
-
-    // Scan forward (ascending) in chunks
-    let offset = startIndex;
-    while (ids.length < n) {
+    while (eligible.length < n) {
       const chunk = await this.redis.zrange(mentionKey, offset, offset + CHUNK - 1);
       if (chunk.length === 0) break;
       for (const id of chunk) {
-        if (ids.length >= n) break;
-        // Extra safety: skip IDs <= afterMessageId (handles edge cases)
-        if (effectiveAfter && id <= effectiveAfter) continue;
+        if (eligible.length >= n) break;
         if (userId) {
           const score = await this.redis.zscore(MessageKeys.user(userId), id);
           if (score === null) continue;
         }
-        if (threadId) {
-          const score = await this.redis.zscore(MessageKeys.thread(threadId), id);
-          if (score === null) continue;
-        }
-        ids.push(id);
+        eligible.push(id);
       }
+      if (chunk.length < CHUNK) break;
       offset += CHUNK;
     }
 
-    if (ids.length === 0) return [];
-    const messages = await this.hydrateMessages(ids); // Already ascending
-    return messages.filter(isDelivered);
+    if (eligible.length === 0) return [];
+    const messages = await this.hydrateMessages(eligible);
+    // #1200 Sol R2: explicit deletedAt filter for mentions (hydrateAndFilter no longer filters)
+    // #1269: isTimelinePublished — timeline-published = visible everywhere.
+    return messages.filter((m) => isTimelinePublished(m) && !m.deletedAt).slice(0, n);
   }
 
   /**
@@ -309,39 +2637,23 @@ export class RedisMessageStore {
     threadId?: string,
   ): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
-    const mentionKey = MessageKeys.mentions(catId);
-
-    const CHUNK = 50;
-    const ids: string[] = [];
-    let offset = 0;
-
-    // Scan backward (descending) in chunks and filter down to the most recent N matches.
-    while (ids.length < n) {
-      const chunk = await this.redis.zrevrange(mentionKey, offset, offset + CHUNK - 1);
-      if (chunk.length === 0) break;
-      for (const id of chunk) {
-        if (ids.length >= n) break;
-        if (userId) {
-          const score = await this.redis.zscore(MessageKeys.user(userId), id);
-          if (score === null) continue;
-        }
-        if (threadId) {
-          const score = await this.redis.zscore(MessageKeys.thread(threadId), id);
-          if (score === null) continue;
-        }
-        ids.push(id);
-      }
-      offset += CHUNK;
-    }
-
+    const ids = await readRecentMentionIds(this.redis, catId, n, userId, threadId);
     if (ids.length === 0) return [];
-    const messages = await this.hydrateMessages(ids.reverse());
-    return messages.filter(isDelivered);
+    const messages = await this.hydrateMessages(ids);
+    // #1269: isTimelinePublished — timeline-published = visible everywhere.
+    return messages.filter(isTimelinePublished);
   }
 
-  async getBefore(timestamp: number, limit?: number, userId?: string, beforeId?: string): Promise<StoredMessage[]> {
+  async getBefore(
+    timestamp: number,
+    limit?: number,
+    userId?: string,
+    beforeId?: string,
+    options?: Pick<ThreadMessageReadOptions, 'includeQueuedCatMessages'>,
+  ): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
     const key = userId ? MessageKeys.user(userId) : MessageKeys.TIMELINE;
+    const isVisible = options?.includeQueuedCatMessages ? isTimelinePublished : isDelivered;
 
     if (!beforeId) {
       // F117: Chunked scan (desc) to collect N delivered messages
@@ -354,7 +2666,7 @@ export class RedisMessageStore {
         // Keep desc order — don't reverse
         const messages = await this.hydrateMessages(ids);
         for (const msg of messages) {
-          if (isDelivered(msg)) result.push(msg);
+          if (isVisible(msg)) result.push(msg);
           if (result.length >= n) break;
         }
         if (ids.length < CHUNK) break;
@@ -365,65 +2677,597 @@ export class RedisMessageStore {
     }
 
     // F117: Scan cursor path with integrated isDelivered filtering
-    const result = await this.fetchDeliveredBeforeCursor(key, timestamp, beforeId, n);
+    const result = await this.fetchVisibleBeforeCursor(key, timestamp, beforeId, n, undefined, isVisible);
     return result.reverse();
   }
 
-  async getByThread(threadId: string, limit?: number, userId?: string): Promise<StoredMessage[]> {
+  async getOwnerBeforeBounded(
+    ownerUserId: string,
+    timestamp: number,
+    limit: number,
+    beforeId: string | undefined,
+    scanLimit: number,
+    options?: Pick<ThreadMessageReadOptions, 'includeQueuedCatMessages'>,
+  ): Promise<BoundedOwnerMessagePage> {
+    const pageLimit = Math.min(Math.max(0, Math.floor(limit)), Math.max(0, Math.floor(scanLimit)));
+    if (pageLimit === 0) {
+      return {
+        messages: [],
+        scannedCount: 0,
+        storageRoundTrips: 0,
+        exhausted: false,
+        oldestTimelineGroupComplete: false,
+      };
+    }
+
+    const key = MessageKeys.user(ownerUserId);
+    let storageRoundTrips = 0;
+    let raw: string[];
+    if (beforeId) {
+      const [cursorRank, cursorScore] = await Promise.all([
+        this.redis.zrevrank(key, beforeId),
+        this.redis.zscore(key, beforeId),
+      ]);
+      storageRoundTrips += 2;
+      if (cursorRank === null || cursorScore === null || parseRedisNumber(cursorScore) !== timestamp) {
+        return {
+          messages: [],
+          scannedCount: 0,
+          storageRoundTrips,
+          exhausted: false,
+          oldestTimelineGroupComplete: false,
+        };
+      }
+      raw = await this.redis.zrevrange(key, cursorRank + 1, cursorRank + pageLimit, 'WITHSCORES');
+    } else {
+      raw = await this.redis.zrevrangebyscore(key, `(${timestamp}`, '-inf', 'WITHSCORES', 'LIMIT', 0, pageLimit);
+    }
+    storageRoundTrips += 1;
+
+    const { ids, oldestTimestamp } = parseRedisScoredIds(raw);
+    const scannedCount = ids.length;
+    const isVisible = options?.includeQueuedCatMessages ? isTimelinePublished : isDelivered;
+    const messages = ids.length > 0 ? await this.hydrateMessages(ids) : [];
+    if (ids.length > 0) storageRoundTrips += 1;
+    const visibleMessages = messages.filter((message) => message.userId === ownerUserId && isVisible(message));
+    const oldestId = ids.at(-1);
+    let exhausted = scannedCount < pageLimit;
+    let oldestTimelineGroupComplete = exhausted;
+    if (!exhausted && oldestId && oldestTimestamp !== undefined) {
+      const [ascendingRank, olderScoreCount] = await Promise.all([
+        this.redis.zrank(key, oldestId),
+        this.redis.zcount(key, '-inf', `(${oldestTimestamp}`),
+      ]);
+      storageRoundTrips += 2;
+      if (ascendingRank !== null) {
+        exhausted = ascendingRank === 0;
+        oldestTimelineGroupComplete = ascendingRank === olderScoreCount;
+      }
+    }
+
+    return {
+      messages: visibleMessages.reverse(),
+      scannedCount,
+      storageRoundTrips,
+      exhausted,
+      oldestTimelineGroupComplete,
+      ...(oldestId && oldestTimestamp !== undefined
+        ? { nextCursor: { timestamp: oldestTimestamp, id: oldestId } }
+        : {}),
+    };
+  }
+
+  async getByThread(
+    threadId: string,
+    limit?: number,
+    userId?: string,
+    options?: ThreadMessageReadOptions,
+  ): Promise<StoredMessage[]> {
+    const n = limit ?? DEFAULT_LIMIT;
+    if (options?.onlyUnpositionedOwnerMessages)
+      return readOwnerUncertainty({
+        redis: this.redis,
+        threadId,
+        userId,
+        limit: n,
+        options,
+        hydrate: (ids) => this.hydrateMessages(ids, { strict: true }),
+      });
+    if (options?.artifactProjection || options?.recipientProjection)
+      return readArtifactMessagePage(this, threadId, n, userId, options);
+    const key = MessageKeys.thread(threadId);
+    return this.fetchVisibleDesc(
+      key,
+      n,
+      userId ? (m) => m.userId === userId || isSystemUserMessage(m) : undefined,
+      resolveThreadMessageVisibility(options, userId),
+    );
+  }
+
+  /** Memory indexing needs visible text/block inputs, never tool-event payloads. */
+  async getThreadEvidenceProjection(
+    threadId: string,
+    limit?: number,
+    userId?: string,
+  ): Promise<MessageEvidenceProjection[]> {
+    return projectMessageEvidence(
+      await this.fetchVisibleDesc(
+        MessageKeys.thread(threadId),
+        limit ?? DEFAULT_LIMIT,
+        userId ? (message) => message.userId === userId || isSystemUserMessage(message) : undefined,
+        resolveThreadMessageVisibility(undefined, userId),
+        true,
+      ),
+    );
+  }
+
+  getThreadReplyProjection(
+    threadId: string,
+    userId: string,
+    limit = 500,
+    before?: { timestamp: number; messageId: string },
+  ): Promise<ThreadReplyProjection[]> {
+    return readThreadReplyProjection(this.redis, threadId, userId, limit, before);
+  }
+
+  async getByThreadIncludingQueued(threadId: string, limit?: number, userId?: string): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
     const key = MessageKeys.thread(threadId);
-    return this.fetchDeliveredDesc(key, n, userId ? (m) => m.userId === userId : undefined);
+    const CHUNK = Math.max(n, 50);
+    const result: StoredMessage[] = [];
+    let offset = 0;
+
+    while (result.length < n) {
+      const ids = await this.redis.zrevrange(key, offset, offset + CHUNK - 1);
+      if (ids.length === 0) break;
+      const messages = await this.hydrateMessages(ids);
+      for (const msg of messages) {
+        if (msg.deletedAt) continue;
+        if (msg.deliveryStatus === 'canceled' && msg.lifecycle?.kind !== 'response') continue;
+        if (!passesManagedHoldViewerBoundary(msg, userId)) {
+          continue;
+        }
+        if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
+        result.push(msg);
+        if (result.length >= n) break;
+      }
+      if (ids.length < CHUNK) break;
+      offset += CHUNK;
+    }
+
+    return result.slice(0, n).reverse();
   }
 
   /**
    * Get messages in a thread after a cursor ID (exclusive), oldest first.
    * If afterId is undefined, returns from thread start.
    * If limit is undefined, returns all matches.
+   *
+   * #1200 rewrite: reads from the visibility index (not the thread ZSET).
+   * §8.10 steps 4+5: ensureVisibilityMigrated → parseCursor → resolve/direct →
+   * WITHSCORES → hydrate → filter-then-limit → visibilitySeq injection.
+   * Lazy null-ZREM for stale members.
    */
   async getByThreadAfter(
     threadId: string,
     afterId?: string,
     limit?: number,
     userId?: string,
+    options?: ThreadMessageReadOptions,
   ): Promise<StoredMessage[]> {
-    const key = MessageKeys.thread(threadId);
+    if (options?.includeQueuedUserMessages === true) {
+      return this.getByThreadAfterRawTimeline(threadId, afterId, limit, userId, options);
+    }
 
-    let ids: string[];
-    if (!afterId) {
-      if (limit && limit > 0) {
-        ids = await this.redis.zrange(key, 0, limit - 1);
+    // 1. Ensure visibility index is migrated (lazy one-time backfill)
+    await this.ensureVisibilityMigrated(threadId);
+
+    const visKey = MessageKeys.threadVisibility(threadId);
+
+    // 2. Parse cursor token (§8.3) + resolve to (seq, id) pair (§8.4)
+    let cursor: ReturnType<typeof parseCursor>;
+    try {
+      cursor = parseCursor(afterId);
+    } catch (error) {
+      if (options?.unresolvedCursorPolicy === 'empty') return [];
+      throw error;
+    }
+    let afterSeq: number | null = null;
+    let cursorId: string | null = null;
+
+    if (cursor) {
+      cursorId = cursor.id;
+      if (cursor.version === 2) {
+        // v2: seq is directly available — skip resolve round-trips
+        afterSeq = cursor.seq;
       } else {
-        ids = await this.redis.zrange(key, 0, -1);
-      }
-    } else {
-      const afterScore = await this.redis.zscore(key, afterId);
-      if (afterScore === null) {
-        // Cursor message may have expired; fall back to lexicographic ID filtering.
-        ids = await this.redis.zrange(key, 0, -1);
-        ids = ids.filter((id) => id > afterId);
-      } else {
-        // Split into two ranges to avoid filtering by ID across different
-        // scores — deliveredAt can shift a message's score forward while
-        // its ID still embeds the original send timestamp.
-        // 1) Same score as cursor: use ID as tiebreaker
-        const sameScore = await this.redis.zrangebyscore(key, afterScore, afterScore);
-        const sameFiltered = sameScore.filter((id) => id !== afterId && id > afterId);
-        // 2) Strictly higher scores: include all (no ID filter needed)
-        const higherScore = await this.redis.zrangebyscore(key, `(${afterScore}`, '+inf');
-        ids = [...sameFiltered, ...higherScore];
-      }
-      if (limit && limit > 0 && ids.length > limit) {
-        ids = ids.slice(0, limit);
+        // v1: lazy resolve (§8.4 three-step)
+        // Step 1: HGET visibilitySeq from message hash (cheapest)
+        const seqRaw = await this.redis.hget(MessageKeys.detail(cursor.id), 'visibilitySeq');
+        if (seqRaw) {
+          afterSeq = Number(seqRaw);
+        } else {
+          // Step 2: ZSCORE from visibility index (hash evicted but member exists)
+          const score = await this.redis.zscore(visKey, cursor.id);
+          if (score !== null) afterSeq = Number(score);
+          // Step 3: Both null = fully pruned → scan from start
+        }
       }
     }
 
-    if (ids.length === 0) return [];
+    // #1224/#3444 read-evidence boundary: an omitted cursor means "read from
+    // origin", but a supplied v1 cursor that lost both canonical evidence
+    // sources is indeterminate. Generic pagination keeps §8.4's at-least-once
+    // rescan default; state-bearing consumers opt into empty/fail-closed so
+    // old history cannot be reborn as unread or unseen.
+    if (cursor?.version === 1 && afterSeq === null && options?.unresolvedCursorPolicy === 'empty') {
+      return [];
+    }
 
-    // ADR-008 D3: cursor path must include deleted messages (tombstones)
-    const messages = await this.hydrateMessages(ids, { includeDeleted: true });
-    const delivered = messages.filter(isDelivered);
-    if (!userId) return delivered;
-    return delivered.filter((m) => m.userId === userId);
+    // 3. Chunked WITHSCORES read from visibility ZSET: filter-then-limit
+    // #1269 R9 P1-1: caller-appropriate visibility predicate — respects
+    // includeQueuedCatMessages option (default: isDelivered only).
+    const isVisible = resolveThreadMessageVisibility(options, userId);
+    const maxResults = limit && limit > 0 ? limit : Number.MAX_SAFE_INTEGER;
+    const result: StoredMessage[] = [];
+    const staleIds: string[] = [];
+
+    if (!cursor || afterSeq === null) {
+      // No cursor or fully pruned: scan from start
+      await this.scanVisibilityChunked(visKey, '-inf', '+inf', maxResults, userId, result, staleIds, isVisible);
+    } else {
+      // Same-score segment: IDs with same visibilitySeq, id > cursorId
+      const sameRaw = await this.redis.zrangebyscore(visKey, String(afterSeq), String(afterSeq));
+      const sameFiltered = sameRaw.filter((id) => id > cursorId!);
+      if (sameFiltered.length > 0) {
+        // All members share afterSeq — build score map for injection
+        const sameScores = new Map(sameFiltered.map((id) => [id, afterSeq!]));
+        await this.hydrateAndFilter(sameFiltered, userId, maxResults, result, staleIds, isVisible, sameScores);
+      }
+      // Strict segment: visibilitySeq > afterSeq (chunked)
+      // #1200 codex P2: pass maxResults (absolute total), not maxResults - result.length.
+      // scanVisibilityChunked's while loop uses `result.length < maxCollect` — result
+      // already contains items from the same-score segment, so passing the absolute
+      // target lets the shared accumulator stop at the right total.
+      if (result.length < maxResults) {
+        await this.scanVisibilityChunked(
+          visKey,
+          `(${afterSeq}`,
+          '+inf',
+          maxResults,
+          userId,
+          result,
+          staleIds,
+          isVisible,
+        );
+      }
+    }
+
+    // 4. Lazy null-ZREM: clean stale visibility members (fire-and-forget)
+    if (staleIds.length > 0) {
+      this.redis.zrem(visKey, ...staleIds).catch(() => {});
+    }
+
+    return result;
+  }
+
+  /**
+   * Forward pagination for an explicitly queued-inclusive reader. Queued user
+   * rows have no visibility member by design, so this path uses the raw thread
+   * ZSET and its authoritative timeline score instead of pretending the
+   * visibility index can represent them.
+   */
+  private async getByThreadAfterRawTimeline(
+    threadId: string,
+    afterId: string | undefined,
+    limit: number | undefined,
+    userId: string | undefined,
+    options: ThreadMessageReadOptions,
+  ): Promise<StoredMessage[]> {
+    let cursor: ReturnType<typeof parseCursor>;
+    try {
+      cursor = parseCursor(afterId);
+    } catch (error) {
+      if (options.unresolvedCursorPolicy === 'empty') return [];
+      throw error;
+    }
+
+    const key = MessageKeys.thread(threadId);
+    let afterScore: number | null = null;
+    if (cursor) {
+      const rawScore = await this.redis.zscore(key, cursor.id);
+      if (rawScore !== null) afterScore = parseRedisNumber(rawScore);
+      if (afterScore === null && options.unresolvedCursorPolicy === 'empty') return [];
+    }
+
+    const maxResults = limit && limit > 0 ? limit : Number.MAX_SAFE_INTEGER;
+    const chunkSize = Math.max(50, Math.min(maxResults, 200));
+    const isVisible = resolveThreadMessageVisibility(options, userId);
+    const result: StoredMessage[] = [];
+    let offset = 0;
+
+    while (result.length < maxResults) {
+      const raw = await this.redis.zrangebyscore(
+        key,
+        afterScore === null ? '-inf' : String(afterScore),
+        '+inf',
+        'WITHSCORES',
+        'LIMIT',
+        offset,
+        chunkSize,
+      );
+      if (raw.length === 0) break;
+
+      const ids: string[] = [];
+      const scores = new Map<string, number>();
+      for (let index = 0; index < raw.length; index += 2) {
+        const id = raw[index]!;
+        ids.push(id);
+        scores.set(id, parseRedisNumber(raw[index + 1]!));
+      }
+      const hydrated = new Map((await this.hydrateMessages(ids)).map((message) => [message.id, message]));
+      for (const id of ids) {
+        const score = scores.get(id)!;
+        if (cursor && afterScore !== null && score === afterScore && id <= cursor.id) continue;
+        const message = hydrated.get(id);
+        if (!message || !isVisible(message)) continue;
+        if (userId && message.userId !== userId && !isSystemUserMessage(message)) continue;
+        result.push(message);
+        if (result.length >= maxResults) break;
+      }
+
+      if (ids.length < chunkSize) break;
+      offset += ids.length;
+    }
+
+    return result;
+  }
+
+  async getUnreadSummaryProjection(
+    cursors: readonly ThreadUnreadProjectionCursor[],
+    userId: string,
+  ): Promise<ThreadUnreadMessageProjection[]> {
+    await this.ensureVisibilityMigratedBatch(cursors.map(({ threadId }) => threadId));
+    return projectRedisUnreadSummaries(this.redis, cursors, userId);
+  }
+
+  /**
+   * #1200 §8.7: Get the latest visible cursor for a thread.
+   *
+   * Reverse chunked scan of the visibility ZSET: ZREVRANGE WITHSCORES from the
+   * top, hydrate, apply the requested evidence predicate, and return the FIRST
+   * live member.
+   *
+   * Returns {cursor: v2 token, messageId: raw ID} or null if no live messages.
+   * Read-state routes select durable owner-read evidence; freshness consumers
+   * keep the published timeline frontier.
+   */
+  async getLatestVisibleCursor(
+    threadId: string,
+    options?: {
+      readonly evidence?: 'timeline_visible' | 'durable_owner_read';
+      readonly viewerUserId?: string;
+    },
+  ): Promise<{ cursor: string; messageId: string } | null> {
+    await this.ensureVisibilityMigrated(threadId);
+    const visKey = MessageKeys.threadVisibility(threadId);
+    const CHUNK = 20;
+    const staleIds: string[] = [];
+    let offset = 0;
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const raw = await this.redis.zrevrange(visKey, offset, offset + CHUNK - 1, 'WITHSCORES');
+      if (raw.length === 0) break;
+
+      // Parse WITHSCORES pairs: [id, score, id, score, ...]
+      for (let i = 0; i < raw.length; i += 2) {
+        const id = raw[i]!;
+        const score = Number(raw[i + 1]);
+        const data = await this.redis.hgetall(MessageKeys.detail(id));
+        if (!data || !data.id) {
+          staleIds.push(id);
+          continue;
+        }
+        const msg = this.hydrateHash(data as Record<string, string>);
+        if (!msg) {
+          staleIds.push(id);
+          continue;
+        }
+        const eligible =
+          options?.evidence === 'durable_owner_read' ? isDurableOwnerReadEvidence(msg) : isTimelinePublished(msg);
+        if (!eligible) continue;
+        if (!passesManagedHoldViewerBoundary(msg, options?.viewerUserId)) continue;
+        if (msg.deletedAt) continue;
+
+        // Found the latest visible message — build v2 cursor
+        // Lazy null-ZREM for stale members encountered before this one
+        if (staleIds.length > 0) {
+          this.redis.zrem(visKey, ...staleIds).catch(() => {});
+        }
+        return {
+          cursor: cursorFor({ id: msg.id, visibilitySeq: score }),
+          messageId: msg.id,
+        };
+      }
+
+      offset += CHUNK;
+    }
+
+    // No live messages found — clean stale members
+    if (staleIds.length > 0) {
+      this.redis.zrem(visKey, ...staleIds).catch(() => {});
+    }
+    return null;
+  }
+
+  /** #1200: Canonicalize a raw message ID to a v2 cursor token. */
+  async canonicalizeCursor(messageId: string, threadId: string): Promise<string> {
+    await this.ensureVisibilityMigrated(threadId);
+    const score = await this.redis.zscore(MessageKeys.threadVisibility(threadId), messageId);
+    if (score == null) return messageId;
+    return cursorFor({ id: messageId, visibilitySeq: Number(score) });
+  }
+
+  /**
+   * #1200: Ensure the visibility index exists for a thread (lazy migration guard).
+   * Cheap no-op when already migrated (single HGET inside the Lua).
+   */
+  private async ensureVisibilityMigrated(threadId: string): Promise<void> {
+    const threadKey = MessageKeys.thread(threadId);
+    await this.redis.eval(
+      ENSURE_VISIBILITY_MIGRATED_LUA,
+      1,
+      threadKey,
+      this.keyPrefix,
+      threadId,
+      String(MAX_BACKFILL_MEMBERS),
+    );
+  }
+
+  /** Batch form used by Sidebar unread projection to preserve its O(1) round trips. */
+  private async ensureVisibilityMigratedBatch(threadIds: readonly string[]): Promise<void> {
+    const uniqueThreadIds = [...new Set(threadIds)];
+    if (uniqueThreadIds.length === 0) return;
+
+    const pipeline = this.redis.pipeline();
+    for (const threadId of uniqueThreadIds) {
+      pipeline.eval(
+        ENSURE_VISIBILITY_MIGRATED_LUA,
+        1,
+        MessageKeys.thread(threadId),
+        this.keyPrefix,
+        threadId,
+        String(MAX_BACKFILL_MEMBERS),
+      );
+    }
+    const results = await pipeline.exec();
+    if (!results) throw new Error('Visibility migration pipeline returned no results');
+    for (const [error] of results) {
+      if (error) throw error;
+    }
+  }
+
+  /**
+   * #1200: Chunked scan of the visibility ZSET. Reads CHUNK members at a time,
+   * hydrates, filters (visibilityPredicate + userId), and collects into `result`.
+   * Stops when `maxCollect` published messages are collected or ZSET exhausted.
+   *
+   * #1269 R9 P1-1: visibilityPredicate is caller-supplied — getByThreadAfter
+   * passes resolveThreadMessageVisibility(options, userId), mention scans pass
+   * isTimelinePublished. This keeps canonical position allocation independent
+   * from reader eligibility.
+   */
+  private async scanVisibilityChunked(
+    visKey: string,
+    minScore: string,
+    maxScore: string,
+    maxCollect: number,
+    userId: string | undefined,
+    result: StoredMessage[],
+    staleIds: string[],
+    visibilityPredicate: (msg: StoredMessage) => boolean,
+    extraFilter?: (msg: StoredMessage) => boolean,
+  ): Promise<void> {
+    const CHUNK = Math.max(maxCollect, 50);
+    let offset = 0;
+    while (result.length < maxCollect) {
+      // WITHSCORES: response is [id, score, id, score, ...] — binding by ID (§8.7 rev 4)
+      const raw = await this.redis.zrangebyscore(visKey, minScore, maxScore, 'WITHSCORES', 'LIMIT', offset, CHUNK);
+      if (raw.length === 0) break;
+
+      // Parse WITHSCORES pairs into ids + score map
+      const ids: string[] = [];
+      const scores = new Map<string, number>();
+      for (let i = 0; i < raw.length; i += 2) {
+        const id = raw[i]!;
+        const score = Number(raw[i + 1]);
+        ids.push(id);
+        scores.set(id, score);
+      }
+
+      // #1200 P1-B: NO lex-ID filtering. Score-range params handle positioning.
+      // #1200 codex P2: pass maxCollect directly — hydrateAndFilter checks
+      // result.length < maxCollect with the shared accumulator.
+      if (ids.length > 0) {
+        await this.hydrateAndFilter(
+          ids,
+          userId,
+          maxCollect,
+          result,
+          staleIds,
+          visibilityPredicate,
+          scores,
+          extraFilter,
+        );
+      }
+
+      if (ids.length < CHUNK) break;
+      offset += CHUNK;
+    }
+  }
+
+  /**
+   * #1200: Hydrate a batch of IDs + apply visibility filters.
+   * Collects up to `maxCollect` published messages into `result`.
+   * Null-hydrated IDs are added to `staleIds` for lazy ZREM.
+   *
+   * #1269 R9 P1-1: visibilityPredicate is caller-supplied so each reader
+   * applies its own publication filter (e.g. resolveThreadMessageVisibility
+   * for getByThreadAfter, isTimelinePublished for mention scans).
+   */
+  private async hydrateAndFilter(
+    ids: string[],
+    userId: string | undefined,
+    maxCollect: number,
+    result: StoredMessage[],
+    staleIds: string[],
+    visibilityPredicate: (msg: StoredMessage) => boolean,
+    scores?: Map<string, number>,
+    extraFilter?: (msg: StoredMessage) => boolean,
+  ): Promise<void> {
+    const pipeline = this.redis.multi();
+    for (const id of ids) {
+      pipeline.hgetall(MessageKeys.detail(id));
+    }
+    const rawResults = await pipeline.exec();
+    if (!rawResults) return;
+
+    for (let i = 0; i < rawResults.length && result.length < maxCollect; i++) {
+      const [err, data] = rawResults[i] ?? [null, null];
+      if (err || !data || typeof data !== 'object') {
+        staleIds.push(ids[i]!);
+        continue;
+      }
+      const d = data as Record<string, string>;
+      if (!d.id) {
+        staleIds.push(ids[i]!);
+        continue;
+      }
+
+      const msg = this.hydrateHash(d);
+      if (!msg) {
+        staleIds.push(ids[i]!);
+        continue;
+      }
+      // #1200 Sol R2 P2-5: tombstones (deletedAt) are KEPT per binding doc
+      // (tombstone-keep / null-skip / canceled-skip / visibilityPredicate). Parity with
+      // Memory store: both stores return tombstones in getByThreadAfter.
+      // #1269 R9 P1-1: caller-supplied visibilityPredicate replaces hardcoded filter.
+      // getByThreadAfter passes resolveThreadMessageVisibility(options, userId) (option-aware);
+      // mention scans pass isTimelinePublished (always include published cat speech).
+      // Hidden queued work is excluded by all predicates.
+      if (!visibilityPredicate(msg)) continue;
+      if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
+      if (extraFilter && !extraFilter(msg)) continue;
+      // §8.7: Inject visibilitySeq from WITHSCORES (authoritative over hash field
+      // for backfilled legacy messages that lack the hash field). Binding by ID.
+      if (scores) {
+        const seq = scores.get(ids[i]!);
+        if (seq !== undefined) msg.visibilitySeq = seq;
+      }
+      result.push(msg);
+    }
   }
 
   async getByThreadBefore(
@@ -432,10 +3276,17 @@ export class RedisMessageStore {
     limit?: number,
     beforeId?: string,
     userId?: string,
+    options?: ThreadMessageReadOptions,
   ): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
+    if (options?.artifactProjection || options?.recipientProjection)
+      return readArtifactMessagePage(this, threadId, n, userId, options, {
+        timestamp,
+        ...(beforeId ? { id: beforeId } : {}),
+      });
     const key = MessageKeys.thread(threadId);
-    const userFilter = userId ? (m: StoredMessage) => m.userId === userId : undefined;
+    const userFilter = userId ? (m: StoredMessage) => m.userId === userId || isSystemUserMessage(m) : undefined;
+    const isVisible = resolveThreadMessageVisibility(options, userId);
 
     if (!beforeId) {
       // F117: Chunked desc scan — collect N delivered, scan until full or exhausted
@@ -448,7 +3299,7 @@ export class RedisMessageStore {
         // Keep desc order — don't reverse
         const messages = await this.hydrateMessages(ids);
         for (const msg of messages) {
-          if (!isDelivered(msg)) continue;
+          if (!isVisible(msg)) continue;
           if (userFilter && !userFilter(msg)) continue;
           result.push(msg);
           if (result.length >= n) break;
@@ -459,20 +3310,115 @@ export class RedisMessageStore {
       return result.slice(0, n).reverse();
     }
 
-    // F117: Scan cursor path with integrated isDelivered + user filtering
-    const result = await this.fetchDeliveredBeforeCursor(key, timestamp, beforeId, n, userFilter);
+    // F117/F128: Scan cursor path with integrated publication + user filtering
+    const result = await this.fetchVisibleBeforeCursor(key, timestamp, beforeId, n, userFilter, isVisible);
     return result.reverse();
   }
 
+  async getByThreadBeforeBounded(
+    threadId: string,
+    timestamp: number,
+    limit: number,
+    beforeId: string | undefined,
+    userId: string | undefined,
+    scanLimit: number,
+    options?: ThreadMessageReadOptions,
+  ): Promise<BoundedThreadMessagePage> {
+    const key = MessageKeys.thread(threadId);
+    const resultTarget = Math.max(1, Math.floor(limit));
+    const rawLimit = Math.max(0, Math.floor(scanLimit));
+    const chunkSize = Math.min(resultTarget, 500);
+    const userFilter = userId
+      ? (message: StoredMessage) => message.userId === userId || isSystemUserMessage(message)
+      : undefined;
+    const isVisible = resolveThreadMessageVisibility(options, userId);
+    const result: StoredMessage[] = [];
+    let scannedCount = 0;
+    let storageRoundTrips = 0;
+    let exhausted = rawLimit === 0;
+    let offset = 0;
+    let nextCursor: BoundedThreadMessagePage['nextCursor'];
+
+    const projected = options?.artifactProjection || options?.recipientProjection;
+    let cursorRank: number | null | undefined;
+    if (beforeId && !projected) {
+      cursorRank = await this.redis.zrevrank(key, beforeId);
+      storageRoundTrips += 1;
+    }
+
+    while (result.length < resultTarget && scannedCount < rawLimit) {
+      const count = Math.min(chunkSize, rawLimit - scannedCount);
+      let raw: string[];
+      if (beforeId && projected) {
+        raw = await readArtifactBeforeRange(this.redis, key, timestamp, beforeId, offset, count);
+      } else if (cursorRank !== null && cursorRank !== undefined) {
+        const start = cursorRank + 1 + offset;
+        raw = await this.redis.zrevrange(key, start, start + count - 1, 'WITHSCORES');
+      } else {
+        const max = beforeId ? String(timestamp) : `(${timestamp}`;
+        raw = await this.redis.zrevrangebyscore(key, max, '-inf', 'WITHSCORES', 'LIMIT', offset, count);
+      }
+      storageRoundTrips += 1;
+
+      const pairCount = Math.floor(raw.length / 2);
+      if (pairCount === 0) {
+        exhausted = true;
+        break;
+      }
+
+      const validIds: string[] = [];
+      for (let index = 0; index < pairCount; index += 1) {
+        const id = raw[index * 2]!;
+        const score = parseRedisNumber(raw[index * 2 + 1]!);
+        scannedCount += 1;
+        nextCursor = { timestamp: score, id };
+        if (cursorRank === null && beforeId && score === timestamp && id >= beforeId) continue;
+        validIds.push(id);
+      }
+
+      if (validIds.length > 0) {
+        const messages = await this.hydrateMessages(
+          validIds,
+          options?.recipientProjection
+            ? { recipientOnly: true, strict: true }
+            : options?.artifactProjection
+              ? { artifactOnly: true, strict: true }
+              : undefined,
+        );
+        storageRoundTrips += 1;
+        for (const message of messages) {
+          if (!isVisible(message)) continue;
+          if (userFilter && !userFilter(message)) continue;
+          result.push(message);
+        }
+      }
+
+      offset += pairCount;
+      if (pairCount < count) {
+        exhausted = true;
+        break;
+      }
+    }
+
+    return {
+      messages: result.reverse(),
+      scannedCount,
+      storageRoundTrips,
+      exhausted,
+      ...(nextCursor ? { nextCursor } : {}),
+    };
+  }
+
   /**
-   * F117: Scan a sorted set in reverse (newest first), hydrate + filter by isDelivered,
-   * collecting up to `n` delivered messages. Returns messages in ascending order (oldest first).
-   * Scans until N delivered collected or sorted set exhausted.
+   * Scan a sorted set in reverse (newest first), hydrate + apply the selected
+   * visibility predicate, collecting up to `n` visible messages. Returns oldest first.
    */
-  private async fetchDeliveredDesc(
+  private async fetchVisibleDesc(
     key: string,
     n: number,
     extraFilter?: (msg: StoredMessage) => boolean,
+    visibilityFilter: (msg: StoredMessage) => boolean = isDelivered,
+    evidenceOnly = false,
   ): Promise<StoredMessage[]> {
     const CHUNK = Math.max(n, 50);
     const result: StoredMessage[] = []; // Collects in desc order (newest first)
@@ -483,9 +3429,9 @@ export class RedisMessageStore {
       if (ids.length === 0) break; // Sorted set exhausted
 
       // Hydrate in desc order (don't reverse — preserve newest-first)
-      const messages = await this.hydrateMessages(ids);
+      const messages = await this.hydrateMessages(ids, evidenceOnly ? { evidenceOnly: true } : undefined);
       for (const msg of messages) {
-        if (!isDelivered(msg)) continue;
+        if (!visibilityFilter(msg)) continue;
         if (extraFilter && !extraFilter(msg)) continue;
         result.push(msg);
         if (result.length >= n) break;
@@ -501,63 +3447,41 @@ export class RedisMessageStore {
   }
 
   /**
-   * Fetch IDs before a composite cursor (timestamp + beforeId) using chunked scanning.
-   * Loops until we have `limit` results or exhaust the sorted set.
-   */
-  private async fetchBeforeWithCursor(
-    key: string,
-    timestamp: number,
-    beforeId: string,
-    limit: number,
-  ): Promise<string[]> {
-    const CHUNK = 50;
-    const filtered: string[] = [];
-    let offset = 0;
-
-    while (filtered.length < limit) {
-      const chunk = await this.redis.zrevrangebyscore(key, String(timestamp), '-inf', 'LIMIT', offset, CHUNK);
-      if (chunk.length === 0) break;
-
-      for (const id of chunk) {
-        if (filtered.length >= limit) break;
-        const score = await this.redis.zscore(key, id);
-        if (score !== null && parseInt(score, 10) === timestamp && id >= beforeId) {
-          continue;
-        }
-        filtered.push(id);
-      }
-
-      offset += CHUNK;
-    }
-
-    return filtered;
-  }
-
-  /**
-   * F117: Scan before a cursor (desc), hydrate + filter by isDelivered + optional extra,
-   * collecting exactly N delivered messages or until sorted set exhausted.
+   * Scan before a cursor (desc), hydrate + apply visibility + optional extra,
+   * collecting exactly N visible messages or until sorted set exhaustion.
    * Returns messages in desc order (newest first). Caller must reverse for asc.
    */
-  private async fetchDeliveredBeforeCursor(
+  private async fetchVisibleBeforeCursor(
     key: string,
     timestamp: number,
     beforeId: string,
     n: number,
     extraFilter?: (msg: StoredMessage) => boolean,
+    visibilityFilter: (msg: StoredMessage) => boolean = isDelivered,
   ): Promise<StoredMessage[]> {
     const CHUNK = 50;
     const result: StoredMessage[] = [];
     let offset = 0;
 
     while (result.length < n) {
-      const chunk = await this.redis.zrevrangebyscore(key, String(timestamp), '-inf', 'LIMIT', offset, CHUNK);
-      if (chunk.length === 0) break;
+      const chunk = await this.redis.zrevrangebyscore(
+        key,
+        String(timestamp),
+        '-inf',
+        'WITHSCORES',
+        'LIMIT',
+        offset,
+        CHUNK,
+      );
+      const memberCount = chunk.length / 2;
+      if (memberCount === 0) break;
 
-      // Filter cursor boundary (same logic as fetchBeforeWithCursor)
+      // Bind the boundary to the timeline score returned with each member.
       const validIds: string[] = [];
-      for (const id of chunk) {
-        const score = await this.redis.zscore(key, id);
-        if (score !== null && Number.parseInt(score, 10) === timestamp && id >= beforeId) {
+      for (let i = 0; i < chunk.length; i += 2) {
+        const id = chunk[i]!;
+        const score = parseRedisNumber(chunk[i + 1]!);
+        if (score === timestamp && id >= beforeId) {
           continue;
         }
         validIds.push(id);
@@ -567,15 +3491,15 @@ export class RedisMessageStore {
         // Hydrate in desc order (don't reverse)
         const messages = await this.hydrateMessages(validIds);
         for (const msg of messages) {
-          if (!isDelivered(msg)) continue;
+          if (!visibilityFilter(msg)) continue;
           if (extraFilter && !extraFilter(msg)) continue;
           result.push(msg);
           if (result.length >= n) break;
         }
       }
 
-      if (chunk.length < CHUNK) break;
-      offset += CHUNK;
+      if (memberCount < CHUNK) break;
+      offset += memberCount;
     }
 
     return result;
@@ -589,17 +3513,21 @@ export class RedisMessageStore {
 
     // Get all message IDs in this thread
     const ids = await this.redis.zrange(key, 0, -1);
-    if (ids.length === 0) return 0;
 
     const pipeline = this.redis.multi();
 
-    // Delete each message hash
-    for (const id of ids) {
-      pipeline.del(MessageKeys.detail(id));
-    }
+    // Delete each authority hash.
+    for (const id of ids) pipeline.del(MessageKeys.detail(id));
 
-    // Delete the thread sorted set
+    // Delete the thread sorted set (even if empty — may still exist as empty key)
     pipeline.del(key);
+
+    // #1200: Delete visibility ZSET + metadata hash (these are permanent — no TTL).
+    // Must run even when ids.length === 0: a thread may have migrated metadata
+    // but no messages (e.g. after all messages were individually deleted).
+    pipeline.del(MessageKeys.threadVisibility(threadId));
+    pipeline.del(MessageKeys.threadVisibilityMeta(threadId));
+    pipeline.del(MessageKeys.legacyQueueExposureIndex(threadId));
 
     // Note: We don't clean up global timeline, user timeline, or mention sets
     // as those will auto-expire via TTL. Cleaning them would be O(n) expensive.
@@ -621,6 +3549,7 @@ export class RedisMessageStore {
     });
     msg.deletedAt = now;
     msg.deletedBy = deletedBy;
+    notifyMessageTimelineChange(this, msg);
     return msg;
   }
 
@@ -631,28 +3560,29 @@ export class RedisMessageStore {
     const msg = await this.getById(id);
     if (!msg) return null;
     const now = Date.now();
-    await this.redis.hset(MessageKeys.detail(id), {
-      content: '',
-      contentBlocks: '',
-      toolEvents: '',
-      metadata: '',
-      extra: '',
-      thinking: '',
-      mentions: '[]',
-      deletedAt: String(now),
-      deletedBy,
-      _tombstone: '1',
-    });
+    const transition = Number(
+      await this.redis.eval(HARD_DELETE_MESSAGE_LUA, 1, MessageKeys.detail(id), String(now), deletedBy),
+    );
+    if (transition !== 1) return null;
+    const pipeline = this.redis.multi();
+    for (const catId of msg.mentions) pipeline.zrem(MessageKeys.mentions(catId), id);
+    const cleanupResults = await pipeline.exec();
+    if (!cleanupResults) throw new Error('message hard delete: pipeline exec aborted');
+    for (const [error] of cleanupResults) {
+      if (error) throw error;
+    }
     msg.content = '';
     msg.mentions = [];
     delete msg.contentBlocks;
     delete msg.toolEvents;
     delete msg.metadata;
     delete msg.extra;
+    delete msg.lifecycle;
     delete msg.thinking;
     msg.deletedAt = now;
     msg.deletedBy = deletedBy;
     msg._tombstone = true;
+    notifyMessageTimelineChange(this, msg);
     return msg;
   }
 
@@ -663,10 +3593,10 @@ export class RedisMessageStore {
   async restore(id: string): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg || !msg.deletedAt || msg._tombstone) return null;
-    await this.redis.hdel(MessageKeys.detail(id), 'deletedAt', 'deletedBy');
-    delete msg.deletedAt;
-    delete msg.deletedBy;
-    return msg;
+    const result = await this.redis.eval(withUserMentionIndex(RESTORE_SOFT_DELETED_LUA), 1, MessageKeys.detail(id));
+    const restored = result === 0 ? null : this.parseLuaHgetall(result);
+    if (restored) notifyMessageTimelineChange(this, restored);
+    return restored;
   }
 
   /**
@@ -690,97 +3620,736 @@ export class RedisMessageStore {
     return count;
   }
 
-  /** F096: Update message extra data (for interactive block state persistence). */
-  async updateExtra(id: string, extra: NonNullable<StoredMessage['extra']>): Promise<StoredMessage | null> {
-    const msg = await this.getById(id);
-    if (!msg) return null;
-    await this.redis.hset(MessageKeys.detail(id), { extra: JSON.stringify(extra) });
-    msg.extra = extra;
-    return msg;
+  /** F096: Update message extra data (merge semantics — preserves existing fields). */
+  async recordCompanionDeliveryAcceptance(
+    id: string,
+    input: CompanionDeliveryAcceptance,
+  ): Promise<StoredMessage | null> {
+    const message = await this.getById(id);
+    if (
+      !message ||
+      message.userId !== input.ownerUserId ||
+      message.threadId !== input.threadId ||
+      !companionDeliveryMatches(message, input)
+    )
+      return null;
+    if (!(await recordRedisCompanionAcceptance(this.redis, id, input, message.content))) return null;
+    const current = await this.getById(id);
+    return current &&
+      current.companionDeliveryReceipt &&
+      companionDeliveryMatches(current, current.companionDeliveryReceipt)
+      ? current
+      : null;
   }
 
-  /** F098-D: Mark a queued message as delivered (set deliveredAt timestamp). */
-  async markDelivered(id: string, deliveredAt: number): Promise<StoredMessage | null> {
+  async attachMessageSearchAnswer(id: string, input: MessageSearchAnswerAttachment): Promise<StoredMessage | null> {
+    const parsed = messageSearchAnswerBindingSchema.safeParse(input.binding);
+    if (!parsed.success) return null;
+    const changed = await this.redis.eval(
+      ATTACH_MESSAGE_SEARCH_ANSWER_LUA,
+      1,
+      MessageKeys.detail(id),
+      input.ownerUserId,
+      input.threadId,
+      input.catId,
+      JSON.stringify(parsed.data),
+      JSON.stringify(messageSearchAnswerBlock(parsed.data)),
+    );
+    if (Number(changed) !== 1) return null;
+    const result = await this.getById(id);
+    if (result) notifyMessageTimelineChange(this, result);
+    return result;
+  }
+
+  async updateExtra(id: string, extra: HostMessageExtra): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg) return null;
-    if (msg.deliveryStatus !== 'queued') return msg; // only transition queued → delivered
-    const pipeline = this.redis.multi();
-    pipeline.hset(MessageKeys.detail(id), {
-      deliveredAt: String(deliveredAt),
-      deliveryStatus: 'delivered',
+    const { hostExtra: current, pluginMessage } = splitMessageExtra(msg.extra);
+    const {
+      messageSearchAnswer: _stripAnswer,
+      pluginMessage: _stripPlugin,
+      custodyOfferV1: _stripCustody,
+      entrustedWorkHumanTerminalReceiptV1: _stripEntrustedWorkTerminal,
+      evolutionPreparationSubmissionV1: _stripPreparation,
+      dotAsk: _stripDotAsk,
+      deliveryBoundary: _stripBoundary,
+      collectiveOwnerAdmissionV1: _stripCollectiveAdmission,
+      collectiveAuthorizationInvalid: _stripCollectiveInvalid,
+      collectiveWorkInvocationV1: _stripCollectiveInvocation,
+      collectiveWorkDelegationV1: _stripCollectiveDelegation,
+      ...hostPatch
+    } = extra as Record<string, unknown>;
+    const merged = { ...current, ...hostPatch };
+    const updated = await this.redis.eval(
+      UPDATE_EXTRA_IF_NOT_RECALLED_LUA,
+      1,
+      MessageKeys.detail(id),
+      serializeExtra(merged ?? {}),
+      pluginMessage ? JSON.stringify(pluginMessage) : '',
+    );
+    if (Number(updated) !== 1) return null;
+    const result = await this.getById(id);
+    if (result && hostPatch.rich !== undefined && JSON.stringify(current?.rich) !== JSON.stringify(result.extra?.rich))
+      notifyMessageTimelineChange(this, result);
+    return result;
+  }
+
+  async compareAndTransitionCustodyOffer(
+    id: string,
+    input: CustodyOfferTransitionInput,
+  ): Promise<CustodyOfferTransitionResult> {
+    const hashKey = MessageKeys.detail(id);
+    const snapshot = await readCustodyOfferCasSnapshot(this.redis, hashKey);
+    if (snapshot.kind === 'failure') return snapshot.result;
+    if (snapshot.actualSourceRevision !== input.expectedSourceMessageRevision) {
+      return { kind: 'source_revision_mismatch' };
+    }
+    if (snapshot.currentOffer && snapshot.currentOffer.sourceMessageRevision !== input.expectedSourceMessageRevision) {
+      return { kind: 'invalid_state' };
+    }
+    const expectedParsed = input.expectedOffer === null ? null : custodyOfferV1Schema.safeParse(input.expectedOffer);
+    if (expectedParsed !== null && !expectedParsed.success) return { kind: 'invalid_transition' };
+    const expectedOffer = expectedParsed === null ? null : expectedParsed.data;
+    if (JSON.stringify(snapshot.currentOffer) !== JSON.stringify(expectedOffer)) {
+      return { kind: 'state_conflict', currentOffer: snapshot.currentOffer };
+    }
+    if (!isValidCustodyOfferTransition(input.expectedSourceMessageRevision, input.expectedOffer, input.nextOffer)) {
+      return { kind: 'invalid_transition' };
+    }
+
+    const nextOffer = custodyOfferV1Schema.parse(input.nextOffer);
+    const result = await this.redis.eval(
+      COMPARE_AND_TRANSITION_CUSTODY_OFFER_LUA,
+      1,
+      hashKey,
+      snapshot.content,
+      snapshot.rawContentBlocks,
+      snapshot.rawCurrentOffer,
+      JSON.stringify(nextOffer),
+    );
+    const receipt = parseCustodyOfferCasReceipt(result);
+    if (receipt.kind !== 'updated_hash') return receipt;
+    const message = this.parseLuaHgetall(receipt.fields);
+    if (!message) throw new Error('custody offer CAS lost canonical source message');
+    return { kind: 'updated', message };
+  }
+
+  async updatePluginMessage(
+    id: string,
+    pluginMessage: StoredPluginMessage,
+    expectedRevision: number,
+  ): Promise<StoredMessage | null> {
+    const updated = await this.redis.eval(
+      UPDATE_PLUGIN_MESSAGE_LUA,
+      1,
+      MessageKeys.detail(id),
+      JSON.stringify(pluginMessage),
+      String(expectedRevision),
+    );
+    if (Number(updated) !== 1) return null;
+    return this.getById(id);
+  }
+
+  async augmentStreamMetadata(id: string, patch: StreamMetadataAugmentInput): Promise<StoredMessage | null> {
+    const msg = await this.getById(id);
+    if (!msg) return null;
+    const previousRich = JSON.stringify(msg.extra?.rich);
+    const augmented = applyStreamMetadataAugment(msg, patch);
+    const fields: Record<string, string> = {};
+    if (patch.thinking && augmented.thinking) fields.thinking = augmented.thinking;
+    if (patch.metadata && augmented.metadata) fields.metadata = JSON.stringify(augmented.metadata);
+    if (patch.toolEvents?.length && augmented.toolEvents) fields.toolEvents = JSON.stringify(augmented.toolEvents);
+    if (patch.replyTo && augmented.replyTo) fields.replyTo = augmented.replyTo;
+    if (patch.mentionsUser && augmented.mentionsUser) fields.mentionsUser = '1';
+    const { pluginMessage } = splitMessageExtra(augmented.extra);
+    if (patch.extra && augmented.extra) fields.extra = serializeHostExtra(augmented.extra);
+    if (Object.keys(fields).length > 0) {
+      await this.redis.eval(
+        withUserMentionIndex(`
+        local fields = cjson.decode(ARGV[1])
+        for field, value in pairs(fields) do redis.call('HSET', KEYS[1], field, value) end
+        if ARGV[2] ~= '' then redis.call('HSETNX', KEYS[1], 'pluginMessage', ARGV[2]) end
+        return 1
+      `),
+        1,
+        MessageKeys.detail(id),
+        JSON.stringify(fields),
+        pluginMessage ? JSON.stringify(pluginMessage) : '',
+      );
+    }
+    const updated = (await this.getById(id)) ?? augmented;
+    if (patch.mentionsUser || (patch.extra?.rich && previousRich !== JSON.stringify(updated.extra?.rich)))
+      notifyMessageTimelineChange(this, updated);
+    return updated;
+  }
+
+  async commitLifecycleResponseTerminal(
+    id: string,
+    patch: LifecycleResponseTerminalPatch,
+  ): Promise<CommitLifecycleResponseTerminalResult> {
+    return this.commitLifecycleResponseTerminalInternal(id, patch);
+  }
+
+  private async commitLifecycleResponseTerminalInternal(
+    id: string,
+    patch: LifecycleResponseTerminalPatch,
+  ): Promise<CommitLifecycleResponseTerminalResult> {
+    const key = MessageKeys.detail(id);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      // Read the expected lifecycle before hydrating the full message. If a child
+      // settles between these reads, the Lua comparison fails instead of blessing
+      // a terminal state derived from mismatched snapshots.
+      const expectedLifecycleRaw = (await this.redis.hget(key, 'lifecycle')) ?? '';
+      const current = await this.getById(id);
+      if (!current) return { kind: 'not_found' };
+      const prepared = prepareRedisLifecycleResponseTerminal(current, patch);
+      if (prepared.kind === 'result') {
+        if (prepared.result.kind !== 'replayed') return prepared.result;
+        await this.ensureVisibilityMigrated(current.threadId);
+        return {
+          kind: 'replayed',
+          message: (await this.getById(id)) ?? prepared.result.message,
+        };
+      }
+      await this.ensureVisibilityMigrated(current.threadId);
+      const outcome = Number(
+        await this.redis.eval(
+          COMMIT_LIFECYCLE_RESPONSE_TERMINAL_LUA,
+          3,
+          key,
+          MessageKeys.threadVisibility(current.threadId),
+          MessageKeys.threadVisibilityMeta(current.threadId),
+          ...lifecycleResponseTerminalLuaArgs(patch, prepared.nextMessage, expectedLifecycleRaw),
+        ),
+      );
+      // Both codes mean the snapshot changed after our read. Re-read even when
+      // another writer terminalized first: the next pass can distinguish an
+      // exact replay from a genuinely different terminal without stale data.
+      if (outcome === 0 || outcome === -4) continue;
+      if (outcome === -1) return { kind: 'not_found' };
+      const message = await this.getById(id);
+      if (!message) throw new Error(`lifecycle response terminal committed but message vanished: ${id}`);
+      return lifecycleResponseTerminalResultFromRedis(outcome, message);
+    }
+    const message = await this.getById(id);
+    if (!message) return { kind: 'not_found' };
+    return { kind: 'conflict', reason: 'different_terminal', message };
+  }
+
+  async commitLifecyclePreAdmissionFailure(
+    input: LifecyclePreAdmissionFailureInput,
+  ): Promise<CommitLifecyclePreAdmissionFailureResult> {
+    const source = await this.getById(input.sourceMessageId);
+    if (!source) return { kind: 'not_found' };
+    const idempotencyKey = preAdmissionFailureIdempotencyKey(input.expectedEntryId);
+    const existingFailure = await this.getByIdempotencyKey('system', source.threadId, idempotencyKey);
+    if (existingFailure) {
+      if (!matchesLifecyclePreAdmissionFailure(existingFailure, source, input)) {
+        return {
+          kind: 'conflict',
+          reason: 'different_failure',
+          inputMessage: source,
+          failureMessage: existingFailure,
+        };
+      }
+      const targetProjectionReplayed = input.requestedTargets.every((targetId) =>
+        source.lifecycle?.dispatchRefs?.some(
+          (ref) => ref.targetId === targetId && ref.phase === 'settled' && ref.statusMessageId === existingFailure.id,
+        ),
+      );
+      const queuedInputReplayed =
+        source.deliveryStatus === 'delivered' &&
+        source.lifecycle?.kind === 'input' &&
+        (input.requestedTargets.length === 0 || targetProjectionReplayed);
+      const publicWakeReplayed =
+        source.deliveryStatus === undefined && messageFrom(source).kind === 'agent' && targetProjectionReplayed;
+      if (!queuedInputReplayed && !publicWakeReplayed) {
+        return {
+          kind: 'conflict',
+          reason: 'invalid_failure',
+          inputMessage: source,
+          failureMessage: existingFailure,
+        };
+      }
+      return { kind: 'replayed', inputMessage: source, failureMessage: existingFailure };
+    }
+
+    if (source.recall || source._tombstone) {
+      return { kind: 'conflict', reason: 'invalid_failure', inputMessage: structuredClone(source) };
+    }
+    const isQueuedInput = source.deliveryStatus === 'queued';
+    // One sibling may already have published this input. Only settle recipients
+    // with no dispatch reference; keep the original publication coordinates.
+    const isDeliveredInput =
+      source.deliveryStatus === 'delivered' &&
+      source.lifecycle?.kind === 'input' &&
+      (source.lifecycle.dispatchRefs?.length ?? 0) > 0;
+    const isPublicAgentWake =
+      source.deliveryStatus === undefined &&
+      messageFrom(source).kind === 'agent' &&
+      source.visibility !== 'whisper' &&
+      source.lifecycle?.kind !== 'delivery_failure';
+
+    const uniqueTargets = new Set(input.requestedTargets);
+    if (
+      !Number.isInteger(input.failedAt) ||
+      input.failedAt < source.timestamp ||
+      input.requestedTargets.some((target) => typeof target !== 'string' || target.length === 0) ||
+      uniqueTargets.size !== input.requestedTargets.length ||
+      (!isQueuedInput && input.requestedTargets.length === 0) ||
+      (!isQueuedInput && !isDeliveredInput && !isPublicAgentWake)
+    ) {
+      return { kind: 'conflict', reason: 'invalid_failure', inputMessage: source };
+    }
+    const inputIdentity = lifecycleInputIdentityForStoredMessage(source);
+    const assigned = assignLifecycleDispatchTargetsMetadata(source.lifecycle, inputIdentity, input.requestedTargets);
+    if (assigned.kind === 'conflict') {
+      return { kind: 'conflict', reason: 'invalid_failure', inputMessage: source };
+    }
+    const failureId = generateSortableId(input.failedAt);
+    const settledSourceLifecycle =
+      input.requestedTargets.length === 0
+        ? assigned.lifecycle
+        : settleAssignedLifecycleDispatchFailureMetadata(
+            assigned.lifecycle,
+            input.requestedTargets,
+            failureId,
+            input.failedAt,
+          );
+    if (!settledSourceLifecycle) {
+      return { kind: 'conflict', reason: 'invalid_failure', inputMessage: source };
+    }
+    const failureLifecycle: LifecycleStoredMessageMetadata = {
+      kind: 'delivery_failure',
+      orderKey: `${input.failedAt}:${source.id}:failure`,
+      status: 'failed',
+      sourceEntryId: input.expectedEntryId,
+      inputMessageId: source.id,
+      requestedTargets: [...input.requestedTargets],
+      reason: input.reason,
+      createdAt: input.failedAt,
+    };
+    const failureInput = canonicalizeAppendMessageInput({
+      from: { kind: 'system', service: 'message_delivery' },
+      userId: 'system',
+      threadId: source.threadId,
+      content: input.content,
+      ...(input.contentBlocks ? { contentBlocks: input.contentBlocks } : {}),
+      mentions: [],
+      timestamp: input.failedAt,
+      lifecycle: failureLifecycle,
+      idempotencyKey,
     });
-    // Update sorted set scores so history queries return messages at delivery
-    // position, not original send-time slot (Bug A: queue message ordering).
-    const scoreStr = String(deliveredAt);
-    pipeline.zadd(MessageKeys.thread(msg.threadId), scoreStr, id);
-    pipeline.zadd(MessageKeys.TIMELINE, scoreStr, id);
-    pipeline.zadd(MessageKeys.user(msg.userId), scoreStr, id);
-    await pipeline.exec();
-    msg.deliveredAt = deliveredAt;
-    msg.deliveryStatus = 'delivered';
-    return msg;
+    if (
+      !isLifecycleStoredMessageMetadata(settledSourceLifecycle) ||
+      !isLifecycleStoredMessageMetadata(failureLifecycle)
+    ) {
+      return { kind: 'conflict', reason: 'invalid_failure', inputMessage: source };
+    }
+    await this.ensureVisibilityMigrated(source.threadId);
+    const result = (await this.redis.eval(
+      COMMIT_LIFECYCLE_PRE_ADMISSION_FAILURE_LUA,
+      1,
+      MessageKeys.detail(source.id),
+      this.keyPrefix,
+      failureId,
+      source.threadId,
+      source.userId,
+      input.expectedEntryId,
+      String(input.failedAt),
+      source.lifecycle === undefined ? '' : JSON.stringify(source.lifecycle),
+      JSON.stringify(settledSourceLifecycle),
+      JSON.stringify(failureLifecycle),
+      failureInput.content,
+      failureInput.contentBlocks === undefined ? '' : JSON.stringify(failureInput.contentBlocks),
+      MessageKeys.idempotency('system', source.threadId, idempotencyKey),
+      String(this.ttlSeconds ?? 0),
+      isQueuedInput ? 'queued_input' : isDeliveredInput ? 'delivered_input' : 'public_wake',
+      JSON.stringify(failureInput.from),
+    )) as [number | string, string];
+    const outcome = Number(result[0]);
+    if (outcome === -1) return { kind: 'not_found' };
+
+    const inputMessage = await this.getById(source.id);
+    if (!inputMessage) {
+      throw new Error(`pre-admission failure transaction lost source message: ${source.id}`);
+    }
+    if (outcome < 0) {
+      const reason = outcome === -2 ? 'not_queued' : 'invalid_failure';
+      return { kind: 'conflict', reason, inputMessage };
+    }
+
+    const committedFailureId = result[1];
+    const failureMessage = await this.getById(committedFailureId);
+    if (!failureMessage) {
+      throw new Error(`pre-admission failure transaction lost failure message: ${committedFailureId}`);
+    }
+    if (!matchesLifecyclePreAdmissionFailure(failureMessage, inputMessage, input)) {
+      return {
+        kind: 'conflict',
+        reason: 'different_failure',
+        inputMessage,
+        failureMessage,
+      };
+    }
+    const targetProjectionCommitted = input.requestedTargets.every((targetId) =>
+      inputMessage.lifecycle?.dispatchRefs?.some(
+        (ref) => ref.targetId === targetId && ref.phase === 'settled' && ref.statusMessageId === failureMessage.id,
+      ),
+    );
+    const queuedInputCommitted =
+      inputMessage.deliveryStatus === 'delivered' &&
+      inputMessage.lifecycle?.kind === 'input' &&
+      (input.requestedTargets.length === 0 || targetProjectionCommitted);
+    const publicWakeCommitted =
+      inputMessage.deliveryStatus === undefined &&
+      messageFrom(inputMessage).kind === 'agent' &&
+      targetProjectionCommitted;
+    if (!queuedInputCommitted && !publicWakeCommitted) {
+      return {
+        kind: 'conflict',
+        reason: 'invalid_failure',
+        inputMessage,
+        failureMessage,
+      };
+    }
+    if (outcome === 1 && this.onAppend) {
+      try {
+        void Promise.resolve(this.onAppend(failureMessage)).catch(() => {});
+      } catch {
+        /* best-effort */
+      }
+    }
+    if (outcome === 1) return { kind: 'applied', inputMessage, failureMessage };
+    if (outcome === 2) return { kind: 'replayed', inputMessage, failureMessage };
+    throw new Error(`unexpected lifecycle pre-admission failure outcome: ${outcome}`);
   }
 
-  /** F117: Mark a queued message as canceled (withdraw/clear). */
-  async markCanceled(id: string): Promise<StoredMessage | null> {
-    const msg = await this.getById(id);
-    if (!msg) return null;
-    await this.redis.hset(MessageKeys.detail(id), { deliveryStatus: 'canceled' });
-    msg.deliveryStatus = 'canceled';
-    return msg;
+  async advanceLifecycleInputDispatch(
+    id: string,
+    patch: LifecycleInputDispatchPatch,
+  ): Promise<AdvanceLifecycleInputDispatchResult> {
+    const locked = await this.withLifecycleDispatchLock(id, () =>
+      this.advanceLifecycleInputDispatchUnlocked(id, patch),
+    );
+    if (locked !== null) return locked;
+    const message = await this.getById(id);
+    if (!message) return { kind: 'not_found' };
+    return { kind: 'conflict', reason: 'contended', message };
+  }
+
+  /**
+   * Serialize dispatchRef writes for one source message. A fan-out delivers the
+   * same input to several cats at once; without this mutex every target races
+   * the same read-modify-write CAS and the last writer can lose all retries.
+   * The lock is only an optimizer: the CAS below still guarantees correctness
+   * if a lock expires or is lost.
+   */
+  private async withLifecycleDispatchLock<T>(id: string, run: () => Promise<T>): Promise<T | null> {
+    const key = MessageKeys.lifecycleDispatchLock(id);
+    const token = randomUUID();
+    const deadline = Date.now() + 500;
+    for (;;) {
+      const acquired = await this.redis.set(key, token, 'PX', 2000, 'NX');
+      if (acquired === 'OK') {
+        try {
+          return await run();
+        } finally {
+          await this.redis.eval(RELEASE_LIFECYCLE_DISPATCH_LOCK_LUA, 1, key, token).catch(() => 0);
+        }
+      }
+      if (Date.now() >= deadline) return null;
+      await new Promise((resolve) => setTimeout(resolve, 2 + Math.floor(Math.random() * 3)));
+    }
+  }
+
+  private async advanceLifecycleInputDispatchUnlocked(
+    id: string,
+    patch: LifecycleInputDispatchPatch,
+  ): Promise<AdvanceLifecycleInputDispatchResult> {
+    const key = MessageKeys.detail(id);
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const raw = await this.redis.hget(key, 'lifecycle');
+      const current = raw ? safeParseLifecycleMetadata(raw) : undefined;
+      const message = await this.getById(id);
+      if (!message) return { kind: 'not_found' };
+      if (raw && !current) return { kind: 'conflict', reason: 'not_input', message };
+      const transition = advanceLifecycleInputDispatchMetadata(current, patch);
+      if (transition.kind === 'conflict') return { ...transition, message };
+      if (transition.kind === 'replayed') return { kind: 'replayed', message };
+      const outcome = Number(
+        await this.redis.eval(CAS_LIFECYCLE_METADATA_LUA, 1, key, raw ?? '', JSON.stringify(transition.lifecycle)),
+      );
+      if (outcome === 0) continue;
+      if (outcome === -1) return { kind: 'not_found' };
+      if (outcome === -2) return { kind: 'conflict', reason: 'not_input', message };
+      if (outcome !== 1) throw new Error(`unexpected lifecycle input dispatch outcome: ${outcome}`);
+      const applied = await this.getById(id);
+      if (!applied) throw new Error(`lifecycle input dispatch committed but message vanished: ${id}`);
+      return { kind: 'applied', message: applied };
+    }
+    const message = await this.getById(id);
+    if (!message) return { kind: 'not_found' };
+    return { kind: 'conflict', reason: 'contended', message };
+  }
+
+  async commitLifecycleAppendAdmission(
+    input: LifecycleAppendAdmissionInput,
+  ): Promise<CommitLifecycleAppendAdmissionResult> {
+    const ids = [...input.inputMessageIds, ...input.runs.map((run) => run.responseMessageId)];
+    const keys = ids.map((id) => MessageKeys.detail(id));
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const [messages, rawLifecycles] = await Promise.all([
+        Promise.all(ids.map((id) => this.getById(id))),
+        Promise.all(keys.map((key) => this.redis.hget(key, 'lifecycle'))),
+      ]);
+      if (messages.some((message) => !message)) return { kind: 'not_found' };
+      const prepared = prepareLifecycleAppendAdmission(messages as StoredMessage[], input);
+      if (prepared.kind !== 'prepared') return prepared;
+      if (prepared.replayed) {
+        return { kind: 'replayed', messages: messages as StoredMessage[] };
+      }
+      const argv = prepared.lifecycles.flatMap((lifecycle, index) => [
+        rawLifecycles[index] ?? '',
+        JSON.stringify(lifecycle),
+      ]);
+      const outcome = Number(await this.redis.eval(CAS_LIFECYCLE_APPEND_ADMISSION_LUA, keys.length, ...keys, ...argv));
+      if (outcome === 0) continue;
+      if (outcome === -1) return { kind: 'not_found' };
+      if (outcome === -2) return { kind: 'conflict', reason: 'scope_mismatch' };
+      if (outcome !== 1) throw new Error(`unexpected lifecycle Append admission outcome: ${outcome}`);
+      const applied = await Promise.all(ids.map((id) => this.getById(id)));
+      if (applied.some((message) => !message)) {
+        throw new Error('lifecycle Append admission committed but a message vanished');
+      }
+      return { kind: 'applied', messages: applied as StoredMessage[] };
+    }
+    return { kind: 'conflict', reason: 'response_lifecycle_conflict' };
+  }
+
+  commitLifecycleAppendRecovery(
+    input: LifecycleAppendRecoveryInput,
+    ledgerStore: QueueLedgerStore,
+  ): Promise<LifecycleAppendRecoveryResult> {
+    return commitRedisLifecycleAppendRecovery(this.redis, this, input, ledgerStore);
+  }
+
+  commitLifecycleWakeCoverage(
+    input: LifecycleWakeCoverageInput,
+    ledgerStore: QueueLedgerStore,
+  ): Promise<LifecycleWakeCoverageResult> {
+    return commitRedisLifecycleWakeCoverage(this.redis, this, input, ledgerStore);
+  }
+
+  /**
+   * F098-D: Atomically mark a queued message delivered while preserving the
+   * Clowder AI publication score and returning an applied/no-op receipt.
+   */
+  async markDelivered(id: string, deliveredAt: number): Promise<MarkDeliveredResult | null> {
+    assertValidStoredMessageTimestamp(deliveredAt);
+    const hashKey = MessageKeys.detail(id);
+
+    // #1200 codex P1: ensure visibility migration before DELIVER Lua marks migrated.
+    // We need threadId for ensureVisibilityMigrated — get it from the hash.
+    // The extra HGET is acceptable: delivery is a one-time operation per message.
+    const threadId = await this.redis.hget(hashKey, 'threadId');
+    if (threadId) {
+      await this.ensureVisibilityMigrated(threadId);
+    }
+
+    // Atomic CAS: queued → delivered + visibilitySeq allocation.
+    // #1200: DELIVER_WITH_VISIBILITY_LUA extends the original to atomically allocate
+    // a visibilitySeq and ZADD into the visibility index upon delivery.
+    // Lua returns HGETALL on CAS win (no separate getById round-trip needed).
+    const result = await this.redis.eval(
+      DELIVER_WITH_VISIBILITY_LUA,
+      1,
+      hashKey,
+      id,
+      String(deliveredAt),
+      this.keyPrefix,
+    );
+    if (result === 0) {
+      // CAS no-op: message was not queued (already delivered or not found)
+      const existing = await this.getById(id);
+      if (!existing) return null;
+      return { ...existing, deliveryTransitioned: false };
+    }
+    const message = this.parseLuaHgetall(result);
+    if (!message) throw new Error(`Redis delivery transition lost canonical message: ${id}`);
+    notifyMessageTimelineChange(this, message);
+    return { ...message, deliveryTransitioned: true };
+  }
+
+  async prepareQueueAdmission(id: string): Promise<QueueAdmissionPrepareResult> {
+    const outcome = Number(await this.redis.eval(PREPARE_QUEUE_ADMISSION_LUA, 1, MessageKeys.detail(id)));
+    if (outcome === -1) return { kind: 'not_found' };
+    if (outcome === -2) return { kind: 'conflict' };
+    const message = await this.getById(id);
+    if (!message) return { kind: 'not_found' };
+    if (outcome === 0) return { kind: 'existing', message };
+    if (outcome !== 1) throw new Error(`unexpected queue admission prepare result: ${outcome}`);
+    return { kind: 'prepared', message };
+  }
+
+  /**
+   * F117: Mark a queued message as canceled (withdraw/clear).
+   * #1200: canceled source work is removed from visibility. Lifecycle response
+   * rows retain their index position because cancellation is their visible
+   * member-owned terminal state.
+   */
+  async markCanceled(id: string): Promise<MarkCanceledResult | null> {
+    const hashKey = MessageKeys.detail(id);
+    // Atomic CAS: queued → canceled + visibility ZREM.
+    const result = await this.redis.eval(CANCEL_WITH_VISIBILITY_LUA, 1, hashKey, this.keyPrefix);
+    if (result === 0) {
+      const existing = await this.getById(id);
+      if (!existing) return null;
+      return { ...existing, deliveryTransitioned: false };
+    }
+    const message = this.parseLuaHgetall(result);
+    if (!message) throw new Error(`Redis cancellation transition lost canonical message: ${id}`);
+    notifyMessageTimelineChange(this, message);
+    return { ...message, deliveryTransitioned: true };
+  }
+
+  /**
+   * #697: Scan for message IDs matching a given deliveryStatus.
+   * Uses SCAN + pipeline HGET pattern (same as InvocationRecordStore.scanByStatus).
+   * Called by StartupReconciler to find orphaned queued messages after restart.
+   */
+  async scanByDeliveryStatus(status: string): Promise<string[]> {
+    const matchPattern = `${this.keyPrefix}${MessageKeys.detail('*')}`;
+    const ids: string[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 200);
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        const pipeline = this.redis.pipeline();
+        for (const key of keys) {
+          pipeline.hget(this.stripPrefix(key), 'deliveryStatus');
+        }
+        const results = await pipeline.exec();
+        for (let i = 0; i < keys.length; i++) {
+          const [err, val] = results?.[i] ?? [null, null];
+          if (!err && val === status) {
+            ids.push(this.stripPrefix(keys[i]!).replace(/^msg:/, ''));
+          }
+        }
+      }
+    } while (cursor !== '0');
+    return ids;
+  }
+
+  /** A bounded pass over the existing raw timeline, never a full Redis key scan. */
+  async scanCoordinationTerminalMessageIds(cursor?: MessageScanCursor): Promise<MessageIdScanPage> {
+    const offset = cursor?.offset ?? 0;
+    const upperBound = cursor?.upperBound ?? (await this.redis.zcard(MessageKeys.TIMELINE));
+    const end = Math.min(offset + COORDINATION_TERMINAL_SCAN_PAGE_SIZE, upperBound);
+    if (offset >= end) return { messageIds: [] };
+    const ids = await this.redis.zrange(MessageKeys.TIMELINE, offset, end - 1);
+    const pipeline = this.redis.pipeline();
+    for (const id of ids) pipeline.hget(MessageKeys.detail(id), 'extra');
+    const extras = ids.length > 0 ? await pipeline.exec() : [];
+    if (!extras) throw new Error('coordination terminal message page unavailable');
+    const messageIds: string[] = [];
+    for (const [index, id] of ids.entries()) {
+      const extra = extras[index];
+      if (!extra) throw new Error('coordination terminal message page incomplete');
+      const [error, raw] = extra;
+      if (error) throw error;
+      if (typeof raw === 'string' && safeParseExtra(raw)?.coordination?.phase === 'terminal') messageIds.push(id);
+    }
+    return { messageIds, ...(end < upperBound ? { nextCursor: { offset: end, upperBound } } : {}) };
   }
 
   /** Hydrate message IDs into full StoredMessage objects */
-  private async hydrateMessages(ids: string[], options?: { includeDeleted?: boolean }): Promise<StoredMessage[]> {
+  private async hydrateMessages(
+    ids: string[],
+    options?: {
+      includeDeleted?: boolean;
+      strict?: boolean;
+      humanOnly?: true;
+      evidenceOnly?: true;
+      artifactOnly?: true;
+      recipientOnly?: true;
+    },
+  ): Promise<StoredMessage[]> {
     const pipeline = this.redis.multi();
     for (const id of ids) {
-      pipeline.hgetall(MessageKeys.detail(id));
+      if (options?.humanOnly) pipeline.eval(HUMAN_SOURCE_HASH_LUA, 1, MessageKeys.detail(id));
+      else if (options?.evidenceOnly) pipeline.hmget(MessageKeys.detail(id), ...MESSAGE_EVIDENCE_FIELDS);
+      else if (options?.recipientOnly) pipeline.hmget(MessageKeys.detail(id), ...MESSAGE_RECIPIENT_FIELDS);
+      else if (options?.artifactOnly) pipeline.hmget(MessageKeys.detail(id), ...MESSAGE_ARTIFACT_FIELDS);
+      else pipeline.hgetall(MessageKeys.detail(id));
     }
-    const results = await pipeline.exec();
-    if (!results) return [];
-
-    const messages: StoredMessage[] = [];
-    for (const [err, data] of results) {
-      if (err || !data || typeof data !== 'object') continue;
-      const d = data as Record<string, string>;
-      if (!d.id) continue;
-
-      const deletedAt = d.deletedAt ? parseInt(d.deletedAt, 10) : undefined;
-
-      // ADR-008 D3: skip soft-deleted messages unless includeDeleted
-      if (deletedAt && !options?.includeDeleted) continue;
-
-      const contentBlocks = safeParseContentBlocks(d.contentBlocks);
-      const toolEvents = safeParseToolEvents(d.toolEvents);
-      const parsedMetadata = safeParseMetadata(d.metadata);
-      const parsedExtra = safeParseExtra(d.extra);
-      const parsedSource = safeParseConnectorSource(d.source);
-      messages.push({
-        id: d.id,
-        threadId: d.threadId || DEFAULT_THREAD_ID,
-        userId: d.userId ?? 'unknown',
-        catId: (d.catId || null) as CatId | null,
-        content: d.content ?? '',
-        ...(contentBlocks ? { contentBlocks } : {}),
-        ...(toolEvents ? { toolEvents } : {}),
-        ...(parsedMetadata ? { metadata: parsedMetadata } : {}),
-        ...(parsedExtra ? { extra: parsedExtra } : {}),
-        mentions: safeParseMentions(d.mentions),
-        timestamp: parseInt(d.timestamp ?? '0', 10),
-        ...(deletedAt ? { deletedAt, deletedBy: d.deletedBy ?? '' } : {}),
-        ...(d._tombstone === '1' ? { _tombstone: true as const } : {}),
-        ...(d.thinking ? { thinking: d.thinking } : {}),
-        ...(d.origin === 'stream' || d.origin === 'callback' ? { origin: d.origin as 'stream' | 'callback' } : {}),
-        ...(d.visibility === 'whisper' ? { visibility: 'whisper' as const } : {}),
-        ...(d.whisperTo ? { whisperTo: safeParseMentions(d.whisperTo) } : {}),
-        ...(d.revealedAt ? { revealedAt: parseInt(d.revealedAt, 10) } : {}),
-        ...(d.deliveredAt ? { deliveredAt: parseInt(d.deliveredAt, 10) } : {}),
-        ...(d.deliveryStatus ? { deliveryStatus: d.deliveryStatus as StoredMessage['deliveryStatus'] } : {}),
-        ...(parsedSource ? { source: parsedSource } : {}),
-        ...(d.mentionsUser === '1' ? { mentionsUser: true } : {}),
-        ...(d.replyTo ? { replyTo: d.replyTo } : {}),
-      });
+    let span: MessageReadSpan | undefined;
+    try {
+      span = this.readDiagnostics?.beginBatch(ids.length);
+    } catch {
+      /* optional diagnostics */
     }
-    return messages;
+    let hydratedRows = 0;
+    let readStatus: 'ok' | 'unavailable' | 'failed' = 'failed';
+    try {
+      const results = await pipeline.exec();
+      try {
+        span?.decodeStarted();
+      } catch {
+        /* optional diagnostics */
+      }
+      if (!results) {
+        if (options?.strict) throw new Error('Owner uncertainty hydration unavailable');
+        readStatus = 'unavailable';
+        return [];
+      }
+
+      if (options?.strict && results.length !== ids.length) throw new Error('Owner uncertainty hydration incomplete');
+      const messages: StoredMessage[] = [];
+      for (const [index, [err, data]] of results.entries()) {
+        if (
+          err ||
+          !data ||
+          typeof data !== 'object' ||
+          (options?.strict && !options.artifactOnly && !options.recipientOnly && Array.isArray(data))
+        ) {
+          if (options?.strict) throw new Error('Owner uncertainty hydration failed');
+          continue;
+        }
+        const d = options?.recipientOnly
+          ? recipientMessageHash(data, ids[index])
+          : options?.artifactOnly
+            ? artifactMessageHash(data)
+            : options?.humanOnly
+              ? humanSourceHash(data)
+              : options?.evidenceOnly
+                ? evidenceMessageHash(data)
+                : (data as Record<string, string>);
+        if (!d) {
+          if (options?.recipientOnly) throw new Error('Recipient source hydration failed');
+          if (options?.artifactOnly) throw new Error('Artifact source hydration failed');
+          continue;
+        }
+        if (!d.id) continue;
+
+        const message = this.hydrateHash(d, span);
+        if (!message) continue;
+        if (options?.humanOnly && messageFrom(message).kind !== 'user') continue;
+
+        // ADR-008 D3: skip soft-deleted messages unless includeDeleted
+        if (message.deletedAt && !options?.includeDeleted) continue;
+        messages.push(message);
+      }
+      hydratedRows = messages.length;
+      readStatus = 'ok';
+      return messages;
+    } finally {
+      try {
+        span?.end(hydratedRows, readStatus);
+      } catch {
+        /* original read result/error wins */
+      }
+    }
   }
 }

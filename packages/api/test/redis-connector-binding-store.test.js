@@ -1,11 +1,15 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import { assertRedisIsolationOrThrow, cleanupPrefixedRedisKeys } from './helpers/redis-test-helpers.js';
+import {
+  assertRedisIsolationOrThrow,
+  cleanupPrefixedRedisKeys,
+  redisIsolationSkipReason,
+} from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
 
-describe('RedisConnectorThreadBindingStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }, () => {
+describe('RedisConnectorThreadBindingStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisConnectorThreadBindingStore;
   let createRedisClient;
   let redis;
@@ -63,6 +67,18 @@ describe('RedisConnectorThreadBindingStore', { skip: !REDIS_URL ? 'REDIS_URL not
     assert.equal(binding.threadId, 'thread-abc');
     assert.equal(binding.userId, 'user-1');
     assert.equal(typeof binding.createdAt, 'number');
+  });
+
+  it('disconnect atomically rejects stale or foreign bindings and updates both indexes', async () => {
+    const shown = await store.bind('arbitrary.plugin', 'room/1', 'old-thread', 'owner');
+    const latest = await store.bind('arbitrary.plugin', 'room/1', 'new-thread', 'owner');
+    assert.equal(await store.removeIfMatches(shown), false);
+    assert.equal(await store.removeIfMatches({ ...latest, userId: 'other' }), false);
+    assert.equal((await store.getByExternal('arbitrary.plugin', 'room/1')).threadId, 'new-thread');
+    assert.equal(await store.removeIfMatches(latest), true);
+    assert.deepEqual(await store.getByThread('new-thread'), []);
+    assert.deepEqual(await store.listByUser('arbitrary.plugin', 'owner'), []);
+    assert.equal(await store.removeIfMatches(latest), false);
   });
 
   it('getByExternal returns the bound thread', async () => {
@@ -165,6 +181,16 @@ describe('RedisConnectorThreadBindingStore', { skip: !REDIS_URL ? 'REDIS_URL not
     assert.equal(results.length, 2);
     const threads = results.map((r) => r.threadId).sort();
     assert.deepEqual(threads, ['thread-1', 'thread-2']);
+  });
+
+  it('listByUser without a limit does not silently truncate plugin bindings', async () => {
+    await Promise.all(
+      Array.from({ length: 25 }, (_, index) =>
+        store.bind('dev.clowder.fixture', `group-${index}`, `thread-${index}`, 'user-1'),
+      ),
+    );
+
+    assert.equal((await store.listByUser('dev.clowder.fixture', 'user-1')).length, 25);
   });
 
   it('listByUser respects limit', async () => {

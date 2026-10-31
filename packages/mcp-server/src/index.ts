@@ -5,11 +5,12 @@
  * 保持向后兼容：聚合注册 collab + memory + signals。
  */
 
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { installShutdownHandlers, startRefreshLoop } from './refresh-loop.js';
 import { registerFullToolset } from './server-toolsets.js';
+import { shutdownActiveAudioCapture } from './tools/audio-tools.js';
+import { isDirectExecution } from './utils/is-direct-execution.js';
 import { initCatCafeDir } from './utils/path-validator.js';
 
 function createBaseServer(name: string): McpServer {
@@ -35,10 +36,17 @@ async function main(): Promise<void> {
   console.error('[cat-cafe] MCP Server starting...');
   await server.connect(transport);
   console.error('[cat-cafe] MCP Server running on stdio');
+
+  // F174 Phase C — keep callback token alive for long sessions where猫 has
+  // no incidental tool calls. Best-effort; failures log but don't crash.
+  // Shutdown preserves Unix signal exit codes and waits for any active audio
+  // artifact to finalize before the MCP process exits.
+  const refreshLoop = startRefreshLoop();
+  installShutdownHandlers(refreshLoop, process, shutdownActiveAudioCapture);
 }
 
 // 仅作为入口运行时启动 (import 时跳过，避免测试阻塞在 stdio)
-const isEntryPoint = process.argv[1] && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1]);
+const isEntryPoint = isDirectExecution(import.meta.url);
 if (isEntryPoint) {
   main().catch((err) => {
     console.error('[cat-cafe] Fatal error:', err);

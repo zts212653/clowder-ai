@@ -36,6 +36,14 @@ describe('RichBlockBuffer', () => {
     assert.equal(result.length, 2);
   });
 
+  it('checks only rich block kind for the exact in-flight invocation', () => {
+    const buf = getRichBlockBuffer();
+    buf.add('t1', 'codex-sol', { id: 'html-1', kind: 'html_widget', v: 1, html: '<p>ELI5</p>' }, 'inv-1');
+    assert.equal(buf.hasKind('t1', 'codex-sol', 'inv-1', 'html_widget'), true);
+    assert.equal(buf.hasKind('t1', 'codex-sol', 'inv-other', 'html_widget'), false);
+    assert.equal(buf.hasKind('t1', 'codex-sol', 'inv-1', 'card'), false);
+  });
+
   it('isolates different thread/cat keys', () => {
     const buf = getRichBlockBuffer();
     buf.add('t1', 'opus', { id: 'b1', kind: 'card', v: 1, title: 'A' });
@@ -114,12 +122,12 @@ describe('RichBlockBuffer', () => {
     assert.equal(result.length, 2); // b1 only once + b2
   });
 
-  // R6 P2: add() returns boolean indicating whether block was new
-  it('add returns true for new block, false for duplicate', () => {
+  // R6 P2: add() distinguishes accepted blocks and retries
+  it('add returns added for new block, duplicate for retry', () => {
     const buf = getRichBlockBuffer();
-    assert.equal(buf.add('t1', 'opus', { id: 'b1', kind: 'card', v: 1, title: 'A' }, 'inv-1'), true);
-    assert.equal(buf.add('t1', 'opus', { id: 'b1', kind: 'card', v: 1, title: 'A' }, 'inv-1'), false);
-    assert.equal(buf.add('t1', 'opus', { id: 'b2', kind: 'card', v: 1, title: 'B' }, 'inv-1'), true);
+    assert.equal(buf.add('t1', 'opus', { id: 'b1', kind: 'card', v: 1, title: 'A' }, 'inv-1'), 'added');
+    assert.equal(buf.add('t1', 'opus', { id: 'b1', kind: 'card', v: 1, title: 'A' }, 'inv-1'), 'duplicate');
+    assert.equal(buf.add('t1', 'opus', { id: 'b2', kind: 'card', v: 1, title: 'B' }, 'inv-1'), 'added');
   });
 
   // Cloud Codex R6 P1: late callbacks after consume must be rejected
@@ -129,8 +137,21 @@ describe('RichBlockBuffer', () => {
     const blocks = buf.consume('t1', 'opus', 'inv-1');
     assert.equal(blocks.length, 1);
     // Late callback arrives after consume — must be rejected
-    assert.equal(buf.add('t1', 'opus', { id: 'b2', kind: 'card', v: 1, title: 'Late' }, 'inv-1'), false);
+    assert.equal(buf.add('t1', 'opus', { id: 'b2', kind: 'card', v: 1, title: 'Late' }, 'inv-1'), 'rejected');
     // But a NEW invocation for the same key should work fine
-    assert.equal(buf.add('t1', 'opus', { id: 'b3', kind: 'card', v: 1, title: 'New' }, 'inv-2'), true);
+    assert.equal(buf.add('t1', 'opus', { id: 'b3', kind: 'card', v: 1, title: 'New' }, 'inv-2'), 'added');
+  });
+
+  it('keeps an interim invocation open, deduplicates across posts, and closes even with no pending blocks', () => {
+    const buf = getRichBlockBuffer();
+    const blockA = { id: 'a', kind: 'card', v: 1, title: 'A' };
+    const blockB = { id: 'b', kind: 'card', v: 1, title: 'B' };
+    assert.equal(buf.add('t1', 'opus', blockA, 'inv-open'), 'added');
+    assert.deepEqual(buf.consume('t1', 'opus', 'inv-open', { final: false }), [blockA]);
+    assert.equal(buf.add('t1', 'opus', blockA, 'inv-open'), 'duplicate');
+    assert.equal(buf.add('t1', 'opus', blockB, 'inv-open'), 'added');
+    assert.deepEqual(buf.consume('t1', 'opus', 'inv-open', { final: false }), [blockB]);
+    assert.deepEqual(buf.consume('t1', 'opus', 'inv-open'), []);
+    assert.equal(buf.add('t1', 'opus', { id: 'late', kind: 'card', v: 1, title: 'Late' }, 'inv-open'), 'rejected');
   });
 });

@@ -1,0 +1,7 @@
+{
+  "name": "eslint-plugin-cafe",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Clowder AI design system governance rules (F056)",
+  "main": "index.js"
+}

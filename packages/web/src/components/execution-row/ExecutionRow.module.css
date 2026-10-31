@@ -1,0 +1,20 @@
+.container {
+  container-type: inline-size;
+}
+
+.compactStatus,
+.actionIcon {
+  display: none;
+}
+
+@container (max-width: 30rem) {
+  .fullStatus,
+  .actionLabel {
+    display: none;
+  }
+
+  .compactStatus,
+  .actionIcon {
+    display: inline-flex;
+  }
+}

@@ -1,0 +1,122 @@
+import type { ActiveExecutionListResponse, ActiveExecutionProjection } from '@cat-cafe/shared';
+import { create } from 'zustand';
+
+export function activeExecutionKey(
+  execution: Pick<ActiveExecutionProjection, 'kind' | 'threadId' | 'catId' | 'executionId'>,
+): string {
+  // Parallel cats share a parent executionId; live identity follows the exact cancel slot.
+  // Managed commands retain their globally unique task identity (also read by ConnectorBubble).
+  return execution.kind === 'managed_command'
+    ? `${execution.kind}:${execution.executionId}`
+    : JSON.stringify([execution.kind, execution.threadId, execution.catId, execution.executionId]);
+}
+
+interface ActiveExecutionState {
+  anchorThreadId: string | null;
+  projectPath: string | null;
+  scope: 'project' | 'all';
+  unavailableProjectPaths: readonly string[];
+  executionsByKey: Record<string, ActiveExecutionProjection>;
+  cancelPendingByKey: Record<string, true>;
+  hydration: 'idle' | 'loading' | 'ready' | 'error';
+  hydrationError: string | null;
+  requestVersion: number;
+  beginHydration(anchorThreadId: string, projectPath: string | null): number;
+  applySnapshot(anchorThreadId: string, requestVersion: number, response: ActiveExecutionListResponse): void;
+  failHydration(anchorThreadId: string, requestVersion: number, error: unknown): void;
+  beginCancellation(execution: ActiveExecutionProjection): boolean;
+  settleCancellation(execution: ActiveExecutionProjection): void;
+  releaseCancellation(execution: ActiveExecutionProjection): void;
+  reset(): void;
+}
+
+const INITIAL_STATE = {
+  anchorThreadId: null,
+  projectPath: null,
+  scope: 'project' as const,
+  unavailableProjectPaths: [] as readonly string[],
+  executionsByKey: {},
+  cancelPendingByKey: {},
+  hydration: 'idle' as const,
+  hydrationError: null,
+  requestVersion: 0,
+};
+
+export const useActiveExecutionStore = create<ActiveExecutionState>((set, get) => ({
+  ...INITIAL_STATE,
+  beginHydration(anchorThreadId, projectPath) {
+    const current = get();
+    const requestVersion = current.requestVersion + 1;
+    const projectChanged = current.projectPath !== projectPath && current.scope !== 'all';
+    set({
+      anchorThreadId,
+      projectPath,
+      requestVersion,
+      hydration: projectChanged || current.hydration === 'idle' ? 'loading' : current.hydration,
+      ...(projectChanged || (projectPath === null && current.scope !== 'all')
+        ? { executionsByKey: {}, cancelPendingByKey: {}, hydrationError: null }
+        : {}),
+    });
+    return requestVersion;
+  },
+  applySnapshot(anchorThreadId, requestVersion, response) {
+    const current = get();
+    if (current.anchorThreadId !== anchorThreadId || current.requestVersion !== requestVersion) return;
+    const executionsByKey = Object.fromEntries(
+      response.executions.map((execution) => [activeExecutionKey(execution), execution]),
+    );
+    set({
+      projectPath: response.scope === 'all' ? current.projectPath : response.projectPath,
+      scope: response.scope ?? 'project',
+      unavailableProjectPaths: response.scope === 'all' ? (response.unavailableProjectPaths ?? []) : [],
+      executionsByKey,
+      cancelPendingByKey: Object.fromEntries(
+        Object.keys(current.cancelPendingByKey)
+          .filter((key) => executionsByKey[key] !== undefined)
+          .map((key) => [key, true as const]),
+      ),
+      hydration: 'ready',
+      hydrationError: null,
+    });
+  },
+  failHydration(anchorThreadId, requestVersion, error) {
+    const current = get();
+    if (current.anchorThreadId !== anchorThreadId || current.requestVersion !== requestVersion) return;
+    set({
+      hydration: 'error',
+      hydrationError: error instanceof Error ? error.message : String(error),
+    });
+  },
+  beginCancellation(execution) {
+    const key = activeExecutionKey(execution);
+    const current = get();
+    if (current.cancelPendingByKey[key] || !current.executionsByKey[key]) return false;
+    set({ cancelPendingByKey: { ...current.cancelPendingByKey, [key]: true } });
+    return true;
+  },
+  settleCancellation(execution) {
+    const key = activeExecutionKey(execution);
+    const current = get();
+    if (!current.executionsByKey[key]) return;
+    set({
+      // A response started before this confirmed cancellation cannot restore its slot.
+      requestVersion: current.requestVersion + 1,
+      executionsByKey: Object.fromEntries(
+        Object.entries(current.executionsByKey).filter(([entryKey]) => entryKey !== key),
+      ),
+    });
+  },
+  releaseCancellation(execution) {
+    const key = activeExecutionKey(execution);
+    const current = get();
+    if (!current.cancelPendingByKey[key]) return;
+    set({
+      cancelPendingByKey: Object.fromEntries(
+        Object.entries(current.cancelPendingByKey).filter(([entryKey]) => entryKey !== key),
+      ),
+    });
+  },
+  reset() {
+    set({ ...INITIAL_STATE, requestVersion: get().requestVersion + 1 });
+  },
+}));

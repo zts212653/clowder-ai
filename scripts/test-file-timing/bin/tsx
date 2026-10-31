@@ -1,0 +1,48 @@
+#!/bin/sh
+set -eu
+
+case "$0" in
+  */*) script_directory="${0%/*}" ;;
+  *) script_directory=. ;;
+esac
+script_directory="$(CDPATH= cd -- "$script_directory" && pwd -P)"
+. "$script_directory/resolve-runtime-command.sh"
+
+real_tsx="$(resolve_runtime_command tsx "${CAT_CAFE_REAL_TSX:-}" "$script_directory" || true)"
+if [ -z "$real_tsx" ]; then
+  printf '%s\n' '[test-file-timing] unable to locate a non-shim tsx executable' >&2
+  exit 127
+fi
+
+has_test=false
+has_reporter=false
+skip_next=false
+for argument in "$@"; do
+  if [ "$skip_next" = true ]; then
+    skip_next=false
+    continue
+  fi
+  case "$argument" in
+    --test) has_test=true ;;
+    --test-reporter|--test-reporter=*) has_reporter=true ;;
+    --test-reporter-destination) skip_next=true ;;
+    --) break ;;
+    -*) ;;
+    *) break ;;
+  esac
+done
+
+if [ "$has_test" = true ] && [ "$has_reporter" = false ] && [ -n "${CAT_CAFE_TEST_TIMING_DIR:-}" ] && [ -n "${CAT_CAFE_TEST_TIMING_REPORTER:-}" ]; then
+  reporter="$CAT_CAFE_TEST_TIMING_REPORTER"
+  case "$reporter" in
+    /*) ;;
+    *) reporter="${CAT_CAFE_TEST_TIMING_REPO_ROOT:-$PWD}/$reporter" ;;
+  esac
+  exec "$real_tsx" \
+    --test-reporter=spec \
+    --test-reporter-destination=stdout \
+    "--test-reporter=${reporter}" \
+    --test-reporter-destination=/dev/null \
+    "$@"
+fi
+exec "$real_tsx" "$@"

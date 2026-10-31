@@ -1,47 +1,46 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { apiFetch } from '@/utils/api-client';
+import { useShellPresentation } from '@/components/shell/shell-presentation';
+import typographyTokens from '@/styles/typography-tokens.json';
+import { AgentPaneListV2 } from './AgentPaneListV2';
+import { type AgentPane, useAgentPanes } from './useAgentPanes';
 
-interface AgentPane {
+export interface AgentPaneSelectionMeta {
   invocationId: string;
-  paneId: string;
-  status: 'running' | 'done' | 'crashed';
-  startedAt: number;
+  catId: string | null;
 }
 
 interface AgentPaneListProps {
   worktreeId: string;
-  onSelectPane: (paneId: string) => void;
+  onSelectPane: (paneId: string, meta?: AgentPaneSelectionMeta) => void;
   selectedPaneId?: string;
 }
 
-export function AgentPaneList({ worktreeId, onSelectPane, selectedPaneId }: AgentPaneListProps) {
-  const [panes, setPanes] = useState<AgentPane[]>([]);
-
-  const refresh = useCallback(async () => {
-    try {
-      const res = await apiFetch(`/api/terminal/agent-panes?worktreeId=${encodeURIComponent(worktreeId)}`);
-      if (res.ok) setPanes((await res.json()) as AgentPane[]);
-    } catch {
-      /* ignore fetch errors */
-    }
-  }, [worktreeId]);
-
-  useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, 5000);
-    return () => clearInterval(interval);
-  }, [refresh]);
+function AgentPaneListClassic({ worktreeId, onSelectPane, selectedPaneId }: AgentPaneListProps) {
+  const panes = useAgentPanes(worktreeId);
 
   if (panes.length === 0) return null;
 
-  const statusColor = (s: AgentPane['status']) => (s === 'running' ? '#9ece6a' : s === 'crashed' ? '#f7768e' : '#888');
+  const statusColor = (s: AgentPane['status']) =>
+    s === 'running'
+      ? 'var(--terminal-status-ok)'
+      : s === 'crashed'
+        ? 'var(--terminal-status-error)'
+        : 'var(--terminal-text-muted)';
   const statusLabel = (s: AgentPane['status']) => (s === 'running' ? 'Running' : s === 'crashed' ? 'Crashed' : 'Done');
 
   return (
-    <div style={{ borderBottom: '1px solid #2a2b3d', padding: '4px 0' }}>
-      <div style={{ padding: '2px 8px', fontSize: 11, color: '#666', fontWeight: 600 }}>Agent Panes</div>
+    <div style={{ borderBottom: '1px solid var(--terminal-chrome)', padding: '4px 0' }}>
+      <div
+        style={{
+          padding: '2px 8px',
+          fontSize: typographyTokens.fontSizePx.label,
+          color: 'var(--terminal-text-dim)',
+          fontWeight: 600,
+        }}
+      >
+        Agent Panes
+      </div>
       {panes.map((p) => (
         <button
           key={p.invocationId}
@@ -53,10 +52,10 @@ export function AgentPaneList({ worktreeId, onSelectPane, selectedPaneId }: Agen
             gap: 6,
             width: '100%',
             padding: '4px 8px',
-            fontSize: 12,
-            background: selectedPaneId === p.paneId ? '#2a2b3d' : 'transparent',
+            fontSize: typographyTokens.fontSizePx.xs,
+            background: selectedPaneId === p.paneId ? 'var(--terminal-chrome)' : 'transparent',
             border: 'none',
-            color: '#a9b1d6',
+            color: 'var(--terminal-fg)',
             cursor: 'pointer',
             textAlign: 'left',
           }}
@@ -80,9 +79,16 @@ export function AgentPaneList({ worktreeId, onSelectPane, selectedPaneId }: Agen
           >
             {p.invocationId.slice(0, 8)}
           </span>
-          <span style={{ fontSize: 10, color: '#666' }}>{statusLabel(p.status)}</span>
+          <span style={{ fontSize: typographyTokens.fontSizePx.micro, color: 'var(--terminal-text-dim)' }}>
+            {statusLabel(p.status)}
+          </span>
         </button>
       ))}
     </div>
   );
+}
+
+export function AgentPaneList(props: AgentPaneListProps) {
+  const presentation = useShellPresentation();
+  return presentation === 'v2' ? <AgentPaneListV2 {...props} /> : <AgentPaneListClassic {...props} />;
 }

@@ -1,7 +1,7 @@
 /**
  * Summary CRUD Routes (拍立得照片墙)
  *
- * POST   /api/summaries         → 创建纪要 (201, 广播 thread_summary)
+ * POST   /api/summaries         → 创建纪要 (201)
  * GET    /api/summaries?threadId → 列出线程纪要
  * GET    /api/summaries/:id     → 获取单个 / 404
  * DELETE /api/summaries/:id     → 删除 (204)
@@ -47,7 +47,8 @@ export const summariesRoutes: FastifyPluginAsync<SummariesRoutesOptions> = async
     };
     const summary = await summaryStore.create(input);
 
-    socketManager.broadcastToRoom(`thread:${summary.threadId}`, 'thread_summary', summary);
+    // Auto-summary disabled (clowder-ai#343): no longer broadcast to chat flow.
+    // Summary is still persisted for memory infrastructure / future Thread Recap.
 
     reply.status(201);
     return summary;

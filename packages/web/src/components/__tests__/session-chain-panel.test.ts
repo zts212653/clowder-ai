@@ -8,7 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CatInvocationInfo } from '@/stores/chat-types';
-import { SessionChainPanel } from '../SessionChainPanel';
+import { __resetSessionChainCacheForTest, SessionChainPanel } from '../SessionChainPanel';
 
 beforeAll(() => {
   (globalThis as { React?: typeof React }).React = React;
@@ -17,7 +17,7 @@ afterAll(() => {
   delete (globalThis as { React?: typeof React }).React;
 });
 
-let mockApiFetch: ReturnType<typeof vi.fn>;
+let mockApiFetch: ReturnType<typeof vi.fn<(...args: unknown[]) => unknown>>;
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
@@ -29,21 +29,33 @@ vi.mock('../ContextHealthBar', () => ({
     React.createElement('div', { 'data-testid': `health-bar-${props.catId}` }),
 }));
 
-// F33: Stub useCatData for BindNewSessionSection
+vi.mock('../CloudConversationLink', () => ({
+  CloudConversationLink: ({ threadId }: { threadId: string }) =>
+    React.createElement(
+      'div',
+      { 'data-testid': 'cloud-conversation-link', 'data-thread-id': threadId },
+      'ChatGPT 对话',
+    ),
+}));
+
+// useCatData stub — mirrors cat-config.json so SessionChainPanel can pull
+// border/badge colors from cat.color.primary instead of a hardcoded table.
+const MOCK_CATS: Record<string, { id: string; displayName: string; color: { primary: string; secondary: string } }> = {
+  opus: { id: 'opus', displayName: '布偶猫', color: { primary: '#9B7EBD', secondary: '#E8DFF5' } },
+  codex: { id: 'codex', displayName: '缅因猫', color: { primary: '#5B8C5A', secondary: '#D4E6D3' } },
+  gemini: { id: 'gemini', displayName: '暹罗猫', color: { primary: '#4A90E2', secondary: '#D8E6F8' } },
+  kimi: { id: 'kimi', displayName: '梵花猫', color: { primary: '#4B5563', secondary: '#E5E7EB' } },
+  gpt52: { id: 'gpt52', displayName: '缅因猫', color: { primary: '#66BB6A', secondary: '#C8E6C9' } },
+  'opus-45': { id: 'opus-45', displayName: '布偶猫', color: { primary: '#7E57C2', secondary: '#E1D5F0' } },
+  'opus-47': { id: 'opus-47', displayName: '布偶猫', color: { primary: '#7B1FA2', secondary: '#E1BEE7' } },
+  sonnet: { id: 'sonnet', displayName: '布偶猫', color: { primary: '#B39DDB', secondary: '#EDE7F6' } },
+};
+
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({
-    cats: [
-      { id: 'opus', displayName: '布偶猫', color: { primary: '#7C3AED', secondary: '#EDE9FE' } },
-      { id: 'codex', displayName: '缅因猫', color: { primary: '#059669', secondary: '#D1FAE5' } },
-    ],
+    cats: Object.values(MOCK_CATS),
     isLoading: false,
-    getCatById: (id: string) => {
-      const map: Record<string, unknown> = {
-        opus: { id: 'opus', displayName: '布偶猫' },
-        codex: { id: 'codex', displayName: '缅因猫' },
-      };
-      return map[id];
-    },
+    getCatById: (id: string) => MOCK_CATS[id],
     getCatsByBreed: () => new Map(),
   }),
   formatCatName: (cat: { displayName: string; variantLabel?: string }) =>
@@ -52,6 +64,12 @@ vi.mock('@/hooks/useCatData', () => ({
 
 vi.mock('../status-helpers', () => ({
   truncateId: (id: string, len: number) => (id.length > len ? `${id.slice(0, len)}…` : id),
+}));
+
+// Stub next/link — render as <a> so we can assert href
+vi.mock('next/link', () => ({
+  default: (props: { href: string; className?: string; children: React.ReactNode }) =>
+    React.createElement('a', { href: props.href, className: props.className }, props.children),
 }));
 
 const origCreateElement = document.createElement.bind(document);
@@ -63,16 +81,24 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   mockApiFetch = vi.fn();
+  __resetSessionChainCacheForTest();
 });
 
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.restoreAllMocks();
 });
 
-function renderPanel(threadId: string, catInvocations: Record<string, CatInvocationInfo> = {}) {
+type ActiveInvocations = Record<string, { catId: string; mode: string; startedAt?: number }>;
+
+function renderPanel(
+  threadId: string,
+  catInvocations: Record<string, CatInvocationInfo> = {},
+  activeInvocations: ActiveInvocations = {},
+) {
   act(() => {
-    root.render(React.createElement(SessionChainPanel, { threadId, catInvocations }));
+    root.render(React.createElement(SessionChainPanel, { threadId, catInvocations, activeInvocations }));
   });
 }
 
@@ -89,7 +115,207 @@ function mockSessionsResponse(sessions: unknown[]) {
   });
 }
 
+/** Sealed section is default-collapsed; click the toggle to expand it. */
+function expandSealed() {
+  const toggle = container.querySelector('[data-testid="sealed-toggle"]') as HTMLElement | null;
+  if (toggle) {
+    act(() => {
+      toggle.click();
+    });
+  }
+}
+
 describe('F24: SessionChainPanel', () => {
+  it('fails closed instead of crashing when a successful response omits the sessions collection', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
+
+    renderPanel('thread-malformed');
+    await flushFetch();
+
+    expect(container.querySelector('[data-testid="session-chain-load-failed"]')).not.toBeNull();
+    expect(container.textContent).toContain('会话记录加载失败');
+  });
+
+  it.each([
+    ['null entry', [null]],
+    ['malformed object', [{ id: 'session-without-required-fields' }]],
+  ])('fails closed instead of crashing when a successful response contains a %s', async (_case, sessions) => {
+    mockSessionsResponse(sessions);
+
+    renderPanel('thread-malformed-entry');
+    await flushFetch();
+
+    expect(container.querySelector('[data-testid="session-chain-load-failed"]')).not.toBeNull();
+    expect(container.textContent).toContain('会话记录加载失败');
+  });
+
+  it('runs native compaction beside an idle bound Codex session and refreshes canonical session truth', async () => {
+    const active = {
+      id: 's-codex',
+      cliSessionId: 'native-1',
+      catId: 'codex',
+      seq: 0,
+      status: 'active',
+      messageCount: 4,
+      createdAt: Date.now(),
+    };
+    mockSessionsResponse([active]);
+    renderPanel('thread-1');
+    await flushFetch();
+    const compact = container.querySelector<HTMLButtonElement>('[data-testid="compact-native-session-s-codex"]');
+    expect(compact).not.toBeNull();
+    mockApiFetch.mockImplementation((url: unknown) =>
+      Promise.resolve(
+        url === '/api/threads/thread-1/sessions/codex/compact-native'
+          ? { ok: true, json: async () => ({ outcome: 'observed', contextEpoch: 2 }) }
+          : { ok: true, json: async () => ({ sessions: [active] }) },
+      ),
+    );
+    act(() => compact?.click());
+    await flushFetch();
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/thread-1/sessions/codex/compact-native', {
+      method: 'POST',
+    });
+  });
+
+  it('seals an idle active session and refreshes the chain', async () => {
+    mockSessionsResponse([
+      { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+
+    const sealButton = container.querySelector('[data-testid="seal-session-s1"]') as HTMLButtonElement;
+    expect(sealButton).not.toBeNull();
+    expect(sealButton.disabled).toBe(false);
+    mockApiFetch.mockImplementation((url: unknown) =>
+      Promise.resolve(
+        url === '/api/sessions/s1/seal'
+          ? { ok: true, json: async () => ({ mode: 'sealed' }) }
+          : { ok: true, json: async () => ({ sessions: [] }) },
+      ),
+    );
+
+    act(() => {
+      sealButton.click();
+    });
+    await flushFetch();
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/sessions/s1/seal', { method: 'POST' });
+  });
+
+  it('refreshes the chain after a partial seal response changes session state', async () => {
+    mockSessionsResponse([
+      { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+
+    const sealButton = container.querySelector('[data-testid="seal-session-s1"]') as HTMLButtonElement;
+    mockApiFetch.mockImplementation((url: unknown) =>
+      Promise.resolve(
+        url === '/api/sessions/s1/seal'
+          ? {
+              ok: false,
+              status: 503,
+              json: async () => ({
+                error: 'Session sealed, but transcript or digest finalization did not complete',
+                code: 'SESSION_SEAL_PARTIAL',
+              }),
+            }
+          : {
+              ok: true,
+              json: async () => ({
+                sessions: [
+                  {
+                    id: 's1',
+                    catId: 'opus',
+                    seq: 0,
+                    status: 'sealed',
+                    messageCount: 5,
+                    createdAt: Date.now(),
+                    sealedAt: Date.now(),
+                  },
+                ],
+              }),
+            },
+      ),
+    );
+
+    act(() => {
+      sealButton.click();
+    });
+    await flushFetch();
+    await flushFetch();
+
+    expect(mockApiFetch.mock.calls.filter(([url]) => url === '/api/threads/thread-1/sessions')).toHaveLength(2);
+    expect(container.textContent).toContain('Session sealed, but transcript or digest finalization did not complete');
+    expect(container.textContent).toContain('0 未封存');
+  });
+
+  it('refreshes the chain after a seal transport failure (server may have sealed)', async () => {
+    mockSessionsResponse([
+      { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+
+    const sealButton = container.querySelector('[data-testid="seal-session-s1"]') as HTMLButtonElement;
+    mockApiFetch.mockImplementation((url: unknown) =>
+      url === '/api/sessions/s1/seal'
+        ? Promise.reject(new Error('socket hang up'))
+        : Promise.resolve({
+            ok: true,
+            json: async () => ({
+              sessions: [
+                {
+                  id: 's1',
+                  catId: 'opus',
+                  seq: 0,
+                  status: 'sealed',
+                  messageCount: 5,
+                  createdAt: Date.now(),
+                  sealedAt: Date.now(),
+                },
+              ],
+            }),
+          }),
+    );
+
+    act(() => {
+      sealButton.click();
+    });
+    await flushFetch();
+    await flushFetch();
+
+    // The ambiguous transport failure must trigger an authoritative re-fetch —
+    // the server may have claimed and sealed the session before the drop.
+    expect(mockApiFetch.mock.calls.filter(([url]) => url === '/api/threads/thread-1/sessions')).toHaveLength(2);
+    expect(container.textContent).toContain('封存请求失败');
+    expect(container.textContent).toContain('0 未封存');
+  });
+
+  it('disables manual seal for a running Agent and explains how to proceed on hover only', async () => {
+    mockSessionsResponse([
+      { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+    ]);
+    renderPanel(
+      'thread-1',
+      { opus: { invocationId: 'invocation-1' } },
+      { 'invocation-1': { catId: 'opus', mode: 'execute' } },
+    );
+    await flushFetch();
+
+    const sealButton = container.querySelector('[data-testid="seal-session-s1"]') as HTMLButtonElement;
+    expect(sealButton.disabled).toBe(true);
+    expect(sealButton.title).toBe('请先停止该 Agent，再封存会话');
+    expect(container.querySelector('[data-testid="seal-session-blocked-s1"]')).toBeNull();
+    expect(container.textContent).not.toContain('请先停止该 Agent，再封存会话');
+  });
+
   it('renders panel with bind section even when API returns empty sessions (F33)', async () => {
     mockSessionsResponse([]);
     renderPanel('thread-1');
@@ -97,8 +323,28 @@ describe('F24: SessionChainPanel', () => {
     // Panel should render (F33: always visible for external session binding)
     expect(container.querySelector('section')).not.toBeNull();
     // No session cards, but bind section available
-    expect(container.textContent).toContain('0 sessions');
-    expect(container.textContent).toContain('绑定外部 Session');
+    expect(container.textContent).toContain('0 未封存');
+    expect(container.textContent).toContain('0 总计');
+    expect(container.textContent).toContain('绑定命令行会话');
+  });
+
+  it('renders a typed access denial instead of presenting a forbidden chain as 0 总计', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        error: 'Access denied',
+        code: 'THREAD_ACCESS_DENIED',
+        reason: 'not_visible_to_user',
+      }),
+    });
+
+    renderPanel('thread-forbidden');
+    await flushFetch();
+
+    expect(container.querySelector('[data-testid="session-chain-access-denied"]')).not.toBeNull();
+    expect(container.textContent).toContain('无权查看这条对话的会话记录');
+    expect(container.textContent).not.toContain('0 总计');
   });
 
   it('renders session count in header', async () => {
@@ -116,23 +362,302 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.textContent).toContain('2 sessions');
+    expect(container.textContent).toContain('1 未封存');
+    expect(container.textContent).toContain('2 总计');
   });
 
-  it('renders active session with seq number, cat badge, and clickable session ID', async () => {
+  it('distinguishes unknown compression history from observed zero', async () => {
+    mockSessionsResponse([
+      {
+        id: 'unknown-count',
+        catId: 'opus',
+        seq: 0,
+        status: 'active',
+        messageCount: 0,
+        compressionCount: null,
+        createdAt: Date.now(),
+      },
+      {
+        id: 'observed-zero',
+        catId: 'codex',
+        seq: 0,
+        status: 'active',
+        messageCount: 0,
+        compressionCount: 0,
+        createdAt: Date.now(),
+      },
+    ]);
+
+    renderPanel('thread-count-state');
+    await flushFetch();
+
+    expect(container.textContent).toContain('压缩次数未报告');
+    expect(container.textContent).toContain('未观察到压缩');
+  });
+
+  it('keeps applied policy details out of active cards and sealed summaries', async () => {
+    mockSessionsResponse([
+      {
+        id: 'active-policy-node',
+        catId: 'opus',
+        seq: 0,
+        status: 'active',
+        messageCount: 0,
+        compressionCount: null,
+        createdAt: Date.now(),
+        appliedPolicy: {
+          config: { strategy: 'hybrid', thresholds: { warn: 0.8, action: 0.9 } },
+          source: 'runtime_override',
+          revision: 'runtime:hybrid:1',
+          changedAt: 1,
+          execution: {
+            status: 'degraded',
+            missingCapabilities: ['compression_signal', 'session_rotation'],
+          },
+        },
+      },
+      {
+        id: 'sealed-policy-node',
+        catId: 'codex',
+        seq: 1,
+        status: 'sealed',
+        messageCount: 12,
+        compressionCount: 2,
+        contextHealth: {
+          usedTokens: 94_720,
+          windowTokens: 128_000,
+          fillRatio: 0.74,
+          source: 'exact',
+        },
+        sealReason: 'threshold',
+        createdAt: Date.now() - 60_000,
+        sealedAt: Date.now() - 30_000,
+        appliedPolicy: {
+          config: { strategy: 'handoff', thresholds: { warn: 0.8, action: 0.9 } },
+          source: 'runtime_override',
+          revision: 'runtime:handoff:1',
+          changedAt: 1,
+          execution: {
+            status: 'unavailable',
+            missingCapabilities: ['authoritative_usage'],
+          },
+        },
+      },
+    ]);
+
+    renderPanel('thread-policy-state');
+    await flushFetch();
+
+    expect(container.querySelector('[data-testid="session-policy-state"]')).toBeNull();
+    expect(container.textContent).not.toContain('compression_signal');
+    expect(container.textContent).not.toContain('session_rotation');
+
+    expandSealed();
+    const sealedSummary = container.querySelector<HTMLElement>('[data-testid="sealed-session-summary"]');
+    await act(async () => sealedSummary?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
+    expect(sealedSummary?.textContent).toContain('74%');
+    expect(sealedSummary?.textContent).toContain('压缩 2 次');
+    expect(sealedSummary?.textContent).toContain('达到阈值');
+    expect(sealedSummary?.textContent).not.toContain('handoff');
+    expect(sealedSummary?.textContent).not.toContain('unavailable');
+    expect(sealedSummary?.textContent).not.toContain('authoritative_usage');
+  });
+
+  it('collapses repeated 0-msg tool_conflict retry corpses into one summary (F201-churn)', async () => {
+    const corpse = (seq: number) => ({
+      id: `corpse-${seq}`,
+      catId: 'antig-opus',
+      seq,
+      status: 'sealed',
+      messageCount: 0,
+      createdAt: Date.now() - (10 - seq) * 1000,
+      sealedAt: Date.now() - (10 - seq) * 1000,
+      sealReason: 'tool_conflict',
+    });
+    mockSessionsResponse([
+      {
+        id: 'real-sealed',
+        catId: 'antig-opus',
+        seq: 9,
+        status: 'sealed',
+        messageCount: 12,
+        createdAt: Date.now() - 5000,
+        sealedAt: Date.now() - 4000,
+        sealReason: 'runtime_disconnected',
+      },
+      corpse(1),
+      corpse(2),
+      corpse(3),
+      corpse(4),
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+    expandSealed();
+    // F201-churn: 4 empty (0-msg) tool_conflict retry corpses collapse into ONE summary,
+    // leaving only the real sealed session as a full card. Transparency preserved via the
+    // summary's visible count; the UI no longer litters one corpse card per F201 retry.
+    const sealedCards = container.querySelectorAll('[data-testid="session-card-sealed"]');
+    expect(sealedCards.length).toBe(1);
+    const summary = container.querySelector('[data-testid="session-card-retry-collapsed"]');
+    expect(summary).not.toBeNull();
+    expect(summary?.textContent).toContain('4');
+    expect(summary?.textContent).toContain('重试片段');
+  });
+
+  it('collapses repeated runtime-tagged retry fragments without relying on sealReason heuristics', async () => {
+    const fragment = (seq: number) => ({
+      id: `fragment-${seq}`,
+      catId: 'antig-opus',
+      seq,
+      status: 'sealed',
+      messageCount: 0,
+      createdAt: Date.now() - (10 - seq) * 1000,
+      sealedAt: Date.now() - (10 - seq) * 1000,
+      sealReason: 'model_capacity',
+      runtimeSession: {
+        runtime: 'antigravity-desktop',
+        runtimeSessionId: `cascade-fragment-${seq}`,
+        lifecycleState: 'sealed',
+        lastObservedAt: Date.now() - (10 - seq) * 1000,
+        retryFragment: {
+          kind: 'retry',
+          retryReason: 'model_capacity',
+          nextRuntimeSessionId: `cascade-next-${seq}`,
+          detectedAt: Date.now() - (10 - seq) * 1000,
+        },
+      },
+    });
+    mockSessionsResponse([fragment(1), fragment(2), fragment(3)]);
+    renderPanel('thread-1');
+    await flushFetch();
+    expandSealed();
+    expect(container.querySelectorAll('[data-testid="session-card-sealed"]').length).toBe(0);
+    const summary = container.querySelector('[data-testid="session-card-retry-collapsed"]');
+    expect(summary).not.toBeNull();
+    expect(summary?.textContent).toContain('3');
+    expect(summary?.textContent).toContain('重试片段');
+  });
+
+  it('collapses a single runtime-tagged retry fragment', async () => {
+    mockSessionsResponse([
+      {
+        id: 'fragment-single',
+        catId: 'antig-opus',
+        seq: 1,
+        status: 'sealed',
+        messageCount: 0,
+        createdAt: Date.now() - 5000,
+        sealedAt: Date.now() - 4000,
+        sealReason: 'model_capacity',
+        runtimeSession: {
+          runtime: 'antigravity-desktop',
+          runtimeSessionId: 'cascade-fragment-single',
+          lifecycleState: 'sealed',
+          lastObservedAt: Date.now() - 4000,
+          retryFragment: {
+            kind: 'retry',
+            retryReason: 'model_capacity',
+            nextRuntimeSessionId: 'cascade-next-single',
+            detectedAt: Date.now() - 4000,
+          },
+        },
+      },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+    expandSealed();
+    expect(container.querySelectorAll('[data-testid="session-card-sealed"]').length).toBe(0);
+    const summary = container.querySelector('[data-testid="session-card-retry-collapsed"]');
+    expect(summary).not.toBeNull();
+    expect(summary?.textContent).toContain('1');
+    expect(summary?.textContent).toContain('重试片段');
+  });
+
+  it('does NOT collapse in-flight sealing 0-msg tool_conflict records (砚砚 review P2)', async () => {
+    // requestSeal() writes sealReason while status is still 'sealing' (async-finalizes to 'sealed'
+    // later) — a sealing record must keep its own card (live status + 查看), NOT be folded.
+    const sealingCorpseLike = (seq: number) => ({
+      id: `sealing-${seq}`,
+      catId: 'antig-opus',
+      seq,
+      status: 'sealing',
+      messageCount: 0,
+      createdAt: Date.now() - (10 - seq) * 1000,
+      sealReason: 'tool_conflict',
+    });
+    mockSessionsResponse([sealingCorpseLike(1), sealingCorpseLike(2)]);
+    renderPanel('thread-1');
+    await flushFetch();
+    expandSealed();
+    expect(container.querySelector('[data-testid="session-card-retry-collapsed"]')).toBeNull();
+    expect(container.querySelectorAll('[data-testid="session-card-sealed"]').length).toBe(2);
+  });
+
+  it('renders an unsealed resumable session without claiming that it is running', async () => {
     mockSessionsResponse([
       { id: 'ses_abc12345xyz', catId: 'opus', seq: 2, status: 'active', messageCount: 8, createdAt: Date.now() - 5000 },
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.textContent).toContain('Session #3');
-    expect(container.textContent).toContain('opus');
-    expect(container.textContent).toContain('Active');
-    expect(container.textContent).toContain('8 msgs');
+    expect(container.textContent).toContain('第 3 段会话');
+    expect(container.textContent).toContain('布偶猫');
+    expect(container.textContent).toContain('未封存 · 可续接');
+    expect(container.textContent).not.toContain('正在工作');
+    expect(container.querySelector('[data-session-lifecycle="resumable"]')).not.toBeNull();
+    expect(container.textContent).toContain('8 条消息');
     // Session ID should be visible (truncated) with copy title
     const idBtn = container.querySelector('button[title*="ses_abc12345xyz"]');
     expect(idBtn).not.toBeNull();
     expect(idBtn?.textContent).toContain('ses_abc123');
+  });
+
+  it('labels an unsealed session as running only when its cat has a live invocation', async () => {
+    mockSessionsResponse([
+      { id: 'running-session', catId: 'opus', seq: 0, status: 'active', messageCount: 1, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-1', {}, { 'inv-running': { catId: 'opus', mode: 'execute' } });
+    await flushFetch();
+
+    expect(container.textContent).toContain('正在工作');
+    expect(container.textContent).not.toContain('未封存 · 可续接');
+    expect(container.querySelector('[data-session-lifecycle="running"]')).not.toBeNull();
+  });
+
+  it('renders Antigravity runtime session identity and unexpected switch diagnostics', async () => {
+    mockSessionsResponse([
+      {
+        id: 'session-new',
+        cliSessionId: 'cascade-new-unexpected',
+        catId: 'opus',
+        seq: 1,
+        status: 'active',
+        messageCount: 1,
+        createdAt: Date.now() - 5000,
+        runtimeSession: {
+          runtime: 'antigravity-desktop',
+          runtimeSessionId: 'cascade-new-unexpected',
+          lifecycleState: 'active',
+          lastObservedAt: Date.now() - 1000,
+          unexpectedRuntimeSessionSwitch: {
+            detectedAt: Date.now() - 1000,
+            previousSessionId: 'session-old',
+            previousRuntimeSessionId: 'cascade-old-unexpected',
+            currentRuntimeSessionId: 'cascade-new-unexpected',
+            reason: 'missing_previous_runtime_session_id',
+          },
+        },
+      },
+    ]);
+
+    renderPanel('thread-1');
+    await flushFetch();
+
+    expect(container.querySelector('[data-testid="runtime-session-summary"]')).not.toBeNull();
+    expect(container.textContent).toContain('运行会话');
+    expect(container.textContent).toContain('antigravity-desktop');
+    expect(container.textContent).toContain('运行会话意外切换');
+    expect(container.querySelector('button[title*="cascade-new-unexpected"]')).not.toBeNull();
+    expect(container.querySelector('button[title*="cascade-old-unexpected"]')).not.toBeNull();
   });
 
   it('renders ContextHealthBar for active session with health data', async () => {
@@ -208,11 +733,20 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.textContent).toContain('Session #1');
-    expect(container.textContent).toContain('Session #2');
-    expect(container.textContent).toContain('compact');
-    expect(container.textContent).toContain('threshold');
-    expect(container.textContent).toContain('Sealed');
+    expect(container.textContent).toContain('已封存');
+    expandSealed();
+    expect(container.querySelectorAll('[data-session-lifecycle="sealed"]').length).toBe(2);
+    expect(container.textContent).toContain('第 1 段会话');
+    expect(container.textContent).toContain('第 2 段会话');
+    const summaries = container.querySelectorAll<HTMLElement>('[data-testid="sealed-session-summary"]');
+    expect(summaries.length).toBe(2);
+    for (const summary of summaries) {
+      await act(async () => summary.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
+      expect(summary.querySelector('pre')).toBeNull();
+      expect(summary.querySelector('button[aria-expanded]')).toBeNull();
+    }
+    expect(container.textContent).toContain('压缩后封存');
+    expect(container.textContent).toContain('达到阈值');
     // Both sealed sessions should have clickable ID buttons
     expect(container.querySelector('button[title*="seal_aaa111"]')).not.toBeNull();
     expect(container.querySelector('button[title*="seal_bbb222"]')).not.toBeNull();
@@ -224,7 +758,34 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.textContent).toContain('sealing');
+    expandSealed();
+    const summary = container.querySelector<HTMLElement>('[data-testid="sealed-session-summary"]');
+    await act(async () => summary?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
+    expect(container.textContent).toContain('封存中');
+    expect(container.querySelector('[data-session-lifecycle="sealing"]')).not.toBeNull();
+  });
+
+  it('renders kimi colors from cat.color (border inline style)', async () => {
+    // kimi primary #4B5563 → 75,85,99
+    mockSessionsResponse([
+      { id: 'kimi_s1', catId: 'kimi', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+    const card = container.querySelector(
+      '[data-testid="session-card-active"][data-cat-id="kimi"]',
+    ) as HTMLElement | null;
+    expect(card).not.toBeNull();
+    expect(card!.style.boxShadow).toMatch(/rgba?\(75,\s*85,\s*99/);
+  });
+
+  it('renders cat displayName in the active session badge', async () => {
+    mockSessionsResponse([
+      { id: 's1', catId: 'kimi', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+    expect(container.textContent).toContain('梵花猫');
   });
 
   it('shows post-compact safety alert when sessionSealed is true', async () => {
@@ -236,8 +797,8 @@ describe('F24: SessionChainPanel', () => {
     };
     renderPanel('thread-1', invocations);
     await flushFetch();
-    expect(container.textContent).toContain('Post-compact safety active');
-    expect(container.textContent).toContain('High-risk ops may be blocked');
+    expect(container.textContent).toContain('压缩后安全保护中');
+    expect(container.textContent).toContain('高风险操作可能被拦截');
   });
 
   it('does not show post-compact alert when no cat has sessionSealed', async () => {
@@ -246,7 +807,7 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1', { opus: { sessionSeq: 0 } });
     await flushFetch();
-    expect(container.textContent).not.toContain('Post-compact safety active');
+    expect(container.textContent).not.toContain('压缩后安全保护中');
   });
 
   it('re-fetches when sealSignal changes', async () => {
@@ -322,9 +883,9 @@ describe('F24: SessionChainPanel', () => {
         usage: { inputTokens: 100000, outputTokens: 5000, cacheReadTokens: 75000 },
       },
     };
-    renderPanel('thread-1', invocations);
+    renderPanel('thread-1', invocations, { 'inv-opus': { catId: 'opus', mode: 'execute' } });
     await flushFetch();
-    expect(container.textContent).toContain('cached');
+    expect(container.textContent).toContain('缓存命中');
   });
 
   it('hides cached percentage when no cacheReadTokens', async () => {
@@ -338,7 +899,7 @@ describe('F24: SessionChainPanel', () => {
     };
     renderPanel('thread-1', invocations);
     await flushFetch();
-    expect(container.textContent).not.toContain('cached');
+    expect(container.textContent).not.toContain('缓存命中');
   });
 
   it('shows token counts from session.lastUsage when no live invocation', async () => {
@@ -358,7 +919,7 @@ describe('F24: SessionChainPanel', () => {
     await flushFetch();
     expect(container.textContent).toContain('120k');
     expect(container.textContent).toContain('8k');
-    expect(container.textContent).toContain('cached');
+    expect(container.textContent).toContain('缓存命中');
   });
 
   it('prefers live invocation usage over session.lastUsage', async () => {
@@ -378,7 +939,7 @@ describe('F24: SessionChainPanel', () => {
         usage: { inputTokens: 150000, outputTokens: 10000 },
       },
     };
-    renderPanel('thread-1', invocations);
+    renderPanel('thread-1', invocations, { 'inv-opus': { catId: 'opus', mode: 'execute' } });
     await flushFetch();
     // Should show live data (150k/10k), not persisted (50k/2k)
     expect(container.textContent).toContain('150k');
@@ -399,41 +960,37 @@ describe('F24: SessionChainPanel', () => {
     renderPanel('thread-1');
     await flushFetch();
     // Should not crash; panel still renders (F33: bind section always present)
-    expect(container.textContent).toContain('0 sessions');
+    expect(container.textContent).toContain('0 总计');
     expect(container.textContent).not.toContain('Session #');
   });
 
-  it('renders singular "session" for count of 1', async () => {
+  it('renders active and total counts in header', async () => {
     mockSessionsResponse([
       { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 1, createdAt: Date.now() },
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.textContent).toContain('1 session');
-    expect(container.textContent).not.toContain('1 sessions');
+    expect(container.textContent).toContain('1 未封存');
+    expect(container.textContent).toContain('1 总计');
   });
 
-  it('clears stale sessions on thread switch when fetch fails (P2 regression)', async () => {
-    // First thread loads successfully
+  it('hides the prior thread session synchronously while the next thread request is pending', async () => {
     mockSessionsResponse([
-      { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+      { id: 'session-thread-a', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
     ]);
-    renderPanel('thread-1');
+    renderPanel('thread-A');
     await flushFetch();
-    expect(container.textContent).toContain('Session #1');
+    expect(container.querySelector('button[title*="session-thread-a"]')).not.toBeNull();
 
-    // Switch to thread-2, but fetch fails
-    mockApiFetch.mockResolvedValue({ ok: false, status: 500 });
-    renderPanel('thread-2');
-    await flushFetch();
+    mockApiFetch.mockImplementationOnce(() => new Promise(() => {}));
+    renderPanel('thread-B');
 
-    // Old thread-1 data must be gone
-    expect(container.textContent).not.toContain('Session #1');
-    // Panel still renders (F33: bind section), but no session cards
-    expect(container.textContent).toContain('0 sessions');
+    expect(container.querySelector('button[title*="session-thread-a"]')).toBeNull();
+    expect(container.textContent).not.toContain('session-thread-a');
+    expect(container.textContent).toContain('正在读取会话…');
   });
 
-  it('clears stale sessions on thread switch when fetch throws', async () => {
+  it('does not expose another thread session after the replacement fetch fails', async () => {
     mockSessionsResponse([
       {
         id: 's1',
@@ -447,99 +1004,280 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-A');
     await flushFetch();
-    expect(container.textContent).toContain('Session #1');
+    expandSealed();
+    expect(container.textContent).toContain('第 1 段会话');
 
-    // Switch to thread-B, but fetch throws network error
     mockApiFetch.mockRejectedValue(new Error('network error'));
     renderPanel('thread-B');
     await flushFetch();
 
-    // Old thread-A data must be gone
-    expect(container.textContent).not.toContain('Session #1');
-    // Panel still renders (F33: bind section), but no session cards
-    expect(container.textContent).toContain('0 sessions');
+    expect(container.textContent).not.toContain('第 1 段会话');
   });
 
-  it('applies codex green colors to active session border and badge', async () => {
+  it('does not expose another thread restore action after a failed refetch', async () => {
+    // Load sealed session for thread-1
+    mockSessionsResponse([
+      {
+        id: 's1',
+        catId: 'opus',
+        seq: 0,
+        status: 'sealed',
+        messageCount: 5,
+        createdAt: Date.now() - 60000,
+        sealedAt: Date.now(),
+      },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+    expandSealed();
+
+    const findRestoreBtn = () => {
+      const buttons = Array.from(container.querySelectorAll('button'));
+      return buttons.find((b) => b.textContent?.includes('恢复为当前')) as HTMLButtonElement | undefined;
+    };
+
+    // Restore button should be enabled for fresh data
+    expect(findRestoreBtn()?.disabled).toBe(false);
+
+    mockApiFetch.mockRejectedValue(new Error('network error'));
+    renderPanel('thread-2');
+    await flushFetch();
+
+    expect(findRestoreBtn()).toBeUndefined();
+    expect(container.textContent).not.toContain('s1');
+  });
+
+  it('confirms and sends the expected active identity when restoring a historical session', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    mockApiFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sessions: [
+            { id: 'old', catId: 'opus', seq: 0, status: 'sealed', messageCount: 3, createdAt: 1, sealedAt: 2 },
+            { id: 'current', catId: 'opus', seq: 2, status: 'active', messageCount: 1, createdAt: 3 },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ mode: 'restored' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sessions: [
+            { id: 'old', catId: 'opus', seq: 0, status: 'active', messageCount: 3, createdAt: 1 },
+            {
+              id: 'current',
+              catId: 'opus',
+              seq: 2,
+              status: 'sealed',
+              messageCount: 1,
+              createdAt: 3,
+              sealedAt: 4,
+            },
+          ],
+        }),
+      });
+
+    renderPanel('thread-1');
+    await flushFetch();
+    expandSealed();
+
+    const restoreButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('恢复为当前'),
+    );
+    expect(restoreButton).toBeDefined();
+    await act(async () => {
+      restoreButton!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('第 3 段会话'));
+    expect(mockApiFetch).toHaveBeenNthCalledWith(2, '/api/sessions/old/unseal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedActiveSessionId: 'current' }),
+    });
+  });
+
+  it('does not restore or seal anything when the current-session confirmation is cancelled', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    mockSessionsResponse([
+      { id: 'old', catId: 'opus', seq: 0, status: 'sealed', messageCount: 3, createdAt: 1, sealedAt: 2 },
+      { id: 'current', catId: 'opus', seq: 2, status: 'active', messageCount: 1, createdAt: 3 },
+    ]);
+
+    renderPanel('thread-1');
+    await flushFetch();
+    expandSealed();
+    const restoreButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('恢复为当前'),
+    );
+
+    await act(async () => {
+      restoreButton!.click();
+    });
+
+    expect(mockApiFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('replaces stale data when new thread fetch succeeds (stale-while-revalidate)', async () => {
+    // First thread loads
+    mockSessionsResponse([
+      { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+    expect(container.textContent).toContain('第 1 段会话');
+
+    // Switch to thread-2 with different data — old data replaced
+    mockSessionsResponse([
+      { id: 's2', catId: 'codex', seq: 0, status: 'active', messageCount: 3, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-2');
+    await flushFetch();
+
+    // New data visible, old data gone
+    expect(container.textContent).toContain('缅因猫');
+    expect(container.textContent).toContain('1 总计');
+  });
+
+  it('reuses per-thread session cache immediately when revisiting a thread during revalidate', async () => {
+    let resolveThread1Revisit!: (value: unknown) => void;
+    const thread1Revisit = new Promise((resolve) => {
+      resolveThread1Revisit = resolve;
+    });
+
+    mockApiFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sessions: [{ id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sessions: [{ id: 's2', catId: 'codex', seq: 5, status: 'active', messageCount: 3, createdAt: Date.now() }],
+        }),
+      })
+      .mockImplementationOnce(() => thread1Revisit);
+
+    renderPanel('thread-1');
+    await flushFetch();
+    expect(container.textContent).toContain('第 1 段会话');
+
+    renderPanel('thread-2');
+    await flushFetch();
+    expect(container.textContent).toContain('第 6 段会话');
+    expect(container.textContent).toContain('缅因猫');
+
+    renderPanel('thread-1');
+    await flushFetch();
+
+    // Cache should win immediately while revalidate is still in flight.
+    expect(container.textContent).toContain('第 1 段会话');
+    expect(container.textContent).not.toContain('第 6 段会话');
+
+    resolveThread1Revisit({
+      ok: true,
+      json: async () => ({
+        sessions: [{ id: 's1b', catId: 'opus', seq: 1, status: 'active', messageCount: 6, createdAt: Date.now() }],
+      }),
+    });
+    await flushFetch();
+
+    expect(container.textContent).toContain('第 2 段会话');
+    expect(container.textContent).not.toContain('第 6 段会话');
+  });
+
+  it('applies codex green colors from cat.color (border + badge inline style)', async () => {
+    // codex primary #5B8C5A → 91,140,90
+    // F056: badge bg/text derived via OKLCH badgeBackground()/contrastingText()
     mockSessionsResponse([
       { id: 's1', catId: 'codex', seq: 0, status: 'active', messageCount: 3, createdAt: Date.now() },
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    // Border should use codex green, not opus purple
-    const card = container.querySelector('.border-codex-primary\\/40');
+    const card = container.querySelector(
+      '[data-testid="session-card-active"][data-cat-id="codex"]',
+    ) as HTMLElement | null;
     expect(card).not.toBeNull();
-    // Badge should use codex colors
-    const badge = container.querySelector('.bg-codex-light.text-codex-dark');
-    expect(badge).not.toBeNull();
-    expect(badge?.textContent).toContain('codex');
-    // Must NOT have opus purple
-    expect(container.querySelector('.border-opus-primary\\/40')).toBeNull();
-    expect(container.querySelector('.bg-opus-light')).toBeNull();
+    expect(card!.style.boxShadow).toMatch(/rgba?\(91,\s*140,\s*90/);
+    const badge = container.querySelector(
+      '[data-testid="session-badge-active"][data-cat-id="codex"]',
+    ) as HTMLElement | null;
+    expect(badge?.textContent).toContain('缅因猫');
+    // F056: badge colors are oklch-derived from primary hex (secondary removed)
+    expect(badge!.style.backgroundColor).toMatch(/oklch\(/);
+    expect(badge!.style.color).toMatch(/oklch\(/);
   });
 
-  it('applies gemini blue colors to active session border and badge', async () => {
+  it('applies gemini colors from cat.color', async () => {
+    // gemini primary #4A90E2 → 74,144,226
     mockSessionsResponse([
       { id: 's1', catId: 'gemini', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    const card = container.querySelector('.border-gemini-primary\\/40');
+    const card = container.querySelector(
+      '[data-testid="session-card-active"][data-cat-id="gemini"]',
+    ) as HTMLElement | null;
     expect(card).not.toBeNull();
-    const badge = container.querySelector('.bg-gemini-light.text-gemini-dark');
-    expect(badge).not.toBeNull();
+    expect(card!.style.boxShadow).toMatch(/rgba?\(74,\s*144,\s*226/);
   });
 
-  it('applies dare amber colors to active session border and badge', async () => {
-    mockSessionsResponse([
-      { id: 's1', catId: 'dare', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
-    ]);
-    renderPanel('thread-1');
-    await flushFetch();
-    const card = container.querySelector('.border-dare-primary\\/40');
-    expect(card).not.toBeNull();
-    const badge = container.querySelector('.bg-dare-light.text-dare-dark');
-    expect(badge).not.toBeNull();
-  });
-
-  it('applies maine-coon variant green shades for gpt52', async () => {
+  it('applies gpt52 (maine-coon variant) colors from cat.color', async () => {
+    // gpt52 primary #66BB6A → 102,187,106
     mockSessionsResponse([
       { id: 's1', catId: 'gpt52', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.innerHTML).toContain('border-[#66BB6A66]');
-    expect(container.innerHTML).toContain('bg-[#C8E6C9]');
-    expect(container.innerHTML).toContain('text-[#2E7D32]');
-    expect(container.querySelector('.bg-gray-200.text-gray-600')).toBeNull();
+    const card = container.querySelector(
+      '[data-testid="session-card-active"][data-cat-id="gpt52"]',
+    ) as HTMLElement | null;
+    expect(card).not.toBeNull();
+    expect(card!.style.boxShadow).toMatch(/rgba?\(102,\s*187,\s*106/);
   });
 
-  it('applies ragdoll variant purple shades for opus-45 and sonnet', async () => {
+  it('applies opus-45 and sonnet (ragdoll variant) distinct colors from cat.color', async () => {
+    // opus-45 primary #7E57C2 → 126,87,194; sonnet primary #B39DDB → 179,157,219
     mockSessionsResponse([
       { id: 's1', catId: 'opus-45', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
       { id: 's2', catId: 'sonnet', seq: 1, status: 'active', messageCount: 2, createdAt: Date.now() },
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.innerHTML).toContain('border-[#7E57C266]');
-    expect(container.innerHTML).toContain('bg-[#E1D5F0]');
-    expect(container.innerHTML).toContain('text-[#5E35B1]');
-    expect(container.innerHTML).toContain('border-[#B39DDB66]');
-    expect(container.innerHTML).toContain('bg-[#EDE7F6]');
-    expect(container.innerHTML).toContain('text-[#6A1B9A]');
+    const opus45 = container.querySelector(
+      '[data-testid="session-card-active"][data-cat-id="opus-45"]',
+    ) as HTMLElement | null;
+    const sonnet = container.querySelector(
+      '[data-testid="session-card-active"][data-cat-id="sonnet"]',
+    ) as HTMLElement | null;
+    expect(opus45).not.toBeNull();
+    expect(sonnet).not.toBeNull();
+    expect(opus45!.style.boxShadow).toMatch(/rgba?\(126,\s*87,\s*194/);
+    expect(sonnet!.style.boxShadow).toMatch(/rgba?\(179,\s*157,\s*219/);
   });
 
-  it('applies gray fallback colors for unknown catId', async () => {
+  it('falls back to neutral gray when cat is missing from cat-config (badge background)', async () => {
+    // Fallback: primary #9CA3AF. F056: badge bg/text derived via OKLCH.
     mockSessionsResponse([
       { id: 's1', catId: 'unknown-cat', seq: 0, status: 'active', messageCount: 1, createdAt: Date.now() },
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    const card = container.querySelector('.border-gray-300\\/40');
-    expect(card).not.toBeNull();
-    const badge = container.querySelector('.bg-gray-200.text-gray-600');
+    const badge = container.querySelector(
+      '[data-testid="session-badge-active"][data-cat-id="unknown-cat"]',
+    ) as HTMLElement | null;
     expect(badge).not.toBeNull();
-    expect(badge?.textContent).toContain('unknown-cat');
+    expect(badge!.textContent).toContain('unknown-cat');
+    // F056: badge colors are oklch-derived from fallback #9CA3AF (secondary removed)
+    expect(badge!.style.backgroundColor).toMatch(/oklch\(/);
+    expect(badge!.style.color).toMatch(/oklch\(/);
   });
 
   it('discards stale response when slow thread-1 fetch resolves after thread-2 (P1 race condition)', async () => {
@@ -555,7 +1293,8 @@ describe('F24: SessionChainPanel', () => {
     });
 
     // First render: thread-1 (slow)
-    mockApiFetch.mockImplementation((url: string) => {
+    mockApiFetch.mockImplementation((...args: unknown[]) => {
+      const url = args[0] as string;
       if (url.includes('thread-1')) return thread1Promise;
       if (url.includes('thread-2')) return thread2Promise;
       return Promise.resolve({ ok: false });
@@ -577,7 +1316,7 @@ describe('F24: SessionChainPanel', () => {
     });
     await flushFetch();
 
-    expect(container.textContent).toContain('Session #6'); // seq 5 → display #6
+    expect(container.textContent).toContain('第 6 段会话'); // seq 5 → display #6
 
     // Now thread-1 (stale) resolves late
     resolveThread1({
@@ -589,27 +1328,141 @@ describe('F24: SessionChainPanel', () => {
     await flushFetch();
 
     // Stale thread-1 data must NOT overwrite thread-2
-    expect(container.textContent).toContain('Session #6');
-    expect(container.textContent).not.toContain('Session #1');
+    expect(container.textContent).toContain('第 6 段会话');
+    expect(container.textContent).not.toContain('第 1 段会话');
+  });
+
+  describe('cat color rendering — driven by cat-config.json (no hardcoded table)', () => {
+    // Helper: extract numeric RGB triple from any inline color value.
+    function rgbTripleOf(value: string): [number, number, number] | null {
+      // Accepts "rgb(r, g, b)", "rgba(r, g, b, a)" — jsdom always serialises as rgb/rgba.
+      const m = value.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+      return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+    }
+
+    it('opus-47 active session uses cat.color.primary (#7B1FA2 → 123,31,162) for border, not gray fallback', async () => {
+      // opus-47 was missing from the legacy hardcoded CAT_SESSION_COLORS table,
+      // so before the fix it fell through to the gray DEFAULT_SESSION_COLORS.
+      mockSessionsResponse([
+        { id: 's_47', catId: 'opus-47', seq: 0, status: 'active', messageCount: 1, createdAt: Date.now() },
+      ]);
+      renderPanel('thread-1');
+      await flushFetch();
+      const card = container.querySelector(
+        '[data-testid="session-card-active"][data-cat-id="opus-47"]',
+      ) as HTMLElement | null;
+      expect(card).not.toBeNull();
+      const triple = rgbTripleOf(card!.style.boxShadow);
+      expect(triple).toEqual([123, 31, 162]);
+    });
+
+    it('opus-47 active session badge uses oklch-derived colors from cat.color.primary', async () => {
+      // F056: secondary removed — badge bg/text derived via OKLCH from primary
+      mockSessionsResponse([
+        { id: 's_47', catId: 'opus-47', seq: 0, status: 'active', messageCount: 1, createdAt: Date.now() },
+      ]);
+      renderPanel('thread-1');
+      await flushFetch();
+      const badge = container.querySelector(
+        '[data-testid="session-badge-active"][data-cat-id="opus-47"]',
+      ) as HTMLElement | null;
+      expect(badge).not.toBeNull();
+      // F056: badge colors are oklch-derived from primary #7B1FA2 (secondary removed)
+      expect(badge!.style.backgroundColor).toMatch(/oklch\(/);
+      expect(badge!.style.color).toMatch(/oklch\(/);
+    });
+
+    it('sealed session for opus-47 also uses cat.color (parity with active card)', async () => {
+      mockSessionsResponse([
+        {
+          id: 'seal_47',
+          catId: 'opus-47',
+          seq: 0,
+          status: 'sealed',
+          messageCount: 5,
+          createdAt: Date.now() - 60000,
+          sealedAt: Date.now(),
+        },
+      ]);
+      renderPanel('thread-1');
+      await flushFetch();
+      expandSealed();
+      const card = container.querySelector(
+        '[data-testid="session-card-sealed"][data-cat-id="opus-47"]',
+      ) as HTMLElement | null;
+      expect(card).not.toBeNull();
+      expect(rgbTripleOf(card!.style.boxShadow)).toEqual([123, 31, 162]);
+    });
+
+    it('falls back to neutral gray (#9CA3AF → 156,163,175) for unknown catId', async () => {
+      mockSessionsResponse([
+        { id: 's_x', catId: 'unknown-cat', seq: 0, status: 'active', messageCount: 1, createdAt: Date.now() },
+      ]);
+      renderPanel('thread-1');
+      await flushFetch();
+      const card = container.querySelector(
+        '[data-testid="session-card-active"][data-cat-id="unknown-cat"]',
+      ) as HTMLElement | null;
+      expect(card).not.toBeNull();
+      expect(rgbTripleOf(card!.style.boxShadow)).toEqual([156, 163, 175]);
+    });
+
+    it('does not emit any of the legacy hardcoded color tokens', async () => {
+      mockSessionsResponse([
+        { id: 's1', catId: 'codex', seq: 0, status: 'active', messageCount: 1, createdAt: Date.now() },
+        { id: 's2', catId: 'gemini', seq: 1, status: 'active', messageCount: 1, createdAt: Date.now() },
+        { id: 's3', catId: 'opus-45', seq: 2, status: 'active', messageCount: 1, createdAt: Date.now() },
+        { id: 's4', catId: 'gpt52', seq: 3, status: 'active', messageCount: 1, createdAt: Date.now() },
+      ]);
+      renderPanel('thread-1');
+      await flushFetch();
+      const html = container.innerHTML;
+      // Legacy semantic tokens
+      expect(html).not.toContain('border-codex-primary');
+      expect(html).not.toContain('bg-codex-light');
+      expect(html).not.toContain('text-codex-dark');
+      expect(html).not.toContain('border-gemini-primary');
+      expect(html).not.toContain('border-opus-45-primary');
+      expect(html).not.toContain('border-kimi-primary');
+      expect(html).not.toContain('border-opus-primary');
+      // Legacy arbitrary hex tokens for gpt52 / opus-45 / sonnet
+      expect(html).not.toContain('border-[#66BB6A66]');
+      expect(html).not.toContain('border-[#7E57C266]');
+      expect(html).not.toContain('border-[#B39DDB66]');
+      // Legacy gray fallback class
+      expect(html).not.toContain('border-cafe/40');
+      expect(html).not.toContain('bg-cafe-surface-elevated');
+    });
   });
 
   describe('F33: bind new external session', () => {
+    it('keeps cloud conversations in 会话记录 and distinguishes them from CLI sessions', async () => {
+      mockSessionsResponse([]);
+
+      renderPanel('thread-1');
+      await flushFetch();
+
+      expect(container.querySelector('[data-testid="cloud-conversation-link"]')).not.toBeNull();
+      expect(container.textContent).toContain('ChatGPT 对话');
+      expect(container.textContent).toContain('绑定命令行会话');
+    });
+
     it('hides bind UI for default thread (system-owned, bind returns 403)', async () => {
       mockSessionsResponse([
         { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 3, createdAt: Date.now() },
       ]);
       renderPanel('default');
       await flushFetch();
-      // Neither the per-session "bind..." nor the "绑定外部 Session" should appear
-      expect(container.textContent).not.toContain('bind...');
-      expect(container.textContent).not.toContain('绑定外部 Session');
+      // Neither the per-session "绑定会话 ID…" nor the "绑定外部 Session" should appear
+      expect(container.textContent).not.toContain('绑定会话 ID…');
+      expect(container.textContent).not.toContain('绑定命令行会话');
     });
 
     it('shows bind-new-session button even when no sessions exist', async () => {
       mockSessionsResponse([]);
       renderPanel('thread-1');
       await flushFetch();
-      expect(container.textContent).toContain('绑定外部 Session');
+      expect(container.textContent).toContain('绑定命令行会话');
     });
 
     it('shows bind-new-session button alongside active sessions', async () => {
@@ -618,8 +1471,8 @@ describe('F24: SessionChainPanel', () => {
       ]);
       renderPanel('thread-1');
       await flushFetch();
-      expect(container.textContent).toContain('Session #1');
-      expect(container.textContent).toContain('绑定外部 Session');
+      expect(container.textContent).toContain('第 1 段会话');
+      expect(container.textContent).toContain('绑定命令行会话');
     });
 
     it('filters out cats that already have active sessions from dropdown', async () => {
@@ -631,20 +1484,21 @@ describe('F24: SessionChainPanel', () => {
 
       // Click to expand bind section
       const bindBtn = Array.from(container.querySelectorAll('button')).find((btn) =>
-        btn.textContent?.includes('绑定外部 Session'),
+        btn.textContent?.includes('绑定命令行会话'),
       );
       expect(bindBtn).not.toBeUndefined();
       act(() => {
         bindBtn?.click();
       });
 
-      // Should show codex (no active session) but not opus (has active session)
+      // Should show codex (no active session) but not opus (has active session).
+      // Asserting on option value (catId) instead of displayName so that other
+      // ragdoll-family variants (sonnet/opus-45/opus-47) don't accidentally match.
       const select = container.querySelector('select');
       expect(select).not.toBeNull();
-      const options = Array.from(select?.querySelectorAll('option'));
-      const optionTexts = options.map((o) => o.textContent);
-      expect(optionTexts.some((t) => t?.includes('缅因猫'))).toBe(true);
-      expect(optionTexts.some((t) => t?.includes('布偶猫'))).toBe(false);
+      const optionValues = Array.from(select!.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value);
+      expect(optionValues).toContain('codex');
+      expect(optionValues).not.toContain('opus');
     });
   });
 
@@ -655,7 +1509,7 @@ describe('F24: SessionChainPanel', () => {
       ]);
       renderPanel('thread-1');
       await flushFetch();
-      expect(container.textContent).toContain('bind...');
+      expect(container.textContent).toContain('绑定会话 ID…');
     });
 
     it('does not render bind button for sealed sessions', async () => {
@@ -672,7 +1526,7 @@ describe('F24: SessionChainPanel', () => {
       ]);
       renderPanel('thread-1');
       await flushFetch();
-      expect(container.textContent).not.toContain('bind...');
+      expect(container.textContent).not.toContain('绑定会话 ID…');
     });
 
     it('shows input after clicking bind button', async () => {
@@ -682,14 +1536,16 @@ describe('F24: SessionChainPanel', () => {
       renderPanel('thread-1');
       await flushFetch();
 
-      const bindBtn = Array.from(container.querySelectorAll('button')).find((btn) => btn.textContent === 'bind...');
+      const bindBtn = Array.from(container.querySelectorAll('button')).find(
+        (btn) => btn.textContent === '绑定会话 ID…',
+      );
       expect(bindBtn).not.toBeUndefined();
 
       act(() => {
         bindBtn?.click();
       });
 
-      const input = container.querySelector('input[placeholder="CLI session ID"]');
+      const input = container.querySelector('input[placeholder="命令行会话 ID"]');
       expect(input).not.toBeNull();
     });
 
@@ -701,13 +1557,15 @@ describe('F24: SessionChainPanel', () => {
       await flushFetch();
 
       // Click bind button to open input
-      const bindBtn = Array.from(container.querySelectorAll('button')).find((btn) => btn.textContent === 'bind...');
+      const bindBtn = Array.from(container.querySelectorAll('button')).find(
+        (btn) => btn.textContent === '绑定会话 ID…',
+      );
       act(() => {
         bindBtn?.click();
       });
 
       // Type session ID
-      const input = container.querySelector('input[placeholder="CLI session ID"]') as HTMLInputElement;
+      const input = container.querySelector('input[placeholder="命令行会话 ID"]') as HTMLInputElement;
       act(() => {
         const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!
           .set!;
@@ -719,7 +1577,7 @@ describe('F24: SessionChainPanel', () => {
       mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
 
       // Click bind submit button
-      const submitBtn = Array.from(container.querySelectorAll('button')).find((btn) => btn.textContent === 'bind');
+      const submitBtn = Array.from(container.querySelectorAll('button')).find((btn) => btn.textContent === '绑定');
       act(() => {
         submitBtn?.click();
       });
@@ -746,13 +1604,15 @@ describe('F24: SessionChainPanel', () => {
       await flushFetch();
 
       // Open bind input
-      const bindBtn = Array.from(container.querySelectorAll('button')).find((btn) => btn.textContent === 'bind...');
+      const bindBtn = Array.from(container.querySelectorAll('button')).find(
+        (btn) => btn.textContent === '绑定会话 ID…',
+      );
       act(() => {
         bindBtn?.click();
       });
 
       // Type value
-      const input = container.querySelector('input[placeholder="CLI session ID"]') as HTMLInputElement;
+      const input = container.querySelector('input[placeholder="命令行会话 ID"]') as HTMLInputElement;
       act(() => {
         const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
         setter.call(input, 'bad_session');
@@ -762,14 +1622,269 @@ describe('F24: SessionChainPanel', () => {
       // Mock failed bind
       mockApiFetch.mockResolvedValue({ ok: false, status: 404 });
 
-      const submitBtn = Array.from(container.querySelectorAll('button')).find((btn) => btn.textContent === 'bind');
+      const submitBtn = Array.from(container.querySelectorAll('button')).find((btn) => btn.textContent === '绑定');
       act(() => {
         submitBtn?.click();
       });
 
       await flushFetch();
 
-      expect(container.textContent).toContain('err');
+      expect(container.textContent).toContain('失败，重试');
     });
+  });
+
+  describe('collapse toggle', () => {
+    it('active 会话记录: click header hides active cards, click again restores', async () => {
+      mockSessionsResponse([
+        { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+      ]);
+      renderPanel('thread-1');
+      await flushFetch();
+
+      // Default: expanded — active card visible
+      expect(container.querySelector('[data-testid="session-card-active"]')).not.toBeNull();
+      expect(container.textContent).toContain('第 1 段会话');
+      // Header shows counts
+      expect(container.textContent).toContain('1 未封存');
+
+      // Click 会话记录 header to collapse
+      const chainHeader = Array.from(container.querySelectorAll('button')).find((b) =>
+        b.textContent?.includes('会话记录'),
+      );
+      expect(chainHeader).toBeTruthy();
+      act(() => {
+        chainHeader?.click();
+      });
+
+      // Collapsed: active card hidden, but header/count still visible
+      expect(container.querySelector('[data-testid="session-card-active"]')).toBeNull();
+      expect(container.querySelector('[data-testid="cloud-conversation-link"]')).toBeNull();
+      expect(container.textContent).not.toContain('绑定命令行会话');
+      expect(container.textContent).toContain('1 未封存');
+      expect(container.textContent).toContain('会话记录');
+
+      // Click again to expand
+      act(() => {
+        chainHeader?.click();
+      });
+
+      // Restored: active card visible again
+      expect(container.querySelector('[data-testid="session-card-active"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="cloud-conversation-link"]')).not.toBeNull();
+      expect(container.textContent).toContain('绑定命令行会话');
+      expect(container.textContent).toContain('第 1 段会话');
+    });
+
+    it('Sealed section: default collapsed, click expands, click collapses', async () => {
+      mockSessionsResponse([
+        {
+          id: 'seal1',
+          catId: 'opus',
+          seq: 0,
+          status: 'sealed',
+          messageCount: 10,
+          createdAt: Date.now() - 60000,
+          sealedAt: Date.now(),
+          sealReason: 'compact',
+        },
+      ]);
+      renderPanel('thread-1');
+      await flushFetch();
+
+      // Default: collapsed — sealed card hidden, but toggle visible
+      expect(container.querySelector('[data-testid="session-card-sealed"]')).toBeNull();
+      expect(container.textContent).toContain('已封存');
+
+      // Click to expand
+      expandSealed();
+
+      // Expanded: sealed card visible
+      expect(container.querySelector('[data-testid="session-card-sealed"]')).not.toBeNull();
+      expect(container.textContent).toContain('第 1 段会话');
+      const summary = container.querySelector<HTMLElement>('[data-testid="sealed-session-summary"]');
+      await act(async () => summary?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
+      expect(container.textContent).toContain('压缩后封存');
+
+      // Click to collapse again
+      expandSealed(); // toggles back
+
+      // Collapsed again
+      expect(container.querySelector('[data-testid="session-card-sealed"]')).toBeNull();
+    });
+  });
+
+  describe('F252: Story Player entry point', () => {
+    it('does NOT render standalone replay link for sealed sessions (AC-E1 sunset)', async () => {
+      mockSessionsResponse([
+        {
+          id: 'ses_sealed_replay',
+          catId: 'opus',
+          seq: 0,
+          status: 'sealed',
+          messageCount: 10,
+          createdAt: Date.now() - 60000,
+          sealedAt: Date.now() - 30000,
+        },
+      ]);
+      renderPanel('thread-1');
+      await flushFetch();
+      expandSealed();
+
+      // AC-E1: standalone session replay route is sunset — canonical entry
+      // is Theater Overlay via ThreadItem, not a per-session link here
+      const replayLink = container.querySelector('a[href="/story/session:ses_sealed_replay"]');
+      expect(replayLink).toBeNull();
+    });
+
+    it('does NOT render replay link for active sessions', async () => {
+      mockSessionsResponse([
+        { id: 'ses_active_no_replay', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+      ]);
+      renderPanel('thread-1');
+      await flushFetch();
+
+      const replayLink = container.querySelector('a[href*="/story/session:"]');
+      expect(replayLink).toBeNull();
+    });
+  });
+
+  it('does not treat an old invocation ID snapshot as live work or block a resumable record', async () => {
+    mockSessionsResponse([
+      { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-stale-invocation', { opus: { invocationId: 'inv-finished-long-ago', durationMs: 8000 } });
+    await flushFetch();
+    const card = container.querySelector<HTMLElement>('[data-testid="session-card-active"]');
+    expect(card?.dataset.sessionLifecycle).toBe('resumable');
+
+    expect(card?.querySelector<HTMLButtonElement>('[data-testid="seal-session-s1"]')?.disabled).toBe(false);
+    expect(card?.textContent).not.toContain('猫正在工作');
+  });
+
+  it('does not call either idle record resumable when the same cat has two unsealed records', async () => {
+    mockSessionsResponse([
+      { id: 'older', catId: 'opus', seq: 0, status: 'active', messageCount: 4, createdAt: Date.now() - 60000 },
+      { id: 'newer', catId: 'opus', seq: 1, status: 'active', messageCount: 9, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-idle-ambiguous');
+    await flushFetch();
+
+    const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-testid="session-card-active"]'));
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.dataset.sessionLifecycle).toBe('unverified');
+      expect(row.parentElement?.textContent).toContain('当前会话待核对');
+      expect(row.textContent).not.toContain('可续接');
+    }
+  });
+
+  it('does not attribute cat-level live usage to either ambiguous session record', async () => {
+    mockSessionsResponse([
+      {
+        id: 'older',
+        catId: 'opus',
+        seq: 0,
+        status: 'active',
+        messageCount: 4,
+        createdAt: Date.now() - 60000,
+        lastUsage: { inputTokens: 5000 },
+      },
+      {
+        id: 'newer',
+        catId: 'opus',
+        seq: 1,
+        status: 'active',
+        messageCount: 9,
+        createdAt: Date.now(),
+        lastUsage: { inputTokens: 9000 },
+      },
+    ]);
+    renderPanel(
+      'thread-ambiguous-usage',
+      { opus: { usage: { inputTokens: 200000 } } },
+      { 'inv-opus': { catId: 'opus', mode: 'execute' } },
+    );
+    await flushFetch();
+    const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-testid="session-card-active"]'));
+    expect(rows[0]?.textContent).toContain('5k');
+    expect(rows[1]?.textContent).toContain('9k');
+    expect(container.textContent).not.toContain('200k');
+  });
+
+  it('blocks restore while that cat is working and explains when it can be used', async () => {
+    mockSessionsResponse([
+      { id: 'old', catId: 'opus', seq: 0, status: 'sealed', messageCount: 3, createdAt: 1, sealedAt: 2 },
+      { id: 'current', catId: 'opus', seq: 2, status: 'active', messageCount: 1, createdAt: 3 },
+    ]);
+    renderPanel('thread-running-restore', {}, { 'inv-opus': { catId: 'opus', mode: 'execute' } });
+    await flushFetch();
+    expandSealed();
+
+    const sealedCard = container.querySelector<HTMLElement>('[data-testid="session-card-sealed"]');
+    const restoreButton = sealedCard?.querySelector<HTMLButtonElement>('button[data-testid="restore-session-old"]');
+    expect(restoreButton?.disabled).toBe(true);
+    expect(restoreButton?.title).toBe('停止工作后才能恢复为当前');
+  });
+
+  it('blocks cat-scoped compact, bind and restore when two records claim the current cat', async () => {
+    mockSessionsResponse([
+      {
+        id: 'first',
+        cliSessionId: 'cli-first',
+        catId: 'opus',
+        seq: 0,
+        status: 'active',
+        messageCount: 2,
+        createdAt: 1,
+      },
+      {
+        id: 'second',
+        cliSessionId: 'cli-second',
+        catId: 'opus',
+        seq: 1,
+        status: 'active',
+        messageCount: 3,
+        createdAt: 2,
+      },
+      { id: 'old', catId: 'opus', seq: 2, status: 'sealed', messageCount: 4, createdAt: 3, sealedAt: 4 },
+    ]);
+    renderPanel('thread-ambiguous-actions');
+    await flushFetch();
+    const first = container.querySelector<HTMLElement>('[data-testid="session-card-active"]');
+    expect(first?.querySelector<HTMLButtonElement>('[data-testid="compact-native-session-first"]')?.disabled).toBe(
+      true,
+    );
+    const bind = Array.from(first?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent === '绑定会话 ID…',
+    );
+    expect(bind?.disabled).toBe(true);
+    expandSealed();
+    const restore = container.querySelector<HTMLButtonElement>('[data-testid="restore-session-old"]');
+    expect(restore?.disabled).toBe(true);
+    expect(restore?.title).toContain('多条未封存记录');
+  });
+  it('shows sealed record facts directly after the history list is opened', async () => {
+    mockSessionsResponse([
+      {
+        id: 'sealed-direct',
+        catId: 'opus',
+        seq: 2,
+        status: 'sealed',
+        messageCount: 8,
+        createdAt: 1,
+        sealedAt: 2,
+        compressionCount: 2,
+        sealReason: 'manual',
+        contextHealth: { fillRatio: 0.6 },
+      },
+    ]);
+    renderPanel('thread-direct-history');
+    await flushFetch();
+    expandSealed();
+    const row = container.querySelector('[data-testid="session-card-sealed"]');
+    expect(row?.textContent).toContain('60%');
+    expect(row?.textContent).toContain('压缩 2 次');
+    expect(row?.textContent).toContain('手动封存');
+    expect(row?.textContent).not.toContain('查看技术详情');
   });
 });

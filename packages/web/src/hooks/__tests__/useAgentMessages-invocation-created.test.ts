@@ -18,7 +18,9 @@ const mockSetMessageUsage = vi.fn();
 const mockRequestStreamCatchUp = vi.fn();
 const mockSetMessageMetadata = vi.fn();
 const mockSetMessageThinking = vi.fn();
-const mockSetMessageStreamInvocation = vi.fn();
+const mockRemoveActiveInvocation = vi.fn();
+const mockAddActiveInvocation = vi.fn();
+const mockReplaceThreadTargetCats = vi.fn();
 
 const mockAddMessageToThread = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
@@ -45,6 +47,7 @@ const storeState = {
       },
     },
   } as Record<string, unknown>,
+  catStatuses: {} as Record<string, string>,
   addMessage: mockAddMessage,
   appendToMessage: mockAppendToMessage,
   appendToolEvent: mockAppendToolEvent,
@@ -60,7 +63,9 @@ const storeState = {
   requestStreamCatchUp: mockRequestStreamCatchUp,
   setMessageMetadata: mockSetMessageMetadata,
   setMessageThinking: mockSetMessageThinking,
-  setMessageStreamInvocation: mockSetMessageStreamInvocation,
+  removeActiveInvocation: mockRemoveActiveInvocation,
+  addActiveInvocation: mockAddActiveInvocation,
+  replaceThreadTargetCats: mockReplaceThreadTargetCats,
 
   addMessageToThread: mockAddMessageToThread,
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
@@ -68,6 +73,8 @@ const storeState = {
   setThreadMessageStreaming: mockSetThreadMessageStreaming,
   getThreadState: mockGetThreadState,
   currentThreadId: 'thread-1',
+  targetCats: ['codex'],
+  activeInvocations: {} as Record<string, { catId: string; mode: string; startedAt?: number }>,
 };
 
 let captured: ReturnType<typeof useAgentMessages> | undefined;
@@ -104,9 +111,30 @@ describe('useAgentMessages system_info invocation_created', () => {
     root = createRoot(container);
     captured = undefined;
     storeState.messages = [];
+    storeState.targetCats = ['codex'];
+    storeState.catStatuses = {};
+    storeState.activeInvocations = {};
+    mockRemoveActiveInvocation.mockImplementation((invocationId: string) => {
+      delete storeState.activeInvocations[invocationId];
+    });
+    mockAddActiveInvocation.mockImplementation(
+      (invocationId: string, catId: string, mode: string, startedAt?: number) => {
+        storeState.activeInvocations[invocationId] = { catId, mode, ...(startedAt ? { startedAt } : {}) };
+      },
+    );
+    mockReplaceThreadTargetCats.mockImplementation((_threadId: string, cats: string[]) => {
+      storeState.targetCats = [...cats];
+    });
+    mockSetCatStatus.mockImplementation((catId: string, status: string) => {
+      storeState.catStatuses[catId] = status;
+    });
     mockAddMessage.mockClear();
+    mockSetCatStatus.mockClear();
     mockSetCatInvocation.mockClear();
-    mockSetMessageStreamInvocation.mockClear();
+    mockAddMessageToThread.mockClear();
+    mockRemoveActiveInvocation.mockClear();
+    mockAddActiveInvocation.mockClear();
+    mockReplaceThreadTargetCats.mockClear();
   });
 
   afterEach(() => {
@@ -145,19 +173,109 @@ describe('useAgentMessages system_info invocation_created', () => {
       (call) => call[0]?.type === 'system' && String(call[0]?.content).includes('"invocation_created"'),
     );
     expect(rawJsonBubble).toBeUndefined();
+    // invocation_created is status-only: it never creates or binds a response bubble.
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
   });
 
-  it('binds stream invocation identity onto an existing placeholder bubble when invocation_created arrives late', () => {
-    storeState.messages = [
-      {
-        id: 'msg-live-1',
-        type: 'assistant',
+  it('migrates the active slot and displayed target during sequential handoff recovery', () => {
+    storeState.activeInvocations = {
+      'inv-root': { catId: 'codex', mode: 'execute', startedAt: 123456 },
+    };
+    storeState.targetCats = ['codex'];
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'opus',
+        content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-root' }),
+      });
+    });
+
+    expect(mockRemoveActiveInvocation).toHaveBeenCalledWith('inv-root');
+    expect(mockAddActiveInvocation).toHaveBeenCalledWith('inv-root', 'opus', 'execute', 123456);
+    expect(mockReplaceThreadTargetCats).toHaveBeenCalledWith('thread-1', ['opus']);
+    expect(storeState.activeInvocations['inv-root']).toEqual({
+      catId: 'opus',
+      mode: 'execute',
+      startedAt: 123456,
+    });
+    expect(storeState.targetCats).toEqual(['opus']);
+  });
+
+  it('treats a2a_handoff as a projection without mutating invocation ownership', () => {
+    storeState.activeInvocations = {
+      'inv-root': { catId: 'codex', mode: 'execute', startedAt: 123456 },
+    };
+    storeState.targetCats = ['codex'];
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'a2a_handoff',
         catId: 'codex',
-        content: 'partial chunk',
-        isStreaming: true,
-        timestamp: Date.now(),
-      },
-    ];
+        content: '缅因猫 ⇉ 布偶猫',
+        targetCatId: 'opus',
+        routing: { mode: 'parallel', index: 1, total: 2 },
+        timestamp: 123999,
+      } as never);
+    });
+
+    expect(mockRemoveActiveInvocation).not.toHaveBeenCalled();
+    expect(mockAddActiveInvocation).not.toHaveBeenCalled();
+    expect(mockReplaceThreadTargetCats).not.toHaveBeenCalled();
+    expect(mockSetCatStatus).not.toHaveBeenCalled();
+    expect(storeState.activeInvocations['inv-root']).toEqual({
+      catId: 'codex',
+      mode: 'execute',
+      startedAt: 123456,
+    });
+    expect(storeState.targetCats).toEqual(['codex']);
+  });
+
+  it('parallel routing projection never steals the active slot', () => {
+    storeState.activeInvocations = {
+      'inv-root': { catId: 'codex', mode: 'execute', startedAt: 123456 },
+    };
+    storeState.targetCats = ['codex'];
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'a2a_handoff',
+        catId: 'codex',
+        content: '缅因猫 ⇉ 暹罗猫（并行 2/2）',
+        targetCatId: 'gemini',
+        routing: { mode: 'parallel', index: 2, total: 2 },
+        timestamp: 124000,
+      } as never);
+    });
+
+    expect(mockRemoveActiveInvocation).not.toHaveBeenCalled();
+    expect(mockAddActiveInvocation).not.toHaveBeenCalled();
+    expect(storeState.activeInvocations['inv-root']).toEqual({
+      catId: 'codex',
+      mode: 'execute',
+      startedAt: 123456,
+    });
+    expect(storeState.targetCats).toEqual(['codex']);
+  });
+
+  it('does not rewrite slots for cats that already have an explicit parallel slot', () => {
+    storeState.activeInvocations = {
+      'inv-root': { catId: 'opus', mode: 'execute', startedAt: 123456 },
+      'inv-root-codex': { catId: 'codex', mode: 'execute', startedAt: 123457 },
+    };
+    storeState.targetCats = ['opus', 'codex'];
 
     act(() => {
       root.render(React.createElement(Harness));
@@ -167,10 +285,16 @@ describe('useAgentMessages system_info invocation_created', () => {
       captured?.handleAgentMessage({
         type: 'system_info',
         catId: 'codex',
-        content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-new-2' }),
+        content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-root' }),
       });
     });
 
-    expect(mockSetMessageStreamInvocation).toHaveBeenCalledWith('msg-live-1', 'inv-new-2');
+    expect(mockRemoveActiveInvocation).not.toHaveBeenCalled();
+    expect(mockAddActiveInvocation).not.toHaveBeenCalled();
+    expect(mockReplaceThreadTargetCats).not.toHaveBeenCalled();
+    expect(storeState.activeInvocations).toEqual({
+      'inv-root': { catId: 'opus', mode: 'execute', startedAt: 123456 },
+      'inv-root-codex': { catId: 'codex', mode: 'execute', startedAt: 123457 },
+    });
   });
 });

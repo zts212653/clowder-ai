@@ -1,0 +1,38 @@
+import { defineShellCopy } from '../shell/shell-copy';
+
+export const messageActionsCopy = defineShellCopy({
+  zh: {
+    actions: '消息操作',
+    select: '多选：转发或导出',
+    reply: '引用回复',
+    trajectory: '查看这轮轨迹',
+    read: '朗读',
+    stop: '停止朗读',
+    edit: '编辑（从这里分支）',
+    remove: '删除',
+    more: '更多消息操作',
+    copyId: '复制消息 ID',
+    branch: '从这里分支',
+    permanent: '永久删除',
+    open: '打开消息操作',
+    close: '关闭消息操作',
+    closeMore: '关闭更多消息操作',
+  },
+  en: {
+    actions: 'Message actions',
+    select: 'Select to forward or export',
+    reply: 'Reply',
+    trajectory: 'View trajectory',
+    read: 'Read aloud',
+    stop: 'Stop reading',
+    edit: 'Edit (branch from here)',
+    remove: 'Delete',
+    more: 'More message actions',
+    copyId: 'Copy message ID',
+    branch: 'Branch from here',
+    permanent: 'Delete permanently',
+    open: 'Open message actions',
+    close: 'Close message actions',
+    closeMore: 'Close more message actions',
+  },
+});

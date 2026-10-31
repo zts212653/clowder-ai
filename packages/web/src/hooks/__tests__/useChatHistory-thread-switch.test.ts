@@ -1,23 +1,44 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useChatStore } from '@/stores/chatStore';
+import { ThreadChatHistoryAdmissionProvider } from '@/components/thread-chat/ThreadChatRuntimeProvider';
+import { DEFAULT_THREAD_STATE, useChatStore } from '@/stores/chatStore';
+import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
-import { useChatHistory } from '../useChatHistory';
+import { loadThreadMessages } from '@/utils/offline-store';
+import { __resetTaskCacheForTest, useChatHistory } from '../useChatHistory';
+import { useChatSocketCallbacks } from '../useChatSocketCallbacks';
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(),
 }));
 
-function HookHost({ threadId }: { threadId: string }) {
+// F164: Mock offline-store so IDB calls resolve immediately (this test is about
+// thread-switch ordering, not IndexedDB behavior).
+vi.mock('@/utils/offline-store', () => ({
+  loadThreadMessages: vi.fn().mockResolvedValue(null),
+  saveThreadMessages: vi.fn().mockResolvedValue(undefined),
+  loadThreadActiveState: vi.fn().mockResolvedValue(null),
+  saveThreadActiveState: vi.fn().mockResolvedValue(undefined),
+  loadThreads: vi.fn().mockResolvedValue(null),
+  saveThreads: vi.fn().mockResolvedValue(undefined),
+  clearAll: vi.fn().mockResolvedValue(undefined),
+}));
+
+function HookProbe({ threadId }: { threadId: string }) {
   useChatHistory(threadId);
   return null;
+}
+
+function HookHost({ threadId }: { threadId: string }) {
+  return React.createElement(ThreadChatHistoryAdmissionProvider, null, React.createElement(HookProbe, { threadId }));
 }
 
 describe('useChatHistory thread switch ordering', () => {
   let container: HTMLDivElement;
   let root: Root;
   const apiFetchMock = vi.mocked(apiFetch);
+  const loadThreadMessagesMock = vi.mocked(loadThreadMessages);
 
   beforeAll(() => {
     (globalThis as { React?: typeof React }).React = React;
@@ -44,7 +65,6 @@ describe('useChatHistory thread switch ordering', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
 
       threadStates: {},
       currentThreadId: 'thread-a',
@@ -54,10 +74,17 @@ describe('useChatHistory thread switch ordering', () => {
       currentProjectPath: 'default',
       threads: [],
       isLoadingThreads: false,
+      streamCatchUpVersionByThread: {},
+      lastConsumedCatchUpVersionByThread: {},
+      pendingCatchUpTargetSeqByThread: {},
     });
+    useTaskStore.getState().clearTasks();
+    __resetTaskCacheForTest();
 
     // Keep requests pending so this test only observes immediate switch side-effects.
     apiFetchMock.mockImplementation(() => new Promise<Response>(() => {}));
+    loadThreadMessagesMock.mockReset();
+    loadThreadMessagesMock.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -66,6 +93,37 @@ describe('useChatHistory thread switch ordering', () => {
     });
     container.remove();
     apiFetchMock.mockReset();
+  });
+
+  it('task updates do not rerender history and socket owners that only consume task actions', async () => {
+    let renders = 0;
+    function ActionConsumer() {
+      useChatHistory('thread-a');
+      useChatSocketCallbacks({ threadId: 'thread-a', handleAgentMessage: () => true });
+      renders += 1;
+      return null;
+    }
+    await act(async () => {
+      root.render(React.createElement(ThreadChatHistoryAdmissionProvider, null, React.createElement(ActionConsumer)));
+    });
+    const beforeUpdate = renders;
+    await act(async () => {
+      useTaskStore.getState().addTask({
+        id: 'background-task',
+        threadId: 'thread-a',
+        kind: 'work',
+        subjectKey: null,
+        title: 'background progress',
+        ownerCatId: null,
+        status: 'doing',
+        why: '',
+        createdBy: 'user',
+        createdAt: 1,
+        updatedAt: 1,
+      });
+    });
+    expect(useTaskStore.getState().tasks[0]?.id).toBe('background-task');
+    expect(renders).toBe(beforeUpdate);
   });
 
   it('does not clear previous thread messages before setCurrentThread runs', () => {
@@ -78,14 +136,164 @@ describe('useChatHistory thread switch ordering', () => {
     expect(state.messages.map((m) => m.id)).toEqual(['a1']);
   });
 
-  it('clears messages when thread is already synced with no cache', () => {
-    act(() => {
+  it('clears messages when thread is already synced with no cache', async () => {
+    // F164: bootstrap is now async (IDB lookup before clear), so we need
+    // await act() to flush the microtask before asserting.
+    await act(async () => {
       root.render(React.createElement(HookHost, { threadId: 'thread-a' }));
     });
 
     const state = useChatStore.getState();
     expect(state.currentThreadId).toBe('thread-a');
     expect(state.messages).toHaveLength(0);
+  });
+
+  it('discards a delayed IDB snapshot after route and store switch to another thread', async () => {
+    let resolveThreadAIdb!: (value: {
+      messages: Array<{ id: string; type: 'user'; content: string; timestamp: number }>;
+      hasMore: boolean;
+      updatedAt: number;
+    }) => void;
+    loadThreadMessagesMock.mockImplementation((requestedThreadId) => {
+      if (requestedThreadId !== 'thread-a') return Promise.resolve(null);
+      return new Promise((resolve) => {
+        resolveThreadAIdb = resolve;
+      });
+    });
+
+    useChatStore
+      .getState()
+      .replaceThreadMessages(
+        'thread-b',
+        [{ id: 'b1', type: 'user', content: 'thread-b message', timestamp: Date.now() }],
+        false,
+      );
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-a' }));
+      await Promise.resolve();
+    });
+
+    act(() => {
+      useChatStore.getState().setCurrentThread('thread-b');
+      root.render(React.createElement(HookHost, { threadId: 'thread-b' }));
+    });
+
+    await act(async () => {
+      resolveThreadAIdb({
+        messages: [{ id: 'a-idb', type: 'user', content: 'late thread-a cache', timestamp: Date.now() }],
+        hasMore: true,
+        updatedAt: Date.now(),
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const state = useChatStore.getState();
+    expect(state.currentThreadId).toBe('thread-b');
+    expect(state.messages.map((message) => message.id)).toEqual(['b1']);
+    expect(state.hasMore).toBe(false);
+    expect(state.isOfflineSnapshot).toBe(false);
+  });
+
+  it('hydrates route thread from its own projection, never the flat selection of another thread', async () => {
+    useChatStore.setState({
+      currentThreadId: 'thread-b',
+      messages: [{ id: 'b-local', type: 'user', content: 'foreign local message', timestamp: Date.now() }],
+      hasMore: false,
+      isOfflineSnapshot: false,
+      threadStates: {},
+    });
+    apiFetchMock.mockImplementation((url: string) => {
+      if (url.includes('/api/messages')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              messages: [
+                {
+                  id: 'a-server',
+                  type: 'user',
+                  content: 'thread-a server message',
+                  timestamp: Date.now(),
+                },
+              ],
+              hasMore: false,
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      if (url.includes('/api/tasks')) {
+        return Promise.resolve(new Response(JSON.stringify({ tasks: [] }), { status: 200 }));
+      }
+      if (url.includes('/task-progress')) {
+        return Promise.resolve(new Response(JSON.stringify({ taskProgress: {} }), { status: 200 }));
+      }
+      if (url.includes('/queue')) {
+        return Promise.resolve(new Response(JSON.stringify({ queue: [], paused: false }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-a' }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const state = useChatStore.getState();
+    expect(state.currentThreadId).toBe('thread-b');
+    expect(state.messages.map((message) => message.id)).toEqual(['b-local']);
+    expect(state.threadStates['thread-a']?.messages.map((message) => message.id)).toEqual(['a-server']);
+  });
+
+  it('does not treat delayed cached-history refresh as activity before ChatContainer selects the route thread', async () => {
+    const originalActivity = Date.now() - 14 * 24 * 60 * 60 * 1000;
+    let resolveMessages!: (response: Response) => void;
+    const messagesPromise = new Promise<Response>((resolve) => {
+      resolveMessages = resolve;
+    });
+    apiFetchMock.mockImplementation((url: string) => {
+      if (url.includes('/api/messages')) return messagesPromise;
+      return new Promise<Response>(() => {});
+    });
+    useChatStore.setState({
+      currentThreadId: 'thread-a',
+      threadStates: {
+        'thread-b': {
+          ...DEFAULT_THREAD_STATE,
+          messages: [{ id: 'b-cached', type: 'user', content: 'cached B message', timestamp: originalActivity }],
+          unreadCount: 1,
+          lastActivity: originalActivity,
+        },
+      },
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-b' }));
+      await Promise.resolve();
+    });
+
+    expect(useChatStore.getState().threadStates['thread-b']?.isLoadingHistory).toBe(true);
+    expect(useChatStore.getState().threadStates['thread-b']?.lastActivity).toBe(originalActivity);
+
+    // ChatContainer's synchronizing effect runs after useChatHistory's effect.
+    act(() => {
+      useChatStore.getState().setCurrentThread('thread-b');
+    });
+
+    resolveMessages(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const state = useChatStore.getState();
+    expect(state.currentThreadId).toBe('thread-b');
+    expect(state.threadStates['thread-b']?.isLoadingHistory).toBe(false);
+    expect(state.threadStates['thread-b']?.lastActivity).toBe(originalActivity);
   });
 
   it('F069-R4: thread with cached messages AND unreadCount > 0 triggers fetchHistory', () => {
@@ -110,18 +318,22 @@ describe('useChatHistory thread switch ordering', () => {
           isLoadingHistory: false,
           hasMore: true,
           hasActiveInvocation: false,
+          activeInvocations: {},
           intentMode: null,
           targetCats: [],
           catStatuses: {},
+          catStatusDetails: {},
           catInvocations: {},
-          currentGame: null,
 
           unreadCount: 1,
           hasUserMention: false,
           lastActivity: Date.now(),
           queue: [],
-          queuePaused: false,
           queueFull: false,
+          workspaceWorktreeId: null,
+          workspaceOpenTabs: [],
+          workspaceOpenFilePath: null,
+          workspaceOpenFileLine: null,
         },
       },
     });
@@ -155,18 +367,22 @@ describe('useChatHistory thread switch ordering', () => {
           isLoadingHistory: false,
           hasMore: true,
           hasActiveInvocation: false,
+          activeInvocations: {},
           intentMode: null,
           targetCats: [],
           catStatuses: {},
+          catStatusDetails: {},
           catInvocations: {},
-          currentGame: null,
 
           unreadCount: 0,
           hasUserMention: false,
           lastActivity: Date.now(),
           queue: [],
-          queuePaused: false,
           queueFull: false,
+          workspaceWorktreeId: null,
+          workspaceOpenTabs: [],
+          workspaceOpenFilePath: null,
+          workspaceOpenFileLine: null,
         },
       },
     });
@@ -180,6 +396,60 @@ describe('useChatHistory thread switch ordering', () => {
     const calls = apiFetchMock.mock.calls;
     const historyCall = calls.find(([url]) => typeof url === 'string' && url.includes('/api/messages'));
     expect(historyCall).toBeUndefined();
+  });
+
+  it('defers a background thread catch-up until that thread history hook is mounted', async () => {
+    vi.useFakeTimers();
+    apiFetchMock.mockImplementation((url: string) => {
+      if (url.includes('/api/messages')) {
+        return Promise.resolve(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
+      }
+      if (url.includes('/api/tasks')) {
+        return Promise.resolve(new Response(JSON.stringify({ tasks: [] }), { status: 200 }));
+      }
+      if (url.includes('/task-progress')) {
+        return Promise.resolve(new Response(JSON.stringify({ taskProgress: {} }), { status: 200 }));
+      }
+      if (url.includes('/queue')) {
+        return Promise.resolve(new Response(JSON.stringify({ queue: [], paused: false }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-a' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    apiFetchMock.mockClear();
+
+    act(() => {
+      useChatStore.getState().requestStreamCatchUp('thread-b');
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(700);
+    });
+
+    const backgroundHistoryCalls = apiFetchMock.mock.calls.filter(
+      ([url]) => typeof url === 'string' && url.includes('/api/messages') && url.includes('threadId=thread-b'),
+    );
+    expect(backgroundHistoryCalls).toHaveLength(0);
+    expect(useChatStore.getState().streamCatchUpVersionByThread['thread-b']).toBe(1);
+    expect(useChatStore.getState().lastConsumedCatchUpVersionByThread['thread-b'] ?? 0).toBe(0);
+
+    act(() => {
+      useChatStore.getState().setCurrentThread('thread-b');
+      root.render(React.createElement(HookHost, { threadId: 'thread-b' }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(700);
+      await Promise.resolve();
+    });
+
+    expect(useChatStore.getState().lastConsumedCatchUpVersionByThread['thread-b']).toBe(1);
+    vi.useRealTimers();
   });
 
   it('forces replace hydration when cached thread already contains duplicate same-invocation bubbles', () => {
@@ -212,18 +482,22 @@ describe('useChatHistory thread switch ordering', () => {
           isLoadingHistory: false,
           hasMore: true,
           hasActiveInvocation: false,
+          activeInvocations: {},
           intentMode: null,
           targetCats: [],
           catStatuses: {},
+          catStatusDetails: {},
           catInvocations: {},
-          currentGame: null,
 
           unreadCount: 0,
           hasUserMention: false,
           lastActivity: now,
           queue: [],
-          queuePaused: false,
           queueFull: false,
+          workspaceWorktreeId: null,
+          workspaceOpenTabs: [],
+          workspaceOpenFilePath: null,
+          workspaceOpenFileLine: null,
         },
       },
     });
@@ -248,18 +522,22 @@ describe('useChatHistory thread switch ordering', () => {
           isLoadingHistory: false,
           hasMore: true,
           hasActiveInvocation: true,
+          activeInvocations: {},
           intentMode: 'execute',
           targetCats: ['opus'],
           catStatuses: { opus: 'streaming' },
+          catStatusDetails: {},
           catInvocations: {},
-          currentGame: null,
 
           unreadCount: 0,
           hasUserMention: false,
           lastActivity: Date.now(),
           queue: [],
-          queuePaused: false,
           queueFull: false,
+          workspaceWorktreeId: null,
+          workspaceOpenTabs: [],
+          workspaceOpenFilePath: null,
+          workspaceOpenFileLine: null,
         },
       },
     });
@@ -289,7 +567,10 @@ describe('useChatHistory thread switch ordering', () => {
       }
       if (typeof url === 'string' && url.includes('/queue')) {
         return Promise.resolve(
-          new Response(JSON.stringify({ queue: [], paused: false, activeInvocations: ['opus'] }), { status: 200 }),
+          new Response(
+            JSON.stringify({ queue: [], paused: false, activeInvocations: [{ catId: 'opus', startedAt: Date.now() }] }),
+            { status: 200 },
+          ),
         );
       }
       if (typeof url === 'string' && url.includes('/task-progress')) {
@@ -323,14 +604,17 @@ describe('useChatHistory thread switch ordering', () => {
           intentMode: null,
           targetCats: [],
           catStatuses: {},
+          catStatusDetails: {},
           catInvocations: {},
-          currentGame: null,
           unreadCount: 0,
           hasUserMention: false,
           lastActivity: now,
           queue: [],
-          queuePaused: false,
           queueFull: false,
+          workspaceWorktreeId: null,
+          workspaceOpenTabs: [],
+          workspaceOpenFilePath: null,
+          workspaceOpenFileLine: null,
         },
       },
     });
@@ -358,11 +642,135 @@ describe('useChatHistory thread switch ordering', () => {
     expect(stateAfterThreadSwitch.targetCats).toEqual(['opus']);
     expect(stateAfterThreadSwitch.catStatuses).toEqual({ opus: 'streaming' });
 
-    resolveMessages?.(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
+    resolveMessages!(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
     await act(async () => {
       await Promise.resolve();
     });
 
     vi.useRealTimers();
+  });
+
+  it('restores cached tasks immediately when revisiting a thread', async () => {
+    let resolveThreadARevisit!: (value: Response) => void;
+    const threadARevisit = new Promise<Response>((resolve) => {
+      resolveThreadARevisit = resolve;
+    });
+    const tasksByThread = new Map<string, object[]>([
+      [
+        'thread-a',
+        [
+          {
+            id: 'task-a',
+            kind: 'work',
+            threadId: 'thread-a',
+            subjectKey: null,
+            title: 'Task A',
+            ownerCatId: null,
+            status: 'todo',
+            why: 'seed',
+            createdBy: 'user',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      ],
+      [
+        'thread-b',
+        [
+          {
+            id: 'task-b',
+            kind: 'work',
+            threadId: 'thread-b',
+            subjectKey: null,
+            title: 'Task B',
+            ownerCatId: null,
+            status: 'doing',
+            why: 'seed',
+            createdBy: 'user',
+            createdAt: 2,
+            updatedAt: 2,
+          },
+        ],
+      ],
+    ]);
+    const taskRequestCounts = new Map<string, number>();
+
+    apiFetchMock.mockImplementation((url: string) => {
+      if (url.includes('/api/messages')) {
+        return Promise.resolve(new Response(JSON.stringify({ messages: [], hasMore: false }), { status: 200 }));
+      }
+      if (url.includes('/api/tasks')) {
+        const parsed = new URL(url, 'http://localhost');
+        const nextThreadId = parsed.searchParams.get('threadId');
+        if (!nextThreadId) {
+          throw new Error(`missing threadId in mock url: ${url}`);
+        }
+        const nextCount = (taskRequestCounts.get(nextThreadId) ?? 0) + 1;
+        taskRequestCounts.set(nextThreadId, nextCount);
+        if (nextThreadId === 'thread-a' && nextCount === 2) {
+          return threadARevisit;
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ tasks: tasksByThread.get(nextThreadId) ?? [] }), { status: 200 }),
+        );
+      }
+      if (url.includes('/task-progress')) {
+        return Promise.resolve(new Response(JSON.stringify({ taskProgress: {} }), { status: 200 }));
+      }
+      if (url.includes('/queue')) {
+        return Promise.resolve(new Response(JSON.stringify({ queue: [], paused: false }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-a' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(useTaskStore.getState().tasks.map((task) => task.id)).toEqual(['task-a']);
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-b' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(useTaskStore.getState().tasks.map((task) => task.id)).toEqual(['task-b']);
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-a' }));
+      await Promise.resolve();
+    });
+
+    expect(useTaskStore.getState().tasks.map((task) => task.id)).toEqual(['task-a']);
+
+    resolveThreadARevisit(
+      new Response(
+        JSON.stringify({
+          tasks: [
+            {
+              id: 'task-a2',
+              kind: 'work',
+              threadId: 'thread-a',
+              subjectKey: null,
+              title: 'Task A2',
+              ownerCatId: null,
+              status: 'done',
+              why: 'updated',
+              createdBy: 'user',
+              createdAt: 3,
+              updatedAt: 3,
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(useTaskStore.getState().tasks.map((task) => task.id)).toEqual(['task-a2']);
   });
 });

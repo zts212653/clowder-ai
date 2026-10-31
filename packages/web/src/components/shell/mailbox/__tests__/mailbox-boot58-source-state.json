@@ -1,0 +1,51 @@
+{
+  "status": "partial",
+  "sources": {
+    "approvals": {
+      "status": "available",
+      "coverage": "all_registered_F246_producers",
+      "exhaustiveness": "complete",
+      "startedAt": 1793155015580,
+      "observedAt": 1793155015813
+    },
+    "needsMe": {
+      "status": "available",
+      "coverage": "current_linked_F310_five_producers",
+      "exhaustiveness": "partial",
+      "startedAt": 1793155015580,
+      "observedAt": 1793155015615
+    },
+    "structuredChoices": {
+      "coverage": "pending_f306_structured_choices",
+      "startedAt": 1793155015580,
+      "observedAt": 1793155015594,
+      "status": "available",
+      "exhaustiveness": "complete"
+    },
+    "collectiveAccountabilityRequests": {
+      "coverage": "pending_f290_collective_accountability_requests",
+      "startedAt": 1793155015581,
+      "observedAt": 1793155015604,
+      "status": "unavailable",
+      "exhaustiveness": "unknown"
+    },
+    "userMentions": {
+      "status": "available",
+      "coverage": "explicit_user_mentions",
+      "exhaustiveness": "complete",
+      "startedAt": 1793155015580,
+      "observedAt": 1793155015813
+    },
+    "personalPreferences": {
+      "coverage": "owner_personal_ignored_items",
+      "startedAt": 1793155015580,
+      "observedAt": 1793155015581,
+      "status": "available",
+      "exhaustiveness": "complete"
+    }
+  },
+  "consistency": {
+    "state": "uncertain",
+    "reasons": ["collective_accountability_plugin_unavailable"]
+  }
+}

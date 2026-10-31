@@ -36,6 +36,45 @@ describe('GENSHIN_VOICE_DIR backward compat (P1)', () => {
     }
   });
 
+  it('CHARACTER_VOICE_DIR still wins when runtime config loading falls back', () => {
+    const savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = '/tmp/nonexistent-cat-template-for-voice-test.json';
+    process.env.CHARACTER_VOICE_DIR = '/custom/character-models';
+    clearVoiceCache();
+    try {
+      const voice = getCatVoice('opus');
+      if (voice.refAudio) {
+        assert.ok(
+          voice.refAudio.startsWith('/custom/character-models'),
+          `fallback refAudio should use CHARACTER_VOICE_DIR, got: ${voice.refAudio}`,
+        );
+      }
+    } finally {
+      if (savedTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = savedTemplatePath;
+      clearVoiceCache();
+    }
+  });
+
+  it('GENSHIN_VOICE_DIR remains the exact fallback genshin directory when runtime config loading falls back', () => {
+    const savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = '/tmp/nonexistent-cat-template-for-voice-test.json';
+    process.env.GENSHIN_VOICE_DIR = '/custom/not-literally-genshin';
+    clearVoiceCache();
+    try {
+      const voice = getCatVoice('ragdoll');
+      assert.ok(voice.refAudio, 'fallback breed default should include refAudio');
+      assert.ok(
+        voice.refAudio.startsWith('/custom/not-literally-genshin/'),
+        `fallback refAudio should use exact GENSHIN_VOICE_DIR, got: ${voice.refAudio}`,
+      );
+    } finally {
+      if (savedTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = savedTemplatePath;
+      clearVoiceCache();
+    }
+  });
+
   it('GENSHIN_VOICE_DIR infers character base when CHARACTER_VOICE_DIR unset', () => {
     process.env.GENSHIN_VOICE_DIR = '/my/custom/path/genshin';
     clearVoiceCache();

@@ -1,0 +1,38 @@
+---
+domainId: eval:memory
+displayName: Memory Recall & Library Health Eval
+descriptionForHuman: 记忆系统好不好使——recall 找得到吗、library 健康吗
+metricGlossaryRef: eval-memory.metrics.yaml
+systemThreadId: thread_eval_memory
+evalCat:
+  catId: opus-47
+  handle: "@opus47"
+  model: claude-opus-4-7
+frequency: daily
+triggerPolicy:
+  mode: time_only
+  maxDetectionDelayHours: 24
+sourceAdapter: f200-f188-memory-eval
+sourceRefsKind: memory-recall-snapshot
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds:
+  - memory-recall-digest
+handoffTargetResolver:
+  featureId: F200
+  ownerCatId: opus-47
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 48
+  reevalWithinHours: 168
+# 2026-10-01 dormant: see feature-discussions/2026-10-01-eval-into-f311/README.md
+dormancy:
+  reason: "Silent since 2026-08-09; recall quality did drive a real fix (#2962), so stop the empty weekly runs while the owner investigates why it stopped."
+  revivalPath: "After the owner root-cause task, restart as a Program measure (candidates F188, F276) or retire."
+  decisionRef: "private-thread-id#private-source-id"
+enabled: false

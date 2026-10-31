@@ -1,0 +1,90 @@
+total_recall_events:
+  label: 记忆召回次数
+  means: 评估窗口里发生了多少次记忆搜索；它告诉我们样本量够不够，不能单独代表召回质量。
+  goodDirection: neutral
+  category: context
+  component: recall
+consumed_mrr:
+  label: 首个有用结果排名质量
+  means: 用户真正采用的第一条结果排得有多靠前；越接近 1，说明有用记忆越容易第一眼找到。
+  goodDirection: higher
+  category: derived
+  component: recall
+consumed_at_3:
+  label: 有用结果前三命中率
+  means: 最终被采用的记忆落在前三条结果里的比例；越高，说明不用翻很久就能找到。
+  goodDirection: higher
+  category: derived
+  component: recall
+search_abandon_rate:
+  label: 搜完没采用的比例
+  means: 搜索后没有记录到后续采用行为的比例；越低通常越好，但用户只看预览就得到答案时也可能被记成未采用。
+  goodDirection: lower
+  category: friction
+  component: recall
+shadow_consumed_mrr:
+  label: 候选排序排名质量
+  means: 新候选排序在影子样本上的首个有用结果排名质量；要和同一批样本的线上排序对比，不能单看绝对值。
+  goodDirection: higher
+  category: derived
+  component: shadow-ranking
+live_on_shadow_subset_mrr:
+  label: 线上排序对照质量
+  means: 当前线上排序在同一批影子样本上的排名质量，作为候选排序的公平对照基线。
+  goodDirection: higher
+  category: context
+  component: shadow-ranking
+shadow_live_ratio:
+  label: 候选相对线上提升
+  means: 候选排序质量除以线上对照质量；大于 1 表示候选更好，接近 1 表示没有明显收益。
+  goodDirection: higher
+  category: derived
+  component: shadow-ranking
+first_consumed_rank_median:
+  label: 首个有用结果中位排名
+  means: 用户采用的第一条记忆通常排在第几位；越低越好，1 表示通常第一条就有用。
+  goodDirection: lower
+  category: friction
+  component: recall
+search_zero_hit_count:
+  label: 零结果搜索数
+  means: 抽样搜索里完全找不到任何结果的次数；应尽量为 0，出现时要检查索引、查询或数据覆盖。
+  goodDirection: lower
+  category: friction
+  component: library-health
+search_identifier_probe_zero_hit_count:
+  label: 标识符探针零结果数
+  means: 把 thread ID、session UUID 或 commit SHA 当普通文本去搜索且返回零结果的次数；这是检索入口用错，不算内容召回失败。
+  goodDirection: lower
+  category: friction
+  component: library-health
+search_low_hit_count:
+  label: 结果过少搜索数
+  means: 抽样搜索里只返回很少结果的次数；持续升高说明索引覆盖或查询召回面可能变窄。
+  goodDirection: lower
+  category: friction
+  component: library-health
+orphan_edge_count:
+  label: 孤儿关系数
+  means: 记忆图中指向已不存在或无法解析目标的关系数量；越少越好。
+  goodDirection: lower
+  category: friction
+  component: library-health
+stale_anchor_count:
+  label: 过期锚点数
+  means: 已失效或需要更新的记忆锚点数量；应尽量为 0，避免召回到旧结论。
+  goodDirection: lower
+  category: friction
+  component: library-health
+verification_debt_count:
+  label: 待核验记忆数
+  means: 仍需要人工或自动复核的记忆条目数量；越少越好，积压会降低结果可信度。
+  goodDirection: lower
+  category: friction
+  component: library-health
+replay_drift_avg:
+  label: 回放结果一致度
+  means: 同一批记忆查询重放后的平均相似度；越接近 1，说明结果越稳定，下降表示排序或索引发生漂移。
+  goodDirection: higher
+  category: derived
+  component: library-health

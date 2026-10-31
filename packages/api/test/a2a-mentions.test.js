@@ -3,8 +3,14 @@
  */
 
 import assert from 'node:assert/strict';
+import { dirname, resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// Explicit path to the repo template — immune to CAT_TEMPLATE_PATH drift across tests.
+const REPO_TEMPLATE_PATH = resolve(__dirname, '..', '..', '..', 'cat-template.json');
 
 describe('parseA2AMentions', () => {
   it('detects line-start @mention (Chinese name)', async () => {
@@ -74,31 +80,100 @@ describe('parseA2AMentions', () => {
     assert.deepEqual(result, ['opus', 'codex']);
   });
 
+  it('routes multiple @mentions on the same line when the line is a pure handoff target list', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      // Use explicit path — immune to CAT_TEMPLATE_PATH drift from other tests.
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(REPO_TEMPLATE_PATH));
+      for (const [id, config] of Object.entries(runtimeConfigs)) {
+        catRegistry.register(id, config);
+      }
+
+      // @opus and @codex are both roster members; test that multiple @mentions on
+      // a pure handoff line are all routed (no keyword gate required).
+      const text = '到我这里结束了吗？是的 — 我的编译修复已完成，等待 commit + push 和 CI 结果。\n@opus @codex';
+      const result = parseA2AMentions(text, 'kimi');
+      assert.deepEqual(result, ['opus', 'codex']);
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
+  it('does not treat later inline mentions as actionable once prose starts on the line', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      // Use explicit path — immune to CAT_TEMPLATE_PATH drift from other tests.
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(REPO_TEMPLATE_PATH));
+      for (const [id, config] of Object.entries(runtimeConfigs)) {
+        catRegistry.register(id, config);
+      }
+
+      // Inline @codex mention after prose — should NOT be routed (keyword-gated inline rule).
+      const text = '@opus 请继续推进，如果需要再找 @codex';
+      const result = parseA2AMentions(text, 'kimi');
+      assert.deepEqual(result, ['opus']);
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
   // === Content-before-mention: 上文写内容，最后一行 @ (缅因猫习惯) ===
 
   it('routes when content comes before @mention (content-before-mention pattern)', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
-    const text = '这是交接文档，DARE 源码目录执行 + 业务项目 workspace\n是否接受完全禁用 --api-key argv\n@opus';
+    const text = '这是交接文档，源码目录执行 + 业务项目 workspace\n是否接受完全禁用 --api-key argv\n@opus';
     const result = parseA2AMentions(text, 'codex');
     assert.deepEqual(result, ['opus']);
   });
 
-  it('analyzeA2AMentions returns empty suppressed (no suppression system)', async () => {
-    const { analyzeA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
-    const result = analyzeA2AMentions('@布偶猫', 'codex');
-    assert.deepEqual(result.mentions, ['opus']);
-    assert.deepEqual(result.suppressed, []);
+  it('routes line-start @mention after markdown numbered-list prefix', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '1. @codex 帮忙看下这个实现';
+    const result = parseA2AMentions(text, 'kimi');
+    assert.deepEqual(result, ['codex']);
   });
 
-  // === Backward compat: mode option is accepted but ignored ===
-
-  it('mode option is accepted but does not affect routing (backward compat)', async () => {
+  it('routes line-start @mention after markdown bullet prefix', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
-    const text = '@布偶猫\n\n这是交接文档';
-    const strict = parseA2AMentions(text, 'codex', { mode: 'strict' });
-    const relaxed = parseA2AMentions(text, 'codex', { mode: 'relaxed' });
-    assert.deepEqual(strict, ['opus']);
-    assert.deepEqual(relaxed, ['opus']);
+    const text = '- @codex please review this patch';
+    const result = parseA2AMentions(text, 'opus');
+    assert.deepEqual(result, ['codex']);
+  });
+
+  it('routes line-start @mention after markdown quote prefix', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '> @gemini 看下这个视觉方案';
+    const result = parseA2AMentions(text, 'codex');
+    assert.deepEqual(result, ['gemini']);
+  });
+
+  it('matches markdown-style .md suffix handles emitted by Kimi', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '@KIMI.md 这个给你继续';
+    const result = parseA2AMentions(text, 'opus');
+    assert.deepEqual(result, ['kimi']);
+  });
+
+  it('analyzeA2AMentions omits suppressed field (suppression system removed)', async () => {
+    const { analyzeA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const result = analyzeA2AMentions('', 'codex');
+    assert.deepEqual(result.mentions, []);
+    assert.equal(result.suppressed, undefined);
+    assert.ok(Array.isArray(result.routing_warnings));
   });
 
   it('does NOT trigger for non-line-start @mention', async () => {
@@ -154,7 +229,8 @@ describe('parseA2AMentions', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      // Use explicit path — immune to CAT_TEMPLATE_PATH drift from other tests.
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(REPO_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
@@ -176,7 +252,8 @@ describe('parseA2AMentions', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      // Use explicit path — immune to CAT_TEMPLATE_PATH drift from other tests.
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(REPO_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
@@ -198,7 +275,8 @@ describe('parseA2AMentions', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      // Use explicit path — immune to CAT_TEMPLATE_PATH drift from other tests.
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(REPO_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
@@ -220,7 +298,8 @@ describe('parseA2AMentions', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig());
+      // Use explicit path — immune to CAT_TEMPLATE_PATH drift from other tests.
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(REPO_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }
@@ -254,6 +333,266 @@ describe('F052: cross-thread self-reference exemption', () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
     const result = parseA2AMentions('@gemini 请确认这个安排', undefined);
     assert.ok(result.includes('gemini'), '@gemini should work with undefined currentCatId');
+  });
+});
+
+describe('#417: detectInlineActionMentions', () => {
+  it('detects inline @mention with action word (Ready for @codex review)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '217 tests pass. Ready for @codex review on lifecycle completeness.';
+    const result = detectInlineActionMentions(text, 'opus', []);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].catId, 'codex');
+  });
+
+  it('detects Chinese action word with inline @mention', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '这个方案 @codex 请帮忙看一下';
+    const result = detectInlineActionMentions(text, 'opus', []);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].catId, 'codex');
+  });
+
+  it('ignores inline @mention WITHOUT action word (pure narrative)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '之前 @codex 提出的方案不错';
+    const result = detectInlineActionMentions(text, 'opus', []);
+    assert.deepEqual(result, []);
+  });
+
+  it('skips cats already routed via line-start mention', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = 'Ready for @codex review';
+    const result = detectInlineActionMentions(text, 'opus', ['codex']);
+    assert.deepEqual(result, []);
+  });
+
+  it('ignores line-start @mention (those are handled by parseA2AMentions)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '@codex 请 review';
+    const result = detectInlineActionMentions(text, 'opus', []);
+    assert.deepEqual(result, []);
+  });
+
+  it('ignores @mention inside code blocks', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '看看代码：\n```\nReady for @codex review\n```';
+    const result = detectInlineActionMentions(text, 'opus', []);
+    assert.deepEqual(result, []);
+  });
+
+  it('ignores @mention inside blockquotes', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '> Ready for @codex review';
+    const result = detectInlineActionMentions(text, 'opus', []);
+    assert.deepEqual(result, []);
+  });
+
+  it('filters self-mention', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = 'Ready for @opus review';
+    const result = detectInlineActionMentions(text, 'opus', []);
+    assert.deepEqual(result, []);
+  });
+
+  it('returns empty for empty text', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    assert.deepEqual(detectInlineActionMentions('', 'opus', []), []);
+  });
+
+  // --- P1 regression: gpt52 review repro cases (proximity-based matching) ---
+
+  it('P1-repro: "请按 @codex 之前的建议" is narrative, not handoff', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '请按 @codex 之前的建议继续处理这个问题。';
+    const result = detectInlineActionMentions(text, 'opus', []);
+    assert.deepEqual(result, [], 'should not trigger: "请按" is not a handoff directive to @codex');
+  });
+
+  it('P1-repro: multi-mention line targets the right cat', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '之前 @codex 讨论过，Ready for @gemini review on this patch.';
+    const result = detectInlineActionMentions(text, 'opus', []);
+    assert.equal(result.length, 1, 'should detect exactly one inline action mention');
+    assert.equal(result[0].catId, 'gemini', 'should target gemini (Ready for), not codex (narrative)');
+  });
+
+  it('proximity: "帮 @codex review" triggers (adjacent action)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '这个问题帮 @codex review 一下';
+    const result = detectInlineActionMentions(text, 'opus', []);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].catId, 'codex');
+  });
+
+  it('proximity: distant action word does not trigger', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '请参考 @codex 提出的方案并继续处理';
+    const result = detectInlineActionMentions(text, 'opus', []);
+    assert.deepEqual(result, [], 'action words "请" and "处理" are not adjacent to @codex');
+  });
+
+  // --- R2 P1 regression: completion suffixes turn commands into narrative ---
+
+  it('R2-P1: "@codex 处理过" is narrative (completion suffix 过)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    assert.deepEqual(detectInlineActionMentions('之前 @codex 处理过这个问题', 'opus', []), []);
+  });
+
+  it('R2-P1: "@codex 确认了" is narrative (completion suffix 了)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    assert.deepEqual(detectInlineActionMentions('之前 @codex 确认了这个方案', 'opus', []), []);
+  });
+
+  it('R2-P1: "@codex 来看过" is narrative (completion suffix 过)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    assert.deepEqual(detectInlineActionMentions('之前 @codex 来看过一次', 'opus', []), []);
+  });
+
+  it('R2-P1: "@codex 处理一下" is still handoff (no completion suffix)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const result = detectInlineActionMentions('这个问题 @codex 处理一下', 'opus', []);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].catId, 'codex');
+  });
+
+  // --- R2 P2 regression: same cat appears twice, second occurrence is handoff ---
+
+  it('R2-P2: same cat twice — first narrative, second handoff', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '之前 @codex 提过意见，现在 Ready for @codex review';
+    const result = detectInlineActionMentions(text, 'opus', []);
+    assert.equal(result.length, 1, 'should detect the second occurrence as handoff');
+    assert.equal(result[0].catId, 'codex');
+  });
+
+  // --- Codex review: routed cat on same line must not block other cats ---
+
+  it('routed cat does not block other cats on same line', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = 'Ready for @codex and @gemini review';
+    // codex already routed via line-start, gemini is not
+    const result = detectInlineActionMentions(text, 'opus', ['codex']);
+    assert.equal(result.length, 1, 'should still detect gemini');
+    assert.equal(result[0].catId, 'gemini');
+  });
+
+  // --- Codex R3: 请 compound exclusion + left boundary ---
+
+  it('"@codex 请教过" is narrative (请教 = consult, not imperative)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    assert.deepEqual(detectInlineActionMentions('之前 @codex 请教过这个问题', 'opus', []), []);
+  });
+
+  it('"@codex 请看" is still handoff (请 + action verb)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const result = detectInlineActionMentions('这个 @codex 请看一下', 'opus', []);
+    assert.equal(result.length, 1);
+  });
+
+  it('ignores embedded @mention without left boundary (foo@codex)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    assert.deepEqual(detectInlineActionMentions('contact foo@codex review', 'opus', []), []);
+  });
+
+  it('detects @mention with left boundary (space before @)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const result = detectInlineActionMentions('contact @codex review', 'opus', []);
+    assert.equal(result.length, 1);
+  });
+
+  // --- Codex R4: English verb boundary ---
+
+  it('"@codex reviewed" is narrative (past tense, not imperative)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    assert.deepEqual(detectInlineActionMentions('之前 @codex reviewed this', 'opus', []), []);
+  });
+
+  it('"@codex checklist" is narrative (compound word)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    assert.deepEqual(detectInlineActionMentions('@codex checklist 已更新', 'opus', []), []);
+  });
+
+  // --- Codex R5: 请 as compound suffix (邀请/申请) ---
+
+  it('"邀请 @codex 参加评审" is narrative (邀请 = invite, not imperative 请)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    assert.deepEqual(detectInlineActionMentions('邀请 @codex 参加评审', 'opus', []), []);
+  });
+
+  it('"申请 @codex 权限" is narrative (申请 = apply, not imperative 请)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    assert.deepEqual(detectInlineActionMentions('申请 @codex 权限', 'opus', []), []);
+  });
+
+  it('"请 @codex review" still triggers (standalone 请 is imperative)', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const result = detectInlineActionMentions('这个问题请 @codex review 一下', 'opus', []);
+    assert.equal(result.length, 1);
+  });
+
+  // --- Codex R6: already-seen cat must not block fresh cats on later lines ---
+
+  it('already-seen cat (longer pattern, scanned first) does not block fresh cat on same line', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    // @gemini (7 chars) is longer than @codex (6 chars), so entries sort puts gemini first.
+    // Line 1 adds gemini to seen. Line 2: gemini scanned first → already seen → must NOT set lineMatched.
+    const text = 'Ready for @gemini review\nReady for @gemini and @codex review';
+    const result = detectInlineActionMentions(text, 'opus', []);
+    const catIds = result.map((r) => r.catId);
+    assert.ok(catIds.includes('gemini'), 'gemini should be detected from line 1');
+    assert.ok(catIds.includes('codex'), 'codex should be detected from line 2 even though gemini already seen');
+  });
+
+  // --- Codex review P1: line-start @ + inline @ on same line ---
+
+  it('P1-fix: "@codex and @gemini review" — codex routed, gemini should still get feedback', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '@codex and @gemini review this patch';
+    // codex is already routed via line-start, gemini is inline with action word
+    const result = detectInlineActionMentions(text, 'opus', ['codex']);
+    assert.equal(result.length, 1, 'should detect gemini as inline action mention');
+    assert.equal(result[0].catId, 'gemini');
+  });
+
+  it('P1-fix: pure line-start @codex with no other mentions — no false positive', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '@codex 请 review 一下这个 patch';
+    const result = detectInlineActionMentions(text, 'opus', ['codex']);
+    assert.deepEqual(result, [], 'codex is already routed, no other mentions');
+  });
+});
+
+describe('#1063: detectInlineActionMentions → ThreadStore integration', () => {
+  it('writes inline_action feedback to ThreadStore and consumes it one-shot', async () => {
+    const { detectInlineActionMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'Integration test');
+    const catId = 'opus';
+
+    // Simulate: cat wrote "Ready for @codex review" inline
+    const inlineHits = detectInlineActionMentions('Done. Ready for @codex review', catId, []);
+    assert.equal(inlineHits.length, 1);
+    assert.equal(inlineHits[0].catId, 'codex');
+
+    // Write feedback (mimics route-serial.ts wiring)
+    await store.setMentionRoutingFeedback(thread.id, catId, {
+      sourceTimestamp: Date.now(),
+      items: inlineHits.map((m) => ({ targetCatId: m.catId, reason: 'inline_action' })),
+    });
+
+    // Consume — should return the feedback (one-shot)
+    const feedback = await store.consumeMentionRoutingFeedback(thread.id, catId);
+    assert.ok(feedback, 'feedback should exist');
+    assert.equal(feedback.items.length, 1);
+    assert.equal(feedback.items[0].targetCatId, 'codex');
+    assert.equal(feedback.items[0].reason, 'inline_action');
+
+    // Consume again — should be empty (one-shot consumed)
+    const second = await store.consumeMentionRoutingFeedback(thread.id, catId);
+    assert.equal(second, null, 'feedback should be consumed after first read');
   });
 });
 

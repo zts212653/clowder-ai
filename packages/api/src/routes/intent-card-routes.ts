@@ -7,6 +7,7 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { ExternalProjectStore } from '../domains/projects/external-project-store.js';
 import type { IntentCardStore } from '../domains/projects/intent-card-store.js';
 import { detectRisks } from '../domains/projects/risk-detection-service.js';
+import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 export interface IntentCardRoutesOptions {
   externalProjectStore: ExternalProjectStore;
@@ -17,7 +18,7 @@ export const intentCardRoutes: FastifyPluginAsync<IntentCardRoutesOptions> = asy
   const { externalProjectStore, intentCardStore } = opts;
 
   function requireUserId(request: FastifyRequest, reply: FastifyReply): string | null {
-    const userId = request.headers['x-cat-cafe-user'] as string | undefined;
+    const userId = resolveHeaderUserId(request) ?? undefined;
     if (!userId) {
       void reply.status(401).send({ error: 'Identity required' });
       return null;
@@ -25,8 +26,8 @@ export const intentCardRoutes: FastifyPluginAsync<IntentCardRoutesOptions> = asy
     return userId;
   }
 
-  function requireOwnedProject(id: string, userId: string, reply: FastifyReply) {
-    const project = externalProjectStore.getById(id);
+  async function requireOwnedProject(id: string, userId: string, reply: FastifyReply) {
+    const project = await externalProjectStore.getById(id);
     if (!project || project.userId !== userId) {
       void reply.status(404).send({ error: 'Project not found' });
       return null;
@@ -46,7 +47,7 @@ export const intentCardRoutes: FastifyPluginAsync<IntentCardRoutesOptions> = asy
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId } = request.params as { projectId: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
 
     const body = request.body as Record<string, unknown>;
     const card = intentCardStore.create({
@@ -72,7 +73,7 @@ export const intentCardRoutes: FastifyPluginAsync<IntentCardRoutesOptions> = asy
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId } = request.params as { projectId: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
     const query = request.query as { bucket?: string };
     const cards = intentCardStore.listByProject(
       projectId,
@@ -85,7 +86,7 @@ export const intentCardRoutes: FastifyPluginAsync<IntentCardRoutesOptions> = asy
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId, cardId } = request.params as { projectId: string; cardId: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
     const card = getCardForProject(projectId, cardId);
     if (!card) return reply.status(404).send({ error: 'Intent card not found' });
     return reply.send({ card });
@@ -95,7 +96,7 @@ export const intentCardRoutes: FastifyPluginAsync<IntentCardRoutesOptions> = asy
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId, cardId } = request.params as { projectId: string; cardId: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
     if (!getCardForProject(projectId, cardId)) return reply.status(404).send({ error: 'Intent card not found' });
     const body = request.body as Partial<
       Pick<
@@ -124,7 +125,7 @@ export const intentCardRoutes: FastifyPluginAsync<IntentCardRoutesOptions> = asy
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId, cardId } = request.params as { projectId: string; cardId: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
     if (!getCardForProject(projectId, cardId)) return reply.status(404).send({ error: 'Intent card not found' });
     const body = request.body as Record<string, unknown>;
     const card = intentCardStore.triage(cardId, {
@@ -142,7 +143,7 @@ export const intentCardRoutes: FastifyPluginAsync<IntentCardRoutesOptions> = asy
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId, cardId } = request.params as { projectId: string; cardId: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
     if (!getCardForProject(projectId, cardId)) return reply.status(404).send({ error: 'Intent card not found' });
     intentCardStore.delete(cardId);
     return reply.status(204).send();
@@ -154,7 +155,7 @@ export const intentCardRoutes: FastifyPluginAsync<IntentCardRoutesOptions> = asy
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId, cardId } = request.params as { projectId: string; cardId: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
     const card = getCardForProject(projectId, cardId);
     if (!card) return reply.status(404).send({ error: 'Intent card not found' });
 
@@ -170,7 +171,7 @@ export const intentCardRoutes: FastifyPluginAsync<IntentCardRoutesOptions> = asy
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId } = request.params as { projectId: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
 
     const cards = intentCardStore.listByProject(projectId);
     const signalCounts: Record<string, number> = {};

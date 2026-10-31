@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
+import { writeShellLanguage } from '../shell/shell-language';
 
 beforeAll(() => {
   (globalThis as { React?: typeof React }).React = React;
@@ -21,8 +22,10 @@ describe('ScrollToBottomButton', () => {
   let root: Root;
   let scrollEl: HTMLDivElement;
   let endEl: HTMLDivElement;
+  let onJumpToLatest: Mock<() => void>;
 
   beforeEach(() => {
+    writeShellLanguage('zh');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -37,11 +40,33 @@ describe('ScrollToBottomButton', () => {
     defineNumberProp(scrollEl, 'scrollTop', 200); // at bottom (300 - 100)
 
     endEl.scrollIntoView = vi.fn();
+    onJumpToLatest = vi.fn();
   });
 
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    writeShellLanguage('zh');
+  });
+
+  it('offers the existing resume action in English when English is selected', async () => {
+    const { ScrollToBottomButton } = await import('@/components/ScrollToBottomButton');
+    writeShellLanguage('en');
+    defineNumberProp(scrollEl, 'scrollTop', 0);
+    act(() =>
+      root.render(
+        React.createElement(ScrollToBottomButton, {
+          scrollContainerRef: { current: scrollEl },
+          messagesEndRef: { current: endEl },
+          onJumpToLatest,
+          placement: 'rail',
+        }),
+      ),
+    );
+    const button = container.querySelector<HTMLButtonElement>('button[aria-label="Back to latest"]');
+    expect(button).not.toBeNull();
+    act(() => button?.click());
+    expect(onJumpToLatest).toHaveBeenCalledOnce();
   });
 
   it('hidden when already at bottom; shows when scrolled up; click scrolls to bottom', async () => {
@@ -55,6 +80,7 @@ describe('ScrollToBottomButton', () => {
         React.createElement(ScrollToBottomButton, {
           scrollContainerRef: scrollRef,
           messagesEndRef: endRef,
+          onJumpToLatest,
         }),
       );
     });
@@ -74,7 +100,33 @@ describe('ScrollToBottomButton', () => {
       (btn as HTMLButtonElement).click();
     });
 
-    expect(endEl.scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(onJumpToLatest).toHaveBeenCalledTimes(1);
+    expect(endEl.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('renders the v2 rail control as a compact icon without a native tooltip', async () => {
+    const { ScrollToBottomButton } = await import('@/components/ScrollToBottomButton');
+
+    defineNumberProp(scrollEl, 'scrollTop', 0);
+    act(() => {
+      root.render(
+        React.createElement(ScrollToBottomButton, {
+          scrollContainerRef: { current: scrollEl },
+          messagesEndRef: { current: endEl },
+          onJumpToLatest,
+          placement: 'rail',
+        }),
+      );
+    });
+
+    const button = container.querySelector('button[aria-label="到最新"]');
+    expect(button).toBeTruthy();
+    expect(button?.classList.contains('absolute')).toBe(true);
+    expect(button?.classList.contains('h-7')).toBe(true);
+    expect(button?.classList.contains('w-7')).toBe(true);
+    expect(button?.querySelector('svg[aria-hidden="true"]')).toBeTruthy();
+    expect(button?.getAttribute('title')).toBeNull();
+    expect(button?.textContent?.trim()).toBe('');
   });
 
   it('recomputes visibility when thread/content changes without scroll events (cloud P2)', async () => {
@@ -90,6 +142,7 @@ describe('ScrollToBottomButton', () => {
         React.createElement(ScrollToBottomButton, {
           scrollContainerRef: scrollRef,
           messagesEndRef: endRef,
+          onJumpToLatest,
           recomputeSignal: 'thread-A',
         }),
       );
@@ -104,6 +157,7 @@ describe('ScrollToBottomButton', () => {
         React.createElement(ScrollToBottomButton, {
           scrollContainerRef: scrollRef,
           messagesEndRef: endRef,
+          onJumpToLatest,
           recomputeSignal: 'thread-B',
         }),
       );
@@ -125,6 +179,7 @@ describe('ScrollToBottomButton', () => {
         React.createElement(ScrollToBottomButton, {
           scrollContainerRef: scrollRef,
           messagesEndRef: endRef,
+          onJumpToLatest,
           recomputeSignal: 'base',
         }),
       );
@@ -168,6 +223,7 @@ describe('ScrollToBottomButton', () => {
           React.createElement(ScrollToBottomButton, {
             scrollContainerRef: scrollRef,
             messagesEndRef: endRef,
+            onJumpToLatest,
             recomputeSignal: 'base',
           }),
         );

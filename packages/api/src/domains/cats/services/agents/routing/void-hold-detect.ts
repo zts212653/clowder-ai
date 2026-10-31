@@ -1,0 +1,159 @@
+/**
+ * F167 Phase I AC-I1~I3 — 虚空持球检测 (Void Hold Detection).
+ *
+ * 检测猫的回复文本声明"持球"但本轮 tool_calls 不含 cat_cafe_hold_ball。
+ * 这是声明-动作一致性检查（KD-25），不是语义分类器（KD-8 safe）。
+ *
+ * 结构剥离复用 Phase H 的逻辑：fenced code / blockquote / URL 内的关键词不触发。
+ *
+ * F192 Phase D — eval:a2a 2026-06-10 build verdict: `evaluateVoidHold` returns
+ * the matched HOLD_PATTERN id as `trigger` so per-fire sample evidence can bucket
+ * fires by surface phrase (parallel to verdict-detect returning matched verdict
+ * keyword). `shouldWarnVoidHold` is preserved as a backward-compatible shim.
+ *
+ * 2026-06-20 verdict eval:a2a `2026-06-20-eval-a2a-c2-void-hold-english-fix`
+ * (砚砚): 06-20 eval shows C2 void-hold at 10/122 = 8.2% above the 5% floor;
+ * 7 sampled fires dominated by `en_hold_ball_underscore` / `en_holdball_space`
+ * matching English tool/status prose in narrative body. Same false-positive
+ * class verdict-detect hit on 2026-06-16. Same surgery: scope detection to
+ * the **final routing slot** via `finalRoutingSlot()` so narrative `hold_ball`
+ * / `holdball` mentions in body (status reports, tool-name citations) no
+ * longer fire — only a hold claim in the actual final routing position does.
+ * KD-24 mechanical, no semantic classifier.
+ */
+
+import { stripTrailingCatSignatures } from './cat-signature-strip.js';
+import { finalRoutingSlot } from './final-routing-slot.js';
+
+/**
+ * Hold pattern catalog. Order matters: more-specific patterns first so a
+ * multi-pattern match (e.g. "我现在持着球" hits both /持球/ via substring and
+ * /我.*持.*球/) attributes to the more informative trigger. Iteration
+ * short-circuits on first hit.
+ *
+ * Trigger ids are stable wire-format strings; downstream attribution buckets
+ * fires by these strings. Renaming an id is a breaking change for eval
+ * dashboards / classification — bump a new id rather than renaming.
+ */
+export interface HoldPatternEntry {
+  readonly id: string;
+  readonly re: RegExp;
+  readonly statementOnly?: boolean;
+}
+
+export const HOLD_PATTERNS: readonly HoldPatternEntry[] = [
+  // Most-specific first ↓
+  { id: 'cn_no_reply_self_act', statementOnly: true, re: /(?:不回|没回)[^。\n？?]{0,20}我(?:先|就|去|来)/ },
+  // Deliberately name external conditions: waiting on a person is not a timer contract.
+  {
+    id: 'cn_wait_external_then_act',
+    statementOnly: true,
+    re: /(?:等|待)\s*(?:监控|gate\b|ci\b|测试|构建|命令|编译|检查|pr\b|回调|webhook\b)[^。\n，,？?]{0,20}(?:出来|跑完|完成|结束|通过|合入|返回)[^。\n？?]{0,12}(?:我再|我就|再提交|就提交|再继续|再汇报)/i,
+  },
+  { id: 'mcp_tool_name', re: /cat_cafe_hold_ball/ },
+  { id: 'en_hold_ball_underscore', re: /\bhold_ball\b/i },
+  // English words are whitespace-separated; punctuation in task IDs and
+  // property names (hold-ball-…, holding.the.ball) is not a hold declaration.
+  { id: 'en_holding_the_ball', re: /\bholding\s+the\s+ball\b/i },
+  { id: 'en_holdball_space', re: /\bhold\s+ball\b/i },
+  { id: 'cn_wo_chi_qiu', re: /我.*持.*球/ },
+  // Least-specific last ↓ (bare 持球 substring)
+  { id: 'cn_chiqiu', re: /持球/ },
+] as const;
+
+/** Stable id list for downstream test contracts and attribution allowlists. */
+export const HOLD_PATTERN_IDS: readonly string[] = HOLD_PATTERNS.map((p) => p.id);
+
+/**
+ * Returns the matched HOLD_PATTERN id (most-specific first) or null if no hold
+ * surface phrase is found in the **final routing slot**.
+ *
+ * 2026-06-20 verdict (eval:a2a `2026-06-20-eval-a2a-c2-void-hold-english-fix`):
+ * Previously this scanned the entire structurally-stripped text. 06-20 eval
+ * showed C2 void-hold at 10/122 = 8.2% above the 5% floor with English
+ * `hold_ball` / `holdball` triggers dominating — cats writing tool/status
+ * prose ("the `hold_ball` flow scheduled..." / "I invoked `hold_ball` and
+ * waited") tripped the regex even though the actual final routing slot was
+ * elsewhere.
+ *
+ * Fix: scope detection to the final routing slot via `finalRoutingSlot()`
+ * (same Phase H mechanism that scopes inline-@ and verdict-without-pass —
+ * KD-24 mechanical, no semantic classifier). Trailing cat signatures are
+ * stripped first so signed messages still surface the real final paragraph.
+ *
+ * Trade-off: structural exemptions (fenced code / blockquote / URL) at the end
+ * of the message strip the slot to the previous paragraph — see `finalRoutingSlot`
+ * for the strip discipline. A hold phrase ONLY inside trailing fenced code
+ * (e.g. pasted prior-cat output) is treated as quoted, not a new claim — desired.
+ */
+export function matchHoldPattern(text: string): string | null {
+  if (!text) return null;
+  const slot = finalRoutingSlot(stripTrailingCatSignatures(text));
+  if (!slot) return null;
+  // The new declaration checks do not turn questions or inline quotations into promises.
+  const statements = slot
+    .replace(/`[^`]*`|「[^」]*」|“[^”]*”|"[^"\n]*"/g, '')
+    .split(/(?<=[。！？!?])|\n/)
+    .filter((sentence) => !/[？?]\s*$/.test(sentence));
+  for (const entry of HOLD_PATTERNS) {
+    if (entry.statementOnly ? statements.some((sentence) => entry.re.test(sentence)) : entry.re.test(slot))
+      return entry.id;
+  }
+  return null;
+}
+
+export function hasHoldTextClaim(text: string): boolean {
+  return matchHoldPattern(text) !== null;
+}
+
+function hasHoldBallToolCall(toolNames: readonly string[]): boolean {
+  return toolNames.some((name) => name.includes('cat_cafe_hold_ball'));
+}
+
+export interface VoidHoldInput {
+  readonly text: string;
+  readonly toolNames: readonly string[];
+  readonly lineStartMentions: readonly string[];
+  readonly structuredTargetCats: readonly string[];
+  readonly hasCoCreatorLineStartMention?: boolean;
+  /** A server-verified callback-backed wait is already this turn's routing exit. */
+  readonly hasVerifiedEventBackedRoutingExit?: boolean;
+}
+
+export interface VoidHoldEvaluation {
+  /** True iff the internal void-hold correction signal and counter should fire. */
+  readonly shouldEmit: boolean;
+  /**
+   * Matched HOLD_PATTERN id when text claims hold — preserved even when
+   * `shouldEmit=false` (suppressed by exit / actual tool call). Tells telemetry
+   * which surface phrase the cat wrote, separate from whether emission fired.
+   * Null only when no hold phrase appeared at all.
+   */
+  readonly matchedPattern: string | null;
+}
+
+/**
+ * Full evaluation: returns both emission decision and matched trigger.
+ * Emission is suppressed if any legitimate exit is present (hold_ball tool,
+ * line-start @cat / co-creator mention, or structured MCP routing).
+ */
+export function evaluateVoidHold(input: VoidHoldInput): VoidHoldEvaluation {
+  const matched = matchHoldPattern(input.text);
+  if (matched === null) return { shouldEmit: false, matchedPattern: null };
+  if (hasHoldBallToolCall(input.toolNames)) return { shouldEmit: false, matchedPattern: matched };
+  if (input.lineStartMentions.length > 0) return { shouldEmit: false, matchedPattern: matched };
+  if (input.structuredTargetCats.length > 0) return { shouldEmit: false, matchedPattern: matched };
+  if (input.hasCoCreatorLineStartMention && matched !== 'cn_no_reply_self_act') {
+    return { shouldEmit: false, matchedPattern: matched };
+  }
+  if (input.hasVerifiedEventBackedRoutingExit) return { shouldEmit: false, matchedPattern: matched };
+  return { shouldEmit: true, matchedPattern: matched };
+}
+
+/**
+ * Backward-compatible shim: boolean form preserved for callers that don't need
+ * the matched trigger. Equivalent to `evaluateVoidHold(input).shouldEmit`.
+ */
+export function shouldWarnVoidHold(input: VoidHoldInput): boolean {
+  return evaluateVoidHold(input).shouldEmit;
+}

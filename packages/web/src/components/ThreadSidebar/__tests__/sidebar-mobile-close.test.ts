@@ -27,6 +27,7 @@ const mockStore: Record<string, unknown> = {
   getThreadState: () => ({ catStatuses: {}, unreadCount: 0 }),
   updateThreadPin: vi.fn(),
   updateThreadFavorite: vi.fn(),
+  fetchGlobalBubbleDefaults: vi.fn(),
 };
 vi.mock('@/stores/chatStore', () => {
   const hook = Object.assign(
@@ -60,7 +61,7 @@ describe('ThreadSidebar mobile auto-close', () => {
     mockPush.mockReset();
     // Default: threads list returns empty
     mockApiFetch.mockImplementation((path: string) => {
-      if (path === '/api/threads') return jsonOk({ threads: [] });
+      if (path === '/api/threads?view=sidebar') return jsonOk({ threads: [] });
       if (path === '/api/projects/cwd') return jsonOk({ path: '/test' });
       if (path.startsWith('/api/projects/browse'))
         return jsonOk({
@@ -97,7 +98,7 @@ describe('ThreadSidebar mobile auto-close', () => {
 
     const onClose = vi.fn();
     act(() => {
-      root.render(React.createElement(ThreadSidebar, { onClose }));
+      root.render(React.createElement(ThreadSidebar, { onClose, routeThreadId: 'default' }));
     });
     await flush();
 
@@ -106,7 +107,7 @@ describe('ThreadSidebar mobile auto-close', () => {
       if (path === '/api/threads' && init?.method === 'POST') {
         return jsonOk({ id: 'new-thread-123' });
       }
-      if (path === '/api/threads') return jsonOk({ threads: [] });
+      if (path === '/api/threads?view=sidebar') return jsonOk({ threads: [] });
       return jsonOk({});
     });
 
@@ -144,7 +145,7 @@ describe('ThreadSidebar mobile auto-close', () => {
 
     const onClose = vi.fn();
     act(() => {
-      root.render(React.createElement(ThreadSidebar, { onClose }));
+      root.render(React.createElement(ThreadSidebar, { onClose, routeThreadId: 'default' }));
     });
     await flush();
 
@@ -152,7 +153,7 @@ describe('ThreadSidebar mobile auto-close', () => {
       if (path === '/api/threads' && init?.method === 'POST') {
         return jsonOk({ id: 'new-thread-456' });
       }
-      if (path === '/api/threads') return jsonOk({ threads: [] });
+      if (path === '/api/threads?view=sidebar') return jsonOk({ threads: [] });
       return jsonOk({});
     });
 

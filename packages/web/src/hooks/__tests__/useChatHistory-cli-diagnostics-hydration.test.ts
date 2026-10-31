@@ -1,0 +1,367 @@
+/**
+ * F212 Phase B 云端 codex P2 regression (2026-05-27):
+ *
+ * Cold history hydration (F5 / re-fetch) must copy `metadata.cliDiagnostics`
+ * from stored error messages into `extra.cliDiagnostics`, otherwise the
+ * `ChatMessage` folded panel disappears after page reload even though the
+ * stored payload still carries the data.
+ */
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ThreadChatHistoryAdmissionProvider } from '@/components/thread-chat/ThreadChatRuntimeProvider';
+import { useChatStore } from '@/stores/chatStore';
+import { apiFetch } from '@/utils/api-client';
+import { useChatHistory } from '../useChatHistory';
+
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: vi.fn(),
+}));
+
+let capturedHook: ReturnType<typeof useChatHistory> | null = null;
+
+function HookProbe({ threadId }: { threadId: string }) {
+  capturedHook = useChatHistory(threadId);
+  return React.createElement('div', {
+    ref: capturedHook.scrollContainerRef,
+    style: { height: '100px', overflow: 'auto' },
+  });
+}
+
+function HookHost({ threadId }: { threadId: string }) {
+  return React.createElement(ThreadChatHistoryAdmissionProvider, null, React.createElement(HookProbe, { threadId }));
+}
+
+const STORED_DIAGNOSTICS = {
+  reasonCode: 'auth_failed' as const,
+  publicSummary: 'API 认证失败',
+  publicHint: '检查 .env API key',
+  safeExcerpt: '401 Unauthorized: invalid api key',
+  debugRef: { command: 'codex', exitCode: 1, signal: null, invocationId: 'inv-stored-1' },
+};
+
+describe('F212 Phase B — cold hydration restores cliDiagnostics (云端 codex P2)', () => {
+  const apiFetchMock = vi.mocked(apiFetch);
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeAll(() => {
+    (globalThis as { React?: typeof React }).React = React;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterAll(() => {
+    delete (globalThis as { React?: typeof React }).React;
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    useChatStore.setState({
+      messages: [],
+      hasMore: false,
+      isLoadingHistory: false,
+      currentThreadId: 'thread-cli-diag',
+      threadStates: {},
+    });
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    apiFetchMock.mockReset();
+    capturedHook = null;
+  });
+
+  it('copies metadata.cliDiagnostics to extra.cliDiagnostics on initial hydration', async () => {
+    // Stored payload as /api/messages returns it: cliDiagnostics on metadata,
+    // not on extra (Phase A providers stamp metadata; api persists as-is).
+    apiFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        messages: [
+          {
+            id: 'msg-err-1',
+            type: 'system',
+            variant: 'error',
+            catId: 'opus',
+            content: 'Error: CLI 异常退出 (code: 1)',
+            metadata: { provider: 'anthropic', model: 'claude-opus', cliDiagnostics: STORED_DIAGNOSTICS },
+            timestamp: 1700000000000,
+          },
+        ],
+        tasks: [],
+        hasMore: false,
+      }),
+    } as Response);
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-cli-diag' }));
+    });
+    // Allow useEffect microtask to flush
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const messages = useChatStore.getState().messages;
+    expect(messages).toHaveLength(1);
+    expect(messages[0].extra?.cliDiagnostics).toEqual(STORED_DIAGNOSTICS);
+  });
+
+  it('F117: restores the timeout diagnostics a failed response persisted into its panel carrier', async () => {
+    const timeoutDiagnostics = { silenceDurationMs: 1_800_000, processAlive: true, invocationId: 'turn-1' };
+    apiFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        messages: [
+          {
+            id: 'response-timeout',
+            type: 'assistant',
+            catId: 'opus',
+            content: '缅因猫 CLI 响应超时 (1800s)',
+            metadata: { provider: 'openai', model: 'gpt', timeoutDiagnostics },
+            timestamp: 1700000000000,
+          },
+        ],
+        tasks: [],
+        hasMore: false,
+      }),
+    } as Response);
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-cli-diag' }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(useChatStore.getState().messages[0]?.extra?.timeoutDiagnostics).toEqual(timeoutDiagnostics);
+  });
+
+  it.each([
+    'failed',
+    'canceled',
+  ] as const)('G1: cold hydration retains remote cancellation facts on a %s response', async (status) => {
+    const content = 'partial output\n\n本地等待已取消；远端任务是否已停止尚未确认，可能仍在运行。';
+    const cancellationDiagnostics = {
+      localWaitCancelled: true,
+      remoteTermination: 'unconfirmed',
+      remoteExecution: { kind: 'a2a_task', id: 'remote-task-1' },
+    };
+    apiFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        messages: [
+          {
+            id: 'response-remote',
+            type: 'assistant',
+            catId: 'opus',
+            content,
+            metadata: { provider: 'a2a', model: '', cancellationDiagnostics },
+            timestamp: 1700000000000,
+            lifecycle: {
+              kind: 'response',
+              orderKey: '1700000000000:r',
+              invocationId: 'turn-remote',
+              targetId: 'opus',
+              inputEntryIds: [],
+              inputMessageIds: [],
+              status,
+              startedAt: 1700000000000,
+              completedAt: 1700000001000,
+              reason: status === 'failed' ? 'timeout' : 'user_cancel',
+            },
+          },
+        ],
+        tasks: [],
+        hasMore: false,
+      }),
+    } as Response);
+    await act(async () => root.render(React.createElement(HookHost, { threadId: 'thread-cli-diag' })));
+    const messages = useChatStore.getState().messages;
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      id: 'response-remote',
+      content,
+      lifecycle: { status },
+      metadata: { cancellationDiagnostics },
+    });
+  });
+
+  it('F293 restores the exact durable routing receipt and retry source on cold history hydration', async () => {
+    const systemInfo = {
+      v: 1,
+      fallbackCatId: 'codex-astra',
+      payload: {
+        type: 'routing_preflight',
+        v: 1,
+        ownerId: 'owner',
+        observedAt: 100,
+        resolverState: 'fresh',
+        snapshotRef: 'snapshot:1',
+        sourceMessageId: 'original-1',
+        retryInvocationId: 'parent-1',
+        target: { targetCatId: 'codex-astra', disposition: 'rejected', reasons: [], alternatives: [] },
+      },
+    };
+    apiFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        messages: [
+          {
+            id: 'receipt-1',
+            type: 'system',
+            content: JSON.stringify(systemInfo.payload),
+            extra: { systemInfo },
+            timestamp: 100,
+          },
+        ],
+        tasks: [],
+        hasMore: false,
+      }),
+    } as Response);
+    await act(async () => root.render(React.createElement(HookHost, { threadId: 'thread-cli-diag' })));
+    expect(useChatStore.getState().messages[0]).toMatchObject({ id: 'receipt-1', extra: { systemInfo } });
+  });
+
+  it('prefers extra.cliDiagnostics when both extra and metadata carry diagnostics', async () => {
+    const extraVersion = { ...STORED_DIAGNOSTICS, publicSummary: 'extra-path summary' };
+    const metadataVersion = { ...STORED_DIAGNOSTICS, publicSummary: 'metadata-path summary' };
+    apiFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        messages: [
+          {
+            id: 'msg-err-2',
+            type: 'system',
+            variant: 'error',
+            catId: 'opus',
+            content: 'Error: ...',
+            metadata: { provider: 'anthropic', model: 'claude-opus', cliDiagnostics: metadataVersion },
+            extra: { cliDiagnostics: extraVersion },
+            timestamp: 1700000000000,
+          },
+        ],
+        tasks: [],
+        hasMore: false,
+      }),
+    } as Response);
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-cli-diag' }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const messages = useChatStore.getState().messages;
+    expect(messages[0].extra?.cliDiagnostics?.publicSummary).toBe('extra-path summary');
+  });
+
+  it('no-op when neither metadata nor extra carries cliDiagnostics (regression guard)', async () => {
+    apiFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        messages: [
+          {
+            id: 'msg-err-3',
+            type: 'system',
+            variant: 'error',
+            catId: 'opus',
+            content: 'Error: ...',
+            metadata: { provider: 'anthropic', model: 'claude-opus' },
+            timestamp: 1700000000000,
+          },
+        ],
+        tasks: [],
+        hasMore: false,
+      }),
+    } as Response);
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-cli-diag' }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const messages = useChatStore.getState().messages;
+    expect(messages[0].extra?.cliDiagnostics).toBeUndefined();
+  });
+
+  it('preserves the durable F254 accident-recovery marker on cold hydration', async () => {
+    const recovery = {
+      kind: 'f254_withheld_message',
+      cvoDecisionRef: '0001783820437069-000027-a6cebcce',
+      recoveredAt: 1700000005000,
+    };
+    apiFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        messages: [
+          {
+            id: 'msg-recovered-1',
+            type: 'assistant',
+            catId: 'fable-5',
+            content: '买到了，正在回家。',
+            extra: { recovery },
+            timestamp: 1700000000000,
+          },
+        ],
+        tasks: [],
+        hasMore: false,
+      }),
+    } as Response);
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-cli-diag' }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const hydrated = useChatStore.getState().messages[0].extra as { recovery?: typeof recovery } | undefined;
+    expect(hydrated?.recovery).toEqual(recovery);
+  });
+  it('cold history preserves upstream classification, hint and request ID from the backend payload', async () => {
+    const { buildCliDiagnostics } = await import('../../../../api/src/utils/cli-diagnostics');
+    const requestId = '7ab62694-a1b3-4ef6-977e-7edb76b44640';
+    const diag = buildCliDiagnostics({
+      rawText: `stream disconnected before completion: An error occurred while processing your request. Please include the request ID ${requestId} in your message.`,
+      debugRef: { command: 'codex app-server', signal: null, invocationId: 'inv-upstream' },
+    });
+    apiFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        messages: [
+          {
+            id: 'upstream-stored',
+            type: 'system',
+            variant: 'error',
+            catId: 'codex',
+            content: 'Error: upstream',
+            metadata: JSON.parse(JSON.stringify({ provider: 'openai', cliDiagnostics: diag })),
+            timestamp: 1700000000000,
+          },
+        ],
+        tasks: [],
+        hasMore: false,
+      }),
+    } as Response);
+    await act(async () => root.render(React.createElement(HookHost, { threadId: 'thread-cli-diag' })));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const hydrated = useChatStore.getState().messages[0].extra?.cliDiagnostics;
+    expect(hydrated?.reasonCode).toBe('upstream_service_error');
+    expect(hydrated?.debugRef.upstreamRequestId).toBe(requestId);
+    expect(hydrated).toEqual(diag);
+  });
+});

@@ -1,6 +1,6 @@
 ---
 feature_ids: [F111]
-related_features: [F066, F034, F021]
+related_features: [F066, F034, F021, F279]
 topics: [voice, tts, streaming, chunker, latency]
 doc_kind: spec
 created: 2026-03-12
@@ -14,7 +14,7 @@ created: 2026-03-12
 
 F066 Phase 1 落地了本地 TTS（Qwen3-TTS Base clone），但合成方式是**全文一次性**：VoiceBlockSynthesizer 收到完整 text → 调用 TTS → 等整段合成完 → 返回 audioUrl。对于长文本（>100 字），用户要等 10-30 秒才能听到第一个音节。
 
-team lead的核心痛点：**"为什么要等这么久才开始说话？"**
+operator的核心痛点：**"为什么要等这么久才开始说话？"**
 
 流式分句的思路是：LLM 边生成文字，TTS 边合成语音，前端边收边播。首次发声延迟从"全文合成时长"降到"第一句合成时长"（通常 1-2 秒）。
 
@@ -108,7 +108,7 @@ AIRI 项目的 `tts-chunker.ts` 已验证了这种管线在 TypeScript 中的可
 | ~~WebSocket 复杂度高于 SSE~~ | **已决**：选 SSE（单向足够，复杂度低） |
 | Qwen3-TTS mlx-audio SDK 不支持流式 generate | 三路可选：A) vLLM-Omni serving（真流式）B) KV-cache 手动 step（社区方案）C) Node 层分段调用全量合成（伪流式，最简单） |
 
-## 实测延迟报告（2026-03-17 team lead亲测）
+## 实测延迟报告（2026-03-17 operator亲测）
 
 **测试环境**：M-series Mac，本地 Qwen3-TTS (mlx-audio)，runtime worktree
 
@@ -124,7 +124,7 @@ AIRI 项目的 `tts-chunker.ts` 已验证了这种管线在 TypeScript 中的可
 **关键结论**：
 
 1. **F111 Plan C（分句合成）方向验证通过** — TTS 合成部分只占 2-3s，主要延迟来自 LLM 思考和 CLI 启动
-2. **CLI 冷启动 28s 是最大瓶颈** — opencode 框架开销，非 Cat Café 可优化范围
+2. **CLI 冷启动 28s 是最大瓶颈** — opencode 框架开销，非 Clowder AI 可优化范围
 3. **"边吐字边转语音"（Plan A 真流式）可进一步优化** — 理论上把 10s 压缩到 3-5s，因为 LLM 思考时间被 TTS 并行利用
 4. **当前实现满足 AC-A1 的精神**（TTS 合成部分 < 2s），但完整端到端还受 LLM 思考时间影响
 

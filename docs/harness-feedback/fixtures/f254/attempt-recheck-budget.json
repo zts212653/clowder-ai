@@ -1,0 +1,22 @@
+{
+  "id": "attempt-recheck-budget",
+  "scenario": "attempt_recheck_budget",
+  "threadId": "thread_fixture_f254_budgets",
+  "catIds": ["codex-sol"],
+  "evidenceRefs": ["fixture:F254/AC-E9/attempt-recheck-budget@v1"],
+  "facts": {
+    "responsibilityCount": 1,
+    "custodyCount": 1,
+    "formalFinalCount": 0,
+    "formalFinalLimit": 1,
+    "knownStaleFinalCount": 0,
+    "targetCount": 1,
+    "accountedTargetCount": 1,
+    "sameBatchSiblingWakeCount": 0,
+    "automaticAttemptCount": 5,
+    "automaticAttemptLimit": 5,
+    "commitRecheckCount": 10,
+    "commitRecheckLimit": 10,
+    "terminalEvidenceComplete": true
+  }
+}

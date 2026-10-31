@@ -1,0 +1,276 @@
+current.episodes:
+  label: 本窗口任务样本数
+  means: 当前观察窗口里创建了多少个任务 episode；用于判断这轮结论的样本量。
+  goodDirection: neutral
+  category: context
+  component: current-window
+current.completed:
+  label: 本窗口已完成任务数
+  means: 当前窗口里已经完成的任务数量；用于观察任务活动与样本成熟度。
+  goodDirection: neutral
+  category: activation
+  component: current-window
+current.in_progress:
+  label: 本窗口进行中任务数
+  means: 当前窗口结束时仍未完成的任务数量；需要结合任务年龄判断，不能单独视为失败。
+  goodDirection: neutral
+  category: context
+  component: current-window
+current.signals:
+  label: 本窗口结果信号总数
+  means: 当前窗口里附着到任务 episode 的所有结果与反馈信号数量。
+  goodDirection: neutral
+  category: context
+  component: current-window
+current.a1_signals:
+  label: 本窗口客观结果信号
+  means: merge、revert、测试和构建等由系统自动记录的客观结果信号数量。
+  goodDirection: neutral
+  category: context
+  component: current-window
+current.a2_signals:
+  label: 本窗口人类反馈信号
+  means: 用户明确作出的纠正、取消或拒绝等互动决策数量；它说明反馈量，不等于每条都是质量问题。
+  goodDirection: neutral
+  category: context
+  component: current-window
+current.merge_signals:
+  label: 本窗口合入成功信号
+  means: 当前窗口里记录到的成功 merge 信号数量；用于确认任务是否形成了可验证结果。
+  goodDirection: neutral
+  category: activation
+  component: current-window
+current.magic_word_signals:
+  label: 本窗口强纠正信号
+  means: 用户用约定拉闸词指出方向或流程偏差的次数；越少通常表示同类严重偏差越少。
+  goodDirection: lower
+  category: friction
+  component: current-window
+current.magic_word_distinct_event_ids:
+  label: 本窗口独立强纠正事件
+  means: 去重后真实发生了多少次强纠正事件；用于区分真实重复与同一事件被重复投影。
+  goodDirection: lower
+  category: friction
+  component: current-window
+current.magic_word_duplicate_signals:
+  label: 本窗口重复投影信号
+  means: 同一个强纠正事件被重复记账的数量；应为 0，否则会夸大问题严重度。
+  goodDirection: lower
+  category: friction
+  component: current-window
+current.proposal_reject_signals:
+  label: 本窗口提案拒绝次数
+  means: 用户明确拒绝猫猫提案的次数；升高时要检查提案是否偏离真实目标。
+  goodDirection: lower
+  category: friction
+  component: current-window
+current.permission_cancel_signals:
+  label: 本窗口权限取消次数
+  means: 用户取消工具或权限动作的次数；升高时要检查动作是否打扰人或授权边界不清。
+  goodDirection: lower
+  category: friction
+  component: current-window
+episodes:
+  label: 本次任务样本数
+  means: 本次已发布 verdict 覆盖的任务 episode 数量；用于判断样本量。
+  goodDirection: neutral
+  category: context
+  component: verdict-window
+completedepisodes:
+  label: 本次已完成任务数
+  means: 本次已发布 verdict 中完成的任务数量；用于观察样本成熟度。
+  goodDirection: neutral
+  category: activation
+  component: verdict-window
+inprogressepisodes:
+  label: 本次进行中任务数
+  means: 本次已发布 verdict 中仍在进行的任务数量；需结合任务年龄解释。
+  goodDirection: neutral
+  category: context
+  component: verdict-window
+signals:
+  label: 本次结果信号总数
+  means: 本次已发布 verdict 关联到任务 episode 的全部结果与反馈信号数。
+  goodDirection: neutral
+  category: context
+  component: verdict-window
+a1signals:
+  label: 本次客观结果信号
+  means: 本次已发布 verdict 中 merge、revert、测试和构建等系统客观信号数。
+  goodDirection: neutral
+  category: context
+  component: verdict-window
+a2signals:
+  label: 本次人类反馈信号
+  means: 本次已发布 verdict 中用户纠正、取消或拒绝等互动信号数。
+  goodDirection: neutral
+  category: context
+  component: verdict-window
+mergesignals:
+  label: 本次合入成功信号
+  means: 本次已发布 verdict 中记录到的成功 merge 信号数。
+  goodDirection: neutral
+  category: activation
+  component: verdict-window
+magicwordsignals:
+  label: 本次强纠正信号
+  means: 本次已发布 verdict 中约定拉闸词触发的纠正信号原始数量。
+  goodDirection: lower
+  category: friction
+  component: verdict-window
+magicworddistincteventids:
+  label: 本次独立强纠正事件
+  means: 本次已发布 verdict 中去重后的强纠正事件数量。
+  goodDirection: lower
+  category: friction
+  component: verdict-window
+magicwordduplicatesignals:
+  label: 本次强纠正重复投影
+  means: 本次已发布 verdict 中同一强纠正事件被重复记账的数量；应为 0。
+  goodDirection: lower
+  category: friction
+  component: verdict-window
+magicwordsourcemessages:
+  label: 本次强纠正源消息数
+  means: 本次已发布 verdict 中触发强纠正的不同用户消息数；同一条消息触发多个拉闸词只算一个干预来源。
+  goodDirection: lower
+  category: friction
+  component: verdict-window
+maxmagicwordspermessage:
+  label: 单条消息最多强纠正词数
+  means: 一条用户源消息里同时触发的强纠正词最大数量；越高说明单次互动暴露的偏差越集中。
+  goodDirection: lower
+  category: friction
+  component: verdict-window
+proposalrejectsignals:
+  label: 本次提案拒绝数
+  means: 本次已发布 verdict 中用户明确拒绝提案的次数。
+  goodDirection: lower
+  category: friction
+  component: verdict-window
+proposalrejectepisodes:
+  label: 本次含提案拒绝的任务数
+  means: 本次已发布 verdict 中出现过提案拒绝信号的不同任务 episode 数；同一任务内多次拒绝只算一个受影响任务。
+  goodDirection: lower
+  category: friction
+  component: verdict-window
+permissioncancelsignals:
+  label: 本次权限取消数
+  means: 本次已发布 verdict 中用户取消工具或权限动作的次数。
+  goodDirection: lower
+  category: friction
+  component: verdict-window
+episodeverdicts.success:
+  label: 成功任务判定数
+  means: 本次已发布 verdict 中被判定为直接成功的任务 episode 数量。
+  goodDirection: higher
+  category: activation
+  component: verdict-outcome
+episodeverdicts.newwriteback.success:
+  label: 本次新写回的成功任务数
+  means: 本次发布时由评估猫审阅后首次写入 success 判定的任务 episode 数量；它反映本轮新增判定，不包含历史已有判定。
+  goodDirection: higher
+  category: activation
+  component: verdict-outcome
+episodeverdicts.preexisting.success:
+  label: 已有成功判定任务数
+  means: 本次窗口开始审阅前就已经带有 success 判定的任务 episode 数量；用于解释成功样本由历史判定与本轮写回各占多少。
+  goodDirection: neutral
+  category: context
+  component: verdict-outcome
+episodeverdicts.corrected_success:
+  label: 纠偏后成功任务数
+  means: 本次已发布 verdict 中经历纠正后仍成功完成的任务 episode 数量；升高时应结合纠偏原因分析。
+  goodDirection: lower
+  category: friction
+  component: verdict-outcome
+baseline7d.episodes:
+  label: 七天基线任务样本数
+  means: 前七天对照窗口里的任务 episode 数量，用来判断当前窗口的活动量是否可比。
+  goodDirection: neutral
+  category: context
+  component: baseline-7d
+baseline7d.completed:
+  label: 七天基线已完成任务数
+  means: 前七天对照窗口里已经完成的任务数量；用于和当前窗口的完成量比较，不单独代表任务质量。
+  goodDirection: neutral
+  category: context
+  component: baseline-7d
+baseline7d.in_progress:
+  label: 七天基线进行中任务数
+  means: 前七天对照窗口结束时仍在进行的任务数量；用于解释基线样本成熟度，需结合任务年龄判断。
+  goodDirection: neutral
+  category: context
+  component: baseline-7d
+baseline7d.signals:
+  label: 七天基线结果信号总数
+  means: 前七天对照窗口里的全部结果与反馈信号数量。
+  goodDirection: neutral
+  category: context
+  component: baseline-7d
+baseline7d.a1_signals:
+  label: 七天基线客观结果信号
+  means: 前七天对照窗口里的 merge、revert、测试和构建等客观结果信号数量。
+  goodDirection: neutral
+  category: context
+  component: baseline-7d
+baseline7d.a2_signals:
+  label: 七天基线人类反馈信号
+  means: 前七天对照窗口里的用户纠正、取消和拒绝等互动决策数量。
+  goodDirection: neutral
+  category: context
+  component: baseline-7d
+baseline7d.magic_word_signals:
+  label: 七天基线强纠正信号
+  means: 前七天对照窗口里强纠正信号的原始数量，用来和当前窗口比较。
+  goodDirection: neutral
+  category: context
+  component: baseline-7d
+baseline7d.magic_word_distinct_event_ids:
+  label: 七天基线独立强纠正事件
+  means: 前七天对照窗口里去重后的强纠正事件数量。
+  goodDirection: neutral
+  category: context
+  component: baseline-7d
+baseline7d.magic_word_duplicate_signals:
+  label: 七天基线重复投影信号
+  means: 前七天对照窗口里同一强纠正事件被重复记账的数量；应为 0。
+  goodDirection: lower
+  category: friction
+  component: baseline-7d
+baseline7d.proposal_reject_signals:
+  label: 七天基线提案拒绝次数
+  means: 前七天对照窗口里用户拒绝提案的次数，用作当前窗口的比较基线。
+  goodDirection: neutral
+  category: context
+  component: baseline-7d
+baseline7d.permission_cancel_signals:
+  label: 七天基线权限取消次数
+  means: 前七天对照窗口里用户取消工具或权限动作的次数，用作当前窗口的比较基线。
+  goodDirection: neutral
+  category: context
+  component: baseline-7d
+proposalrejectdistinctproposalids:
+  label: 本次独立被拒提案数
+  means: 本次已发布 verdict 中被用户拒绝的不同提案数量（按 proposalId 去重）；和拒绝次数不同，衡量有多少个独立提案被拒绝。
+  goodDirection: lower
+  category: friction
+  component: verdict-window
+proposalrejectduplicatesignals:
+  label: 本次提案拒绝重复信号
+  means: 同一提案拒绝事件被重复记账的数量；应为 0，否则会夸大拒绝严重度。
+  goodDirection: lower
+  category: friction
+  component: verdict-window
+a2watchthresholdexceeded:
+  label: A2 干预超阈值标记
+  means: A2 干预总数（magic word 源消息 + 提案拒绝 episode + 权限取消）是否超过观察阈值；较新运行使用集群调整后的计数（clusterAdjustedA2Total）。1 表示需要进一步调查纠正频率。
+  goodDirection: lower
+  category: derived
+  component: verdict-window
+clusteradjusteda2total:
+  label: 集群校正后的 A2 干预总数
+  means: 强纠正源消息数、含提案拒绝的任务数与权限取消次数之和；先按真实干预来源聚类，避免同一事件被多条信号重复放大。
+  goodDirection: lower
+  category: derived
+  component: verdict-window

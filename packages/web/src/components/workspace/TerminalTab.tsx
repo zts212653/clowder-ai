@@ -3,18 +3,51 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useShellCopy } from '@/components/shell/shell-copy';
+import { useShellPresentation } from '@/components/shell/shell-presentation';
+import typographyTokens from '@/styles/typography-tokens.json';
 import { API_URL, apiFetch } from '@/utils/api-client';
-import { getUserId } from '@/utils/userId';
-import { AgentPaneList } from './AgentPaneList';
+
+import { AgentPaneList, type AgentPaneSelectionMeta } from './AgentPaneList';
 import { AgentPaneViewer } from './AgentPaneViewer';
-import '@xterm/xterm/css/xterm.css';
+import { type CodeToolsCopy, codeToolsCopy } from './code-tools.shell-copy';
+import { TERMINAL_THEME } from './terminal-theme';
 
 interface TerminalTabProps {
   worktreeId: string;
 }
 
-export function TerminalTab({ worktreeId }: TerminalTabProps) {
-  const [watchingPane, setWatchingPane] = useState<string | null>(null);
+type TerminalChromeCopy = Pick<
+  CodeToolsCopy['terminal'],
+  'myTerminalConnected' | 'myTerminalConnecting' | 'myTerminalDisconnected' | 'reconnect' | 'closeTerminal'
+>;
+
+const CLASSIC_COPY: TerminalChromeCopy = {
+  myTerminalConnected: 'Terminal',
+  myTerminalConnecting: 'Connecting…',
+  myTerminalDisconnected: 'Disconnected',
+  reconnect: 'Reconnect',
+  closeTerminal: 'Close Terminal',
+};
+
+interface WatchingPane {
+  paneId: string;
+  invocationId?: string;
+  catId?: string | null;
+}
+
+export function TerminalTab(props: TerminalTabProps) {
+  const presentation = useShellPresentation();
+  return presentation === 'v2' ? <TerminalTabV2 {...props} /> : <TerminalTabCore {...props} copy={CLASSIC_COPY} />;
+}
+
+function TerminalTabV2(props: TerminalTabProps) {
+  const copy = useShellCopy(codeToolsCopy).terminal;
+  return <TerminalTabCore {...props} copy={copy} />;
+}
+
+function TerminalTabCore({ worktreeId, copy }: TerminalTabProps & { copy: TerminalChromeCopy }) {
+  const [watchingPane, setWatchingPane] = useState<WatchingPane | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -47,13 +80,9 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
       // Init xterm.js
       const term = new Terminal({
         cursorBlink: true,
-        fontSize: 13,
+        fontSize: typographyTokens.fontSizePx.compact,
         fontFamily: 'JetBrains Mono, Menlo, Monaco, monospace',
-        theme: {
-          background: '#1a1b26',
-          foreground: '#a9b1d6',
-          cursor: '#c0caf5',
-        },
+        theme: TERMINAL_THEME,
       });
       const fitAddon = new FitAddon();
       term.loadAddon(fitAddon);
@@ -65,8 +94,7 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
       // Connect WebSocket
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const apiUrl = new URL(API_URL);
-      const userId = encodeURIComponent(getUserId());
-      const ws = new WebSocket(`${wsProtocol}//${apiUrl.host}/api/terminal/sessions/${sessionId}/ws?userId=${userId}`);
+      const ws = new WebSocket(`${wsProtocol}//${apiUrl.host}/api/terminal/sessions/${sessionId}/ws`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -136,26 +164,35 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
     };
   }, [connect]);
 
+  const selectedPaneId = watchingPane?.paneId;
+
   if (watchingPane) {
-    return <AgentPaneViewer worktreeId={worktreeId} paneId={watchingPane} onBack={() => setWatchingPane(null)} />;
+    return (
+      <AgentPaneViewer
+        worktreeId={worktreeId}
+        paneId={watchingPane.paneId}
+        catId={watchingPane.catId}
+        onBack={() => setWatchingPane(null)}
+      />
+    );
   }
+
+  const handleSelectPane = (paneId: string, meta?: AgentPaneSelectionMeta) => {
+    setWatchingPane({ paneId, invocationId: meta?.invocationId, catId: meta?.catId });
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <AgentPaneList
-        worktreeId={worktreeId}
-        onSelectPane={setWatchingPane}
-        selectedPaneId={watchingPane ?? undefined}
-      />
+      <AgentPaneList worktreeId={worktreeId} onSelectPane={handleSelectPane} selectedPaneId={selectedPaneId} />
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 8,
           padding: '4px 8px',
-          fontSize: 12,
-          color: '#888',
-          borderBottom: '1px solid #2a2b3d',
+          fontSize: typographyTokens.fontSizePx.xs,
+          color: 'var(--terminal-text-muted)',
+          borderBottom: '1px solid var(--terminal-chrome)',
         }}
       >
         <span
@@ -163,11 +200,20 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
             width: 8,
             height: 8,
             borderRadius: '50%',
-            background: status === 'connected' ? '#9ece6a' : status === 'connecting' ? '#e0af68' : '#f7768e',
+            background:
+              status === 'connected'
+                ? 'var(--terminal-status-ok)'
+                : status === 'connecting'
+                  ? 'var(--terminal-status-warn)'
+                  : 'var(--terminal-status-error)',
           }}
         />
         <span>
-          {status === 'connected' ? 'Terminal' : status === 'connecting' ? 'Connecting\u2026' : 'Disconnected'}
+          {status === 'connected'
+            ? copy.myTerminalConnected
+            : status === 'connecting'
+              ? copy.myTerminalConnecting
+              : copy.myTerminalDisconnected}
         </span>
         {status === 'disconnected' && (
           <button
@@ -175,15 +221,15 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
             type="button"
             style={{
               background: 'none',
-              border: '1px solid #444',
-              color: '#aaa',
+              border: '1px solid var(--terminal-btn-border)',
+              color: 'var(--terminal-text)',
               padding: '2px 8px',
               borderRadius: 4,
               cursor: 'pointer',
-              fontSize: 11,
+              fontSize: typographyTokens.fontSizePx.label,
             }}
           >
-            Reconnect
+            {copy.reconnect}
           </button>
         )}
         {(status === 'connected' || status === 'disconnected') && (
@@ -192,16 +238,16 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
             type="button"
             style={{
               background: 'none',
-              border: '1px solid #6b3030',
-              color: '#f7768e',
+              border: '1px solid var(--terminal-btn-danger-border)',
+              color: 'var(--terminal-status-error)',
               padding: '2px 8px',
               borderRadius: 4,
               cursor: 'pointer',
-              fontSize: 11,
+              fontSize: typographyTokens.fontSizePx.label,
               marginLeft: 'auto',
             }}
           >
-            Close Terminal
+            {copy.closeTerminal}
           </button>
         )}
       </div>

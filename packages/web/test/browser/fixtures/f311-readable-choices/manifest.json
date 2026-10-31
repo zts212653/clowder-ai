@@ -1,0 +1,19 @@
+{
+  "mode": "frozen-author-body-inputs",
+  "sourceCommit": "d9e217f0368ced7256da36b50b3fbda4fc012edf",
+  "productionSequenceObserved": 25,
+  "sourceMessageRef": "thread_mu0ymg0ek2j5zucl#0001789714183929-000142-0c5c3efd",
+  "sha256": {
+    "object-map.body.json": "14b19dcb7d031d95fcb2d21035575646804a3fe3b29f719c919a86fb4af21365",
+    "measurement-plan.body.json": "4edfcb63f78a7739e2f4530c0e19f7b48db9cdb1105c0d77648fba2223e9a3ab",
+    "success-contract.body.json": "27e56bf33d2482f4748af4c841d4e12d2d971d498b59071e022dfaa58a4a3241",
+    "baseline-diagnosis.body.json": "089d4508439e20a26c397ff94bda93e81327bca080734faced8d4186db73e63b"
+  },
+  "sourceSha256": {
+    "object-map.body.json": "14b19dcb7d031d95fcb2d21035575646804a3fe3b29f719c919a86fb4af21365",
+    "measurement-plan.body.json": "99d4db03943cf3a9caf938ce345ac8797ab109a205b030ef460c80dcdf0c38ac",
+    "success-contract.body.json": "26daeb7d80a365c6a60fdca674f08f02b4f81fd88102f0809805a83d563de6bf",
+    "baseline-diagnosis.body.json": "089d4508439e20a26c397ff94bda93e81327bca080734faced8d4186db73e63b"
+  },
+  "copyTransform": "Biome whitespace formatting only; JSON values equal source files"
+}

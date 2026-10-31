@@ -1,0 +1,78 @@
+'use client';
+
+import type { Components } from 'react-markdown';
+import { useChatStore } from '@/stores/chatStore';
+import { API_URL } from '@/utils/api-client';
+import { isRelativeMdLink, resolveRelativePath } from './MarkdownContent';
+
+/** Highlight @mentions in text children */
+type MentionFn = (children: import('react').ReactNode) => import('react').ReactNode;
+
+/** Create an `img` override that resolves workspace-relative image paths */
+export function createWorkspaceImageComponent(basePath: string, worktreeId: string): Components['img'] {
+  return function WorkspaceImage({ src, alt }) {
+    const isRelative =
+      src &&
+      !src.startsWith('http://') &&
+      !src.startsWith('https://') &&
+      !src.startsWith('data:') &&
+      !src.startsWith('/') &&
+      !src.startsWith('blob:');
+    const resolvedUrl = isRelative
+      ? `${API_URL}/api/workspace/file/raw?worktreeId=${encodeURIComponent(worktreeId)}&path=${encodeURIComponent(resolveRelativePath(basePath, src))}`
+      : src;
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={resolvedUrl} alt={alt ?? ''} className="max-w-full rounded my-2" loading="lazy" />;
+  };
+}
+
+/** Create an `a` override that intercepts relative .md links → workspace navigation */
+export function createWorkspaceLinkComponent(
+  basePath: string,
+  withMentions: MentionFn,
+  worktreeId?: string,
+  sourcePath?: string,
+): Components['a'] {
+  return function WorkspaceLink({ href, children, node }) {
+    const setOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
+
+    if (isRelativeMdLink(href)) {
+      const resolved = resolveRelativePath(basePath, href);
+      return (
+        <a
+          href="#"
+          data-workspace-link-line={node?.position?.start.line}
+          onClick={(e) => {
+            e.preventDefault();
+            // F226 云端 P2: navigate within the given worktree (symmetric with the image resolver),
+            // so a torn-off float's relative links stay correct even after the docked workspace
+            // switches to another worktree.
+            if (sourcePath && worktreeId)
+              setOpenFile(resolved, null, worktreeId, undefined, {
+                kind: 'workspace-document',
+                worktreeId,
+                path: sourcePath,
+                line: node?.position?.start.line ?? 1,
+              });
+            else setOpenFile(resolved, null, worktreeId ?? null);
+          }}
+          className="text-cafe-accent hover:text-cafe-interactive hover:underline break-all cursor-pointer"
+          title={`在工作区中打开 ${resolved}`}
+        >
+          {withMentions(children)}
+        </a>
+      );
+    }
+
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-cafe-accent hover:text-cafe-interactive hover:underline break-all"
+      >
+        {withMentions(children)}
+      </a>
+    );
+  };
+}

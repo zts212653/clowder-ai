@@ -37,6 +37,9 @@ describe('F087: Bootcamp env-check route', () => {
     assert.ok('pnpm' in body, 'missing pnpm');
     assert.ok('git' in body, 'missing git');
     assert.ok('claudeCli' in body, 'missing claudeCli');
+    assert.ok('codexCli' in body, 'missing codexCli');
+    assert.ok('geminiCli' in body, 'missing geminiCli');
+    assert.ok('kimiCli' in body, 'missing kimiCli');
     assert.ok('mcp' in body, 'missing mcp');
     // Advanced features
     assert.ok('tts' in body, 'missing tts');
@@ -47,6 +50,7 @@ describe('F087: Bootcamp env-check route', () => {
     assert.strictEqual(typeof body.node.ok, 'boolean');
     assert.strictEqual(typeof body.pnpm.ok, 'boolean');
     assert.strictEqual(typeof body.git.ok, 'boolean');
+    assert.strictEqual(typeof body.kimiCli.ok, 'boolean');
 
     // node/pnpm/git should be ok in dev environment
     assert.ok(body.node.ok, 'node should be available');
@@ -66,6 +70,32 @@ describe('F087: Bootcamp env-check route', () => {
     assert.strictEqual(body.pencil.ok, false);
     assert.ok(body.pencil.note);
     await app.close();
+  });
+
+  it('detects pnpm from the current package manager env when PATH probe is unavailable', async () => {
+    await createApp();
+    const originalPath = process.env.PATH;
+    const originalNpmExecPath = process.env.npm_execpath;
+    const originalUserAgent = process.env.npm_config_user_agent;
+
+    try {
+      process.env.PATH = '/nonexistent';
+      process.env.npm_execpath = '/opt/pnpm/bin/pnpm.cjs';
+      process.env.npm_config_user_agent = 'pnpm/9.15.4 npm/? node/v25.9.0 darwin arm64';
+
+      const res = await app.inject({ method: 'GET', url: '/api/bootcamp/env-check', headers: AUTH_HEADERS });
+      const body = JSON.parse(res.payload);
+      assert.strictEqual(body.pnpm.ok, true);
+      assert.strictEqual(body.pnpm.version, '9.15.4');
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      if (originalNpmExecPath === undefined) delete process.env.npm_execpath;
+      else process.env.npm_execpath = originalNpmExecPath;
+      if (originalUserAgent === undefined) delete process.env.npm_config_user_agent;
+      else process.env.npm_config_user_agent = originalUserAgent;
+      await app.close();
+    }
   });
 
   it('tts includes recommendation when unavailable', async () => {

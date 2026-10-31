@@ -1,10 +1,19 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * MCP Callback Memory Tools — invocation-scoped evidence/reflect/retain
  */
 
 import { z } from 'zod';
 import { callbackGet, callbackPost } from './callback-tools.js';
+import { withDegradation } from './degradation.js';
 import type { ToolResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('callback-memory-tools.ts', undefined, {
+  resourceFamily: 'memory-write',
+  authority: 'callback-owner',
+});
 
 export const callbackEvidenceSearchInputSchema = {
   query: z.string().trim().min(1).describe('Evidence query string'),
@@ -49,20 +58,40 @@ export async function handleCallbackRetainMemory(input: {
   tags?: string[] | undefined;
   metadata?: Record<string, string> | undefined;
 }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/retain-memory', {
-    content: input.content,
-    ...(input.tags ? { tags: input.tags } : {}),
-    ...(input.metadata ? { metadata: input.metadata } : {}),
+  // F174 Phase E (AC-E2/E5): explicit kind:'none'. Local memory file fallback
+  // would diverge from the central evidence store; better to surface auth
+  // failure clearly so cats see the `[degrade]` hint and can re-establish
+  // session before retrying.
+  return withDegradation({
+    toolName: 'retain_memory_callback',
+    primary: () =>
+      callbackPost('/api/callbacks/retain-memory', {
+        content: input.content,
+        ...(input.tags ? { tags: input.tags } : {}),
+        ...(input.metadata ? { metadata: input.metadata } : {}),
+      }),
+    policy: { kind: 'none' },
   });
 }
 
 export const callbackMemoryTools = [
   // D16: search_evidence_callback and reflect_callback removed — merged into
   // the public search_evidence / reflect tools (route supports both auth modes).
-  {
+  defineTool({
     name: 'cat_cafe_retain_memory_callback',
-    description: 'Retain a durable memory item through Cat Cafe callback endpoint.',
+    description:
+      `Retain a durable memory item through ${deploymentDefaults.brand.name} callback endpoint. ` +
+      'Use when you discover an important insight, decision, or lesson that should persist across sessions. ' +
+      'Examples: architectural decisions made during discussion, gotchas discovered while debugging, ' +
+      'cross-cat agreements. NOT for transient notes — only for knowledge worth remembering long-term. ' +
+      'TIP: Add descriptive tags (e.g. ["redis", "pitfall"]) so future search_evidence queries can find it.',
     inputSchema: callbackRetainMemoryInputSchema,
     handler: handleCallbackRetainMemory,
-  },
+    governance: {
+      implementationExport: 'handleCallbackRetainMemory',
+      action: 'create',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
 ] as const;

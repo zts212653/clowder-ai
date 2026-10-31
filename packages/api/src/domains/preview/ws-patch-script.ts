@@ -1,11 +1,13 @@
 /**
  * F120: WebSocket constructor patch injected into previewed pages.
  *
- * Problem: Vite HMR client opens ws://gateway:PORT/__vite_hmr without
- * __preview_port, so the gateway can't route the WS upgrade.
+ * Compatibility problem: legacy query-routed pages open
+ * ws://gateway:PORT/__vite_hmr without __preview_port, so the gateway can't
+ * route the WS upgrade. The primary preview-PORT.localhost origin inherits its
+ * identity and needs no patch.
  *
- * Solution: Monkey-patch WebSocket constructor to append __preview_port
- * only for known HMR paths (Vite, webpack, sockjs).
+ * Compatibility solution: append __preview_port only for known HMR paths
+ * when it exists on the legacy document URL.
  */
 
 /** Known HMR WebSocket path prefixes across bundlers */
@@ -17,6 +19,8 @@ export function buildWsPatchScript(targetPort: number): string {
 (function(){
   var O=window.WebSocket;
   if(!O)return;
+  var legacy=new URL(location.href).searchParams.has('__preview_port');
+  if(!legacy)return;
   var hmrPaths=${pathsJson};
   window.WebSocket=function(u,p){
     try{

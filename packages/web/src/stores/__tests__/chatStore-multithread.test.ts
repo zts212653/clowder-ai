@@ -1,10 +1,47 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearDebugEvents, configureDebug, dumpBubbleTimeline } from '@/debug/invocationEventDebug';
+import { clearDebugEvents, configureDebug } from '@/debug/invocationEventDebug';
+import { selectThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import type { ChatMessage } from '../chat-types';
-import { useChatStore } from '../chatStore';
+import { DEFAULT_THREAD_STATE, useChatStore } from '../chatStore';
 
 function makeMsg(id: string, content = 'hello'): ChatMessage {
   return { id, type: 'user', content, timestamp: Date.now() };
+}
+
+function responseLifecycle(
+  invocationId: string,
+  status: 'processing' | 'completed',
+  completedAt?: number,
+): Extract<NonNullable<ChatMessage['lifecycle']>, { kind: 'response' }> {
+  return {
+    kind: 'response',
+    orderKey: `1:${invocationId}`,
+    status,
+    targetId: 'codex',
+    invocationId,
+    inputEntryIds: [],
+    inputMessageIds: [],
+    startedAt: 1,
+    ...(completedAt === undefined ? {} : { completedAt }),
+  };
+}
+
+type MessageWriter = 'addMessage' | 'active addMessageToThread' | 'background addMessageToThread';
+
+function writeMessage(writer: MessageWriter, existing: ChatMessage[], incoming: ChatMessage): ChatMessage[] {
+  const background = writer === 'background addMessageToThread';
+  useChatStore.setState({
+    messages: background ? [] : existing,
+    threadStates: background ? { 'thread-b': { ...DEFAULT_THREAD_STATE, messages: existing } } : {},
+  });
+
+  if (writer === 'addMessage') {
+    useChatStore.getState().addMessage(incoming);
+  } else {
+    useChatStore.getState().addMessageToThread(background ? 'thread-b' : 'thread-a', incoming);
+  }
+
+  return selectThreadMessages(useChatStore.getState(), background ? 'thread-b' : 'thread-a');
 }
 
 describe('chatStore multi-thread state', () => {
@@ -18,11 +55,11 @@ describe('chatStore multi-thread state', () => {
       isLoadingHistory: false,
       hasMore: true,
       hasActiveInvocation: false,
+      hasDraft: false,
       intentMode: null,
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
 
       threadStates: {},
       viewMode: 'single',
@@ -65,6 +102,15 @@ describe('chatStore multi-thread state', () => {
     expect(msgs[1].id).toBe('a2');
   });
 
+  it('marks a first-visit thread as hydrating instead of presenting an empty conversation', () => {
+    useChatStore.getState().setCurrentThread('thread-cold');
+
+    const state = useChatStore.getState();
+    expect(state.currentThreadId).toBe('thread-cold');
+    expect(state.messages).toEqual([]);
+    expect(state.isLoadingHistory).toBe(true);
+  });
+
   it('preserves catStatuses when switching threads', () => {
     // Set cat status on thread A
     useChatStore.getState().setTargetCats(['opus', 'codex']);
@@ -91,14 +137,15 @@ describe('chatStore multi-thread state', () => {
     expect(useChatStore.getState().intentMode).toBe('ideate');
   });
 
-  it('preserves currentGame when switching threads', () => {
-    const game = { gameId: 'g1', gameType: 'werewolf', status: 'playing' as const, currentPhase: 'night', round: 1 };
-    useChatStore.getState().setCurrentGame(game);
+  it('preserves hasDraft when switching threads', () => {
+    useChatStore.getState().setThreadHasDraft('thread-a', true);
+    expect(useChatStore.getState().getThreadState('thread-a').hasDraft).toBe(true);
+
     useChatStore.getState().setCurrentThread('thread-b');
-    expect(useChatStore.getState().currentGame).toBeNull();
+    expect(useChatStore.getState().threadStates['thread-a']?.hasDraft).toBe(true);
 
     useChatStore.getState().setCurrentThread('thread-a');
-    expect(useChatStore.getState().currentGame).toEqual(game);
+    expect(useChatStore.getState().getThreadState('thread-a').hasDraft).toBe(true);
   });
 
   it('does nothing when switching to same thread', () => {
@@ -132,6 +179,37 @@ describe('chatStore multi-thread state', () => {
       const ts = useChatStore.getState().threadStates['thread-b'];
       expect(ts?.messages).toHaveLength(1);
     });
+
+    it.each<MessageWriter>([
+      'addMessage',
+      'active addMessageToThread',
+      'background addMessageToThread',
+    ])('orders a newly appended message from %s on the shared presentation timeline', (writer) => {
+      const existing: ChatMessage[] = [
+        { id: 'first', type: 'user', content: 'first', timestamp: 1_000, timelineOrderAt: 1_000 },
+        { id: 'third', type: 'user', content: 'third', timestamp: 3_000, timelineOrderAt: 3_000 },
+      ];
+      const messages = writeMessage(writer, existing, {
+        id: 'second',
+        type: 'assistant',
+        catId: 'sol',
+        content: 'second',
+        timestamp: 500,
+        lifecycle: {
+          kind: 'response',
+          orderKey: '500:inv-second',
+          invocationId: 'inv-second',
+          targetId: 'sol',
+          inputEntryIds: ['entry-second'],
+          inputMessageIds: ['input-second'],
+          status: 'completed',
+          startedAt: 500,
+          completedAt: 2_000,
+        },
+      });
+
+      expect(messages.map((message) => message.id)).toEqual(['first', 'second', 'third']);
+    });
   });
 
   describe('appendToThreadMessage', () => {
@@ -148,87 +226,7 @@ describe('chatStore multi-thread state', () => {
     });
   });
 
-  describe('replaceMessageId / replaceThreadMessageId', () => {
-    it('replaces an optimistic active-thread message id in place', () => {
-      useChatStore.getState().addMessage(makeMsg('temp-user-1', 'hello'));
-      useChatStore.getState().replaceMessageId('temp-user-1', 'msg-server-1');
-
-      const messages = useChatStore.getState().messages;
-      expect(messages).toHaveLength(1);
-      expect(messages[0].id).toBe('msg-server-1');
-      expect(messages[0].content).toBe('hello');
-    });
-
-    it('drops the optimistic active-thread duplicate when the canonical id already exists', () => {
-      useChatStore.getState().addMessage(makeMsg('temp-user-1', 'hello'));
-      useChatStore.getState().addMessage(makeMsg('msg-server-1', 'hello'));
-
-      useChatStore.getState().replaceMessageId('temp-user-1', 'msg-server-1');
-
-      const messages = useChatStore.getState().messages;
-      expect(messages).toHaveLength(1);
-      expect(messages[0].id).toBe('msg-server-1');
-    });
-
-    it('records a bubble lifecycle drop event when canonical id already exists in the active thread', () => {
-      configureDebug({ enabled: true });
-      useChatStore.getState().addMessage({
-        id: 'temp-stream-1',
-        type: 'assistant',
-        catId: 'opus',
-        content: 'hello',
-        origin: 'stream',
-        extra: { stream: { invocationId: 'inv-1' } },
-        timestamp: Date.now(),
-      });
-      useChatStore.getState().addMessage({
-        id: 'msg-server-1',
-        type: 'assistant',
-        catId: 'opus',
-        content: 'hello',
-        origin: 'callback',
-        extra: { stream: { invocationId: 'inv-1' } },
-        timestamp: Date.now() + 1,
-      });
-
-      useChatStore.getState().replaceMessageId('temp-stream-1', 'msg-server-1');
-
-      expect(dumpBubbleTimeline({ rawThreadId: true }).events).toEqual([
-        expect.objectContaining({
-          event: 'bubble_lifecycle',
-          threadId: 'thread-a',
-          action: 'drop',
-          reason: 'replace_message_id_dedup',
-          catId: 'opus',
-          messageId: 'msg-server-1',
-          invocationId: 'inv-1',
-          origin: 'stream',
-        }),
-      ]);
-    });
-
-    it('replaces an optimistic background-thread message id in place', () => {
-      useChatStore.getState().addMessageToThread('thread-b', makeMsg('temp-user-2', 'background'));
-
-      useChatStore.getState().replaceThreadMessageId('thread-b', 'temp-user-2', 'msg-server-2');
-
-      const messages = useChatStore.getState().threadStates['thread-b']?.messages;
-      expect(messages).toHaveLength(1);
-      expect(messages[0].id).toBe('msg-server-2');
-      expect(messages[0].content).toBe('background');
-    });
-
-    it('drops the optimistic background-thread duplicate when the canonical id already exists', () => {
-      useChatStore.getState().addMessageToThread('thread-b', makeMsg('temp-user-2', 'background'));
-      useChatStore.getState().addMessageToThread('thread-b', makeMsg('msg-server-2', 'background'));
-
-      useChatStore.getState().replaceThreadMessageId('thread-b', 'temp-user-2', 'msg-server-2');
-
-      const messages = useChatStore.getState().threadStates['thread-b']?.messages;
-      expect(messages).toHaveLength(1);
-      expect(messages[0].id).toBe('msg-server-2');
-    });
-
+  describe('message patches and timeline order', () => {
     it('patchMessage merges callback fields without dropping stream invocation identity', () => {
       useChatStore.getState().addMessage({
         id: 'msg-stream-1',
@@ -260,6 +258,147 @@ describe('chatStore multi-thread state', () => {
           },
         }),
       ]);
+    });
+
+    it('keeps an active response in place during streaming and moves it only after an input is read', () => {
+      useChatStore.setState({
+        messages: [
+          {
+            id: 'response-live',
+            type: 'assistant',
+            catId: 'codex',
+            content: 'working',
+            timestamp: 1_000,
+            timelineOrderAt: 1_000,
+            lifecycle: responseLifecycle('inv-live', 'processing'),
+          },
+          { id: 'user-later', type: 'user', content: 'new context', timestamp: 2_000 },
+        ],
+      });
+
+      useChatStore.getState().patchMessage('response-live', { timestamp: 3_000, timelineOrderAt: 3_000 });
+
+      const state = useChatStore.getState();
+      expect(state.messages.map((message) => message.id)).toEqual(['response-live', 'user-later']);
+      expect(selectThreadMessages(state, 'thread-a').map((message) => message.id)).toEqual([
+        'response-live',
+        'user-later',
+      ]);
+
+      useChatStore.getState().patchMessage('response-live', {
+        lifecycle: { ...responseLifecycle('inv-live', 'processing'), latestInputTimelineOrderAt: 2_500 },
+      });
+      const readState = useChatStore.getState();
+      expect(readState.messages.map((message) => message.id)).toEqual(['response-live', 'user-later']);
+      expect(selectThreadMessages(readState, 'thread-a').map((message) => message.id)).toEqual([
+        'user-later',
+        'response-live',
+      ]);
+    });
+
+    it('does not sort every stream token once the processing response is already at the live edge', () => {
+      useChatStore.setState({
+        messages: [
+          { id: 'user-earlier', type: 'user', content: 'context', timestamp: 1_000 },
+          {
+            id: 'response-live',
+            type: 'assistant',
+            catId: 'codex',
+            content: 'working',
+            timestamp: 2_000,
+            timelineOrderAt: 2_000,
+            lifecycle: responseLifecycle('inv-live', 'processing'),
+          },
+        ],
+      });
+      const sortSpy = vi.spyOn(Array.prototype, 'toSorted');
+      try {
+        useChatStore.getState().patchMessage('response-live', { timestamp: 3_000, timelineOrderAt: 3_000 });
+
+        expect(sortSpy).not.toHaveBeenCalled();
+        expect(useChatStore.getState().messages.map((message) => message.id)).toEqual([
+          'user-earlier',
+          'response-live',
+        ]);
+      } finally {
+        sortSpy.mockRestore();
+      }
+    });
+
+    it('reorders a lifecycle response when it becomes terminal, and it stops streaming', () => {
+      useChatStore.setState({
+        messages: [
+          {
+            id: 'response-live',
+            type: 'assistant',
+            catId: 'codex',
+            content: 'working',
+            timestamp: 1_000,
+            timelineOrderAt: 1_000,
+            isStreaming: true,
+            lifecycle: responseLifecycle('inv-live', 'processing'),
+          },
+          { id: 'user-later', type: 'user', content: 'new context', timestamp: 2_000 },
+        ],
+      });
+
+      useChatStore.getState().upsertLifecycleMessage('thread-a', {
+        id: 'response-live',
+        type: 'assistant',
+        catId: 'codex',
+        content: 'done',
+        timestamp: 1_000,
+        timelineOrderAt: 1_000,
+        lifecycle: responseLifecycle('inv-live', 'completed', 3_000),
+      });
+
+      const state = useChatStore.getState();
+      expect(state.messages.map((message) => message.id)).toEqual(['response-live', 'user-later']);
+      expect(selectThreadMessages(state, 'thread-a').map((message) => message.id)).toEqual([
+        'user-later',
+        'response-live',
+      ]);
+      expect(state.messages[0]).toMatchObject({ content: 'done', isStreaming: false });
+    });
+
+    it('appends a late legacy chunk without moving a terminal response back to the live edge', () => {
+      useChatStore.setState({
+        messages: [
+          {
+            id: 'response-terminal',
+            type: 'assistant',
+            catId: 'codex',
+            content: 'done',
+            timestamp: 1_000,
+            timelineOrderAt: 1_500,
+            isStreaming: false,
+            lifecycle: responseLifecycle('inv-terminal', 'completed', 3_000),
+          },
+          { id: 'user-later', type: 'user', content: 'new context', timestamp: 4_000 },
+        ],
+      });
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(5_000);
+      try {
+        useChatStore.getState().batchStreamChunkUpdate({
+          threadId: 'thread-a',
+          messageId: 'response-terminal',
+          catId: 'codex',
+          content: ' + late chunk',
+          streaming: true,
+          catStatus: 'done',
+        });
+
+        const messages = useChatStore.getState().messages;
+        expect(messages.map((message) => message.id)).toEqual(['response-terminal', 'user-later']);
+        expect(messages[0]).toMatchObject({
+          content: 'done + late chunk',
+          timestamp: 1_000,
+          timelineOrderAt: 1_500,
+          isStreaming: false,
+        });
+      } finally {
+        nowSpy.mockRestore();
+      }
     });
   });
 
@@ -422,6 +561,189 @@ describe('chatStore multi-thread state', () => {
     // switch to c
     useChatStore.getState().setCurrentThread('thread-c');
     expect(useChatStore.getState().messages.map((m) => m.id)).toEqual(['r3']);
+  });
+
+  describe('snapshotActive lastActivity (sidebar sort stability)', () => {
+    it('does not bump lastActivity to Date.now() when switching away from idle thread', () => {
+      const oldTs = Date.now() - 60_000; // message from 1 minute ago
+      const msg: ChatMessage = { id: 'old-msg', type: 'user', content: 'hi', timestamp: oldTs };
+      useChatStore.getState().addMessage(msg);
+
+      // No active invocation — thread is idle
+      expect(useChatStore.getState().hasActiveInvocation).toBe(false);
+
+      const beforeSwitch = Date.now();
+      useChatStore.getState().setCurrentThread('thread-b');
+
+      // The saved snapshot for thread-a should NOT have lastActivity ≈ now
+      const saved = useChatStore.getState().threadStates['thread-a']!;
+      expect(saved.lastActivity).toBeLessThan(beforeSwitch);
+      // It should reflect the message timestamp, not Date.now()
+      expect(saved.lastActivity).toBe(oldTs);
+    });
+
+    it('uses deliveredAt over timestamp when snapshotting idle thread', () => {
+      const oldTs = Date.now() - 120_000; // original message from 2 minutes ago
+      const deliveryTs = Date.now() - 5_000; // delivered 5 seconds ago
+      const msg: ChatMessage = {
+        id: 'queued-msg',
+        type: 'user',
+        content: 'queued',
+        timestamp: oldTs,
+        deliveredAt: deliveryTs,
+      };
+      useChatStore.getState().addMessage(msg);
+
+      expect(useChatStore.getState().hasActiveInvocation).toBe(false);
+      useChatStore.getState().setCurrentThread('thread-b');
+
+      const saved = useChatStore.getState().threadStates['thread-a']!;
+      // Should use deliveredAt (5s ago), not timestamp (2min ago)
+      expect(saved.lastActivity).toBe(deliveryTs);
+    });
+
+    it('preserves Date.now()-level lastActivity when switching away from streaming thread', () => {
+      // Simulate an active invocation (cat is streaming)
+      useChatStore.setState({ hasActiveInvocation: true });
+      useChatStore.getState().addMessage(makeMsg('stream-msg'));
+
+      const beforeSwitch = Date.now();
+      useChatStore.getState().setCurrentThread('thread-b');
+
+      // The saved snapshot for thread-a should have lastActivity ≈ now
+      const saved = useChatStore.getState().threadStates['thread-a']!;
+      expect(saved.lastActivity).toBeGreaterThanOrEqual(beforeSwitch);
+    });
+
+    it('stamps completion time when stream ends then user switches (post-stream idle)', () => {
+      // Simulate: stream active → stream ends → user switches
+      const oldMsgTs = Date.now() - 30_000;
+      const msg: ChatMessage = { id: 'streamed', type: 'assistant', content: 'done', timestamp: oldMsgTs };
+      useChatStore.getState().addMessage(msg);
+
+      // Start invocation
+      useChatStore.getState().addActiveInvocation('inv-1', 'opus', 'execute');
+      expect(useChatStore.getState().hasActiveInvocation).toBe(true);
+
+      // Stream ends — removeActiveInvocation stamps threadStates[currentThread].lastActivity
+      const beforeDone = Date.now();
+      useChatStore.getState().removeActiveInvocation('inv-1');
+      expect(useChatStore.getState().hasActiveInvocation).toBe(false);
+
+      // User switches away — idle branch should pick up the stamped time, not oldMsgTs
+      useChatStore.getState().setCurrentThread('thread-b');
+      const saved = useChatStore.getState().threadStates['thread-a']!;
+      expect(saved.lastActivity).toBeGreaterThanOrEqual(beforeDone);
+    });
+
+    it('stamps completion time on clearAllActiveInvocations (stop/timeout path)', () => {
+      const oldMsgTs = Date.now() - 30_000;
+      const msg: ChatMessage = { id: 'stopped', type: 'assistant', content: 'partial', timestamp: oldMsgTs };
+      useChatStore.getState().addMessage(msg);
+      useChatStore.getState().addActiveInvocation('inv-2', 'opus', 'execute');
+
+      const beforeClear = Date.now();
+      useChatStore.getState().clearAllActiveInvocations();
+      expect(useChatStore.getState().hasActiveInvocation).toBe(false);
+
+      useChatStore.getState().setCurrentThread('thread-b');
+      const saved = useChatStore.getState().threadStates['thread-a']!;
+      expect(saved.lastActivity).toBeGreaterThanOrEqual(beforeClear);
+    });
+
+    it('stamps completion time on clearAllThreadActiveInvocations for active thread', () => {
+      const oldMsgTs = Date.now() - 30_000;
+      const msg: ChatMessage = { id: 'cancelled', type: 'assistant', content: 'partial', timestamp: oldMsgTs };
+      useChatStore.getState().addMessage(msg);
+      useChatStore.getState().addActiveInvocation('inv-3', 'opus', 'execute');
+
+      const beforeClear = Date.now();
+      useChatStore.getState().clearAllThreadActiveInvocations('thread-a');
+      expect(useChatStore.getState().hasActiveInvocation).toBe(false);
+
+      useChatStore.getState().setCurrentThread('thread-b');
+      const saved = useChatStore.getState().threadStates['thread-a']!;
+      expect(saved.lastActivity).toBeGreaterThanOrEqual(beforeClear);
+    });
+
+    it('does not stamp when clearThreadActiveInvocation reconciles stale active-thread state', () => {
+      const oldMsgTs = Date.now() - 30_000;
+      const msg: ChatMessage = { id: 'done', type: 'assistant', content: 'ok', timestamp: oldMsgTs };
+      useChatStore.getState().addMessage(msg);
+      // Simulate stale restored processing state that hydration/reconnect will clear.
+      useChatStore.getState().addActiveInvocation('inv-4', 'opus', 'execute');
+
+      const beforeClear = Date.now();
+      useChatStore.getState().clearThreadActiveInvocation('thread-a');
+      expect(useChatStore.getState().hasActiveInvocation).toBe(false);
+
+      useChatStore.getState().setCurrentThread('thread-b');
+      const saved = useChatStore.getState().threadStates['thread-a']!;
+      expect(saved.lastActivity).toBeLessThan(beforeClear);
+      expect(saved.lastActivity).toBe(oldMsgTs);
+    });
+
+    it('stamps completion time on resetThreadInvocationState for active thread', () => {
+      const oldMsgTs = Date.now() - 30_000;
+      const msg: ChatMessage = { id: 'reset', type: 'assistant', content: 'ok', timestamp: oldMsgTs };
+      useChatStore.getState().addMessage(msg);
+      useChatStore.getState().addActiveInvocation('inv-5', 'opus', 'execute');
+
+      const beforeReset = Date.now();
+      useChatStore.getState().resetThreadInvocationState('thread-a');
+      expect(useChatStore.getState().hasActiveInvocation).toBe(false);
+
+      useChatStore.getState().setCurrentThread('thread-b');
+      const saved = useChatStore.getState().threadStates['thread-a']!;
+      expect(saved.lastActivity).toBeGreaterThanOrEqual(beforeReset);
+    });
+
+    it('stamps completion time on setHasActiveInvocation(false) fallback', () => {
+      const oldMsgTs = Date.now() - 30_000;
+      const msg: ChatMessage = { id: 'fallback', type: 'assistant', content: 'ok', timestamp: oldMsgTs };
+      useChatStore.getState().addMessage(msg);
+      // Simulate active invocation via direct setter (useAgentMessages fallback path)
+      useChatStore.getState().setHasActiveInvocation(true);
+
+      const beforeClear = Date.now();
+      useChatStore.getState().setHasActiveInvocation(false);
+      expect(useChatStore.getState().hasActiveInvocation).toBe(false);
+
+      useChatStore.getState().setCurrentThread('thread-b');
+      const saved = useChatStore.getState().threadStates['thread-a']!;
+      expect(saved.lastActivity).toBeGreaterThanOrEqual(beforeClear);
+    });
+
+    it('stamps completion time when removeActiveInvocation misses an optimistic slot', () => {
+      const oldMsgTs = Date.now() - 30_000;
+      const msg: ChatMessage = { id: 'missing-slot', type: 'assistant', content: 'ok', timestamp: oldMsgTs };
+      useChatStore.getState().addMessage(msg);
+      // Simulate optimistic send path: active flag flipped before any slot was registered.
+      useChatStore.getState().setHasActiveInvocation(true);
+
+      const beforeDone = Date.now();
+      useChatStore.getState().removeActiveInvocation('inv-missing');
+      expect(useChatStore.getState().hasActiveInvocation).toBe(false);
+
+      useChatStore.getState().setCurrentThread('thread-b');
+      const saved = useChatStore.getState().threadStates['thread-a']!;
+      expect(saved.lastActivity).toBeGreaterThanOrEqual(beforeDone);
+    });
+
+    it('does not stamp on redundant setHasActiveInvocation(false) when already false', () => {
+      const oldMsgTs = Date.now() - 30_000;
+      const msg: ChatMessage = { id: 'noop', type: 'assistant', content: 'ok', timestamp: oldMsgTs };
+      useChatStore.getState().addMessage(msg);
+      // hasActiveInvocation is already false (default)
+      expect(useChatStore.getState().hasActiveInvocation).toBe(false);
+
+      useChatStore.getState().setHasActiveInvocation(false);
+
+      useChatStore.getState().setCurrentThread('thread-b');
+      const saved = useChatStore.getState().threadStates['thread-a']!;
+      // Should NOT have a recent timestamp — no real transition occurred
+      expect(saved.lastActivity).toBeLessThanOrEqual(oldMsgTs);
+    });
   });
 
   describe('unread suppression (persistent badge fix)', () => {

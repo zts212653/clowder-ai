@@ -5,18 +5,22 @@
  * 只暴露协作核心工具（消息、上下文、任务、权限）。
  */
 
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { installShutdownHandlers, startRefreshLoop } from './refresh-loop.js';
+import { SERVER_INSTRUCTIONS } from './server-instructions.js';
 import { registerCollabToolset } from './server-toolsets.js';
+import { isDirectExecution } from './utils/is-direct-execution.js';
 import { initCatCafeDir } from './utils/path-validator.js';
 
 function createBaseServer(name: string): McpServer {
-  return new McpServer({
-    name,
-    version: '0.1.0',
-  });
+  return new McpServer(
+    {
+      name,
+      version: '0.1.0',
+    },
+    { instructions: SERVER_INSTRUCTIONS.collab },
+  );
 }
 
 /**
@@ -36,9 +40,12 @@ async function main(): Promise<void> {
   console.error('[cat-cafe-collab] MCP Server starting...');
   await server.connect(transport);
   console.error('[cat-cafe-collab] MCP Server running on stdio');
+
+  const refreshLoop = startRefreshLoop();
+  installShutdownHandlers(refreshLoop);
 }
 
-const isEntryPoint = process.argv[1] && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1]);
+const isEntryPoint = isDirectExecution(import.meta.url);
 if (isEntryPoint) {
   main().catch((err) => {
     console.error('[cat-cafe-collab] Fatal error:', err);

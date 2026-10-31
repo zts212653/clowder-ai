@@ -1,0 +1,283 @@
+{
+  "schemaVersion": 1,
+  "metricBirthCertificate": {
+    "utilityClaim": "A passing replay means review entry and completion follow author and custody provenance: formal external reviews cannot privately suppress GitHub delivery, advisory scans cannot claim review completion, and local-cat reviews return to the author with exact evidence.",
+    "estimator": "Deterministic paired replay over one positive and one counterfactual for each entry mode and completion route; count intent, entry, and completion mismatches without weighting them together.",
+    "validityBounds": "Covers review tasks and trackers with explicit author kind, custody, handoff source, exact revision, entry kind, and bilingual no-comment directives represented by the frozen cases. Unknown or contradictory provenance fails closed; euphemisms outside the directive matcher require a new escaped-incident fixture.",
+    "consumer": "pnpm check:review-completion-routing blocks a change that regresses either side of the route pair; the eval:external-case-closure owner consumes new real incidents by adding a counterfactual pair.",
+    "calibrationPlan": "Recalibrate whenever a real review-routing incident escapes or a legitimate advisory/local handoff is falsely blocked. V1 rejects explicit EN/CN review-artifact suppression verbs, but deliberately does not treat bare 'no GitHub' or a lone Chinese negation as a ban; add the escaped case and its opposite-route counterfactual before changing that boundary.",
+    "repeatabilityContract": "Discovery and acceptance use separate cases in each pair; inputs and expected verdicts are frozen JSON, the evaluator is deterministic, and repeated runs must be byte-for-byte stable.",
+    "sunsetPolicy": "Keep the entry guard while formal external review can create a tracker or completion artifact. Tune directive vocabulary on false blocks; sunset only if a typed runtime contract makes contradictory task and tracker instructions unrepresentable.",
+    "runtimeBoundary": "This V1 hard guard runs in the checked-in review-routing check chain; the live register_pr_tracking mutation path remains description-governed until a typed runtime contract makes contradictory instructions unrepresentable."
+  },
+  "entryPairs": [
+    {
+      "id": "external-pr-task-formal",
+      "positive": {
+        "expectedIntent": "external",
+        "expectedMode": "formal",
+        "expectedOk": true,
+        "input": {
+          "author": { "kind": "external", "githubLogin": "mindfn" },
+          "reviewer": { "catId": "codex-sol", "githubLogin": "zts212653" },
+          "custody": "external_subject",
+          "handoffSource": "cross_thread",
+          "reviewMode": "formal",
+          "target": {
+            "kind": "pull_request",
+            "repository": "zts212653/clowder-ai",
+            "number": 1182,
+            "revision": { "kind": "head_sha", "value": "4444444444444444444444444444444444444444" }
+          },
+          "entry": {
+            "kind": "task",
+            "instructions": "Perform a formal exact-HEAD review and deliver the verdict to the same GitHub PR.",
+            "evidenceRefs": ["head:4444444444444444444444444444444444444444"]
+          }
+        }
+      },
+      "counterfactual": {
+        "expectedIntent": "external",
+        "expectedMode": "formal",
+        "expectedOk": false,
+        "input": {
+          "author": { "kind": "external", "githubLogin": "mindfn" },
+          "reviewer": { "catId": "codex-sol", "githubLogin": "zts212653" },
+          "custody": "external_subject",
+          "handoffSource": "cross_thread",
+          "reviewMode": "formal",
+          "target": {
+            "kind": "pull_request",
+            "repository": "zts212653/clowder-ai",
+            "number": 1182,
+            "revision": { "kind": "head_sha", "value": "4444444444444444444444444444444444444444" }
+          },
+          "entry": {
+            "kind": "task",
+            "instructions": "Return APPROVE or REQUEST_CHANGES for this exact HEAD. Do not comment on GitHub.",
+            "evidenceRefs": ["head:4444444444444444444444444444444444444444"]
+          }
+        }
+      }
+    },
+    {
+      "id": "external-pr-tracker-advisory",
+      "positive": {
+        "expectedIntent": "external",
+        "expectedMode": "advisory_read_only",
+        "expectedOk": true,
+        "input": {
+          "author": { "kind": "external", "githubLogin": "mindfn" },
+          "reviewer": { "catId": "codex-sol", "githubLogin": "zts212653" },
+          "custody": "external_subject",
+          "handoffSource": "github_connector",
+          "reviewMode": "advisory_read_only",
+          "target": {
+            "kind": "pull_request",
+            "repository": "zts212653/clowder-ai",
+            "number": 1182,
+            "revision": { "kind": "head_sha", "value": "5555555555555555555555555555555555555555" }
+          },
+          "entry": {
+            "kind": "tracker",
+            "instructions": "advisory_read_only: keep the audit private, do not comment on GitHub, and never claim review completion.",
+            "evidenceRefs": ["head:5555555555555555555555555555555555555555"]
+          }
+        }
+      },
+      "counterfactual": {
+        "expectedIntent": "external",
+        "expectedMode": "advisory_read_only",
+        "expectedOk": false,
+        "input": {
+          "author": { "kind": "external", "githubLogin": "mindfn" },
+          "reviewer": { "catId": "codex-sol", "githubLogin": "zts212653" },
+          "custody": "external_subject",
+          "handoffSource": "github_connector",
+          "reviewMode": "advisory_read_only",
+          "target": {
+            "kind": "pull_request",
+            "repository": "zts212653/clowder-ai",
+            "number": 1182,
+            "revision": { "kind": "head_sha", "value": "5555555555555555555555555555555555555555" }
+          },
+          "entry": {
+            "kind": "tracker",
+            "instructions": "advisory_read_only: keep the audit private and do not comment on GitHub.",
+            "evidenceRefs": ["head:5555555555555555555555555555555555555555"]
+          },
+          "completion": {
+            "status": "complete",
+            "route": {
+              "kind": "cat_handoff",
+              "targetCatId": "codex-sol",
+              "carrier": "cross_thread",
+              "threadId": "thread_external_advisory"
+            },
+            "evidenceRefs": ["head:5555555555555555555555555555555555555555"]
+          }
+        }
+      }
+    },
+    {
+      "id": "local-cat-entry-provenance",
+      "positive": {
+        "expectedIntent": "local_cat",
+        "expectedMode": "formal",
+        "expectedOk": true,
+        "input": {
+          "author": { "kind": "local_cat", "catId": "opus47", "githubLogin": "zts212653" },
+          "reviewer": { "catId": "codex-sol", "githubLogin": "zts212653" },
+          "custody": "local_cat_handoff",
+          "handoffSource": "cross_thread",
+          "reviewMode": "formal",
+          "target": {
+            "kind": "pull_request",
+            "repository": "acme/widgets",
+            "number": 3087,
+            "revision": { "kind": "head_sha", "value": "6666666666666666666666666666666666666666" }
+          },
+          "entry": {
+            "kind": "task",
+            "instructions": "Review the exact HEAD and return a local-cat verdict to the author.",
+            "evidenceRefs": ["head:6666666666666666666666666666666666666666"]
+          }
+        }
+      },
+      "counterfactual": {
+        "expectedIntent": "unknown",
+        "expectedMode": "formal",
+        "expectedOk": false,
+        "input": {
+          "author": { "kind": "local_cat", "catId": "opus47", "githubLogin": "zts212653" },
+          "reviewer": { "catId": "codex-sol", "githubLogin": "zts212653" },
+          "custody": "local_cat_handoff",
+          "handoffSource": "github_connector",
+          "reviewMode": "formal",
+          "target": {
+            "kind": "pull_request",
+            "repository": "acme/widgets",
+            "number": 3087,
+            "revision": { "kind": "head_sha", "value": "6666666666666666666666666666666666666666" }
+          },
+          "entry": {
+            "kind": "task",
+            "instructions": "Review the exact HEAD and return a local-cat verdict to the author.",
+            "evidenceRefs": ["head:6666666666666666666666666666666666666666"]
+          }
+        }
+      }
+    }
+  ],
+  "pairs": [
+    {
+      "id": "external-pr-review",
+      "positive": {
+        "expectedIntent": "external",
+        "expectedOk": true,
+        "input": {
+          "author": { "kind": "external", "githubLogin": "mindfn" },
+          "reviewer": { "catId": "codex-sol", "githubLogin": "zts212653" },
+          "custody": "external_subject",
+          "handoffSource": "cross_thread",
+          "target": {
+            "kind": "pull_request",
+            "repository": "acme/widgets",
+            "number": 3045,
+            "revision": { "kind": "head_sha", "value": "1111111111111111111111111111111111111111" }
+          },
+          "completion": {
+            "status": "complete",
+            "route": {
+              "kind": "github_artifact",
+              "url": "https://github.com/acme/widgets/pull/3045#pullrequestreview-5000000001"
+            },
+            "evidenceRefs": ["commit:1111111111111111111111111111111111111111"]
+          }
+        }
+      },
+      "counterfactual": {
+        "expectedIntent": "external",
+        "expectedOk": false,
+        "input": {
+          "author": { "kind": "external", "githubLogin": "mindfn" },
+          "reviewer": { "catId": "codex-sol", "githubLogin": "zts212653" },
+          "custody": "external_subject",
+          "handoffSource": "cross_thread",
+          "target": {
+            "kind": "pull_request",
+            "repository": "acme/widgets",
+            "number": 3045,
+            "revision": { "kind": "head_sha", "value": "1111111111111111111111111111111111111111" }
+          },
+          "completion": {
+            "status": "complete",
+            "route": {
+              "kind": "cat_handoff",
+              "targetCatId": "codex-sol",
+              "carrier": "cross_thread",
+              "threadId": "thread_external_review"
+            },
+            "evidenceRefs": ["commit:1111111111111111111111111111111111111111"]
+          }
+        }
+      }
+    },
+    {
+      "id": "local-cat-review",
+      "positive": {
+        "expectedIntent": "local_cat",
+        "expectedOk": true,
+        "input": {
+          "author": { "kind": "local_cat", "catId": "opus47", "githubLogin": "zts212653" },
+          "reviewer": { "catId": "codex-sol", "githubLogin": "zts212653" },
+          "custody": "local_cat_handoff",
+          "handoffSource": "cross_thread",
+          "target": {
+            "kind": "pull_request",
+            "repository": "acme/widgets",
+            "number": 3046,
+            "revision": { "kind": "head_sha", "value": "2222222222222222222222222222222222222222" }
+          },
+          "completion": {
+            "status": "complete",
+            "route": {
+              "kind": "cat_handoff",
+              "targetCatId": "opus47",
+              "carrier": "cross_thread",
+              "threadId": "thread_local_review"
+            },
+            "evidenceRefs": [
+              "commit:2222222222222222222222222222222222222222",
+              "test:node --test targeted-review.test.js"
+            ]
+          }
+        }
+      },
+      "counterfactual": {
+        "expectedIntent": "local_cat",
+        "expectedOk": false,
+        "input": {
+          "author": { "kind": "local_cat", "catId": "opus47", "githubLogin": "zts212653" },
+          "reviewer": { "catId": "codex-sol", "githubLogin": "zts212653" },
+          "custody": "local_cat_handoff",
+          "handoffSource": "cross_thread",
+          "target": {
+            "kind": "pull_request",
+            "repository": "acme/widgets",
+            "number": 3046,
+            "revision": { "kind": "head_sha", "value": "2222222222222222222222222222222222222222" }
+          },
+          "completion": {
+            "status": "complete",
+            "route": {
+              "kind": "github_artifact",
+              "url": "https://github.com/acme/widgets/pull/3046#pullrequestreview-5000000002"
+            },
+            "evidenceRefs": ["commit:2222222222222222222222222222222222222222"]
+          }
+        }
+      }
+    }
+  ]
+}

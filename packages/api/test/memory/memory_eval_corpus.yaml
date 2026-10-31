@@ -6,6 +6,14 @@
 # When multiple docs share the same anchor via feature_ids, the feature
 # spec wins. Queries here target feature spec titles/summaries.
 
+metric_birth_certificate:
+  utility_claim: "Default lexical evidence search retrieves the canonical project truth for discriminative real-world queries."
+  estimator: "Expected-anchor Recall@5 over lexical cases; precision and semantic-only cases are evaluated separately."
+  validity_bounds: "Recalibrate when canonical titles or aliases change, or when corpus growth makes a query ambiguous enough that its expected anchor is no longer uniquely justified."
+  consumer: "pnpm gate blocks merges on a lexical retrieval regression below the threshold."
+  calibration_plan: "On failure, inspect the actual Top-5 and independently confirm user intent before changing either the corpus or ranking implementation."
+  repeatability_contract: "Acceptance metric on one frozen repo tree with an in-memory lexical index and embeddings disabled; deterministic single-run result required."
+
 queries:
   # --- Recall cases: exact anchor lookup (bypass FTS) ---
   - id: R-01
@@ -30,9 +38,9 @@ queries:
 
   # --- Recall cases: FTS title/summary search ---
   - id: R-05
-    query: "adapter"
+    query: "memory adapter"
     expected_anchors: [F102]
-    note: "FTS match on title (Adapter 化重構)"
+    note: "Discriminative title query for the F102 memory adapter"
 
   - id: R-06
     query: "gateway"
@@ -90,9 +98,11 @@ queries:
   - id: S-01
     query: "记忆组件怎么存储"
     expected_anchors: [F102]
+    search_mode: semantic
     note: "Chinese query for memory storage — needs semantic match"
 
   - id: S-02
     query: "how does the cat communication work"
     expected_anchors: [F088]
+    search_mode: semantic
     note: "English paraphrase — FTS might miss, embedding should catch"

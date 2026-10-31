@@ -24,9 +24,10 @@ describe('InvocationTracker userId auth (slot-aware)', () => {
 
   it('cancel with matching userId succeeds', () => {
     const tracker = new InvocationTracker();
-    tracker.start('thread-1', 'opus', 'alice', ['opus']);
+    tracker.start('thread-1', 'opus', 'alice', ['opus'], 'inv-opus');
     const result = tracker.cancel('thread-1', 'opus', 'alice');
     assert.equal(result.cancelled, true);
+    assert.deepEqual(result.executionIds, ['inv-opus']);
     assert.equal(tracker.has('thread-1', 'opus'), false);
   });
 
@@ -45,6 +46,48 @@ describe('InvocationTracker userId auth (slot-aware)', () => {
     const result = tracker.cancel('thread-1', 'opus');
     assert.equal(result.cancelled, true);
     assert.equal(tracker.has('thread-1', 'opus'), false);
+  });
+});
+
+describe('InvocationTracker exact execution cancellation', () => {
+  it('atomically refuses a replaced execution without aborting the replacement', () => {
+    const tracker = new InvocationTracker();
+    tracker.start('thread-1', 'opus', 'alice', ['opus'], 'inv-old');
+    const replacement = tracker.start('thread-1', 'opus', 'alice', ['opus'], 'inv-new');
+
+    const stale = tracker.cancelExact('thread-1', 'opus', 'inv-old', 'alice', 'task_cancelled');
+
+    assert.equal(stale.state, 'execution_mismatch');
+    assert.equal(stale.cancelled, false);
+    assert.equal(replacement.signal.aborted, false);
+    assert.equal(tracker.getExecutionId('thread-1', 'opus'), 'inv-new');
+  });
+
+  it('replays only the same exact cancellation without aborting twice or borrowing another reason', () => {
+    const tracker = new InvocationTracker();
+    const controller = tracker.start('thread-1', 'opus', 'alice', ['opus'], 'inv-opus');
+
+    const first = tracker.cancelExact('thread-1', 'opus', 'inv-opus', 'alice', 'task_cancelled');
+    const replay = tracker.cancelExact('thread-1', 'opus', 'inv-opus', 'alice', 'task_cancelled');
+    const conflicting = tracker.cancelExact('thread-1', 'opus', 'inv-opus', 'alice', 'other_reason');
+
+    assert.equal(first.state, 'cancelled');
+    assert.equal(replay.state, 'already_cancelled');
+    assert.equal(conflicting.state, 'cancellation_conflict');
+    assert.deepEqual(replay.executionIds, ['inv-opus']);
+    assert.equal(controller.signal.aborted, true);
+    assert.equal(controller.signal.reason, 'task_cancelled');
+  });
+
+  it('keeps user ownership inside the same atomic exact-cancel decision', () => {
+    const tracker = new InvocationTracker();
+    const controller = tracker.start('thread-1', 'opus', 'alice', ['opus'], 'inv-opus');
+
+    const result = tracker.cancelExact('thread-1', 'opus', 'inv-opus', 'bob', 'task_cancelled');
+
+    assert.equal(result.state, 'user_mismatch');
+    assert.equal(result.cancelled, false);
+    assert.equal(controller.signal.aborted, false);
   });
 });
 
@@ -79,6 +122,141 @@ describe('InvocationTracker catId tracking (slot-aware)', () => {
     const result = tracker.cancel('thread-1', 'opus', 'bob');
     assert.equal(result.cancelled, true);
     assert.deepEqual(result.catIds, ['gemini', 'codex']);
+  });
+});
+
+describe('InvocationTracker lifecycle ActiveRun binding', () => {
+  it('registers a provider dispatcher only for the exact live child and stale release cannot erase a replacement', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('thread-1', ['opus'], 'owner-1', 'parent-1');
+    const run = {
+      threadId: 'thread-1',
+      targetId: 'opus',
+      invocationId: 'child-1',
+      responseMessageId: 'response-1',
+      inputEntryIds: ['entry-1'],
+      inputMessageIds: ['message-1'],
+      privateInputEntryIds: [],
+      startedAt: 100,
+    };
+    assert.equal(tracker.bindLifecycleActiveRun(run, 'parent-1'), true);
+    const first = {
+      invocationId: 'child-1',
+      capabilities: { append: true, steer: true },
+      handle: {
+        provider: 'openai_codex',
+        carrier: 'codex_app_server',
+        threadId: 'native-thread-1',
+        turnId: 'native-turn-1',
+      },
+      dispatch: async () => ({ accepted: true, handle: first.handle }),
+    };
+    const releaseFirst = tracker.bindAgentClientActiveRunDispatcher('thread-1', 'opus', first, 'parent-1');
+    assert.equal(typeof releaseFirst, 'function');
+    assert.equal(tracker.getAgentClientActiveRunDispatcher('thread-1', 'opus'), first);
+
+    const stale = { ...first, invocationId: 'child-stale' };
+    assert.equal(tracker.bindAgentClientActiveRunDispatcher('thread-1', 'opus', stale, 'parent-1'), null);
+
+    releaseFirst();
+    assert.equal(tracker.getAgentClientActiveRunDispatcher('thread-1', 'opus'), undefined);
+    const replacement = { ...first, handle: { ...first.handle } };
+    const releaseReplacement = tracker.bindAgentClientActiveRunDispatcher('thread-1', 'opus', replacement, 'parent-1');
+    assert.equal(typeof releaseReplacement, 'function');
+    releaseFirst();
+    assert.equal(tracker.getAgentClientActiveRunDispatcher('thread-1', 'opus'), replacement);
+  });
+
+  it('mirrors one durable Append only onto the exact live Active Run', () => {
+    const tracker = new InvocationTracker();
+    tracker.start('thread-1', 'codex', 'user-1', ['codex'], 'parent-1');
+    const run = {
+      threadId: 'thread-1',
+      targetId: 'codex',
+      invocationId: 'turn-1',
+      responseMessageId: 'response-1',
+      inputEntryIds: ['entry-old'],
+      inputMessageIds: ['message-old'],
+      privateInputEntryIds: [],
+      startedAt: 1,
+    };
+    assert.equal(tracker.bindLifecycleActiveRun(run, 'parent-1'), true);
+    tracker.bindAgentClientActiveRunDispatcher(
+      'thread-1',
+      'codex',
+      {
+        invocationId: 'turn-1',
+        capabilities: { append: true, steer: true },
+        handle: { provider: 'openai_codex', carrier: 'codex_app_server', threadId: 'native-1', turnId: 'turn-1' },
+        dispatch: async () => ({ accepted: true, handle: {} }),
+      },
+      'parent-1',
+    );
+
+    assert.equal(
+      tracker.appendLifecycleActiveRunInputs(
+        'thread-1',
+        'codex',
+        { invocationId: 'turn-stale', responseMessageId: 'response-1' },
+        'entry-new',
+        ['message-new'],
+      ),
+      false,
+    );
+    assert.equal(
+      tracker.appendLifecycleActiveRunInputs(
+        'thread-1',
+        'codex',
+        { invocationId: 'turn-1', responseMessageId: 'response-1' },
+        'entry-new',
+        ['message-new'],
+      ),
+      true,
+    );
+    assert.deepEqual(tracker.getActiveSlots('thread-1')[0].activeRun.inputEntryIds, ['entry-old', 'entry-new']);
+    assert.deepEqual(tracker.getActiveSlots('thread-1')[0].activeRun.inputMessageIds, ['message-old', 'message-new']);
+  });
+
+  it('binds the exact child response only to its current parent-owned slot', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('thread-1', ['opus'], 'owner-1', 'parent-1');
+    const run = {
+      threadId: 'thread-1',
+      targetId: 'opus',
+      invocationId: 'child-1',
+      responseMessageId: 'response-1',
+      inputEntryIds: ['entry-1'],
+      inputMessageIds: ['message-1'],
+      privateInputEntryIds: [],
+      startedAt: 100,
+    };
+
+    assert.equal(tracker.bindLifecycleActiveRun(run, 'parent-1'), true);
+    assert.deepEqual(tracker.getActiveSlots('thread-1'), [{ catId: 'opus', startedAt: run.startedAt, activeRun: run }]);
+    assert.equal(tracker.bindLifecycleActiveRun({ ...run, invocationId: 'child-2' }, 'parent-2'), false);
+    assert.equal(tracker.getActiveSlots('thread-1')[0].activeRun.invocationId, 'child-1');
+  });
+
+  it('removes ActiveRun with the slot and rejects a stale replacement binding', () => {
+    const tracker = new InvocationTracker();
+    const oldBatch = tracker.startAll('thread-1', ['opus'], 'owner-1', 'parent-1');
+    const oldRun = {
+      threadId: 'thread-1',
+      targetId: 'opus',
+      invocationId: 'child-1',
+      responseMessageId: 'response-1',
+      inputEntryIds: ['entry-1'],
+      inputMessageIds: ['message-1'],
+      privateInputEntryIds: [],
+      startedAt: 100,
+    };
+    assert.equal(tracker.bindLifecycleActiveRun(oldRun, 'parent-1'), true);
+    tracker.completeAll('thread-1', ['opus'], oldBatch);
+    assert.deepEqual(tracker.getActiveSlots('thread-1'), []);
+
+    tracker.startAll('thread-1', ['opus'], 'owner-1', 'parent-2');
+    assert.equal(tracker.bindLifecycleActiveRun(oldRun, 'parent-1'), false);
+    assert.equal(tracker.getActiveSlots('thread-1')[0].activeRun, undefined);
   });
 });
 
@@ -154,12 +332,17 @@ describe('SlotTracker: per-thread-per-cat isolation', () => {
     assert.equal(tracker.has('t1'), false, 'no slots remain');
   });
 
-  it('getActiveSlots returns all active catIds for thread', () => {
+  it('getActiveSlots returns {catId, startedAt} for all active slots', () => {
     const tracker = new InvocationTracker();
     tracker.start('t1', 'opus', 'user1', ['opus']);
     tracker.start('t1', 'codex', 'user1', ['codex']);
     const slots = tracker.getActiveSlots('t1');
-    assert.deepEqual(slots.sort(), ['codex', 'opus']);
+    const catIds = slots.map((s) => s.catId).sort();
+    assert.deepEqual(catIds, ['codex', 'opus']);
+    for (const slot of slots) {
+      assert.equal(typeof slot.startedAt, 'number');
+      assert.ok(slot.startedAt > 0, 'startedAt should be positive epoch ms');
+    }
   });
 
   it('getActiveSlots returns empty for unknown thread', () => {
@@ -221,6 +404,20 @@ describe('SlotTracker: per-thread-per-cat isolation', () => {
     guard2.release();
   });
 
+  it('guardSessionSeal blocks only its slot until the active-session pointer can change', () => {
+    const tracker = new InvocationTracker();
+    const guard = tracker.guardSessionSeal('t1', 'opus');
+    assert.equal(guard.acquired, true);
+
+    assert.equal(tracker.start('t1', 'opus', 'user1', ['opus']).signal.aborted, true);
+    assert.equal(tracker.tryStartThread('t1', 'opus', 'user1'), null);
+    assert.equal(tracker.startAll('t1', ['opus', 'codex'], 'user1'), null);
+    assert.equal(tracker.start('t1', 'codex', 'user1', ['codex']).signal.aborted, false);
+
+    guard.release();
+    assert.equal(tracker.start('t1', 'opus', 'user1', ['opus']).signal.aborted, false);
+  });
+
   it('different threads are fully independent', () => {
     const tracker = new InvocationTracker();
     tracker.start('t1', 'opus', 'user1', ['opus']);
@@ -261,5 +458,358 @@ describe('SlotTracker: per-thread-per-cat isolation', () => {
     const result = tracker.tryStartThread('t1', 'catA', 'user1');
     assert.equal(result, null, 'should return null when thread is deleting');
     guard.release();
+  });
+});
+
+// --- Multi-cat startAll / completeAll / startedAt (Bug fix: concurrent multi-cat display) ---
+
+describe('InvocationTracker: startAll registers all target cats', () => {
+  it('startAll creates slots for all catIds with shared controller', () => {
+    const tracker = new InvocationTracker();
+    const controller = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    assert.equal(tracker.has('t1', 'opus'), true);
+    assert.equal(tracker.has('t1', 'codex'), true);
+    // Both slots share the same controller
+    assert.equal(controller.signal.aborted, false);
+  });
+
+  it('startAll preempts existing slots for same catId', () => {
+    const tracker = new InvocationTracker();
+    const old = tracker.start('t1', 'opus', 'user1', ['opus']);
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    assert.equal(old.signal.aborted, true, 'old opus slot should be preempted');
+    assert.equal(old.signal.reason, 'preempted');
+  });
+
+  it('startAll returns pre-aborted controller when thread is deleting', () => {
+    const tracker = new InvocationTracker();
+    const guard = tracker.guardDelete('t1');
+    assert.equal(guard.acquired, true);
+    const controller = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    assert.equal(controller.signal.aborted, true);
+    guard.release();
+  });
+
+  it('completeAll removes all target cat slots', () => {
+    const tracker = new InvocationTracker();
+    const controller = tracker.startAll('t1', ['opus', 'codex', 'gemini'], 'user1');
+    tracker.completeAll('t1', ['opus', 'codex', 'gemini'], controller);
+    assert.equal(tracker.has('t1'), false, 'all slots removed');
+  });
+
+  it('completeAll matches all batch slots via batchController', () => {
+    const tracker = new InvocationTracker();
+    const batchController = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    // F-parallel-cancel: batchController is INDEPENDENT from per-cat controllers — complete() of a
+    // single slot needs that cat's own controller (getController), not the batch controller.
+    tracker.complete('t1', 'opus', tracker.getController('t1', 'opus'));
+    assert.equal(tracker.has('t1', 'opus'), false);
+    assert.equal(tracker.has('t1', 'codex'), true);
+    // complete() with the batch controller does NOT match a per-cat slot
+    tracker.complete('t1', 'codex', batchController);
+    assert.equal(tracker.has('t1', 'codex'), true, 'individual complete must not match the batch controller');
+    // completeAll matches all batch slots via batchController
+    tracker.completeAll('t1', ['codex'], batchController);
+    assert.equal(tracker.has('t1'), false);
+  });
+
+  it('completeSlot releases one finished cat from a batch via batchController', () => {
+    const tracker = new InvocationTracker();
+    const controller = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+
+    tracker.completeSlot('t1', 'opus', controller);
+
+    assert.equal(tracker.has('t1', 'opus'), false, 'finished cat should be released immediately');
+    assert.equal(tracker.has('t1', 'codex'), true, 'still-running cat must keep its slot');
+  });
+
+  it('completeSlot with wrong controller does not remove the slot', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+
+    tracker.completeSlot('t1', 'opus', new AbortController());
+
+    assert.equal(tracker.has('t1', 'opus'), true);
+    assert.equal(tracker.has('t1', 'codex'), true);
+  });
+
+  it('completeAll with wrong controller does not remove slots', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    const wrongCtrl = new AbortController();
+    tracker.completeAll('t1', ['opus', 'codex'], wrongCtrl);
+    assert.equal(tracker.has('t1', 'opus'), true, 'opus should survive wrong controller');
+    assert.equal(tracker.has('t1', 'codex'), true, 'codex should survive wrong controller');
+  });
+});
+
+describe('InvocationTracker: tryStartThreadAll', () => {
+  it('registers all cats when thread is idle', () => {
+    const tracker = new InvocationTracker();
+    const controller = tracker.tryStartThreadAll('t1', ['opus', 'codex'], 'user1');
+    assert.ok(controller, 'should return controller when idle');
+    assert.equal(tracker.has('t1', 'opus'), true);
+    assert.equal(tracker.has('t1', 'codex'), true);
+  });
+
+  it('returns null when thread has active slots', () => {
+    const tracker = new InvocationTracker();
+    tracker.start('t1', 'gemini', 'user1', ['gemini']);
+    const result = tracker.tryStartThreadAll('t1', ['opus', 'codex'], 'user1');
+    assert.equal(result, null);
+    // gemini should still be active, opus/codex not registered
+    assert.equal(tracker.has('t1', 'gemini'), true);
+    assert.equal(tracker.has('t1', 'opus'), false);
+    assert.equal(tracker.has('t1', 'codex'), false);
+  });
+
+  it('returns null when thread is deleting', () => {
+    const tracker = new InvocationTracker();
+    const guard = tracker.guardDelete('t1');
+    const result = tracker.tryStartThreadAll('t1', ['opus', 'codex'], 'user1');
+    assert.equal(result, null);
+    guard.release();
+  });
+
+  it('binds a post-reservation executionId for exact terminal ownership', () => {
+    const tracker = new InvocationTracker();
+    const batch = tracker.tryStartThreadAll('t1', ['opus', 'codex'], 'user1');
+    assert.ok(batch);
+
+    tracker.bindExecutionId('t1', ['opus', 'codex'], batch, 'inv-batch');
+    const result = tracker.cancel('t1', 'opus', 'user1');
+
+    assert.deepEqual(result.executionIds, ['inv-batch']);
+  });
+
+  it('does not bind a late executionId onto a replacement slot', () => {
+    const tracker = new InvocationTracker();
+    const stale = tracker.tryStartThreadAll('t1', ['opus'], 'user1');
+    assert.ok(stale);
+    const replacement = tracker.startAll('t1', ['opus'], 'user1', 'inv-replacement');
+
+    tracker.bindExecutionId('t1', ['opus'], stale, 'inv-stale');
+    const result = tracker.cancel('t1', 'opus', 'user1');
+
+    assert.equal(replacement.signal.aborted, false, 'batch gate stays independent from per-cat cancel');
+    assert.deepEqual(result.executionIds, ['inv-replacement']);
+  });
+});
+
+describe('InvocationTracker: exact execution ownership recovery', () => {
+  it('releases a slot only when its executionId matches the terminal record', () => {
+    const tracker = new InvocationTracker();
+    const controller = tracker.start('thread-zombie', 'codex-sol', 'alice', ['codex-sol'], 'inv-zombie');
+
+    assert.equal(tracker.classifyExecutionId('thread-zombie', 'codex-sol', 'inv-zombie'), 'matching');
+    assert.equal(tracker.completeByExecutionId('thread-zombie', 'codex-sol', 'inv-zombie'), 'released');
+    assert.equal(tracker.classifyExecutionId('thread-zombie', 'codex-sol', 'inv-zombie'), 'absent');
+    assert.equal(tracker.has('thread-zombie', 'codex-sol'), false);
+    assert.equal(controller.signal.aborted, false, 'terminal cleanup must not abort an already-dead runner');
+  });
+
+  it('preserves a replacement slot whose executionId differs from the zombie record', () => {
+    const tracker = new InvocationTracker();
+    const replacement = tracker.start('thread-zombie', 'codex-sol', 'alice', ['codex-sol'], 'inv-replacement');
+
+    assert.equal(tracker.classifyExecutionId('thread-zombie', 'codex-sol', 'inv-zombie'), 'replacement');
+    assert.equal(tracker.completeByExecutionId('thread-zombie', 'codex-sol', 'inv-zombie'), 'replacement');
+    assert.equal(tracker.has('thread-zombie', 'codex-sol'), true);
+    assert.equal(replacement.signal.aborted, false);
+  });
+
+  it('distinguishes an empty slot from a replacement owner', () => {
+    const tracker = new InvocationTracker();
+
+    assert.equal(tracker.classifyExecutionId('thread-zombie', 'codex-sol', 'inv-zombie'), 'absent');
+    assert.equal(tracker.completeByExecutionId('thread-zombie', 'codex-sol', 'inv-zombie'), 'absent');
+  });
+});
+
+describe('InvocationTracker: per-cat cancel isolation (AC-B9 regression)', () => {
+  it('cancel one cat from startAll batch does NOT abort other cats', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    // Cancel opus only
+    const result = tracker.cancel('t1', 'opus');
+    assert.equal(result.cancelled, true);
+    assert.equal(tracker.has('t1', 'opus'), false, 'opus should be removed');
+    assert.equal(tracker.has('t1', 'codex'), true, 'codex must survive opus cancel');
+    // Verify codex controller is NOT aborted
+    const slots = tracker.getActiveSlots('t1');
+    assert.equal(slots.length, 1);
+    assert.equal(slots[0].catId, 'codex');
+  });
+
+  it('cancel non-primary cat does NOT abort primary execution signal', () => {
+    const tracker = new InvocationTracker();
+    const primaryController = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    // Cancel codex (non-primary)
+    tracker.cancel('t1', 'codex');
+    // Primary controller must NOT be aborted — routeExecution depends on it
+    assert.equal(primaryController.signal.aborted, false, 'primary controller must survive non-primary cancel');
+    assert.equal(tracker.has('t1', 'opus'), true, 'opus must survive codex cancel');
+  });
+
+  it('cancel one cat aborts only that cat controller, not the batch gate', () => {
+    const tracker = new InvocationTracker();
+    const batchController = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    const opusCtrl = tracker.getController('t1', 'opus');
+    tracker.cancel('t1', 'opus');
+    assert.equal(opusCtrl.signal.aborted, true, 'cancelled cat per-cat controller aborted');
+    // F-parallel-cancel: a single-cat cancel must NOT abort the independent batch gate
+    // (only cancelAll / force-reset does) — else upper consumers treat it as whole-invocation cancel.
+    assert.equal(batchController.signal.aborted, false, 'batch controller survives single-cat cancel');
+    assert.equal(tracker.has('t1', 'codex'), true, 'codex slot still exists');
+  });
+
+  it('cancelAll aborts the batch gate (whole-invocation stop)', () => {
+    const tracker = new InvocationTracker();
+    const batchController = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    tracker.cancelAll('t1', 'user1', 'cancel_all');
+    // F-parallel-cancel: cancelAll/force-reset is the whole-invocation stop → aborts the batch gate
+    // so upper consumers (messages.ts pre-check / QueueProcessor break) stop the whole record.
+    assert.equal(batchController.signal.aborted, true, 'cancelAll aborts the batch gate');
+    assert.equal(tracker.has('t1'), false, 'all slots removed');
+  });
+
+  it('tryStartThreadAll also creates independent controllers', () => {
+    const tracker = new InvocationTracker();
+    const primaryController = tracker.tryStartThreadAll('t1', ['opus', 'codex'], 'user1');
+    assert.ok(primaryController);
+    tracker.cancel('t1', 'codex');
+    assert.equal(primaryController.signal.aborted, false, 'primary survives non-primary cancel');
+    assert.equal(tracker.has('t1', 'opus'), true);
+  });
+
+  // F-parallel-cancel: getController exposes each cat's own signal source so the execution
+  // layer can isolate cancels (instead of all cats sharing the returned primaryController.signal).
+  it('getController returns each cat own controller; cancel one does NOT abort the sibling', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    const opusCtrl = tracker.getController('t1', 'opus');
+    const codexCtrl = tracker.getController('t1', 'codex');
+    assert.ok(opusCtrl, 'opus controller exposed');
+    assert.ok(codexCtrl, 'codex controller exposed');
+    assert.notEqual(opusCtrl, codexCtrl, 'each cat has an independent controller');
+    tracker.cancel('t1', 'opus');
+    assert.equal(opusCtrl.signal.aborted, true, 'opus controller aborted by opus cancel');
+    assert.equal(codexCtrl.signal.aborted, false, 'codex controller (sibling signal source) survives');
+  });
+
+  // F-parallel-cancel invariant 1 (砚砚): cancel keeps a tombstone so getController still hands
+  // back the ABORTED controller — a cat cancelled before grabbing its own signal must surface an
+  // aborted signal, NOT fall back to the batch gate (which a single-cat cancel does not abort).
+  it('getController: absent → undefined; active → live controller; cancelled → aborted tombstone', () => {
+    const tracker = new InvocationTracker();
+    assert.equal(tracker.getController('t1', 'opus'), undefined, 'no slot → undefined');
+    assert.equal(tracker.getSlotState('t1', 'opus'), 'absent', 'no slot → absent');
+    tracker.start('t1', 'opus', 'user1', ['opus']);
+    const ctrl = tracker.getController('t1', 'opus');
+    assert.ok(ctrl, 'active slot → controller');
+    assert.equal(ctrl.signal.aborted, false, 'active controller not aborted');
+    tracker.cancel('t1', 'opus');
+    const afterCancel = tracker.getController('t1', 'opus');
+    assert.ok(afterCancel, 'cancelled tombstone → controller (NOT undefined)');
+    assert.equal(afterCancel.signal.aborted, true, 'tombstone controller is aborted');
+    assert.equal(tracker.has('t1', 'opus'), false, 'has() treats tombstone as inactive');
+    assert.equal(tracker.getSlotState('t1', 'opus'), 'canceled', 'getSlotState reports canceled');
+  });
+});
+
+// F156 Phase B-2: cancelAll with userId authorization
+describe('InvocationTracker: cancelAll userId guard (F156 B-2)', () => {
+  it('cancelAll with matching userId only cancels that user invocations', () => {
+    const tracker = new InvocationTracker();
+    tracker.start('t1', 'opus', 'alice', ['opus']);
+    tracker.start('t1', 'codex', 'bob', ['codex']);
+    tracker.cancelAll('t1', 'alice');
+    assert.equal(tracker.has('t1', 'opus'), false, 'alice opus should be cancelled');
+    assert.equal(tracker.has('t1', 'codex'), true, 'bob codex should survive');
+  });
+
+  it('cancelAll without userId cancels all (backward compat / admin)', () => {
+    const tracker = new InvocationTracker();
+    const ctrl1 = tracker.start('t1', 'opus', 'alice', ['opus']);
+    const ctrl2 = tracker.start('t1', 'codex', 'bob', ['codex']);
+    tracker.cancelAll('t1');
+    assert.equal(ctrl1.signal.aborted, true);
+    assert.equal(ctrl2.signal.aborted, true);
+    assert.equal(tracker.has('t1'), false);
+  });
+
+  it('cancelAll returns cancelled catIds and executionIds for terminal scoping', () => {
+    const tracker = new InvocationTracker();
+    tracker.start('t1', 'opus', 'alice', ['opus'], 'inv-opus');
+    tracker.start('t1', 'codex', 'bob', ['codex'], 'inv-codex');
+    tracker.start('t1', 'gemini', 'alice', ['gemini'], 'inv-gemini');
+
+    const cancelled = tracker.cancelAll('t1', 'alice');
+    assert.deepStrictEqual(cancelled.catIds.sort(), ['gemini', 'opus'], 'should return only alice catIds');
+    assert.deepStrictEqual(cancelled.executionIds.sort(), ['inv-gemini', 'inv-opus']);
+    assert.deepStrictEqual(cancelled.executionIdByCatId, {
+      opus: 'inv-opus',
+      gemini: 'inv-gemini',
+    });
+    assert.equal(tracker.has('t1', 'codex'), true, 'bob codex untouched');
+  });
+
+  it('cancelAll without userId returns all cancelled catIds and executionIds', () => {
+    const tracker = new InvocationTracker();
+    tracker.start('t1', 'opus', 'alice', ['opus'], 'inv-opus');
+    tracker.start('t1', 'codex', 'bob', ['codex'], 'inv-codex');
+
+    const cancelled = tracker.cancelAll('t1');
+    assert.deepStrictEqual(cancelled.catIds.sort(), ['codex', 'opus']);
+    assert.deepStrictEqual(cancelled.executionIds.sort(), ['inv-codex', 'inv-opus']);
+    assert.deepStrictEqual(cancelled.executionIdByCatId, {
+      opus: 'inv-opus',
+      codex: 'inv-codex',
+    });
+  });
+
+  it('cancelAll maps a shared batch execution to every canceled slot while keeping the aggregate deduplicated', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'alice', 'inv-shared');
+
+    const cancelled = tracker.cancelAll('t1', 'alice');
+    assert.deepStrictEqual(cancelled.executionIds, ['inv-shared']);
+    assert.deepStrictEqual(cancelled.executionIdByCatId, {
+      opus: 'inv-shared',
+      codex: 'inv-shared',
+    });
+  });
+});
+
+describe('InvocationTracker: startedAt timestamp', () => {
+  it('start() sets startedAt and getActiveSlots returns it', () => {
+    const before = Date.now();
+    const tracker = new InvocationTracker();
+    tracker.start('t1', 'opus', 'user1', ['opus']);
+    const after = Date.now();
+    const slots = tracker.getActiveSlots('t1');
+    assert.equal(slots.length, 1);
+    assert.ok(slots[0].startedAt >= before, `startedAt (${slots[0].startedAt}) >= before (${before})`);
+    assert.ok(slots[0].startedAt <= after, `startedAt (${slots[0].startedAt}) <= after (${after})`);
+  });
+
+  it('startAll() sets same startedAt for all cats', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    const slots = tracker.getActiveSlots('t1');
+    assert.equal(slots.length, 2);
+    // All cats should share the same startedAt (same Date.now() call)
+    assert.equal(slots[0].startedAt, slots[1].startedAt, 'startAll should use single timestamp');
+  });
+
+  it('F5 recovery: getActiveSlots preserves original startedAt after time passes', async () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    const slotsEarly = tracker.getActiveSlots('t1');
+    // Simulate time passing (F5 happens later)
+    await new Promise((r) => setTimeout(r, 50));
+    const slotsLater = tracker.getActiveSlots('t1');
+    // startedAt should be the ORIGINAL time, not Date.now() at query time
+    assert.equal(slotsLater[0].startedAt, slotsEarly[0].startedAt, 'startedAt must not change over time');
   });
 });

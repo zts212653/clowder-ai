@@ -1,0 +1,19 @@
+{
+  "verdictId": "2026-06-30-eval-a2a-no-data-telemetry-gap-build",
+  "rawInputs": [
+    {
+      "path": "docs/harness-feedback/snapshots/2026-06-17T03-00-00-229Z-F167-eval.yaml",
+      "sha256": "9194d63907715480a3425e1e892e1b971cfa78299224a0b465cd78060df9d0e7"
+    },
+    {
+      "path": "docs/harness-feedback/attributions/2026-06-17T03-00-00-229Z-F167-attribution.yaml",
+      "sha256": "16ddac1bf829f9189ab24e2eb71b1ddb197edd76deca842813e3d8df0278ff51"
+    }
+  ],
+  "generatedAt": "2026-06-17T03:00:00.229Z",
+  "generator": {
+    "name": "eval-a2a-live-verdict",
+    "version": "1"
+  },
+  "sanitizeRulesVersion": "f192-e-pilot-v1"
+}

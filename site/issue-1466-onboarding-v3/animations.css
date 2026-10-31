@@ -1,0 +1,79 @@
+@keyframes breathe {
+  50% {
+    transform: translateY(-4px) rotate(1deg);
+  }
+}
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.demo-input-stage {
+  padding: 90px 0 40px;
+}
+.demo-composer {
+  border: 1px solid #d7cbbb;
+  border-radius: 16px;
+  background: var(--card);
+  padding: 22px;
+  font-size: 15px;
+  line-height: 1.9;
+  min-height: 100px;
+  box-shadow: 0 8px 30px #26150607;
+}
+.demo-composer i {
+  display: inline-block;
+  width: 2px;
+  height: 17px;
+  background: var(--accent);
+  vertical-align: middle;
+  margin-left: 3px;
+}
+.cat-message.entering:before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 80px;
+  height: 88px;
+  background: var(--arrival);
+  background-size: 320px 88px;
+  animation: cat-approach 0.85s ease-out forwards;
+  pointer-events: none;
+}
+.cat-message.entering {
+  position: relative;
+  --arrival: url(assets/cats/ragdoll-walk-row.png);
+}
+.cat-message.entering:has(.avatar[aria-label="暹罗猫"]) {
+  --arrival: url(assets/cats/siamese-walk-row.png);
+}
+.cat-message.entering:has(.avatar[aria-label="缅因猫"]) {
+  --arrival: url(assets/cats/maine-walk-row.png);
+}
+@keyframes cat-approach {
+  0% {
+    transform: translate(130px, 80px) scale(1);
+    opacity: 1;
+    background-position: 0 0;
+  }
+  45% {
+    background-position: -160px 0;
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-15px, -27px) scale(0.35);
+    opacity: 0;
+    background-position: -240px 0;
+  }
+}

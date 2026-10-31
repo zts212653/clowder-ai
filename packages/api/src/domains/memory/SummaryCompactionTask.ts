@@ -1,6 +1,23 @@
 import type Database from 'better-sqlite3';
-import type { ScheduledTask } from '../../infrastructure/scheduler/types.js';
-import { hasHighValueSignal, SUMMARY_CONFIG } from './summary-config.js';
+import type {
+  AbstractiveMessage,
+  DurableCandidate,
+  SummaryAttempt,
+  SummaryGenerationUsage,
+} from './abstractive-summary-types.js';
+import {
+  commitSummaryProjection,
+  countCoveredSummaryMessages,
+  readRecallSuppressionFence,
+  reEmbedSummary,
+  refreshSummaryBacklog,
+  reportSummaryAttempt,
+  submitSummaryCandidates,
+} from './summary-compaction-effects.js';
+import { SUMMARY_CONFIG } from './summary-config.js';
+import { isSummaryEligible } from './summary-eligibility.js';
+import { normalizeSummaryReadBatch, planSummaryInputSettlement, type SummaryReadBatch } from './summary-input-batch.js';
+import { settleSkippedSummaryInput } from './summary-skipped-input.js';
 
 interface SummaryStateRow {
   thread_id: string;
@@ -12,6 +29,7 @@ interface SummaryStateRow {
   last_abstractive_at: string | null;
   abstractive_token_count: number | null;
   carry_over: number; // 1 = has backlog from previous batch, bypasses cooldown
+  daily?: boolean;
 }
 
 interface ThreadLastActivity {
@@ -22,6 +40,8 @@ interface ThreadLastActivity {
 export interface SummaryCompactionDeps {
   /** SQLite database (evidence.sqlite) */
   db: Database.Database;
+  /** Share the append delta writer's queue; never hold it while calling the model. */
+  runExclusive?: <T>(fn: () => T) => Promise<T>;
   /** Feature flag check */
   enabled: () => boolean;
   /** Get last message timestamp for a thread (for quiet window check) */
@@ -31,13 +51,21 @@ export interface SummaryCompactionDeps {
     threadId: string,
     afterMessageId: string | null,
     limit: number,
-  ) => Promise<Array<{ id: string; content: string; catId?: string; timestamp: number }>>;
-  /** Call Opus API to generate abstractive summary + candidates */
-  generateAbstractive: (input: {
-    previousSummary: string | null;
-    messages: Array<{ id: string; content: string; catId?: string; timestamp: number }>;
-    threadId: string;
-  }) => Promise<{
+  ) => Promise<AbstractiveMessage[] | SummaryReadBatch>;
+  /** Generate a summary from the exact attributed input. */
+  generateAbstractive: (
+    input: {
+      previousSummary: string | null;
+      messages: AbstractiveMessage[];
+      threadId: string;
+    },
+    signal?: AbortSignal,
+    onUsage?: (usage: SummaryGenerationUsage) => void,
+  ) => Promise<{
+    curationState?: import('./curation/LunaCurationState.js').LunaCurationState;
+    modelId?: string;
+    promptVersion?: string;
+    usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
     segments: Array<{
       summary: string;
       topicKey: string;
@@ -51,220 +79,153 @@ export interface SummaryCompactionDeps {
       candidates?: unknown[];
     }>;
   } | null>;
+  /** User-visible outcome follows final persistence; record failure remains fail-open. */
+  onAttempt?: (attempt: SummaryAttempt) => Promise<void> | void;
+  /** Re-embed a thread after summary update (for semantic search). Optional — fail-open. */
+  reEmbed?: (anchor: string, text: string) => Promise<void>;
+  /** H-3: Submit durable candidate to MarkerQueue for knowledge emergence pipeline. Optional — fail-open. */
+  submitCandidate?: (candidate: {
+    kind: string;
+    title: string;
+    claim: string;
+    confidence: string;
+    threadId: string;
+    evidence?: DurableCandidate['evidence'];
+  }) => Promise<void>;
   /** Logger */
   logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void };
-}
-
-/**
- * Phase G: LSM-style summary compaction task.
- *
- * Runs periodically, checks eligibility for each thread, generates
- * abstractive summaries via Opus API, and writes to summary_segments + evidence_docs.
- */
-export function createSummaryCompactionTask(deps: SummaryCompactionDeps): ScheduledTask {
-  const config = SUMMARY_CONFIG;
-
-  return {
-    name: 'summary-compaction',
-    intervalMs: config.schedulerIntervalMs,
-    enabled: deps.enabled,
-
-    async execute() {
-      // P1 fix (砚砚 review): get ALL threads with pending work, then filter by
-      // full eligibility (quiet/cooldown/signal) BEFORE applying budget.
-      // Old code truncated to budget first, starving eligible threads behind ineligible ones.
-      const candidates = getEligibleThreads(deps.db, deps, config);
-      if (candidates.length === 0) return;
-
-      let processed = 0;
-      for (const state of candidates) {
-        if (processed >= config.perTickBudget) break;
-        try {
-          const didProcess = await processThread(state, deps, config);
-          if (didProcess) processed++;
-        } catch (err) {
-          deps.logger.error(`[summary-compaction] thread ${state.thread_id} failed`, err);
-        }
-      }
-      if (processed > 0) {
-        deps.logger.info(`[summary-compaction] processed ${processed}/${candidates.length} threads`);
-      }
-    },
+  curation?: {
+    timezone: string;
+    now?: () => number;
+    startedAt?: () => number | null;
+    shouldProcessThread?: (threadId: string) => Promise<boolean>;
+    reconcilePendingInput?: (
+      threadId: string,
+      expectedWatermark?: string | null,
+      signal?: AbortSignal,
+    ) => Promise<boolean>;
   };
 }
 
 /** Check eligibility rule (KD-43 unified): quietWindow AND (count OR tokens OR signal) AND (cooldown OR signal-bypass) */
-function isEligible(
-  state: SummaryStateRow,
-  lastActivity: ThreadLastActivity | null,
-  config: typeof SUMMARY_CONFIG,
-): boolean {
-  const now = Date.now();
-
-  // Quiet window check: thread must be idle
-  if (lastActivity) {
-    const quietMs = now - lastActivity.lastMessageAt;
-    if (quietMs < config.quietWindowMinutes * 60 * 1000) return false;
-  }
-
-  const highSignal = hasHighValueSignal(state.pending_signal_flags);
-
-  // P1 R4 fix (砚砚 review): carry_over is a "backlog continuation" total bypass —
-  // skips BOTH volume gate AND cooldown. A tail of 5 messages from a 205-message
-  // batch should not be blocked by the 20-message threshold.
-  const isCarryOver = state.carry_over === 1;
-
-  // Volume or signal check (carry-over bypasses)
-  const volumeOk =
-    isCarryOver ||
-    state.pending_message_count >= config.pendingMessageThreshold ||
-    state.pending_token_count >= config.pendingTokenThreshold ||
-    highSignal;
-  if (!volumeOk) return false;
-
-  // Cooldown check (high-signal OR carry-over bypasses)
-  const bypassCooldown = highSignal || isCarryOver;
-  if (!bypassCooldown && state.last_abstractive_at) {
-    const hoursSince = (now - new Date(state.last_abstractive_at).getTime()) / (1000 * 60 * 60);
-    if (hoursSince < config.cooldownHours) return false;
-  }
-
-  return true;
-}
-
-function getEligibleThreads(
-  db: Database.Database,
-  _deps: SummaryCompactionDeps,
-  _config: typeof SUMMARY_CONFIG,
-): SummaryStateRow[] {
-  const rows = db.prepare('SELECT * FROM summary_state WHERE pending_message_count > 0').all() as SummaryStateRow[];
-  // Eligibility is checked per-thread in processThread to allow async lastActivity lookup
-  // Here we just return threads with pending work; full eligibility check happens in execute loop
-  return rows;
-}
-
-async function processThread(
+/** Exported for F139 SummaryCompactionTaskSpec to reuse per-thread processing */
+export async function processThread(
   state: SummaryStateRow,
   deps: SummaryCompactionDeps,
   config: typeof SUMMARY_CONFIG,
+  signal?: AbortSignal,
 ): Promise<boolean> {
+  signal?.throwIfAborted();
+  if (deps.curation?.reconcilePendingInput) {
+    if (!(await deps.curation.reconcilePendingInput(state.thread_id, state.last_summarized_message_id, signal)))
+      return false;
+    state = {
+      ...(deps.db.prepare('SELECT * FROM summary_state WHERE thread_id=?').get(state.thread_id) as SummaryStateRow),
+      daily: state.daily,
+    };
+  }
   // Full eligibility check (with async lastActivity)
   const lastActivity = await deps.getThreadLastActivity(state.thread_id);
-  if (!isEligible(state, lastActivity, config)) return false;
+  signal?.throwIfAborted();
+  if (!deps.enabled() || !isSummaryEligible(state, lastActivity, config, { daily: state.daily, ...deps.curation }))
+    return false;
+
+  // A prepared true-recall lease means the canonical MessageStore CAS has not
+  // settled. Do not send a potentially recalled body to the summary provider.
+  const suppressionFence = readRecallSuppressionFence(deps.db, state.thread_id);
+  if (suppressionFence.preparedCount > 0) return false;
 
   // Get messages after watermark
-  const messages = await deps.getMessagesAfterWatermark(state.thread_id, state.last_summarized_message_id, 200);
-  if (messages.length === 0) return false;
+  const batch = normalizeSummaryReadBatch(
+    await deps.getMessagesAfterWatermark(state.thread_id, state.last_summarized_message_id, 200),
+  );
+  const messages = batch.messages;
+  signal?.throwIfAborted();
+  if (messages.length === 0) {
+    const settlement = planSummaryInputSettlement(batch, 0, state.last_summarized_message_id);
+    if (!settlement) return false;
+    const commit = () => {
+      signal?.throwIfAborted();
+      return settleSkippedSummaryInput(deps.db, state.thread_id, settlement, suppressionFence);
+    };
+    if (!(deps.runExclusive ? await deps.runExclusive(commit) : commit())) return false;
+    await refreshSummaryBacklog(deps, state.thread_id, settlement.lastMessageId);
+    return true;
+  }
 
   // Get current summary from evidence_docs (read model)
   const evidenceRow = deps.db
     .prepare('SELECT summary FROM evidence_docs WHERE anchor = ?')
     .get(`thread-${state.thread_id}`) as { summary: string | null } | undefined;
 
-  // Call Opus API
-  const result = await deps.generateAbstractive({
-    previousSummary: evidenceRow?.summary ?? null,
-    messages,
-    threadId: state.thread_id,
-  });
-
-  if (!result) {
-    deps.logger.info(`[summary-compaction] thread ${state.thread_id}: Opus returned null (fail-open)`);
-    return false;
-  }
-
-  // Dual-write: INSERT segments + UPDATE evidence_docs
-  const lastMsg = messages[messages.length - 1]!;
-  const now = new Date().toISOString();
-
-  const insertSegment = deps.db.prepare(`
-    INSERT INTO summary_segments
-    (id, thread_id, level, from_message_id, to_message_id, message_count,
-     summary, topic_key, topic_label, boundary_reason, boundary_confidence,
-     related_segment_ids, candidates, model_id, prompt_version, generated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const tx = deps.db.transaction(() => {
-    // 1. INSERT summary_segments (append-only)
-    for (const seg of result.segments) {
-      const segId = `seg-${state.thread_id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      insertSegment.run(
-        segId,
-        state.thread_id,
-        1, // L1
-        seg.fromMessageId,
-        seg.toMessageId,
-        seg.messageCount,
-        seg.summary,
-        seg.topicKey,
-        seg.topicLabel,
-        seg.boundaryReason,
-        seg.boundaryConfidence,
-        seg.relatedSegmentIds ? JSON.stringify(seg.relatedSegmentIds) : null,
-        seg.candidates ? JSON.stringify(seg.candidates) : null,
-        'claude-opus-4-6',
-        'g2-thread-abstract-v1',
-        now,
-      );
-    }
-
-    // 2. UPDATE evidence_docs.summary (read model = merged summary from all segments)
-    const mergedSummary = result.segments.map((s) => s.summary).join('\n\n');
-    const totalTokens = mergedSummary.length / 4; // rough estimate
-
-    deps.db
-      .prepare(
-        `UPDATE evidence_docs SET summary = ?, source_hash = ?, updated_at = ?
-       WHERE anchor = ?`,
-      )
-      .run(mergedSummary, `abstractive-${Date.now()}`, now, `thread-${state.thread_id}`);
-
-    // 3. UPDATE summary_state watermark (carry_over = 0, will be set to 1 below if backlog remains)
-    deps.db
-      .prepare(
-        `UPDATE summary_state SET
-        last_summarized_message_id = ?,
-        pending_message_count = 0,
-        pending_token_count = 0,
-        pending_signal_flags = 0,
-        carry_over = 0,
-        summary_type = 'abstractive',
-        last_abstractive_at = ?,
-        abstractive_token_count = ?
-       WHERE thread_id = ?`,
-      )
-      .run(lastMsg.id, now, Math.round(totalTokens), state.thread_id);
-  });
-
-  tx();
-
-  // P1 R2 fix (砚砚 review): after compaction, check if there are STILL more messages
-  // beyond the new watermark. If so, re-populate pending signal so the thread stays
-  // in the scheduling pool. Otherwise a delta > 200 messages would silently stall.
+  // Call the selected existing model carrier.
+  const previousSummary = evidenceRow?.summary ?? null;
+  let usage: SummaryGenerationUsage | undefined;
+  let committed = false;
   try {
-    const remaining = await deps.getMessagesAfterWatermark(state.thread_id, lastMsg.id, 1);
-    if (remaining.length > 0) {
-      // Re-count actual remaining (up to 200 to avoid scanning everything)
-      const remainingBatch = await deps.getMessagesAfterWatermark(state.thread_id, lastMsg.id, 200);
-      const estimatedTokens = remainingBatch.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0);
-      // P1 R3 fix: set carry_over=1 so next tick bypasses cooldown for this backlog
-      deps.db
-        .prepare(
-          `UPDATE summary_state SET pending_message_count = ?, pending_token_count = ?, carry_over = 1
-           WHERE thread_id = ?`,
-        )
-        .run(remainingBatch.length, estimatedTokens, state.thread_id);
-      deps.logger.info(
-        `[summary-compaction] thread ${state.thread_id}: ${remainingBatch.length} messages still pending after batch`,
-      );
-    }
-  } catch {
-    // fail-open: worst case is one missed tick, next append will re-trigger
-  }
+    const result = await deps.generateAbstractive(
+      {
+        previousSummary,
+        messages,
+        threadId: state.thread_id,
+      },
+      signal,
+      (generationUsage) => {
+        usage = generationUsage;
+      },
+    );
+    signal?.throwIfAborted();
 
-  deps.logger.info(
-    `[summary-compaction] thread ${state.thread_id}: ${result.segments.length} segment(s), watermark → ${lastMsg.id}`,
-  );
-  return true;
+    if (!result) {
+      deps.logger.info(`[summary-compaction] thread ${state.thread_id}: model returned null (fail-open)`);
+      return false;
+    }
+
+    // Validate a contiguous, fully processed prefix of the exact fetched input.
+    // A bounded provider request must not acknowledge the unread batch tail.
+    const coveredCount = countCoveredSummaryMessages(messages, result);
+    if (coveredCount === null) {
+      deps.logger.error('[summary-compaction] invalid input coverage; keeping watermark unchanged');
+      return false;
+    }
+    const lastMsg = messages[coveredCount - 1];
+    if (!lastMsg) return false;
+    const settlement = planSummaryInputSettlement(batch, coveredCount, state.last_summarized_message_id);
+    if (!settlement) return false;
+    const now = new Date().toISOString();
+    const mergedSummary = result.segments.map((s) => s.summary).join('\n\n');
+    const totalTokens = mergedSummary.length / 4;
+    const commit = () => {
+      signal?.throwIfAborted();
+      return commitSummaryProjection(deps, {
+        threadId: state.thread_id,
+        lastMessageId: settlement.lastMessageId,
+        settlement,
+        result,
+        now,
+        mergedSummary,
+        totalTokens,
+        suppressionFence,
+        expectedSummary: evidenceRow?.summary ?? null,
+        processedMessages: messages.slice(0, coveredCount),
+        pendingMessages: messages.slice(coveredCount),
+      });
+    };
+    committed = deps.runExclusive ? await deps.runExclusive(commit) : commit();
+    if (!committed) return false;
+
+    // The watermark is now canonical. Derived embedding, candidates and backlog
+    // refresh must settle before terminal truth because the next tick cannot infer
+    // which post-commit effects were skipped.
+    await reEmbedSummary(deps, state.thread_id, mergedSummary);
+    await submitSummaryCandidates(deps, state.thread_id, result);
+    await refreshSummaryBacklog(deps, state.thread_id, settlement.lastMessageId);
+
+    deps.logger.info(
+      `[summary-compaction] thread ${state.thread_id}: ${result.segments.length} segment(s), watermark → ${settlement.lastMessageId}`,
+    );
+    return true;
+  } finally {
+    await reportSummaryAttempt(deps, usage, committed);
+  }
 }

@@ -7,15 +7,17 @@
  * - stale queued (> 5min) → failed(error=process_restart)
  * Also clears associated TaskProgress snapshots.
  *
- * Phase A+: Posts visible error messages to affected threads
- * so users know their request was interrupted.
- * (Intake from community PR #78 / Issue #77, with source field fix.)
+ * The parent/auth record is only a projection: child recovery owns the exact
+ * response result, and pending Queue entries resume from their durable ledger.
  */
 
-import type { CatId, ConnectorSource } from '@cat-cafe/shared';
+import type { CatId } from '@cat-cafe/shared';
+import type { IBallCustodyIngest } from '../../../../ball-custody/BallCustodyIngest.js';
+import { buildInvocationDiedEvent } from '../../../../ball-custody/ball-custody-events.js';
 import type { IInvocationRecordStore, InvocationRecord } from '../../stores/ports/InvocationRecordStore.js';
 import type { AppendMessageInput } from '../../stores/ports/MessageStore.js';
-import type { AgentMessage } from '../../types.js';
+import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
+import type { InvocationQueue } from './InvocationQueue.js';
 import type { TaskProgressStore } from './TaskProgressStore.js';
 
 export interface StartupSweepResult {
@@ -26,6 +28,12 @@ export interface StartupSweepResult {
   /** Queued user messages made visible after orphan sweep. */
   messagesRecovered: number;
   notifiedThreads: number;
+  queueEntriesRestored: number;
+  queueEntriesResumed: number;
+  /** Durable Queue scopes that remain eligible after reconciliation, whether resumed here or by the caller. */
+  queueResumeScopes: Array<{ threadId: string; userId: string }>;
+  queueMessagesBackfilled: number;
+  queueMessagesTerminalized: number;
   durationMs: number;
 }
 
@@ -40,31 +48,34 @@ interface MessageAppender {
   markDelivered?(id: string, deliveredAt: number): unknown;
 }
 
-interface AgentMessageBroadcaster {
-  broadcastAgentMessage(message: AgentMessage, threadId: string): void;
+interface ConnectorMessageBroadcaster {
+  broadcastToRoom(room: string, event: string, data: unknown): void;
 }
-
-const RECONCILER_SOURCE: ConnectorSource = {
-  connector: 'startup-reconciler',
-  label: '⚠️ 重启通知',
-  icon: '⚠️',
-};
 
 export interface StartupReconcilerDeps {
   invocationRecordStore: IInvocationRecordStore;
+  /** Durable child lifecycle truth used to reconcile callback-auth projection state. */
+  turnExecutionStore?: ITurnExecutionStore;
   taskProgressStore: TaskProgressStore;
   log: ReconcilerLog;
   /** Only sweep records created before this timestamp (prevents sweeping new invocations from current process). */
   processStartAt?: number;
-  /** Phase A+: Optional — post visible error messages to affected threads. */
+  /** Optional legacy message visibility projection; never append a recovery result. */
   messageStore?: MessageAppender;
-  /** Phase A+: Optional — push real-time WebSocket notification to frontend. */
-  socketManager?: AgentMessageBroadcaster;
+  /** Retained composition option; recovery does not publish an independent chat notice. */
+  socketManager?: ConnectorMessageBroadcaster;
+  /** Optional observability ledger for restart-killed running invocations. */
+  ballCustody?: IBallCustodyIngest;
+  /** Exact in-memory projection hydrated from the canonical durable Queue ledger. */
+  invocationQueue?: InvocationQueue;
+  /** F254: natural next-spawn hook, invoked once for each newly restored queue scope. */
+  resumeQueue?: (threadId: string, userId: string) => Promise<unknown>;
 }
 
 type ScanStore = IInvocationRecordStore & { scanByStatus(status: string): Promise<string[]> };
 
 const STALE_QUEUED_THRESHOLD_MS = 5 * 60 * 1000;
+const CHILD_STATUSES = new Set(['running', 'succeeded', 'failed', 'canceled', 'interrupted']);
 
 export class StartupReconciler {
   private readonly deps: StartupReconcilerDeps;
@@ -87,21 +98,46 @@ export class StartupReconciler {
         taskProgressCleared: 0,
         messagesRecovered: 0,
         notifiedThreads: 0,
+        queueEntriesRestored: 0,
+        queueEntriesResumed: 0,
+        queueResumeScopes: [],
+        queueMessagesBackfilled: 0,
+        queueMessagesTerminalized: 0,
         durationMs: Date.now() - start,
       };
     }
 
     const scanStore = store as ScanStore;
-    const affectedThreads = new Map<string, { catIds: CatId[]; userId: string }>();
-    const runResult = await this.sweepRunning(scanStore, this.deps.processStartAt, affectedThreads);
-    const queueResult = await this.sweepStaleQueued(scanStore, affectedThreads);
+    const runResult = await this.sweepRunning(scanStore, this.deps.processStartAt);
+    const queueResult = await this.sweepStaleQueued(scanStore);
 
-    const notifiedThreads = await this.notifyAffectedThreads(affectedThreads);
+    // ADR-043: Queue rows were hydrated directly from the durable ledger before
+    // this sweep. Atomic message+row admission makes orphan-message recovery and
+    // message-custody reconstruction unnecessary.
+    const orphanedMessageRecovery = 0;
+    const queueResumeScopes = this.deps.invocationQueue?.listScopes() ?? [];
+    let queueEntriesResumed = 0;
+    if (this.deps.resumeQueue) {
+      for (const scope of queueResumeScopes) {
+        try {
+          await this.deps.resumeQueue(scope.threadId, scope.userId);
+          queueEntriesResumed += 1;
+        } catch (err) {
+          this.deps.log.warn(
+            `[startup-reconciler] Failed to resume durable Queue scope ${scope.threadId}/${scope.userId}: ${String(err)}`,
+          );
+        }
+      }
+    }
+
+    // Canonical child recovery settles the original response. Parent/auth projection
+    // recovery never creates a second History result or a socket-only chat notice.
+    const notifiedThreads = 0;
 
     const running = runResult.running;
     const queued = queueResult.queued;
     const taskProgressCleared = runResult.taskProgressCleared;
-    const messagesRecovered = runResult.messagesRecovered + queueResult.messagesRecovered;
+    const messagesRecovered = runResult.messagesRecovered + queueResult.messagesRecovered + orphanedMessageRecovery;
     const swept = running + queued;
     const durationMs = Date.now() - start;
     this.deps.log.info(
@@ -109,13 +145,26 @@ export class StartupReconciler {
         `${taskProgressCleared} task-progress cleared, ${messagesRecovered} messages recovered, ` +
         `${notifiedThreads} threads notified, ${durationMs}ms`,
     );
-    return { swept, running, queued, taskProgressCleared, messagesRecovered, notifiedThreads, durationMs };
+    return {
+      swept,
+      running,
+      queued,
+      taskProgressCleared,
+      messagesRecovered,
+      notifiedThreads,
+      queueEntriesRestored: queueResumeScopes.length,
+      queueEntriesResumed,
+      queueResumeScopes,
+      queueMessagesBackfilled: 0,
+      // Compatibility counter: schema v2 never persists processing/terminal Queue rows.
+      queueMessagesTerminalized: 0,
+      durationMs,
+    };
   }
 
   private async sweepRunning(
     store: ScanStore,
     cutoff: number | undefined,
-    affectedThreads: Map<string, { catIds: CatId[]; userId: string }>,
   ): Promise<{ running: number; taskProgressCleared: number; messagesRecovered: number }> {
     let running = 0;
     let taskProgressCleared = 0;
@@ -127,6 +176,8 @@ export class StartupReconciler {
         const record = await store.get(id);
         if (!record) continue;
         if (cutoff && record.createdAt >= cutoff) continue;
+        if (await this.hasRunningChild(record)) continue;
+        const lastScanAt = record.updatedAt;
         const updated = await store.update(id, {
           status: 'failed',
           expectedStatus: 'running',
@@ -134,7 +185,7 @@ export class StartupReconciler {
         });
         if (updated) {
           running++;
-          this.trackAffectedThread(affectedThreads, record);
+          this.recordInvocationDied(record, lastScanAt);
           taskProgressCleared += await this.clearTaskProgress(record.threadId, record.targetCats);
           // Safe: markDelivered is a no-op for non-queued messages (undefined/delivered/canceled),
           // so already-visible messages won't be re-scored. Only catches the edge case where
@@ -148,10 +199,25 @@ export class StartupReconciler {
     return { running, taskProgressCleared, messagesRecovered };
   }
 
-  private async sweepStaleQueued(
-    store: ScanStore,
-    affectedThreads: Map<string, { catIds: CatId[]; userId: string }>,
-  ): Promise<{ queued: number; messagesRecovered: number }> {
+  private recordInvocationDied(record: InvocationRecord, lastScanAt: number): void {
+    const catId = record.targetCats.length === 1 ? record.targetCats[0] : undefined;
+    this.deps.ballCustody
+      ?.record(
+        buildInvocationDiedEvent({
+          invocationId: record.id,
+          threadId: record.threadId,
+          ...(catId ? { catId } : {}),
+          reason: 'process_restart',
+          lastScanAt,
+          at: Date.now(),
+        }),
+      )
+      .catch((err) =>
+        this.deps.log.warn(`[startup-reconciler] Failed to record invocation.died for ${record.id}: ${String(err)}`),
+      );
+  }
+
+  private async sweepStaleQueued(store: ScanStore): Promise<{ queued: number; messagesRecovered: number }> {
     let queued = 0;
     let messagesRecovered = 0;
     const ids = await store.scanByStatus('queued');
@@ -161,6 +227,7 @@ export class StartupReconciler {
       try {
         const record = await store.get(id);
         if (!record || record.createdAt > staleThreshold) continue;
+        if (await this.hasRunningChild(record)) continue;
         const updated = await store.update(id, {
           status: 'failed',
           expectedStatus: 'queued',
@@ -168,7 +235,6 @@ export class StartupReconciler {
         });
         if (updated) {
           queued++;
-          this.trackAffectedThread(affectedThreads, record);
           if (await this.ensureMessageVisible(record)) messagesRecovered++;
         }
       } catch (err) {
@@ -178,67 +244,26 @@ export class StartupReconciler {
     return { queued, messagesRecovered };
   }
 
-  private trackAffectedThread(map: Map<string, { catIds: CatId[]; userId: string }>, record: InvocationRecord): void {
-    const existing = map.get(record.threadId) ?? { catIds: [], userId: record.userId };
-    for (const catId of record.targetCats) {
-      if (!existing.catIds.includes(catId)) existing.catIds.push(catId);
-    }
-    map.set(record.threadId, existing);
-  }
-
-  private async notifyAffectedThreads(
-    affectedThreads: Map<string, { catIds: CatId[]; userId: string }>,
-  ): Promise<number> {
-    if (affectedThreads.size === 0) return 0;
-    const { messageStore, socketManager } = this.deps;
-    if (!messageStore && !socketManager) return 0;
-
-    let notified = 0;
-    for (const [threadId, { catIds, userId }] of affectedThreads) {
-      const catLabel = catIds.length === 1 ? catIds[0] : `${catIds.length} cats`;
-      const content =
-        `⚠️ 服务重启 — ${catLabel} 的进行中请求已中断，请重新发送。\n` +
-        `Service restarted — interrupted in-progress request (${catLabel}). Please resend your message.`;
-
-      let persisted = false;
-      let broadcasted = false;
-      if (messageStore) {
-        try {
-          await messageStore.append({
-            threadId,
-            userId,
-            catId: null,
-            content,
-            mentions: [],
-            source: RECONCILER_SOURCE,
-            timestamp: Date.now(),
-          });
-          persisted = true;
-        } catch (err) {
-          this.deps.log.warn(
-            `[startup-reconciler] Failed to persist notification for thread ${threadId}: ${String(err)}`,
-          );
-        }
+  private async hasRunningChild(record: InvocationRecord): Promise<boolean> {
+    // Legacy callers without a child ledger retain their existing orphan sweep.
+    // Production supplies this ledger: unavailable or inconsistent truth must
+    // leave the callback-auth projection and its progress untouched.
+    if (!this.deps.turnExecutionStore) return false;
+    const children = await this.deps.turnExecutionStore.listByParent(record.id);
+    for (const child of children) {
+      if (
+        child.parentInvocationId !== record.id ||
+        child.threadId !== record.threadId ||
+        child.userId !== record.userId ||
+        !record.targetCats.includes(child.catId)
+      ) {
+        throw new Error(`Child identity mismatch for parent ${record.id}`);
       }
-
-      if (socketManager) {
-        try {
-          const errorCatId = catIds[0] ?? ('system' as CatId);
-          socketManager.broadcastAgentMessage(
-            { type: 'error', catId: errorCatId, error: content, isFinal: true, timestamp: Date.now() },
-            threadId,
-          );
-          broadcasted = true;
-        } catch (err) {
-          this.deps.log.warn(
-            `[startup-reconciler] Failed to broadcast notification for thread ${threadId}: ${String(err)}`,
-          );
-        }
+      if (!CHILD_STATUSES.has(child.status)) {
+        throw new Error(`Unknown child lifecycle for parent ${record.id}`);
       }
-
-      if (persisted || broadcasted) notified++;
     }
-    return notified;
+    return children.some((child) => child.status === 'running');
   }
 
   private async clearTaskProgress(threadId: string, targetCats: CatId[]): Promise<number> {
@@ -254,6 +279,11 @@ export class StartupReconciler {
     return cleared;
   }
 
+  private isDurableQueuedMessage(threadId: string, messageId: string | null): boolean {
+    if (!this.deps.invocationQueue || !messageId) return false;
+    return this.deps.invocationQueue.findEntryWithMessageId(threadId, messageId)?.status === 'queued';
+  }
+
   /**
    * P1-C: Make queued user messages visible after orphan invocation sweep.
    * Without this, messages with deliveryStatus='queued' stay invisible in timeline/context
@@ -262,8 +292,12 @@ export class StartupReconciler {
   private async ensureMessageVisible(record: InvocationRecord): Promise<boolean> {
     const { messageStore } = this.deps;
     if (!messageStore?.markDelivered || !record.userMessageId) return false;
+    if (this.isDurableQueuedMessage(record.threadId, record.userMessageId)) return false;
     try {
       const result = await messageStore.markDelivered(record.userMessageId, Date.now());
+      if (result && typeof result === 'object' && 'deliveryTransitioned' in result) {
+        return (result as { deliveryTransitioned?: boolean }).deliveryTransitioned === true;
+      }
       return result != null;
     } catch (err) {
       this.deps.log.warn(

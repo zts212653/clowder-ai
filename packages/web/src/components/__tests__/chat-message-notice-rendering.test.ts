@@ -1,0 +1,583 @@
+import type { CapabilityTipContext } from '@cat-cafe/shared';
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { _resetCatDataCache, type CatData, useCatData } from '@/hooks/useCatData';
+import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
+
+const mockApiFetch = vi.fn();
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: (...args: unknown[]) => mockApiFetch(...args),
+}));
+vi.mock('@/lib/mention-highlight', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/mention-highlight')>()),
+  refreshMentionData: vi.fn(),
+}));
+vi.mock('@/utils/transcription-corrector', () => ({ refreshSpeechAliases: vi.fn() }));
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
+vi.mock('@/stores/chatStore', () => ({
+  resolveBubbleExpanded: () => false,
+  useChatStore: (selector: (s: Record<string, unknown>) => unknown) =>
+    selector({
+      uiThinkingExpandedByDefault: false,
+      globalBubbleDefaults: { thinking: 'collapsed', cliOutput: 'collapsed' },
+      threads: [],
+      messages: [],
+      catInvocations: {},
+      threadStates: {},
+    }),
+}));
+
+vi.mock('@/hooks/useTts', () => ({
+  useTts: () => ({ state: 'idle', synthesize: vi.fn(), activeMessageId: null }),
+}));
+
+vi.mock('@/components/CatAvatar', () => ({
+  CatAvatar: () => React.createElement('span', null, 'avatar'),
+}));
+vi.mock('@/components/SystemNoticeBar', () => ({
+  SystemNoticeBar: ({ message }: { message: ChatMessageType }) =>
+    React.createElement('div', { 'data-testid': 'notice-bar' }, `${message.source?.connector}:${message.content}`),
+}));
+vi.mock('@/components/CloudBindingRecoveryCard', () => ({
+  CloudBindingRecoveryCard: ({ sourceMessageId }: { sourceMessageId: string }) =>
+    React.createElement('div', { 'data-testid': 'cloud-recovery-card' }, sourceMessageId),
+}));
+vi.mock('@/components/ConnectorBubble', () => ({
+  ConnectorBubble: ({ message }: { message: ChatMessageType }) =>
+    React.createElement(
+      'div',
+      { 'data-testid': 'connector-bubble' },
+      `${message.source?.connector}:${message.source?.label}:${message.content}`,
+    ),
+}));
+vi.mock('@/components/EvidencePanel', () => ({ EvidencePanel: () => null }));
+vi.mock('@/components/MarkdownContent', () => ({
+  MarkdownContent: ({ content }: { content: string }) => React.createElement('p', null, content),
+}));
+vi.mock('@/components/MetadataBadge', () => ({ MetadataBadge: () => null }));
+vi.mock('@/components/SummaryCard', () => ({ SummaryCard: () => null }));
+vi.mock('@/components/rich/RichBlocks', () => ({ RichBlocks: () => null }));
+
+describe('ChatMessage notice rendering', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  let ChatMessage: React.FC<{
+    message: ChatMessageType;
+    threadId?: string;
+    timelineMessages?: readonly ChatMessageType[];
+    getCatById: (id: string) => CatData | undefined;
+    showCapabilityTip?: boolean;
+    capabilityTipContexts?: readonly CapabilityTipContext[];
+  }>;
+
+  beforeAll(async () => {
+    (globalThis as { React?: typeof React }).React = React;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const mod = await import('@/components/ChatMessage');
+    ChatMessage = mod.ChatMessage;
+  });
+
+  afterAll(() => {
+    delete (globalThis as { React?: typeof React }).React;
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  beforeEach(() => {
+    _resetCatDataCache();
+    mockApiFetch.mockReset();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.restoreAllMocks();
+  });
+
+  it('reprojects an existing system-info notice after a deferred roster load without another event', async () => {
+    let resolveCatsResponse: ((response: Response) => void) | undefined;
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/config/cat-order') return Promise.resolve({ ok: false } as Response);
+      if (path === '/api/cats') {
+        return new Promise<Response>((resolve) => {
+          resolveCatsResponse = resolve;
+        });
+      }
+      return Promise.resolve({ ok: false } as Response);
+    });
+    const message = {
+      id: 'system-info-mode-proposal',
+      type: 'system',
+      variant: 'info',
+      content: 'cat-sol 提议切换到 execute 模式。',
+      timestamp: Date.now(),
+      extra: {
+        systemInfo: {
+          v: 1,
+          payload: {
+            type: 'mode_switch_proposal',
+            proposedBy: 'cat-sol',
+            proposedMode: 'execute',
+          },
+          fallbackCatId: 'cat-sol',
+        },
+      },
+    } as unknown as ChatMessageType;
+
+    function NoticeHarness() {
+      const { getCatById } = useCatData();
+      return React.createElement(ChatMessage, { message, getCatById });
+    }
+
+    await act(async () => {
+      root.render(React.createElement(NoticeHarness));
+    });
+    expect(container.textContent).toContain('cat-sol 提议');
+    expect(mockApiFetch.mock.calls.filter((call) => call[0] === '/api/cats')).toHaveLength(1);
+
+    const completeCatsRequest = resolveCatsResponse;
+    if (!completeCatsRequest) throw new Error('Expected the registry request to be pending');
+    await act(async () => {
+      completeCatsRequest({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            cats: [{ id: 'cat-sol', displayName: '缅因猫', variantLabel: 'sol', carrier: 'cli' }],
+          }),
+      } as Response);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('缅因猫（sol） 提议');
+    expect(container.textContent).not.toContain('cat-sol 提议');
+    expect(mockApiFetch.mock.calls.filter((call) => call[0] === '/api/cats')).toHaveLength(1);
+  });
+
+  it.each([
+    { type: 'session_seal_requested', sessionSeq: 2 },
+    { type: 'provider_recovery', phase: 'recovered' },
+    { type: 'warning', presentation: 'transient_status', message: 'retrying' },
+  ])('does not resurrect internal protocol $type as chat from a restored row', (payload) => {
+    act(() =>
+      root.render(
+        React.createElement(ChatMessage, {
+          message: {
+            id: 'old-notice',
+            type: 'system',
+            content: 'old visible fallback',
+            timestamp: 1,
+            extra: { systemInfo: { v: 1, payload, fallbackCatId: 'codex' } },
+          },
+          getCatById: () => undefined,
+        }),
+      ),
+    );
+    expect(container.textContent).toBe('');
+  });
+
+  it('renders one recovery card beside the exact source and suppresses the linked standalone notice', async () => {
+    const source = {
+      id: 'source-needs-binding',
+      type: 'user',
+      from: { kind: 'user', userId: 'test-user' },
+      content: '@gpt-pro hello',
+      timestamp: 1,
+    } as ChatMessageType;
+    const notice = {
+      id: 'notice-needs-binding',
+      type: 'connector',
+      from: { kind: 'external', connectorId: 'cloud-bridge-status' },
+      content: '这条消息还没有发送',
+      timestamp: 2,
+      replyTo: source.id,
+      source: {
+        connector: 'cloud-bridge-status',
+        label: '云端猫投递',
+        icon: '☁️',
+        meta: {
+          presentation: 'system_notice',
+          cloudBridgeRecovery: {
+            v: 1,
+            kind: 'needs_binding',
+            sourceMessageId: source.id,
+            targetCatId: 'gpt-pro',
+            dispatchInvocationId: 'dispatch-needs-binding',
+          },
+        },
+      },
+    } as ChatMessageType;
+    const timeline = [source, notice];
+
+    await act(async () => {
+      root.render(
+        React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(ChatMessage, {
+            message: source,
+            threadId: 'thread-1',
+            timelineMessages: timeline,
+            getCatById: () => undefined,
+          }),
+          React.createElement(ChatMessage, {
+            message: notice,
+            threadId: 'thread-1',
+            timelineMessages: timeline,
+            getCatById: () => undefined,
+          }),
+        ),
+      );
+    });
+
+    expect(container.querySelectorAll('[data-testid="cloud-recovery-card"]')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="notice-bar"]')).toBeNull();
+  });
+
+  it('renders inline mention hint as in-thread notice bar instead of connector bubble', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: 'notice-inline',
+            type: 'connector',
+            from: { kind: 'external', connectorId: 'inline-mention-hint' },
+            content: '把 @gpt52 单独放到新起一行开头，才能交接。',
+            timestamp: Date.now(),
+            source: {
+              connector: 'inline-mention-hint',
+              label: 'Routing hint',
+              icon: 'lightbulb',
+              meta: { presentation: 'system_notice', noticeTone: 'info' },
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.querySelector('[data-testid="notice-bar"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="connector-bubble"]')).toBeFalsy();
+  });
+
+  it('renders restart interruption notice as in-thread notice bar instead of connector bubble', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: 'notice-restart',
+            type: 'connector',
+            from: { kind: 'system', service: 'startup-reconciler' },
+            content: '服务重启，opus 的进行中请求已中断，请重新发送。',
+            timestamp: Date.now(),
+            source: {
+              connector: 'startup-reconciler',
+              label: '⚠️ 重启通知',
+              icon: '⚠️',
+              meta: { presentation: 'system_notice', noticeTone: 'warning' },
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.querySelector('[data-testid="notice-bar"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="connector-bubble"]')).toBeFalsy();
+  });
+
+  it('keeps true connector events on ConnectorBubble path', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: 'connector-vote',
+            type: 'connector',
+            from: { kind: 'external', connectorId: 'vote-result' },
+            content: '投票结果：2 票',
+            timestamp: Date.now(),
+            source: {
+              connector: 'vote-result',
+              label: '投票结果',
+              icon: 'ballot',
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.querySelector('[data-testid="connector-bubble"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="notice-bar"]')).toBeFalsy();
+  });
+
+  it('renders the thread capability tip in the admitted response instead of a second wait bubble', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => ({
+            id: 'opus',
+            displayName: '布偶猫',
+            clientId: 'anthropic',
+            carrier: 'cli',
+            defaultModel: 'claude',
+            color: { primary: '#765', secondary: '#ede' },
+            mentionPatterns: [],
+            avatar: '/opus.png',
+            roleDescription: '',
+            personality: '',
+          })) as never,
+          showCapabilityTip: true,
+          capabilityTipContexts: ['thinking', 'long_running'],
+          message: {
+            id: 'response-processing',
+            type: 'assistant',
+            from: { kind: 'agent', catId: 'opus' },
+            catId: 'opus',
+            content: '',
+            timestamp: Date.now(),
+            lifecycle: {
+              kind: 'response',
+              orderKey: '1:turn-1',
+              invocationId: 'turn-1',
+              targetId: 'opus',
+              inputEntryIds: ['entry-1'],
+              inputMessageIds: ['source-1'],
+              status: 'processing',
+              startedAt: 1,
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.querySelector('[data-testid="response-lifecycle-tip"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="message-bubble"]')).toBeNull();
+    expect(container.querySelector('[data-testid="capability-tip-strip"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('正在回复');
+    expect(container.textContent).toContain('布偶猫');
+  });
+
+  it('shows account recovery in the existing empty response tip without claiming the model is replying', () => {
+    const now = Date.now();
+    act(() =>
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: () => undefined,
+          message: {
+            id: 'startup-response',
+            type: 'assistant',
+            catId: 'codex',
+            content: '',
+            timestamp: now,
+            lifecycle: {
+              kind: 'response',
+              orderKey: '1:startup',
+              invocationId: 'startup',
+              targetId: 'codex',
+              inputEntryIds: [],
+              inputMessageIds: [],
+              status: 'processing',
+              startedAt: now,
+            },
+            extra: {
+              startupRecovery: {
+                invocationId: 'startup',
+                stage: 'retry_wait',
+                sequence: 2,
+                attempt: 1,
+                maxAttempts: 6,
+                startedAt: now,
+                deadlineAt: now + 120_000,
+                updatedAt: now,
+                nextRetryAt: now + 2_000,
+              },
+            },
+          },
+        }),
+      ),
+    );
+    expect(container.querySelector('[data-testid="response-lifecycle-tip"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="codex-startup-recovery"]')).not.toBeNull();
+    expect(container.textContent).toContain('本次任务尚未开始');
+    expect(container.textContent).not.toContain('已接下，还没有输出');
+    expect(container.querySelector('[data-testid="message-bubble"]')).toBeNull();
+  });
+
+  it.each([
+    ['routing-guard', 'routing-guard-failure', '[F167 球权停止门] 当前普通 A2A dispatch 尚未发生可验证状态迁移。'],
+    ['a2a-liveness-guard', 'ack-liveness-hint', '[接球提醒] A2A 接球后 invocation 结束前必须完成处置。'],
+  ])('hides internal %s protocol diagnostics from stale timeline caches', (service, connector, content) => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: `internal-${service}`,
+            type: 'connector',
+            from: { kind: 'system', service },
+            content,
+            timestamp: Date.now(),
+            source: {
+              connector,
+              label: 'Internal protocol diagnostic',
+              icon: 'warning',
+              meta: { presentation: 'system_notice', noticeTone: 'warning' },
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.querySelector('[data-testid="notice-bar"]')).toBeFalsy();
+    expect(container.querySelector('[data-testid="connector-bubble"]')).toBeFalsy();
+    expect(container.textContent).not.toContain(content);
+  });
+
+  it('hides historical a2a_routing rows at the read compatibility boundary', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: 'legacy-a2a-routing',
+            type: 'system',
+            content: '布偶猫(opus) ⇉ 狸花猫(kimi)（并行 1/2）',
+            timestamp: Date.now(),
+            extra: { systemKind: 'a2a_routing' },
+          },
+        }),
+      );
+    });
+
+    expect(container.textContent).toBe('');
+  });
+
+  it('does not surface boundary-check work while the response is still settling', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: 'msg-scan-pending',
+            type: 'assistant',
+            from: { kind: 'agent', catId: 'opus' },
+            catId: 'opus',
+            content: 'published answer',
+            timestamp: Date.now(),
+            extra: {
+              freshness: { priorFrontierMessageId: 'msg-before' },
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.querySelector('[data-testid="freshness-supplement-status"]')).toBeFalsy();
+    expect(container.textContent).not.toContain('正在核对生成期间的消息边界');
+  });
+
+  it('hides an otherwise empty routing-guard execution', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: 'msg-routing-guard',
+            type: 'assistant',
+            from: { kind: 'agent', catId: 'codex' },
+            catId: 'codex',
+            content: '',
+            timestamp: Date.now(),
+            extra: {
+              turnExecution: {
+                invocationId: 'child-routing-guard-1',
+                parentInvocationId: 'parent-1',
+                executionKind: 'routing_guard',
+              },
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.querySelector('[data-turn-execution-kind="routing_guard"]')).toBeFalsy();
+    expect(container.textContent).not.toContain('系统补路由');
+    expect(container.textContent).not.toContain('重新生成');
+  });
+
+  it('keeps ordinary reply text while hiding auxiliary routing diagnostics', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: 'msg-ordinary-with-guard',
+            type: 'assistant',
+            from: { kind: 'agent', catId: 'codex' },
+            catId: 'codex',
+            content: 'original ordinary answer',
+            timestamp: Date.now(),
+            extra: {
+              turnExecution: {
+                invocationId: 'child-ordinary-1',
+                parentInvocationId: 'parent-1',
+                executionKind: 'ordinary',
+              },
+              auxiliaryTurnExecutions: [
+                {
+                  invocationId: 'child-routing-guard-1',
+                  parentInvocationId: 'parent-1',
+                  executionKind: 'routing_guard',
+                },
+              ],
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.textContent).toContain('original ordinary answer');
+    expect(container.querySelector('[data-auxiliary-turn-execution="child-routing-guard-1"]')).toBeFalsy();
+    expect(container.querySelectorAll('[data-turn-execution-kind="routing_guard"]')).toHaveLength(0);
+  });
+
+  it('hides bodyless child diagnostics beside a guard-owned replacement turn', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: 'msg-guard-with-bodyless-ordinary',
+            type: 'assistant',
+            from: { kind: 'agent', catId: 'codex' },
+            catId: 'codex',
+            content: '@co-creator',
+            timestamp: Date.now(),
+            extra: {
+              turnExecution: {
+                invocationId: 'child-routing-guard-2',
+                parentInvocationId: 'parent-2',
+                executionKind: 'routing_guard',
+              },
+              auxiliaryTurnExecutions: [
+                {
+                  invocationId: 'child-ordinary-bodyless',
+                  parentInvocationId: 'parent-2',
+                  executionKind: 'ordinary',
+                },
+              ],
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.querySelector('[data-auxiliary-turn-execution="child-ordinary-bodyless"]')).toBeFalsy();
+    expect(container.textContent).not.toContain('普通执行（无正文）');
+  });
+});

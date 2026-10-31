@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { QueueEntry } from '../chat-types';
-import { useChatStore } from '../chatStore';
+import { DEFAULT_THREAD_STATE, useChatStore } from '../chatStore';
 
-function makeEntry(id: string, status: 'queued' | 'processing' = 'queued'): QueueEntry {
+function makeEntry(id: string): QueueEntry {
   return {
     id,
     threadId: 'thread-1',
@@ -10,10 +10,10 @@ function makeEntry(id: string, status: 'queued' | 'processing' = 'queued'): Queu
     content: `msg-${id}`,
     messageId: null,
     mergedMessageIds: [],
-    source: 'user',
+    from: { kind: 'user', userId: 'test-user' },
     targetCats: ['opus'],
     intent: 'execute',
-    status,
+    status: 'queued',
     createdAt: Date.now(),
   };
 }
@@ -22,9 +22,8 @@ describe('chatStore queue state', () => {
   beforeEach(() => {
     useChatStore.setState({
       currentThreadId: 'thread-1',
+      messages: [],
       queue: [],
-      queuePaused: false,
-      queuePauseReason: undefined,
       queueFull: false,
       queueFullSource: undefined,
       threadStates: {},
@@ -37,40 +36,65 @@ describe('chatStore queue state', () => {
     expect(useChatStore.getState().queue).toEqual(entries);
   });
 
-  it('setQueuePaused sets paused state', () => {
-    useChatStore.getState().setQueuePaused('thread-1', true, 'canceled');
-    const s = useChatStore.getState();
-    expect(s.queuePaused).toBe(true);
-    expect(s.queuePauseReason).toBe('canceled');
+  it('keeps pending Queue truth out of History messages', () => {
+    useChatStore.setState({
+      messages: [
+        { id: 'msg-primary', type: 'user', content: 'one', timestamp: 1 },
+        { id: 'msg-merged', type: 'user', content: 'two', timestamp: 2 },
+      ],
+    });
+    const entry = {
+      ...makeEntry('receipt'),
+      messageId: 'msg-primary',
+      mergedMessageIds: ['msg-merged'],
+    };
+    const before = useChatStore.getState().messages;
+
+    useChatStore.getState().setQueue('thread-1', [entry]);
+
+    expect(useChatStore.getState().messages).toBe(before);
   });
 
-  it('setQueue clears queuePaused when queue becomes empty', () => {
-    useChatStore.getState().setQueuePaused('thread-1', true, 'canceled');
+  it('does not mutate active History when an actionable Queue row disappears', () => {
+    useChatStore.setState({
+      messages: [
+        { id: 'msg-withdrawn', type: 'user', content: 'stop this work', timestamp: 1 },
+        { id: 'msg-unrelated', type: 'user', content: 'leave me alone', timestamp: 2 },
+      ],
+    });
+
+    const before = useChatStore.getState().messages;
     useChatStore.getState().setQueue('thread-1', []);
-    expect(useChatStore.getState().queuePaused).toBe(false);
+
+    expect(useChatStore.getState().queue).toEqual([]);
+    expect(useChatStore.getState().messages).toBe(before);
   });
 
-  // P1 Red test: queue_updated after "continue" should clear queuePaused
-  // Scenario: queue paused → user clicks continue → backend emits queue_updated
-  // with action='processing' and a non-empty queue → queuePaused should be false
-  it('P1: queue_updated with processing action clears queuePaused (simulate continue)', () => {
-    // Setup: queue is paused with 2 entries
-    const entries = [makeEntry('a'), makeEntry('b')];
-    useChatStore.getState().setQueue('thread-1', entries);
-    useChatStore.getState().setQueuePaused('thread-1', true, 'canceled');
-    expect(useChatStore.getState().queuePaused).toBe(true);
+  it('updates a background Queue without rewriting its History snapshot', () => {
+    useChatStore.setState({
+      messages: [{ id: 'active-message', type: 'user', content: 'active', timestamp: 1 }],
+      threadStates: {
+        'thread-2': {
+          ...DEFAULT_THREAD_STATE,
+          messages: [
+            {
+              id: 'msg-background',
+              type: 'user',
+              content: 'background',
+              timestamp: 2,
+            },
+          ],
+          queue: [makeEntry('background-receipt')],
+        },
+      },
+    });
 
-    // Simulate: backend processes next → emits queue_updated with one entry now 'processing'
-    // This is what useSocket handler does on queue_updated
-    const updatedEntries = [makeEntry('a', 'processing'), makeEntry('b')];
-    const store = useChatStore.getState();
-    store.setQueue('thread-1', updatedEntries);
-    // After "continue" via queue_updated, the handler should also clear paused
-    // (This is where the bug is — setQueue alone doesn't clear it when queue is non-empty)
-    store.setQueuePaused('thread-1', false);
+    const before = useChatStore.getState().threadStates['thread-2']?.messages;
+    useChatStore.getState().setQueue('thread-2', []);
 
-    expect(useChatStore.getState().queuePaused).toBe(false);
-    expect(useChatStore.getState().queuePauseReason).toBeUndefined();
+    expect(useChatStore.getState().messages[0]?.id).toBe('active-message');
+    expect(useChatStore.getState().threadStates['thread-2']?.queue).toEqual([]);
+    expect(useChatStore.getState().threadStates['thread-2']?.messages).toBe(before);
   });
 
   it('setQueueFull sets full state', () => {
@@ -97,12 +121,5 @@ describe('chatStore queue state', () => {
     const entries = [makeEntry('a')];
     useChatStore.getState().setQueue('thread-2', entries);
     expect(useChatStore.getState().threadStates['thread-2']?.queue).toEqual(entries);
-  });
-
-  it('setQueuePaused on background thread updates threadStates', () => {
-    useChatStore.getState().setQueuePaused('thread-2', true, 'failed');
-    const ts = useChatStore.getState().threadStates['thread-2'];
-    expect(ts?.queuePaused).toBe(true);
-    expect(ts?.queuePauseReason).toBe('failed');
   });
 });

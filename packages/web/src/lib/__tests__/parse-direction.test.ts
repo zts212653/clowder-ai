@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDirection } from '../parse-direction';
+import { parseContentDirectionTargets, parseDirection, parseImplicitStructuredTargets } from '../parse-direction';
 
 // Minimal mock: alias (lowercase, no @) → catId
 const mockToCat: Record<string, string> = {
@@ -55,11 +55,20 @@ describe('parseDirection', () => {
       content: 'cross post content',
       extra: { crossPost: { sourceThreadId: 'thread_abc12345xyz' } },
     };
-    expect(parseDirection(msg, getMocks)).toEqual({
+    expect(parseDirection(msg, getMocks, 'thread_target')).toEqual({
       type: 'crossPost',
       targets: ['abc12345'],
       arrow: '↗',
     });
+  });
+
+  it('does not render legacy self-referential crossPost metadata as a cross-thread direction', () => {
+    const msg = {
+      origin: 'callback' as const,
+      content: 'same-thread coordination callback',
+      extra: { crossPost: { sourceThreadId: 'thread_same' } },
+    };
+    expect(parseDirection(msg, getMocks, 'thread_same')).toBeNull();
   });
 
   it('parses whisper direction from whisperTo (highest priority)', () => {
@@ -140,23 +149,50 @@ describe('parseDirection', () => {
   });
 
   it('filters out __co-creator__ pseudo-cat from @mention results (P1-2)', () => {
-    // getMentionToCat maps @co-creator/@铲屎官 to __co-creator__ — must not leak into UI
+    // getMentionToCat maps @co-creator/@co-creator to __co-creator__ — must not leak into UI
     const ownerToCat: Record<string, string> = {
       ...mockToCat,
-      landy: '__co-creator__',
-      铲屎官: '__co-creator__',
+      operator: '__co-creator__',
+      'co-creator': '__co-creator__',
     };
     const ownerAliases = Object.keys(ownerToCat).sort((a, b) => b.length - a.length);
     const ownerRe = new RegExp(`@(${ownerAliases.join('|')})(?=$|\\s|[,.:;!?])`, 'gi');
     const getOwnerMocks = () => ({ toCat: ownerToCat, re: ownerRe });
 
     // Only @co-creator → should return null (owner filtered out)
-    const msg1 = { origin: 'callback' as const, content: '通知铲屎官\n@co-creator' };
+    const msg1 = { origin: 'callback' as const, content: '通知co-creator\n@co-creator' };
     expect(parseDirection(msg1, getOwnerMocks)).toBeNull();
 
     // @co-creator + @codex → only codex in targets
     const msg2 = { origin: 'callback' as const, content: '@co-creator @codex' };
     const result = parseDirection(msg2, getOwnerMocks);
     expect(result?.targets).toEqual(['codex']);
+  });
+});
+
+describe('post_message structured target projection', () => {
+  it('matches only actionable line-start mentions', () => {
+    expect(parseContentDirectionTargets('ask @opus in prose\n- @codex\n> @gpt52', getMocks)).toEqual([
+      'codex',
+      'gpt52',
+    ]);
+  });
+
+  it('projects only structured targets not already visible in the body', () => {
+    const msg = {
+      origin: 'callback' as const,
+      content: '@opus\n@codex\n@gpt52',
+      extra: { isExplicitPost: true, targetCats: ['gpt52', 'new-cat', 'new-cat'] },
+    };
+    expect(parseImplicitStructuredTargets(msg, getMocks)).toEqual(['new-cat']);
+  });
+
+  it('projects structured targets even when callback settlement omits the standalone-post marker', () => {
+    const msg = {
+      origin: 'callback' as const,
+      content: 'ordinary callback',
+      extra: { targetCats: ['opus'] },
+    };
+    expect(parseImplicitStructuredTargets(msg, getMocks)).toEqual(['opus']);
   });
 });

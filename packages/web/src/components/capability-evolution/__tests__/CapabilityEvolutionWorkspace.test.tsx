@@ -1,0 +1,705 @@
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CapabilityEvolutionWorkspace } from '../CapabilityEvolutionWorkspace';
+import type { EvolutionProgramProjection } from '../evolution-program-projection';
+import { useEvolutionReading } from '../evolution-reading-state';
+import { assetReviewFixture } from './evolution-asset-fixtures';
+import { assetRef, ownerRef, programFixture } from './evolution-fixtures';
+
+const { apiFetchMock, setPendingChatInsert, onOpenProgram, chatStoreState, assetReviewState } = vi.hoisted(() => ({
+  apiFetchMock: vi.fn(),
+  setPendingChatInsert: vi.fn(),
+  onOpenProgram: vi.fn(),
+  chatStoreState: {
+    currentThreadId: 'thread-current-but-unrelated',
+    threads: [
+      { id: 'thread-f311', title: '路演表达进化' },
+      { id: 'thread-other', title: '视频工作台' },
+    ],
+  },
+  assetReviewState: { body: '{}', status: 404, calls: 0 },
+}));
+
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: async (...args: unknown[]) => {
+    if (String(args[0]).includes('/asset-review')) {
+      assetReviewState.calls += 1;
+      return new Response(assetReviewState.body, { status: assetReviewState.status });
+    }
+    const response = await apiFetchMock(...args);
+    return response instanceof Response ? response.clone() : response;
+  },
+}));
+vi.mock('@/stores/chatStore', () => ({
+  useChatStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({
+      ...chatStoreState,
+      setPendingChatInsert,
+    }),
+}));
+vi.mock('@/hooks/useCatData', () => ({
+  useCatData: () => ({
+    getCatById: (id: string) =>
+      id === 'codex61-sol' ? { displayName: '缅因猫 Sol', nickname: '砚砚', color: { primary: '#b05f45' } } : undefined,
+  }),
+}));
+
+vi.mock('@/components/eval-workspace/EvalWorkspacePanel', () => ({
+  EvalWorkspacePanel: () => <div data-testid="eval-workspace-panel">评估读面</div>,
+}));
+
+const projection = {
+  program: {
+    schemaVersion: 1,
+    programId: 'evolution-program:bcc336788a7df9d6075b1efb4c0a7e68',
+    workspaceId: 'user:default-user',
+    displayName: '投资人路演效果',
+    objectRef: { ownerFeatureId: 'F311', ownerStateRef: 'capability:f311-investor-roadshow-expression' },
+    claimRef: {
+      ownerFeatureId: 'F311',
+      ownerStateRef: 'evolution-claim:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68',
+    },
+    certificates: {},
+    measurementRoleRefs: {},
+    currentAssetVersionRefs: [],
+    lifecycle: 'active',
+    stage: 'constituting',
+    cycle: 1,
+    sequence: 1,
+    createdAt: '2026-09-01T07:30:53.931Z',
+    updatedAt: '2026-09-01T07:30:53.931Z',
+  },
+  cycles: [
+    {
+      programId: 'evolution-program:bcc336788a7df9d6075b1efb4c0a7e68',
+      cycle: 1,
+      stage: 'constituting',
+      lineageRefIds: [
+        'capability:f311-investor-roadshow-expression',
+        'evolution-claim:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68',
+      ],
+      openedAt: '2026-09-01T07:30:53.931Z',
+    },
+  ],
+  drafts: {
+    goal: { ownerFeatureId: 'F311', ownerStateRef: 'evolution-goal-draft:program' },
+    measurement: { ownerFeatureId: 'F267', ownerStateRef: 'evolution-measurement-draft:program' },
+    economic: { ownerFeatureId: 'F311', ownerStateRef: 'evolution-economic-draft:program' },
+    roles: {},
+  },
+  blockers: [
+    {
+      code: 'measurement_certificate_missing',
+      message: 'Measurement certificate 仍待 F267/source owner 签发。',
+      ownerFeatureId: 'F267',
+    },
+  ],
+  nextAction: { code: 'complete_constitution', label: '继续自动建制' },
+};
+
+describe('F311 Capability Evolution Workspace', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    apiFetchMock.mockReset();
+    assetReviewState.body = '{}';
+    assetReviewState.status = 404;
+    assetReviewState.calls = 0;
+    useEvolutionReading.setState({ programs: {}, workspaceProgramIds: {}, workspacePages: {} });
+    setPendingChatInsert.mockReset();
+    onOpenProgram.mockReset();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('cat-cafe:shell-presentation');
+    act(() => root.unmount());
+    container.remove();
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  async function renderWorkspace(targetThreadId: string | null = 'thread-f311') {
+    await act(async () =>
+      root.render(<CapabilityEvolutionWorkspace targetThreadId={targetThreadId} onOpenProgram={onOpenProgram} />),
+    );
+  }
+
+  it('shows the v2 project list with phase gaps and an honest unnamed origin, without duplicating a focus card', async () => {
+    localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    const unnamed = {
+      ...projection,
+      program: { ...projection.program, displayName: undefined },
+      origin: { threadId: 'thread-f311', title: '开发流程真实改进', createdByCatId: 'codex61-sol' },
+    };
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [unnamed] })));
+    await renderWorkspace();
+    expect(container.textContent).toContain('进化项目');
+    expect(container.textContent).toContain('这一阶段还缺');
+    expect(container.textContent).toContain('尚未命名');
+    expect(container.textContent).toContain('开发流程真实改进');
+    expect(container.textContent).toContain('约定怎样判断改进有效');
+    expect(container.textContent).toContain('还没有完成或停止的项目');
+    expect(container.querySelector('[aria-label="当前关注项目"]')).toBeNull();
+    expect(container.querySelectorAll('[data-testid^="capability-evolution-program-"]')).toHaveLength(1);
+    expect(container.textContent).not.toContain('bcc336788');
+  });
+
+  it('does not turn constitution gaps into a user decision when no approval proposal exists', async () => {
+    localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [projection] })));
+
+    await renderWorkspace();
+
+    const row = container.querySelector(
+      '[data-testid="capability-evolution-program-evolution-program:bcc336788a7df9d6075b1efb4c0a7e68"]',
+    );
+    expect(container.textContent).toContain('待判断 0');
+    expect(container.textContent).toContain('目前没有需要你拍板的提议。');
+    expect(row?.textContent).toContain('提出目标（约定待补齐）');
+    expect(row?.textContent).toContain('约定怎样判断改进有效');
+    expect(row?.textContent).not.toContain('等你确认');
+  });
+
+  it('settles a typed 422 owner-capability gap instead of polling it every two seconds', async () => {
+    vi.useFakeTimers();
+    localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    assetReviewState.body = JSON.stringify({
+      schemaVersion: 1,
+      status: 'unavailable',
+      programRef: { ownerFeatureId: 'F311', ownerStateRef: projection.program.programId },
+      objectRef: projection.program.objectRef,
+      blockers: [{ code: 'owner_version_review_unavailable', ownerRef: projection.program.objectRef }],
+    });
+    assetReviewState.status = 422;
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [projection] })));
+    try {
+      await renderWorkspace();
+      expect(assetReviewState.calls).toBe(1);
+
+      await act(async () => vi.advanceTimersByTimeAsync(10_000));
+      expect(assetReviewState.calls).toBe(1);
+
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'));
+        await Promise.resolve();
+      });
+      expect(assetReviewState.calls).toBe(2);
+
+      await act(async () => vi.advanceTimersByTimeAsync(10_000));
+      expect(assetReviewState.calls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('offers a v2 new goal as an unsent draft in the bound conversation, including an empty directory', async () => {
+    localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [] })));
+    await renderWorkspace();
+    expect(container.textContent).toContain('待判断 0');
+    expect(container.textContent).toContain('目前没有需要你拍板的提议。');
+    const start = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('新建目标'));
+    expect(start).toBeDefined();
+    expect(container.textContent).not.toContain('在下方');
+    await act(async () => start?.click());
+    const input = container.querySelector<HTMLInputElement>('[data-testid="capability-evolution-start-input"]');
+    expect(input).not.toBeNull();
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, '减少审阅返工');
+      input?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[data-testid="capability-evolution-start"]')?.click(),
+    );
+    expect(setPendingChatInsert).toHaveBeenCalledWith({ threadId: 'thread-f311', text: '我们来进化 减少审阅返工' });
+    expect(container.textContent).toContain('原有草稿已保留');
+    expect(apiFetchMock.mock.calls.every(([, init]) => !init || init.method === 'GET')).toBe(true);
+  });
+
+  it('distinguishes the known initiating cat from unknown current work and uses the Program update time', async () => {
+    localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    const initiated = {
+      ...projection,
+      origin: { threadId: 'thread-f311', title: '研发改进', createdByCatId: 'codex61-sol' },
+    };
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [initiated] })));
+    await renderWorkspace();
+    expect(container.textContent).toContain('谁在做');
+    expect(container.textContent).toContain('砚砚');
+    expect(container.textContent).toContain('发起猫');
+    expect(container.textContent).toContain('当前活动未知');
+    expect(container.querySelector('time')?.dateTime).toBe(projection.program.updatedAt);
+    expect(container.textContent).not.toContain('正在准备');
+  });
+
+  it('does not invent a cat for a project without readable origin', async () => {
+    localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [projection] })));
+    await renderWorkspace();
+    expect(container.textContent).toContain('谁在做未知');
+    expect(container.textContent).not.toContain('砚砚');
+  });
+
+  it('keeps the v2 evaluation selection when the returning route remounts its owner', async () => {
+    localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [projection] })));
+    await renderWorkspace();
+    await act(async () =>
+      [...container.querySelectorAll('button')].find((button) => button.textContent === '评估')?.click(),
+    );
+    expect(container.querySelector('[data-testid="eval-workspace-panel"]')).not.toBeNull();
+    await act(async () => root.render(null));
+    await renderWorkspace();
+    expect(container.querySelector('[data-testid="eval-workspace-panel"]')).not.toBeNull();
+  });
+
+  it('does not describe an unreadable v2 list as having no completed projects', async () => {
+    localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    apiFetchMock.mockRejectedValue(new Error('connection unavailable'));
+    await renderWorkspace();
+    expect(container.textContent).toContain('暂时无法读取');
+    expect(container.textContent).toContain('待判断 待核实');
+    expect(container.textContent).not.toContain('目前没有需要你拍板的提议。');
+    expect(container.textContent).not.toContain('还没有完成或停止的项目');
+    expect(container.textContent).not.toContain('还没有进化记录');
+  });
+
+  it('does not describe pending decisions as empty while the v2 list is loading', async () => {
+    localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    apiFetchMock.mockReturnValue(new Promise<Response>(() => undefined));
+    await renderWorkspace();
+    expect(container.textContent).toContain('正在读取能力进化记录');
+    expect(container.textContent).toContain('待判断 待核实');
+    expect(container.textContent).not.toContain('目前没有需要你拍板的提议。');
+  });
+
+  it('does not regress owner state when an older list response arrives after a newer state', async () => {
+    const newer = { ...projection, program: { ...projection.program, sequence: 9, lifecycle: 'paused' } };
+    apiFetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ programs: [newer] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ programs: [projection] })));
+    await renderWorkspace();
+    expect(container.textContent).toContain('已暂停');
+    await act(async () => {
+      [...container.querySelectorAll('button')].find((button) => button.textContent === '刷新')?.click();
+    });
+    expect(container.textContent).toContain('已暂停');
+    expect(container.textContent).not.toContain('准备目标');
+  });
+
+  it('shows a product status first and keeps setup mechanics below the selected capability', async () => {
+    apiFetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ programs: [projection] }), { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify(projection), { status: 200 }));
+    await renderWorkspace();
+
+    expect(container.textContent).toContain('能力进化');
+    expect(container.textContent).toContain('投资人路演效果');
+    expect(container.textContent).toContain('准备目标');
+    expect(container.textContent).toContain('还需要：约定怎样判断改进有效。');
+    expect(container.textContent).not.toContain('F311');
+    expect(container.textContent).not.toContain('Measurement certificate');
+    expect(container.textContent).not.toContain('capability:f311-investor-roadshow-expression');
+    expect(container.textContent).not.toContain('能力进化目标');
+    expect(container.textContent).not.toContain('下一步：');
+
+    const viewProgress = [...container.querySelectorAll('button')].find((button) => button.textContent === '查看进展');
+    expect(viewProgress?.className).toContain('evolution-link');
+    expect(viewProgress?.className).not.toContain('evolution-primary');
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          '[data-testid="capability-evolution-program-evolution-program:bcc336788a7df9d6075b1efb4c0a7e68"]',
+        )
+        ?.click();
+    });
+
+    const setup = container.querySelector('[data-testid="capability-evolution-setup"]');
+    expect(setup?.textContent).toContain('先确定目标与评估方式');
+    expect(setup?.textContent).toContain('1 项待完成');
+    expect(setup?.textContent).toContain('约定怎样判断改进有效');
+    expect(setup?.textContent).toContain('评估体系');
+    expect(setup?.textContent).not.toContain('F267');
+    expect(setup?.textContent).not.toContain('Measurement certificate');
+    expect(container.textContent).not.toContain('你现在是否需要行动');
+
+    const technical = container.querySelector<HTMLDetailsElement>(
+      '[data-testid="capability-evolution-technical-details"]',
+    );
+    expect(technical?.open).toBe(false);
+    expect(technical?.textContent).toContain('F311');
+    expect(technical?.textContent).toContain('Measurement certificate');
+    expect(technical?.textContent).toContain('Program sequence 1');
+    expect(technical?.textContent).toContain('evolution-claim:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68');
+  });
+
+  it.each([
+    {
+      lifecycle: 'paused',
+      nextAction: { code: 'resume_program', label: '恢复 Program' },
+      status: '已暂停',
+      conclusion: '这项能力已暂停，现有记录仍然保留。',
+      blockers: [
+        {
+          code: 'program_paused',
+          message: 'Program 已暂停；生命周期与历史仍永久保留。',
+          ownerFeatureId: 'F311',
+        },
+      ],
+    },
+    {
+      lifecycle: 'needs_expert',
+      nextAction: { code: 'bind_expert', label: '绑定缺失角色' },
+      status: '等待专家',
+      conclusion: '需要专业判断，当前进度已挂起。',
+      blockers: [
+        {
+          code: 'expert_required',
+          message: '当前 claim 缺少合格的 domain_owner，只挂起这条 Program。',
+          ownerFeatureId: 'F267',
+          ownerStateRef: 'expert-assignment:domain-owner',
+        },
+      ],
+    },
+    {
+      lifecycle: 'terminal',
+      nextAction: { code: 'inspect_history', label: '查看完整生命周期' },
+      status: '已完成',
+      conclusion: '本轮已经结束，结论与证据已保留。',
+      blockers: [],
+    },
+  ])('keeps lifecycle $lifecycle in product language without inventing an action', async (scenario) => {
+    const selected = {
+      ...projection,
+      program: {
+        ...projection.program,
+        lifecycle: scenario.lifecycle,
+        ...(scenario.lifecycle === 'terminal' ? { terminalDisposition: 'no_change' } : {}),
+      },
+      cycles:
+        scenario.lifecycle === 'terminal'
+          ? projection.cycles.map((cycle) => ({
+              ...cycle,
+              closedAt: '2026-09-01T08:30:53.931Z',
+              decision: 'no_change',
+            }))
+          : projection.cycles,
+      blockers: scenario.blockers,
+      nextAction: scenario.nextAction,
+    };
+    apiFetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ programs: [selected] }), { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify(selected), { status: 200 }));
+    await renderWorkspace();
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          '[data-testid="capability-evolution-program-evolution-program:bcc336788a7df9d6075b1efb4c0a7e68"]',
+        )
+        ?.click();
+    });
+
+    expect(container.textContent).toContain(scenario.status);
+    expect(container.textContent).toContain(scenario.conclusion);
+    if (scenario.lifecycle === 'terminal') {
+      expect(container.querySelector('[data-testid="capability-evolution-conclusion"]')).not.toBeNull();
+    } else {
+      expect(container.querySelector('[data-testid="capability-evolution-lifecycle-status"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="capability-evolution-setup"]')).toBeNull();
+      expect(container.textContent).not.toContain('补齐一项评估条件');
+      expect(container.textContent).not.toContain('完成后才会开始观测');
+    }
+    expect(container.textContent).not.toContain(scenario.nextAction.label);
+  });
+
+  it('renders the three real capabilities as independent rows with their own state', async () => {
+    const ownerRef = (ownerStateRef: string) => ({ ownerFeatureId: 'F311', ownerStateRef });
+    const program = (
+      id: string,
+      displayName: string,
+      ownerStateRef: string,
+      stage: string,
+      blockers: typeof projection.blockers,
+    ) => {
+      const readyRefs =
+        stage === 'constituting'
+          ? {}
+          : {
+              certificates: {
+                goal: ownerRef(`goal:${id}`),
+                measurement: ownerRef(`measurement:${id}`),
+                economic: ownerRef(`economic:${id}`),
+              },
+              valueOwnerRef: ownerRef(`value-owner:${id}`),
+              measurementRoleRefs: {
+                observer: ownerRef(`observer:${id}`),
+                domainOwner: ownerRef(`domain-owner:${id}`),
+                consumer: ownerRef(`consumer:${id}`),
+                calibrator: ownerRef(`calibrator:${id}`),
+              },
+            };
+      return {
+        ...projection,
+        program: {
+          ...projection.program,
+          programId: id,
+          displayName,
+          objectRef: { ownerFeatureId: 'F311', ownerStateRef },
+          stage,
+          ...readyRefs,
+        },
+        cycles: projection.cycles.map((cycle) => ({ ...cycle, programId: id, stage })),
+        blockers,
+      };
+    };
+    apiFetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          programs: [
+            program(
+              'evolution-program:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              '研发协作改进',
+              'capability:development-process-harness-effectiveness',
+              'instrumenting',
+              [projection.blockers[0], { ...projection.blockers[0], code: 'promotion_holdout_missing' }],
+            ),
+            program(
+              'evolution-program:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+              'Microduck 行走稳定性',
+              'capability:microduck-walking-stability',
+              'constituting',
+              [projection.blockers[0]],
+            ),
+            program(
+              'evolution-program:cccccccccccccccccccccccccccccccc',
+              '投资人路演效果',
+              'capability:f311-investor-roadshow-expression',
+              'observing',
+              [],
+            ),
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await renderWorkspace();
+
+    const rows = [...container.querySelectorAll('[data-testid^="capability-evolution-program-"]')];
+    expect(rows).toHaveLength(3);
+    expect(rows[0]?.textContent).toContain('研发协作改进');
+    expect(rows[0]?.textContent).toContain('还需要：约定怎样判断改进有效、留出未参与选择的验证场景。');
+    expect(rows[1]?.textContent).toContain('Microduck 行走稳定性');
+    expect(rows[1]?.textContent).toContain('还需要：约定怎样判断改进有效。');
+    expect(rows[2]?.textContent).toContain('投资人路演效果');
+    expect(rows[2]?.textContent).toContain('正在收集本轮证据');
+    expect(container.textContent).not.toContain('三个阶段');
+  });
+
+  it('shows the empty-state guidance and a usable StartEvolution entry when no programs exist', async () => {
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [] }), { status: 200 }));
+    await renderWorkspace();
+
+    expect(container.textContent).toContain('还没有进化记录。在下方写下想改进什么，由你从目标对话发送即可开始。');
+    const startDetails = [...container.querySelectorAll('details')].find((details) =>
+      details.textContent?.includes('提出新目标'),
+    );
+    expect(startDetails?.open).toBe(true);
+
+    const input = container.querySelector<HTMLInputElement>('[data-testid="capability-evolution-start-input"]');
+    expect(input).not.toBeNull();
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="capability-evolution-start"]')?.disabled).toBe(
+      true,
+    );
+    await act(async () => {
+      if (!input) return;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, '让代码审阅更少返工');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="capability-evolution-start"]')?.disabled).toBe(
+      false,
+    );
+  });
+
+  it('shows the adopted version by its human title on the home focus card, never the exact SHA', async () => {
+    const sha = '3084ef09530e019d14bdf7e81043bbae6f4ab66b51b019005c42adb18d963285';
+    const catalog = assetReviewFixture(sha, sha);
+    catalog.objectRef = projection.program.objectRef;
+    catalog.versions = [{ versionRef: assetRef(sha), title: '官方 walking ONNX baseline', parentEdges: [] }];
+    assetReviewState.body = JSON.stringify(catalog);
+    assetReviewState.status = 200;
+    const adoptedProjection = structuredClone(projection) as EvolutionProgramProjection;
+    adoptedProjection.program.currentAssetVersionRefs = [assetRef(sha)];
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [adoptedProjection] }), { status: 200 }));
+    await renderWorkspace();
+
+    expect(container.textContent).toContain('当前采用：官方 walking ONNX baseline');
+    expect(container.textContent).not.toContain(sha);
+  });
+
+  it('falls back to a count line when the adopted version has no human title, never the exact SHA', async () => {
+    const sha = '3084ef09530e019d14bdf7e81043bbae6f4ab66b51b019005c42adb18d963285';
+    const catalog = assetReviewFixture(sha, sha);
+    catalog.objectRef = projection.program.objectRef;
+    catalog.versions = [{ versionRef: assetRef(sha), parentEdges: [] }];
+    assetReviewState.body = JSON.stringify(catalog);
+    assetReviewState.status = 200;
+    const adoptedProjection = structuredClone(projection) as EvolutionProgramProjection;
+    adoptedProjection.program.currentAssetVersionRefs = [assetRef(sha)];
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [adoptedProjection] }), { status: 200 }));
+    await renderWorkspace();
+
+    expect(container.textContent).toContain('当前采用 1 个已记录版本');
+    expect(container.textContent).not.toContain(sha);
+  });
+
+  it('F305 contract: shows the bound destination, then confirms the draft handoff without mechanism copy', async () => {
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [] }), { status: 200 }));
+    await renderWorkspace();
+
+    const input = container.querySelector<HTMLInputElement>('[data-testid="capability-evolution-start-input"]');
+    await act(async () => {
+      if (!input) return;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, '视频讲解能力');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(container.querySelector('[data-testid="capability-evolution-chat-destination"]')?.textContent).toContain(
+      '路演表达进化',
+    );
+    expect(container.querySelector('[data-testid="capability-evolution-draft-preview"]')).toBeNull();
+    expect(container.textContent).not.toContain('将加入输入框');
+    expect(container.textContent).not.toContain('只加入输入框，不会自动发送');
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="capability-evolution-start"]')?.textContent).toBe(
+      '带到这个对话',
+    );
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="capability-evolution-start"]')?.click();
+    });
+
+    const inserted = setPendingChatInsert.mock.calls[0]?.[0];
+    expect(inserted).toEqual({
+      threadId: 'thread-f311',
+      text: '我们来进化 视频讲解能力',
+    });
+    expect(inserted).not.toHaveProperty('authoritative');
+    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('已带到「路演表达进化」');
+    expect(container.textContent).toContain('原有草稿已保留');
+    expect(container.textContent).toContain('由你确认后发送');
+  });
+
+  it('follows the surface-bound target when the destination changes instead of the global focused thread', async () => {
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [] }), { status: 200 }));
+    await renderWorkspace('thread-f311');
+    await renderWorkspace('thread-other');
+
+    const input = container.querySelector<HTMLInputElement>('[data-testid="capability-evolution-start-input"]');
+    await act(async () => {
+      if (!input) return;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, '视频讲解能力');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.querySelector('[data-testid="capability-evolution-chat-destination"]')?.textContent).toContain(
+      '视频工作台',
+    );
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="capability-evolution-start"]')?.click();
+    });
+
+    expect(setPendingChatInsert).toHaveBeenCalledWith({
+      threadId: 'thread-other',
+      text: '我们来进化 视频讲解能力',
+    });
+    expect(setPendingChatInsert).not.toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: chatStoreState.currentThreadId }),
+    );
+  });
+
+  it('honestly disables admission when the workspace has no writable conversation target', async () => {
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [] }), { status: 200 }));
+    await renderWorkspace(null);
+
+    const input = container.querySelector<HTMLInputElement>('[data-testid="capability-evolution-start-input"]');
+    await act(async () => {
+      if (!input) return;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, '视频讲解能力');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(container.querySelector('[data-testid="capability-evolution-chat-destination"]')?.textContent).toContain(
+      '没有可写入的目标对话',
+    );
+    expect(container.textContent).toContain('请先回到一个对话');
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="capability-evolution-start"]')?.disabled).toBe(
+      true,
+    );
+    expect(setPendingChatInsert).not.toHaveBeenCalled();
+  });
+
+  it('shows an honest owner-unavailable state without a mock list', async () => {
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'unavailable' }), { status: 503 }));
+    await renderWorkspace();
+
+    expect(container.textContent).toContain('暂时无法读取进化记录');
+    expect(container.textContent).not.toContain('Program owner');
+    expect(container.querySelectorAll('[data-testid^="capability-evolution-program-"]')).toHaveLength(0);
+  });
+  it('keeps lifecycle controls reachable from Program detail', async () => {
+    apiFetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ programs: [projection] }), { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify(projection), { status: 200 }));
+    await renderWorkspace();
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          '[data-testid="capability-evolution-program-evolution-program:bcc336788a7df9d6075b1efb4c0a7e68"]',
+        )
+        ?.click();
+    });
+    const manage = [...container.querySelectorAll('button')].find((button) => button.textContent === '展开阅读 →');
+    if (!manage) throw new Error('lifecycle entry missing from Program detail');
+    act(() => manage.click());
+
+    expect(onOpenProgram.mock.calls[0]?.[0]).toBe('evolution-program:bcc336788a7df9d6075b1efb4c0a7e68');
+  });
+
+  it('keeps known pending decisions reachable when part of the v2 list is unreadable', async () => {
+    localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    const pending = {
+      caseRef: ownerRef('case-known'),
+      proposalRef: { ownerFeatureId: 'F266', ownerStateRef: 'eval-repair-proposal:known' },
+      ownerAuthorizationRef: ownerRef('authorization-known'),
+      targetVersionRef: assetRef('candidate-known'),
+      status: 'pending' as const,
+    };
+    const known = {
+      ...programFixture('awaiting_approval', 8),
+      lineage: { cycles: [{ cycle: 1, changes: [pending] }], current: pending },
+    };
+    apiFetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ programs: [known, { program: { schemaVersion: 2 } }] }), { status: 200 }),
+    );
+    await renderWorkspace();
+
+    expect(container.textContent).toContain('1 项记录暂时无法读取');
+    expect(container.textContent).toContain('待判断 已读 1');
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent === '去待办审阅')).toBe(true);
+    expect(container.textContent).not.toContain('目前没有需要你拍板的提议。');
+    expect(container.textContent).not.toContain('还没有进化记录');
+    expect(container.textContent).not.toContain('在上方写下想改进什么');
+  });
+});

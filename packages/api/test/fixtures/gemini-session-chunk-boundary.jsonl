@@ -1,0 +1,3 @@
+{"sessionId":"test-session-chunk-001","startedAt":"2026-05-09T01:00:00.000Z"}
+{"id":"msg-001","timestamp":"2026-05-09T01:00:01.000Z","type":"user","content":"测试"}
+{"id":"msg-002","timestamp":"2026-05-09T01:00:02.000Z","type":"gemini","content":"调用工具完成了","tokens":{"input":50,"output":10,"cached":0,"thoughts":0,"tool":0,"total":77},"model":"gemini-test"}

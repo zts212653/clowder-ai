@@ -1,0 +1,75 @@
+/*
+ * F056 Phase E — Theme Extras
+ *
+ * F155 Guide engine tokens + warm-pastel Notice tokens。
+ * 两者是 feature-specific 风格层，不属七类色 design system 派生。
+ *
+ * Guide: 引导高光遮罩 + HUD 文字色 + 动效控制
+ * Notice: 系统通知条（info/warning/error）warm-pastel 风格，跟 semantic 色保持视觉协调
+ */
+
+:root {
+  /* --- F155 Guide tokens（独立体系，保留） --- */
+  --guide-overlay-bg: oklch(0.15 0.01 240 / 0.62);
+  --guide-cutout-ring: oklch(0.7 0.13 50);
+  --guide-cutout-shadow: oklch(0.7 0.13 50 / 0.35);
+  --guide-hud-bg: oklch(0.985 0.008 60);
+  --guide-hud-border: oklch(0.9 0.02 60);
+  --guide-text-primary: oklch(0.25 0.02 50);
+  --guide-text-secondary: oklch(0.5 0.02 50);
+  --guide-success: var(--semantic-success);
+  --guide-error: var(--semantic-critical);
+  --guide-z-overlay: 1100;
+  --guide-z-hud: 1110;
+  --guide-radius: 14px;
+  --guide-motion-normal: 260ms;
+  --guide-breathe-animation: guide-breathe 1.8s ease-in-out infinite;
+  --guide-transition-duration: var(--guide-motion-normal);
+
+  /* --- Notice tokens（warm-pastel 风格保留，映射到 Semantic hue） --- */
+  --notice-info-label: oklch(0.55 0.06 240);
+  --notice-info-icon: oklch(0.6 0.07 240);
+  --notice-info-border: oklch(0.88 0.04 240);
+  --notice-warning-label: oklch(0.55 0.09 60);
+  --notice-warning-icon: oklch(0.62 0.12 60);
+  --notice-warning-border: oklch(0.88 0.05 60);
+  --notice-error-label: oklch(0.55 0.1 25);
+  --notice-error-icon: oklch(0.62 0.14 25);
+  --notice-error-border: oklch(0.88 0.05 25);
+  --notice-error-surface: oklch(0.985 0.015 25);
+  --notice-enter-duration: 0.4s;
+  --notice-enter-easing: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --guide-breathe-animation: none;
+    --guide-transition-duration: 0ms;
+    --notice-enter-duration: 0ms;
+  }
+}
+
+[data-theme="dark"] {
+  /* --- Guide dark --- */
+  --guide-overlay-bg: oklch(0.1 0.005 240 / 0.72);
+  --guide-cutout-ring: oklch(0.72 0.13 50);
+  --guide-cutout-shadow: oklch(0.72 0.13 50 / 0.22);
+  --guide-hud-bg: oklch(0.24 0.005 30);
+  --guide-hud-border: oklch(0.32 0.005 30);
+  --guide-text-primary: oklch(0.94 0.005 30);
+  --guide-text-secondary: oklch(0.68 0.005 30);
+  --guide-success: var(--semantic-success);
+  --guide-error: var(--semantic-critical);
+
+  /* --- Notice dark --- */
+  --notice-info-label: oklch(0.72 0.06 240);
+  --notice-info-icon: oklch(0.7 0.07 240);
+  --notice-info-border: oklch(0.55 0.06 240 / 0.32);
+  --notice-warning-label: oklch(0.78 0.1 60);
+  --notice-warning-icon: oklch(0.78 0.12 60);
+  --notice-warning-border: oklch(0.62 0.12 60 / 0.32);
+  --notice-error-label: oklch(0.78 0.1 25);
+  --notice-error-icon: oklch(0.78 0.1 25);
+  --notice-error-border: oklch(0.62 0.14 25 / 0.32);
+  --notice-error-surface: oklch(0.62 0.14 25 / 0.08);
+}

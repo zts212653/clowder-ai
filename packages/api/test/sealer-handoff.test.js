@@ -41,7 +41,7 @@ describe('SessionSealer handoff digest integration', () => {
       },
     };
 
-    const sealer = new SessionSealer(store, writer, threadStore, reader, (_catId) => 180000, handoffConfig);
+    const sealer = new SessionSealer(store, writer, threadStore, reader, handoffConfig);
 
     return { store, writer, reader, sealer };
   }
@@ -152,7 +152,7 @@ describe('SessionSealer handoff digest integration', () => {
     assert.equal(fetchCalled, false, 'should NOT call Haiku without API key');
   });
 
-  test('handoff failure does not prevent session sealing', async () => {
+  test('handoff generation failure seals the session as terminal partial', async () => {
     const handoffConfig = {
       getBootstrapDepth: (_catId) => 'generative',
       resolveProfile: async () => ({ apiKey: 'sk-test', baseUrl: 'https://api.anthropic.com' }),
@@ -175,9 +175,10 @@ describe('SessionSealer handoff digest integration', () => {
     );
 
     await sealer.requestSeal({ sessionId: record.id, reason: 'threshold' });
-    await sealer.finalize({ sessionId: record.id });
+    const result = await sealer.finalize({ sessionId: record.id });
 
     const finalRecord = store.get(record.id);
     assert.equal(finalRecord?.status, 'sealed', 'session should still seal on handoff failure');
+    assert.deepEqual(result, { sealed: true, clean: false });
   });
 });

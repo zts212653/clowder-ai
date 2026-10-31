@@ -43,7 +43,7 @@ export class EventAuditLog {
   private initialized = false;
 
   constructor(options?: { auditDir?: string }) {
-    this.auditDir = options?.auditDir ?? process.env.AUDIT_LOG_DIR ?? DEFAULT_AUDIT_DIR;
+    this.auditDir = resolve(options?.auditDir ?? process.env.AUDIT_LOG_DIR ?? DEFAULT_AUDIT_DIR);
   }
 
   /**
@@ -63,7 +63,14 @@ export class EventAuditLog {
     const filepath = join(this.auditDir, filename);
     const line = `${JSON.stringify(event)}\n`;
 
-    await appendFile(filepath, line, 'utf-8');
+    try {
+      await appendFile(filepath, line, 'utf-8');
+    } catch (error) {
+      // A removed/repaired directory must not leave this process stuck on its
+      // previous initialization. No retry here: append outcomes may be uncertain.
+      this.initialized = false;
+      throw error;
+    }
 
     return event;
   }
@@ -140,6 +147,11 @@ export class EventAuditLog {
     return resolve(this.auditDir, filename);
   }
 
+  /** The actual directory captured by this writer, without creating files or directories. */
+  getDirectory(): string {
+    return this.auditDir;
+  }
+
   /**
    * List all available audit log files.
    */
@@ -199,6 +211,8 @@ export const AuditEventTypes = {
   SERVER_SHUTDOWN: 'server_shutdown',
   /** 运行时配置被更新 */
   CONFIG_UPDATED: 'config_updated',
+  /** 敏感环境变量被写入（owner-only, keys-only audit） */
+  ENV_SENSITIVE_WRITE: 'env_sensitive_write',
 
   // === 消息级审计 (茶话会夺魂 bug fix #37) ===
 
@@ -208,6 +222,8 @@ export const AuditEventTypes = {
   CAT_RESPONDED: 'cat_responded',
   /** 调用发生错误 */
   CAT_ERROR: 'cat_error',
+  /** F293: dynamic routing cognition could not be projected; invocation continued without it. */
+  ROUTING_CONTEXT_PROJECTION_FAILED: 'routing_context_projection_failed',
   /** 猫猫互调 handoff */
   A2A_HANDOFF: 'a2a_handoff',
   /** CLI 工具执行开始（command_execution started） */
@@ -230,6 +246,8 @@ export const AuditEventTypes = {
 
   /** 手动绑定 CLI session (#72) */
   SESSION_BIND: 'session_bind',
+  /** F211 Phase B: External IDE-direct runtime session registration */
+  EXTERNAL_RUNTIME_SESSION_REGISTERED: 'external_runtime_session_registered',
 
   // === Push Delivery Diagnostics ===
 
@@ -250,9 +268,17 @@ export const AuditEventTypes = {
   BROWSER_PREVIEW_CLOSE: 'browser_preview_close',
   /** 浏览器预览导航 */
   BROWSER_PREVIEW_NAVIGATE: 'browser_preview_navigate',
+  /** Workspace 面板导航 */
+  WORKSPACE_NAVIGATE: 'workspace_navigate',
+  /** Revision-bound applied/dismissed skill receipt from a declared consumer */
+  SKILL_CONSUMPTION_RECEIPT: 'skill_consumption_receipt',
 
   // === Session Sealing (F118) ===
 
+  /** requestSeal() accepted — session transitioning active → sealing */
+  SEAL_REQUESTED: 'seal_requested',
+  /** finalize() completed cleanly — session sealed with transcript + digest written. Not emitted on partial finalize (doFinalize failed but status forced to sealed). */
+  SEAL_FINALIZED: 'seal_finalized',
   /** finalize() failed or timed out */
   SEAL_FINALIZE_FAILED: 'seal_finalize_failed',
 } as const;

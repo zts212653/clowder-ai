@@ -1,0 +1,50 @@
+{
+  "resource": {
+    "kind": "family",
+    "resourceFamily": "permission"
+  },
+  "retiredNames": ["cat_cafe_check_permission_status", "cat_cafe_request_permission"],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "b4e00ae628def97e2dc4344e152df117fa305c34",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": ["packages/mcp-server/src/tools/callback-tools.ts", "packages/mcp-server/src/tools/index.ts"]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/server-toolsets.ts",
+        "packages/mcp-server/governance/mcp-surface-baseline.json"
+      ]
+    },
+    "prompt-l0": {
+      "status": "covered",
+      "consumers": ["assets/prompt-templates/c1-mcp-callback.md"]
+    },
+    "skill-convention": {
+      "status": "covered",
+      "consumers": ["cat-cafe-skills/refs/mcp-callbacks.md"]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/tool-registration.test.js",
+        "packages/mcp-server/test/callback-tools.test.js",
+        "packages/api/test/mcp-prompt-injector.test.js"
+      ]
+    },
+    "eval": {
+      "status": "covered",
+      "consumers": ["packages/api/src/infrastructure/harness-eval/task-outcome"]
+    },
+    "observability": {
+      "status": "covered",
+      "consumers": [
+        "packages/api/src/domains/cats/services/auth/AuthorizationManager.ts",
+        "packages/api/src/routes/authorization.ts"
+      ]
+    }
+  }
+}

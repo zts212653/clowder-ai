@@ -1,0 +1,10 @@
+id: tech-article
+domain: writing
+label: Tech Article SOP Stub
+description: Schema fixture only. Not part of runtime codegen.
+stages:
+  - id: outline
+    label: Outline
+    suggested_skill: tech-writing
+    hard_rules: []
+    pitfalls: []

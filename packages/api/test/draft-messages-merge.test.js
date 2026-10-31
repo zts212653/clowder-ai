@@ -1,12 +1,17 @@
 /**
- * #80: Tests for GET /api/messages draft merge behavior.
+ * #80 / F117: GET /api/messages folds a streaming draft into its durable response.
+ *
+ * Every dispatched cat turn owns a response message R, stored empty at admission as a
+ * `processing` lifecycle response whose `lifecycle.invocationId` is the child turn id.
+ * DraftStore keeps that turn's recoverable streamed body under the same id, and the client
+ * renders history by message id only — so a draft is nothing but R's in-flight body.
  *
  * Verifies:
- * 1. First page (no cursor) includes active drafts
- * 2. Pagination (with before cursor) excludes drafts
- * 3. invocationId-based dedup filters drafts that match formal messages
- * 4. userId isolation: drafts scoped to requesting user
- * 5. Draft messages have isDraft flag for frontend streaming indicator
+ * 1. Any page: a draft folds into its response on whichever page holds R (before cursor too)
+ * 2. A draft folds into the processing response with the exact lifecycle.invocationId
+ * 3. A draft without a processing response on the page is ignored (never a record, never deleted)
+ * 4. Terminal responses are never overwritten by a stale draft
+ * 5. userId isolation: drafts are scoped to the requesting user
  */
 
 import assert from 'node:assert/strict';
@@ -15,6 +20,7 @@ import Fastify from 'fastify';
 import { DraftStore } from '../dist/domains/cats/services/stores/ports/DraftStore.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { messagesRoutes } from '../dist/routes/messages.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 // Minimal mock router that satisfies the type contract
 function makeStubRouter() {
@@ -30,9 +36,9 @@ function makeStubRouter() {
   };
 }
 
-// Minimal mock dependencies
+// Production semantics: an unknown id resolves to null, never throws.
 function makeStubRegistry() {
-  return { getLatestId: () => null, register: () => {} };
+  return { getLatestId: () => null, getRecord: async () => null, register: () => {} };
 }
 
 function makeStubSocketManager() {
@@ -43,7 +49,15 @@ function makeStubSocketManager() {
   };
 }
 
-describe('GET /api/messages — draft merge (#80)', () => {
+function assertNoStandaloneDraftRecords(messages) {
+  assert.deepEqual(
+    messages.filter((message) => message.id.startsWith('draft-')).map((message) => message.id),
+    [],
+    'a draft must never become its own history record',
+  );
+}
+
+describe('GET /api/messages — draft folds into its processing response (#80 / F117)', () => {
   /** @type {MessageStore} */
   let messageStore;
   /** @type {DraftStore} */
@@ -66,329 +80,187 @@ describe('GET /api/messages — draft merge (#80)', () => {
     return app;
   }
 
-  it('includes active drafts on first page (no cursor)', async () => {
-    // Seed a formal message
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'Hello',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
-
-    // Seed an active draft
-    draftStore.upsert({
-      userId: 'user-1',
-      threadId: 'thread-1',
-      invocationId: 'inv-active',
-      catId: 'opus',
-      content: 'Draft content...',
-      updatedAt: Date.now(),
-    });
-
-    const app = await buildApp();
+  async function getMessages(app, { userId = 'user-1', query = '' } = {}) {
     const res = await app.inject({
       method: 'GET',
-      url: '/api/messages?threadId=thread-1',
-      headers: { 'x-cat-cafe-user': 'user-1' },
+      url: `/api/messages?threadId=thread-1${query}`,
+      headers: { 'x-cat-cafe-user': userId },
     });
-
     assert.equal(res.statusCode, 200);
-    const body = JSON.parse(res.body);
-    const messages = body.messages;
+    return res.json().messages;
+  }
 
-    // Should have the formal message + the draft
-    assert(messages.length >= 2, `Expected at least 2 messages, got ${messages.length}`);
-    const draft = messages.find((m) => m.id === 'draft-inv-active');
-    assert(draft, 'Draft message should be included');
-    assert.equal(draft.isDraft, true, 'Draft should have isDraft flag');
-    assert.equal(draft.content, 'Draft content...');
-    assert.equal(draft.catId, 'opus');
-  });
-
-  it('excludes drafts on paginated request (with before cursor)', async () => {
-    // Seed messages
-    const ts = Date.now();
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'First',
-      mentions: [],
-      timestamp: ts - 1000,
-      threadId: 'thread-1',
-    });
-
-    // Seed a draft
-    draftStore.upsert({
-      userId: 'user-1',
-      threadId: 'thread-1',
-      invocationId: 'inv-active',
-      catId: 'opus',
-      content: 'Draft...',
-      updatedAt: ts,
-    });
-
-    const app = await buildApp();
-    const res = await app.inject({
-      method: 'GET',
-      url: `/api/messages?threadId=thread-1&before=${ts + 1000}`,
-      headers: { 'x-cat-cafe-user': 'user-1' },
-    });
-
-    assert.equal(res.statusCode, 200);
-    const body = JSON.parse(res.body);
-    const hasDraft = body.messages.some((m) => m.isDraft === true);
-    assert.equal(hasDraft, false, 'Paginated request should not include drafts');
-  });
-
-  it('deduplicates draft when formal message has matching invocationId', async () => {
-    const ts = Date.now();
-
-    // Formal message with invocationId in extra.stream
-    messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'Completed message',
-      mentions: [],
-      timestamp: ts,
-      threadId: 'thread-1',
-      extra: { stream: { invocationId: 'inv-completed' } },
-    });
-
-    // Draft with same invocationId (the race window between append and delete)
-    draftStore.upsert({
-      userId: 'user-1',
-      threadId: 'thread-1',
-      invocationId: 'inv-completed',
-      catId: 'opus',
-      content: 'Stale draft...',
-      updatedAt: ts - 500,
-    });
-
-    const app = await buildApp();
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/messages?threadId=thread-1',
-      headers: { 'x-cat-cafe-user': 'user-1' },
-    });
-
-    assert.equal(res.statusCode, 200);
-    const body = JSON.parse(res.body);
-    const draftMsg = body.messages.find((m) => m.isDraft === true);
-    assert.equal(draftMsg, undefined, 'Deduped draft should not appear in response');
-
-    // Formal message should still be there
-    const formal = body.messages.find((m) => m.content === 'Completed message');
-    assert(formal, 'Formal message should be present');
-  });
-
-  it('userId isolation: cannot see other user drafts', async () => {
-    // Draft from user-B
-    draftStore.upsert({
-      userId: 'user-B',
-      threadId: 'thread-1',
-      invocationId: 'inv-secret',
-      catId: 'opus',
-      content: 'Secret draft',
-      updatedAt: Date.now(),
-    });
-
-    // Seed a message so user-A gets non-empty response
-    messageStore.append({
-      userId: 'user-A',
-      catId: null,
-      content: 'Hi',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
-
-    const app = await buildApp();
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/messages?threadId=thread-1',
-      headers: { 'x-cat-cafe-user': 'user-A' },
-    });
-
-    assert.equal(res.statusCode, 200);
-    const body = JSON.parse(res.body);
-    const hasDraft = body.messages.some((m) => m.isDraft === true);
-    assert.equal(hasDraft, false, 'User A should not see User B drafts');
-  });
-
-  it('deduplicates draft when formal message is pushed off first page (cloud R4 P2)', async () => {
-    const ts = Date.now();
-
-    // 1. Seed the formal message with invocationId (oldest — will be pushed off page)
-    messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'Completed streaming response',
-      mentions: [],
-      timestamp: ts,
-      threadId: 'thread-1',
-      extra: { stream: { invocationId: 'inv-offpage' } },
-    });
-
-    // 2. Seed enough newer messages to push formal off the first page
-    //    Using limit=5 via query param, so we need 5 newer messages
-    for (let i = 1; i <= 5; i++) {
-      messageStore.append({
-        userId: 'user-1',
-        catId: null,
-        content: `Filler message ${i}`,
+  /** Durable response R exactly as dispatch admission stores it (same shape as the exact-hydration test). */
+  function appendResponse({
+    turnId,
+    timestamp,
+    catId = 'opus',
+    parentId = `parent-${turnId}`,
+    stream = { invocationId: parentId, turnInvocationId: turnId },
+    status = 'processing',
+    content = '',
+    userId = 'user-1',
+  }) {
+    return messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId,
+        content,
         mentions: [],
-        timestamp: ts + i * 1000,
+        timestamp,
         threadId: 'thread-1',
-      });
+        origin: 'stream',
+        extra: { stream },
+        lifecycle: {
+          kind: 'response',
+          orderKey: `${timestamp}:${turnId}`,
+          invocationId: turnId,
+          targetId: catId,
+          inputEntryIds: [`entry-${turnId}`],
+          inputMessageIds: [`source-${turnId}`],
+          status,
+          startedAt: timestamp,
+          ...(status === 'processing' ? {} : { completedAt: timestamp + 50 }),
+        },
+      }),
+    );
+  }
+
+  function upsertDraft({ turnId, content, updatedAt, catId = 'opus', userId = 'user-1', ...body }) {
+    draftStore.upsert({ userId, threadId: 'thread-1', invocationId: turnId, catId, content, updatedAt, ...body });
+  }
+
+  it('folds a draft into its response on whichever page holds it (before cursor included)', async () => {
+    const ts = Date.now();
+    const response = appendResponse({ turnId: 'turn-page', timestamp: ts });
+    upsertDraft({ turnId: 'turn-page', content: 'Draft...', updatedAt: ts + 100 });
+    // A long turn: newer messages arrive while R is still processing and push it off page one.
+    for (let i = 1; i <= 3; i += 1) {
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'user-1',
+          catId: null,
+          content: `newer ${i}`,
+          mentions: [],
+          timestamp: ts + i * 1000,
+          threadId: 'thread-1',
+        }),
+      );
     }
 
-    // 3. Draft with same invocationId (stale — should be deduped by wider query)
-    draftStore.upsert({
-      userId: 'user-1',
-      threadId: 'thread-1',
-      invocationId: 'inv-offpage',
-      catId: 'opus',
-      content: 'Stale draft from completed invocation',
-      updatedAt: ts + 6000,
-    });
-
     const app = await buildApp();
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/messages?threadId=thread-1&limit=5',
-      headers: { 'x-cat-cafe-user': 'user-1' },
-    });
+    const firstPage = await getMessages(app, { query: '&limit=3' });
+    assert.equal(
+      firstPage.some((message) => message.id === response.id),
+      false,
+      'R is no longer on the first page',
+    );
 
-    assert.equal(res.statusCode, 200);
-    const body = JSON.parse(res.body);
-
-    // The formal message should NOT be on the page (pushed off by filler)
-    const formalOnPage = body.messages.find((m) => m.content === 'Completed streaming response');
-    assert.equal(formalOnPage, undefined, 'Formal message should be off-page');
-
-    // The stale draft should be deduped by the wider 200-message query
-    const staleDraft = body.messages.find((m) => m.id === 'draft-inv-offpage');
-    assert.equal(staleDraft, undefined, 'Off-page formal should still dedup the draft');
-
-    // hasMore should be true (6 total messages, limit=5)
-    assert.equal(body.hasMore, true, 'Should have more pages');
+    const secondPage = await getMessages(app, { query: `&limit=3&before=${ts + 1000}` });
+    const paged = secondPage.find((message) => message.id === response.id);
+    assert.ok(paged, 'the older page holds the processing response');
+    assert.equal(paged.content, 'Draft...', 'R on an older page still reads its streamed body');
+    assert.equal(paged.isDraft, true);
+    assertNoStandaloneDraftRecords(secondPage);
   });
 
-  it('wider dedup window exceeds page limit when limit equals API max (cloud R5 P2)', async () => {
-    const ts = Date.now();
-
-    // 1. Seed the formal message (will be the 201st oldest → pushed off a 200-message page)
-    messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'Completed at max-limit edge',
-      mentions: [],
-      timestamp: ts,
-      threadId: 'thread-1',
-      extra: { stream: { invocationId: 'inv-maxlimit' } },
-    });
-
-    // 2. Seed 200 newer messages to push formal off the first page at limit=200
-    for (let i = 1; i <= 200; i++) {
-      messageStore.append({
+  it('never hydrates new pending-message recall tombstones or their body', async () => {
+    const hidden = messageStore.append(
+      canonicalTestMessageInput({
         userId: 'user-1',
         catId: null,
-        content: `Filler ${i}`,
-        mentions: [],
-        timestamp: ts + i * 100,
+        content: 'zero exposure secret',
+        mentions: ['opus'],
+        timestamp: 1_000,
         threadId: 'thread-1',
-      });
-    }
-
-    // 3. Stale draft with same invocationId
-    draftStore.upsert({
-      userId: 'user-1',
-      threadId: 'thread-1',
-      invocationId: 'inv-maxlimit',
-      catId: 'opus',
-      content: 'Stale draft at max limit',
-      updatedAt: ts + 30000,
-    });
-
-    const app = await buildApp();
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/messages?threadId=thread-1&limit=200',
-      headers: { 'x-cat-cafe-user': 'user-1' },
-    });
-
-    assert.equal(res.statusCode, 200);
-    const body = JSON.parse(res.body);
-
-    // With old code (wider=200), this draft would leak because wider == limit
-    const staleDraft = body.messages.find((m) => m.id === 'draft-inv-maxlimit');
-    assert.equal(staleDraft, undefined, 'Wider window must exceed limit=200 to catch off-page formal');
-  });
-
-  it('includes tool-only draft with empty content (cloud R6 P1)', async () => {
-    const ts = Date.now();
-
-    // Seed a user message so the thread has content
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'Do something',
-      mentions: [],
-      timestamp: ts,
-      threadId: 'thread-1',
-    });
-
-    // Tool-first draft: no text yet, only tool events
-    draftStore.upsert({
-      userId: 'user-1',
-      threadId: 'thread-1',
-      invocationId: 'inv-tool-first',
-      catId: 'opus',
-      content: '',
-      toolEvents: [{ id: 'te-1', type: 'tool_use', label: 'Read file', timestamp: ts + 500 }],
-      updatedAt: ts + 500,
-    });
+        deliveryStatus: 'queued',
+      }),
+    );
+    const second = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'second pending secret',
+        mentions: ['opus'],
+        timestamp: 1_100,
+        threadId: 'thread-1',
+        deliveryStatus: 'queued',
+      }),
+    );
+    assert.equal(
+      messageStore.recallMessageToComposerDraft(hidden.id, {
+        ownerUserId: 'user-1',
+        threadId: 'thread-1',
+        expectedDraftRevision: 0,
+        merge: 'replace',
+        recalledAt: 2_000,
+      }).kind,
+      'recalled',
+    );
+    assert.equal(
+      messageStore.recallMessageToComposerDraft(second.id, {
+        ownerUserId: 'user-1',
+        threadId: 'thread-1',
+        expectedDraftRevision: 1,
+        merge: 'replace',
+        recalledAt: 2_100,
+      }).kind,
+      'recalled',
+    );
 
     const app = await buildApp();
-    const res = await app.inject({
+    const response = await app.inject({
       method: 'GET',
       url: '/api/messages?threadId=thread-1',
       headers: { 'x-cat-cafe-user': 'user-1' },
     });
 
-    assert.equal(res.statusCode, 200);
-    const body = JSON.parse(res.body);
-
-    const draft = body.messages.find((m) => m.id === 'draft-inv-tool-first');
-    assert(draft, 'Tool-only draft should appear even with empty content');
-    assert.equal(draft.isDraft, true);
-    assert.equal(draft.content, '');
-    assert.equal(draft.toolEvents.length, 1);
-    assert.equal(draft.toolEvents[0].label, 'Read file');
+    assert.equal(response.statusCode, 200);
+    const messages = response.json().messages;
+    assert.equal(
+      messages.some((message) => message.id === hidden.id),
+      false,
+    );
+    assert.equal(
+      messages.some((message) => message.id === second.id),
+      false,
+    );
+    assert.doesNotMatch(JSON.stringify(messages), /zero exposure secret|second pending secret/);
   });
 
-  it('draft response includes origin, extra.stream.invocationId, and thinking (Bug A+B contract)', async () => {
+  it('hydrates a live draft into its exact processing lifecycle response', async () => {
     const ts = Date.now();
-
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'Hello',
-      mentions: [],
-      timestamp: ts,
-      threadId: 'thread-1',
-    });
-
+    const response = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: '',
+        mentions: [],
+        timestamp: ts,
+        threadId: 'thread-1',
+        origin: 'stream',
+        extra: {
+          stream: { invocationId: 'parent-live', turnInvocationId: 'turn-live' },
+        },
+        lifecycle: {
+          kind: 'response',
+          orderKey: `${ts}:turn-live`,
+          invocationId: 'turn-live',
+          targetId: 'opus',
+          inputEntryIds: ['entry-live'],
+          inputMessageIds: ['source-live'],
+          status: 'processing',
+          startedAt: ts,
+        },
+      }),
+    );
     draftStore.upsert({
       userId: 'user-1',
       threadId: 'thread-1',
-      invocationId: 'inv-contract',
+      invocationId: 'turn-live',
       catId: 'opus',
-      content: 'Partial text...',
-      thinking: 'Let me think about this...',
-      toolEvents: [{ id: 'te-1', type: 'tool_use', label: 'Read', timestamp: ts }],
+      content: 'Visible partial output',
+      thinking: 'Visible thought',
       updatedAt: ts + 100,
     });
 
@@ -400,64 +272,197 @@ describe('GET /api/messages — draft merge (#80)', () => {
     });
 
     assert.equal(res.statusCode, 200);
-    const body = JSON.parse(res.body);
-    const draft = body.messages.find((m) => m.id === 'draft-inv-contract');
-    assert(draft, 'Draft should be present');
+    const matches = res
+      .json()
+      .messages.filter((message) => message.id === response.id || message.id === 'draft-turn-live');
+    assert.equal(matches.length, 1, 'live content must reuse the canonical lifecycle response bubble');
+    assert.equal(matches[0].id, response.id);
+    assert.equal(matches[0].content, 'Visible partial output');
+    assert.equal(matches[0].thinking, 'Visible thought');
+    assert.equal(matches[0].isDraft, true);
+    assert.equal(matches[0].lifecycle.status, 'processing');
+  });
 
-    // Bug A: thinking must be included
-    assert.equal(draft.thinking, 'Let me think about this...', 'Draft should include thinking');
+  it('folds a tool-only draft (empty content) into its processing response', async () => {
+    const ts = Date.now();
+    const response = appendResponse({ turnId: 'turn-tool-first', timestamp: ts });
+    upsertDraft({
+      turnId: 'turn-tool-first',
+      content: '',
+      toolEvents: [{ id: 'te-1', type: 'tool_use', label: 'Read file', timestamp: ts + 500 }],
+      updatedAt: ts + 500,
+    });
 
-    // Bug B: stream identity must be included for frontend reconciliation
-    assert.equal(draft.origin, 'stream', 'Draft should have origin: stream');
+    const messages = await getMessages(await buildApp());
+    const folded = messages.find((message) => message.id === response.id);
+    assert.equal(folded.isDraft, true, 'an empty-text draft is still the live body of its response');
+    assert.equal(folded.content, '');
     assert.deepEqual(
-      draft.extra?.stream,
-      { invocationId: 'inv-contract' },
-      'Draft should have extra.stream.invocationId',
+      folded.toolEvents.map((event) => event.label),
+      ['Read file'],
+    );
+    assertNoStandaloneDraftRecords(messages);
+  });
+
+  it('folds thinking and tool events into the response without replacing its identity', async () => {
+    const ts = Date.now();
+    const response = appendResponse({ turnId: 'turn-contract', parentId: 'parent-contract', timestamp: ts });
+    upsertDraft({
+      turnId: 'turn-contract',
+      content: 'Partial text...',
+      thinking: 'Let me think about this...',
+      toolEvents: [{ id: 'te-1', type: 'tool_use', label: 'Read', timestamp: ts }],
+      updatedAt: ts + 100,
+    });
+
+    const folded = (await getMessages(await buildApp())).find((message) => message.id === response.id);
+    assert.equal(folded.content, 'Partial text...');
+    assert.equal(folded.thinking, 'Let me think about this...');
+    assert.equal(folded.toolEvents.length, 1);
+    // The draft contributes body only; identity stays the response's own.
+    assert.equal(folded.catId, 'opus');
+    assert.equal(folded.origin, 'stream');
+    assert.deepEqual(folded.extra?.stream, { invocationId: 'parent-contract', turnInvocationId: 'turn-contract' });
+    assert.equal(folded.lifecycle.invocationId, 'turn-contract');
+    assert.equal(folded.lifecycle.status, 'processing');
+  });
+
+  it('folds concurrent drafts of one parent into their own responses, in response order', async () => {
+    const ts = Date.now();
+    const opus = appendResponse({ turnId: 'turn-opus', catId: 'opus', parentId: 'parent-fanout', timestamp: ts });
+    const codex = appendResponse({
+      turnId: 'turn-codex',
+      catId: 'codex',
+      parentId: 'parent-fanout',
+      timestamp: ts + 1,
+    });
+    // Draft recency is the reverse of response order: position must come from the response.
+    upsertDraft({ turnId: 'turn-codex', catId: 'codex', content: 'Codex draft', updatedAt: ts + 100 });
+    upsertDraft({ turnId: 'turn-opus', catId: 'opus', content: 'Opus draft', updatedAt: ts + 200 });
+
+    const messages = await getMessages(await buildApp());
+    assert.deepEqual(
+      messages
+        .filter((message) => message.isDraft === true)
+        .map((message) => [message.id, message.catId, message.content]),
+      [
+        [opus.id, 'opus', 'Opus draft'],
+        [codex.id, 'codex', 'Codex draft'],
+      ],
+    );
+    assertNoStandaloneDraftRecords(messages);
+  });
+
+  it('ignores drafts whose turn has no processing response on the page, without deleting them', async () => {
+    const ts = Date.now();
+    appendResponse({ turnId: 'turn-offpage', timestamp: ts });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'Filler',
+        mentions: [],
+        timestamp: ts + 1,
+        threadId: 'thread-1',
+      }),
+    );
+    const live = appendResponse({ turnId: 'turn-live', timestamp: ts + 2 });
+    upsertDraft({ turnId: 'turn-offpage', content: 'Off-page partial', updatedAt: ts + 100 });
+    upsertDraft({ turnId: 'turn-orphan', content: 'Orphan partial', updatedAt: ts + 100 });
+    upsertDraft({ turnId: 'turn-live', content: 'Live partial', updatedAt: ts + 100 });
+
+    const messages = await getMessages(await buildApp(), { query: '&limit=2' });
+    assert.equal(messages.length, 2, 'drafts never add rows to the page');
+    assert.deepEqual(
+      messages.filter((message) => message.isDraft === true).map((message) => message.id),
+      [live.id],
+    );
+    assert.doesNotMatch(JSON.stringify(messages), /Off-page partial|Orphan partial/);
+    assertNoStandaloneDraftRecords(messages);
+    assert.equal(draftStore.getByThread('user-1', 'thread-1').length, 3, 'a history read never deletes drafts');
+  });
+
+  it('does not read DraftStore when the page has no processing response', async () => {
+    const ts = Date.now();
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'Hello',
+        mentions: [],
+        timestamp: ts,
+        threadId: 'thread-1',
+      }),
+    );
+    appendResponse({ turnId: 'turn-done', timestamp: ts + 1, status: 'completed', content: 'Done' });
+    upsertDraft({ turnId: 'turn-orphan', content: 'Orphan partial', updatedAt: ts + 100 });
+    let draftReads = 0;
+    const getByThread = draftStore.getByThread.bind(draftStore);
+    draftStore.getByThread = (...args) => {
+      draftReads += 1;
+      return getByThread(...args);
+    };
+
+    const messages = await getMessages(await buildApp());
+    assert.equal(draftReads, 0);
+    assert.equal(messages.length, 2);
+    assert.equal(
+      messages.some((message) => message.isDraft === true),
+      false,
     );
   });
 
-  it('multiple concurrent drafts sorted by updatedAt', async () => {
-    const now = Date.now();
-    draftStore.upsert({
-      userId: 'user-1',
-      threadId: 'thread-1',
-      invocationId: 'inv-codex',
+  it('never binds a draft to a response whose lifecycle.invocationId differs', async () => {
+    const ts = Date.now();
+    const opus = appendResponse({ turnId: 'turn-opus', catId: 'opus', parentId: 'parent-fanout', timestamp: ts });
+    const codex = appendResponse({
+      turnId: 'turn-codex',
       catId: 'codex',
-      content: 'Codex draft',
-      updatedAt: now - 500,
+      timestamp: ts + 1,
+      // Only lifecycle.invocationId names the turn; stream ids are never a binding key.
+      stream: { invocationId: 'parent-fanout', turnInvocationId: 'turn-codex-stream-alias' },
     });
-    draftStore.upsert({
-      userId: 'user-1',
-      threadId: 'thread-1',
-      invocationId: 'inv-opus',
-      catId: 'opus',
-      content: 'Opus draft',
-      updatedAt: now,
-    });
+    upsertDraft({ turnId: 'parent-fanout', content: 'Parent-keyed partial', updatedAt: ts + 100 });
+    upsertDraft({ turnId: 'turn-opus-sibling', content: 'Sibling child partial', updatedAt: ts + 100 });
+    upsertDraft({ turnId: 'turn-codex-stream-alias', catId: 'codex', content: 'Alias partial', updatedAt: ts + 100 });
 
-    // Seed a formal message to have a non-empty page
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'Question',
-      mentions: [],
-      timestamp: now - 1000,
-      threadId: 'thread-1',
-    });
+    const messages = await getMessages(await buildApp());
+    for (const response of [opus, codex]) {
+      const item = messages.find((message) => message.id === response.id);
+      assert.equal(item.content, '', `${response.catId} must keep its own (empty) body`);
+      assert.equal(item.isDraft, undefined);
+      assert.equal(item.lifecycle.status, 'processing');
+    }
+    assert.doesNotMatch(JSON.stringify(messages), /Parent-keyed partial|Sibling child partial|Alias partial/);
+    assertNoStandaloneDraftRecords(messages);
+  });
 
-    const app = await buildApp();
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/messages?threadId=thread-1',
-      headers: { 'x-cat-cafe-user': 'user-1' },
-    });
+  for (const status of ['completed', 'failed', 'canceled', 'interrupted']) {
+    it(`never overwrites a terminal (${status}) response with a stale draft of the same turn`, async () => {
+      const ts = Date.now();
+      const response = appendResponse({ turnId: 'turn-settled', timestamp: ts, status, content: 'Settled body' });
+      upsertDraft({ turnId: 'turn-settled', content: 'Stale partial', thinking: 'Stale thought', updatedAt: ts + 100 });
 
-    assert.equal(res.statusCode, 200);
-    const body = JSON.parse(res.body);
-    const drafts = body.messages.filter((m) => m.isDraft === true);
-    assert.equal(drafts.length, 2);
-    // Codex (older) should come before Opus (newer)
-    assert.equal(drafts[0].catId, 'codex');
-    assert.equal(drafts[1].catId, 'opus');
+      const messages = await getMessages(await buildApp());
+      const settled = messages.find((message) => message.id === response.id);
+      assert.equal(settled.content, 'Settled body');
+      assert.equal(settled.isDraft, undefined);
+      assert.equal(settled.thinking, undefined);
+      assert.equal(settled.lifecycle.status, status);
+      assert.doesNotMatch(JSON.stringify(messages), /Stale partial|Stale thought/);
+      assertNoStandaloneDraftRecords(messages);
+    });
+  }
+
+  it('userId isolation: never folds another user draft', async () => {
+    const ts = Date.now();
+    const response = appendResponse({ turnId: 'turn-shared', timestamp: ts, userId: 'user-A' });
+    upsertDraft({ turnId: 'turn-shared', content: 'Secret draft', updatedAt: ts + 100, userId: 'user-B' });
+
+    const messages = await getMessages(await buildApp(), { userId: 'user-A' });
+    const own = messages.find((message) => message.id === response.id);
+    assert.equal(own.content, '');
+    assert.equal(own.isDraft, undefined, 'User A must not see User B drafts');
+    assert.doesNotMatch(JSON.stringify(messages), /Secret draft/);
   });
 });

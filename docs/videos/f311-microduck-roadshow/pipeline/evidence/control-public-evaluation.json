@@ -1,0 +1,329 @@
+{
+  "comparisonContract": {
+    "allCandidatesRunHoldout": true,
+    "candidateSelectionSource": "public_only",
+    "guardrailMetric": {
+      "direction": "higher_is_better",
+      "key": "survivalRate",
+      "nonInferiorityMargin": 0,
+      "rule": "candidate_control_delta_gte_negative_non_inferiority_margin"
+    },
+    "holdoutRole": "confirm_or_reject_preselected_candidate",
+    "matchedControlSubjectId": "control",
+    "minSeedCount": 8,
+    "otherwise": "no_measured_improvement",
+    "primaryMetric": {
+      "direction": "higher_is_better",
+      "key": "meanForwardDistanceM",
+      "rule": "candidate_control_delta_gt_k_times_combined_standard_error"
+    },
+    "reportingMetric": {
+      "direction": "lower_is_better",
+      "key": "meanAbsVelocityErrorMps"
+    },
+    "requiredMetricKeys": [
+      "meanAbsVelocityErrorMps",
+      "meanForwardDistanceM",
+      "survivalRate"
+    ],
+    "selectionRule": "eligible_candidate_with_largest_primary_delta_then_subject_order",
+    "standardErrorEstimator": "sample_standard_deviation_divided_by_sqrt_n",
+    "standardErrorMultiplier": 2
+  },
+  "completeness": "public_complete",
+  "evaluationEnvRef": "evaluation-env:sha256:5d69ca1b976f7b58cc6df2da1da0bddc9913e4c7dd769d2fe07d4446b6267bf1",
+  "evaluatorRevision": "af6a754c0392fa9ee76983d812b7db393ff256cd",
+  "experimentRef": "control-experiment:sha256:243eac66245bdcef13e62f1ca5268638706f805cca035740937244182989f138",
+  "holdoutProof": null,
+  "interventionKind": "control_config",
+  "kind": "microduck_control_evaluation",
+  "publicDecision": {
+    "candidates": [
+      {
+        "eligible": false,
+        "guardrailDelta": 0,
+        "guardrailMinimumDelta": 0,
+        "guardrailPass": true,
+        "primaryDelta": -0.1016071544933243,
+        "primarySignal": false,
+        "primaryThreshold": 0.05864879461665987,
+        "subjectId": "action-scale-090"
+      },
+      {
+        "eligible": false,
+        "guardrailDelta": 0,
+        "guardrailMinimumDelta": 0,
+        "guardrailPass": true,
+        "primaryDelta": 0.0098793644084465,
+        "primarySignal": false,
+        "primaryThreshold": 0.09119369568324223,
+        "subjectId": "action-scale-105"
+      },
+      {
+        "eligible": true,
+        "guardrailDelta": 0,
+        "guardrailMinimumDelta": 0,
+        "guardrailPass": true,
+        "primaryDelta": 0.0689086924859299,
+        "primarySignal": true,
+        "primaryThreshold": 0.05704235060559237,
+        "subjectId": "action-scale-110"
+      }
+    ],
+    "outcome": "candidate_preselected_for_holdout",
+    "rule": "eligible_candidate_with_largest_primary_delta_then_subject_order",
+    "selectedSubjectId": "action-scale-110"
+  },
+  "receiptSha256": "97d3a31a4b2b7c881a2deddb74b3ae6f309ce95a61cd1b96ccea1aae4abe9ece",
+  "runnerRef": "runner:sha256:aa82ce999e9d88eff247e3cc637c82148a771a4f2a5584f0fd2a7138e068fe1b",
+  "schemaVersion": 1,
+  "seedSets": {
+    "holdout": null,
+    "public": {
+      "ref": "seed-set:sha256:c04e0b31be7118ed991990050ccca6b70d02cb0b50cb3b0f926210189b5b8cc0",
+      "sha256": "c04e0b31be7118ed991990050ccca6b70d02cb0b50cb3b0f926210189b5b8cc0"
+    }
+  },
+  "subjects": [
+    {
+      "artifactRef": "control-package:sha256:3081eec958ac1ff61773ac7a07a625a102e2738f0bb1052d2b59ee632d541eb3",
+      "artifactVersion": "3081eec958ac1ff61773ac7a07a625a102e2738f0bb1052d2b59ee632d541eb3",
+      "configRef": "control-config:sha256:4d2cb82a2bc841dea2acad63b984b5f8c2d3623f641f961fa8506a83c93c2f94",
+      "configSha256": "4d2cb82a2bc841dea2acad63b984b5f8c2d3623f641f961fa8506a83c93c2f94",
+      "evaluationEnvRef": "evaluation-env:sha256:5d69ca1b976f7b58cc6df2da1da0bddc9913e4c7dd769d2fe07d4446b6267bf1",
+      "evaluations": [
+        {
+          "captureRef": "capture:sha256:21edc98cf90324f92ceb4791841ddff3c8c8e95e5aca18fc1edeb84c5b543768",
+          "metrics": {
+            "meanAbsVelocityErrorMps": {
+              "estimate": 0.1640515725078271,
+              "standardError": 0.0014321058507697246
+            },
+            "meanForwardDistanceM": {
+              "estimate": 0.5675658898162914,
+              "standardError": 0.026114749834308698
+            },
+            "survivalRate": {
+              "estimate": 1,
+              "standardError": 0
+            }
+          },
+          "refusal": null,
+          "sampleCount": 8,
+          "split": "public",
+          "status": "passed"
+        },
+        {
+          "captureRef": null,
+          "metrics": null,
+          "refusal": {
+            "code": "missing_result",
+            "detailHash": null,
+            "evidenceRef": null
+          },
+          "sampleCount": null,
+          "split": "holdout",
+          "status": "missing"
+        }
+      ],
+      "id": "baseline",
+      "interventionKind": "control_config",
+      "policyRef": "hf-space:pollen-robotics/microduck-simulator@183f99a40bd7308da3e848de961ed32bb02624a5#app/public/policies/BEST_alpha_walking.onnx",
+      "policySha256": "e36332d383997d51401897734cd3e79cf5038406feddb18b4d57ecfb141daa6c",
+      "role": "deployed_reference",
+      "runnerRef": "runner:sha256:aa82ce999e9d88eff247e3cc637c82148a771a4f2a5584f0fd2a7138e068fe1b"
+    },
+    {
+      "artifactRef": "control-package:sha256:3081eec958ac1ff61773ac7a07a625a102e2738f0bb1052d2b59ee632d541eb3",
+      "artifactVersion": "3081eec958ac1ff61773ac7a07a625a102e2738f0bb1052d2b59ee632d541eb3",
+      "configRef": "control-config:sha256:4d2cb82a2bc841dea2acad63b984b5f8c2d3623f641f961fa8506a83c93c2f94",
+      "configSha256": "4d2cb82a2bc841dea2acad63b984b5f8c2d3623f641f961fa8506a83c93c2f94",
+      "evaluationEnvRef": "evaluation-env:sha256:5d69ca1b976f7b58cc6df2da1da0bddc9913e4c7dd769d2fe07d4446b6267bf1",
+      "evaluations": [
+        {
+          "captureRef": "capture:sha256:3bf4c962acd28098b104dd4f573cba2d68850937976c64c276003139d17ef705",
+          "metrics": {
+            "meanAbsVelocityErrorMps": {
+              "estimate": 0.1640515725078271,
+              "standardError": 0.0014321058507697246
+            },
+            "meanForwardDistanceM": {
+              "estimate": 0.5675658898162914,
+              "standardError": 0.026114749834308698
+            },
+            "survivalRate": {
+              "estimate": 1,
+              "standardError": 0
+            }
+          },
+          "refusal": null,
+          "sampleCount": 8,
+          "split": "public",
+          "status": "passed"
+        },
+        {
+          "captureRef": null,
+          "metrics": null,
+          "refusal": {
+            "code": "missing_result",
+            "detailHash": null,
+            "evidenceRef": null
+          },
+          "sampleCount": null,
+          "split": "holdout",
+          "status": "missing"
+        }
+      ],
+      "id": "control",
+      "interventionKind": "control_config",
+      "policyRef": "hf-space:pollen-robotics/microduck-simulator@183f99a40bd7308da3e848de961ed32bb02624a5#app/public/policies/BEST_alpha_walking.onnx",
+      "policySha256": "e36332d383997d51401897734cd3e79cf5038406feddb18b4d57ecfb141daa6c",
+      "role": "matched_control",
+      "runnerRef": "runner:sha256:aa82ce999e9d88eff247e3cc637c82148a771a4f2a5584f0fd2a7138e068fe1b"
+    },
+    {
+      "artifactRef": "control-package:sha256:1b1fae1ffed14dc7dc0bdb3b6479bd74d74f52f3c5ed7a221835aa06b989c0ed",
+      "artifactVersion": "1b1fae1ffed14dc7dc0bdb3b6479bd74d74f52f3c5ed7a221835aa06b989c0ed",
+      "configRef": "control-config:sha256:93a83b62722a9635f7e00f42bd6e059f930977b0510222bf88061e49239f7832",
+      "configSha256": "93a83b62722a9635f7e00f42bd6e059f930977b0510222bf88061e49239f7832",
+      "evaluationEnvRef": "evaluation-env:sha256:5d69ca1b976f7b58cc6df2da1da0bddc9913e4c7dd769d2fe07d4446b6267bf1",
+      "evaluations": [
+        {
+          "captureRef": "capture:sha256:59e8d88ec73a8d2f196fcff13a98e60fa2ae3f7e5c3cd6562a0aea017391e4fd",
+          "metrics": {
+            "meanAbsVelocityErrorMps": {
+              "estimate": 0.17702545795259345,
+              "standardError": 0.0008593012690617245
+            },
+            "meanForwardDistanceM": {
+              "estimate": 0.4659587353229671,
+              "standardError": 0.013339419724570539
+            },
+            "survivalRate": {
+              "estimate": 1,
+              "standardError": 0
+            }
+          },
+          "refusal": null,
+          "sampleCount": 8,
+          "split": "public",
+          "status": "passed"
+        },
+        {
+          "captureRef": null,
+          "metrics": null,
+          "refusal": {
+            "code": "missing_result",
+            "detailHash": null,
+            "evidenceRef": null
+          },
+          "sampleCount": null,
+          "split": "holdout",
+          "status": "missing"
+        }
+      ],
+      "id": "action-scale-090",
+      "interventionKind": "control_config",
+      "policyRef": "hf-space:pollen-robotics/microduck-simulator@183f99a40bd7308da3e848de961ed32bb02624a5#app/public/policies/BEST_alpha_walking.onnx",
+      "policySha256": "e36332d383997d51401897734cd3e79cf5038406feddb18b4d57ecfb141daa6c",
+      "role": "candidate",
+      "runnerRef": "runner:sha256:aa82ce999e9d88eff247e3cc637c82148a771a4f2a5584f0fd2a7138e068fe1b"
+    },
+    {
+      "artifactRef": "control-package:sha256:b380e3246841b6e2088771a7bbabd612584f294716f850b5397a858ecd3a6307",
+      "artifactVersion": "b380e3246841b6e2088771a7bbabd612584f294716f850b5397a858ecd3a6307",
+      "configRef": "control-config:sha256:b4032690a6262e1ee6bbf2fb05fa1580d4640ef6f2372384f49b2c4735019e1c",
+      "configSha256": "b4032690a6262e1ee6bbf2fb05fa1580d4640ef6f2372384f49b2c4735019e1c",
+      "evaluationEnvRef": "evaluation-env:sha256:5d69ca1b976f7b58cc6df2da1da0bddc9913e4c7dd769d2fe07d4446b6267bf1",
+      "evaluations": [
+        {
+          "captureRef": "capture:sha256:9e9f1d34ba732273db0a7e1674de0317452634caddb25e1ea0e739dfae910417",
+          "metrics": {
+            "meanAbsVelocityErrorMps": {
+              "estimate": 0.15846966410007995,
+              "standardError": 0.0035729014863393775
+            },
+            "meanForwardDistanceM": {
+              "estimate": 0.5774452542247379,
+              "standardError": 0.03737769888828661
+            },
+            "survivalRate": {
+              "estimate": 1,
+              "standardError": 0
+            }
+          },
+          "refusal": null,
+          "sampleCount": 8,
+          "split": "public",
+          "status": "passed"
+        },
+        {
+          "captureRef": null,
+          "metrics": null,
+          "refusal": {
+            "code": "missing_result",
+            "detailHash": null,
+            "evidenceRef": null
+          },
+          "sampleCount": null,
+          "split": "holdout",
+          "status": "missing"
+        }
+      ],
+      "id": "action-scale-105",
+      "interventionKind": "control_config",
+      "policyRef": "hf-space:pollen-robotics/microduck-simulator@183f99a40bd7308da3e848de961ed32bb02624a5#app/public/policies/BEST_alpha_walking.onnx",
+      "policySha256": "e36332d383997d51401897734cd3e79cf5038406feddb18b4d57ecfb141daa6c",
+      "role": "candidate",
+      "runnerRef": "runner:sha256:aa82ce999e9d88eff247e3cc637c82148a771a4f2a5584f0fd2a7138e068fe1b"
+    },
+    {
+      "artifactRef": "control-package:sha256:6a50120d7c9486e29bf2febae43ec3182c33bf091766ec6e890b5cd6b4f2f57e",
+      "artifactVersion": "6a50120d7c9486e29bf2febae43ec3182c33bf091766ec6e890b5cd6b4f2f57e",
+      "configRef": "control-config:sha256:2e14c85ecb030e488dd7094fd29c999dbf190aabf0d9fcdd4c334184dc8f4fda",
+      "configSha256": "2e14c85ecb030e488dd7094fd29c999dbf190aabf0d9fcdd4c334184dc8f4fda",
+      "evaluationEnvRef": "evaluation-env:sha256:5d69ca1b976f7b58cc6df2da1da0bddc9913e4c7dd769d2fe07d4446b6267bf1",
+      "evaluations": [
+        {
+          "captureRef": "capture:sha256:af76db29c419399d10681c33a2dc098088741605806dc7a4b1f401640eb86b1e",
+          "metrics": {
+            "meanAbsVelocityErrorMps": {
+              "estimate": 0.15155855105396582,
+              "standardError": 0.001234297972607373
+            },
+            "meanForwardDistanceM": {
+              "estimate": 0.6364745823022213,
+              "standardError": 0.011466354335372035
+            },
+            "survivalRate": {
+              "estimate": 1,
+              "standardError": 0
+            }
+          },
+          "refusal": null,
+          "sampleCount": 8,
+          "split": "public",
+          "status": "passed"
+        },
+        {
+          "captureRef": null,
+          "metrics": null,
+          "refusal": {
+            "code": "missing_result",
+            "detailHash": null,
+            "evidenceRef": null
+          },
+          "sampleCount": null,
+          "split": "holdout",
+          "status": "missing"
+        }
+      ],
+      "id": "action-scale-110",
+      "interventionKind": "control_config",
+      "policyRef": "hf-space:pollen-robotics/microduck-simulator@183f99a40bd7308da3e848de961ed32bb02624a5#app/public/policies/BEST_alpha_walking.onnx",
+      "policySha256": "e36332d383997d51401897734cd3e79cf5038406feddb18b4d57ecfb141daa6c",
+      "role": "candidate",
+      "runnerRef": "runner:sha256:aa82ce999e9d88eff247e3cc637c82148a771a4f2a5584f0fd2a7138e068fe1b"
+    }
+  ]
+}

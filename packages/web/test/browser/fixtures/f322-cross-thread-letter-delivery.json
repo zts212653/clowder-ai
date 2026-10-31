@@ -1,0 +1,71 @@
+{
+  "source": {
+    "id": "thread_muzcnf8esmtkrqba",
+    "projectPath": "/proof",
+    "title": "来源设计对话 · Design source",
+    "createdBy": "letter-proof-owner",
+    "participants": [],
+    "lastActiveAt": 1791452644574,
+    "createdAt": 1791452644574
+  },
+  "target": {
+    "id": "thread_muzcnf8ebkg1ehxd",
+    "projectPath": "/proof",
+    "title": "来信收件箱",
+    "createdBy": "letter-proof-owner",
+    "participants": [],
+    "lastActiveAt": 1791452644574,
+    "createdAt": 1791452644574
+  },
+  "invocationId": "05577a58-4bba-4e9f-a72a-2e7618ded87c",
+  "messages": [
+    {
+      "userId": "letter-proof-owner",
+      "catId": "opus",
+      "content": "@codex\n\n这封信来自另一条真实回调投递。",
+      "mentions": ["codex"],
+      "origin": "callback",
+      "timestamp": 1791452644613,
+      "threadId": "thread_muzcnf8ebkg1ehxd",
+      "extra": {
+        "isExplicitPost": true,
+        "crossPost": {
+          "sourceThreadId": "thread_muzcnf8esmtkrqba",
+          "sourceInvocationId": "05577a58-4bba-4e9f-a72a-2e7618ded87c"
+        },
+        "targetCats": ["codex"],
+        "stream": {
+          "invocationId": "05577a58-4bba-4e9f-a72a-2e7618ded87c",
+          "turnInvocationId": "05577a58-4bba-4e9f-a72a-2e7618ded87c"
+        }
+      },
+      "id": "0001791452644613-000000-cf73744c",
+      "visibilitySeq": 1791452644613,
+      "type": "assistant"
+    },
+    {
+      "userId": "letter-proof-owner",
+      "catId": "opus",
+      "content": "@co-creator\n\n请你判断。\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.\n\n长信 · Long letter paragraph.",
+      "mentions": [],
+      "mentionsUser": true,
+      "origin": "callback",
+      "timestamp": 1791452644621,
+      "threadId": "thread_muzcnf8ebkg1ehxd",
+      "extra": {
+        "isExplicitPost": true,
+        "crossPost": {
+          "sourceThreadId": "thread_muzcnf8esmtkrqba",
+          "sourceInvocationId": "05577a58-4bba-4e9f-a72a-2e7618ded87c"
+        },
+        "stream": {
+          "invocationId": "05577a58-4bba-4e9f-a72a-2e7618ded87c",
+          "turnInvocationId": "05577a58-4bba-4e9f-a72a-2e7618ded87c"
+        }
+      },
+      "id": "0001791452644621-000001-750c2d25",
+      "visibilitySeq": 1791452644622,
+      "type": "assistant"
+    }
+  ]
+}

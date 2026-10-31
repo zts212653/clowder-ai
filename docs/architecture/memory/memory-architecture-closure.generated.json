@@ -1,0 +1,2027 @@
+{
+  "v": 1,
+  "contractRevision": "MemoryArchitectureClosure.v1",
+  "recallFrameRevision": "RecallFrame.v0",
+  "sourceMode": "lane_owned_manifests",
+  "generatedViewMutable": false,
+  "universe": [
+    "cat-owned-seed",
+    "decision",
+    "diary",
+    "entity",
+    "episode",
+    "event",
+    "feedback",
+    "global-distillation-f152",
+    "lessons-learned",
+    "library-knowledge",
+    "method",
+    "person",
+    "proactive-candidate",
+    "profile",
+    "project-knowledge",
+    "provider-local-memory",
+    "recall-consumption-ledger",
+    "reflection",
+    "skill",
+    "taste",
+    "verdict"
+  ],
+  "declarations": [
+    "cat-owned-seed",
+    "decision",
+    "diary",
+    "entity",
+    "episode",
+    "event",
+    "feedback",
+    "global-distillation-f152",
+    "lessons-learned",
+    "library-knowledge",
+    "method",
+    "person",
+    "proactive-candidate",
+    "profile",
+    "project-knowledge",
+    "provider-local-memory",
+    "recall-consumption-ledger",
+    "reflection",
+    "skill",
+    "taste",
+    "verdict"
+  ],
+  "surfaces": [
+    {
+      "v": 1,
+      "surfaceId": "cat-owned-seed",
+      "label": "Cat-owned seed",
+      "ownerCell": "F255 auto-dream and F271 reflection",
+      "ownerRefs": [
+        "docs/features/F255-auto-dream.md",
+        "docs/features/F271-pragmatic-memory-reflection.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F255-auto-dream.md",
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "The producing cat, owner scope, and current source-linked seed revision jointly bound private seed authority.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F255-auto-dream.md",
+          "packages/api/src/domains/auto-dream/private-seed-contract.ts"
+        ]
+      },
+      "declarationRevision": "F312-Phase-E-2026-09-03",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "F255 writes cat-owned seeds without promoting them into user, person, or team truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F255-auto-dream.md",
+          "docs/features/F271-pragmatic-memory-reflection.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "owned_seed_available.v1 admits at most one current owned seed for the exact owner, producing cat, scheduled Present Loop run, and source revision.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/shared/src/types/memory-cue.ts",
+          "packages/api/src/domains/memory/cue/resolvers/CatOwnedSeedCueResolver.ts",
+          "packages/api/test/memory/cat-owned-seed-memory-cue.test.js"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "The prompt carries only a content-free seed coordinate and opaque handle; exact-cat drill reads the current private claim on demand.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/sources/CatOwnedSeedMemoryCueSource.ts",
+          "packages/api/src/domains/memory/cue/MemoryCueDrillHandleService.ts",
+          "packages/api/test/memory/cat-owned-seed-memory-cue.test.js"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Only the producing cat may treat the drilled seed as a private bounded hypothesis and choose silence or one bounded intent.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md",
+          "packages/api/src/domains/memory/cue/sources/CatOwnedSeedMemoryCueSource.ts"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "Content-free receipts bind owner, consumer cat, invocation, seed coordinate, and source revision; applied additionally requires an exact same-invocation seed intent.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/MemoryCueEpisodeStore.ts",
+          "packages/api/src/routes/callback-memory-cue-routes.ts",
+          "packages/api/test/memory/cat-owned-seed-memory-cue.test.js"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "The bounded outcome is exact intent application with optional existing F255 visit and echo lineage; it does not claim long-term or causal utility.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/auto-dream/private-seed-operations.ts",
+          "packages/api/src/routes/callback-memory-cue-routes.ts",
+          "packages/api/test/memory-cue-callback-routes.test.js"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Missing seeds, source revision correction, owner or cat scope mismatch, and dormant or retired status fail closed with bounded invalidation reasons.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/sources/CatOwnedSeedMemoryCueSource.ts",
+          "packages/api/test/memory/cat-owned-seed-memory-cue.test.js"
+        ]
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md",
+          "docs/features/F255-auto-dream.md",
+          "packages/api/test/memory/cat-owned-seed-memory-cue.test.js",
+          "packages/api/test/memory-cue-callback-routes.test.js"
+        ],
+        "limitations": "Main-candidate tests prove bounded contracts and failure paths; runtime evidence awaits merged-main Alpha."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "decision",
+      "label": "Decision and ADR knowledge",
+      "ownerCell": "ADR owner and operator decision authority",
+      "ownerRefs": [
+        "docs/decisions/index.md"
+      ],
+      "canonicalRefs": [
+        "docs/decisions/index.md",
+        "docs/decisions/015-knowledge-object-contract.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "Accepted ADRs and direct operator decision records own decision truth; Cue Plane owns neither.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/decisions/index.md",
+          "docs/decisions/020-f102-memory-system-architecture.md"
+        ]
+      },
+      "declarationRevision": "F312-D-decision-v2",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Decision owners write versioned ADRs under repository governance; direct operator decisions remain authoritative in their owner carrier until promoted.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/decisions/015-knowledge-object-contract.md",
+          "docs/decisions/index.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "accepted_decision_required is emitted only when the current direct-owner task message names exactly one ADR anchor; ambiguous, history-only, or non-owner references fail closed.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/cats/services/agents/routing/route-helpers.ts",
+          "packages/api/test/memory/f312-operational-knowledge-cues.test.js"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "The Decision resolver presents a bounded pointer and drills a bounded content window from the exact accepted ADR bytes; F209 title/summary remain navigation metadata only.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/resolvers/DecisionCueResolver.ts",
+          "packages/api/src/domains/memory/cue/sources/DecisionMemoryCueSource.ts",
+          "packages/api/src/domains/memory/cue/sources/canonical-project-document.ts",
+          "packages/api/src/domains/memory/cue/createMemoryCueRuntime.ts"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "The current agent_route consumer may constrain its current response or action by the accepted ADR; superseded or draft documents and unstated conclusions are forbidden.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/format-memory-cues.ts",
+          "docs/decisions/015-knowledge-object-contract.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "The content-free Cue Plane ledger admits Decision coordinates and records presented, drilled, applied, or dismissed against the exact ADR revision; applied or dismissed suppresses replay of that revision.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/schema.ts",
+          "packages/api/src/domains/memory/cue/MemoryCueEpisodeStore.ts",
+          "packages/api/src/domains/memory/cue/sources/DecisionMemoryCueSource.ts",
+          "packages/api/test/memory/f312-decision-cue.test.js",
+          "packages/api/test/memory-cue-callback-routes.test.js"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "The bounded outcome is the current agent_route response or action: applied means the drilled accepted ADR materially constrained it, dismissed means it did not; no conformance score or single-ADR causality is claimed.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/format-memory-cues.ts",
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Canonical ADR bytes bind the revision; correction, path removal, non-accepted status, supersession, or lexical/physical path escape makes the old handle unavailable.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/sources/canonical-project-document.ts",
+          "packages/api/src/domains/memory/cue/sources/DecisionMemoryCueSource.ts",
+          "packages/api/test/memory/f312-decision-cue.test.js",
+          "packages/api/test/memory/f312-project-knowledge-cue.test.js"
+        ]
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "docs/decisions/index.md",
+          "packages/api/test/memory/f312-operational-knowledge-cues.test.js",
+          "packages/api/test/memory/f312-decision-cue.test.js"
+        ],
+        "limitations": "The proactive predicate covers exactly one accepted ADR named in the current direct-owner task. Direct operator decisions remain current-input or pull-only unless promoted to an accepted ADR; this lane does not claim runtime acceptance before merged-main Alpha."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "diary",
+      "label": "Diary",
+      "ownerCell": "F229 diary loop as cataloged by the write census",
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "canonicalRefs": [
+        "docs/architecture/memory-write-lane-census.md",
+        "docs/architecture/memory-system-overview.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "The F229 diary lane owns persisted first-person entries, timeline order, edits, and deletion.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-write-lane-census.md"
+        ]
+      },
+      "declarationRevision": "F312-Phase-E-2026-09-03",
+      "disposition": "exempt",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "The diary loop persists user-visible first-person entries with source context.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-write-lane-census.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "exempt",
+        "summary": "No bounded invocation consumer or typed relevance predicate exists; the owner-visible /starry reader remains pull-only.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md",
+          "docs/architecture/memory-write-lane-census.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "The diary reader presents current entries and stored detail on owner pull.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-system-overview.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Readers may use entries for first-person continuity without promoting them to person facts or owner truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-system-overview.md",
+          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "exempt",
+        "summary": "A pull reader without a qualified invocation opportunity does not justify a proactive applied or dismissed receipt.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md"
+        ]
+      },
+      "outcome": {
+        "state": "exempt",
+        "summary": "No named invocation consumer has a bounded diary recall decision, so no utility outcome or eval is created.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md"
+        ]
+      },
+      "invalidation": {
+        "state": "exempt",
+        "summary": "Canonical edit and deletion remain diary-owned; with no cue projection there is no proactive receipt to invalidate.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md",
+          "docs/architecture/memory-write-lane-census.md"
+        ]
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md",
+          "docs/architecture/memory-write-lane-census.md",
+          "docs/architecture/memory-cue-source-map.md"
+        ],
+        "limitations": "Diary persistence and pull reading are verified; invocation-time recall utility is not claimed."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "entity",
+      "label": "Entity memory",
+      "ownerCell": "F260 entity registry",
+      "ownerRefs": [
+        "docs/features/F260-write-side-autopsy-entity-deref.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F260-write-side-autopsy-entity-deref.md",
+        "docs/architecture/memory-cue-source-map.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F260 owns Entity identity, revisions, aliases, and retirement state.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F260-write-side-autopsy-entity-deref.md"
+        ]
+      },
+      "declarationRevision": "F312-entity-nudge-per-consumer-2026-08-30",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Entity capture resolves or proposes a source-linked registry record before use.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F260-write-side-autopsy-entity-deref.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "subject_seen resolves a typed Entity identity plus revision before eligibility.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-cue-source-map.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Direct Entity Nudge fanout binds presentation and cooldown to one exact consumer request; the prompt retains a narrow drill route to the authoritative revision.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F260-write-side-autopsy-entity-deref.md",
+          "docs/features/F287-memory-cue-plane.md",
+          "docs/bug-report/2026-08-29-f312-entity-nudge-per-consumer/bug-report.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "The active cat may resolve references and continuity within scope; cues cannot mutate the registry.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F260-write-side-autopsy-entity-deref.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "F287 receipt states bind delivery and application to the Entity source revision.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F287-memory-cue-plane.md"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "F200 evaluates the shared subject_seen cue family with bounded utility conclusions.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Entity correction, revision change, or retirement invalidates stale cue eligibility.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F260-write-side-autopsy-entity-deref.md",
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ]
+      },
+      "evidence": {
+        "level": "UAT",
+        "refs": [
+          "docs/features/F260-write-side-autopsy-entity-deref.md",
+          "docs/features/F287-memory-cue-plane.md",
+          "docs/bug-report/2026-08-29-f312-entity-nudge-per-consumer/bug-report.md"
+        ],
+        "limitations": "Alpha proves direct non-person fanout and per-consumer cooldown with a persisted document alias; it does not replay the absent 家属喵/未婚喵 records, exercise an unavailable fable-5 runtime, or establish single-Entity causal outcome."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "episode",
+      "label": "Episode",
+      "ownerCell": "Episode producer and source-linked artifact",
+      "ownerRefs": [
+        "docs/episodes/index.md"
+      ],
+      "canonicalRefs": [
+        "docs/episodes/index.md",
+        "docs/architecture/standing-reflex-episode-replay-shadow.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "Source-linked episode artifacts own reconstructed evidence without becoming person facts or owner truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/episodes/index.md",
+          "docs/episodes/2026-09-03-tech-writing-visual-narrative.md",
+          "docs/architecture/standing-reflex-episode-replay-shadow.md"
+        ]
+      },
+      "declarationRevision": "F316-Phase-D-2026-09-05",
+      "disposition": "exempt",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Episode producers can write provenance-bearing artifacts from task traces; the current corpus includes one real non-template artifact.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/episodes/2026-09-03-tech-writing-visual-narrative.md",
+          "docs/architecture/standing-reflex-episode-replay-shadow.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "exempt",
+        "summary": "The generated catalog indexes one real non-template episode artifact plus the template, but no named invocation consumer exists; artifact presence alone does not license a proactive predicate.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/episodes/index.md",
+          "docs/episodes/2026-09-03-tech-writing-visual-narrative.md",
+          "feature-discussions/2026-09-05-f316-phase-d-remaining-active-lanes/README.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "The generated index and source-linked artifact support bounded pull presentation and replay drill.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/episodes/index.md",
+          "docs/episodes/2026-09-03-tech-writing-visual-narrative.md",
+          "docs/architecture/standing-reflex-episode-replay-shadow.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Pull consumers may use source-linked reconstruction as bounded precedent, never as unqualified policy, person fact, or owner truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/episodes/2026-09-03-tech-writing-visual-narrative.md",
+          "docs/architecture/standing-reflex-episode-replay-shadow.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "exempt",
+        "summary": "A real non-template artifact exists and is pull-readable, but no named proactive invocation consumer exists, so no application receipt is created.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/episodes/index.md",
+          "feature-discussions/2026-09-05-f316-phase-d-remaining-active-lanes/README.md"
+        ]
+      },
+      "outcome": {
+        "state": "exempt",
+        "summary": "Artifact publication and pull readability are not invocation application or utility outcomes; no outcome eval is licensed.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/episodes/index.md",
+          "feature-discussions/2026-09-05-f316-phase-d-remaining-active-lanes/README.md"
+        ]
+      },
+      "invalidation": {
+        "state": "exempt",
+        "summary": "A future active episode must bind source correction, deletion, supersession, and drift; no current proactive projection exists to invalidate.",
+        "evidenceLevel": "fixture",
+        "evidenceRefs": [
+          "docs/architecture/standing-reflex-episode-replay-shadow.md",
+          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md"
+        ]
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "docs/architecture/standing-reflex-episode-replay-shadow.md",
+          "docs/episodes/index.md",
+          "docs/episodes/2026-09-03-tech-writing-visual-narrative.md",
+          "feature-discussions/2026-09-05-f316-phase-d-remaining-active-lanes/README.md"
+        ],
+        "limitations": "One real non-template episode artifact is indexed and pull-readable; its lifecycle remains draft. No named proactive invocation consumer exists, so no cue, receipt, outcome, or utility claim is licensed."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "event",
+      "label": "Event memory",
+      "ownerCell": "F227 event memory",
+      "ownerRefs": [
+        "docs/features/F227-event-memory.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F227-event-memory.md",
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F227 event records and linked revisions own Event truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F227-event-memory.md"
+        ]
+      },
+      "declarationRevision": "F312-C-event-v1",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "F227 captures source-linked events into the event lane.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F227-event-memory.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "recent_event_available selects only the newest high-confidence F227 event in the exact owner and subject thread within a bounded fifteen-minute window.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/sources/EventMemoryCueSource.ts",
+          "packages/api/test/memory/f312-event-cue.test.js"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Event timeline and source references provide pull presentation and drill.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F227-event-memory.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Consumers may establish chronology and continuity while preserving source uncertainty.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F227-event-memory.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "The existing Cue Plane records presented, drilled, applied, or dismissed against the exact Event revision; a terminal outcome suppresses that revision.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/MemoryCueEpisodeStore.ts",
+          "packages/api/src/domains/memory/cue/sources/EventMemoryCueSource.ts"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "The strictly authenticated response in the event subject thread is the bounded consumer: applied means the Event established chronology or continuity used in that response, dismissed means it did not; no utility causality is claimed.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/format-memory-cues.ts",
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Resolve and drill fail closed when the Event revision changes, its source message is deleted or loses visibility, owner/thread scope changes, or the fifteen-minute event window expires.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/sources/EventMemoryCueSource.ts",
+          "packages/api/test/memory/f312-event-cue.test.js"
+        ]
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "docs/features/F227-event-memory.md",
+          "packages/api/test/memory/f312-event-cue.test.js"
+        ],
+        "limitations": "Main proves temporal and subject admission, owner scope, bounded drill, receipt suppression, revision/source invalidation, and expiry; merged-main runtime acceptance is recorded separately."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "feedback",
+      "label": "Feedback signal",
+      "ownerCell": "F281 feedback channel",
+      "ownerRefs": [
+        "docs/features/F281-feedback-channel-first-class.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F281-feedback-channel-first-class.md",
+        "docs/harness-feedback/SPEC.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F281 owns source-message identity, feedback disposition, and correction links.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F281-feedback-channel-first-class.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "exempt",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Feedback capture persists a source reference and bounded disposition instead of copying payload into memory.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F281-feedback-channel-first-class.md",
+          "docs/harness-feedback/SPEC.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "exempt",
+        "summary": "Feedback is a control and invalidation input, not a recallable memory surface.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F281-feedback-channel-first-class.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Feedback records drill back to the exact source message and disposition.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F281-feedback-channel-first-class.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Harness and lane owners may use feedback for correction and evaluation, never as user-profile truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/harness-feedback/SPEC.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "Disposition and linked repair state record whether feedback was acted on or dismissed.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F281-feedback-channel-first-class.md"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "Correction and repair state provide a bounded control-loop outcome.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F281-feedback-channel-first-class.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Source correction and disposition changes supersede stale feedback projections.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F281-feedback-channel-first-class.md"
+        ]
+      },
+      "evidence": {
+        "level": "UAT",
+        "refs": [
+          "docs/features/F281-feedback-channel-first-class.md",
+          "docs/harness-feedback/SPEC.md"
+        ],
+        "limitations": "Exemption is deliberate: feedback closes control flow rather than participating in memory recall."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "global-distillation-f152",
+      "label": "F152 global distillation",
+      "ownerCell": "F152 expedition memory",
+      "ownerRefs": [
+        "docs/features/F152-expedition-memory.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F152-expedition-memory.md",
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F152 owns only its nominations and materialized global-distillation artifacts; it does not own project knowledge or generic recall authority.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F152-expedition-memory.md"
+        ]
+      },
+      "declarationRevision": "F312-PB-sunset-2026-08-29",
+      "disposition": "sunset",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "The live producer chain marks, nominates, approves, materializes, and indexes distilled artifacts; 36 retained distilled anchors prove the path, not consumer value.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/distillation-service.ts",
+          "packages/api/src/domains/memory/GlobalIndexBuilder.ts",
+          "private-thread-id#private-source-id"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "sunset",
+        "summary": "No typed predicate ever selected distilled output, and the operator-approved sunset ends investment in one.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/KnowledgeResolver.ts",
+          "private-thread-id#private-source-id"
+        ]
+      },
+      "presentationDrill": {
+        "state": "sunset",
+        "summary": "Generic search, graph resolve/traversal, and recent-browse delivery now omit distilled anchors; retained files and index rows are forensic producer evidence only.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/KnowledgeResolver.ts",
+          "packages/api/src/domains/memory/GraphQueryResolver.ts",
+          "packages/api/src/domains/memory/GraphResolver.ts",
+          "packages/api/src/domains/memory/RecentBrowseResolver.ts",
+          "packages/api/test/memory/knowledge-resolver-dimension.test.js",
+          "packages/api/test/memory/knowledge-resolver-federation.test.js",
+          "packages/api/test/memory/graph-query-resolver.test.js",
+          "packages/api/test/memory/graph-resolver.test.js",
+          "packages/api/test/recent-browse-resolver.test.js"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "sunset",
+        "summary": "No runtime consumer or allowed-use contract was proven; retained artifacts may be inspected only as forensic producer evidence.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F152-expedition-memory.md",
+          "private-thread-id#private-source-id"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "sunset",
+        "summary": "No applied or dismissed receipt exists because runtime consumption is no longer supported for this surface.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md",
+          "private-thread-id#private-source-id"
+        ]
+      },
+      "outcome": {
+        "state": "sunset",
+        "summary": "The operator value decision ends consumer investment after zero named consumer and zero production content; this is not a utility verdict.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F152-expedition-memory.md",
+          "private-thread-id#private-source-id"
+        ]
+      },
+      "invalidation": {
+        "state": "sunset",
+        "summary": "No source-revision invalidation pipeline exists; the shared delivery-eligibility guard prevents retained forensic artifacts from reaching generic search, graph, or recent-browse consumers while the surface is retired.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/recall-delivery-eligibility.ts",
+          "packages/api/src/domains/memory/KnowledgeResolver.ts",
+          "packages/api/src/domains/memory/GraphQueryResolver.ts",
+          "packages/api/src/domains/memory/GraphResolver.ts",
+          "packages/api/src/domains/memory/RecentBrowseResolver.ts",
+          "docs/architecture/memory-derived-view-contract.md"
+        ]
+      },
+      "evidence": {
+        "level": "live",
+        "refs": [
+          "docs/features/F152-expedition-memory.md",
+          "packages/api/src/domains/memory/recall-delivery-eligibility.ts",
+          "packages/api/src/domains/memory/KnowledgeResolver.ts",
+          "packages/api/src/domains/memory/GraphQueryResolver.ts",
+          "packages/api/src/domains/memory/GraphResolver.ts",
+          "packages/api/src/domains/memory/RecentBrowseResolver.ts",
+          "private-thread-id#private-source-id",
+          "private-thread-id#private-source-id"
+        ],
+        "limitations": "Only the global-distillation-f152 consumer surface is sunset. F152 expedition/bootstrap and producer code remain. Durable files and index rows are retained without a utility claim; 36 observed artifacts contain only three repeated test titles. Explicit forensic/admin artifact browsing remains available, while search_evidence, graph_resolve, and list_recent delivery are ineligible."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "lessons-learned",
+      "label": "Lessons learned",
+      "ownerCell": "Normative lessons-learned document owner",
+      "ownerRefs": [
+        "docs/public-lessons.md"
+      ],
+      "canonicalRefs": [
+        "docs/public-lessons.md",
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "The versioned lessons-learned document owns accepted lessons.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/public-lessons.md"
+        ]
+      },
+      "declarationRevision": "G1-LL-2026-08-28",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "LessonPromotionContract.v1 names the reviewed monolith patch as the sole canonical writer and freezes claim-family dedupe across direct edit, F102 candidate, and F152 downstream paths.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "assets/memory-surfaces/lessons-learned/promotion.yaml",
+          "docs/architecture/memory-write-lane-census.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "The lane-owned worktree Redis sanctuary predicate binds LL-015 to the revisioned pre-storage guard event without creating a central cue engine.",
+        "evidenceLevel": "fixture",
+        "evidenceRefs": [
+          "assets/memory-surfaces/lessons-learned/consumption-replay.yaml",
+          "scripts/start-dev.sh#guard_runtime_redis_sanctuary"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "F209 search and source anchors provide exact lesson drill on pull.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F209-evidence-recall-optimization.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Cats may use accepted lessons to avoid repeated failures while preserving source scope.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/public-lessons.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "A refs-only RecallFrame v0 binds the exact LL-015 and predicate revisions to a presented and applied guard receipt; F200 consumption remains observation-only.",
+        "evidenceLevel": "fixture",
+        "evidenceRefs": [
+          "assets/memory-surfaces/lessons-learned/consumption-replay.yaml",
+          "scripts/lesson-learning-closure.test.mjs"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "The replay records zero recurrence inside the same guarded startup and states guard enforcement as a confounder and causal ceiling.",
+        "evidenceLevel": "fixture",
+        "evidenceRefs": [
+          "assets/memory-surfaces/lessons-learned/consumption-replay.yaml",
+          "scripts/lesson-learning-closure.test.mjs#same-operation-replay"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Git revisions and explicit supersession update the canonical lesson source.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/public-lessons.md"
+        ]
+      },
+      "evidence": {
+        "level": "fixture",
+        "refs": [
+          "assets/memory-surfaces/lessons-learned/promotion.yaml",
+          "assets/memory-surfaces/lessons-learned/consumption-replay.yaml",
+          "scripts/lesson-learning-closure.test.mjs"
+        ],
+        "limitations": "The typed replay covers only LL-015 in one source-only guarded startup. It does not claim production execution, future-task correctness, global Lesson utility, or a central cue engine."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "library-knowledge",
+      "label": "Library knowledge",
+      "ownerCell": "F186 library memory",
+      "ownerRefs": [
+        "docs/features/F186-library-memory-architecture.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F186-library-memory-architecture.md",
+        "docs/decisions/015-knowledge-object-contract.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F186 catalog and source revisions own ingested library knowledge.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F186-library-memory-architecture.md"
+        ]
+      },
+      "declarationRevision": "F312-PF-E0-2026-09-03",
+      "disposition": "exempt",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "F186 ingestion records source, collection, and catalog metadata.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F186-library-memory-architecture.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "exempt",
+        "summary": "F186 is an explicit-ingestion and pull-search surface; no named task-class consumer qualifies a proactive cue.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "feature-discussions/2026-09-03-f312-phase-f-library-provider-e0.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "F186 search and source views provide pull presentation and drill.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F186-library-memory-architecture.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Consumers may use provenance-bearing library content subject to collection and source policy; private collections require explicit authorization.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F186-library-memory-architecture.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "exempt",
+        "summary": "Explicit pull reads do not need a proactive applied or dismissed receipt without a named invocation consumer.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "feature-discussions/2026-09-03-f312-phase-f-library-provider-e0.md"
+        ]
+      },
+      "outcome": {
+        "state": "exempt",
+        "summary": "No proactive consumer exists, so Phase F creates neither a bounded outcome nor a utility eval.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "feature-discussions/2026-09-03-f312-phase-f-library-provider-e0.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Collection policy and source revision can retire or refresh stale catalog entries.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F186-library-memory-architecture.md"
+        ]
+      },
+      "evidence": {
+        "level": "docs-only",
+        "refs": [
+          "docs/features/F186-library-memory-architecture.md",
+          "feature-discussions/2026-09-03-f312-phase-f-library-provider-e0.md"
+        ],
+        "limitations": "Library ingestion and pull use remain active under F186; the exemption applies only to proactive Standing Reflex application."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "method",
+      "label": "Method knowledge",
+      "ownerCell": "Method document owner",
+      "ownerRefs": [
+        "docs/methods"
+      ],
+      "canonicalRefs": [
+        "docs/methods",
+        "docs/decisions/015-knowledge-object-contract.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "Published versioned Method Cards under docs/methods would own reusable procedure truth; the generated index and TEMPLATE do not become candidates.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/methods",
+          "docs/methods/TEMPLATE.md",
+          "docs/methods/index.md"
+        ]
+      },
+      "declarationRevision": "F312-D-method-e0-v1",
+      "disposition": "exempt",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Method owners may write and review versioned Method Cards using the repository template and knowledge-object governance.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/methods/TEMPLATE.md",
+          "docs/decisions/015-knowledge-object-contract.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "exempt",
+        "summary": "E0 found no published Method Card and no named task consumer; no task-to-method detector or Cue Plane entry is created for an empty surface.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/methods/TEMPLATE.md",
+          "docs/methods/index.md",
+          "docs/architecture/memory-standing-reflex-contract.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Published Method Cards remain available through exact source pull once they exist; TEMPLATE and the generated index are discovery scaffolding, not method content.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/methods/TEMPLATE.md",
+          "docs/methods/index.md",
+          "docs/features/F209-evidence-recall-optimization.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "A future consumer may follow only a published current Method Card within its declared trigger, prerequisites, guardrails, and confidence threshold.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/methods/TEMPLATE.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "exempt",
+        "summary": "With no candidate and no consumer, there is no honest applied or dismissed event to record; retrieval of TEMPLATE or index metadata must not fabricate one.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/methods/TEMPLATE.md",
+          "docs/methods/index.md",
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "outcome": {
+        "state": "exempt",
+        "summary": "With no named consumer, Method quality has no bounded outcome claim or keep/tune/sunset eval; the surface must repeat E0 when a real Method Card and consumer appear.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/methods/TEMPLATE.md",
+          "docs/architecture/memory-standing-reflex-contract.md",
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "A future Method candidate is revision-bound to canonical document bytes and explicit lifecycle/supersession metadata; repository deletion removes it from pull discovery.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/methods/TEMPLATE.md",
+          "docs/decisions/015-knowledge-object-contract.md"
+        ]
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "docs/methods/TEMPLATE.md",
+          "docs/methods/index.md",
+          "docs/architecture/memory-standing-reflex-contract.md"
+        ],
+        "limitations": "E0 inspected the canonical directory: it contains only TEMPLATE.md, generated index.md, and .gitkeep, so active cue/receipt/outcome claims would be fabricated. Exempt is reversible: publishing a real Method Card with a named consumer requires a new E0 qualification before proactive delivery."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "person",
+      "label": "Person and relationship memory",
+      "ownerCell": "F276 people memory",
+      "ownerRefs": [
+        "docs/features/F276-people-relationship-memory.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F276-people-relationship-memory.md",
+        "docs/architecture/memory-cue-source-map.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F276 owns approved Person records and field revisions.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F276-people-relationship-memory.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "F276/F282 capture candidates and require proposal disposition before canonical write.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F276-people-relationship-memory.md",
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "subject_seen is a typed trigger over resolved Person identity and revision.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-cue-source-map.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "The cue exposes a narrow authenticated Person drill instead of embedding private payload.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F276-people-relationship-memory.md",
+          "docs/features/F287-memory-cue-plane.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "The active cat may personalize the current interaction within F276 visibility and privacy policy.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F276-people-relationship-memory.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "F287 records presented, drilled, applied, or dismissed states against the source revision.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F287-memory-cue-plane.md"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "F200 evaluates subject_seen utility and publishes a bounded keep verdict.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "F276 correction and forget invalidate derived Person cues and their prior revisions.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F276-people-relationship-memory.md",
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ]
+      },
+      "evidence": {
+        "level": "UAT",
+        "refs": [
+          "docs/features/F276-people-relationship-memory.md",
+          "docs/features/F287-memory-cue-plane.md"
+        ],
+        "limitations": "Closure is limited to approved Person facts and policy-visible fields."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "proactive-candidate",
+      "label": "Proactive memory candidate",
+      "ownerCell": "F282 candidate pipeline",
+      "ownerRefs": [
+        "docs/features/F282-proactive-memory-pipeline.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F282-proactive-memory-pipeline.md",
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F282 owns candidate state and disposition; candidates are not approved memory authority.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "exempt",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "The detector writes bounded candidate records and abstention reasons.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "exempt",
+        "summary": "An unapproved candidate cannot be recalled as memory; only approval may hand it to a canonical lane.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Candidates present source refs and bounded context for human or cat disposition.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Consumers may approve, defer, or abstain; they may not treat candidate payload as canonical truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "Proposal, defer, and abstention states provide candidate disposition receipts.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "Candidate disposition and approved-lane handoff provide a bounded workflow outcome.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Suppression, expiry policy, source correction, and final disposition end candidate eligibility.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "evidence": {
+        "level": "UAT",
+        "refs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ],
+        "limitations": "Exemption prevents proposal workflow state from being mistaken for approved memory."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "profile",
+      "label": "User profile",
+      "ownerCell": "F231 profile capsule and F221 Approval Hub",
+      "ownerRefs": [
+        "docs/features/F231-user-profile-capsule.md",
+        "docs/features/F221-taste-lane.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F231-user-profile-capsule.md",
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F231 profile capsule and Approval Hub revisions own profile truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F231-user-profile-capsule.md"
+        ]
+      },
+      "declarationRevision": "F312-C-profile-v1",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Profile proposals are reviewed before persistence.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F231-user-profile-capsule.md",
+          "docs/features/F221-taste-lane.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "profile_revision_available is emitted only for a current F231 capsule revision without a prior applied or dismissed terminal receipt.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/sources/ProfileMemoryCueSource.ts",
+          "packages/api/test/memory/f312-profile-cue.test.js"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Profile can be read through its bounded capsule and Approval Hub surfaces.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F231-user-profile-capsule.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Cats may personalize within approved profile scope and may not infer unapproved fields.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F231-user-profile-capsule.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "The existing Cue Plane records presented, drilled, applied, or dismissed against the exact capsule revision; a terminal outcome suppresses that revision on later invocations.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/MemoryCueEpisodeStore.ts",
+          "packages/api/src/domains/memory/cue/sources/ProfileMemoryCueSource.ts"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "The strictly authenticated owner-facing response is the bounded consumer: applied means approved Profile context changed that response, dismissed means it did not; no single-revision utility causality is claimed.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/format-memory-cues.ts",
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Approval, correction, and revision replacement invalidate stale profile projections.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F231-user-profile-capsule.md",
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ]
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "docs/features/F231-user-profile-capsule.md",
+          "packages/api/test/memory/f312-profile-cue.test.js"
+        ],
+        "limitations": "Main proves revision admission, owner scope, drill, receipt suppression, correction, and forget behavior; merged-main runtime acceptance is recorded separately."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "project-knowledge",
+      "label": "Project operational knowledge",
+      "ownerCell": "F102 project knowledge and F209 retrieval",
+      "ownerRefs": [
+        "docs/decisions/020-f102-memory-system-architecture.md",
+        "docs/features/F209-evidence-recall-optimization.md"
+      ],
+      "canonicalRefs": [
+        "docs/decisions/020-f102-memory-system-architecture.md",
+        "docs/decisions/036-f209-retrieval-surface-multi-layer.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "Versioned project sources own facts; F209 indexes and cites them without taking authority.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/decisions/020-f102-memory-system-architecture.md",
+          "docs/features/F209-evidence-recall-optimization.md"
+        ]
+      },
+      "declarationRevision": "F312-D-project-knowledge-v2",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Repository-governed feature docs and source-linked artifacts capture project knowledge in their owning lanes.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/decisions/015-knowledge-object-contract.md",
+          "docs/decisions/020-f102-memory-system-architecture.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "project_source_required selects only the workflow-bound feature ID, or exactly one explicit owner F-ID when no workflow binding exists; history-only, ambiguous, and non-owner references fail closed.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/cats/services/agents/routing/route-helpers.ts",
+          "packages/api/test/memory/f312-operational-knowledge-cues.test.js"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "The Project Knowledge resolver uses F209 only to locate the canonical feature source, then drills a bounded content window from that exact source revision; index title/summary remain navigation metadata only.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/resolvers/ProjectKnowledgeCueResolver.ts",
+          "packages/api/src/domains/memory/cue/sources/ProjectKnowledgeMemoryCueSource.ts",
+          "packages/api/src/domains/memory/cue/sources/canonical-project-document.ts",
+          "packages/api/src/domains/memory/cue/createMemoryCueRuntime.ts"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "The current feature task consumer may use the drilled canonical feature source only to ground its current response or action; index summaries do not become authority.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/format-memory-cues.ts",
+          "docs/decisions/020-f102-memory-system-architecture.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "The Cue Plane records presented, drilled, applied, or dismissed against the exact canonical feature-document revision; applied or dismissed suppresses replay of that revision.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/MemoryCueEpisodeStore.ts",
+          "packages/api/src/domains/memory/cue/sources/ProjectKnowledgeMemoryCueSource.ts",
+          "packages/api/test/memory/f312-project-knowledge-cue.test.js"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "The bounded outcome is the current feature-task response or action: applied means the exact feature source grounded it, dismissed means it did not; no project-wide score or single-source causality is claimed.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/format-memory-cues.ts",
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Canonical feature-document bytes bind the revision; correction, deletion, inactive status, supersession, or a lexical/physical path escape makes the old handle unavailable.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/sources/canonical-project-document.ts",
+          "packages/api/src/domains/memory/cue/sources/ProjectKnowledgeMemoryCueSource.ts",
+          "packages/api/test/memory/f312-project-knowledge-cue.test.js"
+        ]
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "docs/decisions/020-f102-memory-system-architecture.md",
+          "docs/features/F209-evidence-recall-optimization.md",
+          "packages/api/test/memory/f312-operational-knowledge-cues.test.js",
+          "packages/api/test/memory/f312-project-knowledge-cue.test.js"
+        ],
+        "limitations": "The active proactive subset is exact feature-task grounding. Other project sources remain F209 pull surfaces, and F209 remains a derived index; this lane does not claim runtime acceptance before merged-main Alpha."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "provider-local-memory",
+      "label": "Provider-local memory",
+      "ownerCell": "Provider runtime owner",
+      "ownerRefs": [
+        "docs/architecture/provider-local-memory-census.md"
+      ],
+      "canonicalRefs": [
+        "docs/architecture/provider-local-memory-census.md",
+        "docs/decisions/017-no-runtime-home-overwrite.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "Each provider and account owner retains native authority; the carrier census records support boundaries without copying content.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "docs/architecture/provider-local-memory-census.md"
+        ]
+      },
+      "declarationRevision": "F312-PF-E0-2026-09-03",
+      "disposition": "exempt",
+      "writeCapture": {
+        "state": "exempt",
+        "summary": "Provider-native write paths stay provider-owned; Clowder AI must not write provider homes or create a shared capture adapter.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "docs/architecture/provider-local-memory-census.md",
+          "docs/decisions/017-no-runtime-home-overwrite.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "exempt",
+        "summary": "No carrier exposes both a Clowder AI-verifiable immutable item revision and a named proactive consumer.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "docs/architecture/provider-local-memory-census.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "exempt",
+        "summary": "Provider ambient/session context has no common authorized item drill; Clowder AI does not normalize or copy it.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "docs/architecture/provider-local-memory-census.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "exempt",
+        "summary": "Provider-native context remains account-scoped and is not admitted as a Clowder AI source without explicit owner ingestion.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "docs/architecture/provider-local-memory-census.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "exempt",
+        "summary": "Execution or session completion cannot attest that a distinct provider-memory revision was applied.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "docs/architecture/provider-local-memory-census.md"
+        ]
+      },
+      "outcome": {
+        "state": "exempt",
+        "summary": "Without a named consumer or item receipt, Phase F declares no provider-memory outcome or utility eval.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "feature-discussions/2026-09-03-f312-phase-f-library-provider-e0.md"
+        ]
+      },
+      "invalidation": {
+        "state": "exempt",
+        "summary": "Provider correction and deletion remain authoritative; Clowder AI keeps no provider-memory content replica or derived cue to invalidate.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "docs/architecture/provider-local-memory-census.md"
+        ]
+      },
+      "evidence": {
+        "level": "docs-only",
+        "refs": [
+          "docs/architecture/provider-local-memory-census.md",
+          "feature-discussions/2026-09-03-f312-phase-f-library-provider-e0.md",
+          "docs/decisions/017-no-runtime-home-overwrite.md"
+        ],
+        "limitations": "The census records provider-specific ceilings only; it creates no central store, adapter, cue, receipt, outcome, or runtime episode."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "recall-consumption-ledger",
+      "label": "Recall consumption ledger",
+      "ownerCell": "F200 and F263 observation plane",
+      "ownerRefs": [
+        "docs/features/F200-memory-recall-eval.md",
+        "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F200-memory-recall-eval.md",
+        "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F200/F263 trace records own delivery and consumption observations only.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md",
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "exempt",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "The observation plane records recall delivery and application lifecycle state.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md",
+          "docs/features/F287-memory-cue-plane.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "exempt",
+        "summary": "The ledger observes cues; it must never produce or select recalled truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Trace refs drill to delivery, application, and source revision evidence.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Eval and lifecycle consumers may use ledger facts as proxies with explicit causal limits.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "Presented, drilled, applied, and dismissed states are the ledger's native receipt contract.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F287-memory-cue-plane.md"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "F200 can join observations to bounded outcomes while forbidding proxy-as-correctness claims.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Source revision and lifecycle repair mark stale observations without rewriting historical trace.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ]
+      },
+      "evidence": {
+        "level": "UAT",
+        "refs": [
+          "docs/features/F200-memory-recall-eval.md",
+          "docs/features/F287-memory-cue-plane.md"
+        ],
+        "limitations": "The ledger proves observation, not the correctness or causal value of recalled content."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "reflection",
+      "label": "Reflection",
+      "ownerCell": "F271 pragmatic reflection",
+      "ownerRefs": [
+        "docs/features/F271-pragmatic-memory-reflection.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F271-pragmatic-memory-reflection.md",
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F271 reflection artifacts retain sourced and revised hypotheses while canonical truth stays in destination lanes.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F271-pragmatic-memory-reflection.md"
+        ]
+      },
+      "declarationRevision": "F312-Phase-E-2026-09-03",
+      "disposition": "exempt",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "F271 emits bounded typed deltas without rewriting canonical source memory.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F271-pragmatic-memory-reflection.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "exempt",
+        "summary": "The supply ledger and destination handoff are not a consumption predicate, and no reflection-level invocation consumer is named.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F271-pragmatic-memory-reflection.md",
+          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Reflection artifacts and source refs remain inspectable through pull and destination-owned readers.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F271-pragmatic-memory-reflection.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "A reflection may be used only as a sourced hypothesis or retrospective; approved facts remain destination-owned.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F271-pragmatic-memory-reflection.md",
+          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "exempt",
+        "summary": "F271 production and handoff do not establish a reflection-level invocation application contract.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md"
+        ]
+      },
+      "outcome": {
+        "state": "exempt",
+        "summary": "No named reflection-level consumer has a bounded keep, tune, or sunset decision, so no utility eval is created.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md"
+        ]
+      },
+      "invalidation": {
+        "state": "exempt",
+        "summary": "Source and destination lanes retain correction and disposition authority; no separate proactive reflection projection exists to invalidate.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F271-pragmatic-memory-reflection.md",
+          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md"
+        ]
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "docs/features/F271-pragmatic-memory-reflection.md",
+          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md",
+          "docs/architecture/memory-cue-source-map.md"
+        ],
+        "limitations": "Reflection production and destination handoff exist; reflection-level invocation use and utility are not claimed."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "skill",
+      "label": "Skill instruction knowledge",
+      "ownerCell": "Skill package owner and writing-skills governance",
+      "ownerRefs": [
+        "cat-cafe-skills/writing-skills/SKILL.md"
+      ],
+      "canonicalRefs": [
+        "cat-cafe-skills/writing-skills/SKILL.md",
+        "docs/decisions/009-cat-cafe-skills-distribution.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "Each shipped SKILL.md revision owns executable instruction truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "cat-cafe-skills/writing-skills/SKILL.md"
+        ]
+      },
+      "declarationRevision": "skill-consumption-receipt-v1-2026-08-28",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "writing-skills governs creation, review, and publication of skill packages.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "cat-cafe-skills/writing-skills/SKILL.md",
+          "docs/decisions/009-cat-cafe-skills-distribution.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "Skill descriptions and explicit naming provide typed task-to-skill trigger predicates.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "cat-cafe-skills/writing-skills/SKILL.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "A matched skill is presented by name and drilled by reading its full SKILL.md.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "cat-cafe-skills/writing-skills/SKILL.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "The active agent may execute instructions only within user authority and repository scope.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "cat-cafe-skills/writing-skills/SKILL.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "workspace-navigator prepares an invocation-, consumer-, and package-revision-bound handle; only the real Workspace consumer writes applied, while a separate bounded path writes dismissed.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/skill-consumption-receipt-contract.md",
+          "packages/api/test/skill-consumption-receipt.test.js"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "The pilot outcome is limited to the Workspace consumer's delivery four-state or not_applicable decision and explicitly excludes task-success or single-skill causal claims.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/skill-consumption-receipt-contract.md",
+          "packages/api/test/skill-consumption-receipt.test.js"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Package revision changes invalidate prepared handles and reclassify prior receipts as stale; scoped sync replaces stale distributed copies.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/skill-consumption-receipt-contract.md",
+          "packages/api/test/skill-consumption-receipt.test.js",
+          "docs/decisions/009-cat-cafe-skills-distribution.md"
+        ]
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "cat-cafe-skills/workspace-navigator/SKILL.md",
+          "docs/architecture/skill-consumption-receipt-contract.md",
+          "packages/api/test/skill-consumption-receipt.test.js"
+        ],
+        "limitations": "Receipt does not prove the package was presented or read. Production contract is proven for the workspace-navigator pilot on full invocation MCP; agent-key, readonly/desktop, direct REST, CatAgent, remote A2A, and unproven carrier/tool pairs remain explicit unsupported rather than inferred green."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "taste",
+      "label": "Taste",
+      "ownerCell": "F221 Taste authority and Approval Hub",
+      "ownerRefs": [
+        "docs/features/F221-taste-lane.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F221-taste-lane.md",
+        "docs/architecture/memory-cue-source-map.md",
+        "assets/memory-surfaces/taste/content-read.yaml"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F221 owns approved Taste revisions and correction state.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F221-taste-lane.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Taste proposals flow through Approval Hub before canonical persistence.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F221-taste-lane.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "F287 binds the explicit ELI5 phrase to approved_taste_invoked with predicate revision and exact Taste authority.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F287-memory-cue-plane.md",
+          "docs/architecture/memory-cue-source-map.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "The cue presents an owner-authenticated drill handle and requires drill before response generation.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "feature-specs/2026-08-15-memory-system-research-first-roadmap.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "The responding cat may use the drilled Taste only to shape the matching visual explanation; the cue cannot confer write authority.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F287-memory-cue-plane.md",
+          "docs/features/F221-taste-lane.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "PR #4019 canonical Alpha proved presented→drilled→applied→html_widget for the ELI5 cue.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "feature-specs/2026-08-15-memory-system-research-first-roadmap.md"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "F200 publishes a family-level keep verdict; it does not prove single-anchor causality.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Predicate and source revisions force revalidation after Taste correction or deletion; stale authority fails closed.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F287-memory-cue-plane.md",
+          "docs/features/F221-taste-lane.md"
+        ]
+      },
+      "evidence": {
+        "level": "UAT",
+        "refs": [
+          "feature-specs/2026-08-15-memory-system-research-first-roadmap.md",
+          "docs/features/F287-memory-cue-plane.md"
+        ],
+        "limitations": "UAT covers the explicit ELI5 cue on canonical Alpha, not every Taste trigger or production activation."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "verdict",
+      "label": "Evaluation verdict",
+      "ownerCell": "F192 Eval Hub verdict authority",
+      "ownerRefs": [
+        "docs/features/F192-socio-technical-harness-eval.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F192-socio-technical-harness-eval.md",
+        "docs/decisions/2026-05-27-f192-eval-sop-architecture.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F192 definitions and published verdict artifacts own keep, tune, or sunset decisions.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F192-socio-technical-harness-eval.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "exempt",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Eval Hub publishes provenance-bearing verdicts from registered definitions and evidence.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/decisions/2026-05-27-f192-eval-sop-architecture.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "exempt",
+        "summary": "A verdict is a decision output consumed by governed workflow, not invocation-time memory recall.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F192-socio-technical-harness-eval.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Verdicts drill to definition, evidence bundle, attribution, and snapshot refs.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F192-socio-technical-harness-eval.md",
+          "docs/harness-feedback/SPEC.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Lane owners may use verdicts only for the registered keep, tune, or sunset decision.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/decisions/2026-05-27-f192-eval-sop-architecture.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "Verdict publication and workflow transition provide delivery and application custody.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F192-socio-technical-harness-eval.md"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "The verdict is itself the bounded decision outcome and records its evidence ceiling.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F192-socio-technical-harness-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "A newer evidence window or superseding verdict invalidates prior decision applicability.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/decisions/2026-05-27-f192-eval-sop-architecture.md"
+        ]
+      },
+      "evidence": {
+        "level": "live",
+        "refs": [
+          "docs/features/F192-socio-technical-harness-eval.md",
+          "docs/decisions/2026-05-27-f192-eval-sop-architecture.md"
+        ],
+        "limitations": "Verdict closure does not make verdicts general-purpose recalled memory."
+      }
+    }
+  ],
+  "missing": [],
+  "carriers": []
+}

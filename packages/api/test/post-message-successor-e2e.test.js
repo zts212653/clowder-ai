@@ -1,0 +1,613 @@
+/**
+ * Local review is an ordinary durable A2A fact. It must not depend on the
+ * ActionSuccessor lease/generation state machine that still owns implement and
+ * external-review flows.
+ */
+
+import assert from 'node:assert/strict';
+import { afterEach, beforeEach, mock, test } from 'node:test';
+import './helpers/setup-cat-registry.js';
+import Fastify from 'fastify';
+import { appendTestLifecycleResponseSource } from './helpers/message-from-fixtures.js';
+
+let app;
+let originalEnv;
+
+beforeEach(() => {
+  originalEnv = { ...process.env };
+});
+
+afterEach(async () => {
+  if (app) await app.close();
+  app = undefined;
+  for (const key of Object.keys(process.env)) {
+    if (!(key in originalEnv)) delete process.env[key];
+  }
+  Object.assign(process.env, originalEnv);
+});
+
+async function createHarness({ failEnqueueAttempts = 0, measurementRoutes = false } = {}) {
+  const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
+  const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+  const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+  const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+  const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+  const { handlePostMessage } = await import('../../mcp-server/dist/tools/callback-tools.js');
+  const { MemoryRequestReviewOwnerLedger } = await import(
+    '../dist/infrastructure/capability-evolution/adapters/request-review/request-review-owner-ledger.js'
+  );
+  const { RequestReviewUseReceiptService } = await import(
+    '../dist/infrastructure/capability-evolution/adapters/request-review/request-review-use-receipt.js'
+  );
+
+  const registry = new InvocationRegistry();
+  const drainNotifications = [];
+  const invocationQueue = new InvocationQueue(undefined, {
+    onAdmitted: ({ entries }) => {
+      drainNotifications.push(entries.map((entry) => entry.id));
+    },
+  });
+  const originalEnqueue = invocationQueue.send.bind(invocationQueue);
+  let remainingEnqueueFailures = failEnqueueAttempts;
+  invocationQueue.send = async (...args) => {
+    if (remainingEnqueueFailures > 0) {
+      remainingEnqueueFailures -= 1;
+      return { outcome: 'full' };
+    }
+    return originalEnqueue(...args);
+  };
+  const messageStore = new MessageStore();
+  const useLedger = new MemoryRequestReviewOwnerLedger();
+  const useReceipts = new RequestReviewUseReceiptService({
+    ledger: useLedger,
+    messageStore,
+    invocationRegistry: registry,
+    versionAttestor: { deliver: async () => ({ status: 'unconfirmed' }) },
+  });
+  const threadStore = new ThreadStore();
+  const thread = await threadStore.create('user-1', 'Local review durable fact');
+  const auth = await registry.create('user-1', 'opus', thread.id);
+  const admissionCalls = [];
+
+  app = Fastify();
+  await app.register(callbacksRoutes, {
+    registry,
+    invocationQueue,
+    messageStore,
+    threadStore,
+    socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+    router: {
+      async *routeExecution() {},
+      getExecutions() {
+        return [];
+      },
+    },
+    invocationRecordStore: {
+      create() {
+        return { outcome: 'created', invocationId: 'child-invocation' };
+      },
+      update() {},
+      get() {
+        return null;
+      },
+    },
+    queueProcessor: {
+      async requestDrain() {},
+      async onInvocationComplete() {},
+    },
+    actionSuccessorAdmissionService: {
+      async admit(input) {
+        admissionCalls.push(input);
+        throw new Error('local review must not enter ActionSuccessor admission');
+      },
+    },
+    ...(measurementRoutes ? { skillConsumptionDeps: { receipts: {}, requestReviewReceipts: useReceipts } } : {}),
+  });
+
+  const apiUrl = await app.listen({ host: '127.0.0.1', port: 0 });
+  process.env.CAT_CAFE_API_URL = apiUrl;
+  process.env.CAT_CAFE_INVOCATION_ID = auth.invocationId;
+  process.env.CAT_CAFE_CALLBACK_TOKEN = auth.callbackToken;
+  process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0,0,0';
+
+  return {
+    admissionCalls,
+    drainNotifications,
+    auth,
+    apiUrl,
+    handlePostMessage,
+    invocationQueue,
+    messageStore,
+    registry,
+    thread,
+    useLedger,
+  };
+}
+
+function toolJson(result) {
+  assert.equal(result.isError, undefined, result.content[0]?.text);
+  return JSON.parse(result.content[0]?.text);
+}
+
+const REVIEW_ANCHOR = {
+  reviewSubjectRef: 'pr:zts212653/clowder-ai#4255',
+  acceptedSourceRef: 'docs/features/F314-development-episode-alignment-experiment.md',
+  acceptedRevision: '1'.repeat(40),
+};
+
+test('ordinary request, one typed reply, and author HTTP reads need no F100 measurement handle', async () => {
+  const harness = await createHarness({ measurementRoutes: true });
+  const author = await harness.registry.create('user-1', 'codex', harness.thread.id);
+  const authorHeaders = {
+    'x-invocation-id': author.invocationId,
+    'x-callback-token': author.callbackToken,
+  };
+  const request = await fetch(`${harness.apiUrl}/api/callbacks/post-message`, {
+    method: 'POST',
+    headers: { ...authorHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      content: '@opus\n\nPlease review this exact PR HEAD.',
+      targetCats: ['opus'],
+    }),
+  });
+  assert.equal(request.status, 200);
+
+  const verdict = toolJson(
+    await harness.handlePostMessage({
+      content: '@codex\n\nApproved after checking the accepted source and final HEAD.',
+      targetCats: ['codex'],
+      clientMessageId: 'single-review-no-measurement-handle',
+      localReviewVerdict: 'approved',
+      reviewedHeadSha: 'a'.repeat(40),
+      ...REVIEW_ANCHOR,
+    }),
+  );
+  assert.equal(verdict.status, 'ok');
+  assert.equal(harness.admissionCalls.length, 0);
+  const staleReceipt = await fetch(`${harness.apiUrl}/api/callbacks/request-review-consumption/record`, {
+    method: 'POST',
+    headers: { ...authorHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({ handle: 'stale-or-missing-handle', reviewMessageId: verdict.messageId }),
+  });
+  assert.equal(staleReceipt.status, 409);
+  assert.equal((await staleReceipt.json()).error, 'reservation_not_found');
+  assert.deepEqual(await harness.useLedger.read(), []);
+  const replay = toolJson(
+    await harness.handlePostMessage({
+      content: '@codex\n\nApproved after checking the accepted source and final HEAD.',
+      targetCats: ['codex'],
+      clientMessageId: 'single-review-no-measurement-handle',
+      localReviewVerdict: 'approved',
+      reviewedHeadSha: 'a'.repeat(40),
+      ...REVIEW_ANCHOR,
+    }),
+  );
+  assert.equal(replay.status, 'duplicate');
+  assert.equal(replay.messageId, verdict.messageId);
+  const authorEntries = harness.invocationQueue
+    .list(harness.thread.id, 'user-1')
+    .filter((entry) => entry.targets.includes('codex'));
+  assert.equal(authorEntries.length, 1);
+  // This read-surface fixture has no provider. Commit the same exact receiver
+  // and input ref that Queue admission uses, then retire only that target.
+  const entry = authorEntries[0];
+  assert.ok(await harness.invocationQueue.markProcessingByIdDurable(harness.thread.id, entry.id, 'codex'));
+  const response = appendTestLifecycleResponseSource(harness.messageStore, {
+    invocationId: author.invocationId,
+    catId: 'codex',
+    threadId: harness.thread.id,
+    userId: 'user-1',
+    timestamp: Date.now(),
+  });
+  assert.equal(
+    harness.messageStore.commitLifecycleAppendAdmission({
+      threadId: harness.thread.id,
+      entryId: entry.id,
+      inputMessageIds: [verdict.messageId],
+      runs: [
+        {
+          targetId: 'codex',
+          invocationId: author.invocationId,
+          responseMessageId: response.id,
+          dispatchedAt: Date.now(),
+        },
+      ],
+    }).kind,
+    'applied',
+  );
+  assert.equal(
+    (await harness.invocationQueue.retireClaimedLifecycleTarget(harness.thread.id, entry.id, 'codex')).outcome,
+    'retired',
+  );
+
+  const single = await fetch(`${harness.apiUrl}/api/callbacks/get-message?messageId=${verdict.messageId}&mode=full`, {
+    headers: authorHeaders,
+  });
+  assert.equal(single.status, 200);
+  const fact = (await single.json()).message.localReviewFact;
+  assert.equal(fact.verdict, 'approved');
+  assert.equal(fact.reviewedHeadSha, 'a'.repeat(40));
+  assert.equal(fact.acceptedSourceRef, REVIEW_ANCHOR.acceptedSourceRef);
+
+  const window = await fetch(
+    `${harness.apiUrl}/api/callbacks/thread-context?messageId=${verdict.messageId}&before=0&after=0&responseMode=full`,
+    { headers: authorHeaders },
+  );
+  assert.equal(window.status, 200);
+  assert.deepEqual((await window.json()).messages[0].localReviewFact, fact);
+  assert.equal(
+    harness.messageStore
+      .getByThreadIncludingQueued(harness.thread.id, 20, 'user-1')
+      .filter((message) => message.extra?.localReviewVerdict).length,
+    1,
+  );
+});
+
+test('typed local review fact needs no action lease or inherited coordination to wake the named author once', async () => {
+  const harness = await createHarness();
+  const input = {
+    content: '@codex\n\nREQUEST_CHANGES for the reviewed HEAD; findings are attached in this durable message.',
+    targetCats: ['codex'],
+    clientMessageId: 'durable-local-review-without-lease',
+    localReviewVerdict: 'changes_requested',
+    reviewedHeadSha: 'a'.repeat(40),
+    ...REVIEW_ANCHOR,
+  };
+
+  const first = toolJson(await harness.handlePostMessage(input));
+  assert.equal(first.status, 'ok');
+  assert.equal(harness.admissionCalls.length, 0);
+  const visible = harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1');
+  assert.equal(visible.length, 1);
+  assert.deepEqual(visible[0].extra.localReviewVerdict, {
+    verdict: 'changes_requested',
+    clientMessageId: input.clientMessageId,
+    reviewedHeadSha: input.reviewedHeadSha,
+    ...REVIEW_ANCHOR,
+  });
+  assert.deepEqual(visible[0].mentions, ['codex']);
+  assert.equal(
+    visible[0].deliveryStatus,
+    undefined,
+    'published Agent review remains visible while Queue owns wake admission in lifecycle metadata',
+  );
+  assert.deepEqual(harness.invocationQueue.list(harness.thread.id, 'user-1')[0].targets, ['codex']);
+  assert.equal(new Set(harness.drainNotifications.flat()).size, 1);
+
+  const replay = toolJson(await harness.handlePostMessage(input));
+  assert.equal(replay.status, 'duplicate');
+  assert.equal(replay.messageId, first.messageId);
+  const concurrent = await Promise.all(Array.from({ length: 8 }, () => harness.handlePostMessage(input)));
+  assert.equal(
+    concurrent.every((result) => toolJson(result).status === 'duplicate'),
+    true,
+  );
+  assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 1);
+  assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 1);
+  assert.equal(new Set(harness.drainNotifications.flat()).size, 1);
+});
+
+test('typed local review fact fails closed without an exact reviewed HEAD', async () => {
+  const harness = await createHarness();
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/callbacks/post-message',
+    headers: {
+      'x-invocation-id': harness.auth.invocationId,
+      'x-callback-token': harness.auth.callbackToken,
+    },
+    payload: {
+      content: '@codex\n\nThis conclusion has no exact reviewed revision.',
+      targetCats: ['codex'],
+      clientMessageId: 'durable-local-review-missing-head',
+      localReviewVerdict: 'approved',
+      ...REVIEW_ANCHOR,
+    },
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().kind, 'invalid_review_fact');
+  assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 0);
+  assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 0);
+});
+
+test('typed local review fact fails closed without an accepted source anchor', async () => {
+  const harness = await createHarness();
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/callbacks/post-message',
+    headers: {
+      'x-invocation-id': harness.auth.invocationId,
+      'x-callback-token': harness.auth.callbackToken,
+    },
+    payload: {
+      content: '@codex\n\nThis conclusion has no accepted source coordinate.',
+      targetCats: ['codex'],
+      clientMessageId: 'durable-local-review-missing-source',
+      localReviewVerdict: 'approved',
+      reviewedHeadSha: 'a'.repeat(40),
+      reviewSubjectRef: REVIEW_ANCHOR.reviewSubjectRef,
+    },
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().kind, 'invalid_review_fact');
+  assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 0);
+});
+
+test('direct local review action custody is retired before ActionSuccessor admission', async () => {
+  const harness = await createHarness();
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/callbacks/post-message',
+    headers: {
+      'x-invocation-id': harness.auth.invocationId,
+      'x-callback-token': harness.auth.callbackToken,
+    },
+    payload: {
+      content: '@codex\n\nPlease review this exact revision.',
+      targetCats: ['codex'],
+      clientMessageId: 'retired-direct-local-review-action',
+      action: {
+        subjectRef: 'pr:owner/repo#42',
+        actionFamily: 'review',
+        successorSlot: 'reviewer',
+        mode: 'single',
+        terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+      },
+    },
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().error, 'Invalid request body');
+  assert.equal(harness.admissionCalls.length, 0);
+  assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 0);
+});
+
+test('a durable review fact recovers one author wake after transient Queue failure', async () => {
+  const harness = await createHarness({ failEnqueueAttempts: 1 });
+  const payload = {
+    content: '@codex\n\nAPPROVED at this exact HEAD.',
+    targetCats: ['codex'],
+    clientMessageId: 'durable-review-recover-delivery',
+    localReviewVerdict: 'approved',
+    reviewedHeadSha: 'b'.repeat(40),
+    ...REVIEW_ANCHOR,
+  };
+  const headers = {
+    'x-invocation-id': harness.auth.invocationId,
+    'x-callback-token': harness.auth.callbackToken,
+  };
+
+  const first = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+  assert.equal(first.statusCode, 503);
+  assert.equal(first.json().kind, 'review_delivery_pending');
+  const durable = harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1');
+  assert.equal(durable.length, 0, 'atomic Queue rejection must not publish a source without its wake');
+  assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 0);
+
+  const replay = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+  assert.equal(replay.statusCode, 200);
+  assert.equal(replay.json().status, 'ok');
+  assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 1);
+  assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 1);
+  assert.equal(new Set(harness.drainNotifications.flat()).size, 1);
+});
+
+test('a durable review gallery recovers its author wake after the local source disappears', async () => {
+  const { mkdtemp, writeFile, unlink, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { registerWorktrees } = await import('../dist/domains/workspace/workspace-security.js');
+  const root = await mkdtemp(join(tmpdir(), 'review-gallery-recovery-'));
+  registerWorktrees([{ id: 'review-gallery-recovery', root, branch: 'test', head: 'test' }]);
+  const file = join(root, 'image.png');
+  await writeFile(file, 'image');
+  const harness = await createHarness({ failEnqueueAttempts: 1 });
+  const block = { id: 'review-image', kind: 'media_gallery', v: 1, items: [{ url: file }] };
+  const content = '@codex\n\nAPPROVED with image.\n```cc_rich\n' + JSON.stringify({ v: 1, blocks: [block] }) + '\n```';
+  const payload = {
+    content,
+    targetCats: ['codex'],
+    clientMessageId: 'durable-gallery-recovery',
+    localReviewVerdict: 'approved',
+    reviewedHeadSha: 'b'.repeat(40),
+    ...REVIEW_ANCHOR,
+  };
+  const headers = { 'x-invocation-id': harness.auth.invocationId, 'x-callback-token': harness.auth.callbackToken };
+  try {
+    const first = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+    assert.equal(first.statusCode, 503, first.body);
+    assert.equal(
+      harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length,
+      0,
+      'failed atomic admission publishes neither source nor wake',
+    );
+    const accepted = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+    assert.equal(accepted.statusCode, 200, accepted.body);
+    const durable = harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1')[0];
+    assert.match(durable.extra.rich.blocks[0].items[0].url, /^\/api\/workspace\/file\/raw\?/);
+    const { safeParseExtra } = await import('../dist/domains/cats/services/stores/redis/redis-message-parsers.js');
+    durable.extra = safeParseExtra(JSON.stringify(durable.extra));
+    await unlink(file);
+    const retry = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+    assert.equal(retry.statusCode, 200, retry.body);
+    assert.equal(retry.json().status, 'duplicate');
+    assert.equal(retry.json().messageId, durable.id);
+    assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 1);
+    assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 1);
+    const changed = { ...payload, content: content.replace('image.png', 'different.png') };
+    const conflict = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers,
+      payload: changed,
+    });
+    assert.equal(conflict.statusCode, 409, conflict.body);
+    assert.equal(conflict.json().kind, 'review_fact_idempotency_conflict');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+for (const legacy of [false, true]) {
+  test(`durable audio review recovery preserves raw input (legacy=${legacy})`, async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { initVoiceBlockSynthesizer, getVoiceBlockSynthesizer } = await import(
+      '../dist/domains/cats/services/tts/VoiceBlockSynthesizer.js'
+    );
+    const root = await mkdtemp(join(tmpdir(), 'audio-review-retry-'));
+    initVoiceBlockSynthesizer({}, root);
+    let synthesisCalls = 0;
+    const stub = mock.method(getVoiceBlockSynthesizer(), 'resolveVoiceBlocks', async (blocks) => {
+      synthesisCalls++;
+      return blocks.map((block) =>
+        block.kind === 'audio' ? { ...block, url: '/uploads/review-speech.wav', mimeType: 'audio/wav' } : block,
+      );
+    });
+    const harness = await createHarness({ failEnqueueAttempts: 1 });
+    const block = { id: 'spoken-review', kind: 'audio', v: 1, text: '这轮审查通过' };
+    const content = '@codex\n\nAPPROVED.\n```cc_rich\n' + JSON.stringify({ v: 1, blocks: [block] }) + '\n```';
+    const payload = {
+      content,
+      targetCats: ['codex'],
+      clientMessageId: 'audio-review-recovery',
+      localReviewVerdict: 'approved',
+      reviewedHeadSha: 'b'.repeat(40),
+      ...REVIEW_ANCHOR,
+    };
+    const headers = { 'x-invocation-id': harness.auth.invocationId, 'x-callback-token': harness.auth.callbackToken };
+    try {
+      const first = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+      assert.equal(first.statusCode, 503, first.body);
+      assert.equal(
+        harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length,
+        0,
+        'failed atomic admission publishes neither source nor wake',
+      );
+      const accepted = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+      assert.equal(accepted.statusCode, 200, accepted.body);
+      const stored = harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1')[0];
+      assert.equal(stored.extra.rich.blocks[0].url, '/uploads/review-speech.wav');
+      if (legacy) delete stored.extra.callbackRichRequestDigest;
+      const retry = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+      assert.equal(retry.statusCode, 200, retry.body);
+      assert.equal(retry.json().messageId, stored.id);
+      assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 1);
+      assert.equal(
+        synthesisCalls,
+        legacy ? 3 : 2,
+        'accepted replay does not rerun TTS; rejected atomic admission has no reusable persisted media',
+      );
+      const changed = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/post-message',
+        headers,
+        payload: { ...payload, content: content.replace('这轮审查通过', '换一段语音') },
+      });
+      assert.equal(changed.statusCode, 409, changed.body);
+      assert.equal(changed.json().kind, 'review_fact_idempotency_conflict');
+    } finally {
+      stub.mock.restore();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test('a new HEAD stores a fresh review fact while retaining the old HEAD as history', async () => {
+  const harness = await createHarness();
+  const base = {
+    content: '@codex\n\nAPPROVED for the exact reviewed revision.',
+    targetCats: ['codex'],
+    localReviewVerdict: 'approved',
+    ...REVIEW_ANCHOR,
+  };
+
+  assert.equal(
+    toolJson(
+      await harness.handlePostMessage({
+        ...base,
+        clientMessageId: 'review-head-old',
+        reviewedHeadSha: 'c'.repeat(40),
+      }),
+    ).status,
+    'ok',
+  );
+  assert.equal(
+    toolJson(
+      await harness.handlePostMessage({
+        ...base,
+        clientMessageId: 'review-head-new',
+        reviewedHeadSha: 'd'.repeat(40),
+      }),
+    ).status,
+    'ok',
+  );
+
+  const facts = harness.messageStore
+    .getByThreadIncludingQueued(harness.thread.id, 20, 'user-1')
+    .map((message) => message.extra.localReviewVerdict?.reviewedHeadSha)
+    .filter(Boolean);
+  assert.deepEqual(facts.sort(), ['c'.repeat(40), 'd'.repeat(40)]);
+  assert.equal(harness.admissionCalls.length, 0);
+});
+
+test('one local-review clientMessageId cannot be reused for a different durable fact', async () => {
+  const harness = await createHarness();
+  const headers = {
+    'x-invocation-id': harness.auth.invocationId,
+    'x-callback-token': harness.auth.callbackToken,
+  };
+  const payload = {
+    content: '@codex\n\nAPPROVED for this exact revision.',
+    targetCats: ['codex'],
+    clientMessageId: 'review-idempotency-conflict',
+    localReviewVerdict: 'approved',
+    reviewedHeadSha: 'e'.repeat(40),
+    ...REVIEW_ANCHOR,
+  };
+
+  const first = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+  assert.equal(first.statusCode, 200);
+  const conflict = await app.inject({
+    method: 'POST',
+    url: '/api/callbacks/post-message',
+    headers,
+    payload: { ...payload, reviewedHeadSha: 'f'.repeat(40) },
+  });
+  assert.equal(conflict.statusCode, 409);
+  assert.equal(conflict.json().kind, 'review_fact_idempotency_conflict');
+  assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 1);
+  assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 1);
+});
+
+test('one local-review clientMessageId cannot be reused for a different accepted revision', async () => {
+  const harness = await createHarness();
+  const headers = {
+    'x-invocation-id': harness.auth.invocationId,
+    'x-callback-token': harness.auth.callbackToken,
+  };
+  const payload = {
+    content: '@codex\n\nAPPROVED for this accepted source revision.',
+    targetCats: ['codex'],
+    clientMessageId: 'review-source-idempotency-conflict',
+    localReviewVerdict: 'approved',
+    reviewedHeadSha: 'e'.repeat(40),
+    ...REVIEW_ANCHOR,
+  };
+
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload })).statusCode,
+    200,
+  );
+  const conflict = await app.inject({
+    method: 'POST',
+    url: '/api/callbacks/post-message',
+    headers,
+    payload: { ...payload, acceptedRevision: '2'.repeat(40) },
+  });
+  assert.equal(conflict.statusCode, 409);
+  assert.equal(conflict.json().kind, 'review_fact_idempotency_conflict');
+});

@@ -1,0 +1,142 @@
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
+  API_URL: 'http://localhost:3102',
+}));
+vi.mock('@/stores/chatStore', () => {
+  const hook = Object.assign(() => ({}), { getState: () => ({}) });
+  return { useChatStore: hook };
+});
+vi.mock('@/hooks/usePinnedSections', () => ({
+  usePinnedSections: () => ({ pinned: [], pin: vi.fn(), unpin: vi.fn(), isPinned: () => false }),
+}));
+
+import { SettingsNav } from '../settings/SettingsNav';
+
+describe('SettingsNav search filtering', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeAll(() => {
+    (globalThis as { React?: typeof React }).React = React;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  afterAll(() => {
+    delete (globalThis as { React?: typeof React }).React;
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  it('renders all settings sections when no search query', () => {
+    act(() => {
+      root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn() }));
+    });
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
+    expect(buttons).toHaveLength(13);
+    expect(container.textContent).toContain('协作与规则');
+  });
+
+  it('renders a primary icon for every settings section', () => {
+    act(() => {
+      root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn() }));
+    });
+
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
+    expect(buttons).toHaveLength(13);
+    for (const button of buttons) {
+      expect(button.querySelector('svg.h-4.w-4')).toBeTruthy();
+    }
+  });
+
+  it('filters sections by label match', () => {
+    act(() => {
+      root.render(
+        React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: '语音' }),
+      );
+    });
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toContain('语音管理');
+  });
+
+  it('routes integration searches to the unified plugin section', () => {
+    act(() => {
+      root.render(
+        React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: 'connector' }),
+      );
+    });
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toContain('插件集成');
+  });
+
+  it('filters governance keywords to the rules and SOP section', () => {
+    act(() => {
+      root.render(
+        React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: '家规' }),
+      );
+    });
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toContain('协作与规则');
+  });
+
+  it('filters concierge keywords to the 猫猫球 section', () => {
+    act(() => {
+      root.render(
+        React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: '悬浮球' }),
+      );
+    });
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toContain('猫猫球');
+  });
+
+  it('shows empty message when no match', () => {
+    act(() => {
+      root.render(
+        React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: 'zzzznotfound' }),
+      );
+    });
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
+    expect(buttons).toHaveLength(0);
+    expect(container.textContent).toContain('没有匹配的设置分区');
+  });
+
+  it('marks the active item with font-medium class for visual distinction', () => {
+    act(() => {
+      root.render(React.createElement(SettingsNav, { activeSection: 'voice', onSelect: vi.fn() }));
+    });
+
+    const navButtons = Array.from(container.querySelectorAll('[data-active]'));
+    const active = navButtons.find((b) => b.textContent?.includes('语音管理'));
+    expect(active).toBeTruthy();
+    expect(active?.className).toContain('font-medium');
+  });
+
+  it('keeps unpinned section pin controls reachable without hover', () => {
+    act(() => {
+      root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn() }));
+    });
+
+    const pinButtons = Array.from(container.querySelectorAll('button[title="固定到侧栏"]'));
+    expect(pinButtons.length).toBeGreaterThan(0);
+    for (const button of pinButtons) {
+      expect(button.className).not.toContain('pointer-events-none');
+    }
+  });
+});

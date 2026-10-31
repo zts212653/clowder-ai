@@ -45,7 +45,6 @@ const mockStoreState = () => ({
     targetCats: [],
     catStatuses: {},
     catInvocations: {},
-    currentGame: null,
 
     unreadCount: 0,
     lastActivity: 0,
@@ -116,7 +115,6 @@ describe('SplitPaneView input routing (P1-1)', () => {
       root.render(
         React.createElement(SplitPaneView, {
           onSend: mockOnSend,
-          onStop: vi.fn(),
           onZoomToThread: vi.fn(),
         }),
       );
@@ -130,7 +128,15 @@ describe('SplitPaneView input routing (P1-1)', () => {
       (btn as HTMLElement).click();
     });
 
-    // SplitPaneView wraps onSend: (content, images, whisper, deliveryMode) => onSend(content, images, splitPaneTargetId, whisper, deliveryMode)
-    expect(mockOnSend).toHaveBeenCalledWith('test message', undefined, 'thread-2', undefined, undefined);
+    // SplitPaneView injects the target thread without adding a client-side delivery policy.
+    expect(mockOnSend).toHaveBeenCalledWith(
+      'test message',
+      undefined,
+      'thread-2',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    );
   });
 });

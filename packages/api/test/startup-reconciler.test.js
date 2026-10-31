@@ -11,6 +11,7 @@
 
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 // ── Fake InvocationRecordStore (simulates RedisInvocationRecordStore) ──
 
@@ -139,9 +140,15 @@ function makeTaskSnapshot(threadId, catId) {
 // ── Import StartupReconciler (lazy — file may not exist yet in RED phase) ──
 
 let StartupReconciler;
+let InvocationQueue;
+let InMemoryQueueLedgerStore;
 try {
   const mod = await import('../dist/domains/cats/services/agents/invocation/StartupReconciler.js');
   StartupReconciler = mod.StartupReconciler;
+  ({ InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js'));
+  ({ InMemoryQueueLedgerStore } = await import(
+    '../dist/domains/cats/services/agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js'
+  ));
 } catch {
   // RED phase: module doesn't exist yet — tests will fail with clear message
 }
@@ -193,6 +200,53 @@ describe('StartupReconciler', () => {
     // succeeded record untouched
     const unchanged = await store.get('r3');
     assert.equal(unchanged.status, 'succeeded');
+  });
+
+  test('F233 PR3: running startup sweep records invocation.died after failed transition', async () => {
+    const updatedAt = Date.now() - 45_000;
+    const r1 = makeRecord({
+      id: 'startup-died-1',
+      threadId: 'thread-startup-died',
+      status: 'running',
+      targetCats: ['opus'],
+      updatedAt,
+    });
+    const queued = makeRecord({
+      id: 'startup-queued-1',
+      threadId: 'thread-startup-queued',
+      status: 'queued',
+      targetCats: ['codex'],
+      createdAt: Date.now() - 10 * 60_000,
+    });
+    store.seed(r1);
+    store.seed(queued);
+
+    const recorded = [];
+    const reconciler = new StartupReconciler({
+      invocationRecordStore: store,
+      taskProgressStore,
+      log,
+      ballCustody: {
+        async record(event) {
+          recorded.push(event);
+        },
+      },
+    });
+
+    const result = await reconciler.reconcileOrphans();
+
+    assert.equal(result.running, 1);
+    assert.equal(result.queued, 1);
+    assert.equal(recorded.length, 1, 'only running invocations should produce invocation.died');
+    assert.equal(recorded[0].kind, 'invocation.died');
+    assert.equal(recorded[0].sourceEventId, 'inv:startup-died-1:died');
+    assert.equal(recorded[0].subjectKey, 'ball:thread:thread-startup-died');
+    assert.deepEqual(recorded[0].payload, {
+      invocationId: 'startup-died-1',
+      catId: 'opus',
+      reason: 'process_restart',
+      lastScanAt: updatedAt,
+    });
   });
 
   test('clears task progress for swept records', async () => {
@@ -368,291 +422,43 @@ describe('StartupReconciler', () => {
     assert.ok(result.durationMs >= 0);
   });
 
-  // ── Phase A+ tests: User-visible notification after sweep ──
-
-  test('AC-A+1: posts visible error message to affected threads via source field', async () => {
-    const r1 = makeRecord({ id: 'n1', threadId: 'thread-a', status: 'running', targetCats: ['opus'] });
-    const r2 = makeRecord({ id: 'n2', threadId: 'thread-b', status: 'running', targetCats: ['codex'] });
-    store.seed(r1);
-    store.seed(r2);
-
-    const appendedMessages = [];
-    const messageStore = {
-      append(msg) {
-        appendedMessages.push(msg);
-        return { ...msg, id: `msg-${appendedMessages.length}`, threadId: msg.threadId ?? 'default' };
-      },
-    };
-
-    const broadcastedMessages = [];
-    const socketManager = {
-      broadcastAgentMessage(msg, threadId) {
-        broadcastedMessages.push({ msg, threadId });
-      },
-    };
-
-    const reconciler = new StartupReconciler({
-      invocationRecordStore: store,
-      taskProgressStore,
-      log,
-      messageStore,
-      socketManager,
+  // Parent projection recovery cannot append a second result or socket-only notice.
+  for (const status of ['running', 'queued']) {
+    test('restart projection recovery stays silent for multiple owners: ' + status, async () => {
+      const writes = [],
+        broadcasts = [];
+      for (const [id, userId, threadId] of [
+        ['a', 'alice', 'thread-alice'],
+        ['b', 'bob', 'thread-bob'],
+      ]) {
+        store.seed(makeRecord({ id, userId, threadId, status, createdAt: Date.now() - 10 * 60_000 }));
+      }
+      const reconciler = new StartupReconciler({
+        invocationRecordStore: store,
+        taskProgressStore,
+        log,
+        messageStore: {
+          append(input) {
+            writes.push(input);
+            throw new Error('must not create a chat result');
+          },
+        },
+        socketManager: {
+          broadcastToRoom(...args) {
+            broadcasts.push(args);
+            throw new Error('must not create a socket-only result');
+          },
+        },
+      });
+      const result = await reconciler.reconcileOrphans();
+      assert.equal(result.swept, 2);
+      assert.equal(result.notifiedThreads, 0);
+      assert.deepEqual(writes, []);
+      assert.deepEqual(broadcasts, []);
+      assert.equal((await store.get('a')).status, 'failed');
+      assert.equal((await store.get('b')).status, 'failed');
     });
-
-    const result = await reconciler.reconcileOrphans();
-
-    assert.equal(result.notifiedThreads, 2, 'should notify 2 threads');
-    assert.equal(appendedMessages.length, 2, 'should append 2 messages');
-    assert.equal(broadcastedMessages.length, 2, 'should broadcast 2 messages');
-
-    // AC-A+2: Verify message uses source field (not catId: null)
-    const msgA = appendedMessages.find((m) => m.threadId === 'thread-a');
-    assert.ok(msgA, 'thread-a should have a message');
-    assert.ok(msgA.source, 'message must have source field (not catId: null)');
-    assert.equal(msgA.source.connector, 'startup-reconciler', 'source.connector must be startup-reconciler');
-    assert.equal(msgA.catId, null, 'catId should be null (connector message)');
-    assert.ok(msgA.content.includes('opus'), 'message should mention affected cat');
-    assert.ok(
-      msgA.content.includes('restart') || msgA.content.includes('interrupted') || msgA.content.includes('重启'),
-      'message should explain restart',
-    );
-
-    // P1 fix: Verify notification uses actual userId from InvocationRecord, not 'system'
-    assert.equal(msgA.userId, 'user-1', 'notification userId must match InvocationRecord.userId (not "system")');
-    const msgB = appendedMessages.find((m) => m.threadId === 'thread-b');
-    assert.ok(msgB, 'thread-b should have a message');
-    assert.equal(msgB.userId, 'user-1', 'thread-b notification also uses record userId');
-
-    // Verify broadcast sends error type for real-time UX
-    const bcA = broadcastedMessages.find((b) => b.threadId === 'thread-a');
-    assert.ok(bcA);
-    assert.equal(bcA.msg.type, 'error');
-    assert.equal(bcA.msg.isFinal, true);
-  });
-
-  test('AC-A+3: deduplicates notifications per thread (multiple invocations → one message)', async () => {
-    // Two invocations in the same thread with different cats
-    const r1 = makeRecord({ id: 'dup1', threadId: 'thread-x', status: 'running', targetCats: ['opus'] });
-    const r2 = makeRecord({ id: 'dup2', threadId: 'thread-x', status: 'running', targetCats: ['codex'] });
-    store.seed(r1);
-    store.seed(r2);
-
-    const appendedMessages = [];
-    const messageStore = {
-      append(msg) {
-        appendedMessages.push(msg);
-        return { ...msg, id: `msg-${appendedMessages.length}`, threadId: msg.threadId ?? 'default' };
-      },
-    };
-
-    const reconciler = new StartupReconciler({
-      invocationRecordStore: store,
-      taskProgressStore,
-      log,
-      messageStore,
-    });
-
-    const result = await reconciler.reconcileOrphans();
-
-    assert.equal(result.notifiedThreads, 1, 'only 1 thread notification despite 2 invocations');
-    assert.equal(appendedMessages.length, 1, 'only 1 message appended');
-    // Both cats should be mentioned
-    assert.ok(
-      appendedMessages[0].content.includes('2') || appendedMessages[0].content.includes('opus'),
-      'message should indicate multiple affected cats',
-    );
-  });
-
-  test('AC-A+4: notification failure does not block startup (best-effort)', async () => {
-    store.seed(makeRecord({ id: 'be1', threadId: 'thread-y', status: 'running', targetCats: ['opus'] }));
-
-    const messageStore = {
-      append() {
-        throw new Error('simulated messageStore failure');
-      },
-    };
-
-    const reconciler = new StartupReconciler({
-      invocationRecordStore: store,
-      taskProgressStore,
-      log,
-      messageStore,
-    });
-
-    // Must not throw — sweep should succeed even if notification fails
-    const result = await reconciler.reconcileOrphans();
-
-    assert.equal(result.running, 1, 'sweep still happens');
-    assert.equal(result.notifiedThreads, 0, 'notification failed but counted as 0');
-    assert.ok(
-      log.messages.some((m) => m.level === 'warn' && m.msg.includes('thread-y')),
-      'should log warning about failed notification',
-    );
-  });
-
-  test('AC-A+5: no notification when messageStore/socketManager not provided (memory mode compat)', async () => {
-    store.seed(makeRecord({ id: 'quiet1', status: 'running' }));
-
-    const reconciler = new StartupReconciler({
-      invocationRecordStore: store,
-      taskProgressStore,
-      log,
-      // no messageStore, no socketManager
-    });
-
-    const result = await reconciler.reconcileOrphans();
-
-    assert.equal(result.notifiedThreads, 0);
-    assert.equal(result.running, 1, 'still sweeps even without notification deps');
-  });
-
-  test('AC-A+6: stale queued records also trigger notifications', async () => {
-    const staleQueued = makeRecord({
-      id: 'sq-notify',
-      threadId: 'thread-z',
-      status: 'queued',
-      targetCats: ['gemini'],
-      createdAt: Date.now() - 10 * 60_000, // 10 min ago = stale
-    });
-    store.seed(staleQueued);
-
-    const appendedMessages = [];
-    const messageStore = {
-      append(msg) {
-        appendedMessages.push(msg);
-        return { ...msg, id: `msg-${appendedMessages.length}`, threadId: msg.threadId ?? 'default' };
-      },
-    };
-
-    const reconciler = new StartupReconciler({
-      invocationRecordStore: store,
-      taskProgressStore,
-      log,
-      messageStore,
-    });
-
-    const result = await reconciler.reconcileOrphans();
-
-    assert.equal(result.notifiedThreads, 1, 'stale queued should trigger notification');
-    assert.equal(appendedMessages.length, 1);
-    assert.ok(appendedMessages[0].content.includes('gemini'));
-  });
-
-  test('P1 regression: notification userId matches InvocationRecord.userId per thread', async () => {
-    const r1 = makeRecord({
-      id: 'uid1',
-      threadId: 'thread-alice',
-      userId: 'alice',
-      status: 'running',
-      targetCats: ['opus'],
-    });
-    const r2 = makeRecord({
-      id: 'uid2',
-      threadId: 'thread-bob',
-      userId: 'bob',
-      status: 'running',
-      targetCats: ['codex'],
-    });
-    store.seed(r1);
-    store.seed(r2);
-
-    const appendedMessages = [];
-    const messageStore = {
-      append(msg) {
-        appendedMessages.push(msg);
-        return { ...msg, id: `msg-${appendedMessages.length}`, threadId: msg.threadId ?? 'default' };
-      },
-    };
-
-    const reconciler = new StartupReconciler({
-      invocationRecordStore: store,
-      taskProgressStore,
-      log,
-      messageStore,
-    });
-
-    await reconciler.reconcileOrphans();
-
-    const aliceMsg = appendedMessages.find((m) => m.threadId === 'thread-alice');
-    const bobMsg = appendedMessages.find((m) => m.threadId === 'thread-bob');
-    assert.equal(aliceMsg.userId, 'alice', 'alice thread notification must use alice userId');
-    assert.equal(bobMsg.userId, 'bob', 'bob thread notification must use bob userId');
-  });
-
-  test('P2 regression: broadcast fires even when messageStore.append throws', async () => {
-    store.seed(
-      makeRecord({
-        id: 'p2-1',
-        threadId: 'thread-p2',
-        status: 'running',
-        targetCats: ['opus'],
-      }),
-    );
-
-    const messageStore = {
-      append() {
-        throw new Error('simulated append failure');
-      },
-    };
-
-    const broadcastedMessages = [];
-    const socketManager = {
-      broadcastAgentMessage(msg, threadId) {
-        broadcastedMessages.push({ msg, threadId });
-      },
-    };
-
-    const reconciler = new StartupReconciler({
-      invocationRecordStore: store,
-      taskProgressStore,
-      log,
-      messageStore,
-      socketManager,
-    });
-
-    const result = await reconciler.reconcileOrphans();
-
-    assert.equal(broadcastedMessages.length, 1, 'broadcast must fire even when append throws');
-    assert.equal(broadcastedMessages[0].threadId, 'thread-p2');
-    assert.equal(result.notifiedThreads, 1, 'notified=1 because broadcast succeeded despite persist failure');
-    assert.ok(
-      log.messages.some((m) => m.level === 'warn' && m.msg.includes('persist')),
-      'should log persist failure warning',
-    );
-  });
-
-  test('Cloud P2: socket-only mode counts 0 when broadcast throws', async () => {
-    store.seed(
-      makeRecord({
-        id: 'sock-fail',
-        threadId: 'thread-sock',
-        status: 'running',
-        targetCats: ['opus'],
-      }),
-    );
-
-    const socketManager = {
-      broadcastAgentMessage() {
-        throw new Error('simulated broadcast failure');
-      },
-    };
-
-    const reconciler = new StartupReconciler({
-      invocationRecordStore: store,
-      taskProgressStore,
-      log,
-      socketManager,
-    });
-
-    const result = await reconciler.reconcileOrphans();
-
-    assert.equal(result.running, 1, 'sweep still happens');
-    assert.equal(result.notifiedThreads, 0, 'notified=0 because broadcast failed and no messageStore');
-    assert.ok(
-      log.messages.some((m) => m.level === 'warn' && m.msg.includes('broadcast')),
-      'should log broadcast failure warning',
-    );
-  });
+  }
 
   // ── P1-C: queued message visibility convergence ──
 
@@ -690,7 +496,10 @@ describe('StartupReconciler', () => {
       },
       markDelivered(id, deliveredAt) {
         deliveredIds.push({ id, deliveredAt });
-        return { id, deliveryStatus: 'delivered', deliveredAt };
+        if (id === 'umsg-1') {
+          return { id, deliveryStatus: 'delivered', deliveredAt, deliveryTransitioned: false };
+        }
+        return { id, deliveryStatus: 'delivered', deliveredAt, deliveryTransitioned: true };
       },
     };
 
@@ -703,13 +512,13 @@ describe('StartupReconciler', () => {
 
     const result = await reconciler.reconcileOrphans();
 
-    // Both umsg-1 (running) and umsg-2 (queued) get markDelivered called.
-    // The store's guard (deliveryStatus !== 'queued' → no-op) protects already-visible messages.
-    assert.equal(result.messagesRecovered, 2, 'ensureMessageVisible called for both');
+    // Both get markDelivered called, but CAS decides: umsg-1 (already visible) = no-op,
+    // umsg-2 (queued orphan) = recovered. Only the CAS winner counts.
+    assert.equal(result.messagesRecovered, 1, 'only queued orphan counts as recovered (running = CAS no-op)');
     assert.deepEqual(
       deliveredIds.map((d) => d.id).sort(),
       ['umsg-1', 'umsg-2'],
-      'markDelivered called for both (store decides actual effect)',
+      'markDelivered called for both (CAS decides actual effect)',
     );
   });
 
@@ -791,8 +600,12 @@ describe('StartupReconciler', () => {
       },
       markDelivered(id) {
         markDeliveredCallCount++;
-        // Simulates store guard: message is already delivered → return as-is
-        return { id, deliveryStatus: 'delivered', deliveredAt: Date.now() - 60_000 };
+        return {
+          id,
+          deliveryStatus: 'delivered',
+          deliveredAt: Date.now() - 60_000,
+          deliveryTransitioned: false,
+        };
       },
     };
 
@@ -805,12 +618,69 @@ describe('StartupReconciler', () => {
 
     const result = await reconciler.reconcileOrphans();
 
-    // markDelivered is called, but the store's !== 'queued' guard makes it a no-op
-    // for already-visible messages. This is safe AND catches the edge case where
-    // process crashed between invocation→running and markDelivered.
+    // markDelivered IS called (ensures crash-recovery path is exercised), but CAS
+    // reports applied=false for already-visible messages → not counted as recovered.
     assert.equal(markDeliveredCallCount, 1, 'markDelivered should be called');
-    assert.equal(result.messagesRecovered, 1);
+    assert.equal(result.messagesRecovered, 0, 'CAS no-op: already-visible message not counted as recovered');
     assert.equal(result.running, 1);
+  });
+
+  test('ADR-043: restart resumes pending Queue work without reconstructing already-claimed work', async () => {
+    const ledger = new InMemoryQueueLedgerStore();
+    const queue = new InvocationQueue(ledger);
+    const processingAdmission = queue.enqueueDurableNow(
+      canonicalTestQueueInput({
+        sourceId: 'processing-source',
+        threadId: 'thread-ledger-restart',
+        userId: 'user-1',
+        kind: 'conversation_input',
+        content: 'processing source',
+        targetCats: ['opus'],
+        messageId: 'processing-source',
+        intent: 'execute',
+      }),
+    );
+    const claimed = await queue.markProcessingByIdDurable(
+      'thread-ledger-restart',
+      processingAdmission.entry.id,
+      'opus',
+    );
+    assert.ok(claimed);
+    assert.equal(await queue.commitClaimedProcessing('thread-ledger-restart', [claimed.id]), true);
+    assert.equal(
+      await ledger.get('thread-ledger-restart', claimed.id),
+      null,
+      'History owns processing/terminal truth after Queue releases its claim',
+    );
+
+    queue.enqueueDurableNow(
+      canonicalTestQueueInput({
+        sourceId: 'queued-source',
+        threadId: 'thread-ledger-restart',
+        userId: 'user-1',
+        kind: 'conversation_input',
+        content: 'queued source',
+        targetCats: ['opus'],
+        messageId: 'queued-source',
+        intent: 'execute',
+      }),
+    );
+
+    const reconciler = new StartupReconciler({
+      invocationRecordStore: store,
+      taskProgressStore,
+      log,
+      invocationQueue: queue,
+    });
+    const result = await reconciler.reconcileOrphans();
+
+    assert.equal(result.queueMessagesTerminalized, 0);
+    assert.deepEqual(result.queueResumeScopes, [{ threadId: 'thread-ledger-restart', userId: 'user-1' }]);
+    assert.deepEqual(
+      queue.list('thread-ledger-restart', 'user-1').map((entry) => entry.payload.messageId),
+      ['queued-source'],
+    );
+    assert.equal(await ledger.get('thread-ledger-restart', claimed.id), null);
   });
 
   // ── Phase A (original) tests continue ──

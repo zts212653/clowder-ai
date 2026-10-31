@@ -1,0 +1,36 @@
+eligible_episodes:
+  label: Eligible episodes
+  means: 实际命中 F303 trigger 且 admission 可解析的 Feature/PR episode 数；仅作分母与窗口成熟度上下文。
+  goodDirection: neutral
+  category: context
+  component: design-gate-utility
+pre_review_unique_catches:
+  label: Pre-review unique catches
+  means: Design Gate 在非作者 review 前独特拦下的 canonical divergence 数；缺 canonical catch event 时为 null。
+  goodDirection: higher
+  category: activation
+  component: design-gate-utility
+post_merge_divergence_escapes:
+  label: Post-merge divergence escapes
+  means: 合入后由 landed Alpha 或已关联 incident 明确观察到的规则分叉逃逸数；沉默不能记作零。
+  goodDirection: lower
+  category: friction
+  component: design-gate-utility
+false_positive_blocks:
+  label: False-positive blocks
+  means: 经 owner/operator 有界裁决为误报的阻塞数；没有裁决来源时为 null。
+  goodDirection: lower
+  category: friction
+  component: design-gate-utility
+extra_active_minutes:
+  label: Extra active minutes
+  means: 可从人工等待中分离并归因给 Design Gate 的额外 active minutes；不可分离时为 null。
+  goodDirection: lower
+  category: friction
+  component: design-gate-utility
+extra_review_rounds:
+  label: Extra review rounds
+  means: 相对风险匹配基线、可归因给 Design Gate 的额外 review rounds；无基线时为 null。
+  goodDirection: lower
+  category: friction
+  component: design-gate-utility

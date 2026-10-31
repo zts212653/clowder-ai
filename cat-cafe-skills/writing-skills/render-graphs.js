@@ -22,7 +22,8 @@ function extractDotBlocks(markdown) {
   const regex = /```dot\n([\s\S]*?)```/g;
   let match;
 
-  while ((match = regex.exec(markdown)) !== null) {
+  match = regex.exec(markdown);
+  while (match !== null) {
     const content = match[1].trim();
 
     // Extract digraph name
@@ -30,6 +31,7 @@ function extractDotBlocks(markdown) {
     const name = nameMatch ? nameMatch[1] : `graph_${blocks.length + 1}`;
 
     blocks.push({ name, content });
+    match = regex.exec(markdown);
   }
 
   return blocks;

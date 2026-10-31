@@ -1,13 +1,19 @@
 /**
- * F085 Phase 4 — Hyperfocus Brake Platform Types
+ * F085 Phase 4+6 — Hyperfocus Brake Platform Types
  * 平台级健康守护：后端活跃追踪 + WebSocket 推送 + 前端 UI
+ * Phase 6: 社区默认 OFF (opt-in) + TD110 持久化 + 温柔/硬核双档
  */
+
+/** Brake interaction mode (Phase 6) */
+export type BrakeMode = 'gentle' | 'hardcore';
 
 /** WebSocket event payload: brake:trigger */
 export interface BrakeEvent {
   level: 1 | 2 | 3;
   activeMinutes: number;
   nightMode: boolean;
+  /** Phase 6: mode travels with the trigger so the modal renders correctly without a settings fetch */
+  mode: BrakeMode;
   timestamp: number;
 }
 
@@ -27,8 +33,9 @@ export interface BrakeCheckinResponse {
 
 /** User-configurable brake settings (GET/PUT /api/brake/settings) */
 export interface BrakeSettings {
-  enabled: boolean; // default: true
+  enabled: boolean; // default: false (Phase 6: 社区默认 OFF, opt-in)
   thresholdMinutes: number; // default: 90, range: 30–240
+  mode: BrakeMode; // default: 'gentle' (Phase 6: 温柔档可一键 dismiss)
 }
 
 /** Internal state per user (also exposed via GET /api/brake/state) */

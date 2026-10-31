@@ -1,0 +1,345 @@
+import {
+  type EvolutionCycleV1,
+  type EvolutionProgramEventEnvelopeV1,
+  type EvolutionProgramEventV1,
+  type EvolutionProgramStage,
+  type EvolutionProgramStateV1,
+  evolutionProgramEventEnvelopeV1Schema,
+  evolutionProgramStateV1Schema,
+} from './capability-evolution.js';
+import { metabolismAssetTransitionError } from './capability-evolution-metabolism.js';
+import { initialEvolutionProgramState } from './capability-evolution-reducer-initial.js';
+import { assetOwnerIdentity, type OwnerTruthRefV1 } from './capability-evolution-refs.js';
+export type EvolutionProgramReducerErrorCode =
+  | 'event_before_creation'
+  | 'program_already_exists'
+  | 'program_mismatch'
+  | 'sequence_conflict'
+  | 'program_terminal'
+  | 'invalid_transition';
+export class EvolutionProgramReducerError extends Error {
+  constructor(
+    readonly code: EvolutionProgramReducerErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'EvolutionProgramReducerError';
+  }
+}
+const reject = (code: EvolutionProgramReducerErrorCode, message: string): never => {
+  throw new EvolutionProgramReducerError(code, message);
+};
+const refs = (...values: OwnerTruthRefV1[]) => values.map((value) => value.ownerStateRef);
+interface ReducerContext {
+  program: EvolutionProgramStateV1['program'];
+  cycles: EvolutionCycleV1[];
+  cycle: EvolutionCycleV1;
+  occurredAt: string;
+}
+function addRefs(ctx: ReducerContext, ...values: OwnerTruthRefV1[]): void {
+  ctx.cycle.lineageRefIds = [...new Set([...ctx.cycle.lineageRefIds, ...refs(...values)])];
+}
+function replaceCurrentAssetVersion(
+  ctx: ReducerContext,
+  next: EvolutionProgramStateV1['program']['currentAssetVersionRefs'][number],
+) {
+  const identity = assetOwnerIdentity(next);
+  ctx.program.currentAssetVersionRefs = [
+    ...ctx.program.currentAssetVersionRefs.filter((value) => assetOwnerIdentity(value) !== identity),
+    next,
+  ];
+}
+function setStage(ctx: ReducerContext, next: EvolutionProgramStage): void {
+  ctx.program.stage = next;
+  ctx.cycle.stage = next;
+}
+function requireActiveAt(ctx: ReducerContext, expected: EvolutionProgramStage): void {
+  if (ctx.program.lifecycle !== 'active' || ctx.program.stage !== expected)
+    reject('invalid_transition', `expected active/${expected}`);
+}
+
+function requireActiveAtAny(ctx: ReducerContext, expected: readonly EvolutionProgramStage[], message: string): void {
+  if (ctx.program.lifecycle !== 'active' || !expected.includes(ctx.program.stage))
+    reject('invalid_transition', message);
+}
+
+function assertMetabolismAssetTransition(ctx: ReducerContext, event: EvolutionProgramEventV1): void {
+  const error = metabolismAssetTransitionError(ctx.program.currentAssetVersionRefs, event);
+  if (error) reject('invalid_transition', error);
+}
+
+function applyLifecycleEvent(ctx: ReducerContext, event: EvolutionProgramEventV1): boolean {
+  switch (event.type) {
+    case 'program_named':
+      ctx.program.displayName = event.displayName;
+      return true;
+    case 'program_paused':
+      if (ctx.program.lifecycle !== 'active') reject('invalid_transition', 'only active Programs can pause');
+      ctx.program.lifecycle = 'paused';
+      addRefs(ctx, event.reasonRef);
+      return true;
+    case 'program_resumed':
+      if (ctx.program.lifecycle !== 'paused') reject('invalid_transition', 'only paused Programs can resume');
+      ctx.program.lifecycle = 'active';
+      addRefs(ctx, event.resumeRef);
+      return true;
+    case 'expert_required':
+      if (ctx.program.lifecycle !== 'active')
+        reject('invalid_transition', 'only active Programs can require an expert');
+      ctx.program.lifecycle = 'needs_expert';
+      addRefs(ctx, event.blockerRef);
+      return true;
+    case 'expert_bound':
+      if (ctx.program.lifecycle !== 'needs_expert')
+        reject('invalid_transition', 'only needs_expert Programs can bind an expert');
+      ctx.program.lifecycle = 'active';
+      addRefs(ctx, event.roleOwnerRef);
+      return true;
+    case 'program_withdrawn':
+      addRefs(ctx, event.decisionRef);
+      ctx.program.lifecycle = 'terminal';
+      ctx.program.terminalDisposition = 'withdrawn';
+      ctx.cycle.closedAt = ctx.occurredAt;
+      return true;
+    case 'retention_opted_in':
+      if (ctx.program.lifecycle !== 'terminal') reject('invalid_transition', 'retention requires a terminal Program');
+      ctx.program.retention = event.retention;
+      addRefs(ctx, event.retentionActionRef);
+      return true;
+    default:
+      return false;
+  }
+}
+
+function applyEvidenceEvent(ctx: ReducerContext, event: EvolutionProgramEventV1): boolean {
+  switch (event.type) {
+    case 'preparation_work_registered':
+      requireActiveAtAny(
+        ctx,
+        ['constituting', 'instrumenting', 'observing'],
+        'preparation work is closed at this stage',
+      );
+      addRefs(ctx, event.activityRef, ...(event.baseSubmissionRef ? [event.baseSubmissionRef] : []));
+      return true;
+    case 'preparation_submission_committed':
+      requireActiveAtAny(
+        ctx,
+        ['constituting', 'instrumenting', 'observing'],
+        'preparation submission is closed at this stage',
+      );
+      addRefs(ctx, event.submissionRef, ...event.dependencies);
+      return true;
+    case 'certificates_linked':
+      requireActiveAt(ctx, 'constituting');
+      ctx.program.certificates = event.certificates;
+      ctx.program.valueOwnerRef = event.valueOwnerRef;
+      ctx.program.measurementRoleRefs = event.measurementRoleRefs;
+      addRefs(
+        ctx,
+        event.certificates.goal,
+        event.certificates.measurement,
+        event.certificates.economic,
+        event.valueOwnerRef,
+      );
+      setStage(ctx, 'instrumenting');
+      return true;
+    case 'measurement_constitution_rebound':
+      requireActiveAt(ctx, 'instrumenting');
+      ctx.program.certificates.measurement = event.measurementCertificateRef;
+      ctx.program.measurementRoleRefs = event.measurementRoleRefs;
+      addRefs(
+        ctx,
+        event.sourceRef,
+        event.decisionProofRef,
+        event.measurementCertificateRef,
+        event.measurementRoleRefs.observer,
+        event.measurementRoleRefs.domainOwner,
+        event.measurementRoleRefs.consumer,
+        event.measurementRoleRefs.calibrator,
+      );
+      return true;
+    case 'sources_and_triggers_linked':
+      requireActiveAt(ctx, 'instrumenting');
+      addRefs(ctx, ...event.sourceRefs, event.triggerRef, event.namedConsumerRef);
+      setStage(ctx, 'observing');
+      return true;
+    case 'observation_setup_linked': {
+      requireActiveAt(ctx, 'instrumenting');
+      const s = event.setup;
+      addRefs(
+        ctx,
+        s.trajectory.ref,
+        ...s.sourceBindings.flatMap((b) => [b.ownerSurfaceRef, b.namedConsumerRef, b.instrumentationRef]),
+        ...Object.values(s.evidenceProofRefs),
+        s.triggerRef,
+      );
+      setStage(ctx, 'observing');
+      return true;
+    }
+    case 'evaluation_triggered':
+      requireActiveAt(ctx, 'observing');
+      addRefs(ctx, event.triggerReceiptRef, event.exposureProofRef);
+      setStage(ctx, 'evaluating');
+      return true;
+    case 'measurement_linked':
+      requireActiveAt(ctx, 'evaluating');
+      addRefs(ctx, event.measurementResultRef, ...event.evidenceRefs);
+      setStage(ctx, event.validity === 'valid' ? 'attributing' : 'observing');
+      return true;
+    case 'attribution_linked':
+      requireActiveAt(ctx, 'attributing');
+      addRefs(ctx, event.attributionRef, ...event.diagnosis.evidenceRefs);
+      if ((event.diagnosis.verdict === 'attributed') !== (event.disposition === 'intervention_candidate'))
+        reject('invalid_transition', 'only an attributed diagnosis may become an intervention candidate');
+      // A non-actionable diagnosis still has to pass through the intervention gate so the owner-
+      // backed auto-recheck ref and typed why-not-change blockers are recorded. `deciding` is
+      // reserved for a fresh post-load outcome; entering it here would expose metabolism actions
+      // without any change cycle or outcome to decide about.
+      setStage(ctx, 'awaiting_intervention');
+      return true;
+    default:
+      return false;
+  }
+}
+
+function applyDecision(ctx: ReducerContext, event: Extract<EvolutionProgramEventV1, { type: 'decision_recorded' }>) {
+  requireActiveAt(ctx, 'deciding');
+  addRefs(ctx, event.decisionRef);
+  if (event.executionReceiptRef !== undefined) addRefs(ctx, event.executionReceiptRef);
+  if (event.assetVersionRef !== undefined) {
+    addRefs(ctx, event.assetVersionRef);
+    replaceCurrentAssetVersion(ctx, event.assetVersionRef);
+  }
+  ctx.cycle.decision = event.decision;
+  ctx.cycle.closedAt = ctx.occurredAt;
+  if (event.decision === 'tune' || event.decision === 'rollback') {
+    ctx.program.cycle += 1;
+    ctx.program.stage = 'instrumenting';
+    ctx.cycle = {
+      programId: ctx.program.programId,
+      cycle: ctx.program.cycle,
+      stage: 'instrumenting',
+      lineageRefIds: [],
+      openedAt: ctx.occurredAt,
+    };
+    ctx.cycles.push(ctx.cycle);
+    return;
+  }
+  ctx.program.lifecycle = 'terminal';
+  ctx.program.terminalDisposition = event.decision === 'keep' ? 'kept' : event.decision;
+}
+
+function applyChangeEvent(ctx: ReducerContext, event: EvolutionProgramEventV1): boolean {
+  assertMetabolismAssetTransition(ctx, event);
+  switch (event.type) {
+    case 'intervention_linked':
+      requireActiveAt(ctx, 'awaiting_intervention');
+      if (ctx.cycle.interventionLayerRef !== undefined)
+        reject('invalid_transition', 'a Cycle has only one intervention layer');
+      ctx.cycle.interventionLayerRef = event.interventionLayerRef;
+      addRefs(ctx, event.interventionCardRef, event.interventionLayerRef, event.gateReceiptRef);
+      setStage(ctx, 'awaiting_approval');
+      return true;
+    case 'observe_or_insufficient_recorded':
+      requireActiveAt(ctx, 'awaiting_intervention');
+      addRefs(ctx, event.autoRecheckRef);
+      setStage(ctx, 'observing');
+      return true;
+    case 'change_cycle_linked':
+      requireActiveAt(ctx, 'awaiting_approval');
+      addRefs(ctx, event.caseRef, event.proposalRef, event.ownerAuthorizationRef, event.targetVersionRef);
+      replaceCurrentAssetVersion(ctx, event.targetVersionRef);
+      return true;
+    case 'approval_linked':
+      requireActiveAt(ctx, 'awaiting_approval');
+      addRefs(ctx, event.approvalRef, event.targetVersionRef);
+      setStage(ctx, 'writing_back');
+      return true;
+    case 'approval_rejected_or_superseded':
+      requireActiveAtAny(
+        ctx,
+        ['awaiting_approval', 'writing_back'],
+        'approval closure requires an unmutated active change attempt',
+      );
+      addRefs(ctx, event.decisionRef);
+      // None of these terminal proposal states authorises dispatch, and none is an outcome. Keep the
+      // Program at Change Review so an explicit fresh proposal (or Program withdrawal) is the only
+      // next move. The owner may close an Approval after F311 observed it but before mutation; that
+      // pre-mutation drift must invalidate the old attempt instead of stranding it in writing_back.
+      setStage(ctx, 'awaiting_approval');
+      return true;
+    case 'intervention_receipt_linked':
+      requireActiveAt(ctx, 'writing_back');
+      addRefs(ctx, event.interventionReceiptRef, event.assetVersionRef);
+      if (event.loadedRuntimeRef !== undefined) addRefs(ctx, event.loadedRuntimeRef);
+      if (event.result === 'changed') replaceCurrentAssetVersion(ctx, event.assetVersionRef);
+      setStage(ctx, 'revalidating');
+      return true;
+    case 'outcome_linked':
+      requireActiveAt(ctx, 'revalidating');
+      addRefs(ctx, event.outcomeReceiptRef, event.freshnessProofRef);
+      setStage(ctx, 'deciding');
+      return true;
+    case 'decision_recorded':
+      applyDecision(ctx, event);
+      return true;
+    default:
+      return false;
+  }
+}
+
+export function reduceEvolutionProgramEvent(
+  rawState: EvolutionProgramStateV1 | null | undefined,
+  rawEnvelope: EvolutionProgramEventEnvelopeV1,
+): EvolutionProgramStateV1 {
+  const envelope = evolutionProgramEventEnvelopeV1Schema.parse(rawEnvelope);
+  if (rawState == null) {
+    if (envelope.event.type !== 'program_created')
+      return reject('event_before_creation', 'the first event must create the Program');
+    if (envelope.expectedSequence !== 0) reject('sequence_conflict', 'Program creation expects sequence zero');
+    return initialEvolutionProgramState({ ...envelope, event: envelope.event });
+  }
+  const current = evolutionProgramStateV1Schema.parse(rawState);
+  if (envelope.event.type === 'program_created') reject('program_already_exists', 'a Program has already been created');
+  if (envelope.programId !== current.program.programId) reject('program_mismatch', 'event belongs to another Program');
+  if (envelope.expectedSequence !== current.program.sequence)
+    reject('sequence_conflict', 'event sequence does not follow the projection');
+  if (
+    current.program.lifecycle === 'terminal' &&
+    !['retention_opted_in', 'program_named'].includes(envelope.event.type)
+  )
+    reject('program_terminal', 'terminal Programs cannot accept business events');
+
+  const cycles = current.cycles.map((cycle) => ({ ...cycle, lineageRefIds: [...cycle.lineageRefIds] }));
+  const cycle = cycles.at(-1);
+  if (cycle === undefined) return reject('invalid_transition', 'Program projection has no current Cycle');
+  const ctx: ReducerContext = {
+    program: { ...current.program, sequence: current.program.sequence + 1, updatedAt: envelope.occurredAt },
+    cycles,
+    cycle,
+    occurredAt: envelope.occurredAt,
+  };
+  const event = envelope.event;
+  if (!applyLifecycleEvent(ctx, event) && !applyEvidenceEvent(ctx, event) && !applyChangeEvent(ctx, event)) {
+    return reject('invalid_transition', `event ${event.type} is not applicable`);
+  }
+  return evolutionProgramStateV1Schema.parse({ program: ctx.program, cycles: ctx.cycles });
+}
+
+/** Canonical replay owns identity de-duplication; the single-step reducer has no event-id history. */
+export function replayEvolutionProgramEvents(
+  events: readonly EvolutionProgramEventEnvelopeV1[],
+): EvolutionProgramStateV1 | undefined {
+  const eventIds = new Set<string>();
+  const clientMessageIds = new Set<string>();
+  let state: EvolutionProgramStateV1 | undefined;
+  for (const rawEvent of events) {
+    const event = evolutionProgramEventEnvelopeV1Schema.parse(rawEvent);
+    if (eventIds.has(event.eventId) || clientMessageIds.has(event.clientMessageId))
+      reject('invalid_transition', 'canonical event streams cannot contain duplicate identities');
+    eventIds.add(event.eventId);
+    clientMessageIds.add(event.clientMessageId);
+    state = reduceEvolutionProgramEvent(state, event);
+  }
+  return state;
+}

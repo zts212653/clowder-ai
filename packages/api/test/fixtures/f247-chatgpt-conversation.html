@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>F247 ChatGPT conversation fixture</title>
+  </head>
+  <body>
+    <main id="messages"></main>
+    <div id="prompt-textarea" contenteditable="true"></div>
+    <button data-testid="send-button">Send</button>
+    <script>
+      window.__f247SendCount = 0;
+      document.querySelector('[data-testid="send-button"]').addEventListener('click', () => {
+        window.__f247SendCount += 1;
+        const message = document.createElement('article');
+        message.dataset.messageAuthorRole = 'user';
+        message.dataset.messageId = `fixture-host-message-${window.__f247SendCount}`;
+        message.textContent = document.querySelector('#prompt-textarea').textContent;
+        document.querySelector('#messages').append(message);
+      });
+    </script>
+  </body>
+</html>

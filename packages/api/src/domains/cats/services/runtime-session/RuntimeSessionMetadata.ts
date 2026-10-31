@@ -1,0 +1,359 @@
+import type { CatId } from '@cat-cafe/shared';
+
+export const RUNTIME_SESSION_RUNTIMES = ['antigravity-desktop'] as const;
+export type RuntimeSessionRuntime = (typeof RUNTIME_SESSION_RUNTIMES)[number];
+
+export const RUNTIME_SESSION_SURFACES = ['cat-cafe-dispatch', 'ide-direct'] as const;
+export type RuntimeSessionSurface = (typeof RUNTIME_SESSION_SURFACES)[number];
+
+export const RUNTIME_SESSION_LIFECYCLE_STATES = [
+  'active',
+  'runtime_seal_pending',
+  'runtime_conflict_pending',
+  'sealed',
+] as const;
+export type RuntimeSessionLifecycleState = (typeof RUNTIME_SESSION_LIFECYCLE_STATES)[number];
+
+export const RUNTIME_SESSION_DRAIN_RESULTS = [
+  'complete',
+  'best_effort_quiet_window',
+  'skipped_runtime_unreachable',
+] as const;
+export type RuntimeSessionDrainResult = (typeof RUNTIME_SESSION_DRAIN_RESULTS)[number];
+
+export const RUNTIME_SESSION_UNEXPECTED_SWITCH_REASONS = [
+  'missing_previous_runtime_session_id',
+  'mismatched_previous_runtime_session_id',
+] as const;
+export type RuntimeSessionUnexpectedSwitchReason = (typeof RUNTIME_SESSION_UNEXPECTED_SWITCH_REASONS)[number];
+
+export const RUNTIME_IDENTITY_SOURCES = [
+  'session_init',
+  'trajectory',
+  'external_registration',
+  'legacy_json_import',
+] as const;
+export type RuntimeIdentitySource = (typeof RUNTIME_IDENTITY_SOURCES)[number];
+
+export interface RuntimeIdentityHistoryEntry {
+  catId: CatId;
+  model: string;
+  modelVerified?: boolean;
+  provider?: string;
+  from: number;
+  to?: number;
+  source: RuntimeIdentitySource;
+}
+
+export interface RuntimeSessionLifecycle {
+  state: RuntimeSessionLifecycleState;
+  startedAt: number;
+  lastObservedAt: number;
+  sealReason?: string;
+  drainResult?: RuntimeSessionDrainResult;
+  pendingSince?: number;
+  retryCount?: number;
+  lastRetryAt?: number;
+  lastFailureReason?: string;
+  retryFragment?: RuntimeSessionRetryFragment;
+  unexpectedRuntimeSessionSwitch?: RuntimeSessionUnexpectedRuntimeSessionSwitch;
+}
+
+export interface RuntimeSessionRetryFragment {
+  kind: 'retry';
+  retryReason: string;
+  nextRuntimeSessionId?: string;
+  detectedAt: number;
+}
+
+export interface RuntimeSessionUnexpectedRuntimeSessionSwitch {
+  detectedAt: number;
+  previousSessionId: string;
+  previousRuntimeSessionId: string;
+  currentRuntimeSessionId: string;
+  declaredPreviousRuntimeSessionId?: string;
+  reason: RuntimeSessionUnexpectedSwitchReason;
+}
+
+export interface RuntimeSessionExternalRegistrationProvenance {
+  source: 'antigravity-ide-direct';
+  agentKeyId: string;
+  registeredAt: number;
+  ideWindowId?: string;
+  workspacePath?: string;
+  runtimeUrl?: string;
+  note?: string;
+}
+
+export type RuntimeSessionExternalRegistrationBinding =
+  | { mode: 'orphan_anchor'; anchorThreadId: string }
+  | { mode: 'thread'; threadId: string; requestedBy: 'agent_key' };
+
+export interface RuntimeSessionExternalRegistrationState {
+  binding: RuntimeSessionExternalRegistrationBinding;
+  provenance: RuntimeSessionExternalRegistrationProvenance;
+  title?: string;
+  clientRegistrationId?: string;
+}
+
+export interface RuntimeSessionMetadata {
+  sessionId: string;
+  runtime: RuntimeSessionRuntime;
+  runtimeSessionId: string;
+  runtimeConversationId?: string;
+  threadId?: string;
+  catId: CatId;
+  userId?: string;
+  surface: RuntimeSessionSurface;
+  identityHistory: RuntimeIdentityHistoryEntry[];
+  lifecycle: RuntimeSessionLifecycle;
+  externalRegistration?: RuntimeSessionExternalRegistrationState;
+}
+
+export function normalizeRuntimeSessionMetadata(input: unknown): RuntimeSessionMetadata {
+  const record = requireRecord(input, 'runtime session metadata');
+  const lifecycleRecord = requireRecord(record.lifecycle, 'runtime session lifecycle');
+  const lifecycle = normalizeLifecycle(lifecycleRecord);
+  const identityHistory = Array.isArray(record.identityHistory)
+    ? record.identityHistory.map((entry) => normalizeIdentityHistoryEntry(entry))
+    : [];
+
+  return {
+    sessionId: requireNonEmptyString(record.sessionId, 'sessionId'),
+    runtime: requireOneOf(record.runtime, RUNTIME_SESSION_RUNTIMES, 'runtime'),
+    runtimeSessionId: requireNonEmptyString(record.runtimeSessionId, 'runtimeSessionId'),
+    ...optionalStringField(record.runtimeConversationId, 'runtimeConversationId'),
+    ...optionalStringField(record.threadId, 'threadId'),
+    catId: requireNonEmptyString(record.catId, 'catId') as CatId,
+    ...optionalStringField(record.userId, 'userId'),
+    surface: requireOneOf(record.surface, RUNTIME_SESSION_SURFACES, 'surface'),
+    identityHistory,
+    lifecycle,
+    ...optionalExternalRegistration(record.externalRegistration),
+  };
+}
+
+export function appendRuntimeIdentity(
+  metadata: RuntimeSessionMetadata,
+  entry: RuntimeIdentityHistoryEntry,
+): RuntimeSessionMetadata {
+  const normalizedMetadata = normalizeRuntimeSessionMetadata(metadata);
+  const nextEntry = normalizeIdentityHistoryEntry(entry);
+  const history = normalizedMetadata.identityHistory.map((identity) => ({ ...identity }));
+  const current = history.at(-1);
+
+  if (current) {
+    if (nextEntry.from < current.from) {
+      throw new Error('identity segment starts before current segment');
+    }
+    if (current.to !== undefined && nextEntry.from < current.to) {
+      throw new Error('identity segment overlaps current segment');
+    }
+    current.to = nextEntry.from;
+  }
+
+  return {
+    ...normalizedMetadata,
+    identityHistory: [...history, nextEntry],
+    lifecycle: {
+      ...normalizedMetadata.lifecycle,
+      lastObservedAt: Math.max(normalizedMetadata.lifecycle.lastObservedAt, nextEntry.from),
+    },
+  };
+}
+
+function normalizeLifecycle(input: Record<string, unknown>): RuntimeSessionLifecycle {
+  const startedAt = requireFiniteNumber(input.startedAt, 'lifecycle.startedAt');
+  const observedAt = requireFiniteNumber(input.lastObservedAt, 'lifecycle.lastObservedAt');
+
+  return {
+    state: requireOneOf(input.state, RUNTIME_SESSION_LIFECYCLE_STATES, 'runtime session lifecycle state'),
+    startedAt,
+    lastObservedAt: Math.max(startedAt, observedAt),
+    ...optionalStringField(input.sealReason, 'lifecycle.sealReason'),
+    ...optionalOneOfField(input.drainResult, RUNTIME_SESSION_DRAIN_RESULTS, 'lifecycle.drainResult'),
+    ...optionalNumberField(input.pendingSince, 'lifecycle.pendingSince'),
+    ...optionalNumberField(input.retryCount, 'lifecycle.retryCount'),
+    ...optionalNumberField(input.lastRetryAt, 'lifecycle.lastRetryAt'),
+    ...optionalStringField(input.lastFailureReason, 'lifecycle.lastFailureReason'),
+    ...optionalRetryFragment(input.retryFragment),
+    ...optionalUnexpectedRuntimeSessionSwitch(input.unexpectedRuntimeSessionSwitch),
+  };
+}
+
+function normalizeRetryFragment(input: unknown): RuntimeSessionRetryFragment {
+  const record = requireRecord(input, 'runtime session retry fragment');
+  const kind = requireNonEmptyString(record.kind, 'retryFragment.kind');
+  if (kind !== 'retry') {
+    throw new Error('invalid retryFragment.kind');
+  }
+  return {
+    kind,
+    retryReason: requireNonEmptyString(record.retryReason, 'retryFragment.retryReason'),
+    ...optionalStringField(record.nextRuntimeSessionId, 'retryFragment.nextRuntimeSessionId'),
+    detectedAt: requireFiniteNumber(record.detectedAt, 'retryFragment.detectedAt'),
+  };
+}
+
+function normalizeUnexpectedRuntimeSessionSwitch(input: unknown): RuntimeSessionUnexpectedRuntimeSessionSwitch {
+  const record = requireRecord(input, 'runtime session unexpected switch');
+  return {
+    detectedAt: requireFiniteNumber(record.detectedAt, 'unexpectedRuntimeSessionSwitch.detectedAt'),
+    previousSessionId: requireNonEmptyString(
+      record.previousSessionId,
+      'unexpectedRuntimeSessionSwitch.previousSessionId',
+    ),
+    previousRuntimeSessionId: requireNonEmptyString(
+      record.previousRuntimeSessionId,
+      'unexpectedRuntimeSessionSwitch.previousRuntimeSessionId',
+    ),
+    currentRuntimeSessionId: requireNonEmptyString(
+      record.currentRuntimeSessionId,
+      'unexpectedRuntimeSessionSwitch.currentRuntimeSessionId',
+    ),
+    ...optionalStringField(
+      record.declaredPreviousRuntimeSessionId,
+      'unexpectedRuntimeSessionSwitch.declaredPreviousRuntimeSessionId',
+    ),
+    reason: requireOneOf(
+      record.reason,
+      RUNTIME_SESSION_UNEXPECTED_SWITCH_REASONS,
+      'unexpectedRuntimeSessionSwitch.reason',
+    ),
+  };
+}
+
+function normalizeIdentityHistoryEntry(input: unknown): RuntimeIdentityHistoryEntry {
+  const record = requireRecord(input, 'runtime identity history entry');
+  return {
+    catId: requireNonEmptyString(record.catId, 'identity.catId') as CatId,
+    model: requireNonEmptyString(record.model, 'identity.model'),
+    ...optionalBooleanField(record.modelVerified, 'identity.modelVerified'),
+    ...optionalStringField(record.provider, 'identity.provider'),
+    from: requireFiniteNumber(record.from, 'identity.from'),
+    ...optionalNumberField(record.to, 'identity.to'),
+    source: requireOneOf(record.source, RUNTIME_IDENTITY_SOURCES, 'identity.source'),
+  };
+}
+
+function normalizeExternalRegistration(input: unknown): RuntimeSessionExternalRegistrationState {
+  const record = requireRecord(input, 'runtime session external registration');
+  return {
+    binding: normalizeExternalRegistrationBinding(record.binding),
+    provenance: normalizeExternalRegistrationProvenance(record.provenance),
+    ...optionalStringField(record.title, 'externalRegistration.title'),
+    ...optionalStringField(record.clientRegistrationId, 'externalRegistration.clientRegistrationId'),
+  };
+}
+
+function normalizeExternalRegistrationBinding(input: unknown): RuntimeSessionExternalRegistrationBinding {
+  const record = requireRecord(input, 'runtime session external registration binding');
+  const mode = requireNonEmptyString(record.mode, 'externalRegistration.binding.mode');
+  if (mode === 'orphan_anchor') {
+    return {
+      mode,
+      anchorThreadId: requireNonEmptyString(record.anchorThreadId, 'externalRegistration.binding.anchorThreadId'),
+    };
+  }
+  if (mode === 'thread') {
+    return {
+      mode,
+      threadId: requireNonEmptyString(record.threadId, 'externalRegistration.binding.threadId'),
+      requestedBy: 'agent_key',
+    };
+  }
+  throw new Error('invalid externalRegistration.binding.mode');
+}
+
+function normalizeExternalRegistrationProvenance(input: unknown): RuntimeSessionExternalRegistrationProvenance {
+  const record = requireRecord(input, 'runtime session external registration provenance');
+  const source = requireNonEmptyString(record.source, 'externalRegistration.provenance.source');
+  if (source !== 'antigravity-ide-direct') {
+    throw new Error('invalid externalRegistration.provenance.source');
+  }
+  return {
+    source,
+    agentKeyId: requireNonEmptyString(record.agentKeyId, 'externalRegistration.provenance.agentKeyId'),
+    registeredAt: requireFiniteNumber(record.registeredAt, 'externalRegistration.provenance.registeredAt'),
+    ...optionalStringField(record.ideWindowId, 'externalRegistration.provenance.ideWindowId'),
+    ...optionalStringField(record.workspacePath, 'externalRegistration.provenance.workspacePath'),
+    ...optionalStringField(record.runtimeUrl, 'externalRegistration.provenance.runtimeUrl'),
+    ...optionalStringField(record.note, 'externalRegistration.provenance.note'),
+  };
+}
+
+function requireRecord(value: unknown, name: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`${name} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requireNonEmptyString(value: unknown, name: string): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`${name} must be a non-empty string`);
+  }
+  return value;
+}
+
+function requireFiniteNumber(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`${name} must be a finite number`);
+  }
+  return value;
+}
+
+function requireOneOf<const T extends readonly string[]>(value: unknown, allowed: T, name: string): T[number] {
+  if (typeof value !== 'string' || !allowed.includes(value as T[number])) {
+    throw new Error(`invalid ${name}`);
+  }
+  return value as T[number];
+}
+
+function optionalStringField(value: unknown, name: string): Record<string, string> {
+  if (value === undefined) return {};
+  return { [lastPathSegment(name)]: requireNonEmptyString(value, name) };
+}
+
+function optionalNumberField(value: unknown, name: string): Record<string, number> {
+  if (value === undefined) return {};
+  return { [lastPathSegment(name)]: requireFiniteNumber(value, name) };
+}
+
+function optionalBooleanField(value: unknown, name: string): Record<string, boolean> {
+  if (value === undefined) return {};
+  if (typeof value !== 'boolean') {
+    throw new Error(`${name} must be a boolean`);
+  }
+  return { [lastPathSegment(name)]: value };
+}
+
+function optionalOneOfField<const T extends readonly string[]>(
+  value: unknown,
+  allowed: T,
+  name: string,
+): Record<string, T[number]> {
+  if (value === undefined) return {};
+  return { [lastPathSegment(name)]: requireOneOf(value, allowed, name) };
+}
+
+function optionalExternalRegistration(value: unknown): Record<string, RuntimeSessionExternalRegistrationState> {
+  if (value === undefined) return {};
+  return { externalRegistration: normalizeExternalRegistration(value) };
+}
+
+function optionalRetryFragment(value: unknown): Record<string, RuntimeSessionRetryFragment> {
+  if (value === undefined) return {};
+  return { retryFragment: normalizeRetryFragment(value) };
+}
+
+function optionalUnexpectedRuntimeSessionSwitch(
+  value: unknown,
+): Record<string, RuntimeSessionUnexpectedRuntimeSessionSwitch> {
+  if (value === undefined) return {};
+  return { unexpectedRuntimeSessionSwitch: normalizeUnexpectedRuntimeSessionSwitch(value) };
+}
+
+function lastPathSegment(path: string): string {
+  return path.split('.').at(-1) ?? path;
+}

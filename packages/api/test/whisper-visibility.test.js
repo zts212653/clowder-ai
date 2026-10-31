@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import './helpers/setup-cat-registry.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('canViewMessage', () => {
   let canViewMessage;
@@ -60,60 +61,70 @@ describe('MessageStore whisper', () => {
   });
 
   test('append stores visibility and whisperTo', () => {
-    const msg = store.append({
-      userId: 'user1',
-      catId: null,
-      content: 'secret message',
-      mentions: ['opus'],
-      timestamp: Date.now(),
-      threadId: 'thread1',
-      visibility: 'whisper',
-      whisperTo: ['opus'],
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'secret message',
+        mentions: ['opus'],
+        timestamp: Date.now(),
+        threadId: 'thread1',
+        visibility: 'whisper',
+        whisperTo: ['opus'],
+      }),
+    );
 
     assert.equal(msg.visibility, 'whisper');
     assert.deepEqual(msg.whisperTo, ['opus']);
   });
 
   test('revealWhispers sets revealedAt on all whispers in thread', () => {
-    store.append({
-      userId: 'user1',
-      catId: null,
-      content: 'public msg',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'thread1',
-    });
-    store.append({
-      userId: 'user1',
-      catId: null,
-      content: 'whisper 1',
-      mentions: ['opus'],
-      timestamp: 2000,
-      threadId: 'thread1',
-      visibility: 'whisper',
-      whisperTo: ['opus'],
-    });
-    store.append({
-      userId: 'user1',
-      catId: null,
-      content: 'whisper 2',
-      mentions: ['codex'],
-      timestamp: 3000,
-      threadId: 'thread1',
-      visibility: 'whisper',
-      whisperTo: ['codex'],
-    });
-    store.append({
-      userId: 'user1',
-      catId: null,
-      content: 'other thread whisper',
-      mentions: ['opus'],
-      timestamp: 4000,
-      threadId: 'thread2',
-      visibility: 'whisper',
-      whisperTo: ['opus'],
-    });
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'public msg',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread1',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'whisper 1',
+        mentions: ['opus'],
+        timestamp: 2000,
+        threadId: 'thread1',
+        visibility: 'whisper',
+        whisperTo: ['opus'],
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'whisper 2',
+        mentions: ['codex'],
+        timestamp: 3000,
+        threadId: 'thread1',
+        visibility: 'whisper',
+        whisperTo: ['codex'],
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'other thread whisper',
+        mentions: ['opus'],
+        timestamp: 4000,
+        threadId: 'thread2',
+        visibility: 'whisper',
+        whisperTo: ['opus'],
+      }),
+    );
 
     const count = store.revealWhispers('thread1', 'user1');
     assert.equal(count, 2);
@@ -134,16 +145,18 @@ describe('MessageStore whisper', () => {
   });
 
   test('revealWhispers is idempotent', () => {
-    store.append({
-      userId: 'user1',
-      catId: null,
-      content: 'whisper',
-      mentions: ['opus'],
-      timestamp: 1000,
-      threadId: 'thread1',
-      visibility: 'whisper',
-      whisperTo: ['opus'],
-    });
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'whisper',
+        mentions: ['opus'],
+        timestamp: 1000,
+        threadId: 'thread1',
+        visibility: 'whisper',
+        whisperTo: ['opus'],
+      }),
+    );
 
     assert.equal(store.revealWhispers('thread1', 'user1'), 1);
     assert.equal(store.revealWhispers('thread1', 'user1'), 0); // already revealed
@@ -197,5 +210,17 @@ describe('sendMessageSchema whisper validation', () => {
       content: 'hello',
     });
     assert.ok(result.success);
+  });
+
+  test('accepts long text up to 100K characters', () => {
+    const longContent = 'x'.repeat(50000);
+    const result = sendMessageSchema.safeParse({ content: longContent });
+    assert.ok(result.success, `50K text should be accepted: ${JSON.stringify(result.error?.issues)}`);
+  });
+
+  test('rejects text exceeding 100K characters', () => {
+    const tooLong = 'x'.repeat(100001);
+    const result = sendMessageSchema.safeParse({ content: tooLong });
+    assert.equal(result.success, false, 'text over 100K should be rejected');
   });
 });

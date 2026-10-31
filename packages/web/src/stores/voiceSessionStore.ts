@@ -30,12 +30,13 @@ export interface VoiceSession {
   liveStreamedInvocationIds: Set<string>;
 }
 
-/** Fire-and-forget: notify backend about voice mode toggle for prompt injection. */
-function syncVoiceModeToBackend(threadId: string, voiceMode: boolean): void {
+/** Notify backend about voice mode toggle for prompt injection. */
+function syncVoiceModeToBackend(threadId: string, voiceMode: boolean, keepalive = false): void {
   apiFetch(`/api/threads/${threadId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ voiceMode }),
+    keepalive,
   }).catch(() => {
     // Best-effort — voice mode prompt injection is non-critical path
   });
@@ -59,15 +60,36 @@ interface VoiceSessionActions {
   registerStopCallback: (id: string, fn: () => void) => () => void;
   /** F112-C: Invoke all registered stop callbacks (called by VAD on speech detection). */
   stopAllAudio: () => void;
+  /**
+   * Register centralized playback controls (pause/resume/skip) for an audio path.
+   * Both PlaybackManager and autoplay register here so the UI can control whichever is active.
+   * Returns an unregister function.
+   */
+  registerPlaybackControl: (
+    id: string,
+    control: { pause: () => void; resume: () => void; skip: () => void },
+  ) => () => void;
+  /** Pause all active audio playback paths. */
+  pauseAudio: () => void;
+  /** Resume all paused audio playback paths. */
+  resumeAudio: () => void;
+  /** Skip current audio in all active playback paths. */
+  skipAudio: () => void;
 }
 
 let sessionCounter = 0;
 const stopCallbacks = new Map<string, () => void>();
+const playbackControls = new Map<string, { pause: () => void; resume: () => void; skip: () => void }>();
 
 export const useVoiceSessionStore = create<VoiceSessionActions>((set, get) => ({
   session: null,
 
   start: (threadId, catId, autoplayUnlocked) => {
+    // Clear old thread's voiceMode if switching threads
+    const prev = get().session;
+    if (prev?.boundThreadId && prev.boundThreadId !== threadId) {
+      syncVoiceModeToBackend(prev.boundThreadId, false);
+    }
     sessionCounter++;
     set({
       session: {
@@ -145,4 +167,40 @@ export const useVoiceSessionStore = create<VoiceSessionActions>((set, get) => ({
       fn();
     }
   },
+
+  registerPlaybackControl: (id, control) => {
+    playbackControls.set(id, control);
+    return () => {
+      playbackControls.delete(id);
+    };
+  },
+
+  pauseAudio: () => {
+    // Snapshot to avoid mutation during iteration (skip can delete+re-add keys)
+    for (const ctrl of [...playbackControls.values()]) {
+      ctrl.pause();
+    }
+  },
+
+  resumeAudio: () => {
+    for (const ctrl of [...playbackControls.values()]) {
+      ctrl.resume();
+    }
+  },
+
+  skipAudio: () => {
+    for (const ctrl of [...playbackControls.values()]) {
+      ctrl.skip();
+    }
+  },
 }));
+
+// Clean up voiceMode in Redis when the page unloads (tab close, navigation, etc.)
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    const { session } = useVoiceSessionStore.getState();
+    if (session?.voiceMode && session.boundThreadId) {
+      syncVoiceModeToBackend(session.boundThreadId, false, true);
+    }
+  });
+}

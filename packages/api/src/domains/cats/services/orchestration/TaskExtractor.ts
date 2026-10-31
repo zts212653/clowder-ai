@@ -5,15 +5,12 @@
  */
 
 import { type CatId, type CreateTaskInput, catRegistry } from '@cat-cafe/shared';
-import { getAllCatIdsFromConfig } from '../../../../config/cat-config-loader.js';
 import type { StoredMessage } from '../stores/ports/MessageStore.js';
 import type { AgentService } from '../types.js';
 
 /** Get all valid catIds dynamically from the registry */
 function getValidCatIds(): readonly string[] {
-  const ids = catRegistry.getAllIds();
-  // F032 P2: use config fallback instead of hardcoded cat names
-  return ids.length > 0 ? ids : getAllCatIdsFromConfig();
+  return catRegistry.getAllIds();
 }
 
 export interface ExtractedTask {

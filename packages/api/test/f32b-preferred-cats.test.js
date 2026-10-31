@@ -21,7 +21,7 @@ function createMockRegistry() {
       invocationId: `inv-${++counter}`,
       callbackToken: `tok-${counter}`,
     }),
-    verify: () => null,
+    verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
   };
 }
 
@@ -35,6 +35,7 @@ function createMockMessageStore() {
       rows.push(stored);
       return stored;
     },
+    getById: (id) => rows.find((m) => m.id === id) ?? null,
     getRecent: (limit = 50) => sorted().slice(-limit),
     getMentionsFor: () => [],
     getBefore: () => [],
@@ -67,6 +68,7 @@ function createMockThreadStoreWithPreferred(opts = {}) {
   const preferredCats = { ...opts.preferredCats };
   const participants = { ...opts.participants };
   const activity = {};
+  const effortReads = [];
   return {
     create: (userId, title, projectPath) => ({
       id: 'thread_mock',
@@ -120,6 +122,11 @@ function createMockThreadStoreWithPreferred(opts = {}) {
       const existing = activity[key] ?? { lastMessageAt: 0, messageCount: 0 };
       activity[key] = { lastMessageAt: Date.now(), messageCount: existing.messageCount + 1 };
     },
+    consumeMentionRoutingFeedback: () => null,
+    getMemberEffort: (threadId, catId, userId) => {
+      effortReads.push({ threadId, catId, userId });
+      return undefined;
+    },
     updateLastActive: () => {},
     updatePreferredCats: (threadId, catIds) => {
       if (catIds.length > 0) {
@@ -131,6 +138,7 @@ function createMockThreadStoreWithPreferred(opts = {}) {
     delete: () => true,
     _preferredCats: preferredCats,
     _participants: participants,
+    _effortReads: effortReads,
   };
 }
 
@@ -209,6 +217,7 @@ describe('AgentRouter preferredCats routing', () => {
     assert.equal(mockCodexService.invoke.mock.callCount(), 1);
     assert.equal(mockClaudeService.invoke.mock.callCount(), 0);
     assert.equal(mockGeminiService.invoke.mock.callCount(), 0);
+    assert.deepEqual(threadStore._effortReads, [{ threadId: 'thread-1', catId: 'codex', userId: 'user-1' }]);
   });
 
   test('@mention overrides preferredCats', async () => {
@@ -242,9 +251,10 @@ describe('AgentRouter preferredCats routing', () => {
     assert.equal(mockGeminiService.invoke.mock.callCount(), 1);
     assert.equal(mockCodexService.invoke.mock.callCount(), 0);
     assert.equal(mockClaudeService.invoke.mock.callCount(), 0);
+    assert.deepEqual(threadStore._effortReads, [{ threadId: 'thread-2', catId: 'gemini', userId: 'user-1' }]);
   });
 
-  test('preferredCats takes priority over participants', async () => {
+  test('falls back to healthy participants before non-participant preferredCats', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
     const mockClaudeService = createMockAgentService('opus', 'Opus response');
@@ -272,10 +282,13 @@ describe('AgentRouter preferredCats routing', () => {
       messages.push(msg);
     }
 
-    // preferredCats=[gemini] overrides participants=[opus, codex]
-    assert.equal(mockGeminiService.invoke.mock.callCount(), 1);
-    assert.equal(mockClaudeService.invoke.mock.callCount(), 0);
+    // #1148 + #267: preferredCats only scopes candidates when there is no
+    // healthy participant to continue with. A non-participant preferred cat
+    // should not displace existing healthy participants.
+    assert.equal(mockClaudeService.invoke.mock.callCount(), 1);
     assert.equal(mockCodexService.invoke.mock.callCount(), 0);
+    assert.equal(mockGeminiService.invoke.mock.callCount(), 0);
+    assert.deepEqual(threadStore._effortReads, [{ threadId: 'thread-3', catId: 'opus', userId: 'user-1' }]);
   });
 
   test('invalid preferredCats (unregistered) are filtered out, falls back to participants', async () => {

@@ -1,0 +1,490 @@
+#!/usr/bin/env node
+import { deploymentDefaults } from '@cat-cafe/shared';
+
+/**
+ * Clowder AI MCP Server — Remote Spike Entry (F247 Phase B1a v4)
+ *
+ * v4 (2026-06-21 砚砚 R7 HOLD fix):
+ *   - P1 #1: Env fail-closed gate before listen() —
+ *     缺 token / mode / readonly / cat_id / user_id / agent-key
+ *     source 任一 throw 退出。防 env mistakes 退回 open / full
+ *     toolset surface.
+ *   - P1 #2: Restore output redaction wrapper for outgoing MCP
+ *     text. v3 删 redactor + claim "真 toolset 内部有 sanitizer"
+ *     是 confabulation (砚砚 grep callback-tools.ts:224 +
+ *     evidence-tools.ts:246 实证无通用 redact middleware).
+ *     现 wrap response.write/end 在最终输出前过 secret patterns.
+ *   - P2: Startup log 准确——"redact module: active (wraps response)"
+ *     在 redactor 恢复后才打印；env validation pass 后才打印
+ *     listen 状态.
+ *
+ * v3 (2026-06-21 B1a): 真接 cat-cafe API + cloud-pro-phase0 mode
+ *   - 删 echo + 5 mock stub tools
+ *   - 注册真 collab + memory toolset (走 cloud-pro-phase0 mode
+ *     收窄到 11 项白名单)
+ *
+ * ⚠️  B1a vs B1 production:
+ *   B1a: ?token= interim guard + 真 toolset + 真 cat-cafe API
+ *   B1: verified CF Access OAuth 或 verified header-auth
+ *   本文件是 B1a, F247 KD-7.
+ *
+ * F247 doc: docs/features/F247-cloud-cat-family.md
+ */
+
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import http from 'node:http';
+import { fileURLToPath } from 'node:url';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { handleDotRemoteRequest } from './dot-remote-proxy.js';
+import { adaptModernToolHeaders, registerSharedDotTools, sharedDotRpc } from './remote-shared-dot.js';
+import { registerCollabToolset, registerMemoryToolset } from './server-toolsets.js';
+import { isDirectExecution } from './utils/is-direct-execution.js';
+import { initCatCafeDir } from './utils/path-validator.js';
+
+const HOST = '127.0.0.1' as const;
+const PORT = Number.parseInt(process.env.CAT_CAFE_REMOTE_PORT ?? '3098', 10);
+
+// === Redact module (CodexPro F5 inspired, 砚砚 R7 P1 restore) =========
+// 砚砚 R7 verify_before_guessing 抓: cat-cafe callback/evidence tools
+// 不自带 generic output redact. 这一层 wrap response.write/end 在最终
+// 输出前过 secret patterns. 48 R2 P0 暴露面减一档.
+
+const SECRET_PATTERNS: RegExp[] = [
+  /ghp_[A-Za-z0-9]{36,}/g, // GitHub Personal Access Token
+  /ghs_[A-Za-z0-9]{36,}/g, // GitHub server token
+  /github_pat_[A-Za-z0-9_]{82,}/g, // GitHub fine-grained PAT
+  /sk-[A-Za-z0-9_-]{32,}/g, // OpenAI API key
+  /xoxb-[A-Za-z0-9-]+/g, // Slack bot token
+  /xoxp-[A-Za-z0-9-]+/g, // Slack user token
+  /AKIA[0-9A-Z]{16}/g, // AWS access key ID
+  /AIza[0-9A-Za-z_-]{35}/g, // Google API key
+];
+
+function redactSecrets(text: string): string {
+  let out = text;
+  for (const pat of SECRET_PATTERNS) out = out.replace(pat, '[REDACTED-SECRET]');
+  return out;
+}
+
+/**
+ * Wrap http.ServerResponse so every write/end call passes through
+ * redactSecrets. Handles both string and Buffer chunks. MCP Streamable
+ * HTTP uses chunked SSE-style writes; we redact each chunk independently.
+ * Caveat: secret patterns split across chunk boundaries may slip
+ * through — acceptable for B1a, B1 production should use a streaming
+ * redact state machine or buffer entire response.
+ */
+function redactChunk(chunk: unknown): unknown {
+  if (typeof chunk === 'string') return redactSecrets(chunk);
+  if (chunk instanceof Buffer) return Buffer.from(redactSecrets(chunk.toString('utf-8')), 'utf-8');
+  // 砚砚 R11 P1: StreamableHTTPServerTransport (via SDK Hono node adapter) writes
+  // Web Response bodies as Uint8Array chunks. Without this branch the bytes fall
+  // through `return chunk` and a token in tool output bypasses redaction on the
+  // public /mcp surface. Buffer is a subclass of Uint8Array, so order matters —
+  // Buffer check above handles that path verbatim; this branch covers raw
+  // Uint8Array + any other ArrayBuffer view (Int8Array, Uint8ClampedArray, etc.).
+  if (chunk instanceof Uint8Array) {
+    return Buffer.from(redactSecrets(Buffer.from(chunk).toString('utf-8')), 'utf-8');
+  }
+  if (ArrayBuffer.isView(chunk)) {
+    const bytes = new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+    return Buffer.from(redactSecrets(Buffer.from(bytes).toString('utf-8')), 'utf-8');
+  }
+  if (chunk instanceof ArrayBuffer) {
+    return Buffer.from(redactSecrets(Buffer.from(new Uint8Array(chunk)).toString('utf-8')), 'utf-8');
+  }
+  return chunk;
+}
+
+function wrapResponseWithRedact(res: http.ServerResponse): http.ServerResponse {
+  const origWrite = res.write.bind(res) as (...args: unknown[]) => boolean;
+  const origEnd = res.end.bind(res) as (...args: unknown[]) => http.ServerResponse;
+
+  res.write = ((chunk: unknown, arg2?: unknown, arg3?: unknown) => {
+    const redacted = redactChunk(chunk);
+    if (arg3 !== undefined) return origWrite(redacted, arg2, arg3);
+    if (arg2 !== undefined) return origWrite(redacted, arg2);
+    return origWrite(redacted);
+  }) as typeof res.write;
+
+  res.end = ((arg1?: unknown, arg2?: unknown, arg3?: unknown) => {
+    const redacted = redactChunk(arg1);
+    if (arg3 !== undefined) return origEnd(redacted, arg2, arg3);
+    if (arg2 !== undefined) return origEnd(redacted, arg2);
+    if (arg1 !== undefined) return origEnd(redacted);
+    return origEnd();
+  }) as typeof res.end;
+
+  return res;
+}
+
+// === Env fail-closed gate (砚砚 R7 P1) ===============================
+// 启动前校验所有必需 env。缺一throw 退出 listen 之前. 防 env mistakes
+// 退回 open/full toolset surface.
+
+const EXPECTED_MODE = 'cloud-pro-phase0' as const;
+const EXPECTED_READONLY = 'true' as const;
+/**
+ * F202 h3c-2: the cloud cat is whichever cat the Host configures for the cloud provider — not a
+ * fixed id. The launcher names it; this gate only requires the name to be a cat id that can hold a
+ * key file (the Host's rule), and every identity below to agree with it. The Host then honours
+ * the bound key only while that cat is its configured cloud cat.
+ */
+const CLOUD_CAT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+const SPIKE_VERSION = '0.0.5-b1a' as const;
+const SPIKE_ARTIFACT_REVISION = crypto
+  .createHash('sha256')
+  .update(fs.readFileSync(fileURLToPath(import.meta.url)))
+  .digest('hex');
+
+function validateB1aEnv(): void {
+  const errors: string[] = [];
+
+  if (!process.env.CAT_CAFE_REMOTE_TOKEN) {
+    errors.push('CAT_CAFE_REMOTE_TOKEN missing (B1a interim guard required)');
+  }
+  if (process.env.CAT_CAFE_DESKTOP_MODE !== EXPECTED_MODE) {
+    errors.push(`CAT_CAFE_DESKTOP_MODE must be "${EXPECTED_MODE}" (got: "${process.env.CAT_CAFE_DESKTOP_MODE ?? ''}")`);
+  }
+  if (process.env.CAT_CAFE_READONLY !== EXPECTED_READONLY) {
+    errors.push(`CAT_CAFE_READONLY must be "${EXPECTED_READONLY}" (got: "${process.env.CAT_CAFE_READONLY ?? ''}")`);
+  }
+  const boundCatId = process.env.CAT_CAFE_CAT_ID ?? '';
+  if (!CLOUD_CAT_ID.test(boundCatId) || boundCatId.includes('..')) {
+    errors.push(`CAT_CAFE_CAT_ID must name the configured cloud cat (got: ${JSON.stringify(boundCatId)})`);
+  }
+  if (process.env.CAT_CAFE_AGENT_KEY_BOUND_CAT_ID !== boundCatId) {
+    errors.push(
+      `CAT_CAFE_AGENT_KEY_BOUND_CAT_ID must equal CAT_CAFE_CAT_ID (${JSON.stringify(boundCatId)}) so this ` +
+        'dedicated cloud process can authenticate source-bound returns without a caller-supplied selector',
+    );
+  }
+  if (!process.env.CAT_CAFE_USER_ID) {
+    errors.push('CAT_CAFE_USER_ID missing');
+  }
+  // 砚砚 R11 P2: getCallbackConfig() returns null without CAT_CAFE_API_URL, so
+  // every collab/memory tool would fail as "Clowder AI callback not configured"
+  // while /health still advertised OK. Fail closed at startup instead.
+  if (!process.env.CAT_CAFE_API_URL) {
+    errors.push(
+      'CAT_CAFE_API_URL missing — getCallbackConfig() returns null without it, ' +
+        `all collab/memory tools would fail as "${deploymentDefaults.brand.displayName} callback not configured".`,
+    );
+  }
+  // 砚砚 R12 P2: spike-server may be spawned from an existing cat invocation and
+  // inherit CAT_CAFE_INVOCATION_ID / CAT_CAFE_CALLBACK_TOKEN. callback-tools.ts
+  // gives invocation headers precedence over agent-key auth, so the cloud
+  // connector either writes under the wrong invocation principal or its
+  // required post_message calls fail (F193 KD-1 rejects threadId in
+  // invocation-token mode). Refuse to start if either is set.
+  if (process.env.CAT_CAFE_INVOCATION_ID) {
+    errors.push(
+      'CAT_CAFE_INVOCATION_ID must be unset for B1a — inherited invocation creds ' +
+        'take precedence over agent-key auth and F193 KD-1 rejects threadId. ' +
+        'Use env -u CAT_CAFE_INVOCATION_ID in the spike startup wrapper.',
+    );
+  }
+  if (process.env.CAT_CAFE_CALLBACK_TOKEN) {
+    errors.push(
+      'CAT_CAFE_CALLBACK_TOKEN must be unset for B1a — same reason as INVOCATION_ID. ' +
+        'Use env -u CAT_CAFE_CALLBACK_TOKEN in the spike startup wrapper.',
+    );
+  }
+  // This process is dedicated to the configured cloud cat and binds that identity at startup.
+  // The single-entry variant map remains the key source of truth; validating both
+  // prevents a caller from selecting another principal and lets source-bound
+  // returns omit deployment knowledge that only the server possesses.
+  const agentKeySecret = process.env.CAT_CAFE_AGENT_KEY_SECRET;
+  const agentKeyFilesRaw = process.env.CAT_CAFE_AGENT_KEY_FILES;
+
+  if (!agentKeyFilesRaw) {
+    errors.push(
+      `CAT_CAFE_AGENT_KEY_FILES is required for cloud-pro-phase0 — ` +
+        `the bound identity "${boundCatId}" resolves only through its variantMap entry. ` +
+        'CAT_CAFE_AGENT_KEY_FILE alone is not a dedicated-principal contract.',
+    );
+  } else {
+    let map: Record<string, unknown> = {};
+    let mapParseOk = false;
+    try {
+      const parsed = JSON.parse(agentKeyFilesRaw) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        map = parsed as Record<string, unknown>;
+        mapParseOk = true;
+      } else {
+        errors.push('CAT_CAFE_AGENT_KEY_FILES must be a JSON object {catId: filePath}');
+      }
+    } catch {
+      errors.push('CAT_CAFE_AGENT_KEY_FILES is not valid JSON');
+    }
+
+    if (mapParseOk) {
+      // 砚砚 R12 P1: tool schemas let the remote caller pick agentKeyCatId, and
+      // resolveAgentKeySecret indexes that caller-supplied key. If the inherited
+      // map contains other cats (antigravity / antig-opus / etc.), any spike-token
+      // holder can pass another catId and authenticate as that cat. Fail closed
+      // by requiring the map to contain ONLY boundCatId.
+      const extraCats = Object.keys(map).filter((k) => k !== boundCatId);
+      if (extraCats.length > 0) {
+        errors.push(
+          `CAT_CAFE_AGENT_KEY_FILES contains extra cats [${extraCats.join(', ')}] — ` +
+            `spike-token holder could impersonate them by picking input.agentKeyCatId. ` +
+            `Override the inherited map to a single-entry "${boundCatId}" map in the spike wrapper.`,
+        );
+      }
+      const candidate = map[boundCatId];
+      if (typeof candidate !== 'string' || candidate.trim().length === 0) {
+        errors.push(
+          `CAT_CAFE_AGENT_KEY_FILES has no usable "${boundCatId}" entry — ` +
+            `callback resolver returns undefined for the bound identity "${boundCatId}".`,
+        );
+      } else {
+        const resolvedPath = candidate.trim();
+        const resolutionSource = `CAT_CAFE_AGENT_KEY_FILES["${boundCatId}"]`;
+        try {
+          const stat = fs.statSync(resolvedPath);
+          if (!stat.isFile()) {
+            errors.push(`${resolutionSource} → ${resolvedPath} is not a regular file`);
+          } else {
+            // Read to verify accessible + non-empty (don't print contents).
+            const content = fs.readFileSync(resolvedPath, 'utf-8').trim();
+            if (content.length === 0) {
+              errors.push(`${resolutionSource} → ${resolvedPath} is empty`);
+            }
+          }
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          errors.push(`${resolutionSource} → ${resolvedPath} is not readable: ${errMsg}`);
+        }
+      }
+    }
+  }
+
+  // AGENT_KEY_SECRET is still accepted as an additional source, but the dedicated
+  // bound identity resolves through the variant map, so `_SECRET` alone is not
+  // sufficient for cloud-pro-phase0.
+  if (agentKeySecret && !agentKeyFilesRaw) {
+    errors.push(
+      'CAT_CAFE_AGENT_KEY_SECRET is set but CAT_CAFE_AGENT_KEY_FILES is missing — ' +
+        '_SECRET alone is outside the dedicated bound-principal path.',
+    );
+  }
+
+  if (errors.length > 0) {
+    const msg = [
+      '[cat-cafe-b1a] FATAL: env validation failed (砚砚 R7 P1 + R9 P1 + R10 P1 + R12 P1+P2 fail-closed gate):',
+      ...errors.map((e) => `  - ${e}`),
+    ].join('\n');
+    throw new Error(msg);
+  }
+}
+
+// === Token middleware (B1a interim guard, NOT B1 production) ==========
+
+const REMOTE_TOKEN = process.env.CAT_CAFE_REMOTE_TOKEN ?? '';
+
+function timingSafeEqualString(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  try {
+    return crypto.timingSafeEqual(ab, bb);
+  } catch {
+    return false;
+  }
+}
+
+function isAuthorized(req: http.IncomingMessage): boolean {
+  // 砚砚 R7 P1: validateB1aEnv() 已保证 REMOTE_TOKEN non-empty,
+  // 不再 fail-open on missing token. 这里只做 timing-safe compare.
+  if (!REMOTE_TOKEN) return false; // defense-in-depth (should never reach if env validated)
+
+  try {
+    const url = new URL(req.url ?? '/', `http://${HOST}`);
+    const queryToken = url.searchParams.get('token');
+    if (queryToken && timingSafeEqualString(queryToken, REMOTE_TOKEN)) return true;
+  } catch {
+    // fall through to header
+  }
+
+  const authHeader = req.headers.authorization;
+  if (typeof authHeader === 'string') {
+    const match = authHeader.match(/^Bearer\s+(.+)$/);
+    if (match && timingSafeEqualString(match[1], REMOTE_TOKEN)) return true;
+  }
+
+  return false;
+}
+
+// === MCP server with real cat-cafe toolset (cloud-pro-phase0 mode) ====
+
+function createSpikeServer(): McpServer {
+  const server = new McpServer({
+    name: 'cat-cafe-cloud-pro-b1a',
+    version: SPIKE_VERSION,
+  });
+
+  // server-toolsets.applyReadonlyFilter 在 cloud-pro-phase0 mode 下
+  // 收窄到 11 项白名单. env 已被 validateB1aEnv 保证 mode 正确.
+  registerCollabToolset(server);
+  registerMemoryToolset(server);
+  registerSharedDotTools(server);
+
+  return server;
+}
+
+// === HTTP handler ====================================================
+
+async function handleMcpRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  if (req.method !== 'POST') {
+    res.writeHead(405, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'method not allowed' }));
+    return;
+  }
+
+  if (!isAuthorized(req)) {
+    res.writeHead(401, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'unauthorized', hint: 'pass ?token= or Authorization: Bearer' }));
+    return;
+  }
+
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += bytes.length;
+    if (size > 15 * 1024 * 1024) {
+      res.writeHead(413, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'request too large' }));
+      return;
+    }
+    chunks.push(bytes);
+  }
+  let body: unknown;
+  if (chunks.length > 0) {
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+    } catch {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'invalid json body' }));
+      return;
+    }
+  }
+
+  const shared = await sharedDotRpc(body);
+  if (shared) {
+    res.writeHead(shared.status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify(shared.body));
+    return;
+  }
+  const modern = adaptModernToolHeaders(req);
+  const server = createSpikeServer();
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: modern });
+  await server.connect(transport);
+
+  try {
+    await transport.handleRequest(req, res, body);
+  } catch (err) {
+    console.error('[cat-cafe-b1a] handleRequest error:', err);
+    if (!res.headersSent) {
+      res.writeHead(500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'internal error' }));
+    }
+  }
+}
+
+async function main(): Promise<void> {
+  validateB1aEnv(); // 砚砚 R7 P1: fail-closed before initCatCafeDir/listen
+
+  initCatCafeDir();
+
+  const server = http.createServer((req, res) => {
+    // 砚砚 R7 P1: wrap response with redactor BEFORE any write
+    const wrappedRes = wrapResponseWithRedact(res);
+    const urlForLog = (req.url ?? '').split('?')[0];
+    const jwtHeader = req.headers['cf-access-jwt-assertion'];
+    const authHeader = req.headers.authorization;
+    console.error(
+      `[cat-cafe-b1a] ${req.method} ${urlForLog} cf-jwt=${jwtHeader ? 'present' : 'absent'} auth=${authHeader ? 'present' : 'absent'}`,
+    );
+
+    if (urlForLog === '/health' && req.method === 'GET') {
+      wrappedRes.writeHead(200, { 'content-type': 'application/json' });
+      wrappedRes.end(
+        JSON.stringify({
+          status: 'ok',
+          server: 'cat-cafe-cloud-pro-b1a',
+          version: SPIKE_VERSION,
+          artifact_revision: SPIKE_ARTIFACT_REVISION,
+          mode: process.env.CAT_CAFE_DESKTOP_MODE,
+          cat_id: process.env.CAT_CAFE_CAT_ID,
+        }),
+      );
+      return;
+    }
+
+    if (urlForLog === '/dot/mcp') {
+      void handleDotRemoteRequest(req, wrappedRes, process.env.CAT_CAFE_API_URL ?? '').catch(() => {
+        if (!wrappedRes.headersSent) wrappedRes.writeHead(503);
+        wrappedRes.end(JSON.stringify({ error: 'dot_host_unavailable' }));
+      });
+      return;
+    }
+    if (urlForLog === '/mcp') {
+      handleMcpRequest(req, wrappedRes).catch((err) => {
+        console.error('[cat-cafe-b1a] uncaught:', err);
+        if (!wrappedRes.headersSent) {
+          wrappedRes.writeHead(500, { 'content-type': 'application/json' });
+          wrappedRes.end(JSON.stringify({ error: 'internal error' }));
+        }
+      });
+      return;
+    }
+
+    wrappedRes.writeHead(404, { 'content-type': 'application/json' });
+    wrappedRes.end(JSON.stringify({ error: 'not found', hint: 'POST /mcp or GET /health' }));
+  });
+
+  server.listen(PORT, HOST, () => {
+    console.error(`[cat-cafe-b1a] MCP Streamable HTTP listening on ${HOST}:${PORT}`);
+    console.error(
+      '[cat-cafe-b1a] Auth: token-required (query ?token= or Bearer header) [B1a interim, NOT B1 production verified auth]',
+    );
+    console.error('[cat-cafe-b1a] DESKTOP_MODE:', process.env.CAT_CAFE_DESKTOP_MODE);
+    console.error('[cat-cafe-b1a] READONLY:', process.env.CAT_CAFE_READONLY);
+    console.error('[cat-cafe-b1a] CAT_ID:', process.env.CAT_CAFE_CAT_ID);
+    console.error('[cat-cafe-b1a] ARTIFACT_REVISION:', SPIKE_ARTIFACT_REVISION);
+    console.error('[cat-cafe-b1a] USER_ID:', process.env.CAT_CAFE_USER_ID);
+    console.error('[cat-cafe-b1a] AGENT_KEY_FILE:', process.env.CAT_CAFE_AGENT_KEY_FILE ?? '(via _FILES or _SECRET)');
+    console.error('[cat-cafe-b1a] API_URL:', process.env.CAT_CAFE_API_URL ?? '(unset, default)');
+    console.error(
+      `[cat-cafe-b1a] redact module: active (wraps response.write/end, ${SECRET_PATTERNS.length} patterns)`,
+    );
+    console.error(
+      '[cat-cafe-b1a] toolset: registerCollabToolset + registerMemoryToolset (cloud-pro-phase0 收窄到 11 项)',
+    );
+    console.error(
+      '[cat-cafe-b1a] ⚠️  B1a interim — F247 KD-7: B1 必须 verified CF Access OAuth 或 verified header-auth',
+    );
+  });
+
+  function shutdown(signal: NodeJS.Signals): void {
+    console.error(`[cat-cafe-b1a] received ${signal}, shutting down`);
+    server.close(() => process.exit(0));
+  }
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}
+
+const isEntryPoint = isDirectExecution(import.meta.url);
+if (isEntryPoint) {
+  main().catch((err) => {
+    console.error('[cat-cafe-b1a] fatal:', err);
+    process.exit(1);
+  });
+}
+
+// Export for tests
+export { handleMcpRequest, redactSecrets, validateB1aEnv, wrapResponseWithRedact };

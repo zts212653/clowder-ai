@@ -1,0 +1,436 @@
+import { createHash } from 'node:crypto';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import type { AgyProfileConfig } from '@cat-cafe/shared';
+
+export interface ResolveAgyProfileInput {
+  /** Native acquires the cross-process profile lease before writing mutable settings. */
+  readonly materializeSettings?: boolean;
+  readonly catId: string;
+  readonly expectedModel: string;
+  readonly workingDirectory: string;
+  readonly config?: AgyProfileConfig;
+}
+
+export interface AgyProfile {
+  readonly catId: string;
+  readonly profileId: string;
+  readonly homePath: string;
+  /**
+   * Private process/cache sandbox base. resolveAgySpawnCwd keeps one child per
+   * worktree; Native command cwd is independently pinned by the host effect hook.
+   */
+  readonly cwdPath: string;
+  readonly settingsPath: string;
+  readonly expectedModel: string;
+  readonly trustedWorkspaces: readonly string[];
+  readonly autoApprove: boolean;
+}
+
+export type AgyProfilePreflightFailureReason =
+  | 'missing_binary'
+  | 'unsafe_home'
+  | 'settings_missing'
+  | 'settings_unreadable'
+  | 'model_mismatch'
+  | 'untrusted_workspace';
+
+export type AgyProfilePreflightResult =
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly reason: AgyProfilePreflightFailureReason;
+      readonly message: string;
+    };
+
+export type AgyRuntimePermissionPreflightResult =
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly reason: 'empty_file_permission_path' | 'mcp_permission_server_mismatch';
+      readonly invalidGrants: readonly string[];
+      readonly suggestedGrants?: readonly string[];
+      readonly message: string;
+    };
+
+export interface AgyProfilePreflightInput {
+  readonly agyCommand: string | null | undefined;
+  readonly workingDirectory: string;
+}
+
+function sanitizeProfileId(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error('AGY profile id must not be empty');
+  const sanitized = trimmed.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^-+|-+$/g, '');
+  if (!sanitized || sanitized === '.' || sanitized === '..' || sanitized.includes('..')) {
+    throw new Error(`Unsafe AGY profile id: ${value}`);
+  }
+  return sanitized;
+}
+
+function expandHomePath(path: string): string {
+  if (path === '~') return homedir();
+  if (path.startsWith(`~${sep}`)) return join(homedir(), path.slice(2));
+  return path;
+}
+
+function resolveUnder(root: string, segment: string): string {
+  const resolvedRoot = resolve(root);
+  const target = resolve(resolvedRoot, segment);
+  const rel = relative(resolvedRoot, target);
+  if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error(`AGY profile path escapes root: ${target}`);
+  }
+  return target;
+}
+
+function readSettings(path: string): Record<string, unknown> {
+  if (!existsSync(path)) return {};
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+}
+
+function tryReadSettings(path: string): Record<string, unknown> | null {
+  if (!existsSync(path)) return null;
+  try {
+    return readSettings(path);
+  } catch {
+    return null;
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function preflightEmptyFilePermissions(configPath: string): AgyRuntimePermissionPreflightResult {
+  const config = tryReadSettings(configPath);
+  const allow = asRecord(asRecord(config?.userSettings)?.globalPermissionGrants)?.allow;
+  const invalidGrants = Array.isArray(allow)
+    ? allow.filter((grant): grant is string => typeof grant === 'string' && /^(?:read|write)_file\(\s*\)$/.test(grant))
+    : [];
+  if (invalidGrants.length === 0) return { ok: true };
+
+  return {
+    ok: false,
+    reason: 'empty_file_permission_path',
+    invalidGrants,
+    message: [
+      `AGY permission config contains an empty file path grant: ${invalidGrants.join(', ')}.`,
+      'Remove the empty grant or replace it with an explicit absolute path before retrying.',
+      'Otherwise AGY run_command fails with "sandbox configuration error: readonly : non-absolute file path" or its readwrite variant.',
+    ].join(' '),
+  };
+}
+
+function resolveMcpGrantReplacement(
+  grant: unknown,
+  configuredServers: readonly string[],
+  schemaRoot: string,
+): string | null {
+  if (typeof grant !== 'string') return null;
+  const match = grant.match(/^mcp\(([^/()\s]+)\/([^()\s]+)\)$/);
+  if (!match) return null;
+
+  const [, grantedServer, toolName] = match;
+  const safeSegment = /^[A-Za-z0-9._-]+$/;
+  if (!safeSegment.test(grantedServer) || !safeSegment.test(toolName)) return null;
+  if (existsSync(join(schemaRoot, grantedServer, `${toolName}.json`))) return null;
+
+  const candidateServers = configuredServers.filter(
+    (server) =>
+      safeSegment.test(server) && server !== grantedServer && existsSync(join(schemaRoot, server, `${toolName}.json`)),
+  );
+  return candidateServers.length === 1 ? `mcp(${candidateServers[0]}/${toolName})` : null;
+}
+
+function preflightMcpPermissionNamespaces(
+  settingsDir: string,
+  mcpConfigPath: string,
+): AgyRuntimePermissionPreflightResult {
+  const settings = tryReadSettings(join(settingsDir, 'settings.json'));
+  const mcpConfig = tryReadSettings(mcpConfigPath);
+  const allow = asRecord(settings?.permissions)?.allow;
+  const mcpServers = asRecord(mcpConfig?.mcpServers);
+  if (!Array.isArray(allow) || !mcpServers) return { ok: true };
+
+  const configuredServers = Object.keys(mcpServers);
+  const schemaRoot = join(settingsDir, 'mcp');
+  const mismatches = allow.flatMap((grant) => {
+    const replacement = resolveMcpGrantReplacement(grant, configuredServers, schemaRoot);
+    return typeof grant === 'string' && replacement ? [{ grant, replacement }] : [];
+  });
+  if (mismatches.length === 0) return { ok: true };
+
+  const invalidGrants = mismatches.map(({ grant }) => grant);
+  const suggestedGrants = mismatches.map(({ replacement }) => replacement);
+  return {
+    ok: false,
+    reason: 'mcp_permission_server_mismatch',
+    invalidGrants,
+    suggestedGrants,
+    message: [
+      `AGY MCP permission grants use a server namespace that does not expose the granted tool: ${invalidGrants.join(', ')}.`,
+      `Use the uniquely resolved configured grant instead: ${suggestedGrants.join(', ')}.`,
+      'The runtime did not modify user configuration.',
+    ].join(' '),
+  };
+}
+
+/**
+ * AGY turns file permission grants into sandbox mount paths. Legacy empty grants such as
+ * `read_file()` and `write_file()` therefore become readonly/readwrite mounts with an
+ * empty path and make every run_command fail with a non-absolute sandbox path error.
+ * Detect that deterministic local-config failure before spending a model turn.
+ */
+export function preflightAgyRuntimePermissions(homePath: string): AgyRuntimePermissionPreflightResult {
+  const resolvedHome = resolve(homePath);
+  const configDir = join(resolvedHome, '.gemini', 'config');
+  const filePermissionResult = preflightEmptyFilePermissions(join(configDir, 'config.json'));
+  if (!filePermissionResult.ok) return filePermissionResult;
+  const settingsDir = join(resolvedHome, '.gemini', 'antigravity-cli');
+  return preflightMcpPermissionNamespaces(settingsDir, join(configDir, 'mcp_config.json'));
+}
+
+function uniqueResolvedPaths(paths: readonly string[]): readonly string[] {
+  return [...new Set(paths.map((path) => resolve(path)))];
+}
+
+function isNotFoundError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    String((err as { readonly code?: unknown }).code) === 'ENOENT'
+  );
+}
+
+function tryRealpath(path: string): string | null {
+  try {
+    return realpathSync(path);
+  } catch (err) {
+    if (isNotFoundError(err)) return null;
+    throw err;
+  }
+}
+
+function isExistingSymlink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch (err) {
+    if (isNotFoundError(err)) return false;
+    throw err;
+  }
+}
+
+function canonicalProfileHomePath(homeRoot: string | null, homePath: string): string {
+  const realHomePath = tryRealpath(homePath);
+  if (realHomePath) return realHomePath;
+  if (!homeRoot) return resolve(homePath);
+
+  const resolvedRoot = resolve(homeRoot);
+  const rel = relative(resolvedRoot, resolve(homePath));
+  const realRoot = tryRealpath(resolvedRoot) ?? resolvedRoot;
+  return resolve(realRoot, rel);
+}
+
+function realUserHomePath(): string {
+  return tryRealpath(homedir()) ?? resolve(homedir());
+}
+
+export function resolveAgyProfile(input: ResolveAgyProfileInput): AgyProfile | null {
+  const config = input.config;
+  if (!config || config.enabled === false) return null;
+
+  const profileId = sanitizeProfileId(config.profileId ?? input.catId);
+  const homeRoot = resolve(
+    expandHomePath(
+      config.homeRoot ?? process.env.CAT_CAFE_AGY_PROFILE_ROOT ?? join(homedir(), '.cat-cafe', 'agy-profiles'),
+    ),
+  );
+  const homePath = resolveUnder(homeRoot, profileId);
+  const settingsDir = join(homePath, '.gemini', 'antigravity-cli');
+  const settingsPath = join(settingsDir, 'settings.json');
+  const cwdPath = join(homePath, 'cwd');
+  const unsafeReason = getUnsafeAgyProfileTargetReason(homeRoot, homePath, settingsPath);
+  if (unsafeReason) {
+    throw new Error(unsafeReason);
+  }
+  const expectedModel = config.model?.trim();
+  if (!expectedModel) throw new Error('Explicit AGY profile model label is required.');
+  const trustedWorkspaces = uniqueResolvedPaths([...(config.trustedWorkspaces ?? []), input.workingDirectory]);
+
+  mkdirSync(settingsDir, { recursive: true });
+  mkdirSync(cwdPath, { recursive: true }); // F210 cache-leak: agy spawn cwd sandbox（cwd-relative cache 落此）
+  const currentSettings = readSettings(settingsPath);
+  const nextSettings = {
+    ...currentSettings,
+    model: expectedModel,
+    trustedWorkspaces,
+  };
+  if (input.materializeSettings !== false)
+    writeFileSync(settingsPath, `${JSON.stringify(nextSettings, null, 2)}\n`, 'utf8');
+
+  return {
+    catId: input.catId,
+    profileId,
+    homePath,
+    cwdPath,
+    settingsPath,
+    expectedModel,
+    trustedWorkspaces,
+    autoApprove: config.autoApprove !== false,
+  };
+}
+
+/**
+ * F210 cache-leak fix (砚砚 拍 cwd sandbox 方向)：解析 agy spawn cwd（与 workingDirectory 解耦）。
+ * AGY 写 cwd-relative cache（`cache/projects.json`）到 spawn cwd——必须是 sandbox 而非 repo root
+ * （实证 2026-06-03）。
+ *
+ * **per-worktree 隔离（cloud P1）**：AGY 按 cwd scope conversation/project 命名空间（实证 H2a：
+ * `cache/projects.json` 是 cwd-relative project registry）。若所有 worktree 共用 per-cat sandbox，
+ * 多 repo 会串台 AGY history（resume/list 错乱）。所以 sandbox 必须**每个 workingDirectory 唯一**——
+ * 用绝对 workingDirectory 的 sha256 hash 作 per-worktree 子目录键。
+ *
+ * 布局：`<base>/<workspaceKey>`，base =
+ * - 有 agyProfile：`agyProfile.cwdPath`（profile HOME 下的 per-profile base）
+ * - 无 agyProfile（production gemini/gemini25 当前路径）：`<root>/<sanitized-catId>`，
+ *   root 默认 `~/.cat-cafe/agy-cwd`，可经 `CAT_CAFE_AGY_CWD_ROOT` override（mirror `CAT_CAFE_AGY_PROFILE_ROOT`）。
+ *
+ * symlink fail-closed（cloud P2）：base + sandbox 都拒绝已存在 symlink——mkdirSync(recursive) 会跟随
+ * symlink 把 cwd-relative cache 写回 repo/真 HOME，绕过本修复。
+ *
+ * Native keeps `--add-dir <workingDirectory>` for workspace admission, not
+ * command cwd selection. The historical 2026-06-03 `pwd` result does not define
+ * today's default: controlled CLI 1.4.10 cases follow the first path-sorted
+ * active workspace, including auxiliary skill/upload roots. Native therefore
+ * pins the host-admitted command workspace in its effect hook while this
+ * process/cache coordinate stays isolated. Do not infer command cwd from the
+ * first workspace or move this process into the repository to fix tool cwd.
+ */
+export function resolveAgySpawnCwd(agyProfile: AgyProfile | null, catId: string, workingDirectory: string): string {
+  const workspaceKey = createHash('sha256').update(resolve(workingDirectory)).digest('hex').slice(0, 16);
+  const base = agyProfile
+    ? agyProfile.cwdPath
+    : resolveUnder(
+        resolve(expandHomePath(process.env.CAT_CAFE_AGY_CWD_ROOT ?? join(homedir(), '.cat-cafe', 'agy-cwd'))),
+        sanitizeProfileId(catId),
+      );
+  const sandbox = join(base, workspaceKey);
+  for (const [label, path] of [
+    ['cwd sandbox base', base],
+    ['cwd sandbox', sandbox],
+  ] as const) {
+    if (isExistingSymlink(path)) {
+      throw new Error(
+        `AGY ${label} must not be a symlink (would redirect cwd-relative cache outside the sandbox): ${path}`,
+      );
+    }
+  }
+  mkdirSync(sandbox, { recursive: true });
+  return sandbox;
+}
+
+function isRealUserAntigravitySettingsPath(path: string): boolean {
+  const realAgyDir = join(realUserHomePath(), '.gemini', 'antigravity-cli');
+  const resolvedPath = resolve(path);
+  return resolvedPath === join(realAgyDir, 'settings.json') || resolvedPath.startsWith(`${realAgyDir}${sep}`);
+}
+
+function getUnsafeAgyProfileTargetReason(
+  homeRoot: string | null,
+  homePath: string,
+  settingsPath: string,
+): string | null {
+  const geminiDir = join(homePath, '.gemini');
+  const settingsDir = join(geminiDir, 'antigravity-cli');
+  for (const [label, path] of [
+    ['HOME', homePath],
+    ['.gemini directory', geminiDir],
+    ['settings directory', settingsDir],
+    ['settings file', settingsPath],
+    // F210 cache-leak hardening (cloud P2)：cwd sandbox 也必须拒绝 symlink——mkdirSync(recursive) 会
+    // 跟随已存在的 symlink，spawn cwd 指向 link target（repo/真 HOME），cwd-relative cache 仍泄漏。
+    ['cwd sandbox', join(homePath, 'cwd')],
+  ] as const) {
+    if (isExistingSymlink(path)) {
+      return `AGY profile ${label} must not be a symlink: ${path}`;
+    }
+  }
+
+  const canonicalHomePath = canonicalProfileHomePath(homeRoot, homePath);
+  if (canonicalHomePath === realUserHomePath()) {
+    return 'AGY profile sandbox points at the real user HOME; refusing to write shared state.';
+  }
+
+  const canonicalSettingsPath =
+    tryRealpath(settingsPath) ?? join(canonicalHomePath, '.gemini', 'antigravity-cli', 'settings.json');
+  if (isRealUserAntigravitySettingsPath(canonicalSettingsPath)) {
+    return 'AGY profile sandbox points at the real user AGY settings path; refusing to write shared state.';
+  }
+
+  return null;
+}
+
+export function preflightAgyProfile(profile: AgyProfile, input: AgyProfilePreflightInput): AgyProfilePreflightResult {
+  if (!input.agyCommand) {
+    return {
+      ok: false,
+      reason: 'missing_binary',
+      message: 'Antigravity CLI binary `agy` was not found. Install AGY before using an AGY profile.',
+    };
+  }
+  const unsafeReason = getUnsafeAgyProfileTargetReason(null, profile.homePath, profile.settingsPath);
+  if (unsafeReason) {
+    return {
+      ok: false,
+      reason: 'unsafe_home',
+      message: unsafeReason.replace('write shared state', 'run with shared state'),
+    };
+  }
+  if (!existsSync(profile.settingsPath)) {
+    return {
+      ok: false,
+      reason: 'settings_missing',
+      message: `AGY profile settings file is missing: ${profile.settingsPath}`,
+    };
+  }
+
+  let settings: Record<string, unknown>;
+  try {
+    settings = readSettings(profile.settingsPath);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'settings_unreadable',
+      message: `AGY profile settings file is unreadable: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  const selectedModel = typeof settings.model === 'string' ? settings.model.trim() : '';
+  if (selectedModel !== profile.expectedModel) {
+    return {
+      ok: false,
+      reason: 'model_mismatch',
+      message: `AGY profile selected model mismatch: expected "${profile.expectedModel}", found "${selectedModel || 'unset'}".`,
+    };
+  }
+
+  const trustedWorkspaces = Array.isArray(settings.trustedWorkspaces)
+    ? settings.trustedWorkspaces
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => resolve(value))
+    : [];
+  const workingDirectory = resolve(input.workingDirectory);
+  if (!trustedWorkspaces.includes(workingDirectory)) {
+    return {
+      ok: false,
+      reason: 'untrusted_workspace',
+      message: `AGY profile trustedWorkspaces does not include assigned worktree "${workingDirectory}".`,
+    };
+  }
+
+  return { ok: true };
+}

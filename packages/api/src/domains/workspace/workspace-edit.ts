@@ -2,10 +2,11 @@
  * Workspace Edit — F063 AC-9
  *
  * Edit session token management (HMAC-signed, 30min TTL) and
- * atomic file write with sha256 conflict detection.
+ * file write with byte-sha256 conflict detection among this API process's writers.
  */
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
+import { serializeWorkspaceMutation } from './workspace-mutation-lock.js';
 
 // Token secret — generated once per process lifetime
 const TOKEN_SECRET = randomBytes(32);
@@ -53,23 +54,8 @@ export function verifyEditToken(token: string, worktreeId: string): TokenPayload
   }
 }
 
-function sha256(content: string): string {
+function sha256(content: string | Buffer): string {
   return createHash('sha256').update(content).digest('hex');
-}
-
-// Per-file mutex to serialize read-compare-write (single-process app)
-const fileLocks = new Map<string, Promise<unknown>>();
-
-function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
-  const prev = fileLocks.get(path) ?? Promise.resolve();
-  const next = prev.then(fn, fn); // run fn after previous settles (success or failure)
-  fileLocks.set(path, next);
-  // Clean up when chain settles (success or failure) to avoid unbounded growth
-  const cleanup = () => {
-    if (fileLocks.get(path) === next) fileLocks.delete(path);
-  };
-  next.then(cleanup, cleanup);
-  return next;
 }
 
 export interface WriteResult {
@@ -86,7 +72,7 @@ export interface WriteConflict {
 
 /**
  * Write file content with optimistic concurrency via sha256.
- * Uses per-file mutex to serialize read-compare-write.
+ * Shares the F063 mutation boundary with upload, move, delete and accept.
  * Caller must resolve path and check security before calling this.
  */
 export async function writeWorkspaceFile(
@@ -94,8 +80,10 @@ export async function writeWorkspaceFile(
   content: string,
   baseSha256: string,
 ): Promise<WriteResult | WriteConflict> {
-  return withFileLock(resolvedPath, async () => {
-    const current = await readFile(resolvedPath, 'utf-8');
+  return serializeWorkspaceMutation(async () => {
+    const current = await readFile(resolvedPath);
+    // A lossy UTF-8 decode must never become an editable source whose original bytes can be overwritten.
+    new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(current);
     const currentHash = sha256(current);
 
     if (currentHash !== baseSha256) {

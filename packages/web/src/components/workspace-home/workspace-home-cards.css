@@ -1,0 +1,246 @@
+/*
+ * Workspace home (F322 original-B; home-northstar §1.8 w1 and §1.12 窄栏 1) — presentation only.
+ * `WorkspaceHomeV2` is mounted only while the presentation is v2, and every rule is scoped to it, so the classic home
+ * (`WorkspaceNowSurface` + `WorkspaceLauncher`) is not reached by any of this.
+ *
+ * Wide or narrow is the column's own width, not the window's: the Workspace is a draggable 20%–80% panel. The home is a
+ * size container; at 540px and below the tools go two to a row with the name and one number, and the descriptions and
+ * chevrons give way first (§1.12 宽窄规则 3: 先省说明字). Information (the count, the branch, the state) never moves
+ * into a "更多".
+ *
+ * Two sheets (each under the 350-line convention): this one is the container and the two cards (正在发生, 等待与接回),
+ * `workspace-home-tools.css` is the search, the tool rows, the footer and the narrow rules. Both are imported by
+ * `WorkspaceHomeV2`, so they load with the page that uses them, like the other component sheets. Text sizes are not
+ * set here: the components use the typography-token classes (text-label / text-xs / text-compact / text-sm).
+ */
+[data-shell="v2"] .home-v2 {
+  background: var(--shell-work);
+  container-type: inline-size;
+  container-name: home;
+}
+
+[data-shell="v2"] .home-column {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 24px 16px 32px;
+}
+
+[data-shell="v2"] .home-card {
+  display: block;
+  margin-bottom: 14px;
+  padding: 12px 14px 6px;
+  border-radius: 12px;
+  background: var(--shell-paper);
+  box-shadow: inset 0 0 0 1px var(--shell-hairline-strong);
+}
+
+[data-shell="v2"] .home-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+[data-shell="v2"] .home-dot {
+  flex: none;
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+[data-shell="v2"] .home-dot[data-tone="live"] {
+  background: var(--semantic-success);
+}
+
+[data-shell="v2"] .home-dot[data-tone="wait"] {
+  background: var(--semantic-warning);
+}
+
+[data-shell="v2"] .home-card-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--shell-ink);
+}
+
+[data-shell="v2"] .home-card-scope {
+  flex: none;
+  color: var(--shell-muted);
+  white-space: nowrap; /* "Everywhere · 3" stays together; the title takes the second line instead */
+}
+
+[data-shell="v2"] .home-note {
+  padding-bottom: 12px;
+  color: var(--shell-body);
+}
+
+[data-shell="v2"] .home-note[data-tone="warn"],
+[data-shell="v2"] .home-card-foot[data-tone="warn"],
+[data-shell="v2"] .home-foot-warn,
+[data-shell="v2"] .home-wait-line[data-tone="warn"] {
+  color: var(--conn-amber-text);
+}
+
+[data-shell="v2"] .home-wait-line[data-tone="ok"] {
+  color: var(--conn-green-text);
+}
+
+[data-shell="v2"] .home-card-foot {
+  margin: 0;
+  padding: 8px 0 8px;
+  border-top: 1px solid var(--shell-hairline);
+  color: var(--shell-muted);
+}
+
+[data-shell="v2"] .home-rows > :first-child {
+  border-top: 0;
+}
+
+[data-shell="v2"] .home-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--shell-hairline-strong);
+  color: var(--shell-body);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+[data-shell="v2"] .home-btn:hover {
+  background: color-mix(in srgb, var(--shell-selected) 55%, transparent);
+}
+
+[data-shell="v2"] .home-stop {
+  padding: 0 4px;
+  color: var(--shell-muted);
+  cursor: pointer;
+}
+
+[data-shell="v2"] .home-stop:hover {
+  color: var(--shell-danger);
+}
+
+[data-shell="v2"] .home-link {
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+[data-shell="v2"] .home-actions {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 正在发生 */
+[data-shell="v2"] .home-live-row {
+  padding: 8px 0;
+  border-top: 1px solid var(--shell-hairline);
+}
+
+[data-shell="v2"] .home-live-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+}
+
+[data-shell="v2"] .home-live-link {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: inherit;
+  border-radius: 6px;
+}
+
+[data-shell="v2"] .home-live-clock {
+  flex: none;
+  margin-left: 8px;
+  color: var(--shell-muted);
+  font-weight: 400;
+}
+
+[data-shell="v2"] .home-live-status {
+  color: var(--shell-muted);
+}
+
+[data-shell="v2"] .home-live-main .home-btn {
+  padding: 0 6px;
+  font-size: var(--console-font-lg);
+}
+
+[data-shell="v2"] .home-live-name {
+  flex: none;
+  max-width: 24%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--shell-ink);
+}
+[data-shell="v2"] .home-live-sub {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--shell-muted);
+}
+[data-shell="v2"] .home-badge {
+  flex: none;
+  border-radius: 4px;
+  padding: 1px 3px;
+  background: var(--shell-selected);
+  color: var(--shell-body);
+}
+[data-shell="v2"] .home-live-main {
+  gap: 4px;
+  min-height: 28px;
+}
+[data-shell="v2"] .home-live-link {
+  gap: 5px;
+}
+[data-shell="v2"] .home-live-clock {
+  margin-left: 0;
+}
+[data-shell="v2"] .home-live-row {
+  padding: 5px 0;
+}
+
+/* 等待与接回 */
+[data-shell="v2"] .home-wait-line {
+  display: block;
+  margin-top: 2px;
+  color: var(--shell-muted);
+  overflow-wrap: anywhere;
+}
+
+[data-shell="v2"] .home-empty {
+  padding: 2px 0 10px;
+}
+
+[data-shell="v2"] .home-empty-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--shell-ink);
+}
+
+[data-shell="v2"] .home-empty-hint {
+  margin: 2px 0 0;
+  line-height: 1.5;
+  color: var(--shell-muted);
+}

@@ -1,6 +1,6 @@
 /**
  * Session Transcript Routes — F24 Phase D + F98
- * API endpoints for reading sealed session transcripts.
+ * API endpoints for reading active and sealed session transcripts.
  *
  * GET  /api/sessions/:sessionId/events                    — Paginated events (view=raw|chat|handoff)
  * GET  /api/sessions/:sessionId/digest                    — Extractive digest
@@ -8,45 +8,108 @@
  * GET  /api/threads/:threadId/sessions/search              — Full-text search
  */
 
-import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
-import { z } from 'zod';
-import { formatEventsChat, formatEventsHandoff } from '../domains/cats/services/session/TranscriptFormatter.js';
-import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
-import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
-import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import type { InvocationTrajectorySummary, SessionRecord } from '@cat-cafe/shared';
+import type { FastifyInstance } from 'fastify';
+import { resolveCanonicalInvocationSummaries } from '../domains/cats/services/session/CanonicalInvocationTrajectoryResolver.js';
+import { projectInvocationPromptInput } from '../domains/cats/services/session/InvocationPromptInputProjector.js';
+import { resolveScopedSessionTrajectory } from '../domains/cats/services/session/scoped-session-trajectory.js';
+import { formatEventsChat } from '../domains/cats/services/session/TranscriptFormatter.js';
+import {
+  canReadThreadRecord,
+  filterThreadRecords,
+  resolveThreadAccess,
+  threadAccessDeniedBody,
+  threadRecordAccessDeniedBody,
+} from '../domains/cats/services/session/thread-access-policy.js';
+import { TranscriptInvocationReader } from '../domains/cats/services/session/transcript-index/TranscriptInvocationReader.js';
+import type { TranscriptReadObserver } from '../domains/cats/services/session/transcript-index/transcript-read-observer.js';
+import { createTranscriptReadDiagnostics } from '../infrastructure/transcript-read-diagnostics.js';
 import { resolveUserId } from '../utils/request-identity.js';
-
-const VALID_VIEWS = new Set(['raw', 'chat', 'handoff']);
-
-interface SessionTranscriptRouteOptions extends FastifyPluginOptions {
-  sessionChainStore: ISessionChainStore;
-  threadStore: IThreadStore;
-  transcriptReader: TranscriptReader;
-}
-
-/** Strict integer parse: only pure decimal digit strings (no whitespace, no partial) */
-function strictParseInt(s: string): number {
-  return /^\d+$/.test(s) ? Number(s) : NaN;
-}
-
-const searchSchema = z.object({
-  q: z.string().min(1).max(500),
-  cats: z.string().optional(),
-  sessionIds: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(200).optional(),
-  scope: z.enum(['digests', 'transcripts', 'both']).optional(),
-});
+import { registerInvocationTrajectoryRoutes } from './invocation-trajectory-routes.js';
+import {
+  projectHandoffTranscriptPage,
+  projectRawTranscriptPage,
+  sliceTranscriptEvent,
+} from './session-transcript-response.js';
+import {
+  checkTranscriptCatAccess,
+  strictParseTranscriptInteger,
+  transcriptSearchSchema,
+  VALID_TRANSCRIPT_VIEWS,
+} from './session-transcript-route-helpers.js';
+import type { ReadableSession, SessionTranscriptRouteOptions } from './session-transcript-route-types.js';
+import { withTranscriptReadSignal } from './transcript-read-cancellation.js';
 
 export async function sessionTranscriptRoutes(
   app: FastifyInstance,
   opts: SessionTranscriptRouteOptions,
 ): Promise<void> {
-  const { sessionChainStore, threadStore, transcriptReader } = opts;
+  const {
+    invocationRecordStore,
+    sessionChainStore,
+    threadStore,
+    transcriptReader,
+    transcriptWriter,
+    messageStore,
+    turnExecutionStore,
+    profileRepository,
+    memoryCueSourceReader,
+  } = opts;
+
+  const invocationReader = new TranscriptInvocationReader(transcriptReader, transcriptWriter);
+  const diagnostics = createTranscriptReadDiagnostics({
+    onEvent: (event) => app.log.info(event, '[Task229] transcript read diagnostic'),
+  });
+  app.addHook('onClose', async () => diagnostics.stop());
+  async function resolveInvocationSummary(
+    summary: InvocationTrajectorySummary,
+    session: Pick<SessionRecord, 'scopedInvocation' | 'userId' | 'catId' | 'threadId'>,
+    userId: string,
+  ) {
+    if (session.scopedInvocation) return resolveScopedSessionTrajectory(summary, session, turnExecutionStore);
+    const [canonical] = await resolveCanonicalInvocationSummaries([summary], userId, turnExecutionStore);
+    return canonical;
+  }
+  async function readInvocationEvents(
+    sessions: ReadableSession[],
+    invocationId: string,
+    signal?: AbortSignal,
+    observer?: TranscriptReadObserver,
+  ) {
+    const pages = await invocationReader.readInvocation(
+      sessions,
+      invocationId,
+      { generationEvidenceOnly: true },
+      signal,
+      observer,
+    );
+    return new Map([...pages].map(([id, page]) => [id, page.events]));
+  }
+
+  registerInvocationTrajectoryRoutes(app, {
+    stores: { invocationRecordStore, turnExecutionStore, sessionChainStore, threadStore },
+    listInvocationSummaries: async (sessions, limit, userId, signal) => {
+      const page = await invocationReader.list(sessions, limit, signal);
+      const invocations = await Promise.all(
+        page.invocations.map(async (summary) => {
+          const session = await sessionChainStore.get(summary.sessionId);
+          return session ? resolveInvocationSummary(summary, session, userId) : summary;
+        }),
+      );
+      return { ...page, invocations };
+    },
+    readInvocationEvents,
+    createReadObserver: diagnostics.beginRead,
+    ...(messageStore ? { messageStore } : {}),
+    ...(transcriptWriter ? { keyedContentDigest: transcriptWriter.keyedContentDigest.bind(transcriptWriter) } : {}),
+    ...(profileRepository ? { profileRepository } : {}),
+    ...(memoryCueSourceReader ? { memoryCueSourceReader } : {}),
+  });
 
   // GET /api/sessions/:sessionId/events — Paginated event read (F98: view modes)
   app.get<{
     Params: { sessionId: string };
-    Querystring: { cursor?: string; limit?: string; view?: string };
+    Querystring: { cursor?: string; limit?: string; view?: string; charOffset?: string };
   }>('/api/sessions/:sessionId/events', async (request, reply) => {
     const userId = resolveUserId(request);
     if (!userId) {
@@ -61,56 +124,121 @@ export async function sessionTranscriptRoutes(
     }
 
     const thread = await threadStore.get(session.threadId);
-    if (!thread || thread.createdBy !== userId) {
+    const access = await resolveThreadAccess({
+      threadStore,
+      thread,
+      userId,
+      request: { resource: 'transcript', action: 'read' },
+    });
+    if (access.status === 403) {
+      return reply.status(403).send(threadAccessDeniedBody(access));
+    }
+    if (!canReadThreadRecord(access, session)) {
+      return reply.status(403).send(threadRecordAccessDeniedBody());
+    }
+
+    const callerCatIdErr = checkTranscriptCatAccess(request, session.catId);
+    if (callerCatIdErr) {
       reply.status(403);
-      return { error: 'Access denied' };
+      return { error: callerCatIdErr };
     }
 
     const view = (request.query.view ?? 'raw') as string;
-    if (!VALID_VIEWS.has(view)) {
+    if (!VALID_TRANSCRIPT_VIEWS.has(view)) {
       reply.status(400);
       return { error: `Invalid view: must be one of raw, chat, handoff` };
     }
 
     const cursorParam = request.query.cursor;
-    const cursorNum = cursorParam ? strictParseInt(cursorParam) : undefined;
+    const cursorNum = cursorParam ? strictParseTranscriptInteger(cursorParam) : undefined;
     if (cursorNum != null && (Number.isNaN(cursorNum) || cursorNum < 0)) {
       reply.status(400);
       return { error: 'Invalid cursor: must be a non-negative integer' };
     }
-    const cursor = cursorNum != null ? { eventNo: cursorNum } : undefined;
 
     const limitParam = request.query.limit;
-    const limitNum = limitParam ? strictParseInt(limitParam) : undefined;
+    const limitNum = limitParam ? strictParseTranscriptInteger(limitParam) : undefined;
     if (limitNum != null && (Number.isNaN(limitNum) || limitNum < 1)) {
       reply.status(400);
       return { error: 'Invalid limit: must be a positive integer' };
     }
     const limit = limitNum != null ? Math.min(limitNum, 200) : 50;
 
-    const result = await transcriptReader.readEvents(sessionId, session.threadId, session.catId, cursor, limit);
+    const charOffsetParam = request.query.charOffset;
+    const charOffset = charOffsetParam === undefined ? undefined : strictParseTranscriptInteger(charOffsetParam);
+    if (charOffset !== undefined) {
+      if (Number.isNaN(charOffset) || charOffset < 0 || view !== 'raw' || cursorNum === undefined || limit !== 1) {
+        reply.status(400);
+        return { error: 'charOffset requires raw view, exact cursor eventNo and limit=1' };
+      }
+      const one = await withTranscriptReadSignal(request, reply, (signal) =>
+        invocationReader.readEvents(session, { cursor: cursorNum, limit: 1 }, signal),
+      );
+      const event = one.events.find((candidate) => candidate.eventNo === cursorNum);
+      if (!event) return reply.status(404).send({ error: 'Event not found' });
+      const eventChars = JSON.stringify(event.event).length;
+      if (charOffset >= eventChars) {
+        reply.status(400);
+        return { error: 'charOffset is beyond this event' };
+      }
+      return reply.send(sliceTranscriptEvent(event, charOffset));
+    }
+
+    // Handoff view: read all events, group into complete invocation summaries,
+    // paginate by raw-event budget. The cursor is a genuine raw eventNo —
+    // same semantics as raw/chat views — preserving the external API contract.
+    if (view === 'handoff') {
+      const handoffCursor = cursorNum != null ? { eventNo: cursorNum } : undefined;
+      const handoffResult = await transcriptReader.readEventsHandoff(
+        sessionId,
+        session.threadId,
+        session.catId,
+        handoffCursor,
+        limit,
+      );
+      return reply.send(projectHandoffTranscriptPage(handoffResult, sessionId));
+    }
+
+    // Raw and chat views: paginate by raw event number
+    const result = await withTranscriptReadSignal(request, reply, (signal) =>
+      invocationReader.readEvents(session, { cursor: cursorNum, limit }, signal),
+    );
 
     if (view === 'chat') {
+      const boundedRaw = projectRawTranscriptPage(result, sessionId);
+      const originalByEventNo = new Map(result.events.map((event) => [event.eventNo, event]));
+      const messages: Array<Record<string, unknown>> = [];
+      for (const event of boundedRaw.events) {
+        const original = originalByEventNo.get(event.eventNo);
+        if (!original) continue;
+        const [message] = formatEventsChat([original]);
+        if (!message) continue;
+        messages.push(
+          'oversized' in event && event.oversized
+            ? {
+                eventNo: event.eventNo,
+                role: message.role,
+                oversized: true,
+                contentLength: message.content.length,
+                drillDown: event.drillDown,
+              }
+            : { ...message, eventNo: event.eventNo },
+        );
+      }
       return reply.send({
-        messages: formatEventsChat(result.events),
-        nextCursor: result.nextCursor,
-        total: result.total,
-      });
-    }
-    if (view === 'handoff') {
-      return reply.send({
-        invocations: formatEventsHandoff(result.events),
-        nextCursor: result.nextCursor,
+        messages,
+        ...(boundedRaw.nextCursor ? { nextCursor: boundedRaw.nextCursor } : {}),
         total: result.total,
       });
     }
 
-    return reply.send(result);
+    return reply.send(projectRawTranscriptPage(result, sessionId));
   });
 
   // GET /api/sessions/:sessionId/digest — Extractive digest
   app.get<{
     Params: { sessionId: string };
+    Querystring: { charOffset?: string };
   }>('/api/sessions/:sessionId/digest', async (request, reply) => {
     const userId = resolveUserId(request);
     if (!userId) {
@@ -125,14 +253,52 @@ export async function sessionTranscriptRoutes(
     }
 
     const thread = await threadStore.get(session.threadId);
-    if (!thread || thread.createdBy !== userId) {
+    const access = await resolveThreadAccess({
+      threadStore,
+      thread,
+      userId,
+      request: { resource: 'transcript', action: 'read' },
+    });
+    if (access.status === 403) {
+      return reply.status(403).send(threadAccessDeniedBody(access));
+    }
+    if (!canReadThreadRecord(access, session)) {
+      return reply.status(403).send(threadRecordAccessDeniedBody());
+    }
+
+    const callerCatIdErr2 = checkTranscriptCatAccess(request, session.catId);
+    if (callerCatIdErr2) {
       reply.status(403);
-      return { error: 'Access denied' };
+      return { error: callerCatIdErr2 };
     }
 
     const digest = await transcriptReader.readDigest(sessionId, session.threadId, session.catId);
     if (!digest) {
       return reply.status(404).send({ error: 'Digest not found' });
+    }
+
+    const serialized = JSON.stringify(digest);
+    if (request.query.charOffset !== undefined) {
+      const charOffset = strictParseTranscriptInteger(request.query.charOffset);
+      if (Number.isNaN(charOffset) || charOffset < 0 || charOffset >= serialized.length) {
+        return reply.status(400).send({ error: 'Invalid digest charOffset' });
+      }
+      const digestSlice = serialized.slice(charOffset, charOffset + 8_000);
+      const nextCharOffset = charOffset + digestSlice.length;
+      return reply.send({
+        digestSlice,
+        charOffset,
+        totalChars: serialized.length,
+        ...(nextCharOffset < serialized.length ? { nextCharOffset } : {}),
+      });
+    }
+
+    if (serialized.length > 24_000) {
+      return reply.send({
+        oversized: true,
+        digestChars: serialized.length,
+        drillDown: { tool: 'cat_cafe_read_session_digest', args: { sessionId, charOffset: 0 } },
+      });
     }
 
     return reply.send(digest);
@@ -141,6 +307,7 @@ export async function sessionTranscriptRoutes(
   // GET /api/sessions/:sessionId/invocations/:invocationId — F98 Gap 2
   app.get<{
     Params: { sessionId: string; invocationId: string };
+    Querystring: { cursor?: string; limit?: string };
   }>('/api/sessions/:sessionId/invocations/:invocationId', async (request, reply) => {
     const userId = resolveUserId(request);
     if (!userId) {
@@ -155,22 +322,56 @@ export async function sessionTranscriptRoutes(
     }
 
     const thread = await threadStore.get(session.threadId);
-    if (!thread || thread.createdBy !== userId) {
+    const access = await resolveThreadAccess({
+      threadStore,
+      thread,
+      userId,
+      request: { resource: 'invocations', action: 'read' },
+    });
+    if (access.status === 403) {
+      return reply.status(403).send(threadAccessDeniedBody(access));
+    }
+    if (!canReadThreadRecord(access, session)) {
+      return reply.status(403).send(threadRecordAccessDeniedBody());
+    }
+
+    const callerCatIdErr3 = checkTranscriptCatAccess(request, session.catId);
+    if (callerCatIdErr3) {
       reply.status(403);
-      return { error: 'Access denied' };
+      return { error: callerCatIdErr3 };
     }
 
-    const events = await transcriptReader.readInvocationEvents(
-      sessionId,
-      session.threadId,
-      session.catId,
-      invocationId,
+    const paginated = request.query.cursor !== undefined || request.query.limit !== undefined;
+    let pageOptions: { cursor?: number; limit?: number } = {};
+    if (paginated) {
+      const cursor = request.query.cursor === undefined ? 0 : strictParseTranscriptInteger(request.query.cursor);
+      const limit = request.query.limit === undefined ? 50 : strictParseTranscriptInteger(request.query.limit);
+      if (Number.isNaN(cursor) || cursor < 0 || Number.isNaN(limit) || limit < 1 || limit > 200) {
+        return reply.status(400).send({ error: 'Invalid invocation cursor or limit' });
+      }
+      pageOptions = { cursor, limit };
+    }
+    const pages = await withTranscriptReadSignal(request, reply, (signal) =>
+      invocationReader.readInvocation([session], invocationId, pageOptions, signal),
     );
-    if (!events) {
-      return reply.status(404).send({ error: 'Invocation not found' });
+    const page = pages.get(session.id);
+    if (!page || page.total === 0) return reply.status(404).send({ error: 'Invocation not found' });
+    const { events } = page;
+    if (paginated) {
+      return reply.send({
+        invocationId,
+        ...projectRawTranscriptPage(page, sessionId),
+      });
     }
 
-    return reply.send({ invocationId, events, total: events.length });
+    const summary = page.summary ? await resolveInvocationSummary(page.summary, session, userId) : page.summary;
+    const promptInput = await projectInvocationPromptInput(
+      { messageStore, turnExecutionStore },
+      session,
+      invocationId,
+      userId,
+    );
+    return reply.send({ invocationId, events, total: events.length, summary, promptInput });
   });
 
   // GET /api/threads/:threadId/sessions/search — Full-text search
@@ -186,12 +387,17 @@ export async function sessionTranscriptRoutes(
 
     const { threadId } = request.params;
     const thread = await threadStore.get(threadId);
-    if (!thread || thread.createdBy !== userId) {
-      reply.status(403);
-      return { error: 'Access denied' };
+    const access = await resolveThreadAccess({
+      threadStore,
+      thread,
+      userId,
+      request: { resource: 'transcript', action: 'search' },
+    });
+    if (access.status === 403) {
+      return reply.status(403).send(threadAccessDeniedBody(access));
     }
 
-    const parseResult = searchSchema.safeParse(request.query);
+    const parseResult = transcriptSearchSchema.safeParse(request.query);
     if (!parseResult.success) {
       reply.status(400);
       return { error: 'Invalid query', details: parseResult.error.issues };
@@ -199,8 +405,18 @@ export async function sessionTranscriptRoutes(
 
     const { q, cats, sessionIds, limit, scope } = parseResult.data;
 
-    const catsArr = cats?.split(',').filter(Boolean);
-    const sessionIdsArr = sessionIds?.split(',').filter(Boolean);
+    // P0a enforcement: when x-cat-id header is present, force-filter to caller's own sessions only
+    // Prevents game-playing cats from searching other cats' session content (KD-39)
+    const callerCatId = request.headers['x-cat-id'] as string | undefined;
+    const catsArr = callerCatId ? [callerCatId] : cats?.split(',').filter(Boolean);
+    const requestedSessionIds = sessionIds?.split(',').filter(Boolean);
+    const accessibleSessions = filterThreadRecords(access, await sessionChainStore.getChainByThread(threadId));
+    const accessibleSessionIds = new Set(accessibleSessions.map((session) => session.id));
+    const sessionIdsArr = requestedSessionIds
+      ? requestedSessionIds.filter((sessionId) => accessibleSessionIds.has(sessionId))
+      : access.scope === 'user'
+        ? [...accessibleSessionIds]
+        : undefined;
 
     const hits = await transcriptReader.search(threadId, q, {
       ...(catsArr ? { cats: catsArr } : {}),

@@ -1,4 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { apiFetchMock } = vi.hoisted(() => ({
+  apiFetchMock: vi.fn(),
+}));
+
+vi.mock('../../utils/api-client', () => ({
+  API_URL: 'http://localhost:3004',
+  apiFetch: apiFetchMock,
+}));
+
 import {
   bootstrapDebugFromStorage,
   clearDebugEvents,
@@ -13,6 +23,7 @@ import {
 describe('invocationEventDebug', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    apiFetchMock.mockReset();
     clearDebugEvents();
     configureDebug({ enabled: false });
     delete (window as typeof window & { __catCafeDebug?: unknown }).__catCafeDebug;
@@ -45,7 +56,7 @@ describe('invocationEventDebug', () => {
     expect((window as typeof window & { __catCafeDebug?: unknown }).__catCafeDebug).toBeTruthy();
   });
 
-  it('exposes dumpBubbleTimeline() and returns only bubble lifecycle events', () => {
+  it('exposes dumpBubbleTimeline() and returns only bubble lifecycle/invariant events', () => {
     configureDebug({ enabled: true });
     ensureWindowDebugApi();
 
@@ -66,6 +77,23 @@ describe('invocationEventDebug', () => {
       invocationId: 'inv-1',
       origin: 'stream',
     } as Parameters<typeof recordDebugEvent>[0]);
+    recordDebugEvent({
+      event: 'bubble_invariant_violation',
+      threadId: 'thread-a',
+      timestamp: 3,
+      actorId: 'opus',
+      canonicalInvocationId: 'inv-1',
+      bubbleKind: 'assistant_text',
+      eventType: 'callback_final',
+      originPhase: 'callback/history',
+      sourcePath: 'callback',
+      existingMessageId: 'msg-stream-1',
+      incomingMessageId: 'msg-callback-1',
+      seq: 7,
+      recoveryAction: 'quarantine',
+      violationKind: 'duplicate',
+      level: 'warn',
+    } as Parameters<typeof recordDebugEvent>[0]);
 
     const debugApi = (
       window as typeof window & {
@@ -74,13 +102,15 @@ describe('invocationEventDebug', () => {
     ).__catCafeDebug;
 
     expect(debugApi?.dumpBubbleTimeline).toBeTypeOf('function');
+    const dumpBubbleTimeline = debugApi?.dumpBubbleTimeline;
+    if (!dumpBubbleTimeline) throw new Error('dumpBubbleTimeline not mounted');
 
-    const dump = JSON.parse(debugApi!.dumpBubbleTimeline!({ rawThreadId: true })) as {
+    const dump = JSON.parse(dumpBubbleTimeline({ rawThreadId: true })) as {
       meta: { count: number };
       events: Array<Record<string, unknown>>;
     };
 
-    expect(dump.meta.count).toBe(1);
+    expect(dump.meta.count).toBe(2);
     expect(dump.events).toEqual([
       expect.objectContaining({
         event: 'bubble_lifecycle',
@@ -92,7 +122,69 @@ describe('invocationEventDebug', () => {
         invocationId: 'inv-1',
         origin: 'stream',
       }),
+      expect.objectContaining({
+        event: 'bubble_invariant_violation',
+        actorId: 'opus',
+        canonicalInvocationId: 'inv-1',
+        bubbleKind: 'assistant_text',
+        eventType: 'callback_final',
+        originPhase: 'callback/history',
+        sourcePath: 'callback',
+        existingMessageId: 'msg-stream-1',
+        incomingMessageId: 'msg-callback-1',
+        seq: 7,
+        recoveryAction: 'quarantine',
+        violationKind: 'duplicate',
+        level: 'warn',
+      }),
     ]);
+  });
+
+  it('exports current debug dump to runtime via API', async () => {
+    configureDebug({ enabled: true });
+    ensureWindowDebugApi();
+
+    recordDebugEvent({
+      event: 'queue_updated',
+      threadId: 'thread-a',
+      action: 'processing',
+      timestamp: 1,
+    });
+
+    apiFetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, path: 'docs/runtime/test.json', count: 1 })),
+    );
+
+    const debugApi = (
+      window as typeof window & {
+        __catCafeDebug?: {
+          exportToRuntime?: (options?: { rawThreadId?: boolean; label?: string }) => Promise<unknown>;
+        };
+      }
+    ).__catCafeDebug;
+
+    const result = await debugApi?.exportToRuntime?.({ rawThreadId: true, label: 'repro-thread-a' });
+    expect(result).toEqual({ ok: true, path: 'docs/runtime/test.json', count: 1 });
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/debug/invocation-events/export',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const firstCall = apiFetchMock.mock.calls[0] as unknown[] | undefined;
+    const requestInit = firstCall && firstCall.length > 1 ? (firstCall[1] as RequestInit) : undefined;
+    expect(requestInit).toBeDefined();
+    expect(JSON.parse((requestInit?.body ?? '') as string)).toEqual(
+      expect.objectContaining({
+        kind: 'events',
+        label: 'repro-thread-a',
+        dump: expect.objectContaining({
+          meta: expect.objectContaining({ rawThreadId: true, count: 1 }),
+          events: [expect.objectContaining({ threadId: 'thread-a', action: 'processing' })],
+        }),
+      }),
+    );
   });
 
   it('records history_replace events with action and reason payload', () => {

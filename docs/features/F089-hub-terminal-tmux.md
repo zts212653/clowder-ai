@@ -5,6 +5,7 @@ related_decisions: [012]
 topics: [terminal, tmux, workspace, xterm, pty, agent-observability]
 doc_kind: spec
 created: 2026-03-09
+tips_exempt: documentation-only gate repair — no new user-visible capability or interaction surface
 ---
 
 # F089 Hub Terminal & tmux Integration — 浏览器终端 + 猫猫可观测性
@@ -13,9 +14,9 @@ created: 2026-03-09
 
 ## Why
 
-### 核心需求（team lead 2026-03-08）
+### 核心需求（operator 2026-03-08）
 
-1. **观察猫猫操作**：agent 在 Claude CLI 里跑的子进程（Bash tool、subagent 等）team lead看不到
+1. **观察猫猫操作**：agent 在 Claude CLI 里跑的子进程（Bash tool、subagent 等）operator看不到
 2. **崩溃恢复**：agent 卡死时想看现场（而不是只能杀进程重来）
 3. **手动接管**：agent 做到一半想人工接手继续
 4. **浏览器内 terminal**：不想切 iTerm，在 Hub 里直接操作
@@ -24,6 +25,21 @@ created: 2026-03-09
 
 > 终态是 tmux 管理所有 session，所以从 Day 1 底层就是 tmux。
 > "先做纯 PTY 再叠 tmux" = 脚手架（Phase 1 PTY 在 Phase 3 被推翻），违反 P1。
+
+## User Journey
+
+**Scope unit**：一个 workspace/worktree 及其对应的 tmux server。
+
+### 当前旅程（Phase 1–3a）
+
+1. Operator 在 Hub 的 Workspace Terminal 打开当前 workspace 的 shell，不需要切换到外部终端。
+2. 启用 tmux agent runtime 后，agent invocation 出现在同一 workspace 的 pane 列表中；operator 选择 pane，以只读方式观察 agent 正在执行的真实进程输出。
+3. Agent 异常退出时，`remain-on-exit` 保留 pane 现场，operator 可以回看最后输出并据此诊断，而不是只能重启后猜测原因。
+
+### 目标旅程（Phase 3 剩余项）
+
+1. Operator 从 watch 切换到 takeover，系统暂停机器侧 NDJSON 消费，避免人工输入与自动解析互相干扰。
+2. Operator 在同一 pane 中继续操作，并通过进程树查看、定位和管理 agent 启动的子进程。
 
 ## What
 
@@ -37,7 +53,7 @@ tmux pane（agent 跑在这里）─┤
 
 **一个 agent = 一个 tmux pane。** 机器侧和人类侧消费同一个运行时的输出，不是两套进程。
 
-旧版"双轨制"的问题：机器轨 spawn+pipe 是独立进程，人类轨 tmux pane 是另一个——team lead在浏览器里看到的不是 agent 真正在干的事。
+旧版"双轨制"的问题：机器轨 spawn+pipe 是独立进程，人类轨 tmux pane 是另一个——operator在浏览器里看到的不是 agent 真正在干的事。
 
 ### tmux 架构
 
@@ -136,10 +152,10 @@ tmux pane（agent 跑在这里）─┤
 
 | # | 需求点 | 来源 | 状态 |
 |---|--------|------|------|
-| 1 | 浏览器内打开 terminal（单 shell） | team lead 2026-03-08 | done (Phase 1, PR #326 + #332) |
-| 1b | 浏览器内 tmux pane 列表 UI | team lead 2026-03-08 | done (Phase 3a, AgentPaneList) |
-| 2 | 观察 agent 操作（后端 plumbing） | team lead 2026-03-08 | done (Phase 2, PR #334) |
-| 2b | 观察 agent 操作（前端 UI 入口） | team lead 2026-03-08 | done (Phase 3a, AgentPaneViewer) |
-| 3 | 崩溃现场保留 | team lead 2026-03-08 | done (Phase 2, remain-on-exit) |
-| 4 | 手动接管 agent | team lead 2026-03-08 | pending (Phase 3) |
-| 5 | 进程树可视化 | team lead 2026-03-08 | pending (Phase 3) |
+| 1 | 浏览器内打开 terminal（单 shell） | operator 2026-03-08 | done (Phase 1, PR #326 + #332) |
+| 1b | 浏览器内 tmux pane 列表 UI | operator 2026-03-08 | done (Phase 3a, AgentPaneList) |
+| 2 | 观察 agent 操作（后端 plumbing） | operator 2026-03-08 | done (Phase 2, PR #334) |
+| 2b | 观察 agent 操作（前端 UI 入口） | operator 2026-03-08 | done (Phase 3a, AgentPaneViewer) |
+| 3 | 崩溃现场保留 | operator 2026-03-08 | done (Phase 2, remain-on-exit) |
+| 4 | 手动接管 agent | operator 2026-03-08 | pending (Phase 3) |
+| 5 | 进程树可视化 | operator 2026-03-08 | pending (Phase 3) |

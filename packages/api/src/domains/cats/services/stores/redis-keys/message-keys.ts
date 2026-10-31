@@ -7,6 +7,9 @@ export const MessageKeys = {
   /** Hash with message details: msg:{id} */
   detail: (id: string) => `msg:${id}`,
 
+  /** Short-lived owner-token mutex around lifecycle dispatchRef writes. */
+  lifecycleDispatchLock: (id: string) => `msg:${id}:lifecycle-dispatch-lock`,
+
   /** Global timeline sorted set */
   TIMELINE: 'msg:timeline',
 
@@ -21,4 +24,26 @@ export const MessageKeys = {
 
   /** Idempotency index: msg:idem:{userId}:{threadId}:{key} -> messageId */
   idempotency: (userId: string, threadId: string, key: string) => `msg:idem:${userId}:${threadId}:${key}`,
+
+  /** F264 Gap F: TTL=0 owner+thread composer draft. */
+  ownerComposerDraft: (ownerUserId: string, threadId: string) =>
+    `msg:composer-draft:${encodeURIComponent(ownerUserId)}:${encodeURIComponent(threadId)}`,
+
+  /** Legacy F264 index retained only so thread deletion removes pre-migration data. */
+  legacyQueueExposureIndex: (threadId: string) => `msg:queue-exposures:${threadId}`,
+
+  /**
+   * #1200 Visibility index: per-thread sorted set, member=messageId, score=visibilitySeq.
+   * Queued messages are NOT members until delivered. The thread ZSET (raw-time) is unchanged.
+   * See: docs/architecture/1200-cursor-order-analysis.md §8.2
+   */
+  threadVisibility: (threadId: string) => `msg:visibility:${threadId}`,
+
+  /**
+   * #1200 Visibility metadata: per-thread hash { migrated: '1', hwm: '<seq>' }.
+   * Source of truth for the allocator high-water and migration state.
+   * NEVER TTL'd, NEVER EXPIRE'd — removed only by deleteByThread.
+   * See: docs/architecture/1200-cursor-order-analysis.md §8.2
+   */
+  threadVisibilityMeta: (threadId: string) => `msg:visibility-meta:${threadId}`,
 } as const;

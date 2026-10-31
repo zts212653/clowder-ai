@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "1",
+  "plugins": [
+    {
+      "pluginId": "official.companion",
+      "name": "猫猫球",
+      "description": {
+        "default": "Talk, think and find your shared history with your companion.",
+        "translations": {
+          "zh-CN": "和猫猫说话、查资料，回到同一段聊天继续工作。"
+        }
+      },
+      "icon": {
+        "type": "png",
+        "src": "renderer/skins/ragdoll-v1.png"
+      },
+      "publisher": {
+        "id": "clowder-ai",
+        "name": "Clowder AI"
+      },
+      "keywords": ["companion", "conversation", "desktop", "voice"],
+      "versions": [
+        {
+          "version": "0.1.0-alpha.25",
+          "contractVersion": "0.1.0",
+          "manifestPath": "plugin.yaml",
+          "artifact": {
+            "kind": "npm",
+            "packageName": "@clowder-ai/companion",
+            "version": "0.1.0-alpha.25",
+            "tarballUrl": "https://registry.npmjs.org/@clowder-ai/companion/-/companion-0.1.0-alpha.25.tgz",
+            "integrity": "sha512-nAQbBlflHyfY08lzldO/nxEqbLvteXYT3e+rMxw/Lfq/2o8t01WH82aPLHrkyhxgvDe0IS7cfo0DCo30qow/wQ==",
+            "shasum": "c987c05001e55d9a9e298e53003cfc756c4df87c",
+            "provenance": {
+              "repository": "https://github.com/zts212653/clowder-ai-plugins",
+              "sourceDirectory": "packages/companion"
+            }
+          }
+        },
+        {
+          "version": "0.1.0-alpha.24",
+          "contractVersion": "0.1.0",
+          "manifestPath": "plugin.yaml",
+          "artifact": {
+            "kind": "npm",
+            "packageName": "@clowder-ai/companion",
+            "version": "0.1.0-alpha.24",
+            "tarballUrl": "https://registry.npmjs.org/@clowder-ai/companion/-/companion-0.1.0-alpha.24.tgz",
+            "integrity": "sha512-TN23gstQt3AC79zddScxjr9q9ZPGaNn+ieGdrLvfm3Ju+ev1cBjH/z7US8pxP3bLLF6FbFYfPbFmogb9EeIxug==",
+            "shasum": "c4b03e47820c53d5aa99019ae8f1d6dcc9a67834",
+            "provenance": {
+              "repository": "https://github.com/zts212653/clowder-ai-plugins",
+              "sourceDirectory": "packages/companion"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

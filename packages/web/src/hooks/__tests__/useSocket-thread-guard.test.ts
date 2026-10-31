@@ -9,10 +9,11 @@
  * so events from thread A would leak into thread B's callback after a switch.
  */
 
-import EventEmitter from 'node:events';
+import EventEmitter from 'events';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CatInvocationInfo } from '@/stores/chat-types';
 
 // ── Mock socket.io-client ──
 // Create a controllable EventEmitter that acts as a socket.io client.
@@ -44,82 +45,155 @@ const mockSetThreadMessageUsage = vi.fn();
 const mockSetThreadMessageStreaming = vi.fn();
 const mockSetThreadLoading = vi.fn();
 const mockSetThreadHasActiveInvocation = vi.fn();
-const mockSetQueue = vi.fn();
-const mockSetQueuePaused = vi.fn();
+const mockRequestStreamCatchUp = vi.fn();
+const mockSetQueue = vi.fn((threadId: string, queue: unknown[]) => {
+  mockThreadQueues.set(threadId, queue);
+});
 const mockSetQueueFull = vi.fn();
 const mockSetThreadIntentMode = vi.fn();
 const mockSetThreadTargetCats = vi.fn();
+const mockReplaceThreadTargetCats = vi.fn();
 const mockUpdateThreadCatStatus = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
-const mockGetThreadState = vi.fn(() => ({
-  messages: [],
-  isLoading: false,
-  isLoadingHistory: false,
-  hasMore: true,
-  hasActiveInvocation: false,
-  intentMode: null,
-  targetCats: [],
-  catStatuses: {},
-  catInvocations: {},
-  currentGame: null,
+const mockSetPendingPreviewAutoOpen = vi.fn();
+const mockQueueThreadPreview = vi.fn();
+const mockUpsertLifecycleMessage = vi.fn();
+// Stateful slot records so spawn_started/intent_mode registration behavior
+// (startedAt preservation, slot-count stability) can be asserted through the
+// real handler code, mimicking chatStore's `startedAt ?? Date.now()` write.
+const mockActiveInvocations: Record<string, { catId: string; mode: string; startedAt?: number }> = {};
+const mockThreadActiveInvocations: Record<
+  string,
+  Record<string, { catId: string; mode: string; startedAt?: number }>
+> = {};
+const mockAddActiveInvocation = vi.fn(
+  (threadId: string, invId: string, catId: string, mode: string, startedAt?: number) => {
+    (mockThreadActiveInvocations[threadId] ??= {})[invId] = { catId, mode, startedAt: startedAt ?? Date.now() };
+  },
+);
+const mockAddFlatActiveInvocation = vi.fn((invId: string, catId: string, mode: string, startedAt?: number) => {
+  mockActiveInvocations[invId] = { catId, mode, startedAt: startedAt ?? Date.now() };
+});
+const mockSetCatStatus = vi.fn();
+const mockRemoveActiveInvocation = vi.fn((invId: string) => {
+  delete mockActiveInvocations[invId];
+});
+const mockAddToast = vi.fn();
+const mockThreadQueues = new Map<string, unknown[]>();
+const mockKnownThreadIds = new Set(['thread-A', 'thread-B', 'thread-C']);
+const mockGetThreadState = vi.fn((threadId: string) => {
+  return {
+    messages: [],
+    queue: mockThreadQueues.get(threadId) ?? [],
+    isLoading: false,
+    isLoadingHistory: false,
+    hasMore: true,
+    hasActiveInvocation: false,
+    intentMode: null,
+    targetCats: [] as string[],
+    catStatuses: {} as Record<string, 'pending' | 'spawning' | 'streaming' | 'done' | 'error'>,
+    catInvocations: {} as Record<string, CatInvocationInfo>,
+    activeInvocations: mockThreadActiveInvocations[threadId] ?? {},
 
-  unreadCount: 0,
-  lastActivity: 0,
-}));
+    unreadCount: 0,
+    lastActivity: 0,
+  };
+});
 let mockStoreCurrentThreadId = 'thread-B';
+let mockFlatMessages: unknown[] = [];
 
 vi.mock('@/stores/chatStore', () => {
-  const store = {
-    getState: () => ({
-      currentThreadId: mockStoreCurrentThreadId,
-      addMessageToThread: mockAddMessageToThread,
-      appendToThreadMessage: mockAppendToThreadMessage,
-      appendToolEventToThread: mockAppendToolEventToThread,
-      setThreadCatInvocation: mockSetThreadCatInvocation,
-      setThreadMessageMetadata: mockSetThreadMessageMetadata,
-      setThreadMessageUsage: mockSetThreadMessageUsage,
-      setThreadMessageStreaming: mockSetThreadMessageStreaming,
-      setThreadLoading: mockSetThreadLoading,
-      setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
-      setQueue: mockSetQueue,
-      setQueuePaused: mockSetQueuePaused,
-      setQueueFull: mockSetQueueFull,
-      setThreadIntentMode: mockSetThreadIntentMode,
-      setThreadTargetCats: mockSetThreadTargetCats,
-      updateThreadCatStatus: mockUpdateThreadCatStatus,
-      clearThreadActiveInvocation: mockClearThreadActiveInvocation,
-      getThreadState: mockGetThreadState,
-    }),
+  const getState = () => ({
+    currentThreadId: mockStoreCurrentThreadId,
+    threads: [...mockKnownThreadIds].map((id) => ({ id, projectPath: '/project/cafe' })),
+    messages: mockFlatMessages,
+    threadStates: Object.fromEntries(
+      [...mockKnownThreadIds].map((threadId) => [threadId, { workspaceWorktreeId: null }]),
+    ),
+    workspaceWorktreeId: null,
+    presentationLock: null,
+    queue: mockThreadQueues.get(mockStoreCurrentThreadId) ?? [],
+    addMessageToThread: mockAddMessageToThread,
+    appendToThreadMessage: mockAppendToThreadMessage,
+    appendToolEventToThread: mockAppendToolEventToThread,
+    setThreadCatInvocation: mockSetThreadCatInvocation,
+    setThreadMessageMetadata: mockSetThreadMessageMetadata,
+    setThreadMessageUsage: mockSetThreadMessageUsage,
+    setThreadMessageStreaming: mockSetThreadMessageStreaming,
+    setThreadLoading: mockSetThreadLoading,
+    setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
+    requestStreamCatchUp: mockRequestStreamCatchUp,
+    setQueue: mockSetQueue,
+    setQueueFull: mockSetQueueFull,
+    setThreadIntentMode: mockSetThreadIntentMode,
+    setThreadTargetCats: mockSetThreadTargetCats,
+    replaceThreadTargetCats: mockReplaceThreadTargetCats,
+    updateThreadCatStatus: mockUpdateThreadCatStatus,
+    clearThreadActiveInvocation: mockClearThreadActiveInvocation,
+    clearThreadCatStatuses: vi.fn(),
+    addThreadActiveInvocation: mockAddActiveInvocation,
+    addActiveInvocation: mockAddFlatActiveInvocation,
+    removeActiveInvocation: mockRemoveActiveInvocation,
+    setCatStatus: mockSetCatStatus,
+    activeInvocations: mockActiveInvocations,
+    getThreadState: mockGetThreadState,
+    setPendingPreviewAutoOpen: mockSetPendingPreviewAutoOpen,
+    queueThreadPreview: mockQueueThreadPreview,
+    upsertLifecycleMessage: mockUpsertLifecycleMessage,
+  });
+  const useChatStore = ((selector?: (state: ReturnType<typeof getState>) => unknown) =>
+    selector ? selector(getState()) : getState()) as {
+    (selector?: (state: ReturnType<typeof getState>) => unknown): unknown;
+    getState: typeof getState;
   };
-  return { useChatStore: store };
+  useChatStore.getState = getState;
+  return { useChatStore };
 });
 
 vi.mock('@/stores/toastStore', () => ({
   useToastStore: {
     getState: () => ({
-      addToast: vi.fn(),
+      addToast: mockAddToast,
     }),
   },
 }));
 
 let mockUserId = 'test-user';
+const mockApiFetch = vi.hoisted(() => vi.fn());
+const mockSaveThreadActiveState = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock('@/utils/userId', () => ({
   getUserId: () => mockUserId,
 }));
 
 vi.mock('@/utils/api-client', () => ({
+  refreshApiSession: vi.fn(async () => {}),
   API_URL: 'http://localhost:3100',
+  apiFetch: (...args: unknown[]) => mockApiFetch(...args),
+}));
+
+vi.mock('@/utils/offline-store', () => ({
+  saveThreadActiveState: (...args: unknown[]) => mockSaveThreadActiveState(...args),
 }));
 
 import { configureDebug, invocationDebugConstants } from '@/debug/invocationEventDebug';
+import { previewVisiblePageAdmissionController } from '@/lib/preview-visible-page-admission-controller';
 // ── Import useSocket after mocks ──
+import { type OrchestrationFlow, useGuideStore } from '@/stores/guideStore';
 import { type SocketCallbacks, useSocket } from '../useSocket';
+
+const GUIDE_FLOW: OrchestrationFlow = {
+  id: 'add-member',
+  name: 'Add Member',
+  steps: [{ id: 'step-1', target: 'cats.add-member', tips: 'Add member', advance: 'click' }],
+};
 
 /**
  * Minimal wrapper component to mount the useSocket hook with controlled threadId.
  */
+let latestSocketControls: ReturnType<typeof useSocket> | null = null;
+
 function HookWrapper({ callbacks, threadId }: { callbacks: SocketCallbacks; threadId: string }) {
-  useSocket(callbacks, threadId);
+  latestSocketControls = useSocket(callbacks, threadId);
   return null;
 }
 
@@ -127,11 +201,11 @@ function HookWrapper({ callbacks, threadId }: { callbacks: SocketCallbacks; thre
  * Simulate a server-side socket event arriving at the client.
  * Uses the original EventEmitter.emit (not the mocked socket.emit).
  */
-function simulateServerEvent(event: string, data: unknown) {
+function simulateServerEvent(event: string, ...args: unknown[]) {
   // Get all listeners registered on the mock socket and call them
   const listeners = mockSocket.listeners(event);
   for (const listener of listeners) {
-    (listener as (data: unknown) => void)(data);
+    (listener as (...listenerArgs: unknown[]) => void)(...args);
   }
 }
 
@@ -161,8 +235,16 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     window.sessionStorage.removeItem(invocationDebugConstants.STORAGE_KEY);
     configureDebug({ enabled: false });
     delete (window as typeof window & { __catCafeDebug?: unknown }).__catCafeDebug;
+    latestSocketControls = null;
     mockUserId = 'test-user';
+    mockSocket.connected = true;
     mockStoreCurrentThreadId = 'thread-B';
+    mockFlatMessages = [];
+    mockThreadQueues.clear();
+    mockKnownThreadIds.clear();
+    mockKnownThreadIds.add('thread-A');
+    mockKnownThreadIds.add('thread-B');
+    mockKnownThreadIds.add('thread-C');
     mockAddMessageToThread.mockClear();
     mockAppendToThreadMessage.mockClear();
     mockAppendToolEventToThread.mockClear();
@@ -172,14 +254,44 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     mockSetThreadMessageStreaming.mockClear();
     mockSetThreadLoading.mockClear();
     mockSetThreadHasActiveInvocation.mockClear();
+    mockRequestStreamCatchUp.mockClear();
     mockSetQueue.mockClear();
-    mockSetQueuePaused.mockClear();
     mockSetQueueFull.mockClear();
     mockSetThreadIntentMode.mockClear();
     mockSetThreadTargetCats.mockClear();
+    mockReplaceThreadTargetCats.mockClear();
     mockUpdateThreadCatStatus.mockClear();
     mockClearThreadActiveInvocation.mockClear();
-    mockGetThreadState.mockClear();
+    mockSetPendingPreviewAutoOpen.mockClear();
+    mockQueueThreadPreview.mockClear();
+    mockUpsertLifecycleMessage.mockClear();
+    mockAddActiveInvocation.mockClear();
+    mockAddFlatActiveInvocation.mockClear();
+    mockSetCatStatus.mockClear();
+    mockRemoveActiveInvocation.mockClear();
+    for (const key of Object.keys(mockActiveInvocations)) delete mockActiveInvocations[key];
+    for (const key of Object.keys(mockThreadActiveInvocations)) delete mockThreadActiveInvocations[key];
+    mockAddToast.mockClear();
+    mockGetThreadState.mockReset();
+    mockGetThreadState.mockImplementation((threadId: string) => ({
+      messages: [],
+      queue: mockThreadQueues.get(threadId) ?? [],
+      isLoading: false,
+      isLoadingHistory: false,
+      hasMore: true,
+      hasActiveInvocation: false,
+      intentMode: null,
+      targetCats: [] as string[],
+      catStatuses: {} as Record<string, 'pending' | 'spawning' | 'streaming' | 'done' | 'error'>,
+      catInvocations: {} as Record<string, CatInvocationInfo>,
+      activeInvocations: mockThreadActiveInvocations[threadId] ?? {},
+      unreadCount: 0,
+      lastActivity: 0,
+    }));
+    mockApiFetch.mockReset();
+    mockApiFetch.mockRejectedValue(new Error('canonical queue unavailable in default fixture'));
+    mockSaveThreadActiveState.mockClear();
+    useGuideStore.setState({ session: null, completionPersisted: false, completionFailed: false, pendingStart: null });
     // Clear all socket listeners from previous tests
     mockSocket.removeAllListeners();
   });
@@ -192,6 +304,8 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     window.sessionStorage.removeItem(invocationDebugConstants.STORAGE_KEY);
     configureDebug({ enabled: false });
     delete (window as typeof window & { __catCafeDebug?: unknown }).__catCafeDebug;
+    useGuideStore.setState({ session: null, completionPersisted: false, completionFailed: false, pendingStart: null });
+    latestSocketControls = null;
   });
 
   it('intent_mode from active thread is forwarded to callback', () => {
@@ -223,6 +337,281 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     });
   });
 
+  it('projects a lifecycle delivery failure as an error system message', () => {
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    act(() => {
+      simulateServerEvent('message_lifecycle_updated', {
+        threadId: 'thread-A',
+        message: {
+          id: 'failure-1',
+          catId: 'system',
+          content: '没有可用成员可以处理这条消息。',
+          timestamp: 100,
+          lifecycle: {
+            kind: 'delivery_failure',
+            orderKey: '100:source-1:failure',
+            from: { kind: 'system', service: 'message_delivery' },
+            status: 'failed',
+            sourceEntryId: 'entry-1',
+            inputMessageId: 'source-1',
+            requestedTargets: [],
+            reason: 'no_available_target',
+            createdAt: 100,
+          },
+        },
+      });
+    });
+
+    expect(mockUpsertLifecycleMessage).toHaveBeenCalledWith(
+      'thread-A',
+      expect.objectContaining({
+        id: 'failure-1',
+        type: 'system',
+        variant: 'error',
+      }),
+    );
+  });
+
+  it('preserves exact reply lineage on a live lifecycle response update', () => {
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    act(() => {
+      simulateServerEvent('message_lifecycle_updated', {
+        threadId: 'thread-A',
+        message: {
+          id: 'response-1',
+          from: { kind: 'agent', catId: 'opus' },
+          catId: 'opus',
+          content: '处理完成',
+          replyTo: 'source-1',
+          timestamp: 120,
+          lifecycle: {
+            kind: 'response',
+            orderKey: '120:turn-1',
+            invocationId: 'turn-1',
+            targetId: 'opus',
+            inputEntryIds: ['entry-1'],
+            inputMessageIds: ['source-1'],
+            status: 'completed',
+            startedAt: 100,
+            completedAt: 120,
+          },
+        },
+      });
+    });
+
+    expect(mockUpsertLifecycleMessage).toHaveBeenCalledWith(
+      'thread-A',
+      expect.objectContaining({
+        id: 'response-1',
+        type: 'assistant',
+        replyTo: 'source-1',
+      }),
+    );
+  });
+
+  it('folds the timeout diagnostics a failed response persisted into its panel carrier', () => {
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+    const timeoutDiagnostics = { silenceDurationMs: 1_800_000, processAlive: true, invocationId: 'turn-1' };
+
+    act(() => {
+      simulateServerEvent('message_lifecycle_updated', {
+        threadId: 'thread-A',
+        message: {
+          id: 'response-1',
+          from: { kind: 'agent', catId: 'opus' },
+          catId: 'opus',
+          content: '缅因猫 CLI 响应超时 (1800s)',
+          timestamp: 120,
+          metadata: { provider: 'openai', model: 'gpt', timeoutDiagnostics },
+          lifecycle: {
+            kind: 'response',
+            orderKey: '120:turn-1',
+            invocationId: 'turn-1',
+            targetId: 'opus',
+            inputEntryIds: ['entry-1'],
+            inputMessageIds: ['source-1'],
+            status: 'failed',
+            startedAt: 100,
+            completedAt: 120,
+            reason: 'provider_error',
+          },
+        },
+      });
+    });
+
+    expect(mockUpsertLifecycleMessage).toHaveBeenCalledWith(
+      'thread-A',
+      expect.objectContaining({ id: 'response-1', extra: expect.objectContaining({ timeoutDiagnostics }) }),
+    );
+  });
+
+  it('requests source-thread catch-up when a modification source is persisted without focusing that thread', () => {
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    act(() => root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' })));
+    mockRequestStreamCatchUp.mockClear();
+    act(() =>
+      simulateServerEvent('content_modification_source_saved', { threadId: 'thread-A', messageId: 'actual-source' }),
+    );
+    expect(mockRequestStreamCatchUp).toHaveBeenCalledExactlyOnceWith('thread-A');
+    expect(callbacks.onMessage).not.toHaveBeenCalled();
+    expect(mockStoreCurrentThreadId).toBe('thread-B');
+  });
+
+  it('receives preview auto-open on the stable chat socket across a thread switch', () => {
+    mockStoreCurrentThreadId = 'thread-A';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    const firstAck = vi.fn();
+    act(() => {
+      simulateServerEvent(
+        'preview:auto-open',
+        {
+          port: 5196,
+          path: '/first',
+          threadId: 'thread-A',
+          eventId: 'preview-1',
+        },
+        firstAck,
+      );
+    });
+    expect(firstAck).toHaveBeenCalledWith({ status: 'applied', eventId: 'preview-1' });
+    expect(mockSetPendingPreviewAutoOpen).toHaveBeenCalledWith({ port: 5196, path: '/first' });
+
+    const disconnectCount = (mockSocket.disconnect as ReturnType<typeof vi.fn>).mock.calls.length;
+    mockStoreCurrentThreadId = 'thread-B';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    const secondAck = vi.fn();
+    act(() => {
+      simulateServerEvent(
+        'preview:auto-open',
+        {
+          port: 5196,
+          path: '/second',
+          threadId: 'thread-B',
+          eventId: 'preview-2',
+        },
+        secondAck,
+      );
+    });
+    expect(secondAck).toHaveBeenCalledWith({ status: 'applied', eventId: 'preview-2' });
+    expect((mockSocket.disconnect as ReturnType<typeof vi.fn>).mock.calls.length).toBe(disconnectCount);
+  });
+
+  it('queues an off-thread preview through the stable chat socket and acknowledges custody', () => {
+    mockStoreCurrentThreadId = 'thread-A';
+    act(() => {
+      root.render(
+        React.createElement(HookWrapper, {
+          callbacks: { onMessage: vi.fn() },
+          threadId: 'thread-A',
+        }),
+      );
+    });
+
+    const acknowledge = vi.fn();
+    act(() => {
+      simulateServerEvent(
+        'preview:auto-open',
+        { port: 5196, path: '/queued', threadId: 'thread-B', eventId: 'preview-queued' },
+        acknowledge,
+      );
+    });
+
+    expect(mockQueueThreadPreview).toHaveBeenCalledWith('thread-B', { port: 5196, path: '/queued' });
+    expect(acknowledge).toHaveBeenCalledWith({
+      status: 'queued',
+      eventId: 'preview-queued',
+      reason: 'thread_inactive',
+    });
+  });
+
+  it('withholds applied until the same visible iframe provides candidate identity proof', async () => {
+    mockStoreCurrentThreadId = 'thread-A';
+    act(() => {
+      root.render(
+        React.createElement(HookWrapper, {
+          callbacks: { onMessage: vi.fn() },
+          threadId: 'thread-A',
+        }),
+      );
+    });
+
+    const acknowledge = vi.fn();
+    const revision = 'b'.repeat(40);
+    const targetOrigin = 'http://preview-3011.localhost:4111';
+    const visiblePageAdmission = {
+      expectedClientRevision: revision,
+      requiredDom: [{ selector: '[data-layout-owner="f307"]' }],
+    };
+    act(() => {
+      simulateServerEvent(
+        'preview:auto-open',
+        {
+          port: 3011,
+          path: '/threads/thread-f307?workspaceView=surface',
+          threadId: 'thread-A',
+          eventId: 'preview-attested',
+          targetOrigin,
+          visiblePageAdmission,
+        },
+        acknowledge,
+      );
+    });
+
+    expect(acknowledge).not.toHaveBeenCalled();
+    expect(previewVisiblePageAdmissionController.getSnapshot()).toMatchObject({
+      eventId: 'preview-attested',
+      port: 3011,
+      targetOrigin,
+      admission: visiblePageAdmission,
+    });
+
+    await act(async () => {
+      previewVisiblePageAdmissionController.attest({
+        eventId: 'preview-attested',
+        targetPort: 3011,
+        targetOrigin,
+        targetPath: '/threads/thread-f307?workspaceView=surface',
+        clientRevision: revision,
+        dom: [
+          {
+            selector: '[data-layout-owner="f307"]',
+            found: true,
+            attributes: {},
+            textMatches: [],
+          },
+        ],
+        forbiddenTextMatches: [],
+      });
+      await Promise.resolve();
+    });
+
+    expect(acknowledge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'applied',
+        eventId: 'preview-attested',
+        attestation: expect.objectContaining({ targetPort: 3011, clientRevision: revision }),
+      }),
+    );
+  });
+
   it('intent_mode from OTHER thread routes to background path, not callback', () => {
     const onIntentMode = vi.fn();
     const callbacks: SocketCallbacks = {
@@ -252,6 +641,105 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockSetThreadHasActiveInvocation).toHaveBeenCalledWith('thread-A', true);
     expect(mockSetThreadIntentMode).toHaveBeenCalledWith('thread-A', 'execute');
     expect(mockSetThreadTargetCats).toHaveBeenCalledWith('thread-A', ['opus']);
+  });
+
+  it('guide_complete from active thread is reduced into guide store state', () => {
+    mockStoreCurrentThreadId = 'thread-A';
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+    };
+    useGuideStore.setState({
+      session: {
+        flow: GUIDE_FLOW,
+        sessionId: 'guide-add-member-1',
+        threadId: 'thread-A',
+        currentStepIndex: 0,
+        phase: 'active',
+        startedAt: Date.now(),
+      },
+    });
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    act(() => {
+      simulateServerEvent('guide_complete', {
+        guideId: 'add-member',
+        threadId: 'thread-A',
+        timestamp: Date.now(),
+      });
+    });
+
+    expect(useGuideStore.getState().session?.phase).toBe('complete');
+  });
+
+  it('replays a dropped guide_start into pendingStart when that thread becomes active again', () => {
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+    };
+
+    mockStoreCurrentThreadId = 'thread-B';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('guide_start', {
+        guideId: 'add-member',
+        threadId: 'thread-A',
+        timestamp: 123,
+      });
+    });
+
+    expect(useGuideStore.getState().pendingStart).toBeNull();
+
+    mockStoreCurrentThreadId = 'thread-A';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    expect(useGuideStore.getState().pendingStart).toEqual({
+      guideId: 'add-member',
+      threadId: 'thread-A',
+    });
+  });
+
+  it('does not replay a queued guide_start after off-thread exit control clears it', () => {
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+    };
+
+    mockStoreCurrentThreadId = 'thread-B';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('guide_start', {
+        guideId: 'add-member',
+        threadId: 'thread-A',
+        timestamp: 123,
+      });
+    });
+
+    expect(useGuideStore.getState().pendingStart).toBeNull();
+
+    act(() => {
+      simulateServerEvent('guide_control', {
+        action: 'exit',
+        guideId: 'add-member',
+        threadId: 'thread-A',
+        timestamp: 124,
+      });
+    });
+
+    mockStoreCurrentThreadId = 'thread-A';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    expect(useGuideStore.getState().pendingStart).toBeNull();
   });
 
   it('intent_mode for switched-away thread routes to background after thread change', () => {
@@ -303,7 +791,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     });
   });
 
-  it('agent_message from other thread goes to background handler, not onMessage', () => {
+  it('F173 Phase E (KD-1): agent_message from any thread forwards to onMessage (single dispatch)', async () => {
     const onMessage = vi.fn();
     const callbacks: SocketCallbacks = {
       onMessage,
@@ -313,7 +801,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
     });
 
-    // agent_message from thread-A (background)
+    // agent_message from thread-A (would have been "background" pre-Phase E)
     act(() => {
       simulateServerEvent('agent_message', {
         type: 'text',
@@ -323,12 +811,17 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
         timestamp: Date.now(),
       });
     });
+    // Drain coalescer microtask — agent_message dispatch is now async via queueMicrotask.
+    await Promise.resolve();
 
-    // onMessage should NOT be called for background thread events
-    expect(onMessage).not.toHaveBeenCalled();
+    // Phase E: useSocket no longer dispatches active vs background (after microtask drain).
+    // useAgentMessages.handleAgentMessage 是 single dispatch entry，自己路由。
+    // useSocket 的契约只是"转发到 onMessage"——所有 thread 都应该被 forward。
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage.mock.calls[0]?.[0]).toMatchObject({ threadId: 'thread-A', content: 'hello from thread A' });
   });
 
-  it('route/store mismatch: message for route thread must go background until store switches', () => {
+  it('route/store mismatch: message for route thread must go background until store switches', async () => {
     const onMessage = vi.fn();
     const callbacks: SocketCallbacks = {
       onMessage,
@@ -350,15 +843,267 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
         timestamp: Date.now(),
       });
     });
+    // Drain coalescer microtask — agent_message dispatch is now async via queueMicrotask.
+    await Promise.resolve();
 
-    // Must not mutate old active flat state via onMessage.
-    expect(onMessage).not.toHaveBeenCalled();
-    // Must be routed as background so it lands in thread-B state map.
-    expect(mockAddMessageToThread).toHaveBeenCalledTimes(1);
-    expect(mockAddMessageToThread.mock.calls[0]?.[0]).toBe('thread-B');
+    // Phase E: useSocket forwards everything to onMessage (single dispatch, after microtask drain).
+    // useAgentMessages.handleAgentMessage 内部判断 active vs background，并对
+    // background path 调用 handleBackgroundAgentMessage（mockAddMessageToThread）。
+    // 这里 onMessage 是 vi.fn() 不真跑 useAgentMessages 内部逻辑——只验 forward。
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage.mock.calls[0]?.[0]).toMatchObject({ threadId: 'thread-B' });
   });
 
-  it('route/store mismatch: non-text tool_use event is preserved via background path', () => {
+  // F173 Phase A.2 — single-pointer routing (KD-4)
+  // Original dual-pointer guard requires BOTH route and store to match msg.threadId,
+  // which mis-routes events when route is stale but store is the truth source.
+  // Single-pointer routing uses store as the only source of truth for active-thread decision.
+  it('F173 reverse race: route stale, store=msg.threadId → must go active (single-pointer routing)', async () => {
+    const onMessage = vi.fn();
+    const callbacks: SocketCallbacks = {
+      onMessage,
+    };
+
+    // Reverse race: store has already switched to thread-B (the truth source), but
+    // route ref is still on stale thread-A (URL update lagging behind setCurrentThread).
+    mockStoreCurrentThreadId = 'thread-B';
+    act(() => {
+      // route=A (stale), store=B (truth)
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    // Message belongs to thread-B (matches store truth)
+    act(() => {
+      simulateServerEvent('agent_message', {
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-B',
+        content: 'belongs to thread-B per store truth',
+        timestamp: Date.now(),
+      });
+    });
+    // Drain coalescer microtask — agent_message dispatch is now async via queueMicrotask.
+    await Promise.resolve();
+
+    // Single-pointer (store) routing → onMessage MUST be called (active path, after microtask drain)
+    // Original dual-pointer would mis-route to background because route ≠ msg.threadId.
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage.mock.calls[0]?.[0]).toMatchObject({
+      threadId: 'thread-B',
+      content: 'belongs to thread-B per store truth',
+    });
+    // Background path must NOT also fire
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
+  });
+
+  it('F173 reverse race intent_mode: route stale, store=data.threadId → must forward to callback', () => {
+    const onIntentMode = vi.fn();
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+      onIntentMode,
+    };
+
+    mockStoreCurrentThreadId = 'thread-B';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    act(() => {
+      simulateServerEvent('intent_mode', {
+        threadId: 'thread-B',
+        mode: 'execute',
+        targetCats: ['opus'],
+      });
+    });
+
+    expect(onIntentMode).toHaveBeenCalledTimes(1);
+    expect(onIntentMode.mock.calls[0]?.[0]).toMatchObject({ threadId: 'thread-B', mode: 'execute' });
+  });
+
+  it('F173 reverse race spawn_started: route stale, store=data.threadId → must forward to callback', () => {
+    const onSpawnStarted = vi.fn();
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+      onSpawnStarted,
+    };
+
+    mockStoreCurrentThreadId = 'thread-B';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    act(() => {
+      simulateServerEvent('spawn_started', {
+        threadId: 'thread-B',
+        targetCats: ['opus'],
+        invocationId: 'inv-1',
+      });
+    });
+
+    expect(onSpawnStarted).toHaveBeenCalledTimes(1);
+    expect(onSpawnStarted.mock.calls[0]?.[0]).toMatchObject({ threadId: 'thread-B' });
+  });
+
+  it('spawn_started on active thread registers exact invocation slots (pending bubble before intent_mode)', () => {
+    // Blank-chat regression: intent_mode is deferred to the first CLI event (#768),
+    // so without exact slots at spawn time the pending-bubble projection renders
+    // nothing while the status bar already shows the cat running.
+    const onSpawnStarted = vi.fn();
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+      onSpawnStarted,
+    };
+
+    mockStoreCurrentThreadId = 'thread-A';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    act(() => {
+      simulateServerEvent('spawn_started', {
+        threadId: 'thread-A',
+        targetCats: ['opus', 'kimi'],
+        invocationId: 'inv-1',
+      });
+    });
+
+    // Same fan-out key convention as intent_mode: first cat gets the parent id,
+    // subsequent cats get `${invocationId}-${catId}`.
+    expect(mockAddFlatActiveInvocation).toHaveBeenCalledWith('inv-1', 'opus', 'execute', undefined);
+    expect(mockAddFlatActiveInvocation).toHaveBeenCalledWith('inv-1-kimi', 'kimi', 'execute', undefined);
+    expect(Object.keys(mockActiveInvocations)).toHaveLength(2);
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/executions/active?projectPath=%2Fproject%2Fcafe', {
+      signal: undefined,
+    });
+  });
+
+  it('message lifecycle changes immediately re-read canonical active execution truth', async () => {
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    mockStoreCurrentThreadId = 'thread-A';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    act(() => {
+      simulateServerEvent('message_lifecycle_updated', {
+        threadId: 'thread-A',
+        message: {
+          id: 'response-1',
+          from: { kind: 'agent', catId: 'opus' },
+          catId: 'opus',
+          content: '',
+          timestamp: 100,
+          lifecycle: {
+            kind: 'response',
+            orderKey: '100:turn-1',
+            invocationId: 'turn-1',
+            targetId: 'opus',
+            inputEntryIds: ['entry-1'],
+            inputMessageIds: ['source-1'],
+            status: 'processing',
+            startedAt: 100,
+          },
+        },
+      });
+    });
+    await act(async () => Promise.resolve());
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/executions/active?projectPath=%2Fproject%2Fcafe', {
+      signal: undefined,
+    });
+  });
+
+  it('spawn_started on background thread registers thread-scoped exact invocation slots', () => {
+    const onSpawnStarted = vi.fn();
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+      onSpawnStarted,
+    };
+
+    mockStoreCurrentThreadId = 'thread-A';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    act(() => {
+      simulateServerEvent('spawn_started', {
+        threadId: 'thread-B',
+        targetCats: ['opus', 'kimi'],
+        invocationId: 'inv-1',
+      });
+    });
+
+    expect(mockAddActiveInvocation).toHaveBeenCalledWith('thread-B', 'inv-1', 'opus', 'execute', undefined);
+    expect(mockAddActiveInvocation).toHaveBeenCalledWith('thread-B', 'inv-1-kimi', 'kimi', 'execute', undefined);
+    expect(Object.keys(mockThreadActiveInvocations['thread-B'] ?? {})).toHaveLength(2);
+    // Background path must not fire the active-thread callback
+    expect(onSpawnStarted).not.toHaveBeenCalled();
+  });
+
+  it('duplicate spawn_started and later intent_mode preserve first startedAt and do not grow slots', () => {
+    // Lifecycle regression: addActiveInvocation re-stamps startedAt on every
+    // call (startedAt ?? Date.now()), so re-registration must explicitly carry
+    // the first-seen startedAt — otherwise execution timing resets when
+    // intent_mode arrives (~48s after spawn) and the stale watchdog shifts.
+    vi.useFakeTimers();
+    try {
+      const T0 = 1_800_000_000_000;
+      vi.setSystemTime(T0);
+
+      const callbacks: SocketCallbacks = {
+        onMessage: vi.fn(),
+        onSpawnStarted: vi.fn(),
+        onIntentMode: vi.fn(),
+      };
+
+      mockStoreCurrentThreadId = 'thread-A';
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+      });
+
+      act(() => {
+        simulateServerEvent('spawn_started', {
+          threadId: 'thread-A',
+          targetCats: ['opus', 'kimi'],
+          invocationId: 'inv-1',
+        });
+      });
+      expect(mockActiveInvocations['inv-1']).toMatchObject({ catId: 'opus', startedAt: T0 });
+      expect(mockActiveInvocations['inv-1-kimi']).toMatchObject({ catId: 'kimi', startedAt: T0 });
+
+      // Duplicate spawn_started ~48s later (retry/double dispatch): no reset.
+      vi.setSystemTime(T0 + 48_000);
+      act(() => {
+        simulateServerEvent('spawn_started', {
+          threadId: 'thread-A',
+          targetCats: ['opus', 'kimi'],
+          invocationId: 'inv-1',
+        });
+      });
+      expect(mockActiveInvocations['inv-1']?.startedAt).toBe(T0);
+      expect(mockActiveInvocations['inv-1-kimi']?.startedAt).toBe(T0);
+      expect(Object.keys(mockActiveInvocations)).toHaveLength(2);
+
+      // intent_mode arriving with the first CLI event refines mode but must
+      // keep the original startedAt and the same two slots.
+      vi.setSystemTime(T0 + 49_000);
+      act(() => {
+        simulateServerEvent('intent_mode', {
+          threadId: 'thread-A',
+          mode: 'ideate',
+          targetCats: ['opus', 'kimi'],
+          invocationId: 'inv-1',
+        });
+      });
+      expect(mockActiveInvocations['inv-1']).toMatchObject({ catId: 'opus', mode: 'ideate', startedAt: T0 });
+      expect(mockActiveInvocations['inv-1-kimi']).toMatchObject({ catId: 'kimi', mode: 'ideate', startedAt: T0 });
+      expect(Object.keys(mockActiveInvocations)).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('route/store mismatch: non-text tool_use event is preserved via background path', async () => {
     const onMessage = vi.fn();
     const callbacks: SocketCallbacks = {
       onMessage,
@@ -379,16 +1124,188 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
         timestamp: Date.now(),
       });
     });
+    // Drain coalescer microtask — agent_message dispatch is now async via queueMicrotask.
+    await Promise.resolve();
 
-    expect(onMessage).not.toHaveBeenCalled();
-    expect(mockAddMessageToThread).toHaveBeenCalledTimes(1);
-    expect(mockAddMessageToThread.mock.calls[0]?.[0]).toBe('thread-B');
-    expect(mockAddMessageToThread.mock.calls[0]?.[1]).toMatchObject({ type: 'assistant', catId: 'opus' });
-    expect(mockAppendToolEventToThread).toHaveBeenCalledTimes(1);
-    expect(mockAppendToolEventToThread.mock.calls[0]?.[0]).toBe('thread-B');
+    // Phase E: useSocket forwards all events to onMessage (single dispatch, after microtask drain).
+    // useAgentMessages 内部判断 active vs background 并调 bg helpers (mockAddMessageToThread,
+    // mockAppendToolEventToThread)。这里 onMessage 是 vi.fn() 不真跑——仅验 forward。
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage.mock.calls[0]?.[0]).toMatchObject({ type: 'tool_use', threadId: 'thread-B', catId: 'opus' });
   });
 
-  it('queue_updated processing marks thread as active invocation (P1 regression)', () => {
+  it('queue_updated processing marks thread as active invocation (P1 regression)', async () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    await act(async () => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [
+          {
+            id: 'q1',
+            status: 'processing',
+          },
+        ],
+        action: 'processing',
+      });
+      await Promise.resolve();
+    });
+
+    expect(mockSetQueue).toHaveBeenCalledWith('thread-B', expect.any(Array));
+    expect(mockSetThreadHasActiveInvocation).toHaveBeenCalledWith('thread-B', true);
+  });
+
+  it('queue_updated processing routes background liveness through the thread-scoped active writer', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-A',
+        queue: [{ id: 'q-new', status: 'processing' }],
+        action: 'processing',
+      });
+    });
+
+    expect(mockSetThreadHasActiveInvocation).toHaveBeenCalledWith('thread-A', true);
+  });
+
+  it('does not let a reduced background queue_updated snapshot erase a canonical Append action', async () => {
+    mockStoreCurrentThreadId = 'thread-A';
+    const canonicalEntry = {
+      id: 'q-append',
+      threadId: 'thread-B',
+      userId: 'test-user',
+      kind: 'conversation_input',
+      content: 'append me',
+      from: { kind: 'user', userId: 'test-user' },
+      targetCats: ['opus'],
+      mergedMessageIds: [],
+      intent: 'execute',
+      status: 'queued',
+      createdAt: 1,
+      lifecycleActions: {
+        append: {
+          kind: 'append',
+          expectedQueueRevision: 'revision-7',
+          expectedRuns: [{ targetId: 'opus', invocationId: 'turn-7', responseMessageId: 'response-7' }],
+        },
+      },
+    } as const;
+    mockThreadQueues.set('thread-B', [canonicalEntry]);
+    let resolveQueueJson: ((value: { queue: unknown[]; activeInvocations: unknown[] }) => void) | undefined;
+    const queueJson = new Promise<{ queue: unknown[]; activeInvocations: unknown[] }>((resolve) => {
+      resolveQueueJson = resolve;
+    });
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: () => queueJson,
+    });
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    act(() => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [{ ...canonicalEntry, lifecycleActions: undefined }],
+        action: 'enqueued',
+      });
+    });
+
+    expect(mockSetQueue).toHaveBeenCalledWith('thread-B', [canonicalEntry]);
+    await act(async () => {
+      resolveQueueJson?.({ queue: [canonicalEntry], activeInvocations: [] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/thread-B/queue');
+    expect(mockSetQueue).toHaveBeenCalledTimes(2);
+    expect(mockSetQueue).toHaveBeenCalledWith('thread-B', [canonicalEntry]);
+  });
+
+  it('retires delivered targets immediately and rejects a late GET snapshot after a newer socket event', async () => {
+    const row = {
+      id: 'q-1',
+      from: { kind: 'user', userId: 'test-user' },
+      targetCats: ['opus', 'codex'],
+      status: 'queued',
+      content: 'one source',
+      messageId: 'm-1',
+    };
+    mockThreadQueues.set('thread-B', [row]);
+    const resolvers: Array<(value: unknown) => void> = [];
+    mockApiFetch.mockImplementation(() =>
+      Promise.resolve({ ok: true, json: () => new Promise((resolve) => resolvers.push(resolve)) }),
+    );
+    act(() =>
+      root.render(React.createElement(HookWrapper, { callbacks: { onMessage: vi.fn() }, threadId: 'thread-B' })),
+    );
+    act(() =>
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [{ ...row, targetCats: ['codex'] }],
+        action: 'processing',
+      }),
+    );
+    expect(mockThreadQueues.get('thread-B')).toEqual([{ ...row, targetCats: ['codex'] }]);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => simulateServerEvent('queue_updated', { threadId: 'thread-B', queue: [], action: 'processing' }));
+    expect(mockThreadQueues.get('thread-B')).toEqual([]);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      resolvers[0]?.({ queue: [row], activeInvocations: [] });
+      await Promise.resolve();
+    });
+    expect(mockThreadQueues.get('thread-B')).toEqual([]);
+    await act(async () => {
+      resolvers[1]?.({ queue: [], activeInvocations: [] });
+      await Promise.resolve();
+    });
+    expect(mockThreadQueues.get('thread-B')).toEqual([]);
+  });
+
+  it('forwards true recall and late receipt events with their source thread intact', () => {
+    const onMessageRecalled = vi.fn();
+    const onMessageReceiptUpdated = vi.fn();
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+      onMessageRecalled,
+      onMessageReceiptUpdated,
+    };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    const recall = { messageId: 'm-recalled', threadId: 'thread-A', verdict: 'exposed' as const };
+    const receipt = { messageId: 'm-recalled', threadId: 'thread-A' };
+    act(() => {
+      simulateServerEvent('message_recalled', recall);
+      simulateServerEvent('message_receipt_updated', receipt);
+    });
+
+    expect(onMessageRecalled).toHaveBeenCalledWith(recall);
+    expect(onMessageReceiptUpdated).toHaveBeenCalledWith(receipt);
+  });
+
+  it('queue_updated does not publish a queued user source into History', () => {
     mockStoreCurrentThreadId = 'thread-B';
     const callbacks: SocketCallbacks = { onMessage: vi.fn() };
 
@@ -401,7 +1318,35 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
         threadId: 'thread-B',
         queue: [
           {
-            id: 'q1',
+            id: 'q-queued',
+            messageId: 'm-queued',
+            from: { kind: 'user', userId: 'test-user' },
+            status: 'queued',
+          },
+        ],
+        action: 'enqueued',
+      });
+    });
+
+    expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
+  });
+
+  it('reconciles History when Queue processing proves actual delivery', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [
+          {
+            id: 'q-processing',
+            messageId: 'm-delivered',
+            from: { kind: 'user', userId: 'test-user' },
             status: 'processing',
           },
         ],
@@ -409,8 +1354,565 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       });
     });
 
-    expect(mockSetQueue).toHaveBeenCalledWith('thread-B', expect.any(Array));
-    expect(mockSetThreadHasActiveInvocation).toHaveBeenCalledWith('thread-B', true);
+    expect(mockRequestStreamCatchUp).toHaveBeenCalledOnce();
+    expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-B');
+  });
+
+  it('does not refetch History when Queue processing already has a timeline projection', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    mockFlatMessages = [{ id: 'm-existing' }];
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [{ id: 'q-processing', status: 'processing' }],
+        action: 'processing',
+      });
+    });
+
+    expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
+  });
+
+  it('queue_updated filters malformed siblings without publishing queued sources', async () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    const validUserEntry = {
+      id: 'q-valid',
+      messageId: 'm-valid',
+      from: { kind: 'user', userId: 'test-user' },
+      status: 'queued',
+    };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    await act(async () => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [null, validUserEntry],
+        action: 'enqueued',
+      });
+      await Promise.resolve();
+    });
+
+    expect(mockSetQueue).toHaveBeenCalledWith('thread-B', [validUserEntry]);
+    expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
+  });
+
+  it('does not treat Queue admission as a live History receipt anchor', () => {
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
+    expect(mockSetThreadMessageMetadata).not.toHaveBeenCalledWith(
+      'thread-B',
+      'message-cross-thread',
+      expect.objectContaining({ deliveredAt: expect.anything() }),
+    );
+  });
+
+  it('keeps a queued Host connector out of History until messages_delivered', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    const source = { connector: 'feishu', label: '飞书会议入站 / 录音豆', icon: 'feishu' };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('messages_queued', {
+        threadId: 'thread-B',
+        messageIds: ['meeting-source'],
+        messages: [
+          {
+            id: 'meeting-source',
+            content: 'Host-authored meeting intake',
+            catId: null,
+            timestamp: 1234,
+            source,
+          },
+        ],
+      });
+      simulateServerEvent('spawn_started', {
+        threadId: 'thread-B',
+        targetCats: ['codex-sol'],
+        invocationId: 'meeting-invocation',
+      });
+    });
+
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
+    expect(mockSetCatStatus).toHaveBeenCalled();
+  });
+
+  it('queue_updated processing hydrates current-thread slot truth when intent_mode is missing', async () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        activeInvocations: [{ catId: 'gpt52', startedAt: 1234 }],
+      }),
+    });
+
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    await act(async () => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [{ id: 'q1', status: 'processing' }],
+        action: 'processing',
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/thread-B/queue');
+    expect(mockClearThreadActiveInvocation).toHaveBeenCalledWith('thread-B');
+    expect(mockReplaceThreadTargetCats).toHaveBeenCalledWith('thread-B', ['gpt52']);
+    expect(mockUpdateThreadCatStatus).toHaveBeenCalledWith('thread-B', 'gpt52', 'streaming');
+    // F173 PR-C Task 10: reconcile uses thread-scoped writer; first arg is threadId.
+    expect(mockAddActiveInvocation).toHaveBeenCalledWith(
+      'thread-B',
+      'hydrated-thread-B-gpt52',
+      'gpt52',
+      'execute',
+      1234,
+    );
+  });
+
+  it('queue processing reconciles its exact live child without waiting for refresh', async () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        activeInvocations: [
+          {
+            catId: 'codex-sol',
+            executionId: 'parent-sol',
+            turnInvocationId: 'turn-sol',
+            startedAt: 1234,
+          },
+        ],
+      }),
+    });
+
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    await act(async () => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [
+          {
+            id: 'q-seen',
+            threadId: 'thread-B',
+            userId: 'test-user',
+            content: 'already read by this exact turn',
+            messageId: 'm-seen',
+            mergedMessageIds: [],
+            source: 'agent',
+            targetCats: ['codex-sol'],
+            intent: 'execute',
+            status: 'queued',
+            createdAt: 1200,
+          },
+        ],
+        action: 'processing',
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/thread-B/queue');
+    expect(mockSetThreadCatInvocation).toHaveBeenCalledWith('thread-B', 'codex-sol', {
+      invocationId: 'parent-sol',
+      turnInvocationId: 'turn-sol',
+      freshnessCarrierCapability: {
+        provider: 'other',
+        carrier: 'other',
+        activeInvocationGuidance: 'undeclared',
+        deliverySemantics: 'undeclared',
+      },
+    });
+    expect(mockAddActiveInvocation).toHaveBeenCalledWith('thread-B', 'parent-sol', 'codex-sol', 'execute', 1234);
+  });
+
+  it('queue_updated completed reconciles and persists idle for a background thread', async () => {
+    mockStoreCurrentThreadId = 'thread-A';
+    mockGetThreadState.mockImplementation((threadId: string) => ({
+      messages: [],
+      queue: [],
+      isLoading: false,
+      isLoadingHistory: false,
+      hasMore: true,
+      hasActiveInvocation: threadId === 'thread-B',
+      intentMode: null,
+      targetCats: threadId === 'thread-B' ? ['codex-sol'] : [],
+      catStatuses: (threadId === 'thread-B' ? { 'codex-sol': 'streaming' as const } : {}) as Record<
+        string,
+        'pending' | 'spawning' | 'streaming' | 'done' | 'error'
+      >,
+      catInvocations: (threadId === 'thread-B'
+        ? {
+            'codex-sol': {
+              invocationId: 'inv-closed',
+              appServerLifecycle: {
+                stage: 'closed',
+                lastActivityAt: 123,
+                recoveryAttempt: 0,
+                turnStartSent: true,
+                turnAccepted: true,
+                itemObserved: true,
+              },
+            },
+          }
+        : {}) as Record<string, CatInvocationInfo>,
+      activeInvocations: mockThreadActiveInvocations[threadId] ?? {},
+      unreadCount: 0,
+      lastActivity: 0,
+    }));
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ activeInvocations: [] }),
+    });
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    await act(async () => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [],
+        action: 'completed',
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/thread-B/queue');
+    expect(mockClearThreadActiveInvocation).toHaveBeenCalledWith('thread-B');
+    expect(mockUpdateThreadCatStatus).toHaveBeenCalledWith('thread-B', 'codex-sol', 'done');
+    expect(mockSaveThreadActiveState).toHaveBeenCalledWith('thread-B', {
+      hasActiveInvocation: false,
+      activeInvocations: {},
+    });
+  });
+
+  it('ignores stale queue-processing hydrate after current-thread done is followed by queue completion', async () => {
+    mockStoreCurrentThreadId = 'thread-B';
+
+    let resolveQueueJson: ((value: { activeInvocations: Array<{ catId: string; startedAt: number }> }) => void) | null =
+      null;
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        new Promise<{ activeInvocations: Array<{ catId: string; startedAt: number }> }>((resolve) => {
+          resolveQueueJson = resolve;
+        }),
+    });
+
+    const onMessage = vi.fn();
+    const callbacks: SocketCallbacks = { onMessage };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    await act(async () => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [{ id: 'q1', status: 'processing' }],
+        action: 'processing',
+      });
+      await Promise.resolve();
+    });
+
+    act(() => {
+      simulateServerEvent('agent_message', {
+        type: 'done',
+        catId: 'gpt52',
+        threadId: 'thread-B',
+        isFinal: true,
+        timestamp: Date.now(),
+      });
+    });
+
+    act(() => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [],
+        action: 'completed',
+      });
+    });
+
+    await act(async () => {
+      resolveQueueJson?.({ activeInvocations: [{ catId: 'gpt52', startedAt: 1234 }] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'done',
+        threadId: 'thread-B',
+        catId: 'gpt52',
+        isFinal: true,
+      }),
+    );
+    expect(mockReplaceThreadTargetCats).not.toHaveBeenCalled();
+    expect(mockUpdateThreadCatStatus).not.toHaveBeenCalled();
+    expect(mockAddActiveInvocation).not.toHaveBeenCalled();
+  });
+
+  it('keeps queue-processing hydrate alive when done is non-final and another cat may still be running', async () => {
+    mockStoreCurrentThreadId = 'thread-B';
+
+    let resolveQueueJson: ((value: { activeInvocations: Array<{ catId: string; startedAt: number }> }) => void) | null =
+      null;
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        new Promise<{ activeInvocations: Array<{ catId: string; startedAt: number }> }>((resolve) => {
+          resolveQueueJson = resolve;
+        }),
+    });
+
+    const onMessage = vi.fn();
+    const callbacks: SocketCallbacks = { onMessage };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    await act(async () => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [{ id: 'q1', status: 'processing' }],
+        action: 'processing',
+      });
+      await Promise.resolve();
+    });
+
+    act(() => {
+      simulateServerEvent('agent_message', {
+        type: 'done',
+        catId: 'gpt52',
+        threadId: 'thread-B',
+        isFinal: false,
+        timestamp: Date.now(),
+      });
+    });
+
+    await act(async () => {
+      resolveQueueJson?.({ activeInvocations: [{ catId: 'codex', startedAt: 5678 }] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'done',
+        threadId: 'thread-B',
+        catId: 'gpt52',
+        isFinal: false,
+      }),
+    );
+    expect(mockReplaceThreadTargetCats).toHaveBeenCalledWith('thread-B', ['codex']);
+    expect(mockUpdateThreadCatStatus).toHaveBeenCalledWith('thread-B', 'codex', 'streaming');
+    expect(mockAddActiveInvocation).toHaveBeenCalledWith(
+      'thread-B',
+      'hydrated-thread-B-codex',
+      'codex',
+      'execute',
+      5678,
+    );
+  });
+
+  it('keeps queue-processing hydrate alive when a cat emits isFinal=true but queue still shows processing', async () => {
+    mockStoreCurrentThreadId = 'thread-B';
+
+    let resolveQueueJson: ((value: { activeInvocations: Array<{ catId: string; startedAt: number }> }) => void) | null =
+      null;
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        new Promise<{ activeInvocations: Array<{ catId: string; startedAt: number }> }>((resolve) => {
+          resolveQueueJson = resolve;
+        }),
+    });
+
+    const onMessage = vi.fn();
+    const callbacks: SocketCallbacks = { onMessage };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    await act(async () => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [{ id: 'q1', status: 'processing' }],
+        action: 'processing',
+      });
+      await Promise.resolve();
+    });
+
+    act(() => {
+      simulateServerEvent('agent_message', {
+        type: 'done',
+        catId: 'gpt52',
+        threadId: 'thread-B',
+        isFinal: true,
+        timestamp: Date.now(),
+      });
+    });
+
+    await act(async () => {
+      resolveQueueJson?.({ activeInvocations: [{ catId: 'codex', startedAt: 6789 }] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'done',
+        threadId: 'thread-B',
+        catId: 'gpt52',
+        isFinal: true,
+      }),
+    );
+    expect(mockReplaceThreadTargetCats).toHaveBeenCalledWith('thread-B', ['codex']);
+    expect(mockUpdateThreadCatStatus).toHaveBeenCalledWith('thread-B', 'codex', 'streaming');
+    expect(mockAddActiveInvocation).toHaveBeenCalledWith(
+      'thread-B',
+      'hydrated-thread-B-codex',
+      'codex',
+      'execute',
+      6789,
+    );
+  });
+
+  it('lets a newer background cleared event own canonical active-slot hydration', async () => {
+    mockStoreCurrentThreadId = 'thread-B';
+
+    let queueReads = 0;
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path !== '/api/threads/thread-B/queue') return Promise.resolve({ ok: false });
+      queueReads += 1;
+      if (queueReads === 1) return new Promise(() => {});
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ activeInvocations: [{ catId: 'gpt52', startedAt: 1234 }] }),
+      });
+    });
+
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    await act(async () => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [{ id: 'q1', status: 'processing' }],
+        action: 'processing',
+      });
+      await Promise.resolve();
+    });
+
+    mockStoreCurrentThreadId = 'thread-C';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-C' }));
+    });
+
+    await act(async () => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [],
+        action: 'cleared',
+      });
+      await Promise.resolve();
+    });
+
+    mockStoreCurrentThreadId = 'thread-B';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(queueReads).toBe(2);
+    expect(mockReplaceThreadTargetCats).toHaveBeenCalledWith('thread-B', ['gpt52']);
+    expect(mockUpdateThreadCatStatus).toHaveBeenCalledWith('thread-B', 'gpt52', 'streaming');
+    expect(mockAddActiveInvocation).toHaveBeenCalledWith(
+      'thread-B',
+      'hydrated-thread-B-gpt52',
+      'gpt52',
+      'execute',
+      1234,
+    );
+  });
+
+  it('invalidates completed-state hydrate before a stale processing fetch resolves', async () => {
+    mockStoreCurrentThreadId = 'thread-B';
+
+    let resolveQueueJson: ((value: { activeInvocations: Array<{ catId: string; startedAt: number }> }) => void) | null =
+      null;
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        new Promise<{ activeInvocations: Array<{ catId: string; startedAt: number }> }>((resolve) => {
+          resolveQueueJson = resolve;
+        }),
+    });
+
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    await act(async () => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [{ id: 'q1', status: 'processing' }],
+        action: 'processing',
+      });
+      await Promise.resolve();
+    });
+
+    act(() => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [],
+        action: 'completed',
+      });
+    });
+
+    await act(async () => {
+      resolveQueueJson?.({ activeInvocations: [{ catId: 'gpt52', startedAt: 1234 }] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockReplaceThreadTargetCats).not.toHaveBeenCalled();
+    expect(mockUpdateThreadCatStatus).not.toHaveBeenCalled();
+    expect(mockAddActiveInvocation).not.toHaveBeenCalled();
   });
 
   it('debug API stays unmounted by default (P0: default disabled)', () => {
@@ -441,27 +1943,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockGetThreadState).not.toHaveBeenCalled();
   });
 
-  it('debug disabled: queue_paused with malformed queue payload does not throw', () => {
-    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
-
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
-    });
-
-    expect(() => {
-      act(() => {
-        simulateServerEvent('queue_paused', {
-          threadId: 'thread-B',
-          reason: 'failed',
-          queue: [null],
-        });
-      });
-    }).not.toThrow();
-
-    expect(mockSetQueue).toHaveBeenCalledWith('thread-B', [null]);
-    expect(mockSetQueuePaused).toHaveBeenCalledWith('thread-B', true, 'failed');
-  });
-
   it('debug enabled: non-array queue payload does not crash debug mapping', () => {
     window.sessionStorage.setItem(invocationDebugConstants.STORAGE_KEY, '1');
     const callbacks: SocketCallbacks = { onMessage: vi.fn() };
@@ -483,7 +1964,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       });
     }).not.toThrow();
 
-    const dump = JSON.parse(debugApi?.dump({ rawThreadId: true })) as {
+    const dump = JSON.parse(debugApi!.dump({ rawThreadId: true })) as {
       events: Array<Record<string, unknown>>;
     };
     const event = dump.events.find((item) => item.event === 'queue_updated');
@@ -510,7 +1991,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       });
     });
 
-    const maskedDump = JSON.parse(debugApi?.dump()) as {
+    const maskedDump = JSON.parse(debugApi!.dump()) as {
       meta: { marker: string; rawThreadId: boolean };
       events: Array<Record<string, unknown>>;
     };
@@ -523,7 +2004,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(maskedEvent?.headers).toBeUndefined();
     expect(maskedEvent?.userInput).toBeUndefined();
 
-    const rawDump = JSON.parse(debugApi?.dump({ rawThreadId: true })) as {
+    const rawDump = JSON.parse(debugApi!.dump({ rawThreadId: true })) as {
       meta: { marker: string; rawThreadId: boolean };
       events: Array<Record<string, unknown>>;
     };
@@ -532,7 +2013,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     const rawEvent = rawDump.events.find((event) => event.event === 'queue_updated');
     expect(rawEvent?.threadId).toBe('thread-B');
     expect(rawEvent?.hasActiveInvocation).toBe(true);
-    expect(rawEvent?.queuePaused).toBe(false);
   });
 
   it('socket is NOT disconnected/reconnected when callbacks change (callbacksRef pattern)', () => {
@@ -615,93 +2095,323 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(new Set(joinedRooms)).toEqual(new Set(['thread:thread-A', 'thread:thread-B']));
   });
 
-  it('thread_summary from OTHER thread is silently dropped (cross-thread leakage guard)', () => {
-    const onThreadSummary = vi.fn();
-    const callbacks: SocketCallbacks = {
-      onMessage: vi.fn(),
-      onThreadSummary,
-    };
-
-    // Active thread is thread-B (both route and store agree)
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
-    });
-
-    // Summary arrives from thread-A (background auto-summary)
-    act(() => {
-      simulateServerEvent('thread_summary', {
-        id: 'sum-1',
-        threadId: 'thread-A',
-        topic: 'Discussion about cats',
-        conclusions: ['cats are great'],
-        openQuestions: [],
-        createdBy: 'system',
-        createdAt: Date.now(),
+  it('repairs the foreground room when the initial connect generation misses its one-shot join', async () => {
+    vi.useFakeTimers();
+    try {
+      mockStoreCurrentThreadId = 'thread-A';
+      mockSocket.connected = false;
+      act(() => {
+        root.render(
+          React.createElement(HookWrapper, {
+            callbacks: { onMessage: vi.fn() },
+            threadId: 'thread-A',
+          }),
+        );
       });
-    });
 
-    // MUST NOT be forwarded — this is the P1 regression guard
-    expect(onThreadSummary).not.toHaveBeenCalled();
+      const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+      emitMock.mockClear();
+      // Model the observed server truth: the socket generation is connected,
+      // but neither the mount join nor the connect callback reached join_room.
+      mockSocket.connected = true;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+
+      expect(emitMock).toHaveBeenCalledWith('join_room', 'thread:thread-A', expect.any(Function));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('thread_summary from ACTIVE thread is forwarded to callback', () => {
-    mockStoreCurrentThreadId = 'thread-A';
-    const onThreadSummary = vi.fn();
-    const callbacks: SocketCallbacks = {
-      onMessage: vi.fn(),
-      onThreadSummary,
-    };
+  it('keeps a requested room desired when the socket ref is temporarily unavailable', () => {
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
 
     act(() => {
       root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
     });
 
+    const controls = latestSocketControls;
+    expect(controls).not.toBeNull();
+    if (!controls) throw new Error('socket controls not mounted');
+
+    controls.socketRef.current = null;
     act(() => {
-      simulateServerEvent('thread_summary', {
-        id: 'sum-2',
-        threadId: 'thread-A',
-        topic: 'Summary for active thread',
-        conclusions: ['all good'],
-        openQuestions: [],
-        createdBy: 'system',
-        createdAt: Date.now(),
-      });
+      controls.joinRoom('thread-C');
     });
 
-    expect(onThreadSummary).toHaveBeenCalledTimes(1);
-    expect(onThreadSummary).toHaveBeenCalledWith(expect.objectContaining({ id: 'sum-2', threadId: 'thread-A' }));
+    const desiredRooms = JSON.parse(
+      window.sessionStorage.getItem('cat-cafe:ws:joined-rooms:v1:test-user') ?? '[]',
+    ) as string[];
+    expect(desiredRooms).toContain('thread:thread-C');
+
+    controls.socketRef.current = mockSocket as never;
+    const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+    emitMock.mockClear();
+    act(() => {
+      simulateServerEvent('connect', undefined);
+    });
+
+    expect(emitMock).toHaveBeenCalledWith('join_room', 'thread:thread-C', expect.any(Function));
   });
 
-  it('thread_summary during route/store mismatch is NOT forwarded (dual-pointer guard)', () => {
-    // Route has switched to thread-B, but store still points to thread-A.
-    // This is the switch-window race that the dual-pointer guard must catch.
-    mockStoreCurrentThreadId = 'thread-A';
-    const onThreadSummary = vi.fn();
-    const callbacks: SocketCallbacks = {
-      onMessage: vi.fn(),
-      onThreadSummary,
-    };
+  it('retries an unacknowledged room join instead of trusting the local Set', async () => {
+    vi.useFakeTimers();
+    try {
+      const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+      });
+
+      const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+      emitMock.mockClear();
+      act(() => {
+        simulateServerEvent('connect', undefined);
+      });
+
+      const joinCalls = () =>
+        emitMock.mock.calls.filter(([event, room]) => event === 'join_room' && room === 'thread:thread-A');
+      expect(joinCalls()).toHaveLength(1);
+      expect(joinCalls()[0]?.[2]).toEqual(expect.any(Function));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(joinCalls().length).toBeGreaterThan(1);
+
+      const latestAck = joinCalls().at(-1)?.[2] as ((ack: { ok: boolean; room: string }) => void) | undefined;
+      expect(latestAck).toEqual(expect.any(Function));
+      act(() => {
+        latestAck?.({ ok: true, room: 'thread:thread-A' });
+      });
+      const confirmedCallCount = joinCalls().length;
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(joinCalls()).toHaveLength(confirmedCallCount);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not retry a room join after a permanent server rejection', async () => {
+    vi.useFakeTimers();
+    try {
+      const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+      });
+
+      const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+      emitMock.mockClear();
+      act(() => {
+        simulateServerEvent('connect', undefined);
+      });
+
+      const joinCalls = () =>
+        emitMock.mock.calls.filter(([event, room]) => event === 'join_room' && room === 'thread:thread-A');
+      expect(joinCalls()).toHaveLength(1);
+      const acknowledgement = joinCalls()[0]?.[2] as
+        | ((ack: { ok: false; room: string; error: 'forbidden_room' }) => void)
+        | undefined;
+
+      act(() => {
+        acknowledgement?.({ ok: false, room: 'thread:thread-A', error: 'forbidden_room' });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+
+      expect(joinCalls()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries a room join after a transient server join failure', async () => {
+    vi.useFakeTimers();
+    try {
+      const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+      });
+
+      const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+      emitMock.mockClear();
+      act(() => {
+        simulateServerEvent('connect', undefined);
+      });
+
+      const joinCalls = () =>
+        emitMock.mock.calls.filter(([event, room]) => event === 'join_room' && room === 'thread:thread-A');
+      const acknowledgement = joinCalls()[0]?.[2] as
+        | ((ack: { ok: false; room: string; error: 'join_failed' }) => void)
+        | undefined;
+
+      act(() => {
+        acknowledgement?.({ ok: false, room: 'thread:thread-A', error: 'join_failed' });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+
+      expect(joinCalls()).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reconciles only unconfirmed room membership when a background tab becomes visible', () => {
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+    emitMock.mockClear();
+    act(() => {
+      simulateServerEvent('connect', undefined);
+    });
+    const acknowledgement = emitMock.mock.calls.find(
+      ([event, room]) => event === 'join_room' && room === 'thread:thread-A',
+    )?.[2] as ((ack: { ok: true; room: string }) => void) | undefined;
+    expect(acknowledgement).toEqual(expect.any(Function));
+    act(() => {
+      acknowledgement?.({ ok: true, room: 'thread:thread-A' });
+    });
+
+    const controls = latestSocketControls;
+    expect(controls).not.toBeNull();
+    if (!controls) throw new Error('socket controls not mounted');
+    controls.socketRef.current = null;
+    act(() => {
+      controls.joinRoom('thread-C');
+    });
+    controls.socketRef.current = mockSocket as never;
+
+    emitMock.mockClear();
+    mockStoreCurrentThreadId = '';
+    const visibilitySpy = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    try {
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    } finally {
+      visibilitySpy.mockRestore();
+    }
+
+    const joinedRooms = emitMock.mock.calls.filter(([event]) => event === 'join_room').map(([, room]) => room);
+    expect(joinedRooms).toEqual(['thread:thread-C']);
+  });
+
+  it('leaves inactive rooms when the foreground thread changes', () => {
+    window.sessionStorage.setItem('cat-cafe:ws:joined-rooms:v1:test-user', JSON.stringify(['thread:thread-A']));
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
 
     act(() => {
       root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
     });
+    const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+    emitMock.mockClear();
 
-    // Summary for thread-B arrives — route matches but store doesn't
     act(() => {
-      simulateServerEvent('thread_summary', {
-        id: 'sum-mismatch',
-        threadId: 'thread-B',
-        topic: 'Summary during switch window',
-        conclusions: [],
-        openQuestions: [],
-        createdBy: 'system',
-        createdAt: Date.now(),
-      });
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-C' }));
     });
 
-    // Must NOT forward — would write into thread-A's flat state
-    expect(onThreadSummary).not.toHaveBeenCalled();
+    const leftRooms = emitMock.mock.calls.filter(([event]) => event === 'leave_room').map(([, room]) => room);
+    expect(new Set(leftRooms)).toEqual(new Set(['thread:thread-A', 'thread:thread-B']));
   });
+
+  it('retains an active background room while leaving inactive rooms on a foreground switch', () => {
+    window.sessionStorage.setItem('cat-cafe:ws:joined-rooms:v1:test-user', JSON.stringify(['thread:thread-A']));
+    mockGetThreadState.mockImplementation((threadId: string) => ({
+      messages: [],
+      queue: [],
+      isLoading: false,
+      isLoadingHistory: false,
+      hasMore: true,
+      hasActiveInvocation: threadId === 'thread-A',
+      intentMode: null,
+      targetCats: [],
+      catStatuses: {},
+      catInvocations: {},
+      activeInvocations: {},
+      unreadCount: 0,
+      lastActivity: 0,
+    }));
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+    const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+    emitMock.mockClear();
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-C' }));
+    });
+
+    const leftRooms = emitMock.mock.calls.filter(([event]) => event === 'leave_room').map(([, room]) => room);
+    expect(leftRooms).toContain('thread:thread-B');
+    expect(leftRooms).not.toContain('thread:thread-A');
+  });
+
+  it('retains a queued background room while leaving inactive rooms on a foreground switch', () => {
+    window.sessionStorage.setItem('cat-cafe:ws:joined-rooms:v1:test-user', JSON.stringify(['thread:thread-A']));
+    mockGetThreadState.mockImplementation((threadId: string) => ({
+      messages: [],
+      queue: threadId === 'thread-A' ? [{ id: 'queued-A' }] : [],
+      isLoading: false,
+      isLoadingHistory: false,
+      hasMore: true,
+      hasActiveInvocation: false,
+      intentMode: null,
+      targetCats: [],
+      catStatuses: {},
+      catInvocations: {},
+      activeInvocations: {},
+      unreadCount: 0,
+      lastActivity: 0,
+    }));
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+    const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+    emitMock.mockClear();
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-C' }));
+    });
+
+    const leftRooms = emitMock.mock.calls.filter(([event]) => event === 'leave_room').map(([, room]) => room);
+    expect(leftRooms).toContain('thread:thread-B');
+    expect(leftRooms).not.toContain('thread:thread-A');
+  });
+
+  it('keeps a bounded restored room until the client has enough state to prove it inactive', () => {
+    window.sessionStorage.setItem('cat-cafe:ws:joined-rooms:v1:test-user', JSON.stringify(['thread:thread-A']));
+    mockKnownThreadIds.delete('thread-A');
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+    const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+    emitMock.mockClear();
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-C' }));
+    });
+
+    const leftRooms = emitMock.mock.calls.filter(([event]) => event === 'leave_room').map(([, room]) => room);
+    expect(leftRooms).toContain('thread:thread-B');
+    expect(leftRooms).not.toContain('thread:thread-A');
+  });
+
+  // thread_summary tests removed (clowder-ai#343): listener and callback no longer exist.
 
   it('does not restore rooms persisted by another user id', () => {
     window.sessionStorage.setItem('cat-cafe:ws:joined-rooms:v1:alice', JSON.stringify(['thread:alice-secret']));
@@ -754,6 +2464,105 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     );
   });
 
+  it('keeps entity semantic events out of the timeline because Settings owns their projection', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    const semanticEvent = {
+      v: 1 as const,
+      id: 'native-goal:thread-B:1:updated',
+      kind: 'goal' as const,
+      occurredAt: 1_788_000_000_000,
+      state: 'updated' as const,
+      revision: 1,
+      objective: 'Ship Phase C',
+      status: 'active' as const,
+      source: 'codex_app_server' as const,
+      observedAt: 1_788_000_000_000,
+      provenance: { provider: 'openai_codex', carrier: 'app_server' },
+    };
+    act(() => {
+      simulateServerEvent('connector_message', {
+        threadId: 'thread-B',
+        message: {
+          id: 'semantic-live-1',
+          type: 'connector',
+          content: 'thread/goal/updated raw provider copy',
+          extra: { semanticEvent },
+          timestamp: semanticEvent.occurredAt,
+        },
+      });
+    });
+
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
+  });
+
+  it('keeps plan visible over socket until a real Workspace host owns its projection', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    const semanticEvent = {
+      v: 1 as const,
+      id: 'plan-socket-1',
+      kind: 'plan' as const,
+      occurredAt: 1_788_000_000_000,
+      stage: 'updated' as const,
+      text: 'Locate the contract, then fix it.',
+    };
+    act(() => {
+      simulateServerEvent('connector_message', {
+        threadId: 'thread-B',
+        message: {
+          id: 'semantic-workspace-1',
+          type: 'connector',
+          content: 'raw plan copy must not become a connector bubble',
+          extra: { semanticEvent },
+          timestamp: semanticEvent.occurredAt,
+        },
+      });
+    });
+
+    expect(mockAddMessageToThread).toHaveBeenCalledWith(
+      'thread-B',
+      expect.objectContaining({
+        id: 'semantic-workspace-1',
+        type: 'connector',
+        content: 'Locate the contract, then fix it.',
+      }),
+    );
+  });
+
+  it('fails closed instead of leaking an invalid semantic connector payload', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+    act(() => {
+      simulateServerEvent('connector_message', {
+        threadId: 'thread-B',
+        message: {
+          id: 'semantic-invalid-1',
+          type: 'connector',
+          content: '{"method":"review/start","params":{"raw":true}}',
+          extra: { semanticEvent: { method: 'review/start', params: { raw: true } } },
+          timestamp: Date.now(),
+        },
+      });
+    });
+
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
+  });
+
   it('connector_message from background thread is added to that thread state', () => {
     mockStoreCurrentThreadId = 'thread-B';
     const callbacks: SocketCallbacks = { onMessage: vi.fn() };
@@ -779,6 +2588,49 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockAddMessageToThread).toHaveBeenCalledWith(
       'thread-A',
       expect.objectContaining({ id: 'conn-bg-1', type: 'connector' }),
+    );
+  });
+
+  it('scheduler lifecycle connector_message shows toast instead of appending a thread message', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('connector_message', {
+        threadId: 'thread-B',
+        message: {
+          id: 'scheduler-toast-1',
+          type: 'connector',
+          content: '「喝水提醒」下次执行时间：2026-04-13 09:00:00',
+          source: { connector: 'scheduler', label: '定时任务', icon: 'scheduler' },
+          extra: {
+            scheduler: {
+              toast: {
+                type: 'info',
+                title: '定时任务已创建',
+                message: '「喝水提醒」下次执行时间：2026-04-13 09:00:00',
+                duration: 3200,
+                lifecycleEvent: 'registered',
+              },
+            },
+          },
+          timestamp: Date.now(),
+        },
+      });
+    });
+
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
+    expect(mockAddToast).toHaveBeenCalledTimes(1);
+    expect(mockAddToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'info',
+        title: '定时任务已创建',
+        threadId: 'thread-B',
+      }),
     );
   });
 });

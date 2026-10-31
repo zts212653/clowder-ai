@@ -1,20 +1,30 @@
 ---
 name: worktree
-description: >
-  创建 Git worktree 隔离开发环境，含 Redis 6398 安全配置。
-  Use when: 开始任何代码修改、新功能开发、bug fix。
-  Not for: 纯文档修改（≤5 行）、不涉及代码的讨论。
-  Output: 隔离的 worktree + 正确的 Redis/环境配置。
+tips_exempt: "2026-10-27: developer CLI birth/inventory/finish and automatic merged-checkout retirement; no separate end-user Hub action."
+description: "Use when: 创建代码/脚本/API工位或收尾。Not for: docs直推、代清其他owner。Output: 隔离worktree（Redis6398）、实际移除工位的released回执或具名retained回执。"
 triggers:
   - "开始开发"
   - "新 worktree"
   - "开 worktree"
+  - "worktree 收尾"
 renamed-from: using-git-worktrees
 ---
 
 # Worktree
 
-开始任何非 trivial 的功能开发前，必须拉 worktree 隔离，不要直接在 main 上改代码。
+开始任何非 trivial 的功能开发前，必须拉 worktree 隔离，不要直接在 main 上改代码。Skill / MCP description 如果改到 API route、localhost、script、CLI command、第一方执行面，即使只有几行，也不按“纯文档免验证”处理：默认跑 skill reference/surface 与 claim 对应的定向检查；只有共享契约、门禁执行链或 targeted 无法覆盖跨包合流风险时才跑 full `pnpm gate`；高风险标签单独加强对应独立审查 / 授权。非 trivial 行为改动仍应开 worktree。
+
+获准的新 Feature 开工或旧 Phase 续做，在原责任现场先按 `custody-recognition` 核 accepted scope 并复用原 Task；worktree 只是代码隔离，不是新的托付身份。已批准的执行子线程继续自己的实现，不读取或迁移父线程 Task。
+
+## Co-Creation Docs 边界
+
+纯文档不再按行数决定是否进 worktree。用户授权落盘的共创文档先加载 `co-creation-docs`；显然低风险时猫可直接判定，拿不准或准备升到重载体时才运行 `pnpm classify:co-creation-docs`：
+
+- 显然 low-risk 或 `delivery=direct_push` → 不加载本 skill；走轻量文档校验 + 按内容决定 `review=required|reuse|skip` + commit/push。
+- `delivery=pull_request` 且 `lane=co_creation_docs` → 独立分支用于冲突/治理 review，但不自动升级 full gate。
+- `lane=regular_development` → 正常加载本 skill。
+
+`cat-cafe-skills/**`、`sop-definitions/**`、脚本、CLI 与其他第一方执行面始终属于 regular development；文件扩展名是 `.md` 也不例外。
 
 ## 开工前 Recall（F102 记忆系统）🔴
 
@@ -29,10 +39,10 @@ search_evidence("{topic}", scope="all")
 
 ## 目录位置（铁律）
 
-**Cat Cafe 项目：`../cat-cafe-{feature-name}`（relay-station/ 同级）**
+**Clowder AI 项目：`../cat-cafe-{feature-name}`（relay-station/ 同级）**
 
 ```bash
-git worktree add ../cat-cafe-{feature-name} -b feat/{feature-name}
+pnpm worktree:new ../cat-cafe-{feature-name} --branch feat/{feature-name} --source-ref {原Task或PR的ref} --owner {你的 catId} --policy merged
 ```
 
 - 🔴 **禁止在项目内部创建**（不要用 `.worktrees/` 子目录）
@@ -67,15 +77,38 @@ echo "ahead=$AHEAD behind=$BEHIND"
 3. `git push origin main`（如果 ahead > 0，推送本地更新）
 4. 确认 ahead=0 behind=0 后再创建 worktree
 
+## 创建前：查在飞 PR（别和别的猫撞车）🔴
+
+Main 同步只保证你和 `origin/main` 一致，**不告诉你有没有别的猫正在改同一批文件**。开 worktree 修**跨 feature / 共享代码 / incident（回归 / 脏状态 / "看起来没人管的红灯"）**类问题前，查在飞的 PR——**两刀，缺一不可**：
+
+```bash
+# 刀 1：列在飞 PR，缩到和你要改的 feature/incident 关键词相关的
+gh pr list --state open --search "<关键词>" \
+  --json number,title,headRefName --jq '.[] | "#\(.number) [\(.headRefName)] \(.title)"'
+
+# 刀 2：对可疑候选，确认它到底碰没碰你要改的文件
+gh pr diff <n> --name-only          # 或 gh pr view <n> --json files --jq '.files[].path'
+```
+
+- 🔴 **刀 2 不能省**：`gh pr list` 只给标题 / 分支名，**不显示 changed files**。只跑刀 1 就下"没人在改这个文件"的结论 = 假的安心——这道 pre-flight 自己就成了"名字承诺、覆盖不到"的空门。必须刀 2 核到文件集重叠，才算查过。
+- 命中同一文件 → **先去那只猫的归口 thread 打个招呼**（cross_post 一句"我也在看 X"），别闷头重复。
+- 修 incident / 回归时补历史链路：`gh pr list --state all --limit 30 --search "<关键词>"`。
+- 诊断里列到的分支名（CI 运行表 / `git worktree list`），**凡是匹配你这次关键词 / 同代码区的**，问一句"它在修什么"——别对全仓几百个分支做无差别 triage，那噪音比省下的重复劳动还多。
+- 反过来：你开始修一个跨 feature / incident 问题后，也在归口 thread 留一句"我在改 X"。协调是双向的。
+
+> 教训（2026-07-09 intake #2816 连环事故）：两只猫同一天、修同一批 clobber、找同一个 reviewer，互相不知道。其中一只从零重推诊断 + 366 行恢复补丁**全部作废**——只因开工前没跑这两刀。`git grep` 告诉你"代码是什么样"，回答不了"谁正在改它"。
+
 ## 创建步骤
 
 ```bash
-# 1. 创建 worktree
-git worktree add ../cat-cafe-{feature-name} -b feat/{feature-name}
+# 1. 创建 worktree（唯一入口；owner 默认取 $CAT_CAFE_CAT_ID，policy 默认 merged，登记随创建完成）
+#    不设工位数量上限；创建本身不挪动或删除已有目录
+pnpm worktree:new ../cat-cafe-{feature-name} --branch feat/{feature-name}
 cd ../cat-cafe-{feature-name}
 
-# 2. 安装依赖
-pnpm install
+# 2. 只有任务需要编译/依赖测试时才安装；只读/纯文档/Node 内置脚本无需先铺依赖。
+#    清除 NODE_ENV，使用本分支锁文件。开发中的依赖和构建缓存保留，不在每次 gate 后删除。
+env -u NODE_ENV pnpm install --frozen-lockfile
 
 # 3. 创建 .env（Redis 隔离，必须！）
 cat > .env <<EOF
@@ -86,35 +119,191 @@ EOF
 # 4. 验证 Redis 隔离
 echo $REDIS_URL   # 必须是 redis://localhost:6398，不能是 6399
 
-# 5. 验证基线测试通过
-pnpm test
+# 5. 验证与改动风险匹配的基线（示例；不要机械跑无关全仓测试）
+pnpm check:skills   # skill surface
+pnpm test           # 仅在跨包行为 / high-assurance 需要全量 baseline 时
 ```
+
+新工位默认延后检出大型历史媒体，代码、文字、元数据及已识别的运行/测试素材照常保留。
+要查历史图片/视频时，在工位内用 `pnpm worktree:assets project-evidence/<目录>` 补齐；
+裸 `pnpm worktree:assets` 列出尚未检出的路径，`pnpm worktree:assets --all` 补齐全部。
+从创建起就需要完整素材的任务，在 `worktree:new` 加 `--full`。
+补齐取当前工位分支，不能把 main 的资料目录或整个 `node_modules` 链过来。
+动态拼接的素材路径可能需要主动补齐；检查缺素材时先补本分支文件，不伪造替代图片。
+
+pnpm 复用它自己的 store；每个工位保有独立 workspace 链接和构建产物。
+不把目录显示的 `node_modules` 大小当独占占盘量，不承诺固定恢复秒数。
+
+暂时不用且希望回收空间时，从工位外显式执行：
+
+```bash
+pnpm worktree:trim ../cat-cafe-{feature-name} --source-ref {原Task或PR的ref}
+```
+
+它先核本人登记、保护对象、进程和排队任务，只回收 `.next/cache` 下的 webpack / swc / next-minifier。
+依赖、dist、生产构建、运行缓存、配置和证据保留；继续工作时直接 dev/build，编译器会重建缓存。
+没有 paused 状态，无需 resume。`--retain` 不会自动 trim，也不在每次 gate 后 trim。
+回执分别列目录逻辑大小和文件系统可用空间前后值；后者包含同期其他写入，不等于可归因释放量。
+这是进程/持久记录检查后 rename，不是新任务 admission 锁；别与同一工位的编译同时发起。
+rename 或删除中断时原件不受影响，再次显式 trim 会清理已移开的缓存；EXDEV 不会退回原地删除。
 
 ## Redis 隔离（数据安全红线）
 
 | Redis | 端口 | 用途 |
 |-------|------|------|
-| **用户 Redis** | **6399** | 铲屎官的数据，🔴 圣域，只读 |
-| **开发 Redis** | **6398** | 猫猫开发测试，随便折腾 |
+| **用户 Redis** | **6399** | operator的数据，🔴 圣域，只读 |
+| **开发 Redis** | **6398** | 共享开发实例；操作前核归属，不做全库清理 |
+| **Alpha Redis** | **6397** | 已合入 main 的隔离验收；数据在 Alpha checkout 内 |
 
-**Worktree 中启动服务 = 必须用 6398。**
-不设置 REDIS_URL 就启动服务 = 回落到 6399 = 数据丢失风险。
+**普通功能 worktree 启动服务须用 6398 或隔离 offset；标准 Alpha 专用 6397。**
+不设置 REDIS_URL 就启动服务 = 回落到 6399 = 数据丢失风险（LL-015）。
 
-## 合入后清理
+## 多 Worktree 并发：WORKTREE_PORT_OFFSET
 
-分支合入 main 后**当场清理**，不要留到下次：
+F182 大赛 / 多猫并发开发时，6 个 worktree 同时跑各自服务不打架。
+
+**OFFSET 必须 ≤ 0**（向下减避 production Redis (sacred)），范围 [-100, 0]，10 倍数。`offset=0` 留给 alpha 默认。
+
+| OFFSET | Redis | API | Web | NEXT_PUBLIC_API_URL |
+|---|---|---|---|---|
+| 0（worktree 默认） | 6398 | 3102 | 5102 | http://localhost:3102 |
+| -10 | 6388 | 3112 | 5112 | http://localhost:3112 |
+| -20 | 6378 | 3122 | 5122 | http://localhost:3122 |
+| ... | ... | ... | ... | ... |
+| -60 | 6338 | 3162 | 5162 | http://localhost:3162 |
+
+派生公式：`非 Redis = base - OFFSET`（OFFSET 是负数 → 端口向上加），`Redis = 6398 + OFFSET`（向下减）。
+
+### 启用方式
 
 ```bash
-git worktree remove ../cat-cafe-{feature-name}
-git branch -d feat/{feature-name}
-git worktree prune
+# 1. .env 设置 OFFSET + 禁用 sidecar（多猫并发 worktree 默认）
+cat > .env <<EOF
+WORKTREE_PORT_OFFSET=-10
+PREVIEW_GATEWAY_PORT=0
+ANTHROPIC_PROXY_ENABLED=0
+ASR_ENABLED=0
+TTS_ENABLED=0
+LLM_POSTPROCESS_ENABLED=0
+EMBED_ENABLED=0
+EMBED_MODE=off
+EOF
+
+# 2. 启动用 pnpm dev:direct 或 bash scripts/start-dev.sh
+#    ⚠️ 不要用 `pnpm dev`！它走 pnpm -r --parallel run dev，绕过 OFFSET preflight
+pnpm dev:direct
 ```
 
-检查是否有积压未清理：
+### 优先级（重要）
+
+OFFSET 非 0 时，**派生值优先级高于 `.env` 和 `CAT_CAFE_RESPECT_DOTENV_PORTS`**。即使 `.env` 里硬写了 `REDIS_URL=...:6398` 也会被派生值覆盖。这是 LL-015 防回归——避免"端口数字看起来对了但 ioredis 实际连了 6399"的事故。
+
+### 诊断
+
 ```bash
-git worktree list             # 列出所有 worktree
-git branch --merged main      # 哪些分支已合入
+pnpm check:worktree-port-offset   # 验证全部 7 个大赛 OFFSET 派生 + 端口无冲突
 ```
+
+诊断脚本是 CI 用，**不是唯一 gate**——唯一 gate 是 `start-dev.sh` 内置 preflight（启动时主动派生端口、强制 export sidecar=0、unset Redis dir 让重派生；OFFSET 派生失败 / production data boundary 6399 拒绝启动）。
+
+### Sidecar 处理
+
+多 worktree 并发默认**全禁用** sidecar（Preview Gateway / Anthropic Proxy / Whisper / TTS / LLM Postprocess / Embedding）。OFFSET 模式下 preflight 会**主动 export 0** 这些 sidecar 标志（不依赖用户 .env），即便用户配置了 `EMBED_MODE=on` 或 profile=dev 想拉起 proxy 也会被覆盖——无需用户手动禁用。启用 sidecar 但又不 offset 化 → 端口冲突。
+
+详细设计见 *(internal reference removed)*。
+
+## 出生来源与 PR 关联
+
+`worktree:new` 记录本 invocation 的 thread/user/source/role 到工位私有 config，保留原 owner 与出生时间。
+独立 CLI 没有 callback 环境时，带 `--thread-id {原threadId} --user-id {原userId} --source-ref {原Task或PRref}`。
+只在真实创建/使用记录支持时填写；未知旧目录不通过 declare-only 补造出生记录。
+
+作者创建 PR 后，将它关联到自己的 exact HEAD 工位（不改原出生来源）：
+
+```bash
+pnpm worktree:bind-pr {精确工位路径} pr:{OWNER}/{REPO}#{PR_NUMBER}
+```
+
+只读普查用 `pnpm worktree:inventory`，包含 legacy 与非标准路径；capacity 只回答名额，不是完整库存。
+API 每五分钟扫描本部署仓库的续留及已合入未收尾事实，每轮最多四个 PR subject 轮转。
+已登记且来源 thread/user 核对通过、PR 已合入并包含当前 exact HEAD、没有有效续留的工位，
+扫描会调用原生收尾：再次核对干净状态、进程与持久任务、保护名单及 Git 可见 index，
+保全被忽略的本地数据/环境配置和私有 Git metadata，再用无 force 的 Git remove 释放目录、保留分支。
+常驻目录、Alpha、policy=never、locked、未提交改动和仍有消费者的工位保留。
+结果/恢复入口用已有幂等消息回原 thread，投递中断从原收尾账本补投，不唤醒模型或创建 Queue 任务。
+自动归档/删除失败后，同一路径与 HEAD 暂停自动重试，回原 thread 提醒手动收尾，不重复复制多份原件。
+删除尚未开始且原工位仍在时，失败或中断留下的本次重复归档会清除；删除已开始则保留恢复材料。
+下轮扫描从同一账本核对中断：目录和登记已消失、归档验证通过时补发明确的中断对账通知，
+不伪造原 finish 的完成回执。可能部分删除或无法核验时保留归档并报原 thread。
+来源缺失/损坏会写运行日志并保留在 inventory 中，由原维护查证，不能猜同 catId 的另一个线程。
+过期提醒在代码部署后才生效，源码存在不算线上已验收。
+
+## 收工：核验释放或具名续留
+
+工作结束时，从持有 main 且已包含当前收尾版本的主仓执行唯一收尾入口（merge-gate Step 8 同一套）。旧 feature/review 快照里的 CLI 可能仍执行完整隔离；离开目标目录后调用主仓的 CLI，不从另一份旧快照运行收尾：
+
+```bash
+pnpm worktree:finish ../cat-cafe-{feature-name} --source-ref {原Task或PR的ref}
+pnpm worktree:finish ../cat-cafe-{feature-name} --source-ref {同一ref} --check
+```
+
+只有工具核实工位实际移除、恢复归档验证通过、ledger 有匹配的完成记录，才返回 `state=released` / exit 0。
+它核 owner、保护名单、锁、进程和目标状态；`merged` 还核内容已在 `origin/main`（含 squash）。
+这是 owner 显式收尾，不再等 7 天闲置或 14 天隔离窗：工具先验证归档独有 ignored 原件、工位私有 Git metadata，并保住 HEAD reflog 对象，然后用无 force 的 Git 命令移除工位。分支与源码留在共享 Git；依赖、构建与浏览器测试缓存直接回收，不复制进归档。未知 ignored 内容默认保留，真实 tracked/untracked 源文件仍阻塞释放。
+新回执为 `storageDisposition: removed`，包含归档位置、恢复命令和删除前后可用空间读数。归档里的用户原件持久保留，不自动过期。恢复时重建依赖和构建缓存；不要把全部目录移动到隔离区当作磁盘清理。
+旧隔离回执的 `storageDisposition: quarantined` 只证明离开活跃库存，目录仍占磁盘；不用于声明空间已回收。
+
+仍需预览、验收或接续时，写一条 worktree-local 的 owner/source/原因/截止事实，再核验：
+
+```bash
+pnpm worktree:finish ../cat-cafe-{feature-name} --source-ref {原Task或PR的ref} --retain --reason "等待原Alpha验收" --until {未来ISO时刻}
+pnpm worktree:finish ../cat-cafe-{feature-name} --source-ref {同一ref} --check
+```
+
+单次续留最多30天，`--until` 必须带明确时区（Z 或 offset）；超出范围拒绝，不写登记。到期确需接续须由 owner 重新给出原因与截止。
+`retained` 仍占工位；到期、HEAD 改变或 source 不符时 `--check` 非零，不能当已收尾。
+reaper 尊重有效续留，过期或损坏的续留只报告 review，不能静默按旧策略处置。
+将实际 JSON 回执留在原 Task/PR；`blocked`、merge 成功或单纯命令退出都不替代工位处置。
+
+创建不受登记数量阻挡，也不触发同步清理。已合入工位由上述周期扫描收尾；
+既有 `reap --apply`/`--purge` 仍是单独授权的显式动作。原始未登记旧目录仍只报告。
+
+## 异常：想保留、收尾受阻、要恢复
+
+| 场景 | 你看到什么 | 怎么做 |
+|------|-----------|--------|
+| 工位数量很多 | `worktree:check` 显示库存数量 | 数量只是观测，不阻止创建；不要为了开工先替别的 owner 清目录 |
+| 工作结束但还需保留 | — | 用 `worktree:finish --retain --reason ... --until ... --source-ref ...`；核 `retained` 回执与截止。`never` 是主动长期政策，不替代这次收尾的具名理由 |
+| 临时沙盒 | — | `--policy ttl --ttl-days N`（review 沙盒默认 7） |
+| 工位已完成移除，要恢复 | 原路径不见了 | 按 finish 回执/ledger 的 `archivePath` 与 `restore` 恢复源码及原件，再重装依赖；旧 `quarantinePath` 回执仍用它自己的 move 恢复命令 |
+| 隔离后又在里面干活了 / 改了登记 | — | 不用管：隔离后有改动、新提交或重新登记的目录**不会被 purge**（`review:changed-in-quarantine` / `redeclared-in-quarantine`），恢复回去即可 |
+
+规则细节留给工具（`scripts/lib/worktree-reaper-core.mjs`），这里只记要点：
+- **数量只作观测，不设硬上限**。`pnpm worktree:check` 分别报告登记工位和未登记旧库存；旧调用的 `--max` 仅供对比，不拒绝创建或令数量检查失败。
+- **只动出生时登记过的目录**；没登记的只进报告（`pnpm worktree:reap` dry-run，账本 `.cat-cafe/tmp/reaper-<date>.tsv`）。
+- **有未提交改动、locked、有进程在用的永远不动**；自动 reaper 仅凭闲置/TTL 推断时仍先隔离，满 14 天且期间无人改动才进入 `--purge` 候选。owner 的显式 finish 用上面的真实移除路径。
+
+## Commit / Stash 溯源 Footer（F193 Phase E）
+
+当当前 worktree 的改动来自跨 thread 投递、跨 feature 调查、或你预期后续猫需要反查来源 thread 时，在 commit body 或 stash message 末尾加：
+
+```text
+Thread-Context: threadId=<threadId> invocationId=<invocationId> catId=<catId>
+```
+
+示例：
+
+```text
+Why: Add read-side affordance so search/list_recent results show where to cross-post.
+
+[Maine Coon/GPT-5.5🐾]
+Thread-Context: threadId=[thread-id] invocationId=0001780508313338 catId=codex
+```
+
+规则：
+- 只在有明确 thread context 时写；拿不到 `invocationId` 就省略该键，不要猜。
+- 不通过 hook 自动改写或拒绝提交；这是降摩擦溯源字段，不是新门禁。
+- stash 只写 tracked 临时现场；多 session 工作目录里仍禁止 `git stash -u`，避免清掉别人未跟踪产物。
 
 ## Codex `apply_patch` 陷阱（开发猫必读）
 
@@ -146,7 +335,7 @@ git branch --merged main      # 哪些分支已合入
 - [ ] 目录放在 relay-station/ 同级（不在项目内部）
 - [ ] 不是 `*-runtime` 命名
 - [ ] `.env` 包含 `REDIS_URL=redis://localhost:6398`
-- [ ] 基线测试通过（失败了先报告再问是否继续）
+- [ ] 风险匹配的 baseline 通过（targeted 默认；共享契约、门禁执行链或无法覆盖的跨包影响才全量）
 - [ ] 当前会话不是 `cat-cafe-runtime` 的运行态验收会话（验收会话默认只读，不做重启命令）
 - [ ] 验证目标 URL 已明确；若是 `3003/3004`，你知道自己在打 runtime，而不是当前 worktree 的本地改动
 
@@ -156,4 +345,4 @@ git branch --merged main      # 哪些分支已合入
 
 ## Next Step
 
-→ **直接加载 `tdd`**（在 worktree 里开始实现）。SOP 链条自动推进（§17）。
+行为 / bug 风险 → `tdd`；确定性生成物或现有 checker 已精准覆盖 → 直接以该红灯为 RED 修到绿；复杂度需要时才补 `writing-plans`。

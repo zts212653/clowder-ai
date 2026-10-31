@@ -1,0 +1,155 @@
+import type { FastifyRequest } from 'fastify';
+import { isLoopbackAddress } from '../../utils/loopback-request.js';
+import { resolveOwnerGate } from '../../utils/owner-gate.js';
+import { REDACTED_CAPABILITY_SECRET } from './capability-redaction.js';
+
+export interface CapabilityWriteRouteError {
+  status: number;
+  error: string;
+}
+
+export interface CapabilityWriteOwnerOptions {
+  allowMissingOwner?: boolean;
+  requireConfiguredOwner?: boolean;
+  missingOwnerError?: string;
+}
+
+const LOCAL_CAPABILITY_WRITE_ERROR = 'Capability writes require direct localhost Hub access';
+
+export function resolveCapabilityWriteSessionUserId(request: FastifyRequest): string | null {
+  const sessionUserId = (request as FastifyRequest & { sessionUserId?: string }).sessionUserId;
+  return typeof sessionUserId === 'string' && sessionUserId.trim() ? sessionUserId.trim() : null;
+}
+
+/**
+ * Owner gate for capability/plugin write operations (#794 unified pattern).
+ *
+ * **For write routes** (install, delete, toggle, config save):
+ *   Use `{ allowMissingOwner: true }` — falls through in local single-user mode
+ *   (no DEFAULT_OWNER_USER_ID configured). Security is provided by session auth +
+ *   origin check + loopback guard; the owner gate only adds value when explicitly
+ *   configured for multi-user/shared deployments.
+ *
+ * **For data-visibility filters** (canReadSensitiveMcpConfig):
+ *   Use `{ requireConfiguredOwner: true }` — fail when unconfigured, because
+ *   "not configured" means "hide sensitive data" not "block the request".
+ *
+ * ⚠️ Do NOT use requireConfiguredOwner for write routes — it blocks local single-user
+ *   mode unnecessarily. This mistake has recurred in connector plugin routes
+ *   (see #794 history).
+ */
+export function requireCapabilityWriteOwner(
+  userId: string,
+  options: CapabilityWriteOwnerOptions = {},
+): CapabilityWriteRouteError | null {
+  const shouldFallThrough = !!options.allowMissingOwner && !options.requireConfiguredOwner;
+  return resolveOwnerGate(userId, {
+    requireConfiguredOwner: !shouldFallThrough,
+    errorMessage: options.missingOwnerError,
+  });
+}
+
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
+function normalizeHostForLoopbackCheck(value: string | undefined): string {
+  const raw = value?.split(',')[0]?.trim().toLowerCase() ?? '';
+  if (!raw) return '';
+  if (raw.startsWith('[')) {
+    const end = raw.indexOf(']');
+    return end > 0 ? raw.slice(1, end) : raw;
+  }
+  if (raw.indexOf(':') === raw.lastIndexOf(':')) {
+    return raw.split(':')[0] ?? raw;
+  }
+  return raw;
+}
+
+function isLoopbackHost(value: string): boolean {
+  return value === 'localhost' || value === '127.0.0.1' || value === '::1';
+}
+
+const PROXY_FORWARDING_HEADERS = [
+  'forwarded',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip',
+  'x-client-ip',
+  'cf-connecting-ip',
+  'true-client-ip',
+] as const;
+
+function hasHeaderValue(value: string | string[] | undefined): boolean {
+  if (Array.isArray(value)) return value.some((item) => item.trim().length > 0);
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function hasProxyForwardingHeaders(request: FastifyRequest): boolean {
+  return PROXY_FORWARDING_HEADERS.some((header) => hasHeaderValue(request.headers[header]));
+}
+
+function hasTrustedLocalOrigin(value: string | undefined): boolean {
+  if (!value?.trim()) return false;
+  try {
+    return isLoopbackHost(normalizeHostForLoopbackCheck(new URL(value).host));
+  } catch {
+    return false;
+  }
+}
+
+function isApiBoundToLocalhost(): boolean {
+  const host = process.env.API_SERVER_HOST?.trim();
+  if (!host) return true;
+  return isLoopbackHost(normalizeHostForLoopbackCheck(host));
+}
+
+function isDirectLocalCapabilityRequest(request: FastifyRequest): boolean {
+  if (!isApiBoundToLocalhost()) return false;
+  if (!isLoopbackAddress(request.ip)) return false;
+  if (hasProxyForwardingHeaders(request)) return false;
+
+  // Host is client-supplied; it only narrows requests after the peer socket is loopback.
+  const host = firstHeaderValue(request.headers.host) ?? request.hostname;
+  const normalized = normalizeHostForLoopbackCheck(host);
+  if (!isLoopbackHost(normalized)) return false;
+
+  return true;
+}
+
+export function isLocalCapabilityReadRequest(request: FastifyRequest): boolean {
+  if (!isDirectLocalCapabilityRequest(request)) return false;
+
+  // Direct same-origin reads may omit Origin. If a caller supplies one, it must
+  // still identify a loopback origin rather than weakening the local boundary.
+  const origin = firstHeaderValue(request.headers.origin);
+  return origin === undefined || hasTrustedLocalOrigin(origin);
+}
+
+export function isLocalCapabilityWriteRequest(request: FastifyRequest): boolean {
+  if (!isDirectLocalCapabilityRequest(request)) return false;
+
+  // Capability writes are a direct-local Hub surface; headers narrow the loopback peer check.
+  return hasTrustedLocalOrigin(firstHeaderValue(request.headers.origin));
+}
+
+export function requireLocalCapabilityReadRequest(request: FastifyRequest): CapabilityWriteRouteError | null {
+  if (isLocalCapabilityReadRequest(request)) return null;
+  return { status: 403, error: 'Capability reads require direct localhost Hub access' };
+}
+
+export function requireLocalCapabilityWriteRequest(request: FastifyRequest): CapabilityWriteRouteError | null {
+  if (isLocalCapabilityWriteRequest(request)) return null;
+  return { status: 403, error: LOCAL_CAPABILITY_WRITE_ERROR };
+}
+
+export function containsRedactedPlaceholder(value: unknown): boolean {
+  if (typeof value === 'string') return value.includes(REDACTED_CAPABILITY_SECRET);
+  if (Array.isArray(value)) return value.some((item) => containsRedactedPlaceholder(item));
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).some((item) => containsRedactedPlaceholder(item));
+  }
+  return false;
+}

@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{
+    --ink:#243042;--muted:#667085;--paper:#fffdfa;--cream:#f7f2e9;
+    --peach:#f3a47a;--coral:#e76f51;--rose:#f7d7d0;--gold:#f2c66d;
+    --mint:#cfe8dc;--sage:#5f8f7a;--sky:#d8e9f5;--blue:#3e6f91;
+    --lav:#e9e0f5;--purple:#715c91;--line:#ded7ce;--white:#fff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(150deg,#f7f1e7 0%,#fffaf4 44%,#f4eee7 100%);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px}
+  .hero{position:relative;overflow:hidden;background:linear-gradient(135deg,#fff 0%,#fff7ef 56%,#fbe5dc 100%);border:1px solid #eadfd4;border-radius:28px;padding:30px;box-shadow:0 18px 55px rgba(91,63,42,.10)}
+  .hero:after{content:"";position:absolute;width:260px;height:260px;border-radius:50%;right:-90px;top:-120px;background:radial-gradient(circle,#f1a47c55,transparent 66%)}
+  .topline{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+  .eyebrow{font-size:13px;font-weight:800;letter-spacing:.09em;color:#a44b35;text-transform:uppercase}
+  .status{display:inline-flex;gap:7px;align-items:center;border:1px solid #9bcbb7;background:#e8f6ef;color:#2f6e56;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:800}
+  h1{font-size:34px;line-height:1.18;margin:12px 0 8px;letter-spacing:-.03em}
+  .lead{max-width:900px;color:#4d5664;font-size:17px;line-height:1.7;margin:0}
+  .promise{margin-top:20px;display:grid;grid-template-columns:1.2fr 1fr;gap:14px}
+  .quote,.anti{border-radius:18px;padding:17px 18px}
+  .quote{background:#253346;color:white}
+  .quote b{color:#ffd995}
+  .anti{background:#fff;border:1px dashed #e2a18e;color:#794334}
+  .anti strong{display:block;margin-bottom:5px}
+  .section-title{margin:28px 0 13px;font-size:20px;display:flex;align-items:center;gap:9px}
+  .section-title:after{content:"";height:1px;background:var(--line);flex:1}
+  .journey{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+  .step{position:relative;min-height:104px;border-radius:17px;padding:13px 11px;background:#fff;border:1px solid #e5ddd3}
+  .step:not(:last-child):after{content:"›";position:absolute;right:-10px;top:37px;z-index:2;width:18px;height:26px;border-radius:10px;background:#fff7ef;color:#c36a4e;text-align:center;font-size:22px;line-height:24px;font-weight:900}
+  .step .n{font-size:11px;font-weight:900;color:#aa5d45;letter-spacing:.06em}
+  .step b{display:block;margin:7px 0 5px;font-size:14px}
+  .step small{color:var(--muted);line-height:1.45}
+  .foundation{display:flex;gap:15px;align-items:center;background:#293747;color:white;border-radius:20px;padding:17px 20px;margin-top:12px}
+  .foundation .badge{white-space:nowrap;background:#f4b48f;color:#442719;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:900}
+  .foundation p{margin:0;font-size:13px;line-height:1.55;color:#e3e8ed}
+  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .card{background:var(--paper);border:1px solid #e4ddd4;border-radius:22px;padding:18px;box-shadow:0 7px 20px rgba(72,53,37,.05)}
+  .card-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:12px}
+  .icon{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;font-size:22px;flex:none}
+  .p1 .icon{background:var(--rose)} .p2 .icon{background:var(--sky)}
+  .p3 .icon{background:var(--lav)} .p4 .icon{background:#f8e6b9}
+  .p5 .icon{background:var(--mint)} .p6 .icon{background:#f1ddec}
+  .phase{font-size:11px;font-weight:900;letter-spacing:.08em;color:#8e604f}
+  .card h3{font-size:18px;margin:3px 0 2px}
+  .metaphor{font-size:13px;color:var(--muted)}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .box{border-radius:14px;padding:11px 12px;background:#f8f5f0}
+  .box.user{background:#f1f7f4}
+  .label{font-size:11px;color:#8b6657;font-weight:900;margin-bottom:5px}
+  .box p{font-size:13px;line-height:1.5;margin:0}
+  .done{margin-top:10px;padding:9px 11px;border-left:3px solid #e58b69;background:#fff7f1;border-radius:0 10px 10px 0;font-size:12px;line-height:1.5;color:#624c43}
+  .rail{background:linear-gradient(90deg,#334354,#485c6f);color:white;border-radius:20px;padding:18px 20px;display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center}
+  .rail .rail-title{font-size:15px;font-weight:900;white-space:nowrap}
+  .rail p{margin:0;color:#e5ebef;font-size:13px;line-height:1.6}
+  .owners{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .owner-card{background:#fff;border:1px solid #e5ddd3;border-radius:18px;padding:16px}
+  .owner-card h4{margin:0 0 9px;font-size:15px}
+  .owner-card ul{margin:0;padding-left:18px;color:#596270;font-size:13px;line-height:1.75}
+  .owner-card.f311{border-top:5px solid var(--coral)}
+  .owner-card.others{border-top:5px solid var(--blue)}
+  .close{margin-top:14px;border-radius:22px;padding:20px;background:linear-gradient(135deg,#fff1e8,#f2f7f4);border:1px solid #ead6ca}
+  .close h3{margin:0 0 8px;font-size:18px}
+  .checks{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .check{background:#fff;border:1px solid #e3dbd1;border-radius:13px;padding:10px;font-size:12px;line-height:1.45}
+  .check b{color:#2e7259}
+  .footer{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:16px;color:#7b7068;font-size:11px}
+  details{margin-top:11px;border-top:1px solid #eee5dc;padding-top:9px}
+  summary{cursor:pointer;color:#9b513b;font-size:12px;font-weight:800}
+  details p{font-size:12px;color:#68717d;line-height:1.55;margin:8px 0 0}
+  @media(max-width:850px){
+    .promise,.grid,.owners{grid-template-columns:1fr}
+    .journey{grid-template-columns:repeat(2,1fr)}
+    .step:after{display:none}
+    .checks{grid-template-columns:1fr}
+    .rail{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <section class="hero">
+    <div class="topline">
+      <div class="eyebrow">F311 · Capability Evolution Workspace</div>
+      <div class="status">✓ 终态 Phase 已合入 main</div>
+    </div>
+    <h1>不是“进化一个东西”，而是造一座<br>能持续进化任何能力的工厂</h1>
+    <p class="lead">用户只要说一句“我们来进化 X”。后厨自动完成建制、取证、评估、归因、审批、写回、新鲜复验和退役；用户能看懂、能批准、能撤销，但不用被迫当标注员。</p>
+    <div class="promise">
+      <div class="quote"><b>终极产品承诺：</b>今天纠正过的事情，明天不再重新交学费；使用系统的过程，会积累成属于用户自己的能力资产。</div>
+      <div class="anti"><strong>反脚手架契约</strong>每个 Phase 都是最终产品永久保留的器官。没有样例 Harness、临时 adapter、影子状态机，也没有“Demo 成功后推倒重写”。</div>
+    </div>
+  </section>
+
+  <h2 class="section-title">用户眼中的一条完整旅程</h2>
+  <section class="journey">
+    <div class="step"><span class="n">PHASE 1</span><b>一句话开工</b><small>Program 出生，目标、价值主人和经济账可见</small></div>
+    <div class="step"><span class="n">PHASE 2</span><b>系统长出眼睛</b><small>从正常工作里获得新鲜 bit，不加标注任务</small></div>
+    <div class="step"><span class="n">PHASE 3</span><b>拿尺子查原因</b><small>分清是执行、Harness、尺子还是眼睛坏了</small></div>
+    <div class="step"><span class="n">PHASE 4</span><b>批准后才动手</b><small>真正写回、回滚、复验，并决定保留或退役</small></div>
+    <div class="step"><span class="n">PHASE 5</span><b>换对象也能用</b><small>记忆、Skill、猫画像、外部系统共用一套工厂</small></div>
+    <div class="step"><span class="n">PHASE 6</span><b>工厂也会学习</b><small>立尺、开眼、归因这些器官自身也能进化</small></div>
+  </section>
+
+  <div class="foundation">
+    <span class="badge">PHASE 0 · 已完成</span>
+    <p><b>先立宪法，再施工。</b>已经冻结：F311 是薄控制面；F299 是唯一 invocation trajectory 面；F246 是唯一 Approval 入口；F307 是唯一 Workspace 宿主；版本、证据、写回与 outcome 仍归原 owner。后续任何 Phase 都不能借“先跑起来”再造一套。</p>
+  </div>
+
+  <h2 class="section-title">每个 Phase 到底交付什么</h2>
+  <section class="grid">
+    <article class="card p1">
+      <div class="card-head"><div class="icon">🪪</div><div><div class="phase">PHASE 1</div><h3>建制与可见</h3><div class="metaphor">给一次进化办出生证，并把工地打开给人看</div></div></div>
+      <div class="cols">
+        <div class="box"><div class="label">我们建设</div><p>Durable Evolution Program：对象、单一 claim、经济页、双证、四角色、owner refs、生命周期与当前阶段。</p></div>
+        <div class="box user"><div class="label">用户获得</div><p>任意聊天页说一句话即可启动；Workbench 实时看见进度、阻塞和下一步，正常路径零表单。</p></div>
+      </div>
+      <div class="done"><b>完成标志：</b>Program 从创建起 TTL=0、重启可恢复；API、猫动作和 F307 UI 读取同一份真相。</div>
+      <details><summary>为什么不是一张 Demo 卡片？</summary><p>因为第一天就落正式事件流与正式 Workspace surface；卡片、MCP 和 API 都只是同一 canonical truth 的投影。</p></details>
+    </article>
+
+    <article class="card p2">
+      <div class="card-head"><div class="icon">👁️</div><div><div class="phase">PHASE 2</div><h3>开眼与取证</h3><div class="metaphor">让系统在真实工作里看见发生了什么</div></div></div>
+      <div class="cols">
+        <div class="box"><div class="label">我们建设</div><p>接入 F299 trajectory、日志/指标/爪感差/采纳撤销/外部 evidence；在 F192 注册事件、时间、配额触发。</p></div>
+        <div class="box user"><div class="label">用户获得</div><p>不用额外打标签；正常使用、取消、修订、复用本身就成为有来源的新鲜信号。</p></div>
+      </div>
+      <div class="done"><b>完成标志：</b>Workbench 能回答“眼睛接了什么、还缺什么、何时评估”；F311 只持 ref，不复制证据 payload。</div>
+      <details><summary>谁真正保存数据？</summary><p>轨迹归 F299，各类业务信号归各自 source owner。F311 只保存 join key、consumer 与来源引用。</p></details>
+    </article>
+
+    <article class="card p3">
+      <div class="card-head"><div class="icon">🔬</div><div><div class="phase">PHASE 3</div><h3>评估与归因</h3><div class="metaphor">不只说“变差了”，还要弄清到底哪里坏了</div></div></div>
+      <div class="cols">
+        <div class="box"><div class="label">我们建设</div><p>复用 F192/F267 的 rubric、baseline、measurement 与 validity；支持执行/Harness/尺子/眼睛四层归因和 2×2 换尺复判。</p></div>
+        <div class="box user"><div class="label">用户获得</div><p>看到人话解释：证据够不够、有哪些竞争归因、为何现在应该改或暂时不改。</p></div>
+      </div>
+      <div class="done"><b>完成标志：</b>证据不足可以诚实输出 unresolved / insufficient / incomparable；没有 intervention card 与双 falsifier，不能进入审批。</div>
+      <details><summary>为什么要“新世界”证据？</summary><p>被优化器看过的样本只能帮助归因，不能证明泛化；晋升必须使用未暴露的 sealed 或 time-fresh holdout。</p></details>
+    </article>
+
+    <article class="card p4">
+      <div class="card-head"><div class="icon">🛂</div><div><div class="phase">PHASE 4</div><h3>受治理写回、复验与代谢</h3><div class="metaphor">有判断不等于能乱改；批准、写回、复验才叫闭环</div></div></div>
+      <div class="cols">
+        <div class="box"><div class="label">我们建设</div><p>真实 change/adopt/invest 才进 F246；asset owner 写回并给 receipt；F266/F313 关闭 outcome；F311 编排 lineage 与决策。</p></div>
+        <div class="box user"><div class="label">用户获得</div><p>能批准或拒绝真实改变；能看见版本、回滚与新鲜结果，并做 keep / tune / rollback / sunset / no_change。</p></div>
+      </div>
+      <div class="done"><b>完成标志：</b>首个真实 E0 Program 从一句话走到 merged+loaded 后的新鲜 outcome；“有 proposal / 有 merge”都不算已经进化。</div>
+      <details><summary>首个对象在这里扮演什么角色？</summary><p>只是一条真实生产验收旅程，不预设对象、不定义 schema、不独占 Phase；没有合格目标时绝不造样本。</p></details>
+    </article>
+
+    <article class="card p5">
+      <div class="card-head"><div class="icon">🔌</div><div><div class="phase">PHASE 5</div><h3>多对象联邦与外部适配</h3><div class="metaphor">证明这是通用插座，不是某个对象的专用流水线</div></div></div>
+      <div class="cols">
+        <div class="box"><div class="label">我们建设</div><p>同一无对象特有字段的 Program schema，承载至少两个异质家内对象，再接一个外部托管对象。</p></div>
+        <div class="box user"><div class="label">用户获得</div><p>记忆、视频 Skill、猫画像、per-cat Harness 或外部系统，都能在同一个 Workspace 中被治理和比较。</p></div>
+      </div>
+      <div class="done"><b>完成标志：</b>F307 统一编排多个 Program；外部部署、签字、回滚与 outcome 可审计，但业务真相仍留在原 owner。</div>
+      <details><summary>怎样防止“大一统平台”吞掉所有系统？</summary><p>Adapter 只声明能力与 ref resolver；版本、审批、轨迹、变更和结果都不搬进 F311。</p></details>
+    </article>
+
+    <article class="card p6">
+      <div class="card-head"><div class="icon">🧬</div><div><div class="phase">PHASE 6</div><h3>进化机制本身</h3><div class="metaphor">不只让学生进步，也让眼睛、尺子和老师学会变好</div></div></div>
+      <div class="cols">
+        <div class="box"><div class="label">我们建设</div><p>把立尺、开眼、归因、Eval 设计和 Program 编排本身作为二阶 Program；沉淀可版本化、回滚、退役的 skill/heuristic。</p></div>
+        <div class="box user"><div class="label">用户获得</div><p>随着真实循环增多，系统不只积累能力，也逐渐学会怎样更可靠、更省钱地进化能力。</p></div>
+      </div>
+      <div class="done"><b>完成标志：</b>产品能力必须接通；但未自然积累 ≥K 个可比较案例时，只能写“效用未实证”，不能拿 rubric diff 冒充 GT。</div>
+      <details><summary>二阶 GT 是什么？</summary><p>不是“我们改了 rubric”，而是这套新尺子后来是否让一阶 Program 在真实下游表现得更好。</p></details>
+    </article>
+  </section>
+
+  <h2 class="section-title">贯穿所有 Phase 的修路车道</h2>
+  <section class="rail">
+    <div class="rail-title">🛠 Owner Contract Repair Lane<br><small>它不是产品 Phase</small></div>
+    <p>某个 join 出故障时，F311 记录 exact owner、live case 与 source ref，再把修复交回对应 owner thread。修好后带 receipt 接回来；一个 join 坏了只阻塞自己，不让 F311 变成全家 bug 修理队，也不让整座工厂等全家修完才开工。</p>
+  </section>
+
+  <h2 class="section-title">架构师最关心的所有权边界</h2>
+  <section class="owners">
+    <div class="owner-card f311">
+      <h4>F311 真正拥有的东西</h4>
+      <ul>
+        <li>Evolution Program 的 identity 与 lifecycle</li>
+        <li>当前 stage / schedule 的编排投影</li>
+        <li>Owner refs、双证 refs 与 gate 状态</li>
+        <li>AssetVersionRef 与证据→干预→结果的因果 lineage</li>
+        <li>keep / tune / rollback / sunset / no_change 的编排历史</li>
+      </ul>
+    </div>
+    <div class="owner-card others">
+      <h4>必须留在原系统的真相</h4>
+      <ul>
+        <li>轨迹：F299；评估与尺子：F192 / F267</li>
+        <li>Approval：F246；dispatch/outcome：F266 / F313</li>
+        <li>真实 mutation、版本与 rollback：asset owner</li>
+        <li>Workspace layout：F307；业务 evidence：source owner</li>
+        <li>F311 只联邦读取，禁止第二 Store / Queue / 状态机 / 轨迹页</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="close">
+    <h3>什么时候才允许说“F311 做完了”？</h3>
+    <div class="checks">
+      <div class="check"><b>真实闭环</b><br>一句话 → fresh evidence → Approval → owner 写回 → loaded 后新鲜 outcome</div>
+      <div class="check"><b>治理闭环</b><br>observe/insufficient 零卡；无批准零派工；target drift 令旧批准失效</div>
+      <div class="check"><b>生命闭环</b><br>重启可恢复；rollback/sunset/no-change 可执行；外部对象也能审计回滚</div>
+    </div>
+    <div class="footer">
+      <span>Spec v5 · PR #4122 · main@da56570742</span>
+      <span>Fable one-shot architecture review: APPROVED · 0 P1 / 0 P2</span>
+    </div>
+  </section>
+</main>
+</body>
+</html>

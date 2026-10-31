@@ -1,9 +1,18 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { invocationFetch, resolveInvocationEnv, resolveInvocationUserId } from './invocation-auth.js';
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
-const SIGNAL_USER = process.env['CAT_CAFE_SIGNAL_USER']?.trim() || 'codex';
+const defineTool = defineMcpMigrationFactory('signals-tools.ts', undefined, {
+  resourceFamily: 'signal-article',
+  authority: 'local-runtime',
+});
+
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiBaseUrl;
+}
 
 interface SignalArticleLike {
   readonly id: string;
@@ -23,12 +32,12 @@ async function apiJson(
 ): Promise<{ ok: true; data: unknown } | { ok: false; error: string }> {
   try {
     const headers = new Headers(init?.headers);
-    headers.set('X-Cat-Cafe-User', SIGNAL_USER);
+    headers.set('X-Cat-Cafe-User', resolveInvocationUserId(process.env.CAT_CAFE_SIGNAL_USER?.trim() || 'codex'));
     if (init?.body && !headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/json');
     }
 
-    const response = await fetch(`${API_URL}${path}`, {
+    const response = await invocationFetch(`${resolveApiUrl()}${path}`, {
       ...init,
       headers,
     });
@@ -74,10 +83,7 @@ function formatArticleLine(article: SignalArticleLike): string {
 
 export const signalListInboxInputSchema = {
   limit: z.number().int().min(1).max(100).optional().describe('Max inbox items to return (default: 20)'),
-  tier: z
-    .union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)])
-    .optional()
-    .describe('Filter by signal tier'),
+  tier: z.enum(['1', '2', '3', '4']).optional().describe('Filter by signal tier (1-4)'),
   source: z.string().min(1).max(200).optional().describe('Filter by source id'),
 };
 
@@ -91,10 +97,7 @@ export const signalSearchInputSchema = {
   limit: z.number().int().min(1).max(100).optional().describe('Max search results (default: 20)'),
   status: z.enum(['inbox', 'read', 'starred', 'archived']).optional().describe('Filter by signal article status'),
   source: z.string().min(1).max(200).optional().describe('Filter by source id'),
-  tier: z
-    .union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)])
-    .optional()
-    .describe('Filter by signal tier'),
+  tier: z.enum(['1', '2', '3', '4']).optional().describe('Filter by signal tier (1-4)'),
   dateFrom: z.string().optional().describe('ISO date/time lower bound for fetchedAt'),
   dateTo: z.string().optional().describe('ISO date/time upper bound for fetchedAt'),
 };
@@ -110,7 +113,7 @@ export const signalSummarizeInputSchema = {
 
 export async function handleSignalListInbox(input: {
   limit?: number | undefined;
-  tier?: 1 | 2 | 3 | 4 | undefined;
+  tier?: '1' | '2' | '3' | '4' | undefined;
   source?: string | undefined;
 }): Promise<ToolResult> {
   const params = new URLSearchParams();
@@ -163,7 +166,7 @@ export async function handleSignalSearch(input: {
   limit?: number | undefined;
   status?: 'inbox' | 'read' | 'starred' | 'archived' | undefined;
   source?: string | undefined;
-  tier?: 1 | 2 | 3 | 4 | undefined;
+  tier?: '1' | '2' | '3' | '4' | undefined;
   dateFrom?: string | undefined;
   dateTo?: string | undefined;
 }): Promise<ToolResult> {
@@ -235,34 +238,84 @@ export async function handleSignalSummarize(input: {
 }
 
 export const signalsTools = [
-  {
+  defineTool({
     name: 'signal_list_inbox',
-    description: 'List recent signal articles from inbox. Supports optional limit, tier, and source filters.',
+    description:
+      'List recent signal articles from inbox. Use when co-creator asks to check signals, or when you need to browse unread articles. ' +
+      'Supports optional limit, tier, and source filters. ' +
+      'TIER GUIDE: T1 = critical/breaking, T2 = important, T3 = interesting, T4 = low priority. ' +
+      'Returns article IDs needed for other signal tools (get_article, mark_read, start_study).',
     inputSchema: signalListInboxInputSchema,
     handler: handleSignalListInbox,
-  },
-  {
+    governance: {
+      implementationExport: 'handleSignalListInbox',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'signal_get_article',
-    description: 'Get full signal article detail by id or URL.',
+    description:
+      'Get full signal article detail by id or URL. Returns title, content, source, tier, timestamps, and metadata. ' +
+      'Use when you need to read the full content of a specific article. ' +
+      'PARAM GUIDE: Use id (from list_inbox/search results) OR url (if co-creator shared a link) — not both.',
     inputSchema: signalGetArticleInputSchema,
     handler: handleSignalGetArticle,
-  },
-  {
+    governance: {
+      implementationExport: 'handleSignalGetArticle',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'signal_search',
-    description: 'Search signal articles by keyword with optional filters.',
+    description:
+      'Search signal articles by keyword with optional filters (status, source, tier, date range). ' +
+      'Use when looking for articles about a specific topic across all statuses. ' +
+      'TIP: Combine with dateFrom/dateTo for time-bounded searches (ISO date format).',
     inputSchema: signalSearchInputSchema,
     handler: handleSignalSearch,
-  },
-  {
+    governance: {
+      implementationExport: 'handleSignalSearch',
+      action: 'read',
+      risk: { level: 'read', openWorld: true },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'signal_mark_read',
-    description: 'Mark a signal article as read.',
+    description:
+      'Mark a signal article as read. Use after you or co-creator have reviewed an article. ' +
+      'This removes it from the inbox view.',
     inputSchema: signalMarkReadInputSchema,
     handler: handleSignalMarkRead,
-  },
-  {
+    governance: {
+      implementationExport: 'handleSignalMarkRead',
+      action: 'command',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'signal_summarize',
-    description: 'Generate a concise summary for a signal article and persist it to article frontmatter.',
+    description:
+      'Generate a concise summary for a signal article and persist it to article frontmatter. ' +
+      'Use when an article needs a quick summary for later reference. ' +
+      'Default maxLength is 280 chars (tweet-length). Increase for more detailed summaries (max 1200).',
     inputSchema: signalSummarizeInputSchema,
     handler: handleSignalSummarize,
-  },
+    governance: {
+      implementationExport: 'handleSignalSummarize',
+      action: 'derive',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
 ] as const;

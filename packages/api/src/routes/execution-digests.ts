@@ -3,6 +3,7 @@
  */
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { ExecutionDigestStore } from '../domains/projects/execution-digest-store.js';
+import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 export interface ExecutionDigestRoutesOptions {
   executionDigestStore: ExecutionDigestStore;
@@ -12,7 +13,7 @@ export const executionDigestRoutes: FastifyPluginAsync<ExecutionDigestRoutesOpti
   const { executionDigestStore } = opts;
 
   function requireUserId(request: FastifyRequest, reply: FastifyReply): string | null {
-    const userId = request.headers['x-cat-cafe-user'] as string | undefined;
+    const userId = resolveHeaderUserId(request) ?? undefined;
     if (!userId) {
       void reply.status(401).send({ error: 'Identity required' });
       return null;

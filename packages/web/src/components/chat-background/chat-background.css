@@ -1,0 +1,299 @@
+@import "./chat-background-surfaces.css";
+
+/* Text stays above the image; floating panels retain their native opaque paint. */
+html[data-shell="v2"][data-chat-background="image"] .console-shell {
+  position: relative;
+  isolation: isolate;
+  --cafe-text-muted: var(--shell-muted);
+  --chat-background-text-lightness: min(l, 0.4);
+}
+/* Preserve hue/chroma. Saturated colours need extra lightness margin to also meet the muted luminance floor. */
+html[data-shell="v2"][data-theme="dark"][data-chat-background="image"] .console-shell {
+  --chat-background-text-lightness: max(l, 0.78);
+}
+/* The inline-coloured text node is below PresenceLabel's wrapper, including collapsed groups. */
+html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid="thread-status-label-content"] > span {
+  color: oklch(from currentColor var(--chat-background-text-lightness) c h) !important;
+}
+html[data-shell="v2"][data-chat-background="image"]
+  .console-shell
+  :is([data-testid="thread-running-cat"], [data-testid="group-running-cat"]) {
+  color: oklch(from var(--semantic-info) var(--chat-background-text-lightness) c h) !important;
+}
+html[data-shell="v2"][data-chat-background="image"]
+  .console-shell
+  :is([data-testid="thread-replied-cat"], [data-testid="group-replied-cat"]) {
+  color: oklch(from var(--semantic-success) var(--chat-background-text-lightness) c h) !important;
+}
+html[data-shell="v2"][data-chat-background="image"] .console-shell .system-notice-bar__label {
+  color: oklch(from var(--notice-label) var(--chat-background-text-lightness) c h);
+}
+html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid="empty-state-bootcamp"] + a {
+  color: oklch(from var(--cafe-accent) var(--chat-background-text-lightness) c h);
+}
+.chat-background-layer {
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-color: var(--shell-work);
+}
+.chat-background-layer[data-placement="center"] {
+  background-size: auto;
+}
+.chat-background-layer[data-placement="tile"] {
+  background-size: auto;
+  background-repeat: repeat;
+}
+.chat-background-veil {
+  position: absolute;
+  inset: 0;
+  background: var(--shell-work);
+  opacity: var(--chat-background-veil-opacity);
+}
+.you-settings-page {
+  width: 100%;
+  max-width: 688px;
+  margin-inline: auto;
+  padding-block: 32px;
+  color: var(--shell-body);
+}
+.you-settings-page > h1 {
+  margin: 0 0 20px;
+  color: var(--shell-ink);
+  font-size: 24px;
+  font-weight: 600;
+}
+.you-settings-card {
+  margin-bottom: 16px;
+  border: 1px solid var(--shell-hairline);
+  border-radius: 12px;
+  padding: 18px 20px;
+  background: var(--shell-paper);
+}
+.you-settings-card-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.you-settings-card-heading h2 {
+  margin: 0;
+  color: var(--shell-ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+.you-settings-card-heading > span {
+  color: var(--shell-muted);
+  font-size: 12px;
+}
+.you-profile-avatar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 16px;
+}
+.you-profile-avatar {
+  display: flex;
+  flex: none;
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid var(--shell-paper);
+  border-radius: 50%;
+  background: var(--color-cocreator-primary);
+  color: var(--shell-paper);
+  font-size: 24px;
+}
+.you-settings-button {
+  min-height: 32px;
+  border: 1px solid var(--shell-hairline-strong);
+  border-radius: 8px;
+  padding: 4px 12px;
+  color: var(--shell-ink);
+  font-size: 13px;
+}
+.you-settings-button:disabled {
+  opacity: 0.5;
+}
+.you-settings-save {
+  background: var(--shell-primary);
+  color: var(--shell-primary-on);
+  border-color: var(--shell-primary);
+}
+.you-profile-field {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  border-top: 1px solid var(--shell-hairline);
+  padding-block: 12px;
+  font-size: 13px;
+}
+.you-profile-field > :first-child {
+  padding-top: 7px;
+}
+.you-profile-field input:not([type="color"]) {
+  width: 100%;
+  max-width: 320px;
+  min-height: 32px;
+  border: 1px solid var(--shell-hairline);
+  border-radius: 8px;
+  padding: 4px 10px;
+  background: var(--shell-paper);
+  color: var(--shell-ink);
+}
+.you-profile-field p {
+  margin: 6px 0 0;
+  color: var(--shell-muted);
+  font-size: 12px;
+}
+.you-profile-field input[type="color"] {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.chat-background-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, 112px);
+  gap: 12px 10px;
+}
+.chat-background-tile {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  text-align: center;
+}
+.chat-background-tile:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+.chat-background-thumb {
+  display: block;
+  width: 112px;
+  height: 64px;
+  overflow: hidden;
+  border: 1px solid var(--shell-hairline);
+  border-radius: 8px;
+}
+.chat-background-thumb[data-selected="true"] {
+  outline: 2px solid var(--shell-primary);
+  outline-offset: 2px;
+}
+.chat-background-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.chat-background-empty {
+  display: block;
+  height: 100%;
+  background: var(--shell-work);
+}
+.chat-background-upload {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  color: var(--shell-muted);
+  font-size: 24px;
+}
+.chat-background-control {
+  display: flex;
+  align-items: start;
+  gap: 16px;
+  margin-top: 16px;
+  border-top: 1px solid var(--shell-hairline);
+  padding-top: 12px;
+  font-size: 13px;
+}
+.you-settings-page .chat-background-control > :first-child {
+  width: 120px;
+  flex: none;
+}
+.chat-background-control > :first-child {
+  padding-top: 5px;
+}
+.chat-background-placement {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--shell-hairline);
+  border-radius: 8px;
+}
+.chat-background-placement button {
+  min-height: 32px;
+  padding: 4px 12px;
+}
+.chat-background-placement button[aria-pressed="true"] {
+  background: var(--shell-selected);
+  color: var(--shell-ink);
+}
+.chat-background-separate {
+  margin: 16px 0 0;
+  border-top: 1px solid var(--shell-hairline);
+  padding-top: 12px;
+  color: var(--shell-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.thread-settings-popover {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  width: 386px;
+  max-width: calc(100vw - 16px);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--shell-hairline-strong);
+  border-radius: 12px;
+  background: var(--shell-paper);
+  color: var(--shell-body);
+  box-shadow: 0 8px 24px rgb(43 38 34 / 0.12);
+}
+.thread-background-menu-row {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.thread-background-menu-row + .thread-background-menu-row {
+  border-top: 1px solid var(--shell-hairline);
+}
+.thread-background-settings {
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--shell-hairline);
+  padding-bottom: 8px;
+}
+@media (max-width: 639px) {
+  .you-settings-page {
+    padding-block: 8px;
+  }
+  .you-settings-card {
+    padding: 16px;
+  }
+  .you-profile-field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .you-profile-field > :first-child {
+    padding-top: 0;
+  }
+  .you-settings-page .chat-background-control > :first-child {
+    width: auto;
+  }
+}

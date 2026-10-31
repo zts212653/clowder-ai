@@ -1,6 +1,6 @@
 ---
 feature_ids: [F048]
-related_features: [F039]
+related_features: [F039, F194]
 topics: [restart, recovery, invocation, queue, redis]
 doc_kind: note
 created: 2026-02-28
@@ -17,7 +17,7 @@ created: 2026-02-28
 
 ## Why
 
-当前 Cat Café 的执行模型依赖外部子进程（例如 `codex` CLI）进行流式输出。API/runtime 一旦重启：
+当前 Clowder AI 的执行模型依赖外部子进程（例如 `codex` CLI）进行流式输出。API/runtime 一旦重启：
 - **in-flight invocation 基本等于挂掉**（子进程/管道断开）
 - 队列（InvocationQueue）目前是内存态，重启会丢失排队条目
 
@@ -75,7 +75,7 @@ Phase A 只做了后台清理（用户不可见），Phase A+ 补上用户可见
 - **A/B 分段交付（2026-03-06 三猫讨论）**：不再坚持"要做就做完整体验"。Phase A 先补 correctness 缺口（启动收尸），Phase B 再做队列持久化
 - **收尸策略用 `failed` 而非新增 `interrupted` 状态**：避免前端新增渲染分支，直接清除 TaskProgress 让前端回到"无进度"态。error 字段标注 `process_restart` 作为区分
 - **不扫 ndjson 推断死亡**（否决旧分支 `fix/invocation-restart-guard` 的方案）：直接在启动时 sweep Redis stale records，更直接可靠
-- **Phase A+ 持久化走 `source` 不走 `catId: null`**（2026-07-14 三猫 review 收敛）：因为历史接口 `messages.ts:956` 把 `catId=null && !source` 映射成 `user`，直接写库会导致刷新后变成"用户消息"。走 `source` 字段（如 `startup-reconciler`）则映射为 `connector`，语义正确
+- **Phase A+ 持久化走 `source` 不走 `catId: null`**（2026-03-16 三猫 review 收敛）：因为历史接口 `messages.ts:956` 把 `catId=null && !source` 映射成 `user`，直接写库会导致刷新后变成"用户消息"。走 `source` 字段（如 `startup-reconciler`）则映射为 `connector`，语义正确
 
 ## Evidence（三猫讨论关键证据）
 

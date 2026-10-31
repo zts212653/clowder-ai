@@ -3,9 +3,8 @@
  * Splits project groups into active vs archived based on recency + user pins.
  */
 
-import type { Thread } from '@/stores/chat-types';
 import type { StorageLike } from './collapse-state';
-import type { ThreadGroup } from './thread-utils';
+import type { SidebarThreadShape, ThreadGroup } from './thread-utils';
 
 export const PROJECT_PIN_KEY = 'cat-cafe:sidebar:pinned-projects';
 
@@ -14,7 +13,7 @@ export const PROJECT_PIN_KEY = 'cat-cafe:sidebar:pinned-projects';
  * Excludes default thread and pinned threads (those have their own section).
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function getRecentThreads(threads: Thread[], limit: number, _now?: number): Thread[] {
+export function getRecentThreads<T extends SidebarThreadShape>(threads: T[], limit: number, _now?: number): T[] {
   return threads
     .filter((t) => t.id !== 'default' && !t.pinned)
     .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
@@ -22,7 +21,7 @@ export function getRecentThreads(threads: Thread[], limit: number, _now?: number
 }
 
 /** Get the most recent activity timestamp for a project path. Returns 0 if none. */
-export function getProjectLatestActivity(threads: Thread[], projectPath: string): number {
+export function getProjectLatestActivity<T extends SidebarThreadShape>(threads: T[], projectPath: string): number {
   let max = 0;
   for (const t of threads) {
     if (t.projectPath === projectPath && t.lastActiveAt > max) {
@@ -38,15 +37,15 @@ export function getProjectLatestActivity(threads: Thread[], projectPath: string)
  * Active sort: pinned first, then by latest activity desc.
  * Archived sort: alphabetically by projectPath.
  */
-export function splitIntoActiveAndArchived(
-  projectGroups: ThreadGroup[],
-  allThreads: Thread[],
+export function splitIntoActiveAndArchived<T extends SidebarThreadShape>(
+  projectGroups: ThreadGroup<T>[],
+  allThreads: T[],
   pinnedProjects: Set<string>,
   cutoffMs: number,
   now: number = Date.now(),
-): { active: ThreadGroup[]; archived: ThreadGroup[] } {
-  const active: ThreadGroup[] = [];
-  const archived: ThreadGroup[] = [];
+): { active: ThreadGroup<T>[]; archived: ThreadGroup<T>[] } {
+  const active: ThreadGroup<T>[] = [];
+  const archived: ThreadGroup<T>[] = [];
 
   for (const group of projectGroups) {
     const path = group.projectPath ?? group.label;
@@ -81,6 +80,34 @@ export function splitIntoActiveAndArchived(
   });
 
   return { active, archived };
+}
+
+// F095 Phase F: Custom project display names
+export const PROJECT_NAME_KEY = 'cat-cafe:sidebar:project-names';
+
+/** Read custom project display names from storage. */
+export function readProjectNames(storage: StorageLike): Map<string, string> {
+  try {
+    const raw = storage.getItem(PROJECT_NAME_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        return new Map(Object.entries(parsed as Record<string, string>));
+      }
+    }
+  } catch {
+    // storage unavailable or corrupted
+  }
+  return new Map();
+}
+
+/** Persist custom project display names to storage. */
+export function writeProjectNames(names: Map<string, string>, storage: StorageLike): void {
+  try {
+    storage.setItem(PROJECT_NAME_KEY, JSON.stringify(Object.fromEntries(names)));
+  } catch {
+    // Best effort
+  }
 }
 
 /** Read pinned project paths from storage. */

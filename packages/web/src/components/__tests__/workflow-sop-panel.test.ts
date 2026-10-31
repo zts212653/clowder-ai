@@ -29,6 +29,7 @@ function makeSopFixture(overrides?: Partial<WorkflowSop>): WorkflowSop {
   return {
     featureId: 'F073',
     backlogItemId: 'b-1',
+    sopDefinitionId: 'development',
     stage: 'impl',
     batonHolder: 'opus',
     nextSkill: 'tdd',
@@ -110,21 +111,22 @@ describe('WorkflowSopPanel', () => {
     expect(pills).toBeTruthy();
     const implPill = container.querySelector('[data-testid="sop-stage-impl"]');
     expect(implPill).toBeTruthy();
-    expect(implPill?.className).toContain('bg-[#8B6F47]'); // current = active color
+    expect(implPill?.className).toContain('bg-[var(--mc-accent)]'); // current = active color
 
     // Past stage should have muted color
     const kickoffPill = container.querySelector('[data-testid="sop-stage-kickoff"]');
-    expect(kickoffPill?.className).toContain('bg-[#D4C4A8]');
+    expect(kickoffPill?.className).toContain('bg-[var(--console-border-soft)]');
 
     // Future stage should be lightest
     const reviewPill = container.querySelector('[data-testid="sop-stage-review"]');
-    expect(reviewPill?.className).toContain('bg-[#F0EBE3]');
+    expect(reviewPill?.className).toContain('bg-[var(--console-hover-bg)]');
 
     // Baton holder
     const baton = container.querySelector('[data-testid="sop-baton-holder"]');
     expect(baton?.textContent).toBe('opus');
 
-    // Next skill
+    // Next skill override
+    expect(section?.textContent).toContain('手动 override');
     expect(section?.textContent).toContain('tdd');
 
     // Resume capsule
@@ -169,17 +171,32 @@ describe('WorkflowSopPanel', () => {
     apiFetchMock.mockResolvedValue(mockResponse(200, sop));
     await renderPanel('b-1');
     const completionPill = container.querySelector('[data-testid="sop-stage-completion"]');
-    expect(completionPill?.className).toContain('bg-[#8B6F47]');
+    expect(completionPill?.className).toContain('bg-[var(--mc-accent)]');
     // All prior stages should be past
     const mergePill = container.querySelector('[data-testid="sop-stage-merge"]');
-    expect(mergePill?.className).toContain('bg-[#D4C4A8]');
+    expect(mergePill?.className).toContain('bg-[var(--console-border-soft)]');
   });
 
-  it('hides next skill when null', async () => {
+  it('shows definition suggested skill when nextSkill is null', async () => {
     const sop = makeSopFixture({ nextSkill: null });
     apiFetchMock.mockResolvedValue(mockResponse(200, sop));
     await renderPanel('b-1');
-    expect(container.textContent).not.toContain('下一步 Skill');
+    const nextSkill = container.querySelector('[data-testid="sop-next-skill"]');
+    expect(nextSkill?.textContent).toContain('定义建议');
+    expect(nextSkill?.textContent).toContain('worktree');
+  });
+
+  it('shows stale-data state when SOP stage cannot resolve a skill', async () => {
+    const sop = makeSopFixture({
+      nextSkill: 'tdd',
+      stage: 'retired_stage' as WorkflowSop['stage'],
+    });
+    apiFetchMock.mockResolvedValue(mockResponse(200, sop));
+
+    await renderPanel('b-1');
+
+    const section = container.querySelector('[data-testid="mc-workflow-sop"]');
+    expect(section?.textContent).toContain('SOP 告示牌数据需要更新');
   });
 
   it('handles empty done list in resume capsule', async () => {

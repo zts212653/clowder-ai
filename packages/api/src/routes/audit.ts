@@ -4,7 +4,7 @@
  *
  * 安全:
  * - logPath 绝对路径仅在 EXPOSE_LOG_PATH=true 或 NODE_ENV!=production 时返回
- *   (铲屎官需要 VSCode 跳转; 生产部署应关闭以避免路径泄露)
+ *   (co-creator需要 VSCode 跳转; 生产部署应关闭以避免路径泄露)
  * - 通过 resolveUserId 解析身份 (header > query fallback)
  * - 校验 userId 与 thread.createdBy 一致 (ownership guard)
  */
@@ -23,11 +23,11 @@ export const auditRoutes: FastifyPluginAsync<AuditRoutesOptions> = async (app, o
 
   app.get<{ Params: { threadId: string } }>('/api/audit/thread/:threadId', async (request, reply) => {
     const { threadId } = request.params;
-    const userId = resolveUserId(request);
+    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
 
     if (!userId) {
       reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
     const thread = await threadStore.get(threadId);

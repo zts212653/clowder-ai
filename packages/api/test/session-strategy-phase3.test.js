@@ -56,6 +56,21 @@ describe('session-strategy Phase 3: runtime overrides', () => {
         _clearTestStrategyOverrides();
       }
     });
+
+    test('#1329 derives legacy sessionChain=false as compress without mutating the base config', async () => {
+      const { deriveLegacySessionStrategy } = await loadStrategyModule();
+      const base = {
+        strategy: 'handoff',
+        thresholds: { warn: 0.75, action: 0.85 },
+        turnBudget: 12_000,
+      };
+
+      const derived = deriveLegacySessionStrategy(base, false);
+      assert.equal(derived.strategy, 'compress');
+      assert.equal(derived.thresholds, base.thresholds);
+      assert.equal(base.strategy, 'handoff');
+      assert.equal(deriveLegacySessionStrategy(base, true), undefined);
+    });
   });
 
   // ── Runtime override cache (sync read, async write) ──
@@ -77,7 +92,8 @@ describe('session-strategy Phase 3: runtime overrides', () => {
     });
 
     test('setRuntimeOverride + getRuntimeOverride round-trip (cache only)', async () => {
-      await overridesModule.setRuntimeOverride('opus', {
+      const before = Date.now();
+      const written = await overridesModule.setRuntimeOverride('opus', {
         strategy: 'compress',
         thresholds: { warn: 0.6, action: 0.7 },
       });
@@ -85,6 +101,17 @@ describe('session-strategy Phase 3: runtime overrides', () => {
       assert.ok(result);
       assert.equal(result.strategy, 'compress');
       assert.equal(result.thresholds.warn, 0.6);
+      assert.equal(typeof written.revision, 'string');
+      assert.ok(written.revision.length > 0);
+      assert.ok(written.changedAt >= before);
+      assert.deepEqual(overridesModule.getRuntimeOverrideEntry('opus'), written);
+    });
+
+    test('each saved override receives a new policy revision', async () => {
+      const first = await overridesModule.setRuntimeOverride('opus', { strategy: 'compress' });
+      const second = await overridesModule.setRuntimeOverride('opus', { strategy: 'compress' });
+      assert.notEqual(first.revision, second.revision);
+      assert.ok(second.changedAt >= first.changedAt);
     });
 
     test('getAllRuntimeOverrides returns all cached overrides', async () => {
@@ -144,6 +171,22 @@ describe('session-strategy Phase 3: runtime overrides', () => {
       const after = getSessionStrategyWithSource('opus');
       assert.equal(after.source, 'runtime_override');
       assert.equal(after.effective.strategy, 'compress');
+    });
+
+    test('#1329 keeps an explicit hybrid policy even when the provider lacks hook capability', async () => {
+      const { getSessionStrategyWithSource } = await loadStrategyModule();
+      const { setRuntimeOverride, _clearRuntimeOverrides } = await loadOverridesModule();
+      _clearRuntimeOverrides();
+
+      await setRuntimeOverride('codex', {
+        strategy: 'hybrid',
+        hybrid: { maxCompressions: 2 },
+      });
+
+      const result = getSessionStrategyWithSource('codex');
+      assert.equal(result.source, 'runtime_override');
+      assert.equal(result.effective.strategy, 'hybrid');
+      assert.equal(result.effective.hybrid.maxCompressions, 2);
     });
 
     test('runtime override is deep-merged with base strategy', async () => {
@@ -308,6 +351,51 @@ describe('session-strategy Phase 3: runtime overrides', () => {
     });
   });
 
+  describe('#1329 revisioned dual-read storage', () => {
+    test('hydrates a legacy plain config with a stable synthetic revision and no invented change time', async () => {
+      const overridesModule = await loadOverridesModule();
+      overridesModule._clearRuntimeOverrides();
+      const stubRedis = {
+        options: { keyPrefix: '' },
+        scan: async () => ['0', ['session-strategy:override:opus']],
+        get: async () => JSON.stringify({ strategy: 'compress' }),
+      };
+
+      await overridesModule.initRuntimeOverrides(stubRedis);
+      const first = overridesModule.getRuntimeOverrideEntry('opus');
+      assert.deepEqual(first.config, { strategy: 'compress' });
+      assert.match(first.revision, /^legacy:/);
+      assert.equal(first.changedAt, 0);
+
+      await overridesModule.initRuntimeOverrides(stubRedis);
+      assert.deepEqual(overridesModule.getRuntimeOverrideEntry('opus'), first);
+      overridesModule._clearRuntimeOverrides();
+    });
+
+    test('new writes persist a revisioned envelope instead of a legacy plain config', async () => {
+      const overridesModule = await loadOverridesModule();
+      overridesModule._clearRuntimeOverrides();
+      let stored;
+      const stubRedis = {
+        options: { keyPrefix: '' },
+        scan: async () => ['0', []],
+        get: async () => null,
+        set: async (_key, raw) => {
+          stored = JSON.parse(raw);
+          return 'OK';
+        },
+      };
+
+      await overridesModule.initRuntimeOverrides(stubRedis);
+      const written = await overridesModule.setRuntimeOverride('opus', { strategy: 'hybrid' });
+      assert.deepEqual(stored, written);
+      assert.deepEqual(stored.config, { strategy: 'hybrid' });
+      assert.equal(typeof stored.revision, 'string');
+      assert.equal(typeof stored.changedAt, 'number');
+      overridesModule._clearRuntimeOverrides();
+    });
+  });
+
   // ── P1-1: SCAN keyPrefix hydration (stub redis) ──
 
   describe('P1-1: hydrate with keyPrefix-aware SCAN', () => {
@@ -363,7 +451,7 @@ describe('session-strategy Phase 3: runtime overrides', () => {
       // on top of the fully-resolved fallback (config-file → breed → provider → global),
       // not just the provider/global base.
       //
-      // Currently no cats have cat-config.json session strategy, so the fallback
+      // Currently no cats have runtime-config session strategy, so the fallback
       // is provider_default. But the code path is correct: resolveFallbackStrategy()
       // is called first, then runtime overlay is applied.
       const { getSessionStrategyWithSource, getSessionStrategy } = await loadStrategyModule();

@@ -45,6 +45,38 @@ describe('SignalArticleList', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
+  it('renders status badge for each article status', async () => {
+    const statuses: SignalArticleStatus[] = ['inbox', 'read', 'archived', 'starred'];
+    const articles = statuses.map((status, i) => createArticle({ id: `article-${i}`, status }));
+    const labelMap: Record<SignalArticleStatus, string> = {
+      inbox: '收件箱',
+      read: '已读',
+      archived: '归档',
+      starred: '收藏',
+    };
+
+    await act(async () => {
+      root.render(
+        React.createElement(SignalArticleList, {
+          items: articles,
+          selectedArticleId: null,
+          onSelect: vi.fn(),
+          onStatusChange: vi.fn<(id: string, s: SignalArticleStatus) => Promise<void>>().mockResolvedValue(undefined),
+        }),
+      );
+    });
+
+    const badges = container.querySelectorAll('[data-testid="signal-status-badge"]');
+    expect(badges.length).toBe(4);
+    for (const [i, status] of statuses.entries()) {
+      expect(badges[i]?.textContent).toBe(labelMap[status]);
+    }
+
+    const starredBadge = badges[3]!;
+    expect(starredBadge.className).toContain('text-conn-amber-text');
+    expect(starredBadge.className).toContain('bg-conn-amber-bg');
+  });
+
   it('does not render nested action buttons and keeps action click isolated', async () => {
     const onSelect = vi.fn<(article: SignalArticle) => void>();
     const onStatusChange = vi

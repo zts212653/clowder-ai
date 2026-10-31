@@ -1,0 +1,1459 @@
+{
+  "mode": "isolated-read-only-snapshot",
+  "programId": "evolution-program:352afab60afb6263b8386eaed12dba03",
+  "sequence": 17,
+  "sections": {
+    "object_map": {
+      "ref": {
+        "ownerFeatureId": "F311",
+        "ownerStateRef": "preparation-submission:evolution-program:352afab60afb6263b8386eaed12dba03:object_map",
+        "version": "sha256:c6d7792ac9fa839818bc8257e1ce8dffa5c0b75aeeedcd2074690f9b2e35f0d2"
+      },
+      "body": {
+        "kind": "object_map",
+        "goalStatement": "猫猫带鸭鸭协同踢球赛：让单鸭完成有效踢球，让队友分工并逐步形成真实配合，同时交可核查的视频素材。",
+        "summary": "猫、局部技能与固定动作模型已在共享球场实跑。本修订依据原提交猫316确认，将旧四项显式整理为七项并分开建议、准备决定与已有工作；不改写历史、不代表新实验、训练或正式采用。PR4492已合入并获有限独立实现审阅，足球协作效果仍未证实。",
+        "items": [
+          {
+            "itemId": "motor",
+            "label": "身体动作模型",
+            "category": "Model",
+            "recommendation": {
+              "summary": "保持当前权重；身体命令响应与可达域确有瓶颈时，再考虑训练分支。",
+              "reason": "18个摆球夹具均采到指定脚触球，新场景也发生实际触球，绝对“模型不能踢”不成立；这不证明身体能力已足够。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/README.md"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-kick-calibration-v2.json"
+                }
+              ]
+            },
+            "existingWork": {
+              "summary": "官方模型hash已记录；18点摆球校准与新seed触球证据已归档。未训练、未采用新权重。",
+              "sourceRefs": [
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/README.md"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-kick-calibration-v2.json"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+                }
+              ]
+            },
+            "decision": {
+              "state": "fixed",
+              "reason": "保持当前权重；身体命令响应与可达域确有瓶颈时，再考虑训练分支。；本轮固定权重，训练暂不纳入；内容选择不授予新训练、付费或采用权限。",
+              "responsibility": {
+                "kind": "cat",
+                "basis": "technical"
+              },
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/README.md"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-kick-calibration-v2.json"
+                }
+              ]
+            },
+            "scope": "固定官方alpha_walking、ball_kick_left/right ONNX，以及Lab position actuator配置。",
+            "why": "18个摆球夹具均采到指定脚触球，新场景也发生实际触球，绝对“模型不能踢”不成立；这不证明身体能力已足够。",
+            "modifiability": {
+              "state": "not_modifiable_this_round",
+              "reason": "保持当前权重；身体命令响应与可达域确有瓶颈时，再考虑训练分支。；本轮固定权重，训练暂不纳入；内容选择不授予新训练、付费或采用权限。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:4ee742d09a:docs/videos/f311-microduck-roadshow/pipeline/cortex"
+                }
+              ]
+            },
+            "sourceRefs": [
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+              },
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/README.md"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-kick-calibration-v2.json"
+              }
+            ],
+            "nextAction": "读取身体瓶颈证据；若需要训练，另核具体目标、资源与授权。"
+          },
+          {
+            "itemId": "local-skill",
+            "label": "局部球位与摆位反馈",
+            "category": "Harness",
+            "recommendation": {
+              "summary": "优先比较局部执行，保留sensor对照，分析贴墙、拥挤、朝向和未发起踢腿的局面。",
+              "reason": "旧settle使用过时球位已有确定复现；801–808中state有3次踢腿且均实际触球，但5/8场没有踢腿。不是猫策略的独立贡献证明。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/state_skill.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_state_skill.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/runs.json.gz"
+                }
+              ]
+            },
+            "existingWork": {
+              "summary": "sensor/state组合已做公开新场景比较；完整结果含未尝试与失败，相关实现已合入PR4492。",
+              "sourceRefs": [
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/state_skill.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_state_skill.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/runs.json.gz"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+                }
+              ]
+            },
+            "decision": {
+              "state": "explore",
+              "reason": "优先比较局部执行，保留sensor对照，分析贴墙、拥挤、朝向和未发起踢腿的局面。；仅在原隔离实验范围准备局部反馈候选，保留原模型/环境/判定约定；组合变量必须明示。",
+              "responsibility": {
+                "kind": "cat",
+                "basis": "technical"
+              },
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/state_skill.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_state_skill.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/runs.json.gz"
+                }
+              ]
+            },
+            "scope": "sensor基线与state当前球位反馈候选；state同时改变球位来源、持续摆位反馈和踢腿前窗口，两队使用同种局部技能。",
+            "why": "旧settle使用过时球位已有确定复现；801–808中state有3次踢腿且均实际触球，但5/8场没有踢腿。不是猫策略的独立贡献证明。",
+            "modifiability": {
+              "state": "modifiable",
+              "reason": "优先比较局部执行，保留sensor对照，分析贴墙、拥挤、朝向和未发起踢腿的局面。；仅在原隔离实验范围准备局部反馈候选，保留原模型/环境/判定约定；组合变量必须明示。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:4ee742d09a:docs/videos/f311-microduck-roadshow/pipeline/cortex"
+                }
+              ]
+            },
+            "sourceRefs": [
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+              },
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/state_skill.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_state_skill.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/runs.json.gz"
+              }
+            ],
+            "nextAction": "按既有失败准备有区分力的局部候选；需执行时另取当时版本与比较条件，不改旧结果。"
+          },
+          {
+            "itemId": "cat-tactics",
+            "label": "猫的战术与通信",
+            "category": "Agent",
+            "recommendation": {
+              "summary": "把战术持续性与观察时效单独取证，使用相同局部技能、信息域的无猫或固定战术对照。",
+              "reason": "已发生真实站位执行；live2接受指令的观察年龄10.58–19.70秒，约58秒的过期指令被拒绝。稳定传接和净收益未知。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/contract.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/inbox.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/control.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/run.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                }
+              ]
+            },
+            "existingWork": {
+              "summary": "live1提交/接受/拒绝为4/1/3，live2为8/6/2；d0真实离开拥挤区并到位，全部拒绝留档。",
+              "sourceRefs": [
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/contract.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/inbox.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/control.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/run.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+                }
+              ]
+            },
+            "decision": {
+              "state": "explore",
+              "reason": "把战术持续性与观察时效单独取证，使用相同局部技能、信息域的无猫或固定战术对照。；沿原有限指挥范围准备候选，不暂停物理等回复、不换revision伪装新鲜、不控制对手；两猫方案及新增资源未决定。",
+              "responsibility": {
+                "kind": "cat",
+                "basis": "technical"
+              },
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/contract.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/inbox.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/control.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/run.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                }
+              ]
+            },
+            "scope": "一只真实猫经有限JSON入口管理金队d0/d1，动作限attack/support/move/hold。",
+            "why": "已发生真实站位执行；live2接受指令的观察年龄10.58–19.70秒，约58秒的过期指令被拒绝。稳定传接和净收益未知。",
+            "modifiability": {
+              "state": "modifiable",
+              "reason": "把战术持续性与观察时效单独取证，使用相同局部技能、信息域的无猫或固定战术对照。；沿原有限指挥范围准备候选，不暂停物理等回复、不换revision伪装新鲜、不控制对手；两猫方案及新增资源未决定。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:4ee742d09a:docs/videos/f311-microduck-roadshow/pipeline/cortex"
+                }
+              ]
+            },
+            "sourceRefs": [
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+              },
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/contract.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/inbox.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/control.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/run.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+              }
+            ],
+            "nextAction": "整理跨观察周期目标与局势修正候选；新的模型费用、多猫资源或大规模比较须另核资源授权。"
+          },
+          {
+            "itemId": "world",
+            "label": "共享球场与物理条件",
+            "category": "Env",
+            "recommendation": {
+              "summary": "固定球场与动力学，将环境版本和局部观察/控制干预分别记录。",
+              "reason": "同一MuJoCo场已完成公开回合和live；与旧BAM runner不同，不能并成同一基线。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/world.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_physics.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/README.md"
+                }
+              ]
+            },
+            "existingWork": {
+              "summary": "共享物理场已实跑；原生/带观察器的qpos、qvel、ctrl parity有测试。旧world混合条目在本修订收窄为Env。",
+              "sourceRefs": [
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/world.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_physics.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/README.md"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+                }
+              ]
+            },
+            "decision": {
+              "state": "fixed",
+              "reason": "固定球场与动力学，将环境版本和局部观察/控制干预分别记录。；保持本比较切片环境固定；若以后改环境，另存版本，旧场景和原件不回写。",
+              "responsibility": {
+                "kind": "cat",
+                "basis": "technical"
+              },
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/world.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_physics.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/README.md"
+                }
+              ]
+            },
+            "scope": "Lab54989dff8e4ec8735a89ff5969c17e12882bf0c0，四鸭一球、position actuator、门洞门框、公开开球和摔倒重生规则。",
+            "why": "同一MuJoCo场已完成公开回合和live；与旧BAM runner不同，不能并成同一基线。",
+            "modifiability": {
+              "state": "partially_modifiable",
+              "reason": "固定球场与动力学，将环境版本和局部观察/控制干预分别记录。；保持本比较切片环境固定；若以后改环境，另存版本，旧场景和原件不回写。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:4ee742d09a:docs/videos/f311-microduck-roadshow/pipeline/cortex"
+                }
+              ]
+            },
+            "sourceRefs": [
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+              },
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/world.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_physics.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/README.md"
+              }
+            ],
+            "nextAction": "按冻结条件解释现有结果，不通过改门线、初始化或动力学让旧结果通过。"
+          },
+          {
+            "itemId": "evaluation",
+            "label": "指定脚触球与整球越线判定",
+            "category": "Eval",
+            "recommendation": {
+              "summary": "沿用已校准事件判定，将踢腿、触球、进球、配合与价值分开。",
+              "reason": "18个摆球正例及踢空、半球过线等反例支持当前有限判定；不能当作自主接近成功率或协作效果。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/contract.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/world.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/calibrate.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_physics.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                }
+              ]
+            },
+            "existingWork": {
+              "summary": "量具正反例和独立实现审阅已完成；PR4492实现/采集/字幕放行不等于F267测量证书。",
+              "sourceRefs": [
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/contract.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/world.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/calibrate.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_physics.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+                }
+              ]
+            },
+            "decision": {
+              "state": "fixed",
+              "reason": "沿用已校准事件判定，将踢腿、触球、进球、配合与价值分开。；从旧world显式拆出既有事件判定，本轮保持固定；完整传接、联赛收益、价值阈值尚未决定。",
+              "responsibility": {
+                "kind": "cat",
+                "basis": "technical"
+              },
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/contract.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/world.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/calibrate.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_physics.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                }
+              ]
+            },
+            "scope": "动作实例、指定脚接触力联合判定，以及整球越门线/门柱/高度边界；完整协作和价值量尺不在已冻结范围。",
+            "why": "18个摆球正例及踢空、半球过线等反例支持当前有限判定；不能当作自主接近成功率或协作效果。",
+            "modifiability": {
+              "state": "not_modifiable_this_round",
+              "reason": "从旧world显式拆出既有事件判定，本轮保持固定；完整传接、联赛收益、价值阈值尚未决定。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/contract.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/world.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/calibrate.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_physics.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                }
+              ]
+            },
+            "sourceRefs": [
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+              },
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/contract.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/world.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/calibrate.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_physics.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+              }
+            ],
+            "nextAction": "后续若发现确定契约缺陷，用测试修复并另版本；协作机会单位和反例待猫校准，正式角色/证书回原owner。"
+          },
+          {
+            "itemId": "evidence-data",
+            "label": "公开实验样本与失败切片",
+            "category": "Data",
+            "recommendation": {
+              "summary": "将未尝试与失败纳入分析，保留样本用途、原件和完整分母。",
+              "reason": "56个公开条件及live轨迹可追溯；801–808现已公开并被分析，不能再次作为未暴露promotion holdout。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/runs.json.gz"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                }
+              ]
+            },
+            "existingWork": {
+              "summary": "56条件有结果、事件与manifest；live保留原片、完整轨迹及拒绝。此项从旧measurement_plan/原件显式提出，不是旧对象地图原有行。",
+              "sourceRefs": [
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/runs.json.gz"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+                }
+              ]
+            },
+            "decision": {
+              "state": "explore",
+              "reason": "将未尝试与失败纳入分析，保留样本用途、原件和完整分母。；原件固定，只允许在原授权内整理公开样本的派生分析与采集需求；不改旧样本、不声称训练集采用或新增数据授权。",
+              "responsibility": {
+                "kind": "cat",
+                "basis": "technical"
+              },
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/runs.json.gz"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                }
+              ]
+            },
+            "scope": "793–800公开探针、801–808公开新场景复验、两场live和18点摆球夹具，按诊断/校准/比较用途分列。",
+            "why": "56个公开条件及live轨迹可追溯；801–808现已公开并被分析，不能再次作为未暴露promotion holdout。",
+            "modifiability": {
+              "state": "partially_modifiable",
+              "reason": "原件固定，只允许在原授权内整理公开样本的派生分析与采集需求；不改旧样本、不声称训练集采用或新增数据授权。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/runs.json.gz"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "preparation-submission:evolution-program:352afab60afb6263b8386eaed12dba03:measurement_plan",
+                  "version": "sha256:2b5d14ed527c440cd30278d0100c4af28501a04d72b420269485d2408a68d46f"
+                }
+              ]
+            },
+            "sourceRefs": [
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+              },
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/runs.json.gz"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+              }
+            ],
+            "nextAction": "派生切片保留source/hash与未尝试；未来样本量、封存、观看者数据采集和预算分别核实。"
+          },
+          {
+            "itemId": "tracking",
+            "label": "运行记录与证据追溯",
+            "category": "Tracking",
+            "recommendation": {
+              "summary": "保持记录和归因边界，展示已有工作与真实当前活动各自的来源。",
+              "reason": "原片hash未变，字幕澄清coach/world与local sensor/state；独立重建可复现，但素材交付不等于观看者验收。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/run.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/video.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/annotate_evidence.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/verify_evidence.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+                }
+              ]
+            },
+            "existingWork": {
+              "summary": "31文件hash、56条件、18000live轨迹tick经独立核验，12个字幕/选段派生产物可字节级重建。",
+              "sourceRefs": [
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/run.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/video.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/annotate_evidence.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/verify_evidence.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+                }
+              ]
+            },
+            "decision": {
+              "state": "fixed",
+              "reason": "保持记录和归因边界，展示已有工作与真实当前活动各自的来源。；从旧world和既有采集链拆出记录职责；本轮不扩建tracking、不回写旧时钟/指令/视频，不改owner/store/TTL。",
+              "responsibility": {
+                "kind": "cat",
+                "basis": "technical"
+              },
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/run.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/video.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/annotate_evidence.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/verify_evidence.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+                }
+              ]
+            },
+            "scope": "run/revision、模型和源码hash、200Hz事件、50Hz轨迹、观察、SIM/WALL时钟、指令回执、原片与字幕派生关系。",
+            "why": "原片hash未变，字幕澄清coach/world与local sensor/state；独立重建可复现，但素材交付不等于观看者验收。",
+            "modifiability": {
+              "state": "not_modifiable_this_round",
+              "reason": "从旧world和既有采集链拆出记录职责；本轮不扩建tracking、不回写旧时钟/指令/视频，不改owner/store/TTL。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/run.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/video.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/annotate_evidence.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/verify_evidence.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+                }
+              ]
+            },
+            "sourceRefs": [
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+              },
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/run.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/video.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/annotate_evidence.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/verify_evidence.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+              }
+            ],
+            "nextAction": "消费PR4492和Terra413的有限审阅事实；活动按真实invocation读取，后续记录变化另版本。"
+          }
+        ],
+        "unknowns": [
+          "旧world在本修订收窄为Env，新增Eval/Tracking承接原混合职责；Data来自既有measurement_plan与原件。旧四行及其revision保持原样。",
+          "这些决定由原提交猫作出，属于准备中的技术取舍；不是You299/Fable301的逐项人类决定，也不绑定Program正式角色。",
+          "可靠传接、两猫方案、整体比赛净收益及其独立量尺/样本量仍未决定或未证明。",
+          "权重训练与新增资源预算尚未选择；有真实新增价值/预算需求时沿现有Chat/Needs Me取得授权。",
+          "尚未取得可证明You或观看者已验收的真实反馈，不从素材送达或设计放行推断满意。",
+          "Goal、经济/测量证书及正式角色仍缺；Terra的实现/素材审阅不能将所有测量来源整体升级为正式有效。",
+          "旧sourceMessageId377是当时恢复invocation的工具FYI，不是足球或预算授权；历史metadata不回写。建议/决定引用316，权限依据另引CVO793。"
+        ],
+        "nextAction": "按原提交猫316确认的范围准备局部执行与战术持续性候选，保留固定比较条件及失败分母；关联准备块按真实依赖续办，不覆盖后来的提交。"
+      }
+    },
+    "success_contract": {
+      "ref": {
+        "ownerFeatureId": "F311",
+        "ownerStateRef": "preparation-submission:evolution-program:352afab60afb6263b8386eaed12dba03:success_contract",
+        "version": "sha256:794686586a27f249aeeffa821bb09dd698c93162dfa5c27484ed1d0f2c58d9f5"
+      },
+      "body": {
+        "kind": "success_contract",
+        "summary": "对照新七项对象地图重核原三条规约，判定仍区分指令执行、指定脚触球及人的体验价值。PR4492实现/原件已获Terra413有限独立审阅；规约仍为草案，未签Goal或测量证书。模拟器、自建benchmark、真实观看是取证渠道，不能直接当作GT域。",
+        "criteria": [
+          {
+            "criterionId": "command-execution",
+            "label": "猫的指令真实控制指定鸭",
+            "utilityClaim": "猫能改变自己队伍的执行，而物理持续运行。",
+            "observationUnit": "一次真实观察→提交→接受/拒绝→执行/失效",
+            "estimator": "接受数/提交数、观察到接收年龄、覆盖时长，结合50Hz轨迹与目标到达事实；保留全部拒绝。",
+            "counterexample": "只显示猫的解说，或迟到后把revision换成最新值。",
+            "gtDomain": "verifiable",
+            "judge": "verifier",
+            "payer": {
+              "kind": "engineering_maintenance",
+              "detail": "本地仿真与日志维护成本由本项目执行承担。"
+            },
+            "gtSourceKeys": ["physical-record"],
+            "validityBounds": [
+              "仿真状态可见；证明指定鸭执行，不证明战术值得或真机视觉。",
+              "对应Agent/Harness/Tracking对象；猫读world state与局部sensor/state信息源分别声明。观察器与执行实现通过审阅，不等于战术净收益成立。"
+            ],
+            "unknowns": ["更稳定的跨指令时效策略待验证。"],
+            "nextAction": "两场指令、事件与轨迹已归档并经有限实现审阅；后续沿同一观察域取证目标持续性，保留全部拒绝和失效，不只换依赖引用。"
+          },
+          {
+            "criterionId": "kick-contact",
+            "label": "指定脚在踢球动作期实际触球",
+            "utilityClaim": "鸭完成有物理接触的踢球，减少对旧球位踢空。",
+            "observationUnit": "一次独立踢球技能实例及一次完整起始场景",
+            "estimator": "200Hz接触力、指定脚geom与动作ID联合判定；同时报无尝试场景、踢腿数、接触数、摔倒和目标方向。",
+            "counterexample": "仅kick调用，动作后其他鸭碰球，或摆球夹具冒充自主接近。",
+            "gtDomain": "verifiable",
+            "judge": "verifier",
+            "payer": {
+              "kind": "engineering_maintenance",
+              "detail": "真实仿真采集与校准。"
+            },
+            "gtSourceKeys": ["physical-record", "placed-ball-calibration"],
+            "validityBounds": [
+              "position actuator与冻结球场内；接触不等于传球成功或胜率改善。",
+              "对应Model/Harness/Eval/Data对象。18点摆球夹具校准接触，不作为自主接近成功的分母；已公开801–808不再是未暴露holdout。"
+            ],
+            "unknowns": ["许多场景没有尝试，尚未稳定踢球。"],
+            "nextAction": "完整公开新seed结果已复算；state仍5/8场无踢腿。继续依据已有失败准备局部反馈候选，实际干预另记录版本及比较条件。"
+          },
+          {
+            "criterionId": "team-value",
+            "label": "真实配合与对人的价值",
+            "utilityClaim": "队友形成可追溯传接链，比赛体验值得继续投入。",
+            "observationUnit": "一次传接机会与完整对局；You观看后的判断",
+            "estimator": "意图→A指定脚接触→B响应/接球→后续动作；与固定对手交换边对照。体验由真实观看者判，不用作者LLM自评分。",
+            "counterexample": "两鸭各追球、巧合连续碰球、只剪出一脚或赢了代理比分。",
+            "gtDomain": "open_value",
+            "judge": "mixed",
+            "payer": {
+              "kind": "mixed",
+              "detail": "本地实验计算与You观看注意力；新增成本需另核。"
+            },
+            "gtSourceKeys": ["physical-record", "viewer-feedback"],
+            "validityBounds": [
+              "当前仅分工/站位已出现；尚无完整传接证据或球队净收益结论。",
+              "open_value标的是“对人值得/有趣”；可追溯传接链中的接触与轨迹只能作为物理先决证据，不会自动给出人的价值判断。当前没有经校准的传接判定器。"
+            ],
+            "unknowns": ["价值阈值与独立裁判尚未冻结。"],
+            "nextAction": "成片已交付；真实观看反馈仍未取得，不能代填满意或验收。保留规约与反例，后续先校准传接机会的物理链，再由真实价值主人判断体验。"
+          }
+        ],
+        "unknowns": [
+          "保留原criteria ID、GT域和judge类型：command-execution/verifiable/verifier，kick-contact/verifiable/verifier，team-value/open_value/mixed；本修订不按渠道硬造semi_verifiable标签。",
+          "正式Goal、测量与经济证书、角色及价值阈值尚未冻结；技术审阅不能代签。",
+          "协作机会/传接判据、足量比赛对照、训练预算与观看者反馈仍未知，未新增实验或采用。",
+          "修订依据原提交猫thread_mtmp3gjq2hntizz4#0001789373591565-000316-1350ca00，以及有限审阅thread_mtmp3gjq2hntizz4#0001789038735370-000413-ae17665a；旧规约作为历史保留。"
+        ],
+        "nextAction": "用新对象地图及已合入原件继续准备局部执行/有限战术对照；未知保持可读，正式量尺与价值判断由相应有权来源解决。"
+      }
+    },
+    "measurement_plan": {
+      "ref": {
+        "ownerFeatureId": "F311",
+        "ownerStateRef": "preparation-submission:evolution-program:352afab60afb6263b8386eaed12dba03:measurement_plan",
+        "version": "sha256:30dec6e799b306123bc89596a97341eb70460932fe53a49e68f51f9a51503e27"
+      },
+      "body": {
+        "kind": "measurement_plan",
+        "summary": "56公开条件、两场live和18点校准已采集；PR4492与Terra413完成实现/原件/字幕的有限独立审阅，本轮复算31文件hash、56条件与18000轨迹tick一致。采集、取证渠道、有限实现审阅和正式测量有效性分开，后者不因此升级。",
+        "gtSources": [
+          {
+            "sourceKey": "physical-record",
+            "category": "real_world_outcome",
+            "label": "实际执行的MuJoCo仿真原件（非真实硬件）",
+            "collection": {
+              "state": "collected",
+              "method": "渠道：实际MuJoCo仿真 + 自建公开场景benchmark。run.py保存manifest、200Hz事件、50Hz轨迹、观察与SIM/WALL录像；完整归档索引含56条件和两场live，校验只读原件不重跑比赛。",
+              "sourceRef": {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+              }
+            },
+            "validity": {
+              "state": "needs_review",
+              "detail": "Terra413已核26测试、31文件hash、56结果、18000轨迹tick与12个派生产物可重建；原生/观测器parity属有限实现证据。正式claim适用性、独立校准角色、完整协作/净收益及F267测量资格尚缺，继续待核，不把实现APPROVE写成正式有效。",
+              "proofRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/verify_evidence.py"
+                }
+              ]
+            },
+            "missingOrDisputed": [
+              "仿真不是硬件；sensor/state是不同局部观察与控制组合，不能单独归因给猫。",
+              "31hash等校验不证明统计足量、真机迁移或完整协作。",
+              "当前F307是否能解析每个Git历史引用以读面source状态为准，不能因本地可读就编造owner回执。"
+            ],
+            "cost": {
+              "payer": "本项目执行",
+              "detail": "M4 Max本地有界实验，无云端训练或新权重。"
+            }
+          },
+          {
+            "sourceKey": "placed-ball-calibration",
+            "category": "domain_precedent",
+            "label": "18个已知球位的接触正例与裁判反例",
+            "collection": {
+              "state": "collected",
+              "method": "渠道：自建摆球校准夹具 + MuJoCo接触事件；双脚各9个已知球位，与踢空、半球过线、门外/高球等反例分列。读取旧夹具原件，本轮不重跑。",
+              "sourceRef": {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-kick-calibration-v2.json"
+              }
+            },
+            "validity": {
+              "state": "needs_review",
+              "detail": "18/18正例及有限实现审阅已在；仅支持这些夹具中的指定脚接触和量具边界，不支持自主接近/协作成功率，未补正式独立校准证书。",
+              "proofRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/calibrate.py"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_physics.py"
+                }
+              ]
+            },
+            "missingOrDisputed": ["摆球夹具不证明自主接近/协作。"],
+            "cost": {
+              "payer": "本项目执行",
+              "detail": "本地几秒量级，可复跑。"
+            }
+          },
+          {
+            "sourceKey": "viewer-feedback",
+            "category": "business_fact",
+            "label": "You及演示观看者的体验判断",
+            "collection": {
+              "state": "not_connected",
+              "method": "渠道：用户真实观看与业务反馈；34.5秒选段和完整120/240秒录像已交付，但尚未取得本次体验价值的真实判断。"
+            },
+            "validity": {
+              "state": "unknown",
+              "detail": "观看者体验判断仍未知；素材送达、UI设计放行、代码审阅均不替代满意或PREP5验收。"
+            },
+            "missingOrDisputed": ["不能代填有趣/满意/验收。"],
+            "cost": {
+              "payer": "You/观看者",
+              "detail": "34.5秒选段或完整120/240秒回合。"
+            }
+          }
+        ],
+        "conditions": [
+          {
+            "itemId": "version-freeze",
+            "label": "版本与观察域冻结",
+            "category": "实验条件",
+            "recommendation": {
+              "summary": "保持既有比较条件，明确候选实际改变哪些层。",
+              "reason": "按316七项取舍保留比较条件，避免把更换观察域、球场或量尺的收益归因给猫。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/README.md"
+                }
+              ]
+            },
+            "existingWork": {
+              "summary": "实际源码/模型/场景hash和56公开条件已归档；原始录像及字幕派生hash经独立核验。",
+              "sourceRefs": [
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+                }
+              ]
+            },
+            "decision": {
+              "state": "fixed",
+              "reason": "沿316固定Model/Env/现有Eval/Tracking；保留sensor/state对照和原始失败，不新增训练或评估轮。",
+              "responsibility": {
+                "kind": "cat",
+                "basis": "technical"
+              },
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/README.md"
+                }
+              ]
+            },
+            "scope": "固定Lab54989dff、官方模型hash与Env/现有Eval/Tracking；sensor/state分列。Data只可整理派生分析，Agent/Harness改变另列组合版本。",
+            "why": "按316七项取舍保留比较条件，避免把更换观察域、球场或量尺的收益归因给猫。",
+            "modifiability": {
+              "state": "modifiable",
+              "reason": "已有隔离候选准备权限保留；本轮选择固定比较条件，选择不扩权，不改旧原件或正式owner状态。",
+              "basisRefs": [
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+                },
+                {
+                  "ownerFeatureId": "F117",
+                  "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+                },
+                {
+                  "ownerFeatureId": "F311",
+                  "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/README.md"
+                }
+              ]
+            },
+            "sourceRefs": [
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+              },
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+              }
+            ],
+            "nextAction": "后续候选明确列变量、原件与新结果；本轮已核现有事实，不因没有活跃实验把已有工作显示成未做。"
+          }
+        ],
+        "comparison": {
+          "unit": "完整场景/对局为单位",
+          "primaryVariable": "先比较局部sensor与state反馈组合；猫的独立战术收益另行对照。",
+          "controls": [
+            "同一Lab与官方动作模型",
+            "同seed、同规则、每场60秒",
+            "两队使用同种局部技能",
+            "全部未尝试与失败保留"
+          ],
+          "developmentEvidence": "seed793–800为公开探针；seed793用于候选诊断与live录像。",
+          "independentHoldout": "801–808在候选冻结后首次用于公开复验，但目前已公开且被用于诊断；不能再次充当未暴露promotion holdout。未来封存/新鲜独立样本、量与校准均未确定。",
+          "repeatability": "既有种子、场景、源码/模型hash和物理原件支持限定范围复核；字幕派生产物已有独立字节级重建。墙钟和LLM响应不保证确定重复，未宣称重跑比赛可逐tick复现。"
+        },
+        "unknowns": [
+          "原生感知与state候选不是单变量因果分解；猫净贡献尚未单独证明。",
+          "完整联赛样本量、传接规则与独立校准/正式证书仍缺。",
+          "新增训练资源、两猫比较方案和观看者真实反馈未决定或未取得。",
+          "GT来源category沿旧记录保留为来源分类；模拟器/benchmark/观看是渠道，verifiable/open_value等是逐claim的判定域，两者不可互换。"
+        ],
+        "nextAction": "消费有限独立审阅及新地图/规约，把失败定位到局部执行和战术时效；正式测量资格与观看反馈缺口保持待核，本轮不启动新实验。"
+      }
+    },
+    "baseline_diagnosis": {
+      "ref": {
+        "ownerFeatureId": "F311",
+        "ownerStateRef": "preparation-submission:evolution-program:352afab60afb6263b8386eaed12dba03:baseline_diagnosis",
+        "version": "sha256:3f7d053c8a47c45f7bc2f7e67f70185de3d27205baf7f9b12db1c39432731da8"
+      },
+      "body": {
+        "kind": "baseline_diagnosis",
+        "summary": "重核既有原件与新七项地图：固定模型有真实触球，旧球位可造成踢空，state仍多场不尝试；猫指令确实执行但观察到接受有秒级延迟。PR4492/Terra413已完成有限实现与素材审阅；没有新比赛，基线仍为公开探索草案。",
+        "baselineState": "draft",
+        "observationUnit": "公开60秒对局、120/240秒真实猫在环回合",
+        "facts": [
+          {
+            "factId": "live-one",
+            "label": "第一场120s：4指令1接受3拒绝，0:0，无指定脚命中；墙钟120.041s。",
+            "state": "reported",
+            "sourceRefs": [
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-793-live1/summary.json"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-793-live1/events.jsonl"
+              },
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+              }
+            ],
+            "limitation": "只是一场；不代表长期胜负或协调能力。"
+          },
+          {
+            "factId": "live-two",
+            "label": "第二场240s：8指令6接受2拒绝，0:1；一次蓝鸭左脚接触，随后经金鸭脚偏转越门线；墙钟240.037s。",
+            "state": "reported",
+            "sourceRefs": [
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-793-live2-state/summary.json"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-793-live2-state/events.jsonl"
+              },
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+              }
+            ],
+            "limitation": "双方换成state局部反馈；不能归因猫策略，不是已完成传接。"
+          },
+          {
+            "factId": "fresh-seeds",
+            "label": "新seed801–808：sensor 13踢腿0命中/0球6摔；state 3踢腿3命中/3球3摔，5场无踢腿。",
+            "state": "reported",
+            "sourceRefs": [
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/runs.json.gz"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+              },
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+              }
+            ],
+            "limitation": "旧公开复验结果未变；新场景现已暴露，非正式holdout，不能把3/3接触报成稳定踢球率或整体净收益。"
+          },
+          {
+            "factId": "evidence-review",
+            "label": "PR4492已合入；Terra413核26测试、31文件hash、56条件、18000轨迹tick和字幕可重建。本轮只读复算归档一致。",
+            "state": "reported",
+            "sourceRefs": [
+              {
+                "ownerFeatureId": "F117",
+                "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/verify_evidence.py"
+              }
+            ],
+            "limitation": "证明有限实现/归档链条已审；不新增物理样本、不签测量或Goal证书，不证明用户满意、协作或采用。"
+          }
+        ],
+        "competingExplanations": [
+          {
+            "explanationId": "stale-local-target",
+            "hypothesis": "局部控制对已移动的球仍使用旧摆位，导致踢空。",
+            "evidenceFor": [
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/state_skill.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_state_skill.py"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+              }
+            ],
+            "evidenceAgainst": [],
+            "discriminatingNextStep": "旧摆位机制已有RED→GREEN；沿Harness/Data分析现有5/8未尝试场景，区分贴墙、拥挤、朝向和窗口条件；该分析不代表新干预已执行。"
+          },
+          {
+            "explanationId": "motor-incapable",
+            "hypothesis": "固定动作模型本身无法触球。",
+            "evidenceFor": [],
+            "evidenceAgainst": [
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-kick-calibration-v2.json"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/runs.json.gz"
+              }
+            ],
+            "discriminatingNextStep": "18点摆球和3次新场景触球反驳绝对不能；按316保持Model固定。若出现可复核身体瓶颈，再另核训练分支资源，不先宣称需要重训。"
+          },
+          {
+            "explanationId": "cat-latency",
+            "hypothesis": "猫现场反应延迟和局势变化使合理战术到达时已失效。",
+            "evidenceFor": [
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-793-live2-state/events.jsonl"
+              },
+              {
+                "ownerFeatureId": "F311",
+                "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+              }
+            ],
+            "evidenceAgainst": [],
+            "discriminatingNextStep": "live2已接受指令的观察年龄10.58–19.70秒，约58秒迟到选择被拒绝；沿Agent/Tracking准备持续目标与同信息无猫对照，禁止暂停或换revision伪装新鲜。"
+          }
+        ],
+        "unknowns": [
+          "可靠传接、两猫配合、比赛净收益和人的体验价值仍未证明。",
+          "Terra已完成实现/素材审阅；正式独立校准、采用角色、Goal/经济/测量证书仍未绑定或签发。",
+          "训练预算、完整比赛/协作判据与真实观看反馈未知。"
+        ],
+        "nextAction": "按316七项取舍保持Model/Env/现有Eval/Tracking固定，准备Harness/有限Agent/Data探索；旧物理数据与历史稿不动，后续实际干预另存版本和独立结果。"
+      }
+    }
+  }
+}

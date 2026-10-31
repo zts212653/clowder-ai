@@ -6,11 +6,20 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import sharp from 'sharp';
 
 await import('tsx/esm');
 const { threadExportRoutes, resolveFrontendBaseUrl } = await import('../src/routes/thread-export.ts');
 const { resolveFrontendCorsOrigins } = await import('../src/config/frontend-origin.ts');
-const { ImageExporter } = await import('../src/services/ImageExporter.ts');
+const { ImageExporter, buildImageExportUrl, resolveExportCaptureHeight, stitchImageExportChunks } = await import(
+  '../src/services/ImageExporter.ts'
+);
+const {
+  captureVerifiedImageExportCandidate,
+  HTML_WIDGET_EXPORT_OPERATION_MAX_WAIT_MS,
+  refreshHtmlWidgetExportLayoutProof,
+  resolveHtmlWidgetExportReadiness,
+} = await import('../src/services/html-widget-export-readiness.ts');
 
 const ORIGINAL_CAPTURE = ImageExporter.prototype.capture;
 const ORIGINAL_CLOSE = ImageExporter.prototype.close;
@@ -34,23 +43,51 @@ function createThreadStore() {
   };
 }
 
-async function buildApp() {
+function makeMessage(overrides = {}) {
+  return {
+    id: 'message-1',
+    threadId: 'thread-1',
+    userId: 'user-1',
+    catId: null,
+    content: 'hello',
+    mentions: [],
+    timestamp: 100,
+    deliveryStatus: 'delivered',
+    ...overrides,
+  };
+}
+
+function createMessageStore(messages = [makeMessage()]) {
+  return {
+    async getById(messageId) {
+      return messages.find((message) => message.id === messageId) ?? null;
+    },
+    // Whole-message selection resolves the canonical bubble group, so the store must expose the
+    // same timeline the browser projected from.
+    async getByThreadAfter(threadId) {
+      return messages.filter((message) => message.threadId === threadId);
+    },
+  };
+}
+
+async function buildApp(messageStore = createMessageStore()) {
   const app = Fastify();
   await app.register(threadExportRoutes, {
     threadStore: createThreadStore(),
+    messageStore,
   });
   await app.ready();
   return app;
 }
 
 describe('POST /api/threads/:threadId/export-image', () => {
-  /** @type {{ url: string; userId: string }[]} */
+  /** @type {{ url: string; userId: string; options?: { selectionMessageIds?: readonly string[] } }[]} */
   let captures = [];
 
   beforeEach(() => {
     captures = [];
-    ImageExporter.prototype.capture = async (url, userId) => {
-      captures.push({ url, userId });
+    ImageExporter.prototype.capture = async (url, userId, options) => {
+      captures.push({ url, userId, options });
       return Buffer.from('fake-png');
     };
     ImageExporter.prototype.close = async () => {};
@@ -166,6 +203,383 @@ describe('POST /api/threads/:threadId/export-image', () => {
     assert.equal(res.statusCode, 200);
     assert.equal(captures.length, 1);
     assert.equal(captures[0].url, 'http://localhost:3003/thread/thread-1');
+  });
+
+  it('resolves selection before capture and passes only timeline-normalized IDs', async () => {
+    const messageStore = createMessageStore([
+      makeMessage({ id: 'message-later', timestamp: 200, content: 'later' }),
+      makeMessage({ id: 'message-earlier', timestamp: 100, content: 'earlier' }),
+    ]);
+    const app = await buildApp(messageStore);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/export-selection-image',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: {
+        items: [
+          { kind: 'message', messageId: 'message-later' },
+          { kind: 'message', messageId: 'message-earlier' },
+        ],
+      },
+    });
+    await app.close();
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(captures.length, 1);
+    assert.deepEqual(captures[0].options, {
+      selectionMessageIds: ['message-earlier', 'message-later'],
+    });
+  });
+
+  it('passes the resolved partial selection to image rendering and counts the source once', async () => {
+    const block = { id: 'selected-card', kind: 'card', v: 1, title: '审批卡统一结果行' };
+    const app = await buildApp(
+      createMessageStore([
+        makeMessage({
+          content: '两件都弄好了：',
+          extra: {
+            rich: { v: 1, blocks: [block, { id: 'excluded-card', kind: 'card', v: 1, title: '额度表 · 本周' }] },
+          },
+        }),
+      ]),
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/export-selection-image',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: {
+        items: [
+          { kind: 'quote', messageId: 'message-1', text: '两件都弄好了：', renderedOccurrences: 1 },
+          { kind: 'rich_block', messageId: 'message-1', sourceMessageIds: ['message-1'], blockId: 'selected-card' },
+        ],
+      },
+    });
+    await app.close();
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(captures[0].options.selectionMessageIds, ['message-1']);
+    assert.deepEqual(
+      captures[0].options.selectionItems.map((item) => item.kind),
+      ['quote', 'rich_block'],
+    );
+    assert.equal(captures[0].options.selectionItems[0].readableContent, '两件都弄好了：');
+    assert.equal(captures[0].options.selectionItems[1].richBlock.id, 'selected-card');
+  });
+
+  it('does not launch capture when selection resolution fails', async () => {
+    const app = await buildApp(createMessageStore([makeMessage({ id: 'message-1', _tombstone: true, content: '' })]));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/export-selection-image',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: { items: [{ kind: 'message', messageId: 'message-1' }] },
+    });
+    await app.close();
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(captures.length, 0);
+  });
+});
+
+describe('buildImageExportUrl', () => {
+  it('appends export identity and repeated validated selection parameters', () => {
+    const result = new URL(
+      buildImageExportUrl('http://localhost:3003/thread/thread-1', 'user-1', {
+        selectionMessageIds: ['message-1', 'message-2'],
+      }),
+    );
+
+    assert.equal(result.searchParams.get('export'), 'true');
+    assert.equal(result.searchParams.get('userId'), 'user-1');
+    assert.deepEqual(result.searchParams.getAll('messageId'), ['message-1', 'message-2']);
+  });
+
+  it('uses the export root height instead of the 4000px capture viewport floor', () => {
+    assert.equal(resolveExportCaptureHeight({ documentHeight: 4000, exportRootHeight: 214.2 }), 215);
+    assert.equal(resolveExportCaptureHeight({ documentHeight: 5100, exportRootHeight: 5100 }), 5100);
+    assert.equal(resolveExportCaptureHeight({ documentHeight: 900, exportRootHeight: null }), 900);
+  });
+
+  it('requires every html_widget to be measured and fully expanded before capture', () => {
+    assert.deepEqual(resolveHtmlWidgetExportReadiness([]), { status: 'ready', widgetIds: [] });
+    assert.deepEqual(
+      resolveHtmlWidgetExportReadiness([
+        { widgetId: 'short', layoutState: 'ready', expanded: true },
+        { widgetId: 'long', layoutState: 'pending', expanded: true },
+      ]),
+      { status: 'pending', widgetIds: ['long'] },
+    );
+    assert.deepEqual(resolveHtmlWidgetExportReadiness([{ widgetId: 'long', layoutState: 'ready', expanded: false }]), {
+      status: 'pending',
+      widgetIds: ['long'],
+    });
+    assert.deepEqual(
+      resolveHtmlWidgetExportReadiness([
+        { widgetId: 'short', layoutState: 'ready', expanded: true },
+        { widgetId: 'long', layoutState: 'ready', expanded: true },
+      ]),
+      { status: 'ready', widgetIds: ['short', 'long'] },
+    );
+  });
+
+  it('surfaces html_widget measurement failures instead of permitting a clipped PNG', () => {
+    assert.deepEqual(resolveHtmlWidgetExportReadiness([{ widgetId: 'broken', layoutState: 'error', expanded: true }]), {
+      status: 'error',
+      widgetIds: ['broken'],
+    });
+  });
+
+  it('requires every html_widget to acknowledge the current exporter proof request', () => {
+    const widgets = [
+      { widgetId: 'fresh', layoutState: 'ready', expanded: true, proofRequestId: 'proof-current' },
+      { widgetId: 'stale', layoutState: 'ready', expanded: true, proofRequestId: 'proof-previous' },
+    ];
+    assert.deepEqual(resolveHtmlWidgetExportReadiness(widgets, 'proof-current'), {
+      status: 'pending',
+      widgetIds: ['stale'],
+    });
+    assert.deepEqual(resolveHtmlWidgetExportReadiness([widgets[0]], 'proof-current'), {
+      status: 'ready',
+      widgetIds: ['fresh'],
+    });
+  });
+
+  it('reports the exact proof stage and timing when renderer dispatch exhausts the operation deadline', async () => {
+    const originalNow = Date.now;
+    let now = 1_000;
+    const page = {
+      async evaluate(_fn, ...args) {
+        if (args[0] !== 'catcafe:html-widget-export-proof-request') {
+          throw new Error(`Unexpected browser evaluation: ${String(args[0])}`);
+        }
+        now += HTML_WIDGET_EXPORT_OPERATION_MAX_WAIT_MS + 1;
+      },
+    };
+    Date.now = () => now;
+
+    try {
+      await assert.rejects(
+        () => refreshHtmlWidgetExportLayoutProof(page, 1_000 + HTML_WIDGET_EXPORT_OPERATION_MAX_WAIT_MS),
+        (error) => {
+          assert.match(error.message, /proofSequence=1/);
+          assert.match(error.message, /proofStage=after-dispatch/);
+          assert.match(error.message, /proofElapsedMs=12001/);
+          assert.match(error.message, /remainingMs=-1/);
+          return true;
+        },
+      );
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+
+  it('waits for asynchronous export content even when no HTML widgets exist', async () => {
+    let snapshots = 0;
+    const page = {
+      async evaluate(_fn, ...args) {
+        if (args[0] === 'catcafe:html-widget-export-proof-request') return;
+        snapshots += 1;
+        return { height: 1748, widgets: [], pendingContentIds: snapshots < 2 ? ['paw-feel:message-1'] : [] };
+      },
+    };
+    await refreshHtmlWidgetExportLayoutProof(page, Date.now() + 1000, 1);
+    assert.equal(snapshots, 2, 'capture proof must not accept the offscreen placeholder as complete content');
+  });
+
+  it('commits a screenshot candidate only after fresh proof both before and after capture', async () => {
+    const events = [];
+    let proofCount = 0;
+    await assert.rejects(
+      () =>
+        captureVerifiedImageExportCandidate(
+          async () => {
+            events.push('proof');
+            proofCount += 1;
+            if (proofCount === 2) throw new Error('post-capture layout changed');
+          },
+          async () => {
+            events.push('screenshot');
+            return Buffer.from('candidate-png');
+          },
+        ),
+      /post-capture layout changed/,
+    );
+    assert.deepEqual(events, ['proof', 'screenshot', 'proof']);
+  });
+
+  it('rejects a fresh widget proof delivered after the parent deadline without leaking PNG or page', async () => {
+    const originalNow = Date.now;
+    let now = 1_000;
+    let proofRequestId = null;
+    let delayedFirstProof = true;
+    let screenshotCalls = 0;
+    let pageCloseCalls = 0;
+    const page = {
+      async setExtraHTTPHeaders() {},
+      async setViewport() {},
+      async goto() {},
+      async waitForSelector() {},
+      async addStyleTag() {},
+      async screenshot() {
+        screenshotCalls += 1;
+        return Buffer.from('candidate-png');
+      },
+      async close() {
+        pageCloseCalls += 1;
+      },
+      async evaluate(fn, ...args) {
+        if (args[0] === 'catcafe:html-widget-export-proof-request') {
+          proofRequestId = args[1];
+          if (delayedFirstProof) {
+            delayedFirstProof = false;
+            now += HTML_WIDGET_EXPORT_OPERATION_MAX_WAIT_MS + 1;
+          }
+          return undefined;
+        }
+        if (args[0] === 'data-html-widget-proof-request-id') {
+          return {
+            height: 100,
+            pendingContentIds: [],
+            widgets: [
+              {
+                widgetId: 'late-proof-widget',
+                layoutState: 'ready',
+                expanded: true,
+                proofRequestId,
+              },
+            ],
+          };
+        }
+
+        const source = String(fn);
+        if (source.includes('[data-export-root]')) {
+          return { documentHeight: 100, exportRootHeight: 100 };
+        }
+        if (source.includes('[data-message-id]')) return 1;
+        if (source.includes('requestAnimationFrame')) return undefined;
+        throw new Error(`Unexpected browser evaluation: ${source}`);
+      },
+    };
+    const browserSession = {
+      browser: null,
+      async openPage() {
+        return page;
+      },
+      async close() {},
+    };
+    const exporter = new ImageExporter();
+    exporter.browserSession = browserSession;
+    Date.now = () => now;
+
+    try {
+      await assert.rejects(
+        () => exporter.capture('http://example.test/thread/thread-1', 'user-1'),
+        /deadline|timed out|did not become export-ready/i,
+      );
+      assert.equal(screenshotCalls, 0, 'an ACK after the parent deadline must never produce a PNG candidate');
+      assert.equal(pageCloseCalls, 1, 'the rejected capture must close its browser page');
+    } finally {
+      Date.now = originalNow;
+      await exporter.close();
+    }
+  });
+
+  it('shares one export deadline across widget readiness, height stability, and screenshot proof', async () => {
+    const originalNow = Date.now;
+    let now = 1_000;
+    let proofRequestId = null;
+    let screenshotCalls = 0;
+    let pageCloseCalls = 0;
+    const page = {
+      async setExtraHTTPHeaders() {},
+      async setViewport() {},
+      async goto() {},
+      async waitForSelector() {},
+      async addStyleTag() {},
+      async screenshot() {
+        screenshotCalls += 1;
+        return Buffer.from('candidate-png');
+      },
+      async close() {
+        pageCloseCalls += 1;
+      },
+      async evaluate(fn, ...args) {
+        if (args[0] === 'catcafe:html-widget-export-proof-request') {
+          proofRequestId = args[1];
+          now += 2_500;
+          return undefined;
+        }
+        if (args[0] === 'data-html-widget-proof-request-id') {
+          return {
+            height: 100,
+            pendingContentIds: [],
+            widgets: [
+              {
+                widgetId: 'cumulative-deadline-widget',
+                layoutState: 'ready',
+                expanded: true,
+                proofRequestId,
+              },
+            ],
+          };
+        }
+
+        const source = String(fn);
+        if (source.includes('[data-export-root]')) {
+          return { documentHeight: 100, exportRootHeight: 100 };
+        }
+        if (source.includes('[data-message-id]')) return 1;
+        if (source.includes('requestAnimationFrame')) return undefined;
+        throw new Error(`Unexpected browser evaluation: ${source}`);
+      },
+    };
+    const browserSession = {
+      browser: null,
+      async openPage() {
+        return page;
+      },
+      async close() {},
+    };
+    const exporter = new ImageExporter();
+    exporter.browserSession = browserSession;
+    Date.now = () => now;
+
+    try {
+      await assert.rejects(
+        () => exporter.capture('http://example.test/thread/thread-1', 'user-1'),
+        /deadline|timed out|did not stabilize/i,
+      );
+      assert.equal(screenshotCalls, 0, 'later phases must not receive a fresh screenshot deadline');
+      assert.equal(pageCloseCalls, 1, 'the globally expired capture must close its browser page');
+    } finally {
+      Date.now = originalNow;
+      await exporter.close();
+    }
+  });
+
+  it('stitches exact chunk boundaries without repeating or dropping boundary content', async () => {
+    const first = await sharp({
+      create: { width: 2, height: 4, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 1 } },
+    })
+      .png()
+      .toBuffer();
+    const second = await sharp({
+      create: { width: 2, height: 2, channels: 4, background: { r: 0, g: 255, b: 0, alpha: 1 } },
+    })
+      .png()
+      .toBuffer();
+
+    const stitched = await stitchImageExportChunks(2, 6, [
+      { buffer: first, top: 0 },
+      { buffer: second, top: 4 },
+    ]);
+    const { data, info } = await sharp(stitched).raw().toBuffer({ resolveWithObject: true });
+    const pixel = (y) => Array.from(data.subarray(y * info.width * info.channels, y * info.width * info.channels + 3));
+
+    assert.equal(info.height, 6);
+    assert.deepEqual(pixel(3), [255, 0, 0]);
+    assert.deepEqual(pixel(4), [0, 255, 0]);
   });
 });
 

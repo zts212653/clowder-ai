@@ -1,7 +1,8 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { MessageNavigator } from '@/components/MessageNavigator';
+import { MessageNavigator, messageNavigatorPreviewText } from '@/components/MessageNavigator';
+import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import type { ChatMessage as ChatMessageData } from '@/stores/chatStore';
 
 vi.mock('@/hooks/useCoCreatorConfig', () => ({
@@ -16,6 +17,11 @@ function makeMsg(id: string, type: 'user' | 'assistant' | 'system', catId?: stri
   return {
     id,
     type,
+    from: catId
+      ? { kind: 'agent', catId }
+      : type === 'user'
+        ? { kind: 'user', userId: 'owner' }
+        : { kind: 'system', service: 'test' },
     content: `Content for ${id}`,
     timestamp: Date.now(),
     ...(catId ? { catId } : {}),
@@ -25,7 +31,14 @@ function makeMsg(id: string, type: 'user' | 'assistant' | 'system', catId?: stri
 const nullRef = { current: null };
 
 function render(messages: ChatMessageData[]): string {
-  return renderToStaticMarkup(React.createElement(MessageNavigator, { messages, scrollContainerRef: nullRef }));
+  return renderToStaticMarkup(
+    React.createElement(MessageNavigator, {
+      messages,
+      scrollContainerRef: nullRef,
+      onJumpToMessage: () => false,
+      beginUserScroll: () => null,
+    }),
+  );
 }
 
 describe('MessageNavigator', () => {
@@ -34,7 +47,7 @@ describe('MessageNavigator', () => {
     expect(html).toBe('');
   });
 
-  it('renders dots for user and assistant messages only', () => {
+  it('renders dots for every visible canonical message source', () => {
     const msgs = [
       makeMsg('m1', 'user'),
       makeMsg('m2', 'system'),
@@ -44,46 +57,46 @@ describe('MessageNavigator', () => {
     ];
     const html = render(msgs);
 
-    // 3 buttons: m1=user, m3=assistant, m5=assistant
+    // All five visible messages retain their canonical sender and navigation anchor.
     const buttons = html.match(/<button/g) ?? [];
-    expect(buttons.length).toBe(3);
+    expect(buttons.length).toBe(5);
   });
 
-  it('filters out system messages from navigation', () => {
+  it('filters out retired internal routing rows from navigation', () => {
     const msgs = [
       makeMsg('m1', 'user'),
-      makeMsg('m2', 'system'),
+      { ...makeMsg('m2', 'system'), extra: { systemKind: 'a2a_routing' as const } },
       makeMsg('m3', 'assistant', 'opus'),
       makeMsg('m4', 'assistant', 'codex'),
     ];
     const html = render(msgs);
 
-    // 3 nav items: user + 2 assistants
+    // The retired routing record does not become a navigation surface.
     const buttons = html.match(/<button/g) ?? [];
     expect(buttons.length).toBe(3);
   });
 
-  it('applies cat-specific dot colors', () => {
+  it('uses the shared unknown identity color before member profiles load', () => {
     const msgs = [makeMsg('m1', 'user'), makeMsg('m2', 'assistant', 'opus'), makeMsg('m3', 'assistant', 'codex')];
     const html = render(msgs);
 
-    expect(html).toContain('bg-cocreator-primary');
+    expect(html).toContain('background-color:');
     expect(html).toContain('#9B7EBD');
-    expect(html).toContain('#5B8C5A');
+    expect(html).toContain(UNKNOWN_CAT_COLOR.primary);
   });
 
   it('tolerates variant catIds before /api/cats loads', () => {
     const msgs = [makeMsg('m1', 'user'), makeMsg('m2', 'assistant', 'opus-45'), makeMsg('m3', 'assistant', 'spark')];
     const html = render(msgs);
 
-    // base colors come from shared fallback CAT_CONFIGS (opus/codex)
+    // base colors come from useCatData (populated by /api/cats)
     expect(html).toContain('#9B7EBD');
-    expect(html).toContain('#5B8C5A');
-    expect(html).toContain('跳转到 布偶猫（opus-45） 的消息');
-    expect(html).toContain('跳转到 缅因猫（spark） 的消息');
+    expect(html).toContain(UNKNOWN_CAT_COLOR.primary);
+    expect(html).toContain('跳转到 opus-45 的消息');
+    expect(html).toContain('跳转到 spark 的消息');
   });
 
-  it('resolves non-hyphen variant catIds during fallback', () => {
+  it('does not infer a profile from non-hyphen member IDs', () => {
     const msgs = [
       makeMsg('m1', 'user'),
       makeMsg('m2', 'assistant', 'gpt52'),
@@ -92,33 +105,28 @@ describe('MessageNavigator', () => {
     ];
     const html = render(msgs);
 
-    // base colors come from shared fallback CAT_CONFIGS
-    expect(html).toContain('#5B8C5A'); // codex
-    expect(html).toContain('#9B7EBD'); // opus
-    expect(html).toContain('#5B9BD5'); // gemini
+    expect(html).toContain(UNKNOWN_CAT_COLOR.primary);
 
-    expect(html).toContain('跳转到 缅因猫（gpt52） 的消息');
-    expect(html).toContain('跳转到 布偶猫（sonnet） 的消息');
-    expect(html).toContain('跳转到 暹罗猫（gemini25） 的消息');
+    expect(html).toContain('跳转到 gpt52 的消息');
+    expect(html).toContain('跳转到 sonnet 的消息');
+    expect(html).toContain('跳转到 gemini25 的消息');
   });
 
-  it('treats messages with catId as assistant even when type is user', () => {
+  it('uses from agent identity even when legacy type is user', () => {
     const msgs = [makeMsg('m1', 'user'), makeMsg('m2', 'user', 'gpt52'), makeMsg('m3', 'assistant', 'codex')];
     const html = render(msgs);
 
-    expect(html).toContain('跳转到 缅因猫（gpt52） 的消息');
+    expect(html).toContain('跳转到 gpt52 的消息');
 
     const ownerLabels = html.match(/跳转到 始皇帝 的消息/g) ?? [];
     expect(ownerLabels.length).toBe(1);
   });
 
-  it('applies dare fallback color and labels before /api/cats loads', () => {
-    const msgs = [makeMsg('m1', 'user'), makeMsg('m2', 'assistant', 'dare'), makeMsg('m3', 'assistant', 'dare-agent')];
+  it('applies kimi fallback color but keeps the raw id until /api/cats loads', () => {
+    const msgs = [makeMsg('m1', 'user'), makeMsg('m2', 'assistant', 'kimi'), makeMsg('m3', 'assistant', 'codex')];
     const html = render(msgs);
 
-    expect(html).toContain('#D4A76A');
-    expect(html).toContain('跳转到 狸花猫 的消息');
-    expect(html).toContain('跳转到 狸花猫（dare-agent） 的消息');
+    expect(html).toContain('跳转到 kimi 的消息');
   });
 
   it('includes accessibility labels', () => {
@@ -126,7 +134,7 @@ describe('MessageNavigator', () => {
     const html = render(msgs);
 
     expect(html).toContain('跳转到 始皇帝 的消息');
-    expect(html).toContain('跳转到 缅因猫 的消息');
+    expect(html).toContain('跳转到 codex 的消息');
   });
 
   it('samples at fixed intervals when messages exceed MAX_DOTS (18)', () => {
@@ -142,12 +150,29 @@ describe('MessageNavigator', () => {
     expect(buttons.length).toBe(18);
   });
 
-  it('renders viewport indicator track', () => {
+  it('renders 1px connecting rail, no viewport thumb', () => {
     const msgs = [makeMsg('m1', 'user'), makeMsg('m2', 'assistant', 'opus'), makeMsg('m3', 'assistant', 'codex')];
     const html = render(msgs);
 
-    // Track rail (thin line) and viewport indicator should be present
-    expect(html).toContain('bg-gray-200');
-    expect(html).toContain('bg-gray-300/50');
+    expect(html).toContain('--console-border-soft');
+    expect(html).toContain('w-px');
+    expect(html).not.toContain('w-1.5');
+    expect(html).not.toContain('opacity-40');
+    expect(html).not.toContain('bg-gray-200');
+    expect(html).not.toContain('bg-gray-300/50');
+    expect(html).toContain('rounded-full');
+  });
+
+  it('keeps the canonical source body available in the navigator', () => {
+    const source: ChatMessageData = {
+      ...makeMsg('m-folded', 'user'),
+      content: '这段正文只允许在 canonical child 显示',
+      lifecycle: {
+        kind: 'input',
+        orderKey: '10:m-folded',
+        dispatchRefs: [{ targetId: 'codex-sol', phase: 'settled', statusMessageId: 'm-terminal', dispatchedAt: 10 }],
+      },
+    };
+    expect(messageNavigatorPreviewText(source)).toContain('这段正文只允许');
   });
 });

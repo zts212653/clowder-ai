@@ -30,10 +30,13 @@ describe('Tasks Routes', () => {
     socketManager = createMockSocketManager();
   });
 
-  async function createApp() {
+  async function createApp(overrides = {}) {
     const { tasksRoutes } = await import('../dist/routes/tasks.js');
     const app = Fastify();
-    await app.register(tasksRoutes, { taskStore, socketManager });
+    app.addHook('onRequest', async (request) => {
+      if (!request.headers['x-cat-cafe-user']) request.sessionUserId = 'task-route-user';
+    });
+    await app.register(tasksRoutes, { taskStore, socketManager, ...overrides });
     return app;
   }
 
@@ -102,6 +105,64 @@ describe('Tasks Routes', () => {
         title: 'Test',
         why: '',
         createdBy: 'invalid-cat',
+      },
+    });
+
+    assert.equal(response.statusCode, 400);
+  });
+
+  test('POST preserves F233 probe + resolveMode metadata', async () => {
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        threadId: 'thread-1',
+        title: 'Wait for deploy',
+        why: 'wake once ready',
+        createdBy: 'codex',
+        ownerCatId: 'codex',
+        probe: { kind: 'redis_exists', key: 'probe:deploy-ready' },
+        resolveMode: 'bounces_back',
+      },
+    });
+
+    assert.equal(response.statusCode, 201);
+    const body = response.json();
+    assert.equal(body.resolveMode, 'bounces_back');
+    assert.deepEqual(body.probe, { kind: 'redis_exists', key: 'probe:deploy-ready' });
+  });
+
+  test('POST rejects internal F233 http_get probe URLs', async () => {
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        threadId: 'thread-1',
+        title: 'Wait for local service',
+        why: 'internal URLs must not be server-side fetched',
+        createdBy: 'codex',
+        probe: { kind: 'http_get', url: 'http://localhost:6399/ready' },
+        resolveMode: 'bounces_back',
+      },
+    });
+
+    assert.equal(response.statusCode, 400);
+  });
+
+  test('POST rejects F233 http_get probe timeouts that exceed the poller budget', async () => {
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: {
+        threadId: 'thread-1',
+        title: 'Wait for slow public endpoint',
+        why: 'accepted probe timeout must stay below scheduler poller timeout',
+        createdBy: 'codex',
+        probe: { kind: 'http_get', url: 'https://example.com/ready', timeoutMs: 60_000 },
+        resolveMode: 'bounces_back',
       },
     });
 
@@ -228,6 +289,90 @@ describe('Tasks Routes', () => {
     });
 
     assert.equal(response.statusCode, 400);
+  });
+
+  test('PATCH updates F233 probe + resolveMode metadata', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Task A', why: '', createdBy: 'opus' },
+    });
+    const taskId = createRes.json().id;
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: {
+        probe: { kind: 'http_get', url: 'https://example.com/ready', expectStatus: 200 },
+        resolveMode: 'completes',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().resolveMode, 'completes');
+    assert.deepEqual(response.json().probe, {
+      kind: 'http_get',
+      url: 'https://example.com/ready',
+      expectStatus: 200,
+    });
+  });
+
+  test('PATCH rejects internal F233 http_get probe URLs', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: 'Task A', why: '', createdBy: 'opus' },
+    });
+    const taskId = createRes.json().id;
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: {
+        probe: { kind: 'http_get', url: 'http://169.254.169.254/latest/meta-data/' },
+      },
+    });
+
+    assert.equal(response.statusCode, 400);
+  });
+
+  test('PATCH owner transfer atomically revokes the plugin wait', async () => {
+    let task = taskStore.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#7',
+      threadId: 'thread-1',
+      title: 'Wait',
+      ownerCatId: 'opus',
+      why: '',
+      createdBy: 'opus',
+      userId: 'user-1',
+    });
+    task = taskStore.replacePluginWait(task.id, {
+      expectedStatus: task.status,
+      expectedState: undefined,
+      expectedGeneration: null,
+      state: {
+        pluginInstanceId: 'instance',
+        generation: 1,
+        userId: 'user-1',
+        catId: 'opus',
+        threadId: 'thread-1',
+        await: { generation: 1 },
+      },
+    });
+    const app = await createApp();
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${task.id}`,
+      payload: { ownerCatId: 'codex-sol' },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().ownerCatId, 'codex-sol');
+    assert.equal(response.json().pluginWait.await, undefined);
+    assert.equal(response.json().pluginWait.invalidated, 'owner_changed');
+    assert.equal(response.json().pluginWait.waitOutcome.delivery, 'not_applicable');
   });
 
   // ---- DELETE /api/tasks/:id ----

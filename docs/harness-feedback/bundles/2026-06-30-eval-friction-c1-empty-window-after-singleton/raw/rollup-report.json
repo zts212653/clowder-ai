@@ -1,0 +1,39 @@
+{
+  "verdictId": "2026-06-30-eval-friction-c1-empty-window-after-singleton",
+  "selector": {
+    "kind": "friction-rollup-snapshot",
+    "windowStartMs": 1782529200000,
+    "windowEndMs": 1782788400000,
+    "topN": 10,
+    "tokenCap": 4000
+  },
+  "window": {
+    "sinceMs": 1782529200000,
+    "untilMs": 1782788400000
+  },
+  "signalCount": 0,
+  "clusterCount": 0,
+  "degraded": false,
+  "droppedChannels": [],
+  "report": {
+    "window": {
+      "sinceMs": 1782529200000,
+      "untilMs": 1782788400000
+    },
+    "generatedAt": "2026-06-30T03:03:24.826Z",
+    "topClusters": [],
+    "actionableCandidates": [],
+    "referenceOnly": [],
+    "tailSummary": {
+      "clusterCount": 0,
+      "signalCount": 0,
+      "byChannel": {}
+    },
+    "degraded": false,
+    "droppedChannels": [],
+    "tokenBudget": {
+      "cap": 4000,
+      "estimated": 78
+    }
+  }
+}

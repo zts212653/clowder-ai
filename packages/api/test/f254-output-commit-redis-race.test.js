@@ -1,0 +1,226 @@
+import assert from 'node:assert/strict';
+import { after, before, beforeEach, describe, it } from 'node:test';
+import {
+  assertRedisIsolationOrThrow,
+  cleanupPrefixedRedisKeys,
+  redisIsolationSkipReason,
+} from './helpers/redis-test-helpers.js';
+
+const REDIS_URL = process.env.REDIS_URL;
+
+function message(content, timestamp, overrides = {}) {
+  const input = {
+    userId: 'user-1',
+    catId: null,
+    content,
+    mentions: [],
+    timestamp,
+    threadId: 'thread-1',
+    ...overrides,
+  };
+  const { catId, ...messageInput } = input;
+  return {
+    from: catId ? { kind: 'agent', catId } : { kind: 'user', userId: input.userId },
+    ...messageInput,
+  };
+}
+
+describe('RedisMessageStore unconditional publish boundary', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
+  let redis;
+  let store;
+  let MessageKeys;
+  let connected = false;
+
+  before(async () => {
+    assertRedisIsolationOrThrow(REDIS_URL, 'RedisMessageStore F254 conditional append');
+    const [{ createRedisClient }, { RedisMessageStore }, messageKeysModule] = await Promise.all([
+      import('@cat-cafe/shared/utils'),
+      import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js'),
+      import('../dist/domains/cats/services/stores/redis-keys/message-keys.js'),
+    ]);
+    MessageKeys = messageKeysModule.MessageKeys;
+    redis = createRedisClient({ url: REDIS_URL });
+    try {
+      await redis.ping();
+      connected = true;
+      store = new RedisMessageStore(redis);
+    } catch {
+      await redis.quit().catch(() => {});
+    }
+  });
+
+  beforeEach(async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    await cleanupPrefixedRedisKeys(redis, ['msg:*']);
+  });
+
+  after(async () => {
+    if (!connected) return;
+    await cleanupPrefixedRedisKeys(redis, ['msg:*']);
+    await redis.quit();
+  });
+
+  it('publishes unconditionally and persists the exact pre-append raw frontier', async () => {
+    const trigger = await store.append(message('question', 100));
+    const queued = await store.append(message('queued information', 150, { deliveryStatus: 'queued' }));
+    const candidate = message('published answer', 200, {
+      catId: 'codex-sol',
+      origin: 'stream',
+      idempotencyKey: 'f254-published:inv-1',
+    });
+
+    const result = await store.appendAndObservePriorFrontier(candidate);
+
+    assert.equal(result.kind, 'committed');
+    assert.equal(result.priorFrontierMessageId, queued.id);
+    assert.equal(result.idempotent, false);
+    assert.deepEqual(result.message.extra?.freshness, {
+      priorFrontierMessageId: queued.id,
+    });
+    assert.equal((await store.getById(result.message.id)).content, 'published answer');
+    assert.deepEqual(
+      (await store.getByThreadAfter('thread-1', undefined, 10, 'user-1')).map((entry) => entry.id),
+      [trigger.id, result.message.id],
+    );
+    assert.equal(Number.isSafeInteger(result.message.visibilitySeq), true);
+    assert.notEqual(result.priorFrontierMessageId, trigger.id);
+  });
+
+  it('publishes concurrent cat outputs into the canonical visibility relation', async () => {
+    const trigger = await store.append(message('parallel request', 100));
+    const [source, target] = await Promise.all([
+      store.appendAndObservePriorFrontier(
+        message('source sibling body', 200, {
+          catId: 'codex-sol',
+          origin: 'stream',
+          idempotencyKey: 'f254-published:parallel-source',
+        }),
+      ),
+      store.appendAndObservePriorFrontier(
+        message('target first-pass body', 200, {
+          catId: 'gpt52',
+          origin: 'stream',
+          idempotencyKey: 'f254-published:parallel-target',
+        }),
+      ),
+    ]);
+    const later = await store.append(message('synthesize the sibling', 300));
+
+    const unseen = await store.getByThreadAfter('thread-1', trigger.id, undefined, 'user-1');
+
+    assert.deepEqual(new Set(unseen.map((item) => item.id)), new Set([source.message.id, target.message.id, later.id]));
+    assert.ok(source.message.visibilitySeq, 'source output must receive a canonical visibility position');
+    assert.ok(target.message.visibilitySeq, 'target output must receive a canonical visibility position');
+    assert.notEqual(source.message.visibilitySeq, target.message.visibilitySeq);
+    assert.equal(unseen.at(-1)?.id, later.id, 'the later directed turn must remain after both sibling outputs');
+  });
+
+  it('keeps queued user work outside the canonical visibility relation', async () => {
+    const trigger = await store.append(message('visible trigger', 100));
+    const queued = await store.appendAndObservePriorFrontier(
+      message('private queued work', 200, {
+        deliveryStatus: 'queued',
+        idempotencyKey: 'f254-observed:queued-user',
+      }),
+    );
+
+    assert.equal(queued.message.visibilitySeq, undefined);
+    assert.deepEqual(await store.getByThreadAfter('thread-1', trigger.id, undefined, 'user-1'), []);
+  });
+
+  it('fails before publication when the visibility high-water mark is invalid', async () => {
+    const trigger = await store.append(message('visible trigger', 100));
+    await redis.hset(MessageKeys.threadVisibilityMeta('thread-1'), 'hwm', 'not-a-number');
+    const candidate = message('must remain unpublished', 200, {
+      catId: 'codex-sol',
+      origin: 'stream',
+      idempotencyKey: 'f254-published:invalid-hwm',
+    });
+
+    await assert.rejects(store.appendAndObservePriorFrontier(candidate), /VISIBILITY_HWM_UNPARSEABLE/);
+    assert.deepEqual(
+      (await store.getByThread('thread-1')).map((item) => item.id),
+      [trigger.id],
+    );
+    assert.equal(await store.getByIdempotencyKey('user-1', 'thread-1', candidate.idempotencyKey), null);
+  });
+
+  it('idempotent unconditional replay returns the original boundary and body', async () => {
+    const trigger = await store.append(message('question', 100));
+    const candidate = message('first body', 200, {
+      catId: 'codex-sol',
+      origin: 'stream',
+      idempotencyKey: 'f254-published:inv-2',
+    });
+    const first = await store.appendAndObservePriorFrontier(candidate);
+    await store.append(message('later information', 250));
+
+    const replay = await store.appendAndObservePriorFrontier({
+      ...candidate,
+      content: 'must not replace',
+      timestamp: 300,
+    });
+
+    assert.equal(replay.idempotent, true);
+    assert.equal(replay.message.id, first.message.id);
+    assert.equal(replay.message.content, 'first body');
+    assert.equal(replay.priorFrontierMessageId, trigger.id);
+    assert.equal((await store.getByThread('thread-1')).filter((item) => item.catId === 'codex-sol').length, 1);
+  });
+
+  it('self-heals a dangling idempotency pointer before publishing', async () => {
+    const candidate = message('recovered publish', 200, {
+      catId: 'codex-sol',
+      origin: 'stream',
+      idempotencyKey: 'f254-published:dangling',
+    });
+    await redis.set(MessageKeys.idempotency('user-1', 'thread-1', candidate.idempotencyKey), 'missing-message-id');
+
+    const result = await store.appendAndObservePriorFrontier(candidate);
+
+    assert.equal(result.idempotent, false);
+    assert.equal(result.message.content, 'recovered publish');
+    assert.equal(
+      await redis.get(MessageKeys.idempotency('user-1', 'thread-1', candidate.idempotencyKey)),
+      result.message.id,
+    );
+  });
+
+  it('validates the visibility allocator before any publish side effects', async () => {
+    const trigger = await store.append(message('question', 100));
+    const candidate = message('must not publish', 200, {
+      catId: 'codex-sol',
+      origin: 'stream',
+      idempotencyKey: 'f254-published:invalid-hwm',
+    });
+    await redis.hset(MessageKeys.threadVisibilityMeta('thread-1'), 'hwm', 'invalid');
+
+    await assert.rejects(store.appendAndObservePriorFrontier(candidate), /VISIBILITY_HWM_INVALID/);
+
+    assert.equal(await store.getByIdempotencyKey('user-1', 'thread-1', candidate.idempotencyKey), null);
+    assert.deepEqual(await redis.zrange(MessageKeys.thread('thread-1'), 0, -1), [trigger.id]);
+  });
+
+  it('keeps queued user work private while publishing queued cat speech', async () => {
+    const queuedUser = await store.appendAndObservePriorFrontier(
+      message('private queued work', 100, { deliveryStatus: 'queued' }),
+    );
+    const queuedCat = await store.appendAndObservePriorFrontier(
+      message('published queued speech', 200, {
+        catId: 'codex-sol',
+        origin: 'stream',
+        deliveryStatus: 'queued',
+      }),
+    );
+
+    assert.equal(queuedUser.message.visibilitySeq, undefined);
+    assert.equal(Number.isSafeInteger(queuedCat.message.visibilitySeq), true);
+    assert.equal(await redis.zscore(MessageKeys.threadVisibility('thread-1'), queuedUser.message.id), null);
+    assert.deepEqual(
+      (await store.getByThreadAfter('thread-1', undefined, 10, 'user-1', { includeQueuedCatMessages: true })).map(
+        (entry) => entry.id,
+      ),
+      [queuedCat.message.id],
+    );
+  });
+});

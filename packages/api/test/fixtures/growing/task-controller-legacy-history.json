@@ -1,0 +1,59 @@
+{
+  "bindingRevision": 2,
+  "state": "revoked",
+  "binding": {
+    "userId": "owner",
+    "catId": "codex-sol",
+    "threadId": "thread-private",
+    "subjectKey": "entrusted:legacy-collective-work",
+    "firstSourceRef": "message:collective-source",
+    "admissionAuthorityRef": "message:host-admission",
+    "pluginId": "official.collective-connector",
+    "pluginInstanceId": "pi-current",
+    "moduleRef": "plugin:official.collective-connector",
+    "lifecycleRevision": 8,
+    "grantRevision": 3,
+    "ownerOperationReceiptRef": "task-data-controller:d82830b9e26ccf2648d920c5c1a6fb9db6a4967d56488a0e814a8aff4b66ebc3"
+  },
+  "receipts": [
+    {
+      "receiptRef": "task-data-controller:d82830b9e26ccf2648d920c5c1a6fb9db6a4967d56488a0e814a8aff4b66ebc3",
+      "operationId": "owner-operation:bind-original-task",
+      "payloadDigest": "sha256:375cb776f7b8458b7e72c26161c992772d2e2eff16fe280be4103d65103c76a1",
+      "actorRef": "user:owner",
+      "operationKey": "work",
+      "actionId": "adopt",
+      "requestId": "request-bind-1",
+      "confirmedAt": 1792573400000,
+      "recordedAt": 1000,
+      "kind": "bind",
+      "controller": {
+        "userId": "owner",
+        "catId": "codex-sol",
+        "threadId": "thread-private",
+        "subjectKey": "entrusted:legacy-collective-work",
+        "firstSourceRef": "message:collective-source",
+        "admissionAuthorityRef": "message:host-admission",
+        "pluginId": "official.collective-connector",
+        "pluginInstanceId": "pi-current",
+        "moduleRef": "plugin:official.collective-connector",
+        "lifecycleRevision": 8,
+        "grantRevision": 3
+      }
+    },
+    {
+      "receiptRef": "task-data-controller:a10a2215be8dabed0cdaa42d7fac4b4905abbc6e5b7ccd3b2f24eea43ddf2c9d",
+      "operationId": "owner-operation:revoke-original-task",
+      "payloadDigest": "sha256:62a75b7323830e2fad1bdff16c1e80bbb17dadc13d4ec9f81df5e2c026a864d9",
+      "actorRef": "user:owner",
+      "operationKey": "work",
+      "actionId": "release",
+      "requestId": "request-revoke-1",
+      "confirmedAt": 1792573400000,
+      "recordedAt": 2000,
+      "kind": "revoke",
+      "controllerReceiptRef": "task-data-controller:d82830b9e26ccf2648d920c5c1a6fb9db6a4967d56488a0e814a8aff4b66ebc3"
+    }
+  ],
+  "revocationReceiptRef": "task-data-controller:a10a2215be8dabed0cdaa42d7fac4b4905abbc6e5b7ccd3b2f24eea43ddf2c9d"
+}

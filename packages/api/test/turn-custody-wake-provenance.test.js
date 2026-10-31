@@ -1,0 +1,473 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { TurnCustodyProjectionService } from '../dist/domains/ball-custody/TurnCustodyProjectionService.js';
+import {
+  resolveQueueTurnCustodyWake,
+  retargetTurnCustodyWake,
+  turnCustodyWakeSourceCategory,
+} from '../dist/domains/ball-custody/turn-custody-wake-provenance.js';
+import { boundedTurnCustodySourceCategory } from '../dist/infrastructure/telemetry/turn-custody-shadow-telemetry.js';
+
+function entry(overrides = {}) {
+  const {
+    source = 'connector',
+    callerCatId: overriddenCallerCatId,
+    sourceCategory: selectedSourceCategory,
+    actionSuccessorFence,
+    waitContinuationCarrier,
+    a2aTriggerMessageId: overriddenA2ATriggerMessageId,
+    ...canonicalOverrides
+  } = overrides;
+  const sourceCategory = Object.hasOwn(overrides, 'sourceCategory') ? selectedSourceCategory : 'review';
+  const callerCatId = Object.hasOwn(overrides, 'callerCatId') ? overriddenCallerCatId : 'codex-terra';
+  const a2aTriggerMessageId = Object.hasOwn(overrides, 'a2aTriggerMessageId')
+    ? overriddenA2ATriggerMessageId
+    : 'message-1';
+  const from =
+    source === 'user'
+      ? { kind: 'user', userId: 'user-1' }
+      : sourceCategory === 'scheduled'
+        ? { kind: 'system', service: 'test-scheduler' }
+        : callerCatId
+          ? { kind: 'agent', catId: callerCatId }
+          : { kind: 'external', connectorId: 'test-connector' };
+  return {
+    version: 1,
+    id: 'queue-1',
+    threadId: 'thread-1',
+    owner: { kind: 'user', userId: 'user-1' },
+    kind: 'message_wake',
+    from,
+    sourceCategory,
+    targets: ['codex-sol'],
+    payload: { sourceId: 'message-1', messageId: 'message-1', content: 'wake' },
+    execution: {
+      intent: 'execute',
+      ownerAuthProvenance: 'strict',
+      autoExecute: true,
+      ...(a2aTriggerMessageId ? { a2aTriggerMessageId } : {}),
+      ...(actionSuccessorFence ? { actionSuccessorFence } : {}),
+      ...(waitContinuationCarrier ? { waitContinuationCarrier } : {}),
+    },
+    delivery: {},
+    status: 'queued',
+    enqueuedAt: 1,
+    priority: 'normal',
+    ...canonicalOverrides,
+  };
+}
+
+const noMessage = { getById: async () => null };
+
+describe('F167 Phase T queue wake provenance', () => {
+  it('ordinary plugin conversation is user chat without a custody stop obligation', async () => {
+    const wake = await resolveQueueTurnCustodyWake(
+      entry({
+        kind: 'conversation_input',
+        from: { kind: 'plugin', instanceId: 'pi-weixin' },
+        sourceCategory: undefined,
+        a2aTriggerMessageId: undefined,
+      }),
+      noMessage,
+    );
+    assert.deepEqual(wake, { kind: 'unstructured', source: 'user_chat' });
+    const projection = new TurnCustodyProjectionService({});
+    const opened = await projection.open(wake);
+    assert.equal(opened.state, 'covered_empty');
+    assert.equal((await projection.close(opened)).shouldBlock, false);
+  });
+
+  it('binds an exact action successor while managed-hold wakes remain lifecycle-owned', async () => {
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(
+        entry({ actionSuccessorFence: { leaseId: 'lease-1', generation: 3 } }),
+        noMessage,
+      ),
+      { kind: 'action_successor', leaseId: 'lease-1', generation: 3, holderCatId: 'codex-sol' },
+    );
+
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(entry({ sourceCategory: 'scheduled' }), {
+        getById: async () => ({
+          id: 'message-1',
+          source: {
+            connector: 'hold-ball',
+            meta: {
+              managedHold: true,
+              phase: 'wake',
+              taskId: 'task-hold-1',
+              threadId: 'thread-1',
+              catId: 'codex-sol',
+            },
+          },
+        }),
+      }),
+      {
+        kind: 'structured',
+        protocol: 'hold',
+        subjectKey: 'ball:thread:thread-1',
+        holderCatId: 'codex-sol',
+        sourceMessageId: 'message-1',
+        taskId: 'task-hold-1',
+      },
+    );
+  });
+
+  it('binds Queue wake-up to the exact stored event-wait carrier', async () => {
+    const waitContinuationCarrier = {
+      v: 1,
+      waitId: 'task-pr-7',
+      outcomeId: 'wait:pr:owner/repo#7:g4:matched',
+      ownerFence: { kind: 'action_successor', leaseId: 'lease-wait-4', generation: 4 },
+    };
+    const messageStore = {
+      getById: async () => ({
+        id: 'message-1',
+        source: {
+          connector: 'github-wait',
+          meta: { waitContinuationCarrier },
+        },
+      }),
+    };
+
+    assert.deepEqual(await resolveQueueTurnCustodyWake(entry({ waitContinuationCarrier }), messageStore), {
+      kind: 'structured',
+      protocol: 'event_wait',
+      subjectKey: 'ball:thread:thread-1',
+      holderCatId: 'codex-sol',
+      waitContinuationCarrier,
+    });
+  });
+
+  it('fails closed when Queue and stored event-wait carriers diverge or overlap an action carrier', async () => {
+    const storedCarrier = {
+      v: 1,
+      waitId: 'task-pr-7',
+      outcomeId: 'wait:pr:owner/repo#7:g4:matched',
+      ownerFence: { kind: 'containing_task', generation: 4 },
+    };
+    const messageStore = {
+      getById: async () => ({
+        id: 'message-1',
+        source: { connector: 'github-wait', meta: { waitContinuationCarrier: storedCarrier } },
+      }),
+    };
+    const failClosed = { kind: 'legacy', reason: 'carrier_missing', sourceCategory: 'review' };
+
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(
+        entry({
+          waitContinuationCarrier: {
+            ...storedCarrier,
+            outcomeId: 'wait:pr:owner/repo#7:g5:matched',
+          },
+        }),
+        messageStore,
+      ),
+      failClosed,
+    );
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(
+        entry({
+          waitContinuationCarrier: storedCarrier,
+          actionSuccessorFence: { leaseId: 'lease-unrelated', generation: 4 },
+        }),
+        messageStore,
+      ),
+      failClosed,
+    );
+  });
+
+  it('classifies user, cron, and freshness wakes as obligation-free', async () => {
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(entry({ source: 'user', sourceCategory: undefined }), noMessage),
+      { kind: 'unstructured', source: 'user_chat' },
+    );
+    assert.deepEqual(await resolveQueueTurnCustodyWake(entry({ sourceCategory: 'scheduled' }), noMessage), {
+      kind: 'unstructured',
+      source: 'cron',
+    });
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(entry({ source: 'agent', sourceCategory: 'freshness' }), noMessage),
+      { kind: 'unstructured', source: 'protocol_decline' },
+    );
+  });
+
+  it('binds A2A to the thread dispatch carrier while ordinary Queue delivery bypasses legacy custody', async () => {
+    const expectedDispatch = {
+      kind: 'structured',
+      protocol: 'dispatch',
+      subjectKey: 'ball:thread:thread-1',
+      holderCatId: 'codex-sol',
+      handoff: {
+        sourceEventId: 'route:message-1:codex-sol',
+        messageId: 'message-1',
+        fromCatId: 'codex-terra',
+      },
+    };
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(entry({ source: 'agent', sourceCategory: 'a2a' }), noMessage),
+      expectedDispatch,
+    );
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(entry({ source: 'connector', sourceCategory: 'a2a' }), noMessage),
+      expectedDispatch,
+    );
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(
+        entry({
+          source: 'connector',
+          sourceCategory: 'a2a',
+          callerCatId: undefined,
+          a2aTriggerMessageId: undefined,
+        }),
+        {
+          getById: async () => ({
+            threadId: 'thread-1',
+            from: { kind: 'agent', catId: 'opus' },
+            extra: { crossPost: { sourceThreadId: 'thread-source' } },
+          }),
+        },
+      ),
+      { kind: 'legacy', reason: 'carrier_missing', sourceCategory: 'a2a' },
+    );
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(
+        entry({
+          source: 'connector',
+          sourceCategory: 'a2a',
+          callerCatId: undefined,
+          a2aTriggerMessageId: undefined,
+        }),
+        noMessage,
+      ),
+      { kind: 'legacy', reason: 'carrier_missing', sourceCategory: 'a2a' },
+    );
+    assert.deepEqual(await resolveQueueTurnCustodyWake(entry(), noMessage), {
+      kind: 'unstructured',
+      source: 'queue_delivery',
+    });
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(entry({ sourceCategory: 'scheduled' }), {
+        getById: async () => Promise.reject(new Error('store unavailable')),
+      }),
+      { kind: 'legacy', reason: 'query_failed', sourceCategory: 'scheduled' },
+    );
+  });
+
+  it('preserves the fork policy for every declared ordinary return without inventing a carrier', async () => {
+    for (const sourceCategory of ['ci', 'review', 'conflict', 'issue', 'continuation', 'a2a_failure']) {
+      const wake = await resolveQueueTurnCustodyWake(
+        entry({ sourceCategory, callerCatId: undefined, a2aTriggerMessageId: undefined }),
+        {
+          getById: async () => {
+            throw new Error('ordinary returns must not query a made-up carrier');
+          },
+        },
+      );
+      assert.deepEqual(wake, { kind: 'unstructured', source: 'queue_delivery' }, sourceCategory);
+    }
+  });
+
+  it('does not let a producer-return declaration bypass an existing action fence', async () => {
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(
+        entry({ sourceCategory: 'producer_return', actionSuccessorFence: { leaseId: 'lease-1', generation: 3 } }),
+        noMessage,
+      ),
+      { kind: 'action_successor', leaseId: 'lease-1', generation: 3, holderCatId: 'codex-sol' },
+    );
+  });
+
+  it('classifies machine-proven FYI, coordinate, and terminal coordination wakes as obligation-free', async () => {
+    const cases = [
+      {
+        extra: {
+          crossPost: {
+            sourceThreadId: 'thread-source-fyi',
+            effectClass: 'fyi',
+          },
+        },
+        expectedSource: 'cross_thread_fyi',
+      },
+      {
+        extra: {
+          crossPost: {
+            sourceThreadId: 'thread-source-coordinate',
+            effectClass: 'coordinate',
+          },
+        },
+        expectedSource: 'cross_thread_coordinate',
+      },
+      {
+        extra: {
+          coordination: {
+            id: 'coord-terminal',
+            phase: 'terminal',
+            hop: 2,
+          },
+        },
+        expectedSource: 'coordination_terminal',
+      },
+    ];
+
+    for (const { extra, expectedSource } of cases) {
+      assert.deepEqual(
+        await resolveQueueTurnCustodyWake(entry({ source: 'agent', sourceCategory: 'a2a' }), {
+          getById: async () => ({
+            id: 'message-1',
+            threadId: 'thread-1',
+            from: { kind: 'agent', catId: 'codex-terra' },
+            extra,
+          }),
+        }),
+        { kind: 'non_obligation', source: expectedSource },
+      );
+    }
+  });
+
+  it('keeps investigate and assign_work A2A wakes on the structured dispatch carrier', async () => {
+    for (const effectClass of ['investigate', 'assign_work']) {
+      const wake = await resolveQueueTurnCustodyWake(entry({ source: 'agent', sourceCategory: 'a2a' }), {
+        getById: async () => ({
+          id: 'message-1',
+          threadId: 'thread-1',
+          from: { kind: 'agent', catId: 'codex-terra' },
+          extra: {
+            crossPost: {
+              sourceThreadId: 'thread-source',
+              effectClass,
+            },
+          },
+        }),
+      });
+      assert.equal(wake.kind, 'structured');
+      assert.equal(wake.protocol, 'dispatch');
+    }
+  });
+
+  it('fails closed when retargeting a dispatch carrier outside the thread namespace', () => {
+    assert.deepEqual(
+      retargetTurnCustodyWake(
+        {
+          kind: 'structured',
+          protocol: 'dispatch',
+          subjectKey: 'ball:task:task-1',
+          holderCatId: 'codex-sol',
+          handoff: {
+            sourceEventId: 'route:message-1:codex-sol',
+            messageId: 'message-1',
+            fromCatId: 'codex-terra',
+          },
+        },
+        'opus',
+      ),
+      { kind: 'legacy', reason: 'carrier_missing', sourceCategory: 'a2a' },
+    );
+  });
+
+  it('classifies producer-return connector entries as unstructured (no stop-gate obligation)', async () => {
+    // Positive: connector with explicit producer_return sourceCategory → unstructured
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(
+        entry({
+          source: 'connector',
+          sourceCategory: 'producer_return',
+          callerCatId: undefined,
+          a2aTriggerMessageId: undefined,
+        }),
+        noMessage,
+      ),
+      { kind: 'unstructured', source: 'producer_return' },
+    );
+
+    // Negative: connector WITHOUT sourceCategory still fails closed (legacy/carrier_missing)
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(
+        entry({
+          source: 'connector',
+          sourceCategory: undefined,
+          callerCatId: undefined,
+          a2aTriggerMessageId: undefined,
+        }),
+        noMessage,
+      ),
+      { kind: 'legacy', reason: 'carrier_missing' },
+    );
+  });
+
+  it('classifies Repo Inbox connector entries as unstructured; typed carriers still win over ordinary producer categories', async () => {
+    // F167 ruling 0001790911847173-000222-db2d26fe: Repo Inbox obligations belong to the F168 domain.
+    const repoInbox = (overrides = {}) =>
+      entry({
+        source: 'connector',
+        sourceCategory: 'repo_inbox',
+        callerCatId: undefined,
+        a2aTriggerMessageId: undefined,
+        ...overrides,
+      });
+
+    assert.deepEqual(await resolveQueueTurnCustodyWake(repoInbox(), noMessage), {
+      kind: 'unstructured',
+      source: 'queue_delivery',
+    });
+
+    // An exact action carrier on the same entry still owns the turn.
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(
+        repoInbox({ actionSuccessorFence: { leaseId: 'lease-ri', generation: 2 } }),
+        noMessage,
+      ),
+      { kind: 'action_successor', leaseId: 'lease-ri', generation: 2, holderCatId: 'codex-sol' },
+    );
+
+    // A stored event-wait carrier still owns the turn.
+    const waitContinuationCarrier = {
+      v: 1,
+      waitId: 'task-pr-7',
+      outcomeId: 'wait:pr:owner/repo#7:g4:matched',
+      ownerFence: { kind: 'action_successor', leaseId: 'lease-wait-4', generation: 4 },
+    };
+    const waitStore = {
+      getById: async () => ({
+        id: 'message-1',
+        source: { connector: 'github-wait', meta: { waitContinuationCarrier } },
+      }),
+    };
+    assert.deepEqual(await resolveQueueTurnCustodyWake(repoInbox({ waitContinuationCarrier }), waitStore), {
+      kind: 'structured',
+      protocol: 'event_wait',
+      subjectKey: 'ball:thread:thread-1',
+      holderCatId: 'codex-sol',
+      waitContinuationCarrier,
+    });
+
+    // Producer labels do not create a separate custody owner.
+    assert.deepEqual(await resolveQueueTurnCustodyWake(repoInbox({ sourceCategory: 'repo-inbox' }), noMessage), {
+      kind: 'unstructured',
+      source: 'queue_delivery',
+    });
+  });
+
+  it('maps wake carriers to bounded trace source categories', () => {
+    assert.equal(turnCustodyWakeSourceCategory({ kind: 'unstructured', source: 'queue_delivery' }), 'queue');
+    assert.equal(boundedTurnCustodySourceCategory('repo_inbox'), 'repo_inbox');
+    assert.equal(
+      turnCustodyWakeSourceCategory({ kind: 'legacy', reason: 'carrier_missing', sourceCategory: 'review' }),
+      'review',
+    );
+    assert.equal(turnCustodyWakeSourceCategory({ kind: 'legacy', reason: 'source_missing' }), 'unknown');
+    assert.equal(turnCustodyWakeSourceCategory({ kind: 'unstructured', source: 'user_chat' }), 'user');
+    assert.equal(turnCustodyWakeSourceCategory({ kind: 'unstructured', source: 'queue_delivery' }), 'queue');
+    assert.equal(turnCustodyWakeSourceCategory({ kind: 'unstructured', source: 'producer_return' }), 'producer_return');
+    assert.equal(
+      turnCustodyWakeSourceCategory({
+        kind: 'action_successor',
+        leaseId: 'lease-1',
+        generation: 1,
+        holderCatId: 'codex-sol',
+      }),
+      'action_successor',
+    );
+  });
+});

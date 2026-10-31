@@ -1,0 +1,317 @@
+# Windows Smoke Tests
+# Target-owned by the open-source repo — NOT managed by upstream sync.
+# See sync-manifest.yaml target_owned_files.
+#
+# Runs Windows-specific tests that cannot be validated on Linux/macOS CI.
+# Covers: CLI .cmd shim resolution, ProcessLivenessProbe platform guard,
+# and ManagedRunner parent/descendant process-tree cleanup.
+
+name: Windows Smoke
+
+on:
+  pull_request:
+    branches: [main, next]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'designs/**'
+      - 'assets/**'
+  workflow_dispatch:
+
+concurrency:
+  group: windows-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-windows:
+    name: Test (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @cat-cafe/shared build
+      - run: pnpm --filter @cat-cafe/api build
+      - name: Managed Codex layout link diagnostic
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test --test-timeout=60000 --test-name-pattern="managed layout"
+          test/codex-managed-layout-diagnostic.test.ts
+      - name: Plugin native auth link diagnostic
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          node --import tsx --test --test-timeout=60000 --test-name-pattern="auth link"
+          test/f320-plugin-account.test.ts
+      - name: Workspace root cold-store, HTTP and persistence regressions
+        run: node packages/api/scripts/test-workspace-roots.mjs
+      - name: Windows web build and duplicate Trusted Types regression
+        run: >-
+          node --test
+          scripts/run-preserving-signal-exit.test.mjs
+          scripts/preview-detached-identity.test.mjs
+          scripts/preview-lease-command.test.mjs
+          packages/web/test/sanitize-widget-types.test.mjs
+          packages/web/test/browser/native-team-a2a-proof.test.mjs packages/web/test/native-team-cleanup.test.mjs
+          packages/web/test/browser/native-codex-history-policy.test.mjs
+          packages/web/test/browser/native-team-startup-ready.test.mjs
+      - name: Native authentication and lazy SDK contracts (no live accounts)
+        shell: bash
+        run: >-
+          pnpm --filter @cat-cafe/api exec bash ./scripts/with-test-home.sh
+          node --import tsx --test --test-concurrency=1
+          test/native-runtime-readiness.test.ts
+          test/native-dsh-discovery.test.ts
+          test/dsh-catalog-boundary.test.ts
+          test/native-claude-api-readiness.test.ts
+          test/native-mcp-first-run.test.ts
+          test/f318-claude-sdk-lazy-load.test.ts
+          test/f318-claude-sdk.test.ts
+          test/f318-claude-sdk-custody.test.ts
+          test/f318-claude-sdk-launch.test.ts
+      - name: Desktop isolation and installer profile contracts
+        run: >-
+          node --test
+          desktop/runtime-config.test.js
+          desktop/instance-upgrade.test.js
+          desktop/instance-data-boundary.test.js
+          desktop/runtime-web-server.test.js
+          desktop/runtime-web-config.test.js
+          desktop/service-startup.test.js
+          desktop/project-mirror-startup-recovery.test.js
+          desktop/project-resource-materialization.test.js
+          desktop/project-resource-redirection-guard.test.js
+          desktop/project-mirror-recovery.test.js
+          desktop/project-mirror-consumer.test.js
+          desktop/project-mirror-observability.test.js
+          desktop/project-mirror-diagnostic-history.test.js
+          desktop/startup-error-diagnostics.test.js
+          desktop/startup-mirror-diagnostics.test.js
+          desktop/startup-state.test.js
+          desktop/main-renderer-lifecycle.test.js
+          desktop/startup-timing.test.js
+          desktop/visible-renderer.test.js
+          desktop/renderer-navigation.test.js
+          desktop/installation-lifecycle.test.js
+          desktop/service-manager-isolation.test.js
+          desktop/client-homes.test.js
+          desktop/configure-client-homes.test.js
+          desktop/build-release-policy.test.js
+          desktop/service-manager.test.js
+          desktop/post-install-profile.test.js
+          desktop/frozen-runtime-export.test.mjs
+          desktop/workspace-runtime-modules.test.mjs
+          desktop/extract-runtime-archive.test.cjs
+          desktop/runtime-archive-progress.test.mjs
+          desktop/built-web-assets.test.mjs
+          desktop/api-bundle.test.mjs
+          desktop/api-dependency-bundle.test.mjs
+          desktop/runtime-package-bundle.test.mjs
+          desktop/runtime-dependency-selection.test.mjs
+          desktop/api-startup-probe.test.mjs
+          desktop/api-startup-read-ahead.test.mjs
+          desktop/api-startup-cold-budget.test.mjs
+          desktop/shutdown-controller.test.js
+          desktop/profile-desktop-startup.test.mjs
+          desktop/profile-resources.test.cjs
+          desktop/profile-mirror-cancellation.test.js
+          desktop/api-puppeteer-lazy-boundary.test.mjs
+          packages/api/test/lazy-heavy-imports.test.js
+          desktop/dsh-test-connection.test.mjs
+          desktop/rebuild-frozen-dependencies.test.mjs
+          desktop/installer-integrity.test.mjs
+      - name: Install Inno Setup
+        # P2-5: the native installer tests compile desktop/installer/cat-cafe.iss
+        # with the real Inno compiler, which windows-latest does not ship. This
+        # installs the same Chocolatey package the release build uses (Inno Setup
+        # 7 when available) and exports its path for the test harness.
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = @(
+            'C:\Program Files\Inno Setup 7\ISCC.exe',
+            'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $iscc) { throw 'Native Inno compiler was not found after installation' }
+          "ISCC_EXE=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          & $iscc /? | Select-Object -First 1
+      - name: Native installer preparation and menu behavior
+        run: >-
+          node --test
+          desktop/installer-preparation-log.test.js
+          desktop/installer-no-icons.test.js
+      - name: Build the actual web application
+        run: pnpm --filter @cat-cafe/web build
+      - name: Widget sanitization behavior
+        run: pnpm --filter @cat-cafe/web exec vitest run src/components/rich/__tests__/sanitize-widget-html.test.ts
+      - name: Identify the default tar implementation
+        shell: pwsh
+        run: |
+          where.exe tar
+          tar --version
+      - name: Real tar package authority and published Companion installation
+        run: >-
+          node --test
+          packages/api/test/plugin-package-staging-diagnostics.test.js
+          packages/api/test/plugin-external-runtime-package.test.js
+          packages/api/test/plugin-official-package-installer.test.js
+          packages/api/test/plugin-companion-registry.smoke.mjs
+        env:
+          NODE_ENV: test
+          LOG_DIR: ${{ runner.temp }}/plugin-staging-logs
+      - name: Companion and diagnostics with Windows BSD tar and Git GNU tar
+        shell: pwsh
+        env:
+          NODE_ENV: test
+          LOG_DIR: ${{ runner.temp }}/plugin-tar-variant-logs
+        run: |
+          $originalPath = $env:PATH
+          $failed = @()
+          $variants = @(
+            @{ Name = 'Windows BSD tar'; Path = "$env:SystemRoot\System32\tar.exe" },
+            @{ Name = 'Git GNU tar'; Path = "$env:ProgramFiles\Git\usr\bin\tar.exe" }
+          )
+          try {
+            foreach ($variant in $variants) {
+              if (-not (Test-Path -LiteralPath $variant.Path)) {
+                throw "Required tar implementation is missing: $($variant.Name)"
+              }
+              $env:PATH = "$([System.IO.Path]::GetDirectoryName($variant.Path));$originalPath"
+              Write-Host "tar-case=$($variant.Name)"
+              where.exe tar
+              & $variant.Path --version
+              node --test packages/api/test/plugin-package-staging-diagnostics.test.js packages/api/test/plugin-companion-registry.smoke.mjs packages/api/test/plugin-tar-portability.test.js
+              if ($LASTEXITCODE -ne 0) { $failed += $variant.Name }
+            }
+          } finally {
+            $env:PATH = $originalPath
+          }
+          if ($failed.Count -gt 0) { throw "Tar validation failed: $($failed -join ', ')" }
+      - name: Install OpenCode behavior baseline
+        run: npm install --global opencode-ai@1.18.9
+      - name: Verify OpenCode model ID routing
+        run: >-
+          node --test
+          packages/api/test/opencode-model-id-ci-contract.test.js
+          packages/api/test/opencode-model-id-request.test.js
+        env:
+          REQUIRE_OPENCODE_MODEL_ID_TEST: '1'
+      - name: Windows ACP bootstrap private directories and test isolation
+        run: >-
+          node --import tsx --import ./packages/api/test/helpers/setup-cat-registry.js --test
+          --test-concurrency=2 --test-timeout=60000
+          packages/api/test/acp/acp-bootstrap-cwd.test.js
+          packages/api/test/acp/acp-bootstrap-platform.test.js
+          packages/api/test/acp/acp-bootstrap-windows.test.js
+          packages/api/test/acp/acp-service-factory.test.js
+          packages/api/test/acp/acp-registration-availability.test.js
+          packages/api/test/acp/acp-bootstrap-ancestor-security.test.js
+          packages/api/test/acp/acp-bootstrap-relocation.test.js
+          packages/api/test/acp/acp-bootstrap-spawn-recheck.test.js
+          packages/api/test/acp/acp-bootstrap-startup-policy.test.js
+          packages/api/test/acp/acp-bootstrap-generic-selection.test.ts
+          packages/api/test/acp/acp-bootstrap-explicit-root.test.ts
+          packages/api/test/acp/acp-bootstrap-strict-native.test.ts
+          packages/api/test/acp/acp-bootstrap-posix-preservation.test.ts
+          packages/api/test/acp/acp-bootstrap-check-route.test.ts
+          packages/api/test/acp/acp-host-policy-matrix.test.ts
+          packages/api/test/acp/acp-directory-identity.test.ts
+          packages/api/test/acp-bootstrap-config-recovery.test.js
+          packages/api/test/plugin-inventory-writer-lease.test.js
+          packages/api/test/audit-log-retry.test.js
+          packages/api/test/agent-session-contract/acp-factory-recovery.test.ts
+          packages/api/test/account-credential-identity.test.js
+          packages/api/test/account-store-adjudication.test.js
+        env:
+          NODE_ENV: test
+          CAT_CAFE_GLOBAL_CONFIG_ROOT: ${{ runner.temp }}/acp-bootstrap-config
+          REDIS_URL: redis://127.0.0.1:0
+        # volume-root and audited-runtime tests require explicitly selected native fixtures:
+        # ACP_BOOTSTRAP_TEST_VOLUME and ACP_DSH_AUDITED_ENTRY (see issue1653 verification report).
+      - name: ACP pool and client lifecycle regressions
+        run: >-
+          node --test --test-concurrency=2 --test-timeout=60000
+          packages/api/test/acp/acp-process-pool.test.js
+          packages/api/test/acp/acp-client.test.js
+        env:
+          NODE_ENV: test
+          REDIS_URL: redis://127.0.0.1:0
+      - name: Windows-relevant tests
+        run: |
+          node --test packages/api/test/cli-spawn-win.test.js
+          node --test packages/api/test/process-liveness-probe.test.js
+          node --test packages/api/test/pick-directory.test.js
+      - name: Browser env wrapper regression
+        run: node --test --test-name-pattern='applies --env' packages/web/test/run-with-node-env-test.test.cjs
+      - name: Windows stale-process entrypoint guard
+        run: node --test scripts/cleanup-stale-dev-processes.test.mjs
+      - name: API dev supervisor regression
+        run: node --test packages/api/test/dev-supervisor.test.js
+      # #1542: the compaction launch plan must hold on Windows (realpath
+      # backslash semantics, junction escapes, canonical containment).
+      - name: F296 compaction launch plan (Windows paths)
+        run: >-
+          node --test
+          packages/api/test/f296-claude-compaction-launch-plan.test.js
+          packages/api/test/f296-invocation-carrier-identity.test.js
+      - name: ManagedRunner Windows process-tree cleanup
+        run: >-
+          node --test
+          packages/api/test/managed-runner-process-tree.test.js
+          packages/api/test/managed-runner-windows.test.js
+      - name: Desktop config behavioral tests (PowerShell)
+        run: node --test desktop/generate-desktop-config-behavior.test.js
+
+  # #1542 final acceptance: package the artifact (pnpm deploy, the same
+  # self-contained layout the desktop installer ships), stage the install
+  # tree (packages/api + .claude/hooks carrier per cat-cafe.iss), then run
+  # the installed-layout suite AGAINST THE PACKAGED ARTIFACT — not the
+  # source checkout. Covers: ready plan from installed module, Apps/apps
+  # case-variant spelling, root junction alias, external-project CWD, and
+  # the Node/legacy overlap single-observation guarantee.
+  test-windows-installed:
+    name: Test (Windows, installed layout)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @cat-cafe/shared build
+      - run: pnpm --filter @cat-cafe/api build
+      - name: Record artifact identity
+        run: |
+          echo "commit=$env:GITHUB_SHA" | Tee-Object artifact-identity.txt
+          Get-Content artifact-identity.txt
+      - name: Package the API artifact from the source lock
+        run: >-
+          node desktop/scripts/frozen-runtime-deploy.mjs . ${{ runner.temp }}\clowder-deploy-root api
+      - name: Stage the installed layout (installer file contract)
+        shell: pwsh
+        run: |
+          $install = "${{ runner.temp }}\clowder-install"
+          New-Item -ItemType Directory -Force -Path "$install\packages" | Out-Null
+          Copy-Item -Recurse "${{ runner.temp }}\clowder-deploy-root\api" "$install\packages\api"
+          Copy-Item -Recurse "${{ runner.temp }}\clowder-deploy-root\dependencies" "$install\node_modules"
+          New-Item -ItemType Directory -Force -Path "$install\.claude\hooks" | Out-Null
+          Copy-Item ".claude\hooks\f24-compaction.mjs" "$install\.claude\hooks\f24-compaction.mjs"
+          Write-Host "staged install root: $install"
+          Get-ChildItem "$install\.claude\hooks"
+      - name: Installed-layout acceptance (packaged artifact)
+        env:
+          CAT_CAFE_INSTALLED_LAYOUT_ROOT: ${{ runner.temp }}\clowder-install
+        run: node --test packages/api/test/f296-installed-layout.test.js
+      - name: Retain isolated frozen-startup failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-frozen-startup-logs-${{ github.sha }}
+          path: ${{ runner.temp }}/.startup-profile-*/build.log
+          include-hidden-files: true
+          if-no-files-found: warn

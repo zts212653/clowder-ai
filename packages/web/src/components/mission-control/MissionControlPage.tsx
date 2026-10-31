@@ -1,10 +1,7 @@
 'use client';
 
 import type { BacklogItem, CatId, ExternalProject, MissionHubSelfClaimScope, ThreadPhase } from '@cat-cafe/shared';
-import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ThreadSidebar } from '@/components/ThreadSidebar';
-import { useChatStore } from '@/stores/chatStore';
 import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { useMissionControlStore } from '@/stores/missionControlStore';
 import { apiFetch } from '@/utils/api-client';
@@ -39,6 +36,9 @@ interface ThreadListResponse {
 }
 
 type SelfClaimPolicyBlocker = 'once' | 'thread' | null;
+
+const CONTENT_SURFACE_CLASS =
+  'rounded-[18px] bg-[var(--console-shell-bg)] shadow-[var(--console-shadow-soft)] m-3 px-9 py-8';
 
 function detectSelfClaimPolicyBlocker(rawError: string): SelfClaimPolicyBlocker {
   if (rawError.includes('Self-claim once policy already consumed')) return 'once';
@@ -435,252 +435,203 @@ export function MissionControlPage() {
     setActiveProjectId(activeProject?.id ?? null);
   }, [activeProject, setActiveProjectId]);
 
-  // AC-H2: Referrer-based back button — remember where we came from
-  // Priority: URL ?from= param > store's currentThreadId (last active thread)
-  const storeThreadId = useChatStore((s) => s.currentThreadId);
-  const referrerThread = useMemo(() => {
-    if (typeof window !== 'undefined') {
-      const fromParam = new URLSearchParams(window.location.search).get('from');
-      if (fromParam) return fromParam;
-    }
-    // Fallback: use last active thread from store (survives navigation without ?from=)
-    return storeThreadId && storeThreadId !== 'default' ? storeThreadId : null;
-  }, [storeThreadId]);
-
   return (
-    <div className="flex h-screen bg-[#F4EFE7]">
-      <div className="hidden h-full md:block">
-        <ThreadSidebar />
-      </div>
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Header */}
-        <header className="flex items-center justify-between border-b border-[#E7DAC7] bg-[#FFFDF8] px-6 py-3">
-          <div className="flex items-center gap-3">
-            <Link
-              href={referrerThread && referrerThread !== 'default' ? `/thread/${referrerThread}` : '/'}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-3 py-1.5 text-xs font-medium text-[#8B6F47] transition-colors hover:bg-[#F7EEDB]"
-              data-testid="mc-back-to-chat"
-            >
-              <svg
-                className="h-4 w-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="15 18 9 12 15 6" />
-              </svg>
-              返回线程
-            </Link>
+    <div className="flex h-screen bg-[var(--console-panel-bg)]">
+      <main className="min-w-0 flex-1 overflow-y-auto">
+        <div className={`${CONTENT_SURFACE_CLASS} flex min-h-full flex-col`} data-testid="mission-content-surface">
+          <header className="flex flex-wrap items-center justify-between gap-3">
+            <h1 className="text-xl font-bold text-cafe">Mission Hub</h1>
             <div className="flex items-center gap-2">
-              <svg
-                className="h-5 w-5 text-[#9A866F]"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+              <button
+                type="button"
+                onClick={() => void handleImportFromDocs()}
+                disabled={submitting}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition-colors hover:bg-[var(--console-hover-bg)] disabled:opacity-40"
+                data-testid="mc-import-docs"
               >
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-              </svg>
-              <h1 className="text-lg font-bold text-[#2B2118]">Mission Hub</h1>
+                导入 Backlog
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowImportModal(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--console-card-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition-colors hover:bg-[var(--console-hover-bg)]"
+                data-testid="mc-import-project"
+              >
+                + 导入项目
+              </button>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void handleImportFromDocs()}
-              disabled={submitting}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-3 py-1.5 text-xs font-medium text-[#7A6B5A] transition-colors hover:bg-[#F7EEDB] disabled:opacity-40"
-              data-testid="mc-import-docs"
-            >
-              导入 Backlog
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowImportModal(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-3 py-1.5 text-xs font-medium text-[#7A6B5A] transition-colors hover:bg-[#F7EEDB]"
-              data-testid="mc-import-project"
-            >
-              + 导入项目
-            </button>
-          </div>
-        </header>
+          </header>
 
-        {showImportModal && (
-          <ImportProjectModal
-            onClose={() => setShowImportModal(false)}
-            onImported={() => void loadExternalProjects()}
-          />
-        )}
+          {showImportModal && (
+            <ImportProjectModal
+              onClose={() => setShowImportModal(false)}
+              onImported={() => void loadExternalProjects()}
+            />
+          )}
 
-        {/* Tabs */}
-        <div className="flex border-b border-[#E7DAC7] bg-[#FFFDF8]">
-          <button
-            type="button"
-            onClick={() => setActiveTab('features')}
-            className={`px-5 py-2.5 text-[13px] font-semibold transition-colors ${
-              activeTab === 'features'
-                ? 'border-b-2 border-[#8B6F47] text-[#8B6F47]'
-                : 'text-[#9A866F] hover:text-[#6B5D4F]'
-            }`}
-            data-testid="mc-tab-features"
-          >
-            功能列表
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('dependencies')}
-            className={`px-5 py-2.5 text-[13px] font-semibold transition-colors ${
-              activeTab === 'dependencies'
-                ? 'border-b-2 border-[#8B6F47] text-[#8B6F47]'
-                : 'text-[#9A866F] hover:text-[#6B5D4F]'
-            }`}
-            data-testid="mc-tab-dependencies"
-          >
-            依赖全景
-          </button>
-          {projects.map((p) => (
+          <div className="mt-4 flex console-divider-b">
             <button
-              key={p.id}
               type="button"
-              onClick={() => setActiveTab(p.id)}
-              className={`px-5 py-2.5 text-[13px] font-semibold transition-colors ${
-                activeTab === p.id
-                  ? 'border-b-2 border-[#8B6F47] text-[#8B6F47]'
-                  : 'text-[#9A866F] hover:text-[#6B5D4F]'
+              onClick={() => setActiveTab('features')}
+              className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
+                activeTab === 'features'
+                  ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
+                  : 'text-cafe-muted hover:text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
               }`}
+              data-testid="mc-tab-features"
             >
-              {p.name}
+              功能列表
             </button>
-          ))}
-        </div>
-
-        {/* Status summary bar */}
-        <div className="flex items-center gap-5 border-b border-[#E7DAC7] bg-[#FFFDF8] px-6 py-2.5">
-          <StatusDot color="bg-[#E4A853]" label={`${pendingCount} 待审批`} textColor="text-[#9A7B3D]" />
-          <StatusDot color="bg-[#5B9BD5]" label={`${activeCount} 执行中`} textColor="text-[#4A7FB5]" />
-          <StatusDot color="bg-[#7CB87C]" label={`${doneCount} 已完成`} textColor="text-[#5A9A5A]" />
-        </div>
-
-        {error && (
-          <div
-            className="mx-6 mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
-            data-testid="mc-error"
-            role="alert"
-          >
-            {error}
+            <button
+              type="button"
+              onClick={() => setActiveTab('dependencies')}
+              className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
+                activeTab === 'dependencies'
+                  ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
+                  : 'text-cafe-muted hover:text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
+              }`}
+              data-testid="mc-tab-dependencies"
+            >
+              依赖全景
+            </button>
+            {projects.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setActiveTab(p.id)}
+                className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
+                  activeTab === p.id
+                    ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
+                    : 'text-cafe-muted hover:bg-[var(--console-hover-bg)]'
+                }`}
+              >
+                {p.name}
+              </button>
+            ))}
           </div>
-        )}
 
-        {/* Main content area */}
-        <div className="min-h-0 flex-1 overflow-auto">
-          {activeProject ? (
-            <div className="p-6">
-              <ExternalProjectTab project={activeProject} />
-            </div>
-          ) : activeTab === 'features' ? (
-            <div className="grid min-h-0 grid-cols-1 gap-4 p-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-              <div className="space-y-4">
-                {/* Quick create */}
-                <QuickCreateForm disabled={submitting} onCreate={handleCreate} />
+          <div className="flex flex-wrap items-center gap-5 console-divider-b py-2.5">
+            <StatusDot
+              color="bg-cafe-status-degraded"
+              label={`${pendingCount} 待审批`}
+              textColor="text-[var(--semantic-warning-text)]"
+            />
+            <StatusDot
+              color="bg-cafe-status-active"
+              label={`${activeCount} 执行中`}
+              textColor="text-[var(--semantic-info-text)]"
+            />
+            <StatusDot
+              color="bg-cafe-status-healthy"
+              label={`${doneCount} 已完成`}
+              textColor="text-[var(--semantic-success-text)]"
+            />
+          </div>
 
-                {/* Feature row list */}
-                <FeatureRowList
-                  items={items}
-                  threadsByBacklogId={threadsByBacklogId}
-                  threadCountByFeature={threadCountByFeature}
-                  threadsByFeatureId={threadsByFeatureId}
-                  selectedItemId={selectedItemId}
-                  onSelectItem={setSelectedItemId}
-                />
-              </div>
-
-              {/* Right panel: tabbed operations */}
-              <div className="flex min-h-0 flex-col">
-                <div className="flex border-b border-[#E7DAC7]">
-                  <button
-                    type="button"
-                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                      rightPanelTab === 'suggestion'
-                        ? 'border-b-2 border-[#8B6F47] text-[#4B3A2A]'
-                        : 'text-[#9A866F] hover:text-[#6E5A46]'
-                    }`}
-                    onClick={() => setRightPanelTab('suggestion')}
-                    data-testid="mc-right-tab-suggestion"
-                  >
-                    建议详情
-                  </button>
-                  <button
-                    type="button"
-                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                      rightPanelTab === 'sop'
-                        ? 'border-b-2 border-[#8B6F47] text-[#4B3A2A]'
-                        : 'text-[#9A866F] hover:text-[#6E5A46]'
-                    }`}
-                    onClick={() => setRightPanelTab('sop')}
-                    data-testid="mc-right-tab-sop"
-                  >
-                    SOP
-                  </button>
-                  <button
-                    type="button"
-                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                      rightPanelTab === 'threads'
-                        ? 'border-b-2 border-[#8B6F47] text-[#4B3A2A]'
-                        : 'text-[#9A866F] hover:text-[#6E5A46]'
-                    }`}
-                    onClick={() => setRightPanelTab('threads')}
-                    data-testid="mc-right-tab-threads"
-                  >
-                    线程态势
-                  </button>
-                </div>
-                <div className="flex-1 overflow-auto">
-                  {rightPanelTab === 'suggestion' && (
-                    <SuggestionDrawer
-                      item={selectedItem}
-                      submitting={submitting}
-                      selectedPhase={selectedPhase}
-                      selfClaimScopes={selfClaimScopes}
-                      selfClaimPolicyBlocker={selfClaimPolicyBlocker}
-                      onChangePhase={setSelectedPhase}
-                      onSuggest={handleSuggest}
-                      onApprove={handleApprove}
-                      onReject={handleReject}
-                      onSelfClaim={handleSelfClaim}
-                      onAcquireLease={handleAcquireLease}
-                      onHeartbeatLease={handleHeartbeatLease}
-                      onReleaseLease={handleReleaseLease}
-                      onReclaimLease={handleReclaimLease}
-                    />
-                  )}
-                  {rightPanelTab === 'sop' && <WorkflowSopPanel backlogItemId={selectedItemId} />}
-                  {rightPanelTab === 'threads' && (
-                    <ThreadSituationPanel
-                      dispatchedItems={dispatchedItems}
-                      loading={threadsLoading}
-                      threadsByBacklogId={threadsByBacklogId}
-                      threadsByFeatureId={threadsByFeatureId}
-                    />
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="p-6">
-              <DependencyGraphTab items={items} />
+          {error && (
+            <div
+              className="mt-3 rounded-xl border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-[var(--semantic-error-text)]"
+              data-testid="mc-error"
+              role="alert"
+            >
+              {error}
             </div>
           )}
-        </div>
 
-        {loading && items.length === 0 && <p className="px-6 py-2 text-xs text-[#8A7864]">加载 backlog 中...</p>}
+          <div className="min-h-0 flex-1 pt-4">
+            {activeProject ? (
+              <ExternalProjectTab project={activeProject} />
+            ) : activeTab === 'features' ? (
+              <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+                <div className="space-y-4">
+                  <QuickCreateForm disabled={submitting} onCreate={handleCreate} />
+                  <FeatureRowList
+                    items={items}
+                    threadsByBacklogId={threadsByBacklogId}
+                    threadCountByFeature={threadCountByFeature}
+                    threadsByFeatureId={threadsByFeatureId}
+                    selectedItemId={selectedItemId}
+                    onSelectItem={setSelectedItemId}
+                  />
+                </div>
+
+                <div className="flex min-h-0 flex-col">
+                  <div className="flex console-divider-b">
+                    <button
+                      type="button"
+                      className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                        rightPanelTab === 'suggestion'
+                          ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
+                          : 'text-cafe-muted hover:bg-[var(--console-hover-bg)]'
+                      }`}
+                      onClick={() => setRightPanelTab('suggestion')}
+                      data-testid="mc-right-tab-suggestion"
+                    >
+                      建议详情
+                    </button>
+                    <button
+                      type="button"
+                      className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                        rightPanelTab === 'sop'
+                          ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
+                          : 'text-cafe-muted hover:bg-[var(--console-hover-bg)]'
+                      }`}
+                      onClick={() => setRightPanelTab('sop')}
+                      data-testid="mc-right-tab-sop"
+                    >
+                      SOP
+                    </button>
+                    <button
+                      type="button"
+                      className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                        rightPanelTab === 'threads'
+                          ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
+                          : 'text-cafe-muted hover:bg-[var(--console-hover-bg)]'
+                      }`}
+                      onClick={() => setRightPanelTab('threads')}
+                      data-testid="mc-right-tab-threads"
+                    >
+                      线程态势
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-auto">
+                    {rightPanelTab === 'suggestion' && (
+                      <SuggestionDrawer
+                        item={selectedItem}
+                        submitting={submitting}
+                        selectedPhase={selectedPhase}
+                        selfClaimScopes={selfClaimScopes}
+                        selfClaimPolicyBlocker={selfClaimPolicyBlocker}
+                        onChangePhase={setSelectedPhase}
+                        onSuggest={handleSuggest}
+                        onApprove={handleApprove}
+                        onReject={handleReject}
+                        onSelfClaim={handleSelfClaim}
+                        onAcquireLease={handleAcquireLease}
+                        onHeartbeatLease={handleHeartbeatLease}
+                        onReleaseLease={handleReleaseLease}
+                        onReclaimLease={handleReclaimLease}
+                      />
+                    )}
+                    {rightPanelTab === 'sop' && <WorkflowSopPanel backlogItemId={selectedItemId} />}
+                    {rightPanelTab === 'threads' && (
+                      <ThreadSituationPanel
+                        dispatchedItems={dispatchedItems}
+                        loading={threadsLoading}
+                        threadsByBacklogId={threadsByBacklogId}
+                        threadsByFeatureId={threadsByFeatureId}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <DependencyGraphTab items={items} />
+            )}
+          </div>
+
+          {loading && items.length === 0 && <p className="pt-3 text-xs text-cafe-muted">加载 backlog 中...</p>}
+        </div>
       </main>
     </div>
   );
@@ -690,7 +641,7 @@ function StatusDot({ color, label, textColor }: { color: string; label: string; 
   return (
     <span className="flex items-center gap-1.5">
       <span className={`h-2 w-2 rounded-full ${color}`} />
-      <span className={`text-[13px] font-semibold ${textColor}`}>{label}</span>
+      <span className={`text-xs font-medium ${textColor}`}>{label}</span>
     </span>
   );
 }

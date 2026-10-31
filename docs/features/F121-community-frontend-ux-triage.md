@@ -12,9 +12,9 @@ created: 2026-03-14
 
 ## Why
 
-社区 `clowder-ai` 积累了一批未 triaged 的前端 UX issue（6 个三猫共识），team lead要求以 maintainer 视角逐个侦查：定位是否真的有问题、是否值得做、技术可行性，再决定 accept/reject/duplicate。
+社区 `clowder-ai` 积累了一批未 triaged 的前端 UX issue（6 个三猫共识），operator要求以 maintainer 视角逐个侦查：定位是否真的有问题、是否值得做、技术可行性，再决定 accept/reject/duplicate。
 
-team experience：
+operator experience：
 > "不是所有的需求或者所有觉得是 enhance 的都需要 enhance，也不是所有他们认为的 bug 也是 bug，你们得定位清楚是不是有这个问题"
 
 ## What
@@ -31,18 +31,18 @@ team experience：
 
 ### Phase B: 分诊决策
 
-汇总侦查结果 → team lead拍板 → 社区回复 + 打标签
+汇总侦查结果 → operator拍板 → 社区回复 + 打标签
 
-### Phase B 决策（2026-03-14 team lead拍板）
+### Phase B 决策（2026-03-14 operator拍板）
 
 1. **#89 -> F095**：确认是 F095 Phase B 引入的回归，不按新 feature 处理。
 2. **#16 -> F110**：已被 F110 吸收；在 F110 feature doc 明确写社区来源 issue。
 3. **#88 保留术语，做术语表**：不修改家里的猫言猫语/领域术语本体，改做「项目术语表 / 黑话集合」，必要时把这套内容接进进阶训练营。
 4. **其余 accept 项继续挂 F121**：`#28` / `#27` / `#22` 作为 F121 umbrella 下的社区前端 UX 收口项继续推进。
 
-### Phase C: 社区 PR 侦查（2026-06-12 金渐层初查 → Maine Coon复核）
+### Phase C: 社区 PR 侦查（2026-03-14 金渐层初查 → Maine Coon复核）
 
-team lead要求检查 #22/#89/#28/#27 是否有社区 PR，以及 PR 是否真的修好了问题。
+operator要求检查 #22/#89/#28/#27 是否有社区 PR，以及 PR 是否真的修好了问题。
 
 **金渐层初查**发现 #28 有 PR#43、#27 有 PR#40，reviewer `bouillipx` 是社区 Collaborator 不是我们家猫。
 **Maine Coon(gpt52)复核**发现两个 PR 都有深层问题，不能直接 merge：
@@ -58,7 +58,7 @@ team lead要求检查 #22/#89/#28/#27 是否有社区 PR，以及 PR 是否真�
 - `bouillipx` 是社区 Collaborator，不是我们家的猫。他在 PR#40 的 APPROVED 和 PR#43 的"Approve with nit"（已 DISMISSED）都不能算我们家的放行
 - 两个 PR 都来自 **mindfn**（内测小伙伴 lang），用 Claude Opus 4.6 co-author，历史上都迭代过一轮（PR #39→#40、PR #42→#43）
 
-### Phase D 决策：上游完整修复（2026-03-14 team lead拍板）
+### Phase D 决策：上游完整修复（2026-03-14 operator拍板）
 
 **依据 opensource-ops Inbound PR B2「质量不达标但方向正确 — 上游完整修复」**：
 
@@ -74,9 +74,9 @@ PR #40 和 #43 方向正确但都有深层问题（缺测试 + 边界未覆盖 +
 
 **不走 Hotfix Lane**：这 4 个 UX 改进不是紧急修复，走正常开发 → Outbound Sync 即可
 
-### Follow-up Hotfix（2026-03-14 team lead runtime 反馈）
+### Follow-up Hotfix（2026-03-14 operator runtime 反馈）
 
-PR #449 / #455 合并后，team lead在 runtime 继续打到一个同区域回归：
+PR #449 / #455 合并后，operator在 runtime 继续打到一个同区域回归：
 
 > “如果有人回消息，置顶那一栏会‘biu’一下突然展开。”
 
@@ -101,7 +101,7 @@ Bug report 存档：
 | #89 | collapse-all 后 sidebar 展开跳错分组 | bug | 金渐层 | ✅ accept-bug | 🐾 F095 遗漏。`findGroupKeyForThread()` 遍历 groups 取第一个命中，recent 排在 project 前面导致优先展开 recent。修复方案：优先 project group 或传入来源 groupKey。难度 S，影响范围小（collapse-state.ts + use-collapse-state.ts）。详见下方猫爪印报告。 |
 | #27 | 切换会话时滚动位置重置 | bug | Maine Coon(gpt52) | ✅ accept-bug | [Maine Coon/gpt52] 实锤：线程状态只保存消息/队列，不保存 scrollTop；切换回来首轮渲染会走“初始加载滚到底”分支。详见下方猫爪印报告。 |
 | #22 | @mention 下拉框溢出+行高不一致 | bug | Ragdoll | ✅ accept-bug | 🐾 确认问题存在：ChatInputMenus.tsx L113 `w-64`(256px) 容器过窄，中文描述溢出致行高不一致。缺 `truncate`/`line-clamp-1`/`min-w-0`。纯 CSS 修复 4 行 Tailwind class，`w-64`→`w-72` 对齐游戏菜单宽度。难度 XS。详见下方猫爪印报告。 |
-| #88 | UX Debt 内部术语暴露给用户 | enhancement | 金渐层 | ✅ accept-enhancement (部分) | 🐾 经代码确认：(1) `(F33)` 确实暴露在 HubStrategyTab.tsx 用户 UI 中；(2) sidebar 治理 dot 仅靠 hover title，触屏不可见；(3) GovernanceHealth 的 `Q/O/D/R/A` 和 bucket 名有 legend 但只在有数据时显示。team lead拍板：不改术语本体，改走”项目术语表 / 黑话集合 + 必要可访问性快修”路线。详见下方猫爪印报告。 |
+| #88 | UX Debt 内部术语暴露给用户 | enhancement | 金渐层 | ✅ accept-enhancement (部分) | 🐾 经代码确认：(1) `(F33)` 确实暴露在 HubStrategyTab.tsx 用户 UI 中；(2) sidebar 治理 dot 仅靠 hover title，触屏不可见；(3) GovernanceHealth 的 `Q/O/D/R/A` 和 bucket 名有 legend 但只在有数据时显示。operator拍板：不改术语本体，改走”项目术语表 / 黑话集合 + 必要可访问性快修”路线。详见下方猫爪印报告。 |
 | #16 | Bootcamp 阶段过渡 UX | enhancement | Maine Coon(gpt52) | ✅ accept-enhancement -> F110 | [Maine Coon/gpt52] 问题原始成立，但已被 F110 吸收；当前只剩 Phase 2 全 OK 快路径缺少显式过渡文案。详见下方猫爪印报告。 |
 | #66 | 消息回复引用（replyTo threading） | enhancement | Ragdoll+Maine Coon(gpt52) | ✅ accept-enhancement（上游完整修复） | 🐾 社区 PR#71 (bouillipx) 方向正确但实现不足：缺 thread 边界校验（可跨线程脏引用）、前端 O(n) find 性能问题、删除消息未处理、React DOM 反模式。PR 已关闭，我们自己做终态实现（服务端校验+preview hydration+Map 索引+删除占位），下次 Outbound Sync 带上。Commit 带 `Co-authored-by: bouillipx`。关联 F098。 |
 
@@ -110,7 +110,7 @@ Bug report 存档：
 | Issue | 愿景守护结论 | 说明 |
 |-------|-------------|------|
 | **#27** | ✅ **通过** | 社区原单要求"切回已访问 thread 恢复阅读位置"。当前 main 已实现：module-level `scrollPositionsByThread` Map + `SavedScrollState { top, anchor }` 双语义 + rAF 重试等布局稳定。`cached+unread` replace hydration 边界也在测试保护内（`useChatHistory-scroll-memory` 3/3, `thread-switch` 5/5, `replace-hydration` 6/6 全绿）。社区单还 open 是因为 outbound sync 未做，不是实现未到位。 |
-| **#28** | ⚠️ **口径收窄，部分完成** | 社区原单要求"sidebar + chat 双栏下聊天面板宽度可调"。我们实际修的是 `RightStatusPanel` 的拖拽宽度（`statusPanelOpen && rightPanelMode === 'status'` 分支），不是 chat pane 本身。team lead 2026-03-16 认可收窄口径：当前交付的是"右侧状态栏可拖拽调宽"，社区回复时说明实际修了什么，不用 `Fixes #28` 完整关单。 |
+| **#28** | ⚠️ **口径收窄，部分完成** | 社区原单要求"sidebar + chat 双栏下聊天面板宽度可调"。我们实际修的是 `RightStatusPanel` 的拖拽宽度（`statusPanelOpen && rightPanelMode === 'status'` 分支），不是 chat pane 本身。operator 2026-03-16 认可收窄口径：当前交付的是"右侧状态栏可拖拽调宽"，社区回复时说明实际修了什么，不用 `Fixes #28` 完整关单。 |
 
 ## Dependencies
 
@@ -218,7 +218,7 @@ export function findGroupKeyForThread(
 |------|------|------|
 | 去掉 `(F33)` | ✅ accept-enhancement | 零争议，内部编号不应暴露给用户 |
 | 治理 dot 加 aria-label | ✅ accept-enhancement | 可访问性缺陷，修复成本低 |
-| "治理"术语换成 plain-language | ❌ 不采用 | team lead拍板：不改我们自己的术语，改做术语表 / 黑话集合解释即可 |
+| "治理"术语换成 plain-language | ❌ 不采用 | operator拍板：不改我们自己的术语，改做术语表 / 黑话集合解释即可 |
 | GovernanceHealth 补 legend | ⚠️ needs-discussion | Mission Control 本身面向 team lead，补 legend 合理但优先级低 |
 | 项目术语表 / 黑话集合 | ✅ accept-enhancement | 保留猫言猫语，同时给用户一处集中解释入口 |
 
@@ -228,7 +228,7 @@ export function findGroupKeyForThread(
 - `HubStrategyTab.tsx`：删除 `(F33)` → `Session 策略配置`
 - `SectionGroup.tsx`：dot 加 `aria-label` 属性
 
-**术语层路线（team lead已拍板）**：
+**术语层路线（operator已拍板）**：
 - 不改掉现有猫言猫语 / 领域术语
 - 新增「项目术语表 / 黑话集合」解释这些词
 - 进阶训练营可吸收这套内容，作为新手理解家里术语的入口

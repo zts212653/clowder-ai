@@ -8,9 +8,13 @@ export type CodexSandboxMode = (typeof CODEX_SANDBOX_MODES)[number];
 
 export const CODEX_APPROVAL_POLICIES = ['untrusted', 'on-failure', 'on-request', 'never'] as const;
 export type CodexApprovalPolicy = (typeof CODEX_APPROVAL_POLICIES)[number];
+export type CodexCarrierMode = 'exec_json' | 'app_server';
+export const CODEX_OAUTH_TRANSPORTS = ['builtin', 'https'] as const;
+export type CodexOAuthTransport = (typeof CODEX_OAUTH_TRANSPORTS)[number];
 
 export const DEFAULT_CODEX_SANDBOX_MODE: CodexSandboxMode = 'danger-full-access';
 export const DEFAULT_CODEX_APPROVAL_POLICY: CodexApprovalPolicy = 'on-request';
+export const DEFAULT_CODEX_OAUTH_TRANSPORT: CodexOAuthTransport = 'builtin';
 
 function parseEnum<T extends readonly string[]>(raw: string | undefined, valid: T, fallback: T[number]): T[number] {
   if (!raw) return fallback;
@@ -25,4 +29,33 @@ export function getCodexSandboxMode(env: NodeJS.ProcessEnv = process.env): Codex
 
 export function getCodexApprovalPolicy(env: NodeJS.ProcessEnv = process.env): CodexApprovalPolicy {
   return parseEnum(env.CAT_CODEX_APPROVAL_POLICY, CODEX_APPROVAL_POLICIES, DEFAULT_CODEX_APPROVAL_POLICY);
+}
+
+/**
+ * Prefer Codex's built-in OpenAI provider so upstream can select its current
+ * transport behavior. `https` remains an operational escape hatch for
+ * environments where the built-in websocket path repeatedly fails.
+ */
+export function getCodexOAuthTransport(env: NodeJS.ProcessEnv = process.env): CodexOAuthTransport {
+  return parseEnum(env.CAT_CAFE_CODEX_OAUTH_TRANSPORT, CODEX_OAUTH_TRANSPORTS, DEFAULT_CODEX_OAUTH_TRANSPORT);
+}
+
+export const CODEX_SERVED_MODEL_OBSERVATIONS = ['on', 'off'] as const;
+export type CodexServedModelObservation = (typeof CODEX_SERVED_MODEL_OBSERVATIONS)[number];
+export const DEFAULT_CODEX_SERVED_MODEL_OBSERVATION: CodexServedModelObservation = 'on';
+
+/**
+ * F319: record which model the upstream actually answered with. `on` adds the
+ * trace directives (websocket frames via tungstenite, HTTPS stream via the
+ * SSE trace) for every session without a custom base URL — which credential
+ * signs the request is Codex's own choice, not Clowder AI's auth label — and
+ * leaves the transport as the operator configured it; `off` restores the
+ * exact pre-F319 launch.
+ */
+export function getCodexServedModelObservation(env: NodeJS.ProcessEnv = process.env): CodexServedModelObservation {
+  return parseEnum(
+    env.CAT_CAFE_CODEX_SERVED_MODEL_OBSERVATION,
+    CODEX_SERVED_MODEL_OBSERVATIONS,
+    DEFAULT_CODEX_SERVED_MODEL_OBSERVATION,
+  );
 }

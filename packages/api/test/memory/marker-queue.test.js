@@ -120,6 +120,34 @@ describe('MarkerQueue', () => {
     assert.ok(content.includes('approved'));
   });
 
+  it('submit auto-creates markersDir when it does not exist', async () => {
+    // This is the root cause of the Knowledge Feed being empty:
+    // writeYaml threw ENOENT when docs/markers/ didn't exist
+    const freshDir = join(tmpDir, 'nonexistent', 'markers');
+    const { MarkerQueue } = await import('../../dist/domains/memory/MarkerQueue.js');
+    const freshQueue = new MarkerQueue(freshDir);
+
+    const marker = await freshQueue.submit({
+      content: 'Should auto-create directory',
+      source: 'opus:test',
+      status: 'captured',
+    });
+
+    assert.ok(marker.id);
+    const files = readdirSync(freshDir);
+    assert.equal(files.length, 1);
+    assert.ok(files[0].endsWith('.yaml'));
+  });
+
+  it('list returns empty array when markersDir does not exist (no throw)', async () => {
+    const missingDir = join(tmpDir, 'does-not-exist', 'markers');
+    const { MarkerQueue } = await import('../../dist/domains/memory/MarkerQueue.js');
+    const freshQueue = new MarkerQueue(missingDir);
+
+    const results = await freshQueue.list();
+    assert.deepEqual(results, []);
+  });
+
   it('submit rejects ids with path traversal characters', async () => {
     // This tests the writeYaml guard — the generated UUID-based id should
     // always be safe, but the validation should exist as defense-in-depth
@@ -139,5 +167,62 @@ describe('MarkerQueue', () => {
     const lessons = await queue.list({ targetKind: 'lesson' });
     assert.equal(lessons.length, 1);
     assert.equal(lessons[0].content, 'Lesson');
+  });
+
+  // F186 Phase A: collection routing fields round-trip
+  it('submit + list preserves collection routing fields (F186 AC-A10)', async () => {
+    const marker = await queue.submit({
+      content: 'Knowledge from lexander world',
+      source: 'opus:t1',
+      status: 'captured',
+      targetKind: 'lesson',
+      sourceCollectionId: 'world:lexander',
+      sourceSensitivity: 'private',
+      targetCollectionId: 'global:methods',
+      promoteReviewStatus: 'validated',
+      secretScanFingerprint: 'sha256:abc123',
+    });
+
+    const all = await queue.list();
+    const found = all.find((m) => m.id === marker.id);
+    assert.equal(found.sourceCollectionId, 'world:lexander');
+    assert.equal(found.sourceSensitivity, 'private');
+    assert.equal(found.targetCollectionId, 'global:methods');
+    assert.equal(found.promoteReviewStatus, 'validated');
+    assert.equal(found.secretScanFingerprint, 'sha256:abc123');
+  });
+
+  it('transition with patch merges fields into marker (F186 AC-A10)', async () => {
+    const marker = await queue.submit({
+      content: 'A lesson from world:lexander',
+      source: 'opus:t1',
+      status: 'captured',
+      sourceCollectionId: 'world:lexander',
+    });
+
+    await queue.transition(marker.id, 'approved', {
+      targetCollectionId: 'global:methods',
+      promoteReviewStatus: 'validated',
+    });
+
+    const approved = await queue.list({ status: 'approved' });
+    assert.equal(approved.length, 1);
+    assert.equal(approved[0].targetCollectionId, 'global:methods');
+    assert.equal(approved[0].promoteReviewStatus, 'validated');
+    assert.equal(approved[0].sourceCollectionId, 'world:lexander');
+  });
+
+  it('collection routing fields are optional (backwards compat)', async () => {
+    const marker = await queue.submit({
+      content: 'Legacy marker without collection fields',
+      source: 'opus:t1',
+      status: 'captured',
+    });
+
+    const all = await queue.list();
+    const found = all.find((m) => m.id === marker.id);
+    assert.equal(found.sourceCollectionId, undefined);
+    assert.equal(found.targetCollectionId, undefined);
+    assert.equal(found.promoteReviewStatus, undefined);
   });
 });

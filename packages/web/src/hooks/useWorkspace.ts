@@ -1,14 +1,27 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { hasPendingWorkspaceFileLink } from '@/utils/pending-workspace-file-link';
+import { buildWorktreeAliasMap, resolveListedWorktreeId, type WorktreeAliasMap } from '@/utils/worktree-id-alias';
+import { useWorkspaceFileChange } from './useWorkspaceFileChange';
+import { useWorkspaceSearch } from './useWorkspaceSearch';
+
+export type { SearchResult } from './useWorkspaceSearch';
 
 export interface WorktreeEntry {
   id: string;
+  canonicalId?: string | null;
+  rootIdentity?: string;
   root: string;
   branch: string;
   head: string;
+  resolvedRoot?: string;
+  rootEpoch?: number;
+  removable?: boolean;
+  connectionEpoch?: number;
+  legacyAliases?: readonly string[];
 }
 
 export interface TreeNode {
@@ -33,60 +46,124 @@ function mergeSubtree(nodes: TreeNode[], targetPath: string, children: TreeNode[
 
 export interface FileData {
   path: string;
+  /** Authorized absolute path after the existing Workspace root and realpath checks. Display/copy only. */
+  absolutePath?: string;
   content: string;
   sha256: string;
-  size: number;
+  /** Undefined when the reader has not obtained source metadata (for example an unread Office attachment). */
+  size?: number;
   mime: string;
   truncated: boolean;
   binary?: boolean;
+  pageCount?: number;
+  pageUnit?: 'pages' | 'slides' | 'sheets';
 }
 
-export interface SearchResult {
-  path: string;
-  line: number;
-  content: string;
-  contextBefore: string;
-  contextAfter: string;
-  /** Which search mode produced this result (used by 'all' mode for grouping) */
-  matchType?: 'filename' | 'content';
+async function discoverWorktrees(projectPath: string): Promise<WorktreeEntry[]> {
+  const params = new URLSearchParams();
+  if (projectPath && projectPath !== 'default') params.set('repoRoot', projectPath);
+  const qs = params.toString();
+  const res = await apiFetch(`/api/workspace/worktrees${qs ? `?${qs}` : ''}`);
+  if (!res.ok) throw new Error('worktree discovery failed');
+  const data = await res.json();
+  return data.worktrees ?? [];
 }
 
-export function useWorkspace() {
+function reconcileDiscoveredWorktree(
+  entries: WorktreeEntry[],
+  projectPath: string,
+  setAliases: (aliases: WorktreeAliasMap, projectPath?: string) => void,
+  normalizeWorktreeId: (id: string | null) => void,
+  setWorktreeId: (id: string | null) => void,
+) {
+  const aliases = buildWorktreeAliasMap(entries);
+  setAliases(aliases, projectPath);
+
+  const state = useChatStore.getState();
+  const currentId = state.workspaceWorktreeId;
+  // Keep the content owner's namespace on every read, including after a remount or inventory change.
+  if (currentId?.startsWith('f063_root_v1_')) return;
+  const listedId = resolveListedWorktreeId(entries, currentId, aliases);
+  if (listedId) {
+    if (listedId !== currentId) normalizeWorktreeId(listedId);
+    return;
+  }
+
+  const normalizedProjectPath = projectPath.replace(/[\\/]+$/, '');
+  const projectWorktree = entries.find((entry) => entry.root.replace(/[\\/]+$/, '') === normalizedProjectPath);
+  const discoveredId = projectWorktree?.id ?? entries[0]?.id ?? null;
+  if (discoveredId !== currentId) {
+    // Initial discovery supplies the root for a just-clicked link; it is not a user root switch.
+    if (currentId === null && hasPendingWorkspaceFileLink(state)) normalizeWorktreeId(discoveredId);
+    else setWorktreeId(discoveredId);
+  }
+}
+
+export function useWorkspace({
+  loadContent = true,
+  projectPath: threadProjectPath,
+}: {
+  loadContent?: boolean;
+  /** Null waits for the route thread's project; undefined keeps the classic store projection. */
+  projectPath?: string | null;
+} = {}) {
   const worktreeId = useChatStore((s) => s.workspaceWorktreeId);
   const openFilePath = useChatStore((s) => s.workspaceOpenFilePath);
   const setWorktreeId = useChatStore((s) => s.setWorkspaceWorktreeId);
-  const projectPath = useChatStore((s) => s.currentProjectPath);
+  const normalizeWorktreeId = useChatStore((s) => s.normalizeWorkspaceWorktreeId);
+  const setWorktreeAliases = useChatStore((s) => s.setWorkspaceWorktreeAliases);
+  const storedProjectPath = useChatStore((s) => s.currentProjectPath);
+  const projectPath = threadProjectPath === undefined ? storedProjectPath : threadProjectPath;
+  const projectPathRef = useRef(projectPath);
+  projectPathRef.current = projectPath;
 
   const [worktrees, setWorktrees] = useState<WorktreeEntry[]>([]);
+  const [worktreesProjectPath, setWorktreesProjectPath] = useState<string | null>(null);
+  const [worktreesLoading, setWorktreesLoading] = useState(true);
+  const [worktreesError, setWorktreesError] = useState<string | null>(null);
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [file, setFile] = useState<FileData | null>(null);
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const worktreeRequestSeq = useRef(0);
+  const {
+    results: searchResults,
+    loading: searchLoading,
+    error: searchError,
+    search,
+    reset: resetSearch,
+  } = useWorkspaceSearch(worktreeId);
+  const projectKey = projectPath === null ? null : projectPath || 'default';
+  const worktreesReadyForProject = projectKey !== null && worktreesProjectPath === projectKey;
+  const currentWorktrees = worktreesReadyForProject ? worktrees : [];
 
   // Fetch worktrees — re-fetches when project changes
   const fetchWorktrees = useCallback(async () => {
+    const requestSeq = ++worktreeRequestSeq.current;
+    const isCurrentRequest = () => requestSeq === worktreeRequestSeq.current && projectPathRef.current === projectPath;
+    setWorktreesLoading(true);
+    setWorktreesError(null);
+    if (projectPath === null) return;
     try {
-      const params = new URLSearchParams();
-      if (projectPath && projectPath !== 'default') {
-        params.set('repoRoot', projectPath);
-      }
-      const qs = params.toString();
-      const res = await apiFetch(`/api/workspace/worktrees${qs ? `?${qs}` : ''}`);
-      if (res.ok) {
-        const data = await res.json();
-        const newList: typeof worktrees = data.worktrees ?? [];
-        setWorktrees(newList);
-        // Auto-select first worktree if none selected or current was removed
-        const currentStillExists = worktreeId && newList.some((w: { id: string }) => w.id === worktreeId);
-        if (!currentStillExists && newList.length > 0) {
-          setWorktreeId(newList[0].id);
-        }
-      }
+      const newList = await discoverWorktrees(projectPath);
+      if (!isCurrentRequest()) return;
+
+      setWorktrees(newList);
+      setWorktreesProjectPath(projectKey);
+      // The ordinary flow is discovery + choice, never filesystem-path entry.
+      reconcileDiscoveredWorktree(newList, projectPath, setWorktreeAliases, normalizeWorktreeId, setWorktreeId);
     } catch {
-      /* ignore */
+      if (isCurrentRequest()) {
+        setWorktrees([]);
+        setWorktreesProjectPath(projectKey);
+        setWorktreesError('暂时没能读取工作区');
+      }
+    } finally {
+      if (isCurrentRequest()) {
+        setWorktreesLoading(false);
+      }
     }
-  }, [worktreeId, setWorktreeId, projectPath]);
+  }, [normalizeWorktreeId, projectKey, projectPath, setWorktreeAliases, setWorktreeId]);
 
   useEffect(() => {
     fetchWorktrees();
@@ -118,8 +195,8 @@ export function useWorkspace() {
   );
 
   useEffect(() => {
-    if (worktreeId) fetchTree();
-  }, [worktreeId, fetchTree]);
+    if (loadContent && worktreeId) fetchTree();
+  }, [loadContent, worktreeId, fetchTree]);
 
   // Lazy-load subtree for a directory at max depth (children === undefined)
   const fetchSubtree = useCallback(
@@ -167,87 +244,45 @@ export function useWorkspace() {
 
   // Load file when openFilePath changes
   useEffect(() => {
-    if (openFilePath) fetchFile(openFilePath);
+    if (!loadContent) return;
+    if (openFilePath) void fetchFile(openFilePath);
     else setFile(null);
-  }, [openFilePath, fetchFile]);
+  }, [loadContent, openFilePath, fetchFile]);
 
-  // Single-mode search helper (filename or content)
-  const searchSingle = useCallback(
-    async (query: string, type: 'content' | 'filename'): Promise<SearchResult[]> => {
-      const res = await apiFetch('/api/workspace/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ worktreeId, query, type }),
-      });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return (data.results ?? []) as SearchResult[];
-    },
-    [worktreeId],
-  );
-
-  // Search — supports 'content', 'filename', or 'all' (fires both in parallel)
-  const search = useCallback(
-    async (query: string, type: 'content' | 'filename' | 'all' = 'content') => {
-      if (!worktreeId || !query.trim()) return;
-      setLoading(true);
-      setError(null);
-      try {
-        if (type === 'all') {
-          const [fileResults, contentResults] = await Promise.all([
-            searchSingle(query, 'filename'),
-            searchSingle(query, 'content'),
-          ]);
-          // Tag each result with its match type for grouped rendering
-          const tagged: SearchResult[] = [
-            ...fileResults.map((r) => ({ ...r, matchType: 'filename' as const })),
-            ...contentResults.map((r) => ({ ...r, matchType: 'content' as const })),
-          ];
-          setSearchResults(tagged);
-        } else {
-          const results = await searchSingle(query, type);
-          setSearchResults(results);
-        }
-      } catch {
-        /* ignore */
-      } finally {
-        setLoading(false);
-      }
-    },
-    [worktreeId, searchSingle],
-  );
-
-  // Reveal file in system file manager (Finder/Explorer)
-  const revealInFinder = useCallback(
-    async (path: string) => {
-      if (!worktreeId) return;
-      try {
-        await apiFetch('/api/workspace/reveal', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ worktreeId, path }),
-        });
-      } catch {
-        /* ignore */
-      }
-    },
-    [worktreeId],
-  );
+  const {
+    pendingExternalSha,
+    onDirtyChange: setEditDirty,
+    applyExternalChange,
+    dismissExternalChange,
+  } = useWorkspaceFileChange({
+    enabled: loadContent,
+    worktreeId,
+    path: openFilePath,
+    currentSha: file?.sha256 ?? null,
+    onReload: fetchFile,
+  });
 
   return {
-    worktrees,
+    worktrees: currentWorktrees,
+    worktreesLoading: !worktreesReadyForProject || worktreesLoading,
+    worktreesError: worktreesReadyForProject ? worktreesError : null,
     worktreeId,
     tree,
     file,
     searchResults,
     loading,
+    searchLoading,
+    searchError,
     error,
+    pendingExternalSha,
     fetchWorktrees,
     fetchTree,
     fetchSubtree,
     fetchFile,
     search,
-    setSearchResults,
-    revealInFinder,
+    resetSearch,
+    setEditDirty,
+    applyExternalChange,
+    dismissExternalChange,
   };
 }

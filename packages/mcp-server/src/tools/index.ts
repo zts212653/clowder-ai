@@ -3,6 +3,29 @@
  * 导出所有 MCP 工具
  */
 
+export { artifactReviewTools } from './artifact-review-tools.js';
+export {
+  audioCaptureStartInputSchema,
+  audioCaptureStatusInputSchema,
+  audioCaptureStopInputSchema,
+  audioListSourcesInputSchema,
+  audioReadTranscriptInputSchema,
+  audioTools,
+  handleAudioCaptureStart,
+  handleAudioCaptureStatus,
+  handleAudioCaptureStop,
+  handleAudioListSources,
+  handleAudioReadTranscript,
+} from './audio-tools.js';
+export {
+  autoDreamTools,
+  handleListDiaries,
+  handleReadDiary,
+  handleSettlePresentLoop,
+  listDiariesToolInputSchema,
+  readDiaryToolInputSchema,
+  settlePresentLoopToolInputSchema,
+} from './auto-dream-tools.js';
 export {
   callbackEvidenceSearchInputSchema,
   callbackMemoryTools,
@@ -14,54 +37,274 @@ export {
 } from './callback-memory-tools.js';
 export {
   ackMentionsInputSchema,
+  admitEntrustedWorkInputSchema,
   callbackTools,
-  checkPermissionStatusInputSchema,
+  closeEntrustedWorkInputSchema,
   crossPostMessageInputSchema,
   featIndexInputSchema,
   getPendingMentionsInputSchema,
+  getThreadCatsInputSchema,
   getThreadContextInputSchema,
+  getWorkflowSopInputSchema,
   handleAckMentions,
-  handleCheckPermissionStatus,
+  handleAdmitEntrustedWork,
+  handleCloseEntrustedWork,
   handleCrossPostMessage,
+  handleDrillMemoryCue,
   handleFeatIndex,
   handleGetPendingMentions,
+  handleGetThreadCats,
   handleGetThreadContext,
+  handleGetWorkflowSop,
   handleListTasks,
   handleListThreads,
+  handleOfferCustody,
   handlePostMessage,
-  handleRegisterPrTracking,
-  handleRequestPermission,
+  handleRecordMemoryCueOutcome,
+  handleRetryCustodyAdmission,
+  handleUpdateEntrustedWork,
   handleUpdateTask,
   listTasksInputSchema,
   listThreadsInputSchema,
+  offerCustodyInputSchema,
   postMessageInputSchema,
-  registerPrTrackingInputSchema,
-  requestPermissionInputSchema,
+  retryCustodyAdmissionInputSchema,
+  updateEntrustedWorkInputSchema,
   updateTaskInputSchema,
 } from './callback-tools.js';
-
+export {
+  advanceEvolutionProgramChangeInputSchema,
+  capabilityEvolutionChangeTools,
+  handleAdvanceEvolutionProgramChange,
+} from './capability-evolution-change-tools.js';
+export {
+  beginEvolutionPreparationInputSchema,
+  capabilityEvolutionPreparationTools,
+  handleBeginEvolutionPreparationWork,
+  handleSubmitEvolutionPreparation,
+  submitEvolutionPreparationCommandSchema,
+  submitEvolutionPreparationInputSchema,
+} from './capability-evolution-preparation-tools.js';
+export {
+  capabilityEvolutionRoundTools,
+  constituteEvolutionProgramInputSchema,
+  handleConstituteEvolutionProgram,
+  handleOpenEvolutionRound,
+  handleRecordEvolutionEvaluation,
+  openEvolutionRoundInputSchema,
+  recordEvolutionEvaluationInputSchema,
+} from './capability-evolution-round-tools.js';
+export {
+  capabilityEvolutionTools,
+  getEvolutionProgramInputSchema,
+  handleGetEvolutionProgram,
+  handleStartEvolutionProgram,
+  handleUpdateEvolutionProgram,
+  startEvolutionProgramInputSchema,
+  updateEvolutionProgramInputSchema,
+} from './capability-evolution-tools.js';
+export {
+  contentEditorTools,
+  editOfficeDocumentInputSchema,
+  handleEditOfficeDocument,
+  handleInspectOfficeDocument,
+  inspectOfficeDocumentInputSchema,
+} from './content-editor-tools.js';
+export { contentModificationTools } from './content-modification-tools.js';
+export {
+  developmentReturnInputSchema,
+  developmentReturnTools,
+  handleDevelopmentReturn,
+} from './development-return-tools.js';
+export { developmentWorkInputSchema, developmentWorkTools, handleDevelopmentWork } from './development-work-tools.js';
+export {
+  distillationTools,
+  handleMarkGeneralizable,
+  handleNominateForGlobal,
+  handleReviewDistillation,
+  markGeneralizableInputSchema,
+  nominateForGlobalInputSchema,
+  reviewDistillationInputSchema,
+} from './distillation-tools.js';
+export {
+  entrustedWorkReadTools,
+  handleReadEntrustedWork,
+  readEntrustedWorkInputSchema,
+} from './entrusted-work-read-tools.js';
+export {
+  evalLifecycleTools,
+  handleProposeEvalRepair,
+  handleRecordEvalLifecycle,
+  proposeEvalRepairInputSchema,
+  recordEvalLifecycleInputSchema,
+} from './eval-lifecycle-tools.js';
+export {
+  backfillEventsInputSchema,
+  eventMemoryTools,
+  handleBackfillEvents,
+  handleListEvents,
+  handleTeleport,
+  listEventsInputSchema,
+  teleportInputSchema,
+} from './event-memory-tools.js';
 export {
   evidenceTools,
   handleSearchEvidence,
   searchEvidenceInputSchema,
 } from './evidence-tools.js';
 export {
-  handleLimbInvoke,
+  externalRuntimeSessionCallbackTools,
+  externalRuntimeSessionReadTools,
+  externalRuntimeSessionTools,
+  handleListExternalRuntimeSessions,
+  handleReadExternalRuntimeSession,
+  handleRegisterExternalRuntimeSession,
+  listExternalRuntimeSessionsInputSchema,
+  readExternalRuntimeSessionInputSchema,
+  registerExternalRuntimeSessionInputSchema,
+} from './external-runtime-session-tools.js';
+export {
+  fileSliceTools,
+  handleReadFileSlice,
+  readFileSliceInputSchema,
+} from './file-tools.js';
+export {
+  createFinanceQueryHandler,
+  financeQueryInputSchema,
+  financeTools,
+  handleFinanceQuery,
+} from './finance-tools.js';
+export {
+  graphResolveInputSchema,
+  graphTools,
+  handleGraphResolve,
+} from './graph-tools.js';
+export { handleGetHarnessHistory, handlePublishHarnessHistory, harnessHistoryTools } from './harness-history-tools.js';
+export {
+  capabilitiesSnapshotInputSchema,
+  handleCapabilitiesSnapshot,
+  handleHomeStateSelf,
+  homeStateSelfInputSchema,
+  homeStateTools,
+} from './home-state-tools.js';
+export {
+  handlePreviewOpen,
+  handleWorkspaceNavigate,
+  hubActionTools,
+  previewOpenInputSchema,
+  workspaceNavigateInputSchema,
+} from './hub-action-tools.js';
+export {
+  handleLibraryArchive,
+  handleLibraryCreate,
+  handleLibraryDryRun,
+  handleLibraryList,
+  handleLibraryRebuild,
+  handleLibraryVerify,
+  libraryArchiveInputSchema,
+  libraryCreateInputSchema,
+  libraryDryRunInputSchema,
+  libraryLifecycleTools,
+  libraryListInputSchema,
+  libraryRebuildInputSchema,
+  libraryVerifyInputSchema,
+} from './library-lifecycle-tools.js';
+export {
+  handleLimbInvokeTool,
   handleLimbListAvailable,
-  limbInvokeInputSchema,
+  handleLimbListTools,
+  limbInvokeToolInputSchema,
   limbListAvailableInputSchema,
+  limbListToolsInputSchema,
   limbTools,
 } from './limb-tools.js';
 export {
-  handleReflect,
-  reflectInputSchema,
-  reflectTools,
-} from './reflect-tools.js';
+  createMemoryCueTools,
+  drillMemoryCueInputSchema,
+  recordMemoryCueOutcomeInputSchema,
+} from './memory-cue-tools.js';
+export {
+  handleListPawFeelInbox,
+  handleTriagePawFeel,
+  listPawFeelInboxInputSchema,
+  pawFeelDispositionTools,
+  triagePawFeelInputSchema,
+} from './paw-feel-disposition-tools.js';
+export {
+  handleScanPawFeelInbox,
+  pawFeelInboxAuditScanTools,
+  scanPawFeelInboxInputSchema,
+} from './paw-feel-inbox-audit-scan-tool.js';
+export {
+  handleRunPerspective,
+  perspectiveTools,
+  runPerspectiveInputSchema,
+} from './perspective-tools.js';
+export {
+  createPluginManagementHandlers,
+  createPluginManagerHttpClient,
+  handlePluginCall,
+  handlePluginGet,
+  handlePluginInstall,
+  handlePluginList,
+  handlePluginListTools,
+  handlePluginSearch,
+  handlePluginSetEnabled,
+  handlePluginUninstall,
+  pluginCallInputSchema,
+  pluginGetInputSchema,
+  pluginInstallInputSchema,
+  pluginListInputSchema,
+  pluginListToolsInputSchema,
+  pluginManagementTools,
+  pluginSearchInputSchema,
+  pluginSetEnabledInputSchema,
+  pluginUninstallInputSchema,
+} from './plugin-management-tools.js';
+export {
+  buildCredentialsFromEnv,
+  buildProviderFromEnv,
+  createProtocolTools,
+} from './protocol-tools.js';
+// F192 Phase H AC-H4: cat_cafe_publish_verdict tool
+export { handlePublishVerdict, publishVerdictInputSchema, publishVerdictTools } from './publish-verdict-tool.js';
+export {
+  handleRealtimeCompanionStart,
+  handleRealtimeCompanionStatus,
+  handleRealtimeCompanionStop,
+  realtimeCompanionStartInputSchema,
+  realtimeCompanionStatusInputSchema,
+  realtimeCompanionStopInputSchema,
+  realtimeCompanionTools,
+} from './realtime-companion-tools.js';
+export { recallMetricsTools } from './recall-metrics-tool.js';
+export {
+  handleListRecent,
+  listRecentInputSchema,
+  recentTools,
+} from './recent-tools.js';
+// F193 Phase D AC-D1: reflect-tools removed (deprecated)
 export {
   handleGetRichBlockRules,
   richBlockRulesInputSchema,
   richBlockRulesTools,
 } from './rich-block-rules-tool.js';
+export {
+  handleRequestUserInput,
+  requestUserInputInputSchema,
+  runtimeInteractionTools,
+} from './runtime-interaction-tools.js';
+export {
+  handleListScheduleTemplates,
+  handlePreviewScheduledTask,
+  handleRegisterScheduledTask,
+  handleRemoveScheduledTask,
+  listScheduleTemplatesInputSchema,
+  previewScheduledTaskInputSchema,
+  registerScheduledTaskInputSchema,
+  removeScheduledTaskInputSchema,
+  scheduleTools,
+} from './schedule-tools.js';
 export {
   handleListSessionChain,
   handleReadInvocationDetail,
@@ -75,6 +318,13 @@ export {
   sessionChainTools,
   sessionSearchInputSchema,
 } from './session-chain-tools.js';
+export {
+  getShellExecRefusalReason,
+  handleShellExec,
+  isReadOnlyShellCommand,
+  shellExecInputSchema,
+  shellTools,
+} from './shell-tools.js';
 export { signalStudyTools } from './signal-study-tools.js';
 export {
   handleSignalGetArticle,
@@ -89,3 +339,24 @@ export {
   signalSummarizeInputSchema,
   signalsTools,
 } from './signals-tools.js';
+export {
+  bindRequestReviewConsumptionInputSchema,
+  createSkillConsumptionTools,
+  dismissRequestReviewConsumptionInputSchema,
+  dismissSkillConsumptionInputSchema,
+  handleBindRequestReviewConsumption,
+  handleDismissRequestReviewConsumption,
+  handleDismissSkillConsumption,
+  handleOpenWithWorkspaceNavigator,
+  handlePrepareRequestReviewConsumption,
+  handlePrepareSkillConsumption,
+  handleRecordRequestReviewConsumption,
+  handleRecordRequestReviewOwnerFact,
+  openWithWorkspaceNavigatorInputSchema,
+  prepareRequestReviewConsumptionInputSchema,
+  prepareSkillConsumptionInputSchema,
+  recordRequestReviewConsumptionInputSchema,
+  recordRequestReviewOwnerFactInputSchema,
+  skillConsumptionTools,
+} from './skill-consumption-tools.js';
+export { workTools } from './work-tools.js';

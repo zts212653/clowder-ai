@@ -5,9 +5,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { GovernanceBootstrapService } from '../../dist/config/governance/governance-bootstrap.js';
-import { GOVERNANCE_PACK_VERSION, MANAGED_BLOCK_START } from '../../dist/config/governance/governance-pack.js';
 
-describe('governance confirm flow', () => {
+describe('governance preview and confirmation', () => {
   let catCafeRoot;
   let externalProject;
 
@@ -22,40 +21,33 @@ describe('governance confirm flow', () => {
     await rm(externalProject, { recursive: true, force: true });
   });
 
-  it('confirm triggers bootstrap and registers project', async () => {
+  it('preview is zero-write and confirmed checksum executes the same actions', async () => {
     const service = new GovernanceBootstrapService(catCafeRoot);
-    const report = await service.bootstrap(externalProject, { dryRun: false });
-
-    assert.ok(report.actions.length > 0);
+    const selection = { projectGuide: { thinEntrypoints: [] } };
+    const preview = await service.bootstrap(externalProject, { dryRun: true, selection });
+    await assert.rejects(readFile(join(externalProject, 'AGENTS.md'), 'utf8'), { code: 'ENOENT' });
+    const report = await service.bootstrap(externalProject, {
+      dryRun: false,
+      selection,
+      expectedPreviewChecksum: preview.previewChecksum,
+    });
     assert.equal(report.dryRun, false);
-
-    // Verify registration
-    const registry = service.getRegistry();
-    const entry = await registry.get(externalProject);
-    assert.ok(entry);
-    assert.equal(entry.packVersion, GOVERNANCE_PACK_VERSION);
-    assert.equal(entry.confirmedByUser, true);
-
-    // Verify files
-    const claudeMd = await readFile(join(externalProject, 'CLAUDE.md'), 'utf-8');
-    assert.ok(claudeMd.includes(MANAGED_BLOCK_START));
+    assert.deepStrictEqual(report.actions, preview.actions);
+    assert.ok(await readFile(join(externalProject, 'AGENTS.md'), 'utf8'));
+    assert.equal(
+      (await service.getRegistry().get(externalProject))?.lastBootstrapReport?.previewChecksum,
+      preview.previewChecksum,
+    );
   });
 
-  it('confirm is idempotent — second confirm does not break', async () => {
+  it('execute without an exact preview checksum is rejected', async () => {
     const service = new GovernanceBootstrapService(catCafeRoot);
-    await service.bootstrap(externalProject, { dryRun: false });
-    const report2 = await service.bootstrap(externalProject, { dryRun: false });
-
-    const created = report2.actions.filter((a) => a.action === 'created');
-    assert.equal(created.length, 0, 'second confirm should not create new files');
-  });
-
-  it('health shows healthy after confirm', async () => {
-    const service = new GovernanceBootstrapService(catCafeRoot);
-    await service.bootstrap(externalProject, { dryRun: false });
-
-    const registry = service.getRegistry();
-    const health = await registry.checkHealth(externalProject);
-    assert.equal(health.status, 'healthy');
+    await assert.rejects(
+      service.bootstrap(externalProject, {
+        dryRun: false,
+        selection: { docsLifecycle: true },
+      }),
+      /preview changed/i,
+    );
   });
 });

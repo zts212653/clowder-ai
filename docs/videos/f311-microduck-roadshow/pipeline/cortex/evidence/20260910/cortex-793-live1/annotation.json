@@ -1,0 +1,18 @@
+{
+  "run_id": "8dfc2f18f4574552bd2e7ec9840aa6a5",
+  "source": "match.mp4",
+  "source_sha256": "a7c0cfa5d714ad22d4ec727e21dd92228a56eda924e0a5959946b06dafb84485",
+  "source_observations_sha256": "273d3bd24aee9c9767c6bb81e3e9e503095f7d958c68e9c05a799697fa5b0e03",
+  "observation_domain": "simulator_world_state; local skills use detector/ToF/odometry",
+  "label": "coach: world | local: sensor (detector/ToF/odometry)",
+  "output": "annotated-match.mp4",
+  "output_sha256": "65f99c86251b89e146d5db00c09f07d0cf269d6b3ac34c3e591e64ee7e5c7beb",
+  "video_info": {
+    "width": 1280,
+    "height": 720,
+    "r_frame_rate": "10/1",
+    "duration": "120.000000",
+    "nb_frames": "1200"
+  },
+  "edit": "HUD rectangle x=352,y=60,w=928,h=46 only; H.264 re-encode; no time/motion edits"
+}

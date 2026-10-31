@@ -1,0 +1,4 @@
+interface:
+  display_name: "Concept Demo Design"
+  short_description: "先分家内/对外车道，再把理念变成可验证的交互演示"
+  default_prompt: "Use $concept-demo-design to choose the internal product gate or external showcase lane, then turn this idea into a recordable interactive concept demo."

@@ -1,0 +1,84 @@
+/**
+ * F174-B P2 (cloud Codex review on PR #1363) — env validation regression test.
+ *
+ * Bootstrap silently fell back to memory on unknown env values (e.g. typo
+ * `REDUS=redis`). User saw "redis" intent in code but ran in-memory at runtime,
+ * defeating Phase B's restart-resilience收益. Helper now throws on unknown.
+ */
+
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
+
+describe('selectInvocationBackendKind (F174-B P2 cloud review)', () => {
+  test('reports explicit memory mode as degraded and Redis as durable', async () => {
+    const { callbackAuthCapabilityForBackend } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+    assert.deepEqual(callbackAuthCapabilityForBackend('memory'), {
+      backend: 'memory',
+      durability: 'degraded_memory',
+    });
+    assert.deepEqual(callbackAuthCapabilityForBackend('redis'), {
+      backend: 'redis',
+      durability: 'durable',
+    });
+  });
+
+  test('returns "redis" when env=redis and Redis client available', async () => {
+    const { selectInvocationBackendKind } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+    assert.equal(selectInvocationBackendKind('redis', true), 'redis');
+  });
+
+  test('returns "memory" when env=memory regardless of Redis availability', async () => {
+    const { selectInvocationBackendKind } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+    assert.equal(selectInvocationBackendKind('memory', true), 'memory');
+    assert.equal(selectInvocationBackendKind('memory', false), 'memory');
+  });
+
+  test('returns "redis" when env unset and Redis client available (default)', async () => {
+    const { selectInvocationBackendKind } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+    assert.equal(selectInvocationBackendKind(undefined, true), 'redis');
+  });
+
+  test('fails closed when env is unset and Redis is unavailable', async () => {
+    const { selectInvocationBackendKind } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+    assert.throws(() => selectInvocationBackendKind(undefined, false), /Durable callback auth requires Redis/);
+  });
+
+  test('fails closed when env=redis but Redis is unavailable', async () => {
+    const { selectInvocationBackendKind } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+    assert.throws(() => selectInvocationBackendKind('redis', false), /requires an available Redis backend/);
+  });
+
+  // The actual P2 fix: throw on typos / unknown values so they surface at boot.
+  test('throws on unknown env value (typo guard) — REDUS', async () => {
+    const { selectInvocationBackendKind } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+    assert.throws(() => selectInvocationBackendKind('REDUS', true), /Invalid CAT_CAFE_INVOCATION_REGISTRY="REDUS"/);
+  });
+
+  test('throws on unknown env value — sqlite (proposed but not implemented)', async () => {
+    const { selectInvocationBackendKind } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+    assert.throws(() => selectInvocationBackendKind('sqlite', true), /Invalid CAT_CAFE_INVOCATION_REGISTRY="sqlite"/);
+  });
+
+  test('throws on empty string (defensive — empty != undefined)', async () => {
+    const { selectInvocationBackendKind } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+    assert.throws(() => selectInvocationBackendKind('', true), /Invalid CAT_CAFE_INVOCATION_REGISTRY=""/);
+  });
+});

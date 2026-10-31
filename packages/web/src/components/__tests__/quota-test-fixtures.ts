@@ -25,6 +25,8 @@ export interface ClaudeQuota {
   activeBlock: CcusageBillingBlock | null;
   usageItems?: CodexUsageItem[];
   recentBlocks: CcusageBillingBlock[];
+  officialError?: string;
+  cliError?: string;
   error?: string;
   lastChecked: string | null;
 }

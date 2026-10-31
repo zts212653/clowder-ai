@@ -1,9 +1,83 @@
 /** @type {import('tailwindcss').Config} */
+const typographyTokens = require('./src/styles/typography-tokens.json');
+
 module.exports = {
+  darkMode: ['selector', '[data-theme="dark"]'],
   content: ['./src/**/*.{js,ts,jsx,tsx,mdx}', '../shared/src/**/*.{js,ts}'],
   theme: {
     extend: {
+      fontFamily: {
+        sans: 'var(--font-sans)',
+      },
+      fontSize: {
+        /* token-based (from typography-tokens.json — includes micro/label/compact with lineHeight) */
+        ...typographyTokens.fontSize,
+        /* CSS-variable aliases (allow Tuner override via --font-size-* if ever needed) */
+        caption: 'var(--font-size-caption)',
+      },
       colors: {
+        /* F056 Phase E — OKLCH 七类色 utility 暴露 */
+        neutral: {
+          50: 'var(--neutral-50)',
+          100: 'var(--neutral-100)',
+          200: 'var(--neutral-200)',
+          300: 'var(--neutral-300)',
+          400: 'var(--neutral-400)',
+          500: 'var(--neutral-500)',
+          600: 'var(--neutral-600)',
+          700: 'var(--neutral-700)',
+          800: 'var(--neutral-800)',
+          900: 'var(--neutral-900)',
+          950: 'var(--neutral-950)',
+        },
+        accent: {
+          50: 'var(--accent-50)',
+          100: 'var(--accent-100)',
+          200: 'var(--accent-200)',
+          300: 'var(--accent-300)',
+          400: 'var(--accent-400)',
+          500: 'var(--accent-500)',
+          600: 'var(--accent-600)',
+          700: 'var(--accent-700)',
+          900: 'var(--accent-900)',
+        },
+        semantic: {
+          critical: 'var(--semantic-critical)',
+          success: 'var(--semantic-success)',
+          warning: 'var(--semantic-warning)',
+          info: 'var(--semantic-info)',
+          spotlight: 'var(--semantic-spotlight)',
+          'critical-surface': 'var(--semantic-critical-surface)',
+          'success-surface': 'var(--semantic-success-surface)',
+          'warning-surface': 'var(--semantic-warning-surface)',
+          'info-surface': 'var(--semantic-info-surface)',
+          'spotlight-surface': 'var(--semantic-spotlight-surface)',
+        },
+        chart: {
+          1: 'var(--chart-1)',
+          2: 'var(--chart-2)',
+          3: 'var(--chart-3)',
+          4: 'var(--chart-4)',
+          5: 'var(--chart-5)',
+          6: 'var(--chart-6)',
+          7: 'var(--chart-7)',
+          8: 'var(--chart-8)',
+          9: 'var(--chart-9)',
+          10: 'var(--chart-10)',
+          11: 'var(--chart-11)',
+          12: 'var(--chart-12)',
+        },
+        'avatar-fallback': {
+          1: 'var(--avatar-fallback-1)',
+          2: 'var(--avatar-fallback-2)',
+          3: 'var(--avatar-fallback-3)',
+          4: 'var(--avatar-fallback-4)',
+          5: 'var(--avatar-fallback-5)',
+          6: 'var(--avatar-fallback-6)',
+          7: 'var(--avatar-fallback-7)',
+          8: 'var(--avatar-fallback-8)',
+        },
+        brand: 'var(--brand-cat-cafe-pink)',
         opus: {
           primary: 'var(--color-opus-primary)',
           light: 'var(--color-opus-light)',
@@ -22,11 +96,11 @@ module.exports = {
           dark: 'var(--color-gemini-dark)',
           bg: 'var(--color-gemini-bg)',
         },
-        dare: {
-          primary: 'var(--color-dare-primary)',
-          light: 'var(--color-dare-light)',
-          dark: 'var(--color-dare-dark)',
-          bg: 'var(--color-dare-bg)',
+        kimi: {
+          primary: 'var(--color-kimi-primary)',
+          light: 'var(--color-kimi-light)',
+          dark: 'var(--color-kimi-dark)',
+          bg: 'var(--color-kimi-bg)',
         },
         cocreator: {
           primary: 'var(--color-cocreator-primary)',
@@ -34,9 +108,105 @@ module.exports = {
           dark: 'var(--color-cocreator-dark)',
           bg: 'var(--color-cocreator-bg)',
         },
+        /* Connector identity color tokens — auto-adapts to dark mode via CSS variables */
+        conn: {
+          'slate-bg': 'var(--conn-slate-bg)',
+          'slate-ring': 'var(--conn-slate-ring)',
+          'slate-text': 'var(--conn-slate-text)',
+          'slate-hover': 'var(--conn-slate-hover)',
+          'slate-bubble-bg': 'var(--conn-slate-bubble-bg)',
+          'slate-bubble-border': 'var(--conn-slate-bubble-border)',
+          'gray-bg': 'var(--conn-gray-bg)',
+          'gray-ring': 'var(--conn-gray-ring)',
+          'gray-text': 'var(--conn-gray-text)',
+          'gray-hover': 'var(--conn-gray-hover)',
+          'gray-bubble-bg': 'var(--conn-gray-bubble-bg)',
+          'gray-bubble-border': 'var(--conn-gray-bubble-border)',
+          'amber-bg': 'var(--conn-amber-bg)',
+          'amber-ring': 'var(--conn-amber-ring)',
+          'amber-text': 'var(--conn-amber-text)',
+          'amber-hover': 'var(--conn-amber-hover)',
+          'amber-bubble-bg': 'var(--conn-amber-bubble-bg)',
+          'amber-bubble-border': 'var(--conn-amber-bubble-border)',
+          'purple-bg': 'var(--conn-purple-bg)',
+          'purple-ring': 'var(--conn-purple-ring)',
+          'purple-text': 'var(--conn-purple-text)',
+          'purple-hover': 'var(--conn-purple-hover)',
+          'purple-bubble-bg': 'var(--conn-purple-bubble-bg)',
+          'purple-bubble-border': 'var(--conn-purple-bubble-border)',
+          'emerald-bg': 'var(--conn-emerald-bg)',
+          'emerald-ring': 'var(--conn-emerald-ring)',
+          'emerald-text': 'var(--conn-emerald-text)',
+          'emerald-hover': 'var(--conn-emerald-hover)',
+          'emerald-bubble-bg': 'var(--conn-emerald-bubble-bg)',
+          'emerald-bubble-border': 'var(--conn-emerald-bubble-border)',
+          'blue-bg': 'var(--conn-blue-bg)',
+          'blue-ring': 'var(--conn-blue-ring)',
+          'blue-text': 'var(--conn-blue-text)',
+          'blue-hover': 'var(--conn-blue-hover)',
+          'blue-bubble-bg': 'var(--conn-blue-bubble-bg)',
+          'blue-bubble-border': 'var(--conn-blue-bubble-border)',
+          'sky-bg': 'var(--conn-sky-bg)',
+          'sky-ring': 'var(--conn-sky-ring)',
+          'sky-text': 'var(--conn-sky-text)',
+          'sky-hover': 'var(--conn-sky-hover)',
+          'sky-bubble-bg': 'var(--conn-sky-bubble-bg)',
+          'sky-bubble-border': 'var(--conn-sky-bubble-border)',
+          'cyan-bg': 'var(--conn-cyan-bg)',
+          'cyan-ring': 'var(--conn-cyan-ring)',
+          'cyan-text': 'var(--conn-cyan-text)',
+          'cyan-hover': 'var(--conn-cyan-hover)',
+          'cyan-bubble-bg': 'var(--conn-cyan-bubble-bg)',
+          'cyan-bubble-border': 'var(--conn-cyan-bubble-border)',
+          'red-bg': 'var(--conn-red-bg)',
+          'red-ring': 'var(--conn-red-ring)',
+          'red-text': 'var(--conn-red-text)',
+          'red-hover': 'var(--conn-red-hover)',
+          'red-bubble-bg': 'var(--conn-red-bubble-bg)',
+          'red-bubble-border': 'var(--conn-red-bubble-border)',
+          'indigo-bg': 'var(--conn-indigo-bg)',
+          'indigo-ring': 'var(--conn-indigo-ring)',
+          'indigo-text': 'var(--conn-indigo-text)',
+          'indigo-hover': 'var(--conn-indigo-hover)',
+          'indigo-bubble-bg': 'var(--conn-indigo-bubble-bg)',
+          'indigo-bubble-border': 'var(--conn-indigo-bubble-border)',
+          'violet-bg': 'var(--conn-violet-bg)',
+          'violet-ring': 'var(--conn-violet-ring)',
+          'violet-text': 'var(--conn-violet-text)',
+          'violet-hover': 'var(--conn-violet-hover)',
+          'violet-bubble-bg': 'var(--conn-violet-bubble-bg)',
+          'violet-bubble-border': 'var(--conn-violet-bubble-border)',
+          'green-bg': 'var(--conn-green-bg)',
+          'green-ring': 'var(--conn-green-ring)',
+          'green-text': 'var(--conn-green-text)',
+          'green-hover': 'var(--conn-green-hover)',
+          'green-bubble-bg': 'var(--conn-green-bubble-bg)',
+          'green-bubble-border': 'var(--conn-green-bubble-border)',
+        },
         cafe: {
           white: 'var(--color-base-white)',
           black: 'var(--color-base-black)',
+          surface: 'var(--cafe-surface)',
+          'surface-elevated': 'var(--cafe-surface-elevated)',
+          'surface-sunken': 'var(--cafe-surface-sunken)',
+          'surface-canvas': 'var(--cafe-surface-canvas)',
+          accent: 'var(--cafe-accent)',
+          'accent-hover': 'var(--cafe-accent-hover)',
+          crosspost: 'var(--cafe-crosspost)',
+          interactive: 'var(--cafe-interactive)',
+          /* F174 D2b-2: cat callback-auth status dot palette (烁烁 visual review). */
+          'status-healthy': '#22C55E',
+          'status-degraded': '#F59E0B',
+          'status-active': '#3B82F6',
+          'status-broken': '#EF4444',
+          'status-unknown': '#A89386',
+        },
+        /* Queue agent accent */
+        queue: {
+          accent: 'var(--queue-accent)',
+          'accent-hover': 'var(--queue-accent-hover)',
+          surface: 'var(--queue-accent-surface)',
+          'on-accent': 'var(--queue-on-accent)',
         },
         /* F101 AC-D5: Werewolf Cute theme tokens */
         ww: {
@@ -60,6 +230,11 @@ module.exports = {
         },
       },
       textColor: {
+        cafe: {
+          DEFAULT: 'var(--cafe-text)',
+          secondary: 'var(--cafe-text-secondary)',
+          muted: 'var(--cafe-text-muted)',
+        },
         ww: {
           main: 'var(--ww-text-main)',
           muted: 'var(--ww-text-muted)',
@@ -67,6 +242,10 @@ module.exports = {
         },
       },
       borderColor: {
+        cafe: {
+          DEFAULT: 'var(--cafe-border)',
+          subtle: 'var(--cafe-border-subtle)',
+        },
         ww: {
           subtle: 'var(--ww-border-subtle)',
           active: 'var(--ww-border-active)',
@@ -78,6 +257,19 @@ module.exports = {
         ww: {
           glow: 'var(--ww-shadow-glow)',
         },
+      },
+      /* F056 Phase E AC-E3: 全站 shadow-{sm/md/lg/xl/2xl} 自动吃 OKLCH elevation token
+       * 替代"逐个 className 改造"——dark mode 自动获得 inset 高光 + 深阴影，零侵入。 */
+      boxShadow: {
+        sm: 'var(--shadow-elevation-1)',
+        DEFAULT: 'var(--shadow-elevation-1)',
+        md: 'var(--shadow-elevation-2)',
+        lg: 'var(--shadow-elevation-3)',
+        xl: 'var(--shadow-elevation-3)',
+        '2xl': 'var(--shadow-elevation-3)',
+        'elevation-1': 'var(--shadow-elevation-1)',
+        'elevation-2': 'var(--shadow-elevation-2)',
+        'elevation-3': 'var(--shadow-elevation-3)',
       },
       keyframes: {
         'fade-in': {
@@ -125,6 +317,17 @@ module.exports = {
           '0%': { backgroundPosition: '-200% 0' },
           '100%': { backgroundPosition: '200% 0' },
         },
+        'pulse-subtle': {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.75', boxShadow: '0 0 8px rgba(245, 158, 11, 0.3)' },
+        },
+        shake: {
+          '0%, 100%': { transform: 'translateX(0)' },
+          '20%': { transform: 'translateX(-4px)' },
+          '40%': { transform: 'translateX(4px)' },
+          '60%': { transform: 'translateX(-3px)' },
+          '80%': { transform: 'translateX(2px)' },
+        },
       },
       animation: {
         'fade-in': 'fade-in 0.3s ease-out',
@@ -137,8 +340,19 @@ module.exports = {
         'slide-in-right': 'slide-in-right 0.2s ease-out',
         'tree-expand': 'tree-expand 0.15s ease-out',
         shimmer: 'shimmer 1.5s ease-in-out infinite',
+        'pulse-subtle': 'pulse-subtle 2s ease-in-out infinite',
+        shake: 'shake 0.3s ease-in-out',
       },
     },
   },
-  plugins: [],
+  plugins: [
+    /* Expose fontSizePx as --console-font-{name} CSS vars for JS/non-Tailwind consumers */
+    ({ addBase }) => {
+      const vars = {};
+      for (const [name, px] of Object.entries(typographyTokens.fontSizePx)) {
+        vars[`--console-font-${name}`] = `${px}px`;
+      }
+      addBase({ ':root': vars });
+    },
+  ],
 };

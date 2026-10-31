@@ -36,6 +36,8 @@ test('feature docs override backlog fields for same featId', async () => {
         '  - Keep feature docs as source-of-truth',
         '---',
         '',
+        '> **Owner**: 布偶猫',
+        '',
         '# F043: MCP Unification',
       ].join('\n'),
       'utf8',
@@ -48,7 +50,41 @@ test('feature docs override backlog fields for same featId', async () => {
     assert.ok(f043, 'F043 should exist');
     assert.equal(f043.name, 'Feature Doc Name');
     assert.equal(f043.status, 'in-progress');
+    assert.equal(f043.owner, '布偶猫');
     assert.deepEqual(f043.keyDecisions, ['Keep feature docs as source-of-truth']);
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('feature docs parse inline Status and Owner metadata from one quoted line', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'feat-index-doc-import-'));
+  const previousCwd = process.cwd();
+  try {
+    await createRepoSkeleton(root);
+    await writeFile(
+      join(root, 'docs', 'features', 'F193-cross-thread.md'),
+      [
+        '---',
+        'feature_ids: [F193]',
+        'name: Cross Thread Communication',
+        '---',
+        '',
+        '> **Status**: in-progress | **Owner**: 布偶猫',
+        '',
+        '# F193: Cross Thread Communication',
+      ].join('\n'),
+      'utf8',
+    );
+
+    process.chdir(root);
+    const entries = await readFeatIndexEntries();
+    const f193 = entries.find((entry) => entry.featId === 'F193');
+
+    assert.ok(f193, 'F193 should be indexed from feature doc');
+    assert.equal(f193.status, 'in-progress');
+    assert.equal(f193.owner, '布偶猫');
   } finally {
     process.chdir(previousCwd);
     await rm(root, { recursive: true, force: true });
@@ -109,6 +145,7 @@ test('directory entry matching Fxxx*.md does not crash importer', async () => {
 
     assert.ok(f043, 'F043 should still be available from backlog fallback');
     assert.equal(f043.status, 'spec');
+    assert.equal(f043.owner, '三猫');
   } finally {
     process.chdir(previousCwd);
     await rm(root, { recursive: true, force: true });

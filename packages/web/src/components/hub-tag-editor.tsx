@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 
 function normalizeTag(value: string): string {
   return value.trim();
@@ -11,9 +12,9 @@ function mergeTags(tags: string[], nextTag: string): string[] {
 }
 
 function pillClass(tone: 'purple' | 'green' | 'orange') {
-  if (tone === 'green') return 'border-[#CFE5D5] bg-[#E8F5E9] text-[#4F7B50]';
-  if (tone === 'orange') return 'border-[#E8C9AF] bg-[#F7EEE6] text-[#C8946B]';
-  return 'border-[#D9C5EF] bg-[#F3EDFA] text-[#8B68B7]';
+  if (tone === 'green') return 'bg-[var(--console-runtime-field-bg)] text-[var(--console-runtime-label)]';
+  if (tone === 'orange') return 'bg-[var(--console-pill-bg)] text-[var(--cafe-accent)]';
+  return 'bg-conn-purple-bg text-[var(--color-opus-primary)]';
 }
 
 export function TagPillList({
@@ -22,17 +23,19 @@ export function TagPillList({
   tone = 'purple',
   lockedTags = [],
   onRemove,
+  removeLabel = (tag: string) => `移除 ${tag}`,
 }: {
   tags: string[];
   emptyLabel: string;
   tone?: 'purple' | 'green' | 'orange';
   lockedTags?: string[];
   onRemove?: (tag: string) => void;
+  removeLabel?: (tag: string) => string;
 }) {
   const locked = useMemo(() => new Set(lockedTags), [lockedTags]);
 
   if (tags.length === 0) {
-    return <span className="text-sm italic text-[#8A776B]">{emptyLabel}</span>;
+    return <span className="text-sm italic text-cafe-muted">{emptyLabel}</span>;
   }
 
   return (
@@ -40,15 +43,15 @@ export function TagPillList({
       {tags.map((tag) => (
         <span
           key={tag}
-          className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${pillClass(tone)}`}
+          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${pillClass(tone)}`}
         >
           <span>{tag}</span>
           {onRemove && !locked.has(tag) ? (
             <button
               type="button"
-              aria-label={`移除 ${tag}`}
+              aria-label={removeLabel(tag)}
               onClick={() => onRemove(tag)}
-              className="rounded-full px-1 text-[10px] leading-none opacity-70 transition hover:opacity-100"
+              className="rounded-full px-1 text-micro leading-none opacity-70 transition hover:opacity-100"
             >
               ×
             </button>
@@ -68,7 +71,10 @@ export function TagEditor({
   lockedTags = [],
   tone = 'purple',
   normalize = normalizeTag,
+  validate,
   minCount = 0,
+  commitLabel = '添加',
+  removeLabel,
 }: {
   tags: string[];
   onChange: (nextTags: string[]) => void;
@@ -78,21 +84,34 @@ export function TagEditor({
   lockedTags?: string[];
   tone?: 'purple' | 'green' | 'orange';
   normalize?: (value: string) => string;
+  /** Return error message if tag is invalid, null if OK. */
+  validate?: (tag: string) => string | null;
   minCount?: number;
+  commitLabel?: string;
+  removeLabel?: (tag: string) => string;
 }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const ime = useIMEGuard();
 
   const commit = () => {
     const nextTag = normalize(draft);
     if (!nextTag) {
       setAdding(false);
       setDraft('');
+      setError(null);
+      return;
+    }
+    const err = validate?.(nextTag) ?? null;
+    if (err) {
+      setError(err);
       return;
     }
     onChange(mergeTags(tags, nextTag));
     setAdding(false);
     setDraft('');
+    setError(null);
   };
 
   return (
@@ -103,6 +122,7 @@ export function TagEditor({
           emptyLabel={emptyLabel}
           tone={tone}
           lockedTags={lockedTags}
+          removeLabel={removeLabel}
           onRemove={
             // Only count removable (non-locked) tags against minCount
             tags.filter((t) => !lockedTags.includes(t)).length > minCount
@@ -113,7 +133,7 @@ export function TagEditor({
         <button
           type="button"
           onClick={() => setAdding((value) => !value)}
-          className={`rounded-full border px-3 py-1 text-xs font-medium ${pillClass(tone)}`}
+          className={`rounded-full px-3 py-1 text-xs font-medium ${pillClass(tone)}`}
         >
           {addLabel}
         </button>
@@ -123,23 +143,30 @@ export function TagEditor({
         <div className="flex flex-wrap items-center gap-2">
           <input
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              if (error) setError(null);
+            }}
+            onCompositionStart={ime.onCompositionStart}
+            onCompositionEnd={ime.onCompositionEnd}
             onKeyDown={(event) => {
+              if (ime.isComposing()) return;
               if (event.key === 'Enter') {
                 event.preventDefault();
                 commit();
               }
             }}
             placeholder={placeholder}
-            className="min-w-[220px] flex-1 rounded-xl border border-[#E8DCCF] bg-[#F7F3F0] px-3 py-2 text-sm text-[#2D2118] outline-none transition focus:border-[#D49266] focus:ring-2 focus:ring-[#F5D2B8]"
+            className="min-w-[220px] flex-1 rounded-xl border border-transparent bg-[var(--console-pill-bg)] px-3 py-2 text-sm text-cafe outline-none transition focus:border-[var(--cafe-accent)] focus:ring-2 focus:ring-conn-amber-ring"
           />
           <button
             type="button"
             onClick={commit}
-            className="rounded-full border border-[#D49266] bg-[#FFF1E3] px-3 py-1.5 text-xs font-medium text-[#9A5A2C]"
+            className="rounded-full bg-[var(--console-field-bg)] px-3 py-1.5 text-xs font-medium text-[var(--cafe-accent)]"
           >
-            添加
+            {commitLabel}
           </button>
+          {error && <span className="w-full text-xs text-conn-red-text">{error}</span>}
         </div>
       ) : null}
     </div>

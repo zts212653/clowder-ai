@@ -4,14 +4,46 @@
  */
 
 import assert from 'node:assert';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
-import { MlxAudioTtsProvider } from '../dist/domains/cats/services/tts/MlxAudioTtsProvider.js';
+import { calculateTimeout, MlxAudioTtsProvider } from '../dist/domains/cats/services/tts/MlxAudioTtsProvider.js';
+import { setServiceConfig } from '../dist/domains/services/service-config.js';
+
+function pcmWav(durationSec, sampleRate = 24_000) {
+  const channels = 1;
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * channels * (bitsPerSample / 8);
+  const dataSize = Math.round(durationSec * byteRate);
+  const wav = Buffer.alloc(44 + dataSize);
+  wav.write('RIFF', 0);
+  wav.writeUInt32LE(36 + dataSize, 4);
+  wav.write('WAVE', 8);
+  wav.write('fmt ', 12);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(channels, 22);
+  wav.writeUInt32LE(sampleRate, 24);
+  wav.writeUInt32LE(byteRate, 28);
+  wav.writeUInt16LE(channels * (bitsPerSample / 8), 32);
+  wav.writeUInt16LE(bitsPerSample, 34);
+  wav.write('data', 36);
+  wav.writeUInt32LE(dataSize, 40);
+  return wav;
+}
 
 describe('MlxAudioTtsProvider', () => {
   const originalFetch = globalThis.fetch;
+  const originalServicesConfig = process.env.CAT_CAFE_SERVICES_CONFIG;
+  const originalTtsUrl = process.env.TTS_URL;
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    if (originalServicesConfig === undefined) delete process.env.CAT_CAFE_SERVICES_CONFIG;
+    else process.env.CAT_CAFE_SERVICES_CONFIG = originalServicesConfig;
+    if (originalTtsUrl === undefined) delete process.env.TTS_URL;
+    else process.env.TTS_URL = originalTtsUrl;
   });
 
   it('has correct id and model', () => {
@@ -40,6 +72,90 @@ describe('MlxAudioTtsProvider', () => {
     assert.strictEqual(capturedBody.lang_code, 'en');
   });
 
+  it('canonicalizes localhost baseUrl to IPv4 loopback before requesting TTS', async () => {
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return new Response(new Uint8Array([1]), { status: 200 });
+    };
+
+    const p = new MlxAudioTtsProvider({ baseUrl: 'http://localhost:9879' });
+    await p.synthesize({ text: 'hello', voice: 'vm_test' });
+
+    assert.strictEqual(capturedUrl, 'http://127.0.0.1:9879/v1/audio/speech');
+  });
+
+  it('uses the persisted TTS service port when baseUrl is omitted', async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'tts-provider-config-'));
+    process.env.CAT_CAFE_SERVICES_CONFIG = join(configDir, 'services.json');
+    delete process.env.TTS_URL;
+    setServiceConfig('mlx-tts', { enabled: true, installed: true, port: 19982 });
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return new Response(new Uint8Array([1]), { status: 200 });
+    };
+    try {
+      const p = new MlxAudioTtsProvider();
+      await p.synthesize({ text: 'hello', voice: 'vm_test' });
+
+      assert.strictEqual(capturedUrl, 'http://127.0.0.1:19982/v1/audio/speech');
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // codex P1 2026-05-26: an API process built before /reconfigure changed
+  // the port was stuck on the old endpoint because baseUrl was cached at
+  // construction. The provider must re-read the persisted port on every
+  // request when no explicit baseUrl override was given, so reconfigure
+  // takes effect without restarting the API.
+  it('picks up a reconfigured port on the next synthesize without rebuild', async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'tts-provider-reconfig-'));
+    process.env.CAT_CAFE_SERVICES_CONFIG = join(configDir, 'services.json');
+    delete process.env.TTS_URL;
+    setServiceConfig('mlx-tts', { enabled: false, installed: true, port: 19982 });
+    const capturedUrls = [];
+    globalThis.fetch = async (url) => {
+      capturedUrls.push(String(url));
+      return new Response(new Uint8Array([1]), { status: 200 });
+    };
+    try {
+      const p = new MlxAudioTtsProvider();
+      await p.synthesize({ text: 'hello', voice: 'vm_test' });
+
+      // Simulate /reconfigure persisting a new port while the provider
+      // instance is still alive.
+      setServiceConfig('mlx-tts', { enabled: false, installed: true, port: 19983 });
+      await p.synthesize({ text: 'hello again', voice: 'vm_test' });
+
+      assert.strictEqual(capturedUrls[0], 'http://127.0.0.1:19982/v1/audio/speech');
+      assert.strictEqual(
+        capturedUrls[1],
+        'http://127.0.0.1:19983/v1/audio/speech',
+        'reconfigure must take effect on the next request without restarting the API',
+      );
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // Explicit baseUrl overrides (mostly tests) must stay frozen so the
+  // injected URL is what every request hits.
+  it('keeps an explicit baseUrl override stable across requests', async () => {
+    const capturedUrls = [];
+    globalThis.fetch = async (url) => {
+      capturedUrls.push(String(url));
+      return new Response(new Uint8Array([1]), { status: 200 });
+    };
+
+    const p = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
+    await p.synthesize({ text: 'hello', voice: 'vm_test' });
+    await p.synthesize({ text: 'hello again', voice: 'vm_test' });
+
+    assert.deepStrictEqual(capturedUrls, ['http://test:9877/v1/audio/speech', 'http://test:9877/v1/audio/speech']);
+  });
+
   it('returns Uint8Array audio with correct metadata', async () => {
     const audioBytes = new Uint8Array([0, 1, 2, 3, 4]);
     globalThis.fetch = async () => new Response(audioBytes, { status: 200 });
@@ -52,6 +168,148 @@ describe('MlxAudioTtsProvider', () => {
     assert.strictEqual(result.format, 'wav');
     assert.strictEqual(result.metadata.provider, 'mlx-audio');
     assert.strictEqual(result.metadata.voice, 'v1');
+  });
+
+  it('reports WAV duration so listen-mode synthesis can emit real-time factor', async () => {
+    globalThis.fetch = async () => new Response(pcmWav(1.5), { status: 200, headers: { 'x-audio-format': 'wav' } });
+
+    const p = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
+    const result = await p.synthesize({ text: '听读性能探针', voice: 'v1', format: 'wav' });
+
+    assert.strictEqual(result.durationSec, 1.5);
+  });
+
+  it('streams native clone chunks and the complete cache asset from the sidecar', async () => {
+    let capturedUrl;
+    let capturedBody;
+    const chunkAudio = pcmWav(0.5);
+    const finalAudio = pcmWav(1.0);
+    globalThis.fetch = async (url, init) => {
+      capturedUrl = url;
+      capturedBody = JSON.parse(init.body);
+      const lines = [
+        JSON.stringify({
+          type: 'chunk',
+          audio_base64: chunkAudio.toString('base64'),
+          duration_sec: 0.5,
+          final: true,
+        }),
+        JSON.stringify({
+          type: 'final',
+          audio_base64: finalAudio.toString('base64'),
+          duration_sec: 1,
+        }),
+      ];
+      return new Response(`${lines.join('\n')}\n`, {
+        status: 200,
+        headers: { 'content-type': 'application/x-ndjson' },
+      });
+    };
+
+    const provider = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
+    const events = [];
+    for await (const event of provider.stream({
+      text: '流式听读。',
+      voice: 'wanderer',
+      langCode: 'zh',
+      refAudio: '/path/to/ref.wav',
+      refText: '参考文本',
+      temperature: 0.3,
+    })) {
+      events.push(event);
+    }
+
+    assert.strictEqual(capturedUrl, 'http://test:9877/v1/audio/speech/stream');
+    assert.strictEqual(capturedBody.input, '流式听读。');
+    assert.strictEqual(capturedBody.ref_audio, '/path/to/ref.wav');
+    assert.deepStrictEqual(
+      events.map((event) => event.type),
+      ['chunk', 'final'],
+    );
+    assert.deepStrictEqual(Buffer.from(events[0].audio), chunkAudio);
+    assert.strictEqual(events[0].isFinalChunk, true);
+    assert.deepStrictEqual(Buffer.from(events[1].result.audio), finalAudio);
+    assert.strictEqual(events[1].result.durationSec, 1);
+  });
+
+  it('marks the last native chunk final when the sidecar closes with a complete asset', async () => {
+    const firstChunk = pcmWav(0.5);
+    const lastChunk = pcmWav(0.4);
+    const finalAudio = pcmWav(0.9);
+    globalThis.fetch = async () => {
+      const lines = [
+        JSON.stringify({
+          type: 'chunk',
+          audio_base64: firstChunk.toString('base64'),
+          duration_sec: 0.5,
+          final: false,
+        }),
+        JSON.stringify({
+          type: 'chunk',
+          audio_base64: lastChunk.toString('base64'),
+          duration_sec: 0.4,
+          final: false,
+        }),
+        JSON.stringify({
+          type: 'final',
+          audio_base64: finalAudio.toString('base64'),
+          duration_sec: 0.9,
+        }),
+      ];
+      return new Response(`${lines.join('\n')}\n`, {
+        status: 200,
+        headers: { 'content-type': 'application/x-ndjson' },
+      });
+    };
+
+    const provider = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
+    const events = [];
+    for await (const event of provider.stream({ text: '河床、水流与裁判', voice: 'wanderer' })) {
+      events.push(event);
+    }
+
+    assert.deepStrictEqual(
+      events.map((event) => event.type),
+      ['chunk', 'chunk', 'final'],
+    );
+    assert.strictEqual(events[0].isFinalChunk, false);
+    assert.strictEqual(events[1].isFinalChunk, true, 'the final playable chunk must close the sentence boundary');
+  });
+
+  it('propagates caller cancellation into the sidecar request', async () => {
+    let requestSignal;
+    let responseController;
+    globalThis.fetch = async (_url, init) => {
+      requestSignal = init.signal;
+      const body = new ReadableStream({
+        start(controller) {
+          responseController = controller;
+        },
+      });
+      requestSignal.addEventListener(
+        'abort',
+        () => responseController.error(new DOMException('Aborted', 'AbortError')),
+        { once: true },
+      );
+      return new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson' } });
+    };
+
+    const provider = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
+    const caller = new AbortController();
+    const iterator = provider.stream(
+      { text: '取消旧句。', voice: 'wanderer', refAudio: '/ref.wav', refText: '参考文本' },
+      { signal: caller.signal },
+    );
+    const pending = iterator.next();
+    const rejected = assert.rejects(pending);
+    await new Promise((resolve) => setImmediate(resolve));
+    caller.abort();
+    await new Promise((resolve) => setImmediate(resolve));
+    const propagated = requestSignal.aborted;
+    if (!propagated) responseController.error(new Error('test cleanup'));
+    await rejected;
+
+    assert.equal(propagated, true, 'caller abort must cancel the upstream fetch immediately');
   });
 
   it('throws on non-200 response', async () => {
@@ -174,5 +432,72 @@ describe('MlxAudioTtsProvider', () => {
     assert.strictEqual(capturedBody.instruct, undefined, 'instruct should be absent');
     // temperature is not sent when not provided
     assert.strictEqual(capturedBody.temperature, undefined, 'temperature should be absent');
+  });
+});
+
+describe('calculateTimeout', () => {
+  // ── Clone mode (60s warmup absorbs refAudio load) ───────────
+  it('short clone text gets generation + 60s warmup', () => {
+    // 50 chars * 3 = 150 tokens / 15 tps = 10s + 60s warmup = 70s
+    assert.strictEqual(calculateTimeout('a'.repeat(50), true, 30_000), 70_000);
+  });
+
+  it('long clone text scales linearly', () => {
+    // 500 chars * 3 = 1500 tokens / 15 tps = 100s + 60s warmup = 160s
+    assert.strictEqual(calculateTimeout('a'.repeat(500), true, 30_000), 160_000);
+  });
+
+  it('410-char clone (regression case from 2026-04-27) gets 142s — comfortably above prior 120s', () => {
+    // 410 * 3 = 1230 tokens / 15 tps = 82s + 60s warmup = 142s
+    // Prior fixed cap was 120s; bumped to 142s after cloud codex round 3 P1
+    // pointed out 30s warmup was too tight (gave 112s, less than prior guard).
+    assert.strictEqual(calculateTimeout('a'.repeat(410), true, 30_000), 142_000);
+  });
+
+  it('clone honors high caller baseTimeoutMs (P2 round 1: slow/cold-start hosts)', () => {
+    // 50 chars * 3 / 15 = 10s + 60s = 70s; caller wants 180s, max wins
+    assert.strictEqual(calculateTimeout('a'.repeat(50), true, 180_000), 180_000);
+  });
+
+  it('caller baseTimeoutMs ABOVE hard cap is honored, not clamped (P2 round 2)', () => {
+    // Caller passes 1_200_000 ms (20 min) for a very slow host. Old
+    // `Math.min(..., 600_000)` would have clamped to 10 min. Hard cap now
+    // bounds only the dynamic estimate.
+    assert.strictEqual(calculateTimeout('a'.repeat(50), true, 1_200_000), 1_200_000);
+  });
+
+  // ── Non-clone (5s warmup, fast-fail preserved) ───────────────
+  it('non-clone short text PRESERVES baseTimeoutMs fast-fail (P1-1 regression guard)', () => {
+    // 10 chars * 3 / 25 = 1.2s + 5s = 6.2s; baseTimeoutMs 30s floor wins.
+    // Pre-fix bug had this as 61.2s when warmup was a single 60s for both modes.
+    assert.strictEqual(calculateTimeout('a'.repeat(10), false, 30_000), 30_000);
+  });
+
+  it('non-clone empty text uses baseTimeoutMs floor', () => {
+    assert.strictEqual(calculateTimeout('', false, 90_000), 90_000);
+  });
+
+  it('non-clone long text scales past floor', () => {
+    // 1000 chars * 3 / 25 = 120s + 5s = 125s
+    assert.strictEqual(calculateTimeout('a'.repeat(1000), false, 30_000), 125_000);
+  });
+
+  // ── P1-2 fix: hard cap on dynamic estimate ───────────────────
+  it('5000-char clone with default base is clamped to 600s hard cap', () => {
+    // 5000 * 3 / 15 = 1000s + 60s = 1060s, capped to 600s; base 30s loses.
+    // Prevents runaway timeout × VoiceBlockSynthesizer retry → 35min lockup.
+    assert.strictEqual(calculateTimeout('a'.repeat(5000), true, 30_000), 600_000);
+  });
+
+  it('10000-char non-clone with default base is clamped to 600s hard cap', () => {
+    // 10000 * 3 / 25 = 1200s + 5s = 1205s, capped to 600s.
+    assert.strictEqual(calculateTimeout('a'.repeat(10_000), false, 30_000), 600_000);
+  });
+
+  // ── Boundary ─────────────────────────────────────────────────
+  it('clone just under hard-cap threshold stays dynamic', () => {
+    // 2700 chars * 3 / 15 = 540s + 60s = 600s — exactly at cap, capped to 600s.
+    // 2690 chars: 538 * 1000 = 538s + 60s = 598s, just under cap.
+    assert.strictEqual(calculateTimeout('a'.repeat(2690), true, 30_000), 598_000);
   });
 });

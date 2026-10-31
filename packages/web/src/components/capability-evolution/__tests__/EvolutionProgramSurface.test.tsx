@@ -1,0 +1,443 @@
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';
+import { createEvolutionProgramSurface } from '@/components/workbench/real-surface-adapters';
+import { WorkspaceSurfaceVisibilityProvider } from '@/components/workbench/WorkspaceSurfaceVisibility';
+import { EvolutionProgramList, EvolutionProgramSurface } from '../EvolutionProgramSurface';
+import { useEvolutionReading } from '../evolution-reading-state';
+import { programFixture } from './evolution-fixtures';
+import { evolutionPreparationFixture } from './evolution-preparation-fixtures';
+
+const apiFetchMock = vi.fn();
+const assetFetchMock = vi.fn();
+const navigationMocks = vi.hoisted(() => ({ openInvocationTrajectory: vi.fn() }));
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: async (...args: unknown[]) => {
+    if (String(args[0]).includes('/asset-review')) {
+      assetFetchMock(...args);
+      return new Response('{}', { status: 404 });
+    }
+    const response = await apiFetchMock(...args);
+    return response instanceof Response ? response.clone() : response;
+  },
+}));
+vi.mock('@/components/workspace/trajectory/trajectory-navigation', () => ({
+  openInvocationTrajectory: navigationMocks.openInvocationTrajectory,
+}));
+
+const projection = {
+  ...programFixture(),
+  program: {
+    ...programFixture().program,
+    programId: 'evolution-program:bcc336788a7df9d6075b1efb4c0a7e68',
+    workspaceId: 'user:operator',
+    displayName: 'Video Forge',
+    objectRef: { ownerFeatureId: 'F202', ownerStateRef: 'skill:video-forge', version: 'v1' },
+    claimRef: {
+      ownerFeatureId: 'F311',
+      ownerStateRef: 'evolution-claim:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68',
+    },
+    lifecycle: 'active',
+    stage: 'constituting',
+    sequence: 1,
+    createdAt: '2026-08-31T22:00:00.000Z',
+    updatedAt: '2026-08-31T22:00:00.000Z',
+  },
+  drafts: {
+    goal: {
+      ownerFeatureId: 'F311',
+      ownerStateRef: 'evolution-goal-draft:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68',
+    },
+    measurement: {
+      ownerFeatureId: 'F267',
+      ownerStateRef: 'evolution-measurement-draft:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68',
+    },
+    economic: {
+      ownerFeatureId: 'F311',
+      ownerStateRef: 'evolution-economic-draft:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68',
+    },
+    roles: {
+      observer: {
+        ownerFeatureId: 'F267',
+        ownerStateRef: 'evolution-role-draft:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68:observer',
+      },
+      calibrator: {
+        ownerFeatureId: 'F267',
+        ownerStateRef: 'evolution-role-draft:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68:calibrator',
+      },
+    },
+  },
+  blockers: [
+    {
+      code: 'measurement_certificate_missing',
+      message: 'Measurement certificate 仍待 F267/source owner 签发。',
+      ownerFeatureId: 'F267',
+    },
+  ],
+  nextAction: { code: 'complete_constitution', label: '继续自动建制' },
+  observation: {
+    status: 'connected',
+    trajectory: {
+      ref: { ownerFeatureId: 'F299', ownerStateRef: 'inv:invocation-1' },
+      invocationId: 'invocation-1',
+      threadId: 'thread-owner',
+    },
+    connectedEyes: [
+      {
+        sourceKind: 'paw-feel-disposition',
+        ownerSurfaceRef: { ownerFeatureId: 'F278', ownerStateRef: 'paw-feel:signal-1' },
+        joinKey: 'message:message-1',
+        namedConsumerRef: { ownerFeatureId: 'F311', ownerStateRef: 'evolution-consumer:program' },
+        instrumentationRef: { ownerFeatureId: 'F278', ownerStateRef: 'instrumentation:paw-feel-v1' },
+        ownerHref: '/api/paw-feel/source/message-1',
+      },
+      {
+        sourceKind: 'human-disposition',
+        ownerSurfaceRef: { ownerFeatureId: 'F281', ownerStateRef: 'human-disposition:decision-1' },
+        joinKey: 'subject:proposal-1',
+        namedConsumerRef: { ownerFeatureId: 'F311', ownerStateRef: 'evolution-consumer:program' },
+        instrumentationRef: { ownerFeatureId: 'F281', ownerStateRef: 'instrumentation:human-disposition-v1' },
+        ownerHref: '/api/human-disposition-feedback/episodes?subjectRef=proposal-1',
+      },
+    ],
+    evidenceProofRefs: {
+      decisionProofRef: { ownerFeatureId: 'F267', ownerStateRef: 'measurement-proof:proof-1' },
+      evidenceRoleRef: { ownerFeatureId: 'F267', ownerStateRef: 'measurement-role:observer-1' },
+      consumptionProofRef: { ownerFeatureId: 'F267', ownerStateRef: 'measurement-consumption:receipt-1' },
+      optimizerExposureProofRef: { ownerFeatureId: 'F267', ownerStateRef: 'optimizer-exposure:proof-1' },
+      promotionHoldoutRef: { ownerFeatureId: 'F267', ownerStateRef: 'promotion-holdout:holdout-1' },
+    },
+    trigger: {
+      registrationRef: { ownerFeatureId: 'F192', ownerStateRef: 'eval-domain:eval:capability-evolution' },
+      channels: ['event', 'quota', 'time'],
+    },
+    nextEvaluationAt: '2026-09-06T03:00:00.000Z',
+    gaps: [],
+    hiddenOwnerPayload: 'DO NOT RENDER',
+  },
+  lineage: {
+    cycles: [{ cycle: 1, changes: [] }],
+  },
+};
+
+describe('F311 Evolution Program Workbench surface', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    apiFetchMock.mockReset();
+    assetFetchMock.mockReset();
+    useEvolutionReading.setState({ programs: {}, workspaceProgramIds: {} });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  async function renderView(view: React.ReactNode) {
+    await act(async () => root.render(view));
+  }
+
+  it('keeps the complete v2 preparation in main reading with the original source and project actions', async () => {
+    localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    const prepared = {
+      ...programFixture('instrumenting'),
+      preparation: evolutionPreparationFixture(),
+      origin: { threadId: 'thread-origin', title: '原始准备对话', createdByCatId: 'codex61-sol' },
+    };
+    const programId = prepared.program.programId;
+    const priorAttention = useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId;
+    useF307ExperienceWorkbenchStore.setState({
+      mainAreaAttentionSurfaceId: createEvolutionProgramSurface(programId).id,
+    });
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify(prepared)));
+    try {
+      await renderView(<EvolutionProgramSurface programId={programId} />);
+      const workspace = container.querySelector('[data-testid="evolution-preparation-workspace"]');
+      expect(workspace).not.toBeNull();
+      expect(workspace?.querySelectorAll('[data-preparation-section]')).toHaveLength(4);
+      expect(workspace?.textContent).toContain('草案 · 不等于验证');
+      expect(container.querySelector('a[href="/thread/thread-origin"]')).not.toBeNull();
+      const progress = [...container.querySelectorAll('details')].find(
+        (node) => node.querySelector('summary')?.textContent === '项目推进',
+      );
+      expect(progress).toBeDefined();
+      expect(progress?.textContent).toContain('请猫猫推进');
+      expect(container.querySelector('[aria-label="阅读版本"]')).toBeNull();
+    } finally {
+      await act(async () => useF307ExperienceWorkbenchStore.setState({ mainAreaAttentionSurfaceId: priorAttention }));
+      localStorage.removeItem('cat-cafe:shell-presentation');
+    }
+  });
+
+  it('names the v2 current goal stage consistently when already submitted preparation is read', async () => {
+    localStorage.setItem('cat-cafe:shell-presentation', 'v2');
+    const prepared = { ...programFixture('constituting'), preparation: evolutionPreparationFixture() };
+    const programId = prepared.program.programId;
+    useEvolutionReading.getState().update(programId, { journeyMoment: 1 });
+    const priorAttention = useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId;
+    useF307ExperienceWorkbenchStore.setState({
+      mainAreaAttentionSurfaceId: createEvolutionProgramSurface(programId).id,
+    });
+    apiFetchMock.mockResolvedValue(Response.json(prepared));
+    try {
+      await renderView(<EvolutionProgramSurface programId={programId} />);
+      expect(container.querySelector('.evolution-v2-reading-heading')?.textContent).toContain('提出目标（约定待补齐）');
+      expect(container.querySelector('[data-journey-panel="1"]')?.textContent).toContain('项目目前在提出目标');
+      expect(container.textContent).not.toContain('这里展示后续需要完成的内容');
+      expect(container.querySelector('[data-testid="evolution-preparation-workspace"]')?.textContent).toContain(
+        '已提交',
+      );
+    } finally {
+      await act(async () => useF307ExperienceWorkbenchStore.setState({ mainAreaAttentionSurfaceId: priorAttention }));
+      localStorage.removeItem('cat-cafe:shell-presentation');
+    }
+  });
+
+  it('reads the canonical projection and shows lifecycle, refs, blocker, and next action', async () => {
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify(projection), { status: 200 }));
+    await renderView(<EvolutionProgramSurface programId="evolution-program:bcc336788a7df9d6075b1efb4c0a7e68" />);
+
+    expect(container.textContent).toContain('active');
+    expect(container.textContent).toContain('constituting');
+    expect(container.textContent).toContain('skill:video-forge');
+    expect(container.textContent).toContain('measurement_certificate_missing');
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent === '继续自动建制')).toBe(
+      false,
+    );
+  });
+
+  it('shows real connected eyes, gaps, F192 timing, and owner drilldowns without copying payloads', async () => {
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify(projection), { status: 200 }));
+    await renderView(<EvolutionProgramSurface programId="evolution-program:bcc336788a7df9d6075b1efb4c0a7e68" />);
+
+    expect(container.textContent).toContain('已接眼睛');
+    expect(container.textContent).toContain('paw-feel-disposition');
+    expect(container.textContent).toContain('human-disposition');
+    expect(container.textContent).toContain('2026-09-06');
+    expect(container.textContent).toContain('event · quota · time');
+    expect(container.textContent).not.toContain('DO NOT RENDER');
+    const trajectory = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('inv:invocation-1'),
+    );
+    if (!trajectory) throw new Error('trajectory drilldown missing');
+    act(() => trajectory.click());
+    expect(navigationMocks.openInvocationTrajectory).toHaveBeenCalledWith({
+      invocationId: 'invocation-1',
+      threadId: 'thread-owner',
+    });
+    expect(container.querySelector('a[href="/api/paw-feel/source/message-1"]')).not.toBeNull();
+    expect(
+      container.querySelector('a[href="/api/human-disposition-feedback/episodes?subjectRef=proposal-1"]'),
+    ).not.toBeNull();
+  });
+
+  it('renders the attribution explanation inside the Program surface, not only as a standalone panel', async () => {
+    const attribution = {
+      schemaVersion: 1,
+      verdict: 'unresolved',
+      headline: '证据还不能确诊是哪一层出的问题。',
+      evidence: [
+        {
+          label: '本轮度量结果',
+          ownerFeatureId: 'F267',
+          ownerStateRef: 'measurement-result:evolve-video-skill:w7',
+          identity: '["owner","F267","measurement-result:evolve-video-skill:w7",null]',
+        },
+      ],
+      competingAttributions: [{ layer: 'execution', label: '执行层：被进化的对象自己', discriminating: true }],
+      notAssessedLayers: [{ layer: 'rubric', label: '尺子层（这一轮没有证据，只是没看，不等于已排除）' }],
+      confidence: { basis: 'interval', label: '有区间估计：这次结论带着可复核的置信区间。' },
+      comparability: { status: 'comparable', label: '尺子没换版，前后可以直接比。' },
+      whyNotChange: ['归因还没确诊，现在改就是碰运气。'],
+      gate: {
+        status: 'blocked',
+        blockers: [
+          {
+            code: 'intervention_card_missing',
+            label: '还没有 owner 持有的 intervention card。',
+            ownerFeatureId: 'F267',
+          },
+        ],
+      },
+    };
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ ...projection, attribution }), { status: 200 }));
+    await renderView(<EvolutionProgramSurface programId="evolution-program:bcc336788a7df9d6075b1efb4c0a7e68" />);
+
+    expect(container.querySelector('[data-testid="evolution-attribution-panel"]')).not.toBeNull();
+    expect(container.textContent).toContain('证据还不能确诊是哪一层出的问题。');
+    expect(container.textContent).toContain('现在改就是碰运气');
+    expect(container.textContent).toContain('只是没看，不等于已排除');
+    expect(container.querySelector('[data-blocker-code="intervention_card_missing"]')).not.toBeNull();
+  });
+
+  it('says the round has no evaluation yet instead of hiding the panel', async () => {
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ ...projection, attribution: null }), { status: 200 }));
+    await renderView(<EvolutionProgramSurface programId="evolution-program:bcc336788a7df9d6075b1efb4c0a7e68" />);
+
+    expect(container.textContent).toContain('这一轮还没有评估结果');
+  });
+
+  it('fails closed when an older API projection lacks the observation contract', async () => {
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ ...projection, observation: {} }), { status: 200 }));
+    await renderView(<EvolutionProgramSurface programId="evolution-program:bcc336788a7df9d6075b1efb4c0a7e68" />);
+
+    expect(container.textContent).toContain('这项进化记录暂时无法读取');
+    expect(container.textContent).not.toContain('已接眼睛');
+  });
+
+  it('sends lifecycle choices only through the Program command API', async () => {
+    apiFetchMock.mockResolvedValueOnce(new Response(JSON.stringify(projection), { status: 200 })).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          outcome: 'appended',
+          projection: { ...projection, program: { ...projection.program, lifecycle: 'paused' } },
+        }),
+        { status: 200 },
+      ),
+    );
+    await renderView(<EvolutionProgramSurface programId="evolution-program:bcc336788a7df9d6075b1efb4c0a7e68" />);
+    const pause = [...container.querySelectorAll('button')].find((button) => button.textContent === '暂停项目');
+    if (!pause) throw new Error('pause action missing');
+    await act(async () => pause.click());
+
+    expect(apiFetchMock).toHaveBeenCalledTimes(2);
+    const [path, init] = apiFetchMock.mock.calls[1] as [string, RequestInit];
+    expect(path).toBe(
+      '/api/capability-evolution/programs/evolution-program%3Abcc336788a7df9d6075b1efb4c0a7e68/commands',
+    );
+    const body = JSON.parse(String(init.body));
+    expect(body.action.type).toBe('pause');
+    expect(body.clientMessageId).toBe('workbench:pause:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68:sequence:1');
+    expect(body).not.toHaveProperty('actorRef');
+    expect(body).not.toHaveProperty('workspaceId');
+    expect(body).not.toHaveProperty('stage');
+  });
+
+  it('adopts the latest projection after a stale-sequence conflict', async () => {
+    const latest = {
+      ...projection,
+      program: { ...projection.program, lifecycle: 'paused', sequence: 2 },
+    };
+    apiFetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(projection), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ outcome: 'conflict', actualSequence: 2, projection: latest }), { status: 409 }),
+      );
+
+    await renderView(<EvolutionProgramSurface programId="evolution-program:bcc336788a7df9d6075b1efb4c0a7e68" />);
+    const pause = [...container.querySelectorAll('button')].find((button) => button.textContent === '暂停项目');
+    if (!pause) throw new Error('pause action missing');
+    await act(async () => pause.click());
+
+    expect(container.textContent).toContain('paused');
+    expect(container.textContent).toContain('sequence 2');
+    expect(container.textContent).toContain('已被其他操作更新，已同步到最新状态');
+    expect(container.querySelector('[data-notice-code="program_state_synchronized"]')).not.toBeNull();
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent === '恢复项目')).toBe(true);
+    expect(container.textContent).not.toContain('Program command failed (409)');
+  });
+
+  it('makes every canonical Program immediately discoverable on Workbench Home', async () => {
+    apiFetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ programs: [projection] }), { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify(projection), { status: 200 }));
+    const onOpenProgram = vi.fn();
+    await renderView(<EvolutionProgramList onOpenProgram={onOpenProgram} />);
+
+    const program = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Video Forge'),
+    );
+    if (!program) throw new Error('Program list item missing');
+    await act(async () => program.click());
+    const inspect = [...container.querySelectorAll('button')].find((button) => button.textContent === '展开阅读 →');
+    if (!inspect) throw new Error('Program detail review entry missing');
+    act(() => inspect.click());
+    expect(onOpenProgram.mock.calls[0]?.[0]).toBe('evolution-program:bcc336788a7df9d6075b1efb4c0a7e68');
+  });
+
+  it('distinguishes the initial canonical read from a genuinely empty workspace', async () => {
+    apiFetchMock.mockReturnValue(new Promise(() => undefined));
+    await renderView(<EvolutionProgramList onOpenProgram={() => undefined} />);
+
+    expect(container.textContent).toContain('正在读取能力进化记录');
+    expect(container.textContent).not.toContain('说“我们来进化 X”');
+  });
+
+  it('pauses background list polling while hidden and refreshes when visibility returns', async () => {
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [projection] }), { status: 200 }));
+    try {
+      await renderView(<EvolutionProgramList onOpenProgram={() => undefined} />);
+      await act(async () => vi.advanceTimersByTimeAsync(2_000));
+      expect(apiFetchMock).toHaveBeenCalledTimes(1);
+
+      visibility.mockReturnValue('visible');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        await Promise.resolve();
+      });
+      expect(apiFetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      visibility.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does zero retained-surface reads while hidden and catches up without rebuilding on return', async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify(projection), { status: 200 }));
+    const programId = 'evolution-program:bcc336788a7df9d6075b1efb4c0a7e68';
+    const render = (visible: boolean) =>
+      renderView(
+        <WorkspaceSurfaceVisibilityProvider visible={visible}>
+          <EvolutionProgramSurface programId={programId} />
+        </WorkspaceSurfaceVisibilityProvider>,
+      );
+    try {
+      await render(false);
+      await act(async () => vi.advanceTimersByTimeAsync(60_000));
+      expect(apiFetchMock).not.toHaveBeenCalled();
+      expect(assetFetchMock).not.toHaveBeenCalled();
+
+      await render(true);
+      expect(apiFetchMock).toHaveBeenCalledTimes(1);
+      expect(assetFetchMock).toHaveBeenCalledTimes(1);
+      const owner = container.querySelector('[data-testid="evolution-program-surface"]');
+
+      await act(async () => vi.advanceTimersByTimeAsync(60_000));
+      expect(apiFetchMock).toHaveBeenCalledTimes(31);
+      expect(assetFetchMock).toHaveBeenCalledTimes(61);
+
+      await render(false);
+      await act(async () => vi.advanceTimersByTimeAsync(60_000));
+      expect(apiFetchMock).toHaveBeenCalledTimes(31);
+      expect(assetFetchMock).toHaveBeenCalledTimes(61);
+      expect(container.querySelector('[data-testid="evolution-program-surface"]')).toBe(owner);
+
+      await render(true);
+      expect(apiFetchMock).toHaveBeenCalledTimes(32);
+      expect(assetFetchMock).toHaveBeenCalledTimes(62);
+      expect(container.querySelector('[data-testid="evolution-program-surface"]')).toBe(owner);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows a bounded owner-unavailable state without inventing a local Program', async () => {
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'unavailable' }), { status: 503 }));
+    await renderView(<EvolutionProgramList onOpenProgram={() => undefined} />);
+
+    expect(container.textContent).toContain('暂时无法读取进化记录');
+    expect(container.querySelectorAll('[data-testid^="capability-evolution-program-"]')).toHaveLength(0);
+  });
+});

@@ -2,9 +2,9 @@
  * F34/F066/F103: Cat Voice Configuration
  * Per-cat TTS voice settings, mirroring cat-budgets.ts pattern.
  *
- * Priority: env var override > cat-config.json voiceConfig > hardcoded defaults (by breedId)
+ * Priority: env var override > resolved runtime cat config voiceConfig > hardcoded defaults (by breedId)
  *
- * F103: Each cat (not each breed) has independent voice config in cat-config.json.
+ * F103: Each cat (not each breed) has independent voice config in the resolved runtime cat config.
  * loadVoicesFromJson() iterates ALL variants, keyed by catId — same pattern as avatar/color.
  * Hardcoded breed defaults remain as fallback for cats without explicit voiceConfig.
  *
@@ -16,9 +16,10 @@
  */
 
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { VoiceConfig } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
+import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { resolveBreedId } from './breed-resolver.js';
 import { getAllCatIdsFromConfig, loadCatConfig } from './cat-config-loader.js';
 
@@ -30,10 +31,11 @@ const VOICE_ENV_KEYS = {
 
 /**
  * Base directory for Genshin reference audio files.
- * Override with GENSHIN_VOICE_DIR env var.
+ * Priority: GENSHIN_VOICE_DIR > CHARACTER_VOICE_DIR/genshin > hardcoded default.
  */
 function genshinVoiceDir(): string {
-  return process.env.GENSHIN_VOICE_DIR ?? join(homedir(), 'projects/relay-station/GPT-SoVITS/character-models/genshin');
+  if (process.env.GENSHIN_VOICE_DIR) return process.env.GENSHIN_VOICE_DIR;
+  return join(characterVoiceBaseDir(), 'genshin');
 }
 
 /**
@@ -45,6 +47,35 @@ function characterVoiceBaseDir(): string {
   if (process.env.CHARACTER_VOICE_DIR) return process.env.CHARACTER_VOICE_DIR;
   if (process.env.GENSHIN_VOICE_DIR) return dirname(process.env.GENSHIN_VOICE_DIR);
   return join(homedir(), 'projects/relay-station/GPT-SoVITS/character-models');
+}
+
+export function isWithinBase(base: string, target: string): boolean {
+  const rel = relative(base, target);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
+function hasParentTraversalSegment(value: string): boolean {
+  return value.split(/[\\/]+/).some((segment) => segment === '..');
+}
+
+export function resolveRefAudioPath(refAudio: string, characterBaseDir: string): string {
+  if (refAudio.startsWith('/uploads/')) {
+    const uploadDir = resolve(getDefaultUploadDir(process.env.UPLOAD_DIR));
+    const uploadKey = refAudio.slice('/uploads/'.length);
+    if (hasParentTraversalSegment(uploadKey)) return join(uploadDir, 'invalid-ref');
+    const resolved = resolve(uploadDir, uploadKey);
+    return isWithinBase(uploadDir, resolved) ? resolved : join(uploadDir, 'invalid-ref');
+  }
+
+  if (isAbsolute(refAudio)) {
+    const baseDir = resolve(characterBaseDir);
+    const resolved = resolve(refAudio);
+    return isWithinBase(baseDir, resolved) ? resolved : join(baseDir, 'invalid-ref');
+  }
+
+  const baseDir = resolve(characterBaseDir);
+  const resolved = resolve(baseDir, refAudio);
+  return isWithinBase(baseDir, resolved) ? resolved : join(baseDir, 'invalid-ref');
 }
 
 /**
@@ -83,7 +114,7 @@ function buildDefaultVoices(): Record<string, VoiceConfig> {
       langCode: 'zh',
       speed: 1.0,
       refAudio: join(base, '班尼特/vo_bennett_dialog_greetingNight.wav'),
-      refText: '晚上好！今天的冒险怎么样？',
+      refText: '要不要陪我去和老爹们聊聊天啊？老冒险家的故事可有意思了！',
       instruct: '用一个超级阳光开心的小男孩语气说话，充满热情和兴奋',
       temperature: 0.3,
     },
@@ -104,7 +135,7 @@ function getDefaultVoices(): Record<string, VoiceConfig> {
   return defaultVoices;
 }
 
-// Cache from cat-config.json
+// Cache from resolved runtime cat config
 let cachedJsonVoices: Record<string, VoiceConfig> | null = null;
 
 /**
@@ -112,7 +143,7 @@ let cachedJsonVoices: Record<string, VoiceConfig> | null = null;
  * Each variant's catId gets its own voice config — same pattern as avatar/color.
  *
  * Relative refAudio paths (not starting with /) are resolved against CHARACTER_VOICE_DIR.
- * This lets cat-config.json use clean paths like "genshin/流浪者/xxx.wav".
+ * This lets cat-template.json / runtime catalog use clean paths like "genshin/流浪者/xxx.wav".
  */
 function loadVoicesFromJson(): Record<string, VoiceConfig> {
   if (cachedJsonVoices) return cachedJsonVoices;
@@ -126,8 +157,7 @@ function loadVoicesFromJson(): Record<string, VoiceConfig> {
         if (variant.voiceConfig) {
           const catId = variant.catId ?? breed.catId;
           const vc = variant.voiceConfig;
-          cachedJsonVoices[catId] =
-            vc.refAudio && !isAbsolute(vc.refAudio) ? { ...vc, refAudio: join(baseDir, vc.refAudio) } : vc;
+          cachedJsonVoices[catId] = vc.refAudio ? { ...vc, refAudio: resolveRefAudioPath(vc.refAudio, baseDir) } : vc;
         }
       }
     }
@@ -140,7 +170,7 @@ function loadVoicesFromJson(): Record<string, VoiceConfig> {
 
 /**
  * Get TTS voice config for a cat.
- * Priority: env var override (voice only) > cat-config.json > hardcoded defaults (by breedId)
+ * Priority: env var override (voice only) > resolved runtime cat config > hardcoded defaults (by breedId)
  */
 export function getCatVoice(catName: string): VoiceConfig {
   // 1. Get base voice from JSON or default (resolve breedId for DEFAULT_VOICES)

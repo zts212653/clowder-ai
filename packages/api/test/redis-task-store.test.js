@@ -6,11 +6,309 @@
 
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import { assertRedisIsolationOrThrow, cleanupPrefixedRedisKeys } from './helpers/redis-test-helpers.js';
+import {
+  assertRedisIsolationOrThrow,
+  cleanupPrefixedRedisKeys,
+  redisIsolationSkipReason,
+} from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
 
-describe('RedisTaskStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }, () => {
+class FakeRedisForTaskStore {
+  constructor(sharedState) {
+    this.hashes = sharedState?.hashes ?? new Map();
+    this.strings = sharedState?.strings ?? new Map();
+    this.sortedSets = sharedState?.sortedSets ?? new Map();
+    this.ttls = sharedState?.ttls ?? new Map();
+    this.versions = sharedState?.versions ?? new Map();
+    this.watchedVersions = null;
+    this.pairTtlTransitionCalls = 0;
+    this.failPairTtlTransition = false;
+    this.beforePairTtlTransition = null;
+  }
+
+  duplicate() {
+    return new FakeRedisForTaskStore(this);
+  }
+
+  disconnect() {}
+
+  async hset(key, value) {
+    const existing = this.hashes.get(key) ?? {};
+    this.hashes.set(key, { ...existing, ...value });
+    this.bumpVersion(key);
+    return 1;
+  }
+
+  async hgetall(key) {
+    return this.hashes.get(key) ?? {};
+  }
+
+  async get(key) {
+    return this.strings.get(key) ?? null;
+  }
+
+  async set(key, value) {
+    this.strings.set(key, value);
+    this.bumpVersion(key);
+    return 'OK';
+  }
+
+  async setnx(key, value) {
+    if (this.strings.has(key)) return 0;
+    this.strings.set(key, value);
+    this.bumpVersion(key);
+    return 1;
+  }
+
+  async eval(script, _numKeys, ...keysAndArgs) {
+    if (script.includes('F275_APPLY_TASK_BINDING_TTL')) {
+      this.pairTtlTransitionCalls += 1;
+      if (this.failPairTtlTransition) throw new Error('simulated atomic pair TTL failure');
+      const [detailKey, bindingKey, mode, ttl, expectedUpdatedAt, expectedStatus] = keysAndArgs;
+      if (this.beforePairTtlTransition) {
+        const hook = this.beforePairTtlTransition;
+        this.beforePairTtlTransition = null;
+        await hook({ detailKey, bindingKey, mode, ttl });
+      }
+      if (!this.hashes.get(detailKey)?.id) {
+        this.strings.delete(bindingKey);
+        this.ttls.delete(bindingKey);
+        return 0;
+      }
+      const current = this.hashes.get(detailKey);
+      if (current.updatedAt !== expectedUpdatedAt || current.status !== expectedStatus) return -1;
+      if (mode === 'persist') {
+        this.ttls.delete(detailKey);
+        this.ttls.delete(bindingKey);
+      } else {
+        this.ttls.set(detailKey, Number(ttl));
+        if (this.strings.has(bindingKey)) this.ttls.set(bindingKey, Number(ttl));
+      }
+      return 1;
+    }
+    if (script.includes('F275_BIND_MANAGED_WORK')) {
+      const [detailKey, bindingKey, encodedBinding] = keysAndArgs;
+      if (this.hashes.get(detailKey)?.kind !== 'pr_tracking') {
+        this.strings.delete(bindingKey);
+        this.ttls.delete(bindingKey);
+        return 0;
+      }
+      const anchorTtl = this.ttls.get(detailKey) ?? -1;
+      if (anchorTtl === 0) {
+        this.strings.delete(bindingKey);
+        this.ttls.delete(bindingKey);
+        return 0;
+      }
+      const existing = this.strings.get(bindingKey);
+      if (existing === undefined) {
+        this.strings.set(bindingKey, encodedBinding);
+        this.bumpVersion(bindingKey);
+      }
+      if (anchorTtl === -1) this.ttls.delete(bindingKey);
+      else this.ttls.set(bindingKey, anchorTtl);
+      return existing === undefined ? 1 : existing === encodedBinding ? 2 : -1;
+    }
+    if (script.includes('F310_ATOMIC_CREATE_WITH_SUBJECT')) {
+      const [subjectKey, detailKey, threadKey, kindKey, taskId, score, ...flatFields] = keysAndArgs;
+      if (this.strings.has(subjectKey)) return 0;
+      if (this.hashes.has(detailKey)) return -1;
+      const hash = {};
+      for (let i = 0; i < flatFields.length; i += 2) hash[flatFields[i]] = flatFields[i + 1];
+      this.strings.set(subjectKey, taskId);
+      this.hashes.set(detailKey, hash);
+      const threadSet = this.sortedSets.get(threadKey) ?? new Map();
+      threadSet.set(taskId, Number(score));
+      this.sortedSets.set(threadKey, threadSet);
+      const kindSet = this.sortedSets.get(kindKey) ?? new Map();
+      kindSet.set(taskId, Number(score));
+      this.sortedSets.set(kindKey, kindSet);
+      this.bumpVersion(subjectKey);
+      this.bumpVersion(detailKey);
+      this.bumpVersion(threadKey);
+      this.bumpVersion(kindKey);
+      return 1;
+    }
+    if (script.includes("redis.call('HSET'") && script.includes("redis.call('ZADD'")) {
+      // Atomic owned write: KEYS=[subject, detail, thread, kind], ARGV=[taskId, score, ...fields]
+      const [subjectKey, detailKey, threadKey, kindKey, expectedId, score, ...flatFields] = keysAndArgs;
+      if ((this.strings.get(subjectKey) ?? null) !== expectedId) return 0;
+      const hash = {};
+      for (let i = 0; i < flatFields.length; i += 2) hash[flatFields[i]] = flatFields[i + 1];
+      this.hashes.set(detailKey, { ...(this.hashes.get(detailKey) ?? {}), ...hash });
+      this.bumpVersion(detailKey);
+      const threadSet = this.sortedSets.get(threadKey) ?? new Map();
+      threadSet.set(expectedId, Number(score));
+      this.sortedSets.set(threadKey, threadSet);
+      const kindSet = this.sortedSets.get(kindKey) ?? new Map();
+      kindSet.set(expectedId, Number(score));
+      this.sortedSets.set(kindKey, kindSet);
+      return 1;
+    }
+    if (script.includes("redis.call('set'")) {
+      const [key, expectedValue, nextValue] = keysAndArgs;
+      if ((this.strings.get(key) ?? null) !== expectedValue) return 0;
+      this.strings.set(key, nextValue);
+      this.bumpVersion(key);
+      return 1;
+    }
+    if (script.includes("redis.call('del'")) {
+      const [key, expectedValue] = keysAndArgs;
+      if ((this.strings.get(key) ?? null) !== expectedValue) return 0;
+      this.strings.delete(key);
+      this.bumpVersion(key);
+      return 1;
+    }
+    throw new Error(`Unsupported eval script: ${script}`);
+  }
+
+  async zadd(key, score, member) {
+    const set = this.sortedSets.get(key) ?? new Map();
+    set.set(member, Number(score));
+    this.sortedSets.set(key, set);
+    this.bumpVersion(key);
+    return 1;
+  }
+
+  async zrange(key, start, end) {
+    const set = this.sortedSets.get(key) ?? new Map();
+    const items = [...set.entries()].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0])).map(([member]) => member);
+    const normalizedEnd = end < 0 ? items.length + end + 1 : end + 1;
+    return items.slice(start, normalizedEnd);
+  }
+
+  async zrem(key, member) {
+    const set = this.sortedSets.get(key);
+    if (!set) return 0;
+    const deleted = set.delete(member) ? 1 : 0;
+    if (deleted) this.bumpVersion(key);
+    return deleted;
+  }
+
+  async del(key) {
+    let deleted = 0;
+    deleted += this.hashes.delete(key) ? 1 : 0;
+    deleted += this.strings.delete(key) ? 1 : 0;
+    deleted += this.sortedSets.delete(key) ? 1 : 0;
+    this.ttls.delete(key);
+    if (deleted) this.bumpVersion(key);
+    return deleted;
+  }
+
+  async expire(key, ttl) {
+    this.ttls.set(key, ttl);
+    this.bumpVersion(key);
+    return 1;
+  }
+
+  async persist(key) {
+    this.ttls.delete(key);
+    this.bumpVersion(key);
+    return 1;
+  }
+
+  async watch(...keys) {
+    this.watchedVersions ??= new Map();
+    for (const key of keys) {
+      if (!this.watchedVersions.has(key)) this.watchedVersions.set(key, this.getVersion(key));
+    }
+    return 'OK';
+  }
+
+  async unwatch() {
+    this.watchedVersions = null;
+    return 'OK';
+  }
+
+  getVersion(key) {
+    return this.versions.get(key) ?? 0;
+  }
+
+  bumpVersion(key) {
+    this.versions.set(key, this.getVersion(key) + 1);
+  }
+
+  multi() {
+    const ops = [];
+    const pipeline = {
+      hset: (key, value) => {
+        ops.push(() => this.hset(key, value));
+        return pipeline;
+      },
+      zadd: (key, score, member) => {
+        ops.push(() => this.zadd(key, score, member));
+        return pipeline;
+      },
+      set: (key, value) => {
+        ops.push(() => this.set(key, value));
+        return pipeline;
+      },
+      hgetall: (key) => {
+        ops.push(() => this.hgetall(key));
+        return pipeline;
+      },
+      zrem: (key, member) => {
+        ops.push(() => this.zrem(key, member));
+        return pipeline;
+      },
+      del: (key) => {
+        ops.push(() => this.del(key));
+        return pipeline;
+      },
+      persist: (key) => {
+        ops.push(() => this.persist(key));
+        return pipeline;
+      },
+      expire: (key, ttl) => {
+        ops.push(() => this.expire(key, ttl));
+        return pipeline;
+      },
+      exec: async () => {
+        if (this.watchedVersions) {
+          for (const [key, version] of this.watchedVersions.entries()) {
+            if (this.getVersion(key) !== version) {
+              this.watchedVersions = null;
+              return null;
+            }
+          }
+        }
+        const results = [];
+        for (const op of ops) {
+          results.push([null, await op()]);
+        }
+        this.watchedVersions = null;
+        return results;
+      },
+    };
+    return pipeline;
+  }
+}
+
+function repairSubjectBeforeNextTransaction(redis, subjectKey, taskId) {
+  const duplicate = redis.duplicate.bind(redis);
+  let repaired = false;
+  redis.duplicate = () => {
+    const session = duplicate();
+    const multi = session.multi.bind(session);
+    session.multi = () => {
+      const tx = multi();
+      const exec = tx.exec.bind(tx);
+      tx.exec = async () => {
+        // Redis cannot interleave a competing writer between MULTI commands.
+        // Race before EXEC instead, so WATCH must observe the repaired binding.
+        if (!repaired) {
+          repaired = true;
+          await redis.set(subjectKey, taskId);
+        }
+        return exec();
+      };
+      return tx;
+    };
+    return session;
+  };
+}
+
+describe('RedisTaskStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisTaskStore;
   let createRedisClient;
   let redis;
@@ -122,6 +420,128 @@ describe('RedisTaskStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }, (
     const deleted2 = await store.delete('nonexistent');
     assert.equal(deleted2, false);
   });
+
+  it('allows exactly one concurrent private managed-work binding and persists it without TTL', async () => {
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#999',
+      threadId: 'test-thread-private-race',
+      title: 'PR tracking: owner/repo#999',
+      createdBy: 'codex-sol',
+      why: 'verify F275 private binding race',
+    });
+    const candidates = [
+      { workId: 'work-race-a', attemptId: 'attempt-race-a' },
+      { workId: 'work-race-b', attemptId: 'attempt-race-b' },
+    ];
+
+    const results = await Promise.allSettled(
+      candidates.map((binding) => store.bindManagedWorkBinding(task.id, binding)),
+    );
+    assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+    const winner = await store.getManagedWorkBinding(task.id);
+    assert.ok(candidates.some((candidate) => candidate.workId === winner.workId));
+    assert.equal(await redis.ttl(TaskKeys.managedWorkBinding(task.id)), -1);
+    assert.equal(JSON.stringify(await store.get(task.id)).includes(winner.workId), false);
+  });
+
+  it('atomically couples the winning managed registration with its public task mutation', async () => {
+    const candidates = [
+      {
+        binding: { workId: 'work-register-a', attemptId: 'attempt-register-a' },
+        input: {
+          kind: 'pr_tracking',
+          subjectKey: 'pr:owner/repo#1002',
+          threadId: 'thread-register-a',
+          title: 'PR tracking winner A',
+          createdBy: 'codex-sol',
+          ownerCatId: 'codex-sol',
+          userId: 'user-1',
+          why: 'candidate A',
+          automationState: { trackingInstructions: 'candidate-a-instructions' },
+        },
+      },
+      {
+        binding: { workId: 'work-register-b', attemptId: 'attempt-register-b' },
+        input: {
+          kind: 'pr_tracking',
+          subjectKey: 'pr:owner/repo#1002',
+          threadId: 'thread-register-b',
+          title: 'PR tracking winner B',
+          createdBy: 'codex-sol',
+          ownerCatId: 'codex-sol',
+          userId: 'user-1',
+          why: 'candidate B',
+          automationState: { trackingInstructions: 'candidate-b-instructions' },
+        },
+      },
+    ];
+
+    const results = await Promise.allSettled(
+      candidates.map(({ input, binding }) => store.upsertBySubjectWithManagedWorkBinding(input, binding)),
+    );
+    assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+
+    const winnerIndex = results.findIndex((result) => result.status === 'fulfilled');
+    const winner = candidates[winnerIndex];
+    const task = await store.getBySubject('pr:owner/repo#1002');
+    assert.ok(task);
+    assert.equal(task.threadId, winner.input.threadId);
+    assert.equal(task.title, winner.input.title);
+    assert.equal(task.automationState.trackingInstructions, winner.input.automationState.trackingInstructions);
+    assert.deepEqual(await store.getManagedWorkBinding(task.id), winner.binding);
+  });
+
+  it('expires private managed-work binding with its completed tracking-task anchor', async () => {
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#1000',
+      threadId: 'test-thread-private-expiry',
+      title: 'PR tracking: owner/repo#1000',
+      createdBy: 'codex-sol',
+      why: 'verify F275 private binding lifetime',
+    });
+    await store.bindManagedWorkBinding(task.id, {
+      workId: 'work-expiry',
+      attemptId: 'attempt-expiry',
+    });
+
+    await store.update(task.id, { status: 'done' });
+
+    const taskTtl = await redis.ttl(TaskKeys.detail(task.id));
+    const bindingTtl = await redis.ttl(TaskKeys.managedWorkBinding(task.id));
+    assert.ok(taskTtl > 0 && taskTtl <= 60);
+    assert.ok(bindingTtl > 0 && bindingTtl <= 60);
+    assert.ok(Math.abs(taskTtl - bindingTtl) <= 1);
+  });
+
+  it('preserves a completed tracking anchor TTL when binding after completion', async () => {
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#1001',
+      threadId: 'test-thread-private-late-bind',
+      title: 'PR tracking: owner/repo#1001',
+      createdBy: 'codex-sol',
+      why: 'verify a late private binding cannot outlive its completed anchor',
+    });
+    await store.update(task.id, { status: 'done' });
+    const taskTtlBeforeBind = await redis.ttl(TaskKeys.detail(task.id));
+
+    await store.bindManagedWorkBinding(task.id, {
+      workId: 'work-late-bind',
+      attemptId: 'attempt-late-bind',
+    });
+
+    const bindingTtl = await redis.ttl(TaskKeys.managedWorkBinding(task.id));
+    assert.ok(taskTtlBeforeBind > 0 && taskTtlBeforeBind <= 60);
+    assert.ok(bindingTtl > 0 && bindingTtl <= taskTtlBeforeBind);
+    assert.ok(taskTtlBeforeBind - bindingTtl <= 1);
+  });
 });
 
 describe('TaskStoreFactory', () => {
@@ -137,5 +557,883 @@ describe('TaskStoreFactory', () => {
     const fakeRedis = { multi: () => ({}) };
     const redisStore = createTaskStore(fakeRedis);
     assert.ok(redisStore instanceof RedisTaskStore, 'redis → RedisTaskStore');
+  });
+});
+
+describe('RedisTaskStore unit behavior', () => {
+  it('binds managed-work identity atomically, idempotently, and outside the public task hash', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+    const binding = { workId: 'work-redis-1', attemptId: 'attempt-redis-1' };
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#501',
+      threadId: 'thread-private-binding',
+      title: 'PR tracking: owner/repo#501',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+
+    assert.deepEqual(await store.bindManagedWorkBinding(task.id, binding), binding);
+    assert.deepEqual(await store.bindManagedWorkBinding(task.id, { ...binding }), binding);
+    assert.deepEqual(await store.getManagedWorkBinding(task.id), binding);
+    assert.equal(JSON.stringify(redis.hashes.get(TaskKeys.detail(task.id))).includes('work-redis-1'), false);
+    assert.equal(redis.ttls.get(TaskKeys.managedWorkBinding(task.id)), undefined);
+
+    await assert.rejects(
+      () => store.bindManagedWorkBinding(task.id, { workId: 'work-redis-2', attemptId: 'attempt-redis-2' }),
+      (error) => error?.code === 'TASK_MANAGED_WORK_BINDING_CONFLICT',
+    );
+    assert.deepEqual(await store.getManagedWorkBinding(task.id), binding);
+
+    await store.update(task.id, { status: 'done' });
+    assert.equal(redis.ttls.get(TaskKeys.detail(task.id)), 60);
+    assert.equal(redis.ttls.get(TaskKeys.managedWorkBinding(task.id)), 60);
+  });
+
+  it('applies task and private-binding lifetime changes through one atomic primitive', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#502',
+      threadId: 'thread-private-pair-ttl',
+      title: 'PR tracking: owner/repo#502',
+      why: 'verify atomic pair TTL transition',
+      createdBy: 'codex-sol',
+    });
+    await store.bindManagedWorkBinding(task.id, {
+      workId: 'work-pair-ttl',
+      attemptId: 'attempt-pair-ttl',
+    });
+    redis.pairTtlTransitionCalls = 0;
+
+    await store.update(task.id, { status: 'done' });
+
+    assert.equal(redis.pairTtlTransitionCalls, 1);
+    assert.equal(redis.ttls.get(TaskKeys.detail(task.id)), 60);
+    assert.equal(redis.ttls.get(TaskKeys.managedWorkBinding(task.id)), 60);
+
+    const failureTask = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#502-failure',
+      threadId: 'thread-private-pair-ttl-failure',
+      title: 'PR tracking pair TTL failure',
+      why: 'verify failure leaves prior lifetimes intact',
+      createdBy: 'codex-sol',
+    });
+    await store.bindManagedWorkBinding(failureTask.id, {
+      workId: 'work-pair-ttl-failure',
+      attemptId: 'attempt-pair-ttl-failure',
+    });
+    redis.failPairTtlTransition = true;
+
+    await assert.rejects(() => store.update(failureTask.id, { status: 'done' }), /simulated atomic pair TTL failure/);
+    assert.equal(redis.ttls.get(TaskKeys.detail(failureTask.id)), undefined);
+    assert.equal(redis.ttls.get(TaskKeys.managedWorkBinding(failureTask.id)), undefined);
+  });
+
+  it('does not apply a stale completion TTL after managed re-registration reopens the task', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#502-race',
+      threadId: 'thread-private-pair-ttl-race',
+      title: 'PR tracking pair TTL race',
+      why: 'verify a stale completion cannot expire a reopened task',
+      createdBy: 'codex-sol',
+    });
+    await store.bindManagedWorkBinding(task.id, {
+      workId: 'work-pair-ttl-race',
+      attemptId: 'attempt-pair-ttl-race',
+    });
+
+    redis.beforePairTtlTransition = async ({ detailKey, bindingKey }) => {
+      const completed = redis.hashes.get(detailKey);
+      redis.hashes.set(detailKey, {
+        ...completed,
+        status: 'todo',
+        updatedAt: String(Number(completed.updatedAt) + 1),
+      });
+      redis.ttls.delete(detailKey);
+      redis.ttls.delete(bindingKey);
+    };
+
+    await store.update(task.id, { status: 'done' });
+
+    assert.equal((await store.get(task.id)).status, 'todo');
+    assert.equal(redis.ttls.get(TaskKeys.detail(task.id)), undefined);
+    assert.equal(redis.ttls.get(TaskKeys.managedWorkBinding(task.id)), undefined);
+  });
+
+  it('reconciles completed pair lifetime after a same-status automation patch wins the CAS', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#502-same-status-race',
+      threadId: 'thread-private-pair-ttl-same-status-race',
+      title: 'PR tracking pair TTL same-status race',
+      why: 'verify a newer completed snapshot still receives the completed lifetime',
+      createdBy: 'codex-sol',
+    });
+    await store.bindManagedWorkBinding(task.id, {
+      workId: 'work-pair-ttl-same-status-race',
+      attemptId: 'attempt-pair-ttl-same-status-race',
+    });
+    redis.pairTtlTransitionCalls = 0;
+
+    redis.beforePairTtlTransition = async ({ detailKey }) => {
+      const completed = redis.hashes.get(detailKey);
+      const originalNow = Date.now;
+      Date.now = () => Number(completed.updatedAt) + 1;
+      try {
+        await store.patchAutomationState(task.id, {
+          ci: { lastFingerprint: 'post-completion-patch' },
+        });
+      } finally {
+        Date.now = originalNow;
+      }
+    };
+
+    await store.update(task.id, { status: 'done' });
+
+    assert.equal((await store.get(task.id)).status, 'done');
+    assert.equal(redis.pairTtlTransitionCalls, 2);
+    assert.equal(redis.ttls.get(TaskKeys.detail(task.id)), 60);
+    assert.equal(redis.ttls.get(TaskKeys.managedWorkBinding(task.id)), 60);
+  });
+
+  it('fails closed for an invalid anchor or durable binding and deletes private metadata with its task', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+    const binding = { workId: 'work-redis-3', attemptId: 'attempt-redis-3' };
+
+    assert.equal(await store.bindManagedWorkBinding('missing', binding), null);
+    const workTask = await store.create({
+      threadId: 'thread-work',
+      title: 'ordinary task',
+      why: 'not a tracking anchor',
+      createdBy: 'opus',
+    });
+    assert.equal(await store.bindManagedWorkBinding(workTask.id, binding), null);
+
+    const trackingTask = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#503',
+      threadId: 'thread-private-binding',
+      title: 'PR tracking: owner/repo#503',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+    await store.bindManagedWorkBinding(trackingTask.id, binding);
+    redis.strings.set(TaskKeys.managedWorkBinding(trackingTask.id), '{"workId":"partial"}');
+    await assert.rejects(() => store.getManagedWorkBinding(trackingTask.id), /invalid private binding/);
+
+    redis.strings.set(TaskKeys.managedWorkBinding(trackingTask.id), JSON.stringify(binding));
+    assert.equal(await store.delete(trackingTask.id), true);
+    assert.equal(await store.getManagedWorkBinding(trackingTask.id), null);
+  });
+
+  it('deletes orphaned private bindings even when task detail is already missing', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+    const binding = { workId: 'work-orphan', attemptId: 'attempt-orphan' };
+
+    const direct = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#504',
+      threadId: 'thread-orphan-direct',
+      title: 'orphan direct cleanup',
+      why: 'verify direct delete cleanup',
+      createdBy: 'codex-sol',
+    });
+    await store.bindManagedWorkBinding(direct.id, binding);
+    redis.hashes.delete(TaskKeys.detail(direct.id));
+
+    assert.equal(await store.delete(direct.id), false);
+    assert.equal(await store.getManagedWorkBinding(direct.id), null);
+
+    const byThread = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#505',
+      threadId: 'thread-orphan-bulk',
+      title: 'orphan thread cleanup',
+      why: 'verify deleteByThread cleanup',
+      createdBy: 'codex-sol',
+    });
+    await store.bindManagedWorkBinding(byThread.id, binding);
+    redis.hashes.delete(TaskKeys.detail(byThread.id));
+
+    assert.equal(await store.deleteByThread('thread-orphan-bulk'), 1);
+    assert.equal(await store.getManagedWorkBinding(byThread.id), null);
+  });
+
+  it('deletes orphaned private bindings while cleaning stale task indexes', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#506',
+      threadId: 'thread-orphan-index',
+      title: 'orphan index cleanup',
+      why: 'verify stale-index cleanup',
+      createdBy: 'codex-sol',
+    });
+    await store.bindManagedWorkBinding(task.id, {
+      workId: 'work-orphan-index',
+      attemptId: 'attempt-orphan-index',
+    });
+    redis.hashes.delete(TaskKeys.detail(task.id));
+
+    assert.deepEqual(await store.listByThread('thread-orphan-index'), []);
+    assert.equal(await store.getManagedWorkBinding(task.id), null);
+  });
+
+  it('re-registering a done pr_tracking task resets it back to todo', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    const original = await store.upsertBySubject({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#42',
+      threadId: 'thread-1',
+      title: 'PR tracking: owner/repo#42',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+    await store.update(original.id, { status: 'done' });
+
+    const reopened = await store.upsertBySubject({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#42',
+      threadId: 'thread-2',
+      title: 'PR tracking: owner/repo#42',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+
+    assert.equal(reopened.id, original.id);
+    assert.equal(reopened.threadId, 'thread-2');
+    assert.equal(reopened.status, 'todo');
+  });
+
+  it('rejects cross-thread claims of legacy subject tasks when caller has a userId', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    const original = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#43',
+      threadId: 'thread-owner',
+      title: 'Legacy PR tracking',
+      why: 'legacy task without userId',
+      createdBy: 'opus',
+      ownerCatId: 'opus',
+    });
+
+    await assert.rejects(
+      () =>
+        store.upsertBySubject({
+          kind: 'pr_tracking',
+          subjectKey: 'pr:owner/repo#43',
+          threadId: 'thread-attacker',
+          title: 'Hijacked PR tracking',
+          why: 'take over subject',
+          createdBy: 'codex',
+          ownerCatId: 'codex',
+          userId: 'user-attacker',
+        }),
+      /already owned by another user/,
+    );
+
+    const entry = await store.getBySubject('pr:owner/repo#43');
+    assert.equal(entry.id, original.id);
+    assert.equal(entry.threadId, 'thread-owner');
+    assert.equal(entry.ownerCatId, 'opus');
+    assert.equal(entry.userId, undefined);
+  });
+
+  it('does not leave a TTL on the shared thread index when active PR tracking exists', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#42',
+      threadId: 'thread-1',
+      title: 'PR tracking: owner/repo#42',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+    const work = await store.create({
+      threadId: 'thread-1',
+      title: 'follow-up task',
+      why: 'mixed thread',
+      createdBy: 'opus',
+    });
+
+    await store.update(work.id, { status: 'done' });
+
+    assert.equal(redis.ttls.get(TaskKeys.thread('thread-1')), undefined);
+    const tasks = await store.listByThread('thread-1');
+    assert.ok(tasks.some((task) => task.kind === 'pr_tracking'));
+  });
+
+  it('clears stale subject and kind indexes when the task hash has expired', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#77',
+      threadId: 'thread-7',
+      title: 'PR tracking: owner/repo#77',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+
+    redis.hashes.delete(TaskKeys.detail(task.id));
+
+    const bySubject = await store.getBySubject('pr:owner/repo#77');
+    assert.equal(bySubject, null);
+    assert.equal(redis.strings.get(TaskKeys.subject('pr:owner/repo#77')), undefined);
+
+    const byKind = await store.listByKind('pr_tracking');
+    assert.deepEqual(byKind, []);
+    const remainingKindIds = await redis.zrange(TaskKeys.kind('pr_tracking'), 0, -1);
+    assert.deepEqual(remainingKindIds, []);
+
+    const byThread = await store.listByThread('thread-7');
+    assert.deepEqual(byThread, []);
+    const remainingThreadIds = await redis.zrange(TaskKeys.thread('thread-7'), 0, -1);
+    assert.deepEqual(remainingThreadIds, []);
+  });
+
+  it('does not delete a repaired subject mapping during stale cleanup', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    const staleTaskId = 'task-stale';
+    const freshTaskId = 'task-fresh';
+    redis.strings.set(TaskKeys.subject('pr:owner/repo#88'), staleTaskId);
+    redis.hashes.set(TaskKeys.detail(freshTaskId), {
+      id: freshTaskId,
+      kind: 'pr_tracking',
+      threadId: 'thread-8',
+      subjectKey: 'pr:owner/repo#88',
+      title: 'PR tracking: owner/repo#88',
+      ownerCatId: '',
+      status: 'todo',
+      why: 'track pr',
+      createdBy: 'opus',
+      createdAt: '1',
+      updatedAt: '1',
+      userId: '',
+    });
+
+    const originalHgetall = redis.hgetall.bind(redis);
+    let repaired = false;
+    redis.hgetall = async (key) => {
+      if (key === TaskKeys.detail(staleTaskId) && !repaired) {
+        repaired = true;
+        redis.strings.set(TaskKeys.subject('pr:owner/repo#88'), freshTaskId);
+        return {};
+      }
+      return originalHgetall(key);
+    };
+
+    const result = await store.getBySubject('pr:owner/repo#88');
+    assert.equal(result, null);
+    assert.equal(redis.strings.get(TaskKeys.subject('pr:owner/repo#88')), freshTaskId);
+  });
+
+  it('recomputes TTL for the previous thread index when a tracked PR moves threads', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    await store.upsertBySubject({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#99',
+      threadId: 'thread-old',
+      title: 'PR tracking: owner/repo#99',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+    const oldThreadWork = await store.create({
+      threadId: 'thread-old',
+      title: 'old thread follow-up',
+      why: 'cleanup',
+      createdBy: 'opus',
+    });
+    await store.update(oldThreadWork.id, { status: 'done' });
+    assert.equal(redis.ttls.get(TaskKeys.thread('thread-old')), undefined);
+
+    await store.upsertBySubject({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#99',
+      threadId: 'thread-new',
+      title: 'PR tracking: owner/repo#99',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+
+    assert.equal(redis.ttls.get(TaskKeys.thread('thread-old')), 60);
+    assert.equal(redis.ttls.get(TaskKeys.thread('thread-new')), undefined);
+  });
+
+  it('recomputes thread TTL after deleting the last active pr_tracking task', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    const prTask = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#321',
+      threadId: 'thread-delete',
+      title: 'PR tracking: owner/repo#321',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+    const doneWork = await store.create({
+      threadId: 'thread-delete',
+      title: 'done work',
+      why: 'mixed thread',
+      createdBy: 'opus',
+    });
+    await store.update(doneWork.id, { status: 'done' });
+    assert.equal(redis.ttls.get(TaskKeys.thread('thread-delete')), undefined);
+
+    const deleted = await store.delete(prTask.id);
+    assert.equal(deleted, true);
+    assert.equal(redis.ttls.get(TaskKeys.thread('thread-delete')), 60);
+  });
+
+  it('does not conditionally move a task after its thread has changed', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#802',
+      threadId: 'thread-old',
+      title: 'PR tracking: owner/repo#802',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+
+    await store.update(task.id, { threadId: 'thread-new' });
+    const staleMove = await store.updateIfThreadId(task.id, 'thread-old', { threadId: 'thread-repair' });
+
+    assert.equal(staleMove, null);
+    const current = await store.get(task.id);
+    assert.equal(current?.threadId, 'thread-new');
+    assert.deepEqual(await redis.zrange(TaskKeys.thread('thread-repair'), 0, -1), []);
+    assert.deepEqual(await redis.zrange(TaskKeys.thread('thread-new'), 0, -1), [task.id]);
+  });
+
+  it('retries conditional thread moves after a watched hash conflict', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#803',
+      threadId: 'thread-old',
+      title: 'PR tracking: owner/repo#803',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+
+    const originalDuplicate = redis.duplicate.bind(redis);
+    let injectedConflict = false;
+    redis.duplicate = () => {
+      const session = originalDuplicate();
+      const originalMulti = session.multi.bind(session);
+      session.multi = () => {
+        const pipeline = originalMulti();
+        const originalExec = pipeline.exec.bind(pipeline);
+        pipeline.exec = async () => {
+          if (!injectedConflict) {
+            injectedConflict = true;
+            await redis.hset(TaskKeys.detail(task.id), { title: 'concurrent title update' });
+          }
+          return originalExec();
+        };
+        return pipeline;
+      };
+      return session;
+    };
+
+    const moved = await store.updateIfThreadId(task.id, 'thread-old', { threadId: 'thread-repair' });
+
+    assert.equal(moved?.threadId, 'thread-repair');
+    assert.equal(moved?.title, 'concurrent title update', 'retry must preserve the concurrently written task hash');
+    assert.deepEqual(await redis.zrange(TaskKeys.thread('thread-old'), 0, -1), []);
+    assert.deepEqual(await redis.zrange(TaskKeys.thread('thread-repair'), 0, -1), [task.id]);
+  });
+
+  it('does not delete a repaired subject mapping when deleting a task', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    const staleTask = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#500',
+      threadId: 'thread-delete-race',
+      title: 'PR tracking: owner/repo#500',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+
+    const freshTaskId = 'task-fresh-delete';
+    redis.hashes.set(TaskKeys.detail(freshTaskId), {
+      id: freshTaskId,
+      kind: 'pr_tracking',
+      threadId: 'thread-delete-race',
+      subjectKey: 'pr:owner/repo#500',
+      title: 'PR tracking: owner/repo#500',
+      ownerCatId: '',
+      status: 'todo',
+      why: 'track pr',
+      createdBy: 'opus',
+      createdAt: '2',
+      updatedAt: '2',
+      userId: '',
+    });
+
+    repairSubjectBeforeNextTransaction(redis, TaskKeys.subject('pr:owner/repo#500'), freshTaskId);
+
+    const deleted = await store.delete(staleTask.id);
+    assert.equal(deleted, true);
+
+    const bySubject = await store.getBySubject('pr:owner/repo#500');
+    assert.equal(bySubject?.id, freshTaskId);
+  });
+
+  it('does not delete a repaired subject mapping when deleting a thread', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    const staleTask = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#700',
+      threadId: 'thread-delete-by-thread',
+      title: 'PR tracking: owner/repo#700',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+
+    const freshTaskId = 'task-fresh-delete-by-thread';
+    redis.hashes.set(TaskKeys.detail(freshTaskId), {
+      id: freshTaskId,
+      kind: 'pr_tracking',
+      threadId: 'thread-fresh',
+      subjectKey: 'pr:owner/repo#700',
+      title: 'PR tracking: owner/repo#700',
+      ownerCatId: '',
+      status: 'todo',
+      why: 'track pr',
+      createdBy: 'opus',
+      createdAt: '2',
+      updatedAt: '2',
+      userId: '',
+    });
+
+    repairSubjectBeforeNextTransaction(redis, TaskKeys.subject('pr:owner/repo#700'), freshTaskId);
+
+    const deleted = await store.deleteByThread('thread-delete-by-thread');
+    assert.equal(deleted, 1);
+
+    const bySubject = await store.getBySubject('pr:owner/repo#700');
+    assert.equal(bySubject?.id, freshTaskId);
+  });
+
+  it('retries when the claimed task hash is temporarily missing before treating it as orphan', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    const existingTaskId = 'task-inflight';
+    redis.strings.set(TaskKeys.subject('pr:owner/repo#124'), existingTaskId);
+    redis.hashes.set(TaskKeys.detail(existingTaskId), {
+      id: existingTaskId,
+      kind: 'pr_tracking',
+      threadId: 'thread-existing',
+      subjectKey: 'pr:owner/repo#124',
+      title: 'PR tracking: owner/repo#124',
+      ownerCatId: '',
+      status: 'todo',
+      why: 'track pr',
+      createdBy: 'opus',
+      createdAt: '1',
+      updatedAt: '1',
+      userId: '',
+    });
+
+    const originalHgetall = redis.hgetall.bind(redis);
+    let firstLookup = true;
+    redis.hgetall = async (key) => {
+      if (key === TaskKeys.detail(existingTaskId) && firstLookup) {
+        firstLookup = false;
+        return {};
+      }
+      return originalHgetall(key);
+    };
+
+    const result = await store.upsertBySubject({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#124',
+      threadId: 'thread-new',
+      title: 'PR tracking: owner/repo#124',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+
+    assert.equal(result.id, existingTaskId);
+    assert.equal(redis.strings.get(TaskKeys.subject('pr:owner/repo#124')), existingTaskId);
+    const kindIds = await redis.zrange(TaskKeys.kind('pr_tracking'), 0, -1);
+    assert.deepEqual(kindIds, [existingTaskId]);
+  });
+
+  it('preserves concurrent automationState subtree patches', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#800',
+      threadId: 'thread-automation-race',
+      title: 'PR tracking: owner/repo#800',
+      why: 'track pr',
+      createdBy: 'opus',
+      automationState: {
+        ci: { headSha: 'sha-old', lastFingerprint: 'ci-old' },
+        conflict: { mergeState: 'MERGEABLE' },
+      },
+    });
+
+    const originalDuplicate = redis.duplicate.bind(redis);
+    let injected = false;
+    redis.duplicate = () => {
+      const session = originalDuplicate();
+      const originalHgetall = session.hgetall.bind(session);
+      session.hgetall = async (key) => {
+        if (key === TaskKeys.detail(task.id) && !injected) {
+          injected = true;
+          const snapshot = await originalHgetall(key);
+          await redis.hset(key, {
+            automationState: JSON.stringify({
+              ci: { headSha: 'sha-old', lastFingerprint: 'ci-old' },
+              conflict: { mergeState: 'CONFLICTING', lastFingerprint: 'conflict-new' },
+            }),
+            updatedAt: String(task.updatedAt + 1),
+          });
+          return snapshot;
+        }
+        return originalHgetall(key);
+      };
+      return session;
+    };
+
+    const updated = await store.patchAutomationState(task.id, {
+      ci: { lastFingerprint: 'ci-new', headSha: 'sha-new' },
+    });
+
+    assert.equal(updated?.automationState?.ci?.lastFingerprint, 'ci-new');
+    assert.equal(updated?.automationState?.conflict?.lastFingerprint, 'conflict-new');
+    assert.equal(updated?.automationState?.conflict?.mergeState, 'CONFLICTING');
+  });
+
+  it('does not let an unbound upsert rewrite a concurrent atomic create winner', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    let releaseFirstClaim;
+    let markFirstClaimEntered;
+    const firstClaimEntered = new Promise((resolve) => {
+      markFirstClaimEntered = resolve;
+    });
+    const firstClaimBlocked = new Promise((resolve) => {
+      releaseFirstClaim = resolve;
+    });
+    const originalEval = redis.eval.bind(redis);
+    let blocked = false;
+    redis.eval = async (script, numKeys, ...keysAndArgs) => {
+      if (!blocked && script.includes('F310_ATOMIC_CREATE_WITH_SUBJECT')) {
+        blocked = true;
+        markFirstClaimEntered();
+        await firstClaimBlocked;
+      }
+      return originalEval(script, numKeys, ...keysAndArgs);
+    };
+
+    const first = store.upsertBySubject({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#801',
+      threadId: 'thread-a',
+      title: 'PR tracking: owner/repo#801',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+
+    await firstClaimEntered;
+    assert.equal(redis.strings.get(TaskKeys.subject('pr:owner/repo#801')), undefined);
+
+    const secondTask = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#801',
+      threadId: 'thread-b',
+      title: 'PR tracking: owner/repo#801',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+
+    releaseFirstClaim();
+    await assert.rejects(first, (error) => error?.code === 'TASK_SUBJECT_ALREADY_EXISTS');
+
+    const bySubject = await store.getBySubject('pr:owner/repo#801');
+    assert.equal(bySubject?.id, secondTask.id);
+    assert.equal(bySubject?.threadId, 'thread-b');
+
+    const byKind = await store.listByKind('pr_tracking');
+    assert.deepEqual(
+      byKind.map((task) => task.id),
+      [secondTask.id],
+      'losing upsert must not leave a sibling pr_tracking row behind',
+    );
+    assert.deepEqual(await store.listByThread('thread-a'), []);
+  });
+
+  it('upsertBySubject with lower cursor values does not regress existing cursors (I5 — cursor anti-regression)', async () => {
+    // I5 invariant: upsertBySubject on an existing task must never overwrite already-advanced
+    // issue cursors with lower seed values (e.g. from a re-routing event with stale fetchCommentCursor).
+    //
+    // Bug: mergeAutomationState used { ...existing?.issue, ...patch.issue } — since patch.issue
+    // fields come last in the spread, they OVERWRITE existing cursor values even when lower.
+    // A re-routing with fetchCommentCursor=50 on a task with lastCommentCursor=100 would regress.
+    //
+    // Fix: Math.max semantics for lastCommentCursor and lastDeliveredCursor during merge.
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 0 });
+
+    // First upsert: create task with advanced cursors (simulating a task that has been polling for a while)
+    await store.upsertBySubject({
+      kind: 'issue_tracking',
+      subjectKey: 'issue:owner/repo#900',
+      threadId: 'thread-i5',
+      title: 'Issue tracking: owner/repo#900',
+      why: 'track issue',
+      createdBy: 'system',
+      automationState: { issue: { lastCommentCursor: 100, lastDeliveredCursor: 90 } },
+    });
+
+    // Second upsert: re-routing fires with a stale seed (lower cursor values)
+    // This simulates a duplicate case.routed event where fetchCommentCursor returned a stale value.
+    const result = await store.upsertBySubject({
+      kind: 'issue_tracking',
+      subjectKey: 'issue:owner/repo#900',
+      threadId: 'thread-i5',
+      title: 'Issue tracking: owner/repo#900',
+      why: 'track issue re-routed',
+      createdBy: 'system',
+      automationState: { issue: { lastCommentCursor: 50, lastDeliveredCursor: 50 } },
+    });
+
+    // BUG: without fix, result.automationState.issue.lastCommentCursor would be 50 (regressed)
+    // FIX: cursors must remain at Math.max(existing, patch) = max(100, 50) = 100 and max(90, 50) = 90
+    assert.ok(result.automationState?.issue, 'automationState.issue must be present after re-upsert');
+    assert.strictEqual(
+      result.automationState.issue.lastCommentCursor,
+      100,
+      'lastCommentCursor must NOT be regressed to 50 — existing 100 must be preserved (I5)',
+    );
+    assert.strictEqual(
+      result.automationState.issue.lastDeliveredCursor,
+      90,
+      'lastDeliveredCursor must NOT be regressed to 50 — existing 90 must be preserved (I5)',
+    );
+  });
+
+  it('upsertBySubject preserves independent review cursor monotonicity', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 0 });
+
+    await store.upsertBySubject({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#901',
+      threadId: 'thread-review-cursors',
+      title: 'PR tracking: owner/repo#901',
+      why: 'track review',
+      createdBy: 'system',
+      automationState: {
+        review: {
+          lastInlineCommentCursor: 300,
+          lastConversationCommentCursor: 500,
+          lastDecisionCursor: 400,
+        },
+      },
+    });
+
+    const result = await store.upsertBySubject({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#901',
+      threadId: 'thread-review-cursors',
+      title: 'PR tracking: owner/repo#901',
+      why: 'stale registration',
+      createdBy: 'system',
+      automationState: {
+        review: {
+          lastInlineCommentCursor: 30,
+          lastConversationCommentCursor: 50,
+          lastDecisionCursor: 40,
+        },
+      },
+    });
+
+    assert.equal(result.automationState.review.lastInlineCommentCursor, 300);
+    assert.equal(result.automationState.review.lastConversationCommentCursor, 500);
+    assert.equal(result.automationState.review.lastDecisionCursor, 400);
   });
 });

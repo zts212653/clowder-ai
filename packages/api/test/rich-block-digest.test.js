@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { digestRichBlocks } from '../dist/domains/cats/services/agents/routing/route-helpers.js';
-import { safeParseExtra } from '../dist/domains/cats/services/stores/redis/redis-message-parsers.js';
+import {
+  safeParseContentBlocks,
+  safeParseExtra,
+} from '../dist/domains/cats/services/stores/redis/redis-message-parsers.js';
 
 describe('digestRichBlocks', () => {
   it('returns content unchanged when no extra.rich', () => {
@@ -131,6 +134,65 @@ describe('digestRichBlocks', () => {
   });
 });
 
+describe('safeParseContentBlocks', () => {
+  const attachmentBlock = {
+    type: 'context_attachment',
+    attachment: {
+      v: 1,
+      id: 'ctx-thread-1',
+      kind: 'thread',
+      threadId: 'thread_abc123',
+      title: 'F063 Context Attachments',
+    },
+  };
+
+  it('preserves a valid context attachment through the Redis parser', () => {
+    assert.deepEqual(safeParseContentBlocks(JSON.stringify([{ type: 'text', text: 'inspect' }, attachmentBlock])), [
+      { type: 'text', text: 'inspect' },
+      attachmentBlock,
+    ]);
+  });
+
+  it('preserves canonical persisted upload images alone and beside context attachments', () => {
+    const imageBlock = { type: 'image', url: '/uploads/8f4c2a0d-quote.png', alt: 'uploaded evidence' };
+
+    assert.deepEqual(safeParseContentBlocks(JSON.stringify([imageBlock])), [imageBlock]);
+    assert.deepEqual(safeParseContentBlocks(JSON.stringify([imageBlock, attachmentBlock])), [
+      imageBlock,
+      attachmentBlock,
+    ]);
+  });
+
+  it('preserves canonical persisted generic files beside context attachments', () => {
+    const fileBlock = {
+      type: 'file',
+      url: '/uploads/evidence.pdf',
+      fileName: 'evidence.pdf',
+      mimeType: 'application/pdf',
+      fileSize: 42,
+    };
+
+    assert.deepEqual(safeParseContentBlocks(JSON.stringify([fileBlock, attachmentBlock])), [
+      fileBlock,
+      attachmentBlock,
+    ]);
+  });
+
+  it('fails closed when a stored context attachment violates the shared contract', () => {
+    assert.equal(
+      safeParseContentBlocks(
+        JSON.stringify([
+          {
+            ...attachmentBlock,
+            attachment: { ...attachmentBlock.attachment, unexpected: 'identity-bypass' },
+          },
+        ]),
+      ),
+      undefined,
+    );
+  });
+});
+
 describe('safeParseExtra', () => {
   it('returns undefined for empty/null', () => {
     assert.equal(safeParseExtra(undefined), undefined);
@@ -188,6 +250,26 @@ describe('safeParseExtra', () => {
 
   it('ignores stream with non-string invocationId', () => {
     const raw = JSON.stringify({ stream: { invocationId: 123 } });
+    assert.equal(safeParseExtra(raw), undefined);
+  });
+
+  // Fix: context_briefing systemKind must survive Redis round-trip for API filtering
+  it('preserves systemKind context_briefing through round-trip', () => {
+    const raw = JSON.stringify({ systemKind: 'context_briefing' });
+    const result = safeParseExtra(raw);
+    assert.ok(result, 'context_briefing extra should not return undefined');
+    assert.equal(result.systemKind, 'context_briefing');
+  });
+
+  it('preserves systemKind a2a_routing through round-trip (existing behavior)', () => {
+    const raw = JSON.stringify({ systemKind: 'a2a_routing' });
+    const result = safeParseExtra(raw);
+    assert.ok(result, 'a2a_routing extra should not return undefined');
+    assert.equal(result.systemKind, 'a2a_routing');
+  });
+
+  it('ignores unknown systemKind values', () => {
+    const raw = JSON.stringify({ systemKind: 'unknown_kind' });
     assert.equal(safeParseExtra(raw), undefined);
   });
 });

@@ -4,6 +4,7 @@ related_features: [F117]
 topics: [message, queue, delivery]
 doc_kind: note
 created: 2026-02-26
+tips_exempt: 2026-09-03 ADR-043 retirement updates the existing Queue delivery contract without adding a new user action or discoverable capability
 ---
 
 # F039: 消息排队投递 — 用户操作三模式
@@ -12,8 +13,10 @@ created: 2026-02-26
 > **Created**: 2026-02-26
 > **Completed**: 2026-02-28
 
+> ⚠️ **队列内核设计已于 2026-09-02 收敛。** 本文档中关于队列条目状态、per-target 投递簿记与 Steer 预留的描述反映的是收敛前的实现。当前设计真相源：[ADR-043](../decisions/043-queue-durable-single-ledger.md) 与 [F117 Phase D](F117-message-delivery-lifecycle.md)。本文档保留作为演进历史。
+
 ## Why
-- 2026-02-26 team lead口述
+- 2026-02-26 operator口述
 
 ## What
 - **F39**: 猫在跑时支持排队发送/强制发送/取消三模式。InvocationQueue per-thread FIFO + scopeKey 用户隔离 + 同源合并 + 前端 QueuePanel + cancel 后暂停管理。Maine Coon R1→R8 放行。优先级在 #97 3c 之前（队列是 3c 的基础设施）。需求 · 技术 plan。
@@ -27,7 +30,7 @@ created: 2026-02-26
 - **Related**: 无
 - 无显式依赖声明
 
-## 已知 Bug / UX 改进（2026-02-27 team lead发现）
+## 已知 Bug / UX 改进（2026-02-27 operator发现）
 
 ### Bug 1: F5 刷新后队列消息状态丢失
 - **复现**：消息在队列中（queued/processing） → 按 F5 刷新 → 消息显示为"已发送"
@@ -53,11 +56,11 @@ created: 2026-02-26
 - **描述**：Codex 原生队列有 "Steer" 按钮：当有消息在消息队列里时，把其中一条“拉出来”立即处理（弹窗 1/2）
 - **状态**：✅ 已实现为独立 Feature **F047**（PR #101）
 
-## Out of Scope / 后续能力（不阻塞 F039）
+## 后续演进（已由 ADR-043 完成）
 
 ### 队列持久化到 Redis（进程重启不丢队列）
-- **现状**：队列内存态，进程重启会丢失“排队中”的条目（消息正文仍在 MessageStore，可见但不再自动执行）。
-- **备注**：若要做，需要同时定义“重启恢复语义”（包括：in-flight invocation 的 orphan 处理、processing 条目的回滚/重试、pause 状态恢复等）。
+- **当前**：Queue 已是按 thread 独立持久化的有序 ledger；启动直接 hydrate active rows，不再从 Message 重建。
+- **终态语义**：失败、取消、中断由 response lifecycle / History dispatchRef 保存终局，不写 Queue terminal receipt，不会把已出队消息塞回队列。详见 ADR-043。
 
 ## Risk
 | 风险 | 缓解 |

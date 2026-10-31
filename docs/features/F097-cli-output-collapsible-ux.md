@@ -12,15 +12,15 @@ created: 2026-03-11
 
 ## Why
 
-team experience（2026-03-11 立项）：
+operator experience（2026-03-11 立项）：
 
 > "我们的气泡 UX 我想优化一下，我们能做到 Claude Code 的那个动画效果吗？就是使用 tools 的时候他会展开，然后这个 tool 调用完收起来。一个大气泡这里心里话改成 CLI 输出？... 然后这个 CLI 输出里嵌套 tools 和你的回答，好像会更清晰知道你们在干啥"
 
-team lead runtime 实测后补充（2026-03-11 08:06）：
+operator runtime 实测后补充（2026-03-11 08:06）：
 
 > "我想要这一块也能统一折叠起来！我想把你的全部 tools 折叠起来！！！你 tools 执行完了要变成原本的设计啊！是你这个 feat 之前的那种——这里 tools 变成 1 行！然后我能展开全部工具调用！再点击某个工具调用查看细节这种！自动收起来啊！！"
 
-### team lead要的完整体验（三层折叠）
+### operator要的完整体验（三层折叠）
 
 ```
 第 1 层：CLI 输出块整体
@@ -61,12 +61,12 @@ team lead runtime 实测后补充（2026-03-11 08:06）：
 
 **关键**：done 时 tools 默认折叠成 1 行，但 stdout 在 CLI 块展开时始终可见。用户不需要展开 tools 就能看到猫说了什么。
 
-### team lead痛点（按严重程度）
+### operator痛点（按严重程度）
 
 1. **tools 占满屏** — 9 个工具调用全展开，一屏看不完，找不到猫的回复
 2. **颜色和设计稿不匹配** — `bg-black/75` overlay 黑乎乎，设计稿是 `#1E293B` 干净深蓝
 3. **Markdown 不渲染** — `**粗体**` 显示原始星号
-4. **CLI 输出全英文** — team lead要过一下脑子才知道猫做到哪了
+4. **CLI 输出全英文** — operator要过一下脑子才知道猫做到哪了
 5. **Thinking 位置** — 应在 CLI 上方（先推理再执行）
 6. **内容不换行** — 挤在一起
 
@@ -169,7 +169,7 @@ Before:                              After:
 
 **Rename scope**：Phase A 只改 runtime chat UI（`ChatMessage.tsx` 及新建 `CliOutputBlock.tsx`）；`story-export`、课件、archive 里的"心里话"先不改，避免 scope 膨胀。
 
-### Phase B: 消息聚合 + 时序穿插（可选，team lead确认后再做）
+### Phase B: 消息聚合 + 时序穿插（可选，operator确认后再做）
 
 - **ChatContainer invocation cluster**：callback + stream 合并为一张卡（需要在 callback message 补 `invocationId` 关联键）
 - **真时序穿插**：后端补统一 `cliEvents[]` 数据模型，前端按时间轴渲染 tool + text 交替
@@ -223,16 +223,16 @@ Before:                              After:
 | KD-9 | CliOutputBlock 接口面向终态（统一 CliEvent[] 时序流） | 家规 P1：终态基座不是脚手架。Phase A 前端适配，Phase B 零组件改动 | 2026-03-11 |
 | KD-10 | 全部 SVG icon，禁止 emoji | F056 四大宪章"猫咖隐喻：不堆砌猫 emoji" + KD-8 禁硬编码。共享可见性用猫爪 SVG | 2026-03-11 |
 
-## team lead反馈 + 反思（2026-03-11 Phase A 后）
+## operator反馈 + 反思（2026-03-11 Phase A 后）
 
-### team lead反馈（runtime 实测）
+### operator反馈（runtime 实测）
 
 1. **颜色：黑乎乎一坨** — `bg-black/75` overlay 在品种色气泡上产生浑浊黑色，和设计稿的 `#1E293B`（slate-800）干净深蓝差距巨大
 2. **Markdown 不渲染** — CLI 输出 stdout 区直接 `join('\n')` 纯文本，`**粗体**` 显示星号原文
 3. **Thinking 位置** — Thinking 应在 CLI 输出上方（先推理再执行）
 4. **内容不换行** — 内容全挤在一起
 5. **Tools 独立折叠** — 收起全部 tools 调用但保留 CLI 输出时体验不闭环
-6. **CLI 输出语言** — stdout 全是英文，team lead要过一下脑子才知道做到哪了
+6. **CLI 输出语言** — stdout 全是英文，operator要过一下脑子才知道做到哪了
 
 ### Ragdoll反思
 
@@ -242,8 +242,8 @@ Phase A 写完代码 → review → merge，全程没有拿 runtime 截图和 Pe
 
 **具体错误：**
 
-1. **瞎猜修 bug** — team lead说"黑乎乎"，我没查设计稿就用 `bg-black/10`（浅色叠加）修，方向完全反了。然后又改成 `bg-black/75`，还是猜的。正确做法：打开 .pen 文件读 `fill` 属性值（`#1E293B`），一查就知道是 slate-800
-2. **误提交 875 文件** — stash pop 有冲突，没检查 staging area 就 commit，把team lead工作目录的脏文件全提交了。虽然立刻 revert 了但 git history 多了两个废 commit
+1. **瞎猜修 bug** — operator说"黑乎乎"，我没查设计稿就用 `bg-black/10`（浅色叠加）修，方向完全反了。然后又改成 `bg-black/75`，还是猜的。正确做法：打开 .pen 文件读 `fill` 属性值（`#1E293B`），一查就知道是 slate-800
+2. **误提交 875 文件** — stash pop 有冲突，没检查 staging area 就 commit，把operator工作目录的脏文件全提交了。虽然立刻 revert 了但 git history 多了两个废 commit
 3. **没走 debugging skill** — 家规写了"遇到 bug 必须加载 debugging skill"，我看到"md 不渲染"就直接改，没做根因调查
 4. **设计稿是真相源** — 设计稿里每个颜色值（#1E293B, #22D3EE, #7C3AED, #334155）都是明确的，不需要猜。以后视觉问题第一步永远是 `batch_get` 读设计稿节点属性
 
@@ -257,9 +257,9 @@ Phase A 写完代码 → review → merge，全程没有拿 runtime 截图和 Pe
 | `825456b5` | tools 折叠按钮更醒目 + 折叠态提示 | #1 (部分) |
 | `8200075e` | tools 执行完自动折叠成 1 行 + streaming 时展开 | #1 (核心) |
 
-### 第二轮反思（2026-03-11 09:45，被team lead骂醒）
+### 第二轮反思（2026-03-11 09:45，被operator骂醒）
 
-**team experience**："你把你的反思写过写到你的f97 md里...你先告诉我不要改了 先反思"
+**operator experience**："你把你的反思写过写到你的f97 md里...你先告诉我不要改了 先反思"
 
 **核心问题：有 Pencil skill + batch_get 数据，写出来的代码还是和设计稿不一样。**
 
@@ -289,14 +289,14 @@ Phase A 写完代码 → review → merge，全程没有拿 runtime 截图和 Pe
 4. 先 1:1 还原视觉，再叠加交互逻辑（折叠/auto-collapse）
 5. SVG 用 lucide 官方 path，不自己画
 
-### team lead要的调整（和设计稿的差异）
+### operator要的调整（和设计稿的差异）
 
-设计稿是基础，在设计稿基础上team lead要求的调整：
+设计稿是基础，在设计稿基础上operator要求的调整：
 
-1. **Thinking 布局** — 设计稿里 Thinking 是轻量 disclosure row（无背景色块）。team lead要求：**Thinking 和 CLI 保持一致的深色面板**，有 🧠 Brain SVG。
-2. **Tools 三层折叠** — 设计稿是静态展开的。team lead要求：tools 区可整体折叠成 1 行 + 单个 tool 可展开看细节。
-3. **深色浅 10-20%** — 设计稿 `#1E293B`，team lead要浅 10-20%（约 `#283548`）。
-4. **标签英文** — 设计稿用中文（"CLI 输出"/"已完成"），team lead要英文（"CLI Output"/"done"）。
+1. **Thinking 布局** — 设计稿里 Thinking 是轻量 disclosure row（无背景色块）。operator要求：**Thinking 和 CLI 保持一致的深色面板**，有 🧠 Brain SVG。
+2. **Tools 三层折叠** — 设计稿是静态展开的。operator要求：tools 区可整体折叠成 1 行 + 单个 tool 可展开看细节。
+3. **深色浅 10-20%** — 设计稿 `#1E293B`，operator要浅 10-20%（约 `#283548`）。
+4. **标签英文** — 设计稿用中文（"CLI 输出"/"已完成"），operator要英文（"CLI Output"/"done"）。
 5. **品种色 accent** — 设计稿 hardcode 紫色（`#7C3AED`），需要改成 breedColor 动态传入。
 
 **不该改的**（设计稿的巧思必须保留）：
@@ -305,9 +305,9 @@ Phase A 写完代码 → review → merge，全程没有拿 runtime 截图和 Pe
 - 颜色 token 全部精确值（#22D3EE check、#E2E8F0 tool name、#64748B detail、#4ADE80 success、#CBD5E1 stdout 等）
 - 布局间距（padding、gap、cornerRadius 等）
 
-### 第三轮反思（2026-03-11 10:09，team lead三图对比）
+### 第三轮反思（2026-03-11 10:09，operator三图对比）
 
-**team lead给了三张图**：① 我的实现（runtime）② 我画的设计稿（完成态）③ 我画的设计稿（streaming 态）
+**operator给了三张图**：① 我的实现（runtime）② 我画的设计稿（完成态）③ 我画的设计稿（streaming 态）
 
 **图1（实现）的问题——和图2/图3（设计）的 gap**：
 
@@ -332,28 +332,28 @@ Phase A 写完代码 → review → merge，全程没有拿 runtime 截图和 Pe
 2. 如果原始 label 无 args（如 `opus → Bash`），至少显示正确的工具名 `Bash`
 3. tool_result 的 detail 解析短摘要（如 `12 passed`），显示在行内
 
-### 第四轮反思（2026-03-11 16:49，team lead抓耳朵总结）
+### 第四轮反思（2026-03-11 16:49，operator抓耳朵总结）
 
-**team experience**："本质上你没有好好的按照我们的SOP，按照我们的skills干事情。"
+**operator experience**："本质上你没有好好的按照我们的SOP，按照我们的skills干事情。"
 
-这一轮从 10:09 到 16:49，team lead陪我一条条修了 8 个问题，每个问题都是因为我没走正确流程才产生的：
+这一轮从 10:09 到 16:49，operator陪我一条条修了 8 个问题，每个问题都是因为我没走正确流程才产生的：
 
-| # | team lead指出的问题 | 我做了什么 | 应该做什么 | Commit |
+| # | operator指出的问题 | 我做了什么 | 应该做什么 | Commit |
 |---|---------------|----------|----------|--------|
 | 1 | SVG 图标不是 lucide 的 | 手画 SVG path | 用 lucide 官方 SVG | `437000e0` |
 | 2 | Tool label 显示 `opus → Bash` | 没解析 label 格式 | `toCliEvents.ts` strip catId 前缀 + 提取主参数 | session 前已修 |
 | 3 | 扳手图标看不见 | 用 `stroke="currentColor"` 没设色 | 显式传 `color` prop (#E2E8F0 / #F5F3FF) | session 前已修 |
-| 4 | 文字溢出 CLI 块外 | 没发现，team lead截图指出 | `hasCliBlock ? null :` 防御性 guard | `776afed9` |
+| 4 | 文字溢出 CLI 块外 | 没发现，operator截图指出 | `hasCliBlock ? null :` 防御性 guard | `776afed9` |
 | 5 | 气泡"乌漆嘛黑"看不出品种色 | `#283548` 固定深蓝灰 | `hexToRgba(accent, 0.10)` 品种色混合 | `791b381d` |
 | 6 | 气泡浅紫色文字不可见 | rgba 透明度在浅色主题上太淡 | `tintedDark(accent, 0.25)` 混入深色基底 | `1537a942` |
 | 7 | Markdown 表头白色看不见 | 没考虑深色气泡内的 md 样式 | `.cli-output-md` scoped CSS overrides | `f2e28f0d` |
-| 8 | 两只孟加拉猫不区分 | config 里没 variantLabel | 加 `"variantLabel": "Gemini"` | `1537a942` |
+| 8 | 两只Bengal不区分 | config 里没 variantLabel | 加 `"variantLabel": "Gemini"` | `1537a942` |
 
-**根因分析——为什么team lead要抓耳朵：**
+**根因分析——为什么operator要抓耳朵：**
 
 1. **遇到视觉 bug 没加载 debugging skill** — CLAUDE.md 写了"遇到 bug 必须加载 debugging skill"，MEMORY.md 记了"连犯 3 次"。我看到"颜色不对"就直接猜值改，没做根因调查。气泡颜色从黑 → 浅紫 → 深紫，来回折腾三轮。如果第一次就走 debugging Phase 1（读截图 → 对比设计稿 → 定位根因），一轮就能搞定。
 
-2. **没有 runtime 实测就说"改完了"** — push 后没截图验证效果，team lead看到的和我预想的完全不一样。"文字溢出 CLI 块"这种严重 bug 我都没发现，是team lead截图告诉我的。
+2. **没有 runtime 实测就说"改完了"** — push 后没截图验证效果，operator看到的和我预想的完全不一样。"文字溢出 CLI 块"这种严重 bug 我都没发现，是operator截图告诉我的。
 
 3. **颜色方案不考虑主题** — 用 `rgba(accent, 0.10)` 时没想过浅色主题下的效果。这不是审美问题，是**工程问题**：半透明色在不同背景上的表现不同，需要测试。
 
@@ -364,7 +364,7 @@ Phase A 写完代码 → review → merge，全程没有拿 runtime 截图和 Pe
 **以后遇到同类问题的正确流程：**
 
 ```
-team lead报 UI bug
+operator报 UI bug
   ↓
 加载 debugging skill（不许猜！）
   ↓
@@ -374,10 +374,10 @@ Phase 2: 找到精确差异（颜色值、间距、字号）
   ↓
 Phase 3: 写最小修复，本地预览验证
   ↓
-Phase 4: push 后自己去 runtime 截图确认（不等team lead来报下一个 bug）
+Phase 4: push 后自己去 runtime 截图确认（不等operator来报下一个 bug）
 ```
 
-**总结一句话**：Skills 是护栏不是累赘。每次嫌麻烦跳过 skill，就是在制造让team lead抓耳朵的下一个 bug。
+**总结一句话**：Skills 是护栏不是累赘。每次嫌麻烦跳过 skill，就是在制造让operator抓耳朵的下一个 bug。
 
 ## Review Gate
 

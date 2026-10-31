@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ExpandableProse } from '@/components/content-overflow';
 import { apiFetch } from '@/utils/api-client';
 import { BallotIcon } from './icons/VoteIcons';
 
@@ -77,16 +78,21 @@ export function VoteActiveBar({ threadId, onEnd }: { threadId: string; onEnd: ()
   const progressText = vote.totalVoters > 0 ? `已投 ${vote.voteCount}/${vote.totalVoters}` : `已投 ${vote.voteCount}`;
 
   return (
-    <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 flex items-center gap-3 text-sm">
-      <BallotIcon className="w-5 h-5 flex-shrink-0 text-amber-700" />
-      <span className="font-medium text-amber-900 truncate flex-1">投票进行中: {vote.question}</span>
-      <span className="text-amber-700 flex-shrink-0">
+    <div className="px-4 py-2 bg-conn-amber-bg border-b border-conn-amber-ring flex items-center gap-3 text-sm">
+      <BallotIcon className="w-5 h-5 flex-shrink-0 text-conn-amber-text" color="currentColor" />
+      <ExpandableProse
+        text={`投票进行中: ${vote.question}`}
+        lines={2}
+        className="min-w-0 flex-1"
+        contentClassName="text-sm font-medium leading-5 text-conn-amber-text"
+      />
+      <span className="text-conn-amber-text flex-shrink-0">
         {progressText} · 剩余 {remaining}
       </span>
       <button
         type="button"
         onClick={handleEnd}
-        className="text-xs text-amber-600 hover:text-amber-800 transition-colors flex-shrink-0"
+        className="text-xs text-conn-amber-text hover:text-conn-amber-text transition-colors flex-shrink-0"
       >
         结束投票
       </button>

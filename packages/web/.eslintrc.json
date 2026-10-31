@@ -1,4 +1,39 @@
 {
   "root": true,
-  "extends": ["next/core-web-vitals", "next/typescript"]
+  "extends": ["next/core-web-vitals", "next/typescript"],
+  "plugins": ["cafe"],
+  "rules": {
+    "cafe/no-hardcoded-colors": "warn",
+    "cafe/no-raw-console-borders": "error"
+  },
+  "settings": {
+    "cafe": {
+      "note": "F056 Phase A-0: Design system governance. See docs/features/F056-cat-cafe-design-language.md"
+    }
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/lib/visible-cafe/**/*.{ts,tsx}",
+        "src/components/visible-cafe/**/*.{ts,tsx}",
+        "src/app/starry/**/*.{ts,tsx}",
+        "src/hooks/useVisibleCafePresence.ts",
+        "src/stores/visible-cafe-presence.ts"
+      ],
+      "excludedFiles": ["**/__tests__/**"],
+      "rules": {
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "Literal[value=/\\u002fconcierge\\u002fskins(\\u002f|$)/]",
+            "message": "Visible Café assets must use the independent visible-cafe asset base."
+          },
+          {
+            "selector": "TemplateElement[value.cooked=/\\u002fconcierge\\u002fskins(\\u002f|$)/]",
+            "message": "Visible Café assets must use the independent visible-cafe asset base."
+          }
+        ]
+      }
+    }
+  ]
 }

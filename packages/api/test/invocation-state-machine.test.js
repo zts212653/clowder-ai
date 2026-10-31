@@ -20,6 +20,7 @@ describe('invocation-state-machine', () => {
     mod = await import('../dist/domains/cats/services/stores/ports/invocation-state-machine.js');
     assert.ok(mod.isValidTransition);
     assert.ok(mod.getAllowedTransitions);
+    assert.ok(mod.classifyInvocationRecoveryStatus);
     assert.ok(mod.TERMINAL_STATES);
     assert.ok(mod.ALL_STATUSES);
   });
@@ -89,6 +90,19 @@ describe('invocation-state-machine', () => {
         assert.ok(allowed.length > 0, `${s} should have >0 allowed transitions`);
       }
     }
+  });
+
+  test('classifies only succeeded as completed and keeps queued/failed replayable', () => {
+    assert.deepEqual(
+      Object.fromEntries(mod.ALL_STATUSES.map((status) => [status, mod.classifyInvocationRecoveryStatus(status)])),
+      {
+        queued: 'replayable',
+        running: 'in_flight',
+        succeeded: 'completed',
+        failed: 'replayable',
+        canceled: 'terminal',
+      },
+    );
   });
 
   // ─── Property-based: random transition sequences ───

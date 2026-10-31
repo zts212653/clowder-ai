@@ -1,9 +1,10 @@
 ---
 name: feat-lifecycle
+tips_exempt: "2026-09-10：本次更新猫的愿景、设计与验收判断路径，不新增可向用户推荐的产品操作。"
 description: >
-  Feature 立项、讨论、完成的全生命周期管理。
-  Use when: 开个新功能、new feature、F0xx、立项、feature 完成、验收通过、讨论新功能需求。
-  Not for: 代码实现、review、merge（那些有专门的 skill）。
+  Feature 从原始诉求、设计确认到实际交付与真相同步。
+  Use when: 立项、需求讨论、Design Gate、愿景或范围发生偏移、feature 完成/验收，或operator要求“先看真页面”。
+  Not for: 不涉及 Feature/Design Gate 真相更新的纯代码实现、review、merge（那些有专门的 skill）。
   Output: Feature 聚合文件 + BACKLOG 索引 + 真相源同步。
 triggers:
   - "开个新功能"
@@ -14,16 +15,20 @@ triggers:
   - "F0xx done"
   - "验收通过"
   - "讨论新功能需求"
+  - "先看真页面"
+  - "愿景或范围发生偏移"
 argument-hint: "[阶段: kickoff|discussion|completion] [F0xx 或主题]"
 ---
 
 # Feature Lifecycle
 
-管理 Feature 从诞生到收尾：立项建追溯链、讨论沉淀决策、完成闭环同步。
+让原始诉求经过设计、实现与验收后仍落到用户实际得到的结果上。立项建追溯链，执行中发现愿景、范围或体验解释分叉时回到对应段落，完成时核对实物并同步真相；已有明确方案的日常实现不必每轮重走全文。
+
+**必须达成**：原始诉求与明确接受的范围可回查；设计有足够实物供判断；守护结论有独立观察；重要缺口对用户可见；状态与交付事实一致。采访、表格、逐步截图、录屏是按任务选的参考方法，不以凑齐形式代替结果。下文明确引用的 schema、命令门禁、授权与责任契约仍须满足。
 
 ## 核心知识
 
-**Feature vs Tech Debt**：铲屎官能感知变化 → Feature；只有开发者知道 → Tech Debt。不确定先记 TD。
+**Feature vs Tech Debt**：operator能感知变化 → Feature；只有开发者知道 → Tech Debt。不确定先记 TD。
 
 **追溯链架构**：`ROADMAP.md`（热层）→ `docs/features/Fxxx.md`（温层，唯一入口）→ feature-discussions/research/plans（冷层）
 
@@ -31,7 +36,7 @@ argument-hint: "[阶段: kickoff|discussion|completion] [F0xx 或主题]"
 
 ## 立项 (Kickoff)
 
-**触发**：铲屎官说"新功能"/"立项"、讨论收敛确认要做。**不触发**：还在探索 → `collaborative-thinking` Mode A；小修补 → TD。
+**触发**：operator说"新功能"/"立项"、讨论收敛确认要做。**不触发**：还在探索 → `collaborative-thinking` Mode A；小修补 → TD。
 
 ### 开工前 Recall（F102 记忆系统）🔴
 
@@ -73,11 +78,16 @@ search_evidence("{topic}", scope="all")  # 找历史讨论 + thread
 
 2. **创建聚合文件** `docs/features/Fxxx-name.md`（kebab-case 文件名）
 
-   **从标准模板创建**：复制 `cat-cafe-skills/refs/feature-doc-template.md` 中「模板正文」部分，替换占位符（`{NNN}`/`{Feature Name}`/`{YYYY-MM-DD}` 等）。模板包含 Dashboard parser 所需的全部硬性格式。
+   **从标准模板创建**：复制 `../.cat-cafe-shared-refs/feature-doc-template.md` 中「模板正文」部分，替换占位符（`{NNN}`/`{Feature Name}`/`{YYYY-MM-DD}` 等）。模板包含 Dashboard parser 所需的全部硬性格式。
 
-   轻量 Feature（≤1 Phase）可省略 Timeline/Review Gate/Links/Key Decisions，但 Frontmatter + Status 行 + Why + What + AC + Dependencies 必须保留。
+   轻量 Feature（≤1 Phase）可省略 Timeline/Review Gate/Links/Key Decisions，但 Frontmatter + Status 行 + Why + Current State + What + User Journey（或 `user_journey_exempt`）+ AC + Dependencies 必须保留（全新能力的 Current State 写 "N/A（无既有基线）"，不是删段）。
 
-   并在 spec 中补一节：`## 需求点 Checklist`（模板见 `cat-cafe-skills/refs/requirements-checklist-template.md`）
+   并在 spec 中补一节：`## 需求点 Checklist`（模板见 `../.cat-cafe-shared-refs/requirements-checklist-template.md`）
+
+   **F244 Tips Contribution**：若 feature 有用户可见能力/工作流变化，在 spec 中保留 `## Tips Contribution（F244）`：
+   - 计划新增/更新 1-2 条 tips，指向现有 truth source。
+   - 或写 `tips_exempt: {reason}`（仅纯内部重构/无用户可感知变化）。
+   - 这是贡献门，不是数量门；真正有用性由 reviewer 判断，CI 只守 sourceRef/context/action/anchor。
 
 3. **更新 ROADMAP.md**：末尾加 `| F042 | 名称 | spec | Owner | {source} | [F042](features/...) |`
    - Source 列：`internal`（内部立项）或 `community [#xx](url)`（社区 issue 立项，附链接）
@@ -86,121 +96,431 @@ search_evidence("{topic}", scope="all")  # 找历史讨论 + thread
 
 5. **Commit**：`docs(F042): kickoff {名称} [{猫猫签名}]`，body 含 What/Why
 
-**检查**：聚合文件创建 ✓ frontmatter 完整 ✓ BACKLOG 索引 ✓ 关联文档双向链接 ✓ 已 commit ✓
+6. **接住已获准的开发工作**：立项已接受且用户授权开工，或回原线程继续一个 Phase 时，加载
+   `custody-recognition`，先用 `cat_cafe_resolve_development_work` 解析，再用 `cat_cafe_development_work` admit/resume/adopt/bind。
+   scope 来自已接受 Feature/Phase 的 committed revision；先复用原现场已有工作。已有 generic Task
+   用 owner 返回的快照 adopt，已有 entrusted Task 缺 scope 则 bind，保留原 id、来源和历史。
+   不再并行调用 `cat_cafe_create_task` 建一张 tracking 镜像。
+
+   文档立项、BACKLOG 整理或讨论未来 Phase 本身不等于授权开工。无 Phase 的小改动/非 Feature
+   托付沿 `custody-recognition` 的通用入口，不能虚构 Phase。明确授权不再问一次“是否托付”；
+   typed receipt 返回后继续实际开发与材料交付。新 Phase 需自己的授权范围，不复活终态。
+
+   **Gotcha**：责任留在原猫原线程；`scope_unavailable_here` 不能当作“没有 Task”再新建。
+   普通 Git URL 不自动成为 prepared Artifact；无业务时间不造 DDL，真实需要人判断才进入 Needs Me。
+
+### 把愿景写成可判断的目标（F216→F219 教训）
+
+> **为什么**：F216 立项 Why 写"降 complexity"，AC 却落成"修 bug + 可测性"，两者执行中悄悄分叉，直到 close 前愿景守护才发现 gap。根因是**立项时愿景表述不够硬 + 交接丢上下文**（operator 2026-06-02）。这是 LL-067（后半段被前半段工程量吃）/ LL-069（scope 跟"自我解读"走不跟 spec 走）在**立项时刻**的前置防线——审计时才抓分叉太晚，立项就钉死。
+
+写 AC 前先判断目标是否足够清楚、是否在可承诺范围内。像“帮我赚一个小目标”要先澄清条件与合理工作范围，不能直接捏造一个可打勾的替代目标。已有明确 issue / 讨论结论则沿用，不重复采访。具体反例见[原问题到交付的判断方法](../.cat-cafe-shared-refs/delivery-intent-judgment.md)。
+
+Step 2 写完 spec，用 Why / 现状 / AC 检查理解有没有走样：
+
+| 维度 | 判断重点 | 反模式（F216 踩过） |
+|------|--------|--------------------|
+| **愿景 Why** | 用**价值**语言一句话说清要解决什么 | 用"技术动作"冒充愿景（"重构 X" ❌；"X 每加功能就 7 轮 review" ✅） |
+| **真实现状** | 带**实测证据**（complexity / 行数 / 复现 / hotfix 频次），不美化 | "感觉这块乱"（给数据不给感觉，`feedback_no_classifier`） |
+| **完成判据 AC** | 约定的使用结果与重要边界能由非作者结合实际路径、输出或实物判断；测试只证明其中可确定的行为 | 把接口/字段已增加当用户能力已交付，或把不可保证的业务结果硬写成二元 AC |
+
+这里需要猫的判断：AC 是否遗漏了原诉求，或反过来扩大了目标？不能为了迁就实现而改 Why。交接时用接手者能理解的语言解释已接受的目标，并保留原始来源；重新表述不能替代或缩小原约定。并非所有愿景都适合机械化成 AC，先解决真实歧义，再选择足以判断结果的表达。
+
+核实确属原诉求遗漏就补 AC；确属无依据的扩张就删去，或在确需改变目标时拿具体取舍与用户澄清，不能改写 Why 给已有实现找理由。
+
+承载点：现状写进模板 `## Current State / 现状基线` 段；AC↔Why 自检见模板 `## Acceptance Criteria` 段顶部 comment（均在 feature-doc-template「模板正文」内，随复制进入新 spec）。自检不过 → 回 Step 2 改 spec，不进 Step 3。
+
+**检查**：聚合文件创建 ✓ frontmatter 完整 ✓ BACKLOG 索引 ✓ 关联文档双向链接 ✓ 愿景硬度自检 ✓ 已 commit ✓ 毛线球任务创建 ✓
+
+### 轻量立项（非 F 号：内容生产 / 能力验证项目）
+
+> LL-071 起源：内容生产任务（视频 / PPT / 系列产出）同样有 lifecycle，但不一定进 feat 体系（shared-rules §21）。
+
+**适用**：批量产出消耗显著成本（token / API 抽卡）或铺设技术路线，且 operator 决定不开 F 号（挂 story / IP / 项目目录）。
+
+**锚点形态**：项目目录里的 charter 文档，结构学 feat doc（范例：`docs/videos/cucu-pr-flow/episode-brief.md`）：
+
+- Why（双重目的写清）/ 路线（**引 operator 原话做锚**）/ Scope / **Non-goals（防跑偏的牙齿，最重要的段）** / 预算护栏 / DoD / 分工 / operator signoff（frontmatter `cvo_signoff` 字段记日期与原话）
+- charter 自声明"唯一 scope 真相源"：链上任何一棒发现产出超出 charter scope → 停，回 operator
+- 被取代的外部文档（云端 brief 等）标 `superseded` + 指针，保留为历史不篡改
+
+**与正式 feat 的区别**：无 F 号、无 BACKLOG 索引、无 Design Gate 仪式——但 scope 纪律同强度。
+
+**选型**：改产品代码 / 对外契约 → 正式 feat；内容产出 / 能力验证 → operator 选轻量 charter 或 feat。拿不准 → 问一句，别替 operator 决定。
 
 ## 讨论 (Discussion)
 
-**两种模式**：
+**可选讨论方法**（信息已足够就继续，不重问已经回答的问题）：
 
-- **采访式（默认）**：铲屎官口述 → 一次一问澄清（"为什么要？现在怎么做？做完后怎么用？"）→ 排优先级 → 记开放问题。**Anti-anchor**：先让铲屎官表达完，再分析。
+- **采访式**：operator口述 → 澄清真正缺失的信息（"为什么要？现在怎么做？做完后怎么用？"）→ 排优先级 → 记开放问题。**Anti-anchor**：先让operator表达完，再分析。
 
 - **开放讨论**：多猫协作。结构：背景 + 我的分析（仅供参考，**先自己想再看**）+ 开放问题（按角色分组）+ 我的倾向（透明推理链）。明确标"这是讨论不是任务"，保护观点独立性。
 
 **讨论结束必须做**：
-1. 落盘到 *(internal reference removed)*（含铲屎官原话、决策过程、优先级排序）
-2. ROADMAP.md 该 Feature 行 ref 讨论文档链接
-3. Commit：`docs: {topic} discussion + backlog update [{猫猫签名}]`
+1. 落盘到 `feature-discussions/YYYY-MM-DD-{topic}/README.md`（含operator experience、决策过程、优先级排序）
+2. **回填 User Journey 到 spec**（F252 教训 🔴）：Discussion 中operator口述的用户旅程期望，必须回填到 feature doc 的 `## User Journey` 段。讨论落盘 ≠ spec 记录——reviewer 冷启动读 spec，不读 discussion 记录。
+3. ROADMAP.md 该 Feature 行 ref 讨论文档链接
+4. Commit：`docs: {topic} discussion + backlog update [{猫猫签名}]`
 
 ## Design Gate (设计确认) 🔴
 
-**Discussion → writing-plans 之间的必经关卡。UX 没确认，不准开 worktree。**
+**Discussion → writing-plans 之间的必经关卡。UX 没确认，不准进入正式产品实现；隔离 worktree
+可承载真实壳体验稿。User Journey 没落盘，不准过 Design Gate。**
 
-按功能类型分流确认：
+先按主要功能类型分流，再判断是否叠加了**用户可见表面**；两者不是互斥分类：
 
 | 类型 | 判断标准 | 确认人 | 方式 |
 |------|---------|--------|------|
-| **前端 UI/UX** | 用户能看到的改动 | **铲屎官** | wireframe → 铲屎官 OK 后继续 |
+| **前端 UI/UX** | 新增或实质改变用户可见布局/交互 | **operator** | 真实产品壳中的主旅程 + 默认状态 + 窄屏状态 → operator OK 后继续 |
 | **纯后端** | API/数据模型/内部逻辑 | **其他猫猫** | `collaborative-thinking` 讨论达成共识 |
-| **架构级** | 跨模块、新基础设施 | **猫猫讨论 → 铲屎官拍板** | 先出方案再上报 |
-| **Trivial** | ≤5 行、纯重构、文档 | 跳过 | 跳过 Design Gate，按 SOP 例外路径判断 |
+| **架构级** | 跨模块、新基础设施 | **猫猫讨论 → operator拍板** | 先出方案再上报 |
+| **Trivial** | 无实质用户任务、布局、交互或架构方向变化的文字/样式修正、纯重构或文档 | 猫猫自决 | 按 SOP 风险判断；行数不是跳过或加严依据 |
+
+**叠加触发（F305）**：主要类型即使是纯后端或架构，只要同一改动新增或实质改变用户可见
+布局/交互，就同时走前端 UI/UX 确认；后端/架构确认不能替代体验确认。小型文字、间距或颜色
+修正若不改变用户任务、布局或交互，仍走 Trivial，不扩大门禁。
+
+**“先看真页面”快捷入口（F305 → F083）**：这句话不是新 Magic Word、stage 或 skill。
+收到后停止用 schema、字段表、设计说明或抽象 wireframe 证明体验成立；把当前方案放回真实
+Clowder AI 产品壳，展示主旅程、默认状态与窄屏状态，并逐项使用
+`../.cat-cafe-shared-refs/design-in-context-checklist.md`。正式 UI 实现和合入必须等这个方向确认；
+体验稿本身可以留在隔离预览 worktree。
 
 **前置检查（F086 M2）**：
 开 Design Gate 前，先做触发器 E "新领域侦查"：
 1. 读 `docs/features/README.md` 找相关 Feature
 2. 读相关 Feature spec 的 Key Decisions / Open Questions
-3. 搜 *(internal reference removed)* 看有没有前人讨论过类似问题
+3. 搜 `feature-discussions/` 看有没有前人讨论过类似问题
 4. 把发现记录到 Design Gate 讨论里（避免重复造轮子）
 
-详见 `shared-rules.md` §13 元思考触发器。先搜现状，再开讨论。
+详见 `../.cat-cafe-shared-refs/shared-rules.md` §13 元思考触发器。先搜现状，再开讨论。
+
+**设计要有参照，也要在实物里成立**：新增或实质改变 UI/UX 时，先看同类产品如何完成同一用户任务，优先消费operator给的参考；按 `../.cat-cafe-shared-refs/design-in-context-checklist.md` 的「同类产品参照」做实际对照。参照要进入信息层级、操作位置和状态反馈，不能只变成按钮清单或颜色选择；家里的 `DESIGN.md` / F056 / ADR-043 同样要在实际页面中可见。
+
+**何时请operator一起看**：体验解释或信息结构存在会影响方向的分叉时，先完成能自决的准备，尽早拿具体稿、自己的推荐和一个明确待判断点来共创，不拖到一天实现完。局部探索可先看局部稿并说明覆盖范围；最终信息结构确认必须在真实宿主和可信内容态中进行。可以现场一起操作，不要求先凑录屏、两套方案、固定分钟数或返工天数。把同一轮能判断的问题合并，技术排障和常规 QA 由猫完成。
+
+确认记录要说明覆盖的页面、旅程与状态。后续变化只补确认超出覆盖或使原判断失效的部分，已确认且仍成立的部分继续复用；不重复问“可以继续吗”，也不能拿局部 OK 代替整条旅程通过。
+
+**User Journey 前置门禁（F252 教训）🔴**：
+
+涉及用户可感知变化的 Feature，Design Gate 前 spec 的 `## User Journey` 段必须已落盘，否则 **Design Gate 不放行**。
+
+| 检查项 | 必须 | 说明 |
+|--------|------|------|
+| `## User Journey` 段存在 | ✅ | 非 exempt feature 不能缺段 |
+| Primary Journey 有 `Scope unit` | ✅ | 防 F252 的 session/thread/feature 搞混 |
+| Flow 用用户语言 | ✅ | "点击 thread 标题看回放"，不是"调用 StoryPlayer.replay()" |
+| operator口述期望已回填 | ✅ | Discussion 落盘 ≠ spec 记录（F252 直接原因） |
+| 非用户可感知 | — | 写 `user_journey_exempt: {reason}`，不能靠缺段默认跳过 |
+
+**真实交互 claim 证据（不新增 stage）**：只有交付声明包含编辑、输入、批注、聊天/讨论、发送、审批、拖动/加节点或可恢复草稿时，现有 Design Gate 追加一行 claim→证据；不因 `concept_story` 的预设叙事、播放或场景控制而误触发。
+
+对 `product_experience_gate`、`journey_validation` 或同等真实交互 claim，必须记录并提供可重放浏览器旅程：核心输入为语义控件、核心动作有 handler/状态后果、fixture 外的陌生 sentinel 在动作后进入 DOM 或声明的 browser store。声称可恢复/持久化时才加刷新恢复断言；没有该 claim 不强加 storage。批注、聊天/讨论、协同记录或历史写清用户语义与因果，不能只说“右栏变化”。截图/视频只能证明外观，不能单独通过这项验收。
+
+`pnpm check:design-gate-real-interaction` 守住静态布景的 RED/GREEN 回归 fixture；它不替代每个 Demo 在 Contract 中列出的 exact 可重放浏览器旅程。
+
+若本轮声明已接入真实产品或具备成熟文档编辑能力，必须同时提交 `docs/design-gate-claims/<id>.json`。命令会消费该文件并核验真实入口→宿主→surface 的逐跳 import/mount；编辑器 claim 另核验 manifest 引擎依赖、adapter 的五项实现 token 与实际挂载，并拒绝原生输入框。没有 product/editor claim 的普通 demo 不需要为了过门补空 contract。
+
+**产品宿主与编辑器 claim 证据（同属现有 Design Gate）**：若交付声称已进入现有 Workspace / Collective，必须记录**真实产品宿主**的用户入口、目标组件路径与**宿主挂载证据**；单独 `/dev` route、自造导航或**独立复制壳**只能算组件实验，不能推进正式后端阶段。**默认入口即门**：每个 `claims.productIntegration` 一律要带 `defaultEntryJourney`（`testPath` / `journeyId` / `surfaceTestId`）——一条用 `registerDefaultEntryJourney` 注册在 `packages/web/test/browser/` 下、由 `test:browser` 执行的真实浏览器旅程：从不带任何查询参数的默认入口 `enter`，做用户动作，`arrive` 时断言最终 surface 唯一的 `data-testid` 可见。`?experienceGate=f290-assembly` 这种只能手输 URL 的候选页写不出这条旅程，只能登记为 opt-in 候选。checker 核静态绑定形状（文件在 canonical runner 里、旅程体不用 `setContent` / `goto` / `evaluate` 注入 DOM 或 URL、final surface 位于 `packages/web/src` 或 `packages/collective-client/src`，且 testid 跨两处产品源码唯一）；runtime harness 在进程收尾时逐条对账绑定当前 `testPath` 的 claim，要求 exact `journeyId` 真实注册并完成，藏在未执行分支或只让文件退出都不能通过。可达性由 full gate 实跑旅程证明，不做静态推断（2026-09-10 起，静态 prover 已被 runtime journey 取代）。claim 或旅程文件一改，gate 强制 full（此处的 full 指不能只走文档校验；S2 #4669 起 canonical gate 按冻结 diff 生成 `VerificationPlan`——旅程文件或其宿主源码变化即把该 journey 列入 merge 前必跑的 `requiredUnitIds`，覆盖缺口退出码 3 不标绿；全套旅程留给显式 `test:browser` 的 Design Gate 验收与 alpha 逐 revision 验证，细则以 `merge-gate` skill「浏览器验证政策」为准）。若交付声称共同编辑文档、稳定选区批注、Agent patch 审阅或版本撤销，必须点名**成熟编辑器引擎**并覆盖 `human_edit / selection_anchor / annotation / patch_review / version_undo` 五项**编辑器适配契约**；原生 `textarea`、`contenteditable` 或分段输入框不能冒充文档编辑器。
+
+**架构归属一问（F191）🔴**：
+
+每个非 trivial Feature 在 Design Gate 必须能用一句话回答：
+
+```markdown
+Architecture cell: {ownership cell id}
+Map delta: none | update required | new cell required
+Why: 一句话
+```
+
+- `Architecture cell` 来自 `docs/architecture/ownership/README.md`；普通增量默认引用已有 cell。
+- `Map delta: none` = 本次只扩展现有边界，不改 ownership map，也不重新画架构图。
+- `Map delta: update required` = 本次改变 owner / boundary / extension point / canonical anchor，先改对应 cell。
+- `Map delta: new cell required` = 找不到归属；这不是回去填表，而是 Phase 0 架构发现未完成。
+
+答不出来 → Design Gate 不放行。禁止用新 Feature 私造 `Store` / `Queue` / `Router` / `Adapter` 来绕开已有 cell。
+
+### Architecture / contract integrity admission（F303）🔴
+
+F191 三行先回答归属；随后只在以下三个客观事实任一命中时，把对应 claim 纳入
+architecture / contract 风险核验。它仍属于现有 Design Gate，不是新 stage。
+
+F303 trigger set (three-item OR; no fourth trigger):
+
+- `consumer_delta`: 新增或搬动 route、surface、后台 job 或 caller，并复用既有 auth、policy、resolver、cursor 或 lifecycle 语义。
+- `authority_delta`: 重构、迁移或 single-writer 收敛改变 canonical owner、writer 或 read path。
+- `preservation_boundary_delta`: 出现“保持既有行为”“不改变鉴权”“Map delta: none”“只做 projection”等 preservation claim，且 diff 触及对应 consumer 或 authority boundary。
+
+重复事故 family 与 route-local 分叉只作为 admission 后的证据深度 prior，不是第四个
+trigger。普通增量仍只写 `Architecture cell / Map delta / Why`，不要求永久 consumer Matrix。
+
+命中任一项的 eligible spec/plan 在 F191 三行后追加：
+
+```markdown
+Canonical source: {repo-relative path#symbol | doc path#anchor}
+Consumer evidence: {rerunnable LSP/rg command + relevant output | explicit references + why automatic scan cannot express the boundary}
+Claim guard: {claim} → {test/lint/guard/self-check command or test name} → red when {input or condition}
+```
+
+- `Canonical source` 必须是可检查存在性的 exact ref，不能只写 Feature 名或自然语言 owner。
+- 代码符号 consumer 用可重跑的 LSP find-references / `rg` 命令与相关输出。
+- 只有 MCP tool、skill、workflow callback 等约定面适用 F242 convention graph；工具无法表达的语义边界改用显式 references，并写明无法自动扫描的理由。
+- `Claim guard` 必须指向一个具体 test/lint/guard/self-check 命令或测试名，并说明什么输入或条件会使它变红。
+
+缺少上述任一项，eligible change 不通过 Design Gate。重构、迁移或 single-writer eligible
+change 还必须追加：
+
+```markdown
+Characterization/contract test: {command or test name}
+Code-derived consumer census: {rerunnable command + relevant output}
+Migration/restart/rollback evidence: {only when persistence or runtime semantics migrate}
+```
+
+前两项缺一即不通过；只有持久化或运行语义迁移时才要求第三项。不要为普通增量填空白
+字段，也不要把这份 change-local evidence 扩成 registry、dashboard 或永久 Matrix。
+
+F277 related-set / attention projection 只能作为显式关系的展示证据；它不能提供或推断
+work、custody、completion、acceptance truth。需要这些事实时回到各自 canonical owner。
+
+**主动交互反馈出生三问（F281 / ADR-038）🔴**：
+
+当 Feature 新增或改造“猫主动发起 proposal / candidate / wait，人类作 disposition”的交互面时，
+Design Gate 必须记录以下三项：
+
+```yaml
+human_disposition_feedback:
+  feedback_expression: structured reasons + other + optional skip
+  episode_truth: canonical owner-scoped TTL=0 store + authenticated query + deletion closure
+  consumer: named consumer + exact scope + invalidator
+```
+
+- `feedback_expression` 只有 binary approve/reject → 不通过；跳过 feedback 可以，但不得生成空 envelope。
+- `episode_truth` 只有 UI toast / log / transient callback → 不通过。
+- `consumer` 未点名，或 scope 允许从一个 subject 泛化为 lane/global policy → 不通过；别采死遥测。
+- auth/ownership 4xx、CAS/race conflict、内部 retry、`AbortController` 终止、纯 UI dismiss 不属于此触发器。
+
+确定契约用 schema/test/guard；运行健康走 F153；只有不确定效用且有明确
+keep/tune/sunset consumer 时才走 eval-design。完整判据与 F281 dogfood 见
+`docs/decisions/038-l0-staging-protocol.md`「主动交互面的反馈出生三件套」。
+
+**Eval Contract 门禁（F192）🔴**：
+
+harness / skill / MCP / shared-rules 类 feature 的 spec，**若含"不确定效用"类 claim（ADR-031 v3.4 机制选择第三行：效果未知 + 明确 consumer + keep/tune/sunset 决策），必须含 `## Eval / Tracking Contract` 节**，否则 Design Gate 不通过。
+
+**触发条件**（两问都 yes 才填）：
+- 改动会改变猫猫行为模式？（新增 skill / MCP tool / shared-rules section / SOP step / 显著行为变更）
+- 存在效用不确定、且有明确 verdict consumer 的 claim？
+
+**不触发**：typo / wording 微调 / 纯重构（行为不变）/ 文档补充 / 只有确定契约或原始运行健康信号。未触发时不要创建空白或 N/A Eval 节。
+
+**触发即 4 项必填**（模板见 *(internal reference removed)*）：
+1. Primary Users + Activation Signal
+2. Friction Metric
+3. Regression Fixture（最少 1 条，建议 2-5）
+4. Sunset Signal（**空填 = 不通过，不设 reviewer 签字降级**——KD-4）
+
+**Harness 方法论教学（F218 / ADR-031 v3.4 机制选择）🔴**：
+
+凡是 harness / skill / MCP / shared-rules / SOP / L0 等会改变猫猫行为模式的 feature，Design Gate 对需要机制保障的 claim/decision 逐项记录 `claim → 选中机制 → 验证证据或 consumer`。**只记录实际选中的机制，不枚举未选类别、不填 N/A**。同一 feature 可含多类 claim，逐项选，不给整项贴单一标签。
+
+ADR-031 v3.4 选择器速查：
+
+| 机制 | 承重 | 常见载体 |
+|----|------|----------|
+| Convention/skill | 让猫在正确认知路径上想起该动作 | L0 触发句 / skill description / SOP 教学 |
+| Test/guard | 不靠自觉也能挡住或暴露错误 | test / linter / schema / runtime guard / compile gate |
+| Eval | 检验"效用不确定"的机制是否真的让行为变好 | F192 fixture / regression case / friction metric / sunset signal |
+| Observability | 原始运行健康信号供诊断与 SLO | logs / traces / metrics（默认留在 F153；若升为带 utility claim + consumer + verdict 的估计量，再走 Eval Contract） |
+
+一句话判断：**机制是按问题选的工具箱，不是待填清单**——claim 配错机制（工程 telemetry 硬挂 Eval Hub / 确定契约硬造 friction metric）和该配未配同样是 Design Gate 打回理由（LL-095）。
+
+**在地设计检查 (Design in Context) 🔴**：
+凡是改动或往已有页面/组件添加新 UI 元素，必须逐项过 `../.cat-cafe-shared-refs/design-in-context-checklist.md`。禁止在真空中凭想象画已有页面的布局。
+
+**现场可感知性自检 (In-context Observability) 🔴**：
+
+> **核心铁律**：**统计是事后审计，现场可感知性是第一入口。**
+
+凡是涉及 **agent 状态 / runtime failure / 后台任务 / auth & degradation / diagnostics / health & status / 跨猫协作可见性** 的 feature，必须逐项过 `../.cat-cafe-shared-refs/in-context-observability-checklist.md`，并在 Design Gate 讨论文档里产出 `in_context_observability` 决策字段（`primary_surface` / `why_not_dashboard_only` / `deep_dive_surface` / `noise_dedup_policy`）。缺字段 = Design Gate 不放行。
+
+类比范式：memory entity 自带状态、browser-preview 把页面端上桌——entity carries its own state, surface it where it happens。反面：Datadog/前 agent 时代的 stats dashboard，等用户主动切到 tab 才看到数字 +1。
+
+来源：F174 callback auth lifecycle D2b 实战收敛（2026-04-25，operator experience"新时代的明厨亮灶"）。
 
 **流程**：
 1. 判断功能类型 → 选择确认路径
-2. 前端：画 wireframe（Pencil / 文字版 ASCII）→ 发铲屎官 → 等 OK
+2. 前端：在真实产品壳做可见体验稿（可先用 Pencil 探索）→ 展示主旅程、默认与窄屏 → 等 OK
 3. 后端：`collaborative-thinking` → 拉相关猫讨论 API 契约/数据模型
-4. 架构：猫猫讨论 → 结论给铲屎官 → 铲屎官拍板
-5. 确认产出归档 *(internal reference removed)*
+4. 架构：猫猫讨论 → 结论给operator → **必须附 Decision Packet**（格式见 `../.cat-cafe-shared-refs/decision-matrix.md`）→ operator拍板
+5. 确认产出归档 `feature-discussions/{date}-{fid}-design/`
 
-## Phase 碰头（大 Feature 专属，3+ Phase）🔴
+**Design Gate OQ 升级规则**：先判断可逆性维度（见 `../.cat-cafe-shared-refs/decision-matrix.md`）——回滚成本低+不碰愿景/安全/外部契约/显著成本 → 猫猫自决，不升级 operator。需要升级时，OQ 必须用 Decision Packet 格式，不能只列"模糊问题清单"。
 
-大 scope feature **每个 Phase merge 后**，主动和铲屎官碰头（不是问"要不要继续"，是确认方向）：
+**元审美自检**（Design Gate 必问，F163 教训 + F167 Round 4 canon 化）🔴
 
-1. **成果展示**：这个 Phase 做了什么（截图 / 关键改动 / demo）
-2. **愿景进度**：离最终愿景还差什么（哪些 AC ✅，哪些还没）
-3. **下个 Phase 方向**：下一步计划 + 有没有发现新问题
-4. **方向确认**："方向对吗？有没有要调整的？"
+这个方案是**坐标变换**（改变问题结构，让复杂度消失）还是**多项式堆项**（在现有结构上叠补丁/层数/脚手架）？
+后者 → 先读 Meta-Aesthetics canon（数学美学 / 第一性原理 / 拒绝脚手架），尝试找到更简的分解方式。删掉它不影响安全/可验证性/权限边界，才是多余。
+审计未通过 → 回到 Kickoff 或重新设计。
 
-小 Feature（1-2 Phase）跳过碰头，直接做到底。
+## Phase 进度与方向校准
+
+阶段成果、用户实际得到的变化、剩余差距和下一步要可见；按实际状态变化同步，不为每次 merge 制造确认轮次。已确认方向内的工作自主推进。发现愿景、范围或体验分叉时，不论有几个 Phase，都按上面的具体稿共创方式及时校准；需要 operator 决定的事项仍遵守授权边界。
 
 ## 完成 (Completion)
 
-**触发**：AC 全部打勾 + PR 合入 + 云端 review 通过。**不触发**：只是 Phase 完成 / 只是 review 过了。
+**触发**：本 Feature 的交付已就绪，所需 PR 已合入，风险路由选中的独立验证已通过，进入整体验收。**不触发**：只是 Phase 完成 / 只是 review 过了。云端不是所有 Feature 的固定前置；有未满足项必须在 close 前完成下述处置。
 
-**⚠️ Phase 级进度由 `merge-gate` Step 7.5 实时同步**：每次 PR merge 后，merge-gate 负责更新 Phase ✅、AC 打勾、Timeline 记录。Completion 阶段不需要补这些——它们应该已经是最新的。如果发现 Phase 状态落后于实际 commit，说明之前 merge 时漏了 Step 7.5。
+**⚠️ Phase 级进度由 `merge-gate` Step 7.5 按实际 truth delta 同步**：发生 Phase、AC 或交付状态变化时及时更新，不等 close 才补，也不为无状态变化的 merge 制造 Timeline 记录。Completion 核验它们与事实一致。
 
 **🔴 交付物核实铁律（LL-029）**：spec checkbox 是记录工具，不是真相源。声称"完成"或"未完成"前，**必须**核实实际 commit/PR 状态（`git log --grep` + `gh pr list`）。只读 .md 就下结论 = 睁眼说瞎话。
 
 **Step 0: 愿景对照（必须先做，不可跳过）🔴**
 
-AC 全打勾 ≠ 完成（F041 教训：12 项 AC ✅ 但 UI 不可用）。先读原始 Discussion/Interview，自问三个问题：① 铲屎官最初要解决的核心问题？② 交付物解决了吗？③ 铲屎官用这个功能体验如何？
+AC 全打勾 ≠ 完成（F041 教训：12 项 AC ✅ 但 UI 不可用）。回读原始诉求和后来明确接受的范围变更，回答：① 用户要解决什么问题？② 本次实际得到了什么？③ 仍没得到什么、使用起来如何？范围变更须有来源；不能用立项后的技术动作替代原始痛点，也不能忽略已接受的范围而无限扩张任务。
 
-**愿景守护证物对照表（F114 Gate — 缺表 = BLOCKED）**：
+**User Journey 逐步验收（F252 教训）🔴**：
 
-守护猫必须输出以下格式的对照表，否则 **BLOCKED，不放行**：
+涉及用户可感知变化的 Feature，守护猫必须亲自检查交付物：
+1. 至少一个场景从原始用户诉求选取，不能只照作者的 AC / journey 脚本继承同一理解；同时核验 spec Primary Journey 的关键路径、Scope unit 与 Non-goals。
+2. 产品 UI 从真实用户入口进入实际宿主，走关键动作，覆盖与本次判断有关的可信内容态；空态或孤立组件截图不能证明有内容后的体验。已合入用 alpha，未合入用 feature worktree，记录实际版本与入口。
+3. 非 UI 按实际消费者方式检查对应产物或行为；仅当 claim 涉及会话隔离、首次使用或恢复时才要求相应 fresh session，不机械重开模型会话。
+4. 写清自己的观察：场景来源、入口/对象、观察时间、关键操作与结果、证据位置及未覆盖部分。作者证据可辅助，但不能替代守护猫的独立判断。
+5. 应交付路径走不通或证据无法支持声明 → 不放行，给出具体缺口和处置。
+
+截图、现场操作记录、命令输出或可重放旅程按声明选择；交互 claim 仍须满足 Design Gate 的真实交互证据契约。以下验收表是可选整理方法，不要求每步截图：
 
 ```markdown
-| 铲屎官原话（逐字引用） | 当前实际状态（截图/代码/命令输出） | 匹配？ |
-|----------------------|-------------------------------|--------|
-| "把旧 mode 删掉"      | [截图: mode 入口已无旧选项]       | ✅     |
-| "狼人杀加到 mode 里"   | [截图: mode 入口有狼人杀]         | ✅     |
+| Journey | 步骤 | Spec 描述 | 实际行为 | 截图 | 匹配？ |
+|---------|------|-----------|---------|------|--------|
+| Primary | Step 1 | "从 thread 列表点击回放" | [截图] | evidence/... | ✅/❌ |
+```
+
+**愿景守护证物对照（F114）**：
+
+必须把原始诉求、已接受范围与实际结果对应起来；可写有证据的短文或使用下表，表头不是放行条件：
+
+```markdown
+| 原始诉求 / 已接受范围（来源） | 用户实际得到 / 仍未得到 | 守护猫观察与证据 | 处置 |
+|---------------------------|----------------------|----------------|------|
+| 三页都难用；后明确接受先交一页 | A 页可完成任务；B/C 仍原样 | 真实入口操作与截图 | 引已接受的范围；不声称三页问题已解决 |
 ```
 
 **BLOCKED 条件**（任一触发 → 不放行）：
-- 守护猫输出缺少对照表 → BLOCKED
-- 对照表中有未匹配项（❌）→ BLOCKED，踢回修改
-- 找不到铲屎官原话（Discussion/Interview 缺失）→ BLOCKED，要求补充
+- 缺原始诉求、范围来源或足以支持结论的独立观察 → 补证据，不放行
+- 应交付项仍未满足 → 实做或按下述授权处置，不拿机制完成、后继 F 号或表格全绿掩盖缺口
 
 **跨猫交叉验证（强制，F073 自动化）**：
 
-自己先完成三问 + 对照表 → **自动 @ 其他猫**请求独立愿景守护（不要等铲屎官提醒，直接 @）→ 收到结论 → 对齐 → 填签收表（猫猫 / 读了哪些文档 / 三问结论 / 对照表 / 签收）→ 全部对齐后继续 Step 1。
+作者先交付原始诉求、范围、实际结果与缺口披露 → 主动路由合适的独立守护猫 → 守护猫按上面的观察要求给出具名结论与证据 → 解决实质分歧后继续 Step 1。已有覆盖最终内容的有效独立结论可复用，不为签收表再叫一轮。
 
 **愿景守护猫选择（不能 hardcode！）**：
 ```
-守护猫 ≠ 作者 且 ≠ reviewer
-选法：查 cat-config.json roster → 排除作者 catId + reviewer catId → 剩余猫中选一只
+守护猫 ≠ 作者 且 ≠ reviewer；本 Feature 被验收体验的 Design Gate 定稿人也属于作者
+选法：查 cat-config.json roster → 排除实现作者、该体验设计定稿人和 reviewer catId → 选合适个体
 ```
-| 作者 | Reviewer | 守护猫（示例） |
-|------|----------|---------------|
-| opus | codex | gpt52 或 gemini |
-| codex | opus | gpt52 |
-| gpt52 | codex | opus |
-| 任意 | 任意 | roster 中排除前两者，优先跨 family |
+| 作者 | Reviewer | 守护猫 |
+|------|----------|--------|
+| 猫 A（含该体验设计定稿人） | 猫 B | roster 中排除相应作者与 B，按被验收体验的风险与判断力选一只，同族也行 |
 
 守护猫负责：愿景三问 + 不满足则踢回修改 + 满足则放行 close。
+一般设计讨论参与者、历史 ADR 作者不因此自动排除；排除的是当前被验收体验的实际定稿作者。
 
-前端 UI/UX 额外要求：≤3 张截图 + 15s 录屏 + "需求→截图"映射表。
+**🔴 Step 0.3.5: User Visibility Disclosure（F190 Phase C post-close 教训 2026-05-13）— 守护猫审查前置输入**
+
+愿景三问之前，作者必须产出 **User Visibility Disclosure**，把技术决策翻译成用户可见结果。close 通报开头同样要说清实际收益与重要缺口，不能只藏在 evidence / Non-goals 里。没有缺口就如实说明，不为填表编造。下表为可选表达：
+
+| Surface | 用户能做什么（达成态） | 用户实际能做什么（本 feat close 时） | 缺失/退化 | 处置 |
+|---------|--------------------|--------------------------|----------|------|
+| 例: 通知页 | 配 VAPID 公私钥 + 一键生成 + 联系信箱 | 看诊断矩阵 + 修复建议（read-only） | 完全丢失写能力 | deferred to Phase D / operator signoff: thread `...` |
+
+- ❌ "Service Manifest deferred" → ✅ "通知页用户看到诊断矩阵，无法在 UI 配置 VAPID"
+- ❌ "Phase C 4/4 ✅" → ✅ "通知页/插件页/MCP 写/Skill 管理 4 个 surface 有用户可感缺失，详见 disclosure 表"
+
+**Inbound intake 类 feature 必须额外含**：开源 vs 本地 visual side-by-side screenshots（每个 settings section / 主要 surface 各一对），不能只看"组件 wire 了没"。
+
+**Deliberate defer 必须 operator signoff**——operator 在 thread 里显式确认"接受这个 deferred surface 不在本 feat 内交付"才能 close；否则按"漏"处置，必须实做或取得下述合法降级。后继 F 号只记录归属，不提供范围缩减授权。
+
+守护猫先审 Disclosure 才能做愿景三问。看到 deferred 字样直接拷问："这个 deferred 用户能感知到吗？operator signoff 在哪？"
+
+事故来源：F190 close 时 settings/ 缺 7 个开源 components，operator 完全不知道"通知页变成诊断矩阵"——技术决策语言"deferred"没有映射到用户可见性。详见 *(internal reference removed)*。
+
+**🔴 守护猫提的 P1 = blocker，作者不能 self-resolve（2026-04-26 教训）**
+
+历史踩坑：F173 close 时把没完成的 AC-B2 (handler unification) 抽出去开 F177 stub spec 当作"follow-up anchor"应付守护猫的 P1，本质是把"没完成"藏进新文件后宣布闭环（debt = never，TD = never，stub = never，都是话术包装）。
+
+**反 anti-pattern 检查**（守护猫和作者都要查，operator最终把关）：
+
+- ❌ "deferred → 单独立项" / "follow-up 接棒" / "已记入 TD list" — 全部禁止作为闭环路径
+- ❌ 新建 stub spec / TD 条目当作"已 truth-sync"凭证
+- ✅ **闭环只有两条路径**：
+  - **(A) 实做**：守护猫提的 P1 必须实做完成（哪怕大改动），改完重审
+  - **(B) 联合签字降级**：守护猫 + operator在 thread 里**显式签字**"接受不做 / 不属于本 feat 范围 / 已重新评估"，并写明降级理由
+
+**作者反问自己（close 前必查）**：
+1. 所有 deferred AC 是哪类：(a) 真做了 (b) operator签字降级 (c) 我自己想藏起来？
+2. 如果是 (c) → 不能 close，必须二选一：实做 OR 显式向operator请求降级
+
+**守护猫反问作者**（看到 deferred / follow-up / stub anchor 字样直接拷问）：
+- 这件事**需要做还是可有可无**？
+- 如果需要做，**为什么不现在做**？
+- 如果可有可无，**为什么留 spec/TD 占资源**？
+
+不能给"几个选项让operator选"——这是反问式 ping，把判断推回去。作者必须先有立场再 @ operator。
+
+前端 UI/UX 的证据要覆盖实际入口、内容态、主旅程与相关响应式状态；截图数量、录屏时长和映射表形式按证明需要选择。现场共看可以及早校准，但不能代替缺失的行为验证与可追溯验收记录。
 
 **Step 0.5: 反思胶囊（F086 M3）🔴**
 
-愿景对照 + 跨猫验证之后、AC 打勾之前，写一个反思胶囊：
+有理解偏差、重复摩擦或值得复用的发现时，按 `self-evolution` 沉淀；反思胶囊是一种可选载体：
 
-1. 从 *(internal reference removed)* 复制模板
+1. 从 `project-reflections/README.md` 复制模板
 2. 填 6 个固定章节（What Worked / What Failed / Trigger Missed / Doc Links / Rule Update Target）
-3. 保存到 *(internal reference removed)*
+3. 保存到 `project-reflections/YYYY-MM-DD-{topic}-capsule.md`
 4. Feature spec 只挂链接，不把正文塞回去
 
-**不能跳过**：每个 milestone/feature 完成都要写。没有就写"无"，不允许省略章节。
+没有新发现不写空胶囊、不填六节“无”。下述 Harness Eval Checkpoint 有自己的触发契约，不能因此省略。
 
-**Step 1**: AC 全部 `[x]`；未完成项先确认（完成 / 转 TD / 确认不需要）
+**Step 0.6: Harness Eval Checkpoint（F192 Phase A）🔴**
+
+Close Gate Report 之前，判断是否需要 harness-level 评估。**Checkpoint 必做**，但不一定每次都展开——大多数 feature 写 `harness_feedback: none` 即可。
+
+**触发条件**（任一满足 → 必须展开写 harness-feedback 文档）：
+
+| 触发 | 说明 |
+|------|------|
+| Harness / skill / MCP feature close | harness 自身变化必须评估 fit |
+| operator 不满意 / "不是我要的" | 需要分清 vision gap / translation gap / harness misfit |
+| Trace anomaly（重复 tool call、handoff 断链、长时间无 tool call） | trace 只能给 what，猫解释 why |
+| 抽样（normal feature close） | 防止只看失败样本 |
+
+**未触发时**：在 CloseGateReport 中写 `harness_feedback: none | reason: {简短理由}`。
+
+**触发时**：
+
+1. 在 `docs/harness-feedback/YYYY-MM-DD-Fxxx-{topic}.md` 创建 harness-feedback 文档（schema 见 `docs/harness-feedback/README.md`）
+2. 使用 `evidence_refs` 指向 canonical trace/thread/session，**不复制 raw tool-call payload**
+3. 如需 evidence-directed cat interview，**必须在独立 session 或独立 turn 进行**，不接在工作上下文尾巴上
+4. 在 feature spec 和 CloseGateReport 中链接 harness-feedback 文档
+
+**Step 1: Close Gate Report（F177 Phase A）🔴**
+
+输出 **CloseGateReport**（schema 见 `../.cat-cafe-shared-refs/close-gate.md`）——逐条列明每个 AC 的证据和处置：
+
+```
+AC-A1 ✅ met — commit abc123 + test_xxx
+AC-A2 ✅ met — screenshot_yyy + PR #1234
+AC-A3 ❌ unmet → immediate（现在做完）
+AC-A4 ❌ unmet → cvo_signoff(msg:0001777429xxx) — "ok 接受降级"
+AC-A5 ❌ unmet → delete(why: 经评估不属于 MVP scope)
+```
+
+**unmet AC 只有三条路，没有第四选项**：
+1. **immediate**：当前 session 做完，做完后改为 met + 补 evidence
+2. **delete(why)**：只删除经判断确实不属于已接受需求的误列项，写清依据；涉及缩减已接受范围须先取得相应授权，不能作者自删未完成需求。守护猫 P1 仍适用上面的联合签字边界
+3. **cvo_signoff**：operator 自然语言表态同意降级，录入四件套（proposal_message_id + cvo_message_id + cvo_quote + accepted_scope）
+
+**以下不是合法路径**：follow-up / deferred / next phase / P2 / stub / TD / 后续 / 留个尾巴 / 先这样 / 下次一定 / 回头 / 以后再 / next PR / will address later
+
+缺 CloseGateReport = **不能 close**。自由文本"我都做了"不算。
 
 **Step 2**: 聚合文件 → `Status: done`，加 `Completed: YYYY-MM-DD`，Timeline 加收尾记录
 
@@ -210,16 +530,34 @@ AC 全打勾 ≠ 完成（F041 教训：12 项 AC ✅ 但 UI 不可用）。先�
 
 **Step 5**: 真相源同步 — 所有关联文档 `feature_ids` 正确；Links 章节无遗漏
 
-**Step 6**: Commit：`docs(Fxxx): mark feature as done [{猫猫签名}]`，body 含 What/Why/Evolved from
+**Step 5.5: Feature truth close evidence（F253 教训）🔴**
+
+在 Status→done、BACKLOG 移除、README completed、适用的反思沉淀、CloseGateReport 全部写完后，必须运行：
+
+```bash
+pnpm check:features
+```
+
+`PASS check-feature-truth` 是 feature close 的硬证据；失败则不能 close，先修真相源再提交。尤其要防：
+
+- `[backlog-active] BACKLOG contains Fxxx, but all records are done`：Step 4 漏移除 BACKLOG
+- `[backlog-missing] Active feature Fxxx is missing from BACKLOG`：active/done 状态和热层不一致
+- `[doc-status-drift]`：Status 行和 Timeline merged 记录互相打架
+
+**不要自动改 BACKLOG**：BACKLOG 是手写策展热层，机器只能报错，不能替猫判断 done/active。`check-feature-truth` 已经每次从 feature docs fresh-generate index 到 tempdir；不需要额外"自动重生成 index"兜底。
+
+**暂不做 diff-scope 降级**：feature truth 红灯代表共享真相源会误导所有猫，优先全局修正；若未来 unrelated blocker 成本持续过高，再单独评估 per-feature close checker 或 owner 指针，不在 close 流程里静默放过红灯。
+
+**Step 6**: Commit：`docs(Fxxx): mark feature as done [{猫猫签名}]`，body 含 What/Why/Evolved from + `pnpm check:features` PASS 摘要
 
 ## Quick Reference
 
 | 阶段 | 关键动作 | 文件 |
 |------|---------|------|
 | Kickoff | 分 ID → 聚合文件 → BACKLOG → 双向链接 | `docs/features/Fxxx.md` |
-| Discussion | 采访/开放 → 落盘 → BACKLOG ref | *(internal reference removed)* |
-| **Design Gate** | **分流 → 确认（UX→铲屎官/后端→猫猫/架构→两边）** | *(internal reference removed)* |
-| Completion | 愿景对照 → 跨猫验证 → 更新状态 → 移出 BACKLOG | `docs/features/Fxxx.md` |
+| Discussion | 采访/开放 → 落盘 → BACKLOG ref | `feature-discussions/` |
+| **Design Gate** | **分流 → 确认（UX→operator/后端→猫猫/架构→两边）** | `feature-discussions/{date}-{fid}-design/` |
+| Completion | 愿景对照 → 跨猫验证 → 更新状态 → 移出 BACKLOG → `pnpm check:features` PASS | `docs/features/Fxxx.md` |
 
 ## Common Mistakes
 
@@ -230,19 +568,20 @@ AC 全打勾 ≠ 完成（F041 教训：12 项 AC ✅ 但 UI 不可用）。先�
 | 自己验完就收尾 | 跨猫交叉验证是强制的 |
 | 删了聚合文件 | 只从 BACKLOG 移除，聚合文件永久保留 |
 | 不记录演化关系 | Completion Step 3 必须思考 |
-| 讨论完不落盘 | 讨论结束写入 *(internal reference removed)* |
-| 等铲屎官手动协调跨猫守护 | 自己 @ 其他猫发起守护（F073） |
-| 每步停下来问铲屎官"可以继续吗？" | 全链路自驱，只在阻塞/close 时通知铲屎官 |
+| 讨论完不落盘 | 讨论结束写入 `feature-discussions/` |
+| 等operator手动协调跨猫守护 | 自己 @ 其他猫发起守护（F073） |
+| 每步停下来问“可以继续吗”，或做完一天才暴露体验分叉 | 已确认范围自主推进；方向分叉时拿具体稿及早共创 |
 | 只看 spec checkbox 就声称完成/未完成 | 核实 git log + PR 状态 + 实际 commit（LL-029）|
-| UX 没确认就开 worktree 写代码 | 先过 Design Gate 再动手 |
+| UX 没确认就推进正式产品实现 | 正式实现先过 Design Gate；隔离 worktree 可承载供确认的真实壳体验稿 |
 | 后端 API 自己拍板不跟其他猫讨论 | 纯后端走 `collaborative-thinking` 拉猫讨论 |
-| 等 feat close 才补 Phase 进度 | merge-gate Step 7.5 每次 merge 实时同步（Phase ✅ + AC + Timeline） |
+| 等 feat close 才补 Phase 进度 | merge-gate Step 7.5 按实际 truth delta 及时同步 |
 | 社区 issue 批量打 feature 标签不逐个审核 | 每个 issue 必须过 Step 0 关联检测（F114/F115/F116 教训） |
 | 社区 feature 只在开源仓打标签，BACKLOG 不同步 | ROADMAP.md 必须同步加 Source=community 条目 |
+| Status 标 done 后没跑 feature truth gate | close 前必须跑 `pnpm check:features`，PASS 才能提交 |
 
 ## 下一步
 
 - Kickoff 后 → **Design Gate**（按类型分流确认）→ `writing-plans`
-- 开发完成后 → `quality-gate` → `request-review`
+- 开发完成后 → `quality-gate`；按风险选择独立验证源，需要本地 reviewer 时用 `request-review`，fresh-context scan 按其触发条件选用
 - Review 通过后 → `merge-gate`（合入）→ 回来用 completion 闭环
 - 讨论收敛后 → `collaborative-thinking` Mode C（沉淀 ADR/规则/教训）

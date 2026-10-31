@@ -31,14 +31,33 @@ export function assertRedisIsolationOrThrow(redisUrl, suiteName) {
     throw new Error(`[${suiteName}] Invalid REDIS_URL: ${redisUrl}`);
   }
 
+  if (parsed.port === '0' || parsed.port === '6399') {
+    throw new Error(`[${suiteName}] Redis port ${parsed.port} is disabled or protected`);
+  }
+
   if (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost') {
     throw new Error(`[${suiteName}] REDIS_URL must point to localhost for tests, got hostname=${parsed.hostname}`);
   }
 
   const db = parsed.pathname.replace('/', '') || '0';
-  if (db !== '15') {
-    throw new Error(`[${suiteName}] REDIS_URL must use /15 test DB for isolation, got /${db}`);
+  const assignedDatabase = process.env.CAT_CAFE_REDIS_TEST_DB_ASSIGNED;
+  const hasValidAssignedDatabase = assignedDatabase === db && /^\d+$/.test(db) && Number(db) >= 15;
+  const manifestBackedRunner = Boolean(process.env.CAT_CAFE_REDIS_TEST_DB_MANIFEST);
+  if ((manifestBackedRunner || db !== '15') && !hasValidAssignedDatabase) {
+    throw new Error(`[${suiteName}] REDIS_URL must use /15 or a manifest-assigned test DB for isolation, got /${db}`);
   }
+}
+
+/**
+ * Shared skip reason for Redis integration suites in the default test run.
+ * These suites should only execute when the isolated Redis guard is explicitly enabled.
+ */
+export function redisIsolationSkipReason(redisUrl) {
+  if (!redisUrl) return 'REDIS_URL not set';
+  const port = parseRedisUrl(redisUrl)?.port;
+  if (port === '0' || port === '6399') return `Redis port ${port} is disabled or protected`;
+  if (process.env[ISOLATION_FLAG] !== '1') return 'Redis isolation flag not set';
+  return false;
 }
 
 function normalizePattern(pattern) {
@@ -57,5 +76,31 @@ export async function cleanupPrefixedRedisKeys(redis, patterns) {
   if (prefixedKeys.length === 0) return 0;
 
   const stripped = prefixedKeys.map((key) => key.replace(/^cat-cafe:/, ''));
+  return redis.del(...stripped);
+}
+
+/**
+ * Cleanup all keys under the client's OWN keyPrefix namespace.
+ *
+ * Use with a per-file unique keyPrefix to isolate concurrent test files. Fixes the
+ * cross-file wildcard cleanup race (plan:237): event-log-redis cleans `ballcustody:events:*`
+ * while projector-redis cleans `ballcustody:*` — under `node --test` file-level concurrency
+ * the projector's wildcard wipes event-log's keys mid-test → 6 fail.
+ *
+ * ioredis caveat (redis-pitfalls.md): `keys(pattern)` does NOT auto-prepend keyPrefix and
+ * returns raw keys (with prefix). So match raw `{prefix}*`, then strip the prefix before
+ * `del()` (which DOES re-prepend keyPrefix).
+ *
+ * Guard: requires a non-empty keyPrefix — refuses to run on a bare client to avoid wiping
+ * the whole DB.
+ */
+export async function cleanupClientKeyspace(redis) {
+  const prefix = redis.options?.keyPrefix ?? '';
+  if (!prefix) {
+    throw new Error('cleanupClientKeyspace requires a non-empty client keyPrefix (isolation guard)');
+  }
+  const found = await redis.keys(`${prefix}*`);
+  if (found.length === 0) return 0;
+  const stripped = found.map((key) => key.slice(prefix.length));
   return redis.del(...stripped);
 }

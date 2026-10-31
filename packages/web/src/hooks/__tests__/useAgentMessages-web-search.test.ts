@@ -21,12 +21,17 @@ const mockSetMessageUsage = vi.fn();
 const mockRequestStreamCatchUp = vi.fn();
 const mockSetMessageMetadata = vi.fn();
 const mockSetMessageThinking = vi.fn();
+const mockPatchMessage = vi.fn();
 
-const mockAddMessageToThread = vi.fn();
+const mockAddMessageToThread = vi.fn((_threadId: string, message: (typeof storeState.messages)[number]) => {
+  if (!storeState.messages.some((m) => m.id === message.id)) storeState.messages = [...storeState.messages, message];
+});
+const mockAppendToolEventToThread = vi.fn();
+const mockPatchThreadMessage = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
 const mockResetThreadInvocationState = vi.fn();
 const mockSetThreadMessageStreaming = vi.fn();
-const mockGetThreadState = vi.fn(() => ({ messages: [] }));
+const mockGetThreadState = vi.fn(() => ({ messages: storeState.messages }));
 
 const storeState = {
   messages: [] as Array<{
@@ -36,6 +41,7 @@ const storeState = {
     content: string;
     isStreaming?: boolean;
     timestamp: number;
+    extra?: Record<string, unknown>;
   }>,
   addMessage: mockAddMessage,
   appendToMessage: mockAppendToMessage,
@@ -53,8 +59,18 @@ const storeState = {
   requestStreamCatchUp: mockRequestStreamCatchUp,
   setMessageMetadata: mockSetMessageMetadata,
   setMessageThinking: mockSetMessageThinking,
+  patchMessage: mockPatchMessage,
 
+  // Named-message writes (hooks/named-message-writer.ts) — thread-scoped
   addMessageToThread: mockAddMessageToThread,
+  appendToThreadMessage: vi.fn(),
+  patchThreadMessage: mockPatchThreadMessage,
+  appendToolEventToThread: mockAppendToolEventToThread,
+  setThreadMessageThinking: vi.fn(),
+  appendRichBlockToThread: vi.fn(),
+  setThreadMessageMetadata: vi.fn(),
+  setThreadMessageUsage: vi.fn(),
+  incrementUnread: vi.fn(),
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
   resetThreadInvocationState: mockResetThreadInvocationState,
   setThreadMessageStreaming: mockSetThreadMessageStreaming,
@@ -101,6 +117,10 @@ describe('useAgentMessages system_info web_search', () => {
       storeState.messages = [...storeState.messages, message];
     });
     mockAppendToolEvent.mockClear();
+    mockPatchMessage.mockClear();
+    mockAddMessageToThread.mockClear();
+    mockAppendToolEventToThread.mockClear();
+    mockPatchThreadMessage.mockClear();
     mockClearAllActiveInvocations.mockClear();
   });
 
@@ -111,7 +131,7 @@ describe('useAgentMessages system_info web_search', () => {
     container.remove();
   });
 
-  it('consumes web_search JSON and appends a tool event (no raw JSON system bubble)', () => {
+  it('consumes web_search JSON and appends a tool event to the named response (no raw JSON system bubble)', () => {
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -121,22 +141,26 @@ describe('useAgentMessages system_info web_search', () => {
         type: 'text',
         catId: 'codex',
         content: 'hello',
+        origin: 'stream',
+        messageId: 'resp-1',
       });
     });
 
-    const assistantMsgId = mockAddMessage.mock.calls.find((call) => call[0]?.type === 'assistant')?.[0]?.id;
-    expect(typeof assistantMsgId).toBe('string');
+    // The first body event creates the response under its server id.
+    expect(storeState.messages.filter((m) => m.type === 'assistant').map((m) => m.id)).toEqual(['resp-1']);
 
     act(() => {
       captured?.handleAgentMessage({
         type: 'system_info',
         catId: 'codex',
+        messageId: 'resp-1',
         content: JSON.stringify({ type: 'web_search', catId: 'codex', count: 1 }),
       });
     });
 
-    expect(mockAppendToolEvent).toHaveBeenCalledWith(
-      assistantMsgId,
+    expect(mockAppendToolEventToThread).toHaveBeenCalledWith(
+      'thread-1',
+      'resp-1',
       expect.objectContaining({
         type: 'tool_use',
         label: expect.stringContaining('web_search'),
@@ -147,5 +171,45 @@ describe('useAgentMessages system_info web_search', () => {
       (call) => call[0]?.type === 'system' && String(call[0]?.content).includes('"web_search"'),
     );
     expect(systemJsonCalls).toHaveLength(0);
+  });
+
+  it('does not patch a newer same-cat bubble when an older supplement original is not loaded', () => {
+    storeState.messages = [
+      {
+        id: 'msg-newer',
+        type: 'assistant',
+        catId: 'codex',
+        content: 'newer unrelated answer',
+        timestamp: 300,
+      },
+    ];
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({
+          type: 'freshness_supplement',
+          supplementId: 'f254-supplement:msg-older:1',
+          lineageId: 'msg-older',
+          originalMessageId: 'msg-older',
+          threadId: 'thread-1',
+          catId: 'codex',
+          seq: 1,
+          status: 'running',
+          requiredCount: 1,
+          updatedAt: 400,
+        }),
+      });
+    });
+
+    expect(mockPatchMessage).not.toHaveBeenCalled();
+    expect(mockPatchThreadMessage).not.toHaveBeenCalled();
+    expect(mockAddMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'system', content: expect.stringContaining('freshness_supplement') }),
+    );
   });
 });

@@ -1,8 +1,16 @@
 'use client';
 
-// biome-ignore lint/correctness/noUnusedImports: React needed for JSX in vitest environment
-import React, { useCallback, useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { sessionChainCopy } from '@/components/session-chain.shell-copy';
+import { useTrajectoryCopy } from '@/components/workspace/trajectory/use-trajectory-copy';
+import { useCatData } from '@/hooks/useCatData';
+import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { apiFetch } from '@/utils/api-client';
+import type { ExternalRuntimeSessionListItem } from '../runtime-sessions/external-runtime-session-types';
+import { HandoffEventRows, type HandoffSummary, type RawEvent, RawEventRows } from './SessionEventRows';
+import { type DigestNoiseSummary, RuntimeMetadataHeader } from './SessionRuntimeMetadataHeader';
+import { sessionViewerCopy } from './session-viewer.shell-copy';
 
 type ViewMode = 'chat' | 'handoff' | 'raw';
 
@@ -13,45 +21,95 @@ interface ChatMessage {
   invocationId?: string;
 }
 
-interface HandoffSummary {
-  invocationId: string;
-  eventCount: number;
-  toolCalls: string[];
-  errors: number;
-  durationMs: number;
-  keyMessages: string[];
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
-interface RawEvent {
-  eventNo: number;
-  v: number;
-  t: number;
-  catId: string;
-  event: Record<string, unknown>;
+function isExternalRuntimeSessionListItem(value: unknown): value is ExternalRuntimeSessionListItem {
+  if (!isObjectRecord(value)) return false;
+
+  const lifecycle = value.lifecycle;
+  const binding = value.binding;
+  const drilldown = value.drilldown;
+
+  return (
+    typeof value.sessionId === 'string' &&
+    typeof value.threadId === 'string' &&
+    typeof value.runtime === 'string' &&
+    typeof value.runtimeSessionId === 'string' &&
+    typeof value.catId === 'string' &&
+    typeof value.lastObservedAt === 'number' &&
+    isObjectRecord(lifecycle) &&
+    typeof lifecycle.state === 'string' &&
+    isObjectRecord(binding) &&
+    typeof binding.mode === 'string' &&
+    isObjectRecord(drilldown) &&
+    typeof drilldown.sessionRecord === 'string' &&
+    typeof drilldown.events === 'string' &&
+    typeof drilldown.digest === 'string'
+  );
+}
+
+async function loadExternalRuntimeSession(sessionId: string): Promise<ExternalRuntimeSessionListItem | null> {
+  try {
+    const response = await apiFetch(`/api/external-runtime-sessions/${sessionId}`);
+    if (!response || response.status === 404 || !response.ok) return null;
+    const metadata = await response.json();
+    return isExternalRuntimeSessionListItem(metadata) ? metadata : null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadDigestNoise(sessionId: string): Promise<DigestNoiseSummary[]> {
+  try {
+    const response = await apiFetch(`/api/sessions/${sessionId}/digest`);
+    if (!response?.ok) return [];
+    const digest = (await response.json()) as { diagnostics?: { noise?: DigestNoiseSummary[] } };
+    return Array.isArray(digest.diagnostics?.noise) ? digest.diagnostics.noise : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface SessionEventsViewerProps {
   sessionId: string;
+  catId?: string;
   onClose: () => void;
 }
 
 const PAGE_SIZE = 30;
 
-function fmtDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const sec = Math.round(ms / 1000);
-  if (sec < 60) return `${sec}s`;
-  return `${Math.floor(sec / 60)}m${sec % 60}s`;
-}
-
 const ROLE_STYLES: Record<string, string> = {
-  user: 'bg-blue-50 text-blue-800',
-  assistant: 'bg-purple-50 text-purple-800',
-  system: 'bg-gray-50 text-gray-600',
+  user: 'text-[var(--color-cafe-accent)]',
+  system: 'bg-cafe-surface-elevated text-cafe-secondary',
+};
+/* Slash opacity on CSS-var colors silently fails; use color-mix() via inline style. */
+const ROLE_INLINE_STYLES: Record<string, CSSProperties> = {
+  user: { backgroundColor: 'color-mix(in oklch, var(--color-cafe-accent) 10%, transparent)' },
 };
 
-export function SessionEventsViewer({ sessionId, onClose }: SessionEventsViewerProps) {
+const ASSISTANT_STYLE_BY_CAT: Record<string, string> = {
+  opus: 'bg-opus-light text-opus-dark',
+  codex: 'bg-codex-light text-codex-dark',
+  gemini: 'bg-gemini-light text-gemini-dark',
+  kimi: 'bg-kimi-light text-kimi-dark',
+  gpt52: 'bg-conn-emerald-bg text-conn-emerald-text',
+  'opus-45': 'bg-conn-purple-bg text-[var(--color-opus-primary)]',
+  sonnet: 'bg-conn-purple-bg text-[var(--color-opus-primary)]',
+};
+
+function assistantRoleStyle(catId?: string): string {
+  if (!catId) return 'bg-cafe-surface-elevated text-cafe-secondary';
+  return ASSISTANT_STYLE_BY_CAT[catId] ?? 'bg-cafe-surface-elevated text-cafe-secondary';
+}
+
+export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEventsViewerProps) {
+  const { getCatById } = useCatData();
+  const t = useTrajectoryCopy(sessionChainCopy);
+  const viewerCopy = useTrajectoryCopy(sessionViewerCopy);
   const [view, setView] = useState<ViewMode>('chat');
+  const [dataView, setDataView] = useState<ViewMode>('chat');
   const [data, setData] = useState<ChatMessage[] | HandoffSummary[] | RawEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -59,6 +117,8 @@ export function SessionEventsViewer({ sessionId, onClose }: SessionEventsViewerP
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [total, setTotal] = useState(0);
   const [cursorHistory, setCursorHistory] = useState<number[]>([]);
+  const [runtimeSession, setRuntimeSession] = useState<ExternalRuntimeSessionListItem | null>(null);
+  const [digestNoise, setDigestNoise] = useState<DigestNoiseSummary[]>([]);
 
   const fetchEvents = useCallback(
     async (v: ViewMode, c: number) => {
@@ -77,6 +137,7 @@ export function SessionEventsViewer({ sessionId, onClose }: SessionEventsViewerP
         if (v === 'chat') setData(json.messages ?? []);
         else if (v === 'handoff') setData(json.invocations ?? []);
         else setData(json.events ?? []);
+        setDataView(v);
       } catch {
         setError(true);
       } finally {
@@ -86,12 +147,31 @@ export function SessionEventsViewer({ sessionId, onClose }: SessionEventsViewerP
     [sessionId],
   );
 
+  // Stale-while-revalidate: keep old data visible during view switch.
+  // fetchEvents() replaces data on success; cursor/history reset here
+  // because the new view always starts at page 0.
   useEffect(() => {
-    setData([]);
     setCursor(0);
     setCursorHistory([]);
     fetchEvents(view, 0);
   }, [view, fetchEvents]);
+
+  useEffect(() => {
+    let alive = true;
+    setRuntimeSession(null);
+    setDigestNoise([]);
+
+    void (async () => {
+      const metadata = await loadExternalRuntimeSession(sessionId);
+      if (!alive || !metadata) return;
+      setRuntimeSession(metadata);
+      const noise = await loadDigestNoise(sessionId);
+      if (alive) setDigestNoise(noise);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [sessionId]);
 
   const goNext = () => {
     if (nextCursor == null) return;
@@ -108,103 +188,85 @@ export function SessionEventsViewer({ sessionId, onClose }: SessionEventsViewerP
     fetchEvents(view, prev);
   };
 
+  const assistantStyle = assistantRoleStyle(catId);
+  const assistantLabel = catId ? resolveCatDisplayName(catId, getCatById) : 'assistant';
+
   return (
-    <div className="rounded-lg border border-gray-200 bg-white">
+    <div className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
-        <span className="text-xs font-semibold text-gray-700">Session 事件</span>
+      <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--console-border-soft)]">
+        <span className="text-xs font-semibold text-cafe-secondary">{t.viewer}</span>
         <button
           type="button"
           data-testid="session-viewer-close"
           onClick={onClose}
-          className="text-gray-400 hover:text-gray-600 text-sm"
+          className="text-cafe-muted hover:text-cafe-secondary text-sm"
         >
           ✕
         </button>
       </div>
 
+      {runtimeSession && <RuntimeMetadataHeader session={runtimeSession} noise={digestNoise} />}
+
       {/* View mode tabs */}
-      <div className="flex border-b border-gray-100">
+      <div className="flex border-b border-[var(--console-border-soft)]">
         {(['chat', 'handoff', 'raw'] as const).map((m) => (
           <button
             type="button"
             key={m}
             onClick={() => setView(m)}
-            className={`flex-1 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors
-              ${view === m ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+            className={`flex-1 py-1.5 text-micro font-semibold uppercase tracking-wider transition-colors
+              ${view === m ? 'text-[var(--color-cafe-accent)] border-b-2 border-[var(--color-cafe-accent)]' : 'text-cafe-muted hover:text-cafe-secondary'}`}
           >
             {m === 'chat' ? 'Chat' : m === 'handoff' ? 'Handoff' : 'Raw'}
           </button>
         ))}
       </div>
 
-      {/* Content */}
+      {/* Content — stale-while-revalidate: show old data with loading indicator */}
       <div className="max-h-72 overflow-y-auto p-2">
-        {loading && <div className="text-xs text-gray-400 py-2">加载中...</div>}
-        {error && <div className="text-xs text-red-500 py-2">加载失败</div>}
+        {loading && data.length > 0 && (
+          <div className="text-micro text-cafe-muted text-center py-1 animate-pulse">Refreshing...</div>
+        )}
+        {loading && data.length === 0 && <div className="text-xs text-cafe-muted py-2">{t.viewerLoading}</div>}
+        {error && <div className="text-xs text-conn-red-text py-2">{t.viewerFailed}</div>}
 
-        {!loading && !error && view === 'chat' && (
+        {!error && dataView === 'chat' && (
           <div className="space-y-1.5">
             {(data as ChatMessage[]).map((msg, i) => (
               <div
                 key={`${msg.role}-${msg.timestamp}-${i}`}
-                className={`rounded px-2 py-1.5 text-[11px] ${ROLE_STYLES[msg.role] ?? 'bg-gray-50 text-gray-600'}`}
+                className={`rounded px-2 py-1.5 text-xs ${
+                  msg.role === 'assistant'
+                    ? assistantStyle
+                    : (ROLE_STYLES[msg.role] ?? 'bg-cafe-surface-elevated text-cafe-secondary')
+                }`}
+                style={ROLE_INLINE_STYLES[msg.role]}
               >
-                <span className="font-medium">{msg.role}</span>
+                <span className="font-medium">{msg.role === 'assistant' ? assistantLabel : msg.role}</span>
                 <p className="mt-0.5 whitespace-pre-wrap break-words">{msg.content}</p>
               </div>
             ))}
           </div>
         )}
 
-        {!loading && !error && view === 'handoff' && (
-          <div className="space-y-1.5">
-            {(data as HandoffSummary[]).map((inv) => (
-              <div key={inv.invocationId} className="rounded border border-gray-100 px-2 py-1.5 text-[11px]">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-gray-500">{inv.invocationId}</span>
-                  <span className="text-gray-400">{fmtDuration(inv.durationMs)}</span>
-                  {inv.errors > 0 && <span className="text-red-500">{inv.errors} err</span>}
-                </div>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {(inv.toolCalls ?? []).map((t) => (
-                    <span key={t} className="bg-gray-100 text-gray-600 px-1 py-0.5 rounded text-[10px]">
-                      {t}
-                    </span>
-                  ))}
-                </div>
-                {(inv.keyMessages ?? []).length > 0 && (
-                  <p className="text-gray-500 mt-1 truncate">{(inv.keyMessages ?? [])[0]}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {!error && dataView === 'handoff' && <HandoffEventRows invocations={data as HandoffSummary[]} />}
 
-        {!loading && !error && view === 'raw' && (
-          <div className="space-y-1">
-            {(data as RawEvent[]).map((evt) => (
-              <div key={evt.eventNo} className="text-[10px] font-mono bg-gray-50 rounded px-1.5 py-1">
-                <span className="text-gray-400">#{evt.eventNo}</span>{' '}
-                <span className="text-gray-600">{JSON.stringify(evt.event)}</span>
-              </div>
-            ))}
-          </div>
-        )}
+        {!error && dataView === 'raw' && <RawEventRows events={data as RawEvent[]} />}
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-t border-gray-100 text-[10px] text-gray-400">
-        <span>{total} 条事件</span>
+      <div className="flex items-center justify-between px-3 py-1.5 border-t border-[var(--console-border-soft)] text-micro text-cafe-muted">
+        <span>{t.events(total)}</span>
         <div className="flex gap-2">
           {cursorHistory.length > 0 && (
-            <button type="button" onClick={goPrev} className="text-blue-500 hover:text-blue-700">
-              上一页
+            <button type="button" onClick={goPrev} className="text-[var(--color-cafe-accent)] hover:opacity-80">
+              {viewerCopy.previous}
             </button>
           )}
           {nextCursor != null && (
-            <button type="button" onClick={goNext} className="text-blue-500 hover:text-blue-700">
-              下一页
+            <button type="button" onClick={goNext} className="text-[var(--color-cafe-accent)] hover:opacity-80">
+              {viewerCopy.next}
             </button>
           )}
         </div>

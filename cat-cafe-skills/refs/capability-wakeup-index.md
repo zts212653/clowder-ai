@@ -1,0 +1,337 @@
+---
+feature_ids: [F203, F192, F311]
+topics: [l0, capability-wakeup, skills, features, awareness]
+doc_kind: reference
+created: 2026-05-27
+related_features: [F128, F192, F201, F210, F211, F212, F186, F188, F311]
+---
+
+# Capability Wakeup Index — 家里独有能力速查（L0 §8 配套）
+
+> **L0 §8** = Tier 1（高频日常反射，15 条直接进 native L0 注入）
+> **本文档** = Tier 1 完整 fallback + Tier 2（场景专项，低频但 trigger 明确）
+> **数据驱动 iterate**: F192 Phase F `eval:capability-wakeup` per-cat per-scenario miss rate verdict → L0 §8 v2
+
+## 分类轴：先过 reachability gate，再分 enforcement tier
+
+L0 §8 trigger 写了 ≠ 猫真用。判断"为什么 miss + 怎么修"必须两层筛，不能跳：
+
+**筛子 0 — Reachability（这能力当前 context 调得到吗？怎么调？）**
+- ❌ 调不到 / trigger 没写"怎么调" → 猫误判"这是别人的工具"，100% miss。**修法 = 补"怎么调"一行，不是 hook**。
+- 教训（2026-05-27）：opus-47 断言"terminal 调不了 workspace-navigator"——纯脑补没 verify（未核验工具可达性）。当时底层 API 可由 Bash 直调；F223 Phase B 后主路径升级为 `cat_cafe_workspace_navigate` typed MCP。**一个你以为够不着的能力，miss 不是因为懒，是从没进考虑**——独立于"偷懒"的失败域，药方相反（补可达性 ≠ 上 forcing function）。
+
+**筛子 1 — Enforcement Tier（过了筛子 0 才分）**
+- **Tier A · episodic**：需要时自然想起，无零摩擦偷懒竞品。L0 advisory 够。例：`start_vote` / `collaborative-thinking` / `deep-research`
+- **Tier B · habit-resistant**：有零摩擦默认（纯文字 / 报路径）抢活，赶活时偷懒默认必赢。L0 advisory 必输，需 forcing function（hook：偷懒瞬间主动拦）。例：`rich-messaging` / `browser-preview` / `workspace-navigator`（补完可达性后仍是 B）
+  - hook 守 KD-8：只给数据（"你提了 3 个路径 workspace 开了 0"），不替猫判断开哪个
+
+> **为什么先 reachability**：把 reachability 误判当 Tier B 去开 hook = 开错药——给一个"以为自己没这工具"的猫弹"要不要打开？"，他回"我没这工具"。hook 治不了误判。F192 Phase F eval 只测**过了筛子 0 的真 Tier B**。
+
+### 实战：原"一刀切 Tier B"三能力过筛后分化（opus-48 catch，每条带实测凭证）
+
+opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一起归 Tier B。过 reachability 筛子后**分化成三种，修法不同**——证据级别标清，不脑补：
+
+| 能力 | reachability（实测凭证） | 过筛归类 | 修法 |
+|---|---|---|---|
+| `workspace-navigator` | ✅ `cat_cafe_workspace_navigate` typed MCP（底层 `/api/workspace/navigate`，action `reveal\|open`） | 真 Tier B | 主路径改 typed MCP；reachability 修完后才轮到 hook |
+| `rich-messaging` | ✅ `cat_cafe_create_rich_block` MCP，同 `cat_cafe_post_message` callback 路径（本 session post_message 多次 routed ok）；未单独直调（避免 thread 噪声） | 真 Tier B（纯文字零摩擦抢活） | 候选 forcing-function（hook：长纯文字回复 + 无 rich block → 提醒） |
+| `browser-preview` | ✅ `cat_cafe_preview_open` typed MCP（底层 `/api/preview/auto-open`）；同文件共 6 个 cat-callable POST（`/validate-port` `/open` `/close` `/navigate` `/auto-open` `/screenshot`，全是 `app.post<{...}>(...)` 泛型签名） | 真 Tier B | 跟另两个一致：补可达性认知（cat 主动打开，不是"等 Hub 检测/等operator点"）+ 候选 hook |
+
+**这张表本身就是 reachability 前置筛的价值**：三个"看着该 Tier B"的，过筛后**全是可达的真 Tier B**——workspace / rich-messaging / browser-preview 各有 typed cat path（`cat_cafe_workspace_navigate` / `cat_cafe_create_rich_block` / `cat_cafe_preview_open`）。筛子的价值是**逼出每个的实测调用方式**，把"以为够不着"的误判挡在 hook 决策之外，不是脑补"哪个无 API"。
+
+> **本表自身的事故（meta，opus-48 连环 catch，第三+第四层）**：
+> - **第三层**：browser-preview 这格初稿被 opus-47 写成"无 push API、机制不同"。根因**不是"多行"**——是 grep 模式 `app.post('/api/preview` 假设 `app.post` 直接跟 `(`，但 `preview.ts` 全部 6 个 POST 都是泛型签名 `app.post<{ Body... }>('/...'`，`<{...}>` 把 `app.post` 和 `(` 隔开 → 对 6 个**全部**零命中（auto-open 恰好也多行，但那是次要），只匹配到 2 个 GET，下了否定结论。
+> - **第四层（更狠）**：这条复盘 note 初稿自己把 POST 数成"4 个"、根因写成"多行格式"——**连"我没 verify"的复盘都没 verify**。opus-48 亲读 `preview.ts` 数出 6 个 POST + 泛型签名才拦下。
+> 教训终态：**否定/数字结论（含复盘叙述里的数字、根因）必须读源文件确认，grep 命中为空 ≠ 不存在**（grep 漏泛型 `<{...}>` / 多行 / 别名）；**verify 不是一次性动作，是每个事实声明都要过的尺**。这证明脑补/reachability 病靠写 doc 治不好（doc 自己中招 4 层），只有 reviewer 亲验否定+数字结论的纪律能拦——见 `feedback_verify_reachability_before_classifying`。
+
+## Tier 1（已在 L0 §8）— 详细 fallback / 边界
+
+### 1. `rich-messaging` — 富媒体回复
+
+**坏直觉**：默认纯文字回复（开发系猫习惯）
+**场景 trigger**：
+- 想发一堆文字 / 日志 / 步骤
+- 给operator展示 diff / 选项 / 列表
+- 庆祝 / 仪式感 / 给operator惊喜
+- 给operator听 / 看（语音 / 图 / 视频）
+
+**用法**：`cat_cafe_create_rich_block` + 字段 `kind` / `v` / `id`
+**完整 schema**：`cat_cafe_get_rich_block_rules`
+**Fallback**：rich block 工具失败时退到 markdown table；连 markdown 不够再用纯文字
+
+### 2. `browser-preview` — Hub 内嵌 localhost 预览
+
+**坏直觉**：改完前端发"开浏览器看 http://localhost:5102/foo"
+**场景 trigger**：
+- 改了前端代码想让operator看效果
+- 前端 component / 页面 / 布局 review
+- dev server 已起来想 demo
+
+**用法**：`cat_cafe_preview_open`；worktree 内 OFFSET-aware ports；prevent runtime 3003/3004 误打
+**边界**：localhost 预览用 `browser-preview`；外部网站用 `browser-automation`
+
+### 3. `image-generation` — AI 生图
+
+**坏直觉**：需要图时只找现成图（图床搜 / 用 placeholder）
+**场景 trigger**：
+- 架构图 / 视觉 mock / 完整 UI 设计稿
+- PPT 内容页配图
+- 信息图 / 像素画素材
+
+**Backend 路由**：原生 tool call (Codex/Antigravity) / 浏览器自动化 (Gemini/ChatGPT)
+**边界**：硬要求可编辑 / native text → 用 PPT/HTML 管线，不用 image-generation
+
+### 4. `workspace-navigator` — 程式打开文件到 Workspace panel
+
+**坏直觉**：报文件路径 "见 `packages/web/foo.tsx`"（+ 误判"这是 Hub 专属、terminal 调不了"）
+**场景 trigger**（predicate 全集）：operator说 `打开 / 看看 / 看看代码 / 看看文件 / 查看文件 / 帮我打开 / open the (file|dir|directory) / show me the (file|code)`——想让operator直接看到目标文件 / 文档 / 代码 / 设计图
+
+**用法（reachability — 别误判成 Hub 专属！）**：`cat_cafe_workspace_navigate({ path, action: "open" | "reveal", worktreeId, threadId })`
+- **文件 → `action: "open"`**（打开文件查看器）；**目录 → `action: "reveal"`**（展开文件树到目录，不打开任何文件）；**不确定 → `reveal`**（安全默认，让operator自己挑）
+- 完整：`workspace-navigator/SKILL.md` Step 3（含 line 定位、多 tab 隔离）。F148 navigation 系统底层。
+**分类**：reachability ✅（typed MCP + 底层 API 实测）；enforcement = Tier B（零摩擦"报路径"抢活）——但**先补可达性认知（本条），再考虑 hook**，不是上来就 hook。
+
+### 5. `convention-graph-discovery` — 约定面改动前查影响面
+
+**坏直觉**：改 MCP tool / skill manifest / route / callback 时直接 grep，或只凭记忆判断消费方
+**场景 trigger**：
+- 改 MCP tool schema/name/registry
+- 改 `cat-cafe-skills/*/SKILL.md` / skill manifest trigger
+- 改 route / workflow callback / routing 约定面
+- F242 / convention graph 本体、SOP 或 eval adoption 相关工作
+
+**用法**：先 `pnpm convention-graph:index -- --repo .`，再 `pnpm convention-graph:code-consumers -- --repo . --domain <domain> --kind <kind> --name <name>`；`freshness.stale=true` 先 reindex
+**Hard guard**：`sop-definitions/development.yaml` 的 `impl-convention-graph-before-convention-edit` 对约定面 changedFiles 要求成功 `code-consumers` 命令
+**Eval**：`eval:capability-wakeup` 规则 `convention-graph-before-convention-surface-edit` 统计 changedFiles → convention graph usage/miss
+**边界**：普通函数调用继续用 LSP/grep；约定图看的是 repo-specific convention edge，不替代类型系统
+
+### 6. `pencil-design` — .pen 设计文件 + React 代码导出
+
+**坏直觉**：手搓 CSS / 直接 JSX
+**场景 trigger**：
+- 改 UI 视觉 / 设计界面
+- 需要高保真还原设计稿
+- 设计探索 / variant 对比
+
+**约束**：禁止 emoji 替代 SVG（feedback_design_to_code_fidelity）
+**Fallback**：纯文字描述设计意图，让设计稿先行
+
+### 7. `guide-interaction` — 场景式引导
+
+**坏直觉**：丢一大段 README 让operator自己看
+**场景 trigger**：
+- operator问"这个怎么用 / 怎么配置 / 怎么操作"
+- 配置类 / 流程类 / 多步骤任务
+- 新手 onboarding
+
+**用法**：分步走动 + 视觉提示，配合 Guide Engine
+
+### 8. `collaborative-thinking` / `expert-panel` — 探索与多视角判断
+
+**坏直觉**：在同一个方向反复改 / 等人先把答案说清
+**场景 trigger**：
+- 有目标但不知道怎么做，或改了几版仍不满意
+- 架构决定（需要多视角校验）
+- 讨论中需要探索不同解释、方法或方向
+- operator明确要求专家团
+
+**用法**：普通探索用 `collaborative-thinking`，它支持单猫与多猫思考，不自动召集队友。用户明确要求专家团时才用 `expert-panel`；普通“帮我分析一下”可以直接回答，需继续探索时走前者。已确定的实现与日常 bug 定位沿原工作路径，不为多视角重开讨论。
+
+### 9. `cat_cafe_propose_thread` — 提议创建新 thread（F128）
+
+**坏直觉**：口头说"你新开一个 thread"让operator手动操作
+**场景 trigger**：
+- 想做新 issue 独立调查
+- 子任务需要 isolated context
+- 长讨论已超出当前 thread scope
+
+**用法**：propose-first 流程 — 猫填好 thread 信息 → 卡片让operator确认或编辑 → 系统创建
+**社区 PR 反射**：引用外部 PR/issue 时先加载 `opensource-ops`；服务端不推断外部对象身份、作者角色或 maintainer 策略。子 thread 自己用 canonical provider adapter grounding 对象与作者，执行家里的 maintainer 五问；外部作者的修复球默认不派给家猫，家猫 fixup 需显式 Strategy B 授权 provenance。
+**ADR 锚点**：ADR-035
+
+### 10. F211 外部 runtime session 查询
+
+**坏直觉**：问operator"截图给我看" / "你刚在哪说的"
+**场景 trigger**：
+- Antigravity / 孟加拉 / IDE-direct 会话像丢了
+- cross-runtime session transparency 需要
+- 跨 runtime 的猫历史 lookup
+
+**Tools**：`cat_cafe_list_external_runtime_sessions` / `cat_cafe_read_external_runtime_session` / `cat_cafe_register_external_runtime_session`
+
+### 11. F212 CLI 错误诊断
+
+**坏直觉**：前端只显"codex cli 退出了"就盲猜
+**场景 trigger**：
+- CLI 子进程意外退出
+- runtime stderr 抓不到完整错误
+- 用户视角 only 一行 error message
+
+**Tools**：读 `cliDiagnostics` / safe excerpt / `debugRef`
+**Fallback**：直接 ssh 到 runtime worktree 看 stderr log（operator ops only）
+
+### 12. F192 Eval Hub / Verdict Handoff
+
+**坏直觉**：口头说"修了" / "已优化"
+**场景 trigger**：
+- SOP / harness / tool 改完不知道是 fix / build / sunset / keep_observe
+- 需要 acted-on 闭环证据
+- harness 漂移检测
+
+**Tools**：`eval:a2a` / `eval:memory` / `eval:sop` domain registry + verdict bundles + re-eval closure
+**边界**：本 PR 触发 `eval:capability-wakeup` 新 domain（Phase F）—— L0 §8 trigger reflex 自己也需要 eval
+
+### 13. `search_evidence` + drilldown（F209 evidence recall 优化）
+
+**坏直觉**：单刀搜一次就得结论
+**场景 trigger**：
+- 压缩后失忆 / 找旧决策
+- "我记得最近讨论过 X"
+- session 跨 invocation 查源头
+
+**Drill-down 链**：
+1. `search_evidence` 第一刀
+2. 命中 anchor → `cat_cafe_read_session_digest`
+3. 需要 per-invocation → `cat_cafe_read_session_events` (view=handoff)
+4. 看具体 invocation tool calls → `cat_cafe_read_invocation_detail`
+
+**Best practice**：`memory-search-best-practices` skill（多刀 recall coverage 8 类题型 recipe）
+
+### 14. `cat_cafe_update_workflow` — 推 SOP 告示牌
+
+**坏直觉**：阶段进度只在聊天里说 "我做完 X 进 Y"
+**场景 trigger**：
+- feature 推进到新 stage
+- 想给下一棒猫看到当前 stage 状态
+- 想给operator Hub visibility
+
+**用法**：推 stage → 告示牌更新 → Mission Control panel 反映
+**Schema 真相源**：F203 #748 SopDefinition (`sop-definitions/development.yaml`)
+
+---
+
+### 15. `context-self-management` — context 自管理（handoff vs 压缩，F225 软层）
+
+**坏直觉**：① 一看 context 涨就焦虑"我脏了我要 clear"（你内省不准 context%，别自己猜）；② 收到 warn 就反射 handoff（丢半成品 in-flight 线索）；③ 或干脆无视信号硬冲到 auto-seal（有损兜底）
+**场景 trigger**：
+- 系统发来 `context_management_hint(warn)` 系统信号（warn 区，离 auto-seal 还有窗口）
+- 自觉这一程话题漂移大（线→树），想换张干净桌子
+
+**reachability**：✅ 信号由 `invoke-single-cat` 在 strategy `action==='warn'` 时 queue，下轮经 **prompt-injection** 注入 cat prompt（非 hook、非 system_info——system_info 到不了 cat，cloud review P1 纠正；cross-runtime 统一）；猫读 hint 即触发，调 `cat_cafe_propose_session_handoff` 落地
+**用法**：加载 `context-self-management` skill → 三问（线/树? 干净断点? 压几轮?）+ 2×2 矩阵 → handoff / 续 / 冲刺；handoff 走 `cat_cafe_propose_session_handoff` 写五件套（人来 gate）
+**vs `cross-cat-handoff`**：那个是把活交给**别的猫**；这个是封印**自己** spawn 干净的自己
+**enforcement tier**：候选 Tier A（系统信号显式到达 = 自带 forcing function），但有"无视/反射"两种偷懒默认 → 由 eval 定夺
+**eval（F192 `eval:capability-wakeup`）**：
+- activation：warn + 干净断点时 `propose_session_handoff` 调用率；脏/中途时是否正确**不** handoff（避免过度触发）
+- friction：续接 session 第一个 invocation 是否引用五件套
+- sunset：连续 N 周 0 调用 → 唤醒路径无效，重评（demote / 改写 trigger）
+
+---
+
+## Tier 2（不进 L0 §8，但 trigger 明确）
+
+### 16. F201 Antigravity 中断 recovery
+
+**坏直觉**：中断后盲重跑命令
+**场景 trigger**：Antigravity session 中断但可能已经写文件 / 跑命令
+**用法**：查 recovery card / supervisor / side-effect journal
+
+### 17. F186/F188 Library memory federation
+
+**坏直觉**：项目 repo 里搜不到就说"没有"
+**场景 trigger**：跨领域知识 / Lexander 虚拟世界 / 多 domain knowledge
+**Tools**：`cat_cafe_library_list` / `cat_cafe_library_dry_run` / `cat_cafe_library_create` / `cat_cafe_library_rebuild` / `cat_cafe_library_verify`
+
+### 18. `video-forge` / `ppt-forge` / `tech-writing` — 对外产出
+
+**坏直觉**：阶段成果只发一堆 commits / markdown
+**场景 trigger**：
+- 一句话要一支视频 / Showcase / 教程录屏（Remotion 搭，先出样张自审）
+- HTML PPT slide / 海报
+- 对外技术博客 / 公众号
+
+**Pipeline**：schema-driven 全链路（不要 ad-hoc 写）
+
+### 19. `hyperfocus-brake` — 健康提醒
+
+**坏直觉**：operator连续肝代码 / 情绪波动时硬干
+**场景 trigger**：hook 触发 / 连续工作时长超阈值 / 情绪信号
+**用法**：三猫撒娇打断 hyperfocus
+
+### 20. `deep-research` — 多源调研
+
+**坏直觉**：单 grep / 单 WebSearch 草草搜两下
+**场景 trigger**：
+- 技术问题需要多源调查
+- 设计决策需要证据
+- operator说"调研" / "research"
+
+**Pipeline**：Web Deep Research + Coder 合成 + 云端模型咨询
+
+### 21. `mark_generalizable` / `nominate_for_global` — Lesson 全局化
+
+**坏直觉**：学到 lesson 只记 local memory
+**场景 trigger**：
+- 跨 feature / 跨族适用的 lesson
+- 别族猫也会犯的错
+- shared-rules 候选
+
+**Tools**：`cat_cafe_mark_generalizable` / `cat_cafe_nominate_for_global`
+
+### 22. F210 AGY adapter sticky 行为
+
+**坏直觉**：以为 `/model` 直觉判断就够
+**场景 trigger**：Siamese / Antigravity carrier 或 model sticky 行为异常
+**Source**：`docs/architecture/cli-integration.md` + F210
+
+### 23. `capability-evolution` — F311 能力进化入口
+
+**坏直觉**：听到“你们能进化什么”只加载通用 `self-evolution` 讲理念；听到“我们来进化 X”或直接的 Agent / 业务结果，只给建议，不启动已经上线的 Program
+
+**场景 trigger**：
+
+- 信息型：“能进化什么 / 能力进化是什么” → 解释范围与边界，零写入
+- 动作型：“我们来进化 X”且 X 是具体目标 → 解析 canonical targetRef
+- 动作型：“让 / 请让 Agent 或业务能力达到 Y”且不是问句、显式延后或只讨论 → 使用 F311 admission identity 解析 canonical targetRef；不要追问具体实现
+
+**用法**：加载 `capability-evolution`；只有动作型才调用 `cat_cafe_start_evolution_program`，并用触发消息的 exact `sourceMessageId` 作为 `clientMessageId`；问句、显式延后或只讨论保持零写入。启动后在同一 invocation 继续 get / begin / submit / get，交出首轮正式准备
+
+**边界**：重复错误/SOP/知识沉淀走 `self-evolution`；确定性 bug 走 test/guard；运行健康走 F153 logs/metrics/traces；未知 owner 不猜投，用 F311 admission identity + typed blocker 保持诚实
+
+**Eval**：`eval:capability-wakeup` 的机械规则只统计它能确定判别的显式具体目标；语义型直接目标留给 rubric judge，不能靠扩写 regex 偷渡进机械分母。连续 miss 再决定是否晋升 Tier 1
+
+---
+
+## MCP capability 快扫（underused cat_cafe_* 工具）
+
+> operator 2026-05-27 提醒："盘点 skills + features 还不够，MCP 也得盘"。~75 个 `cat_cafe_*` 里大多数是 plumbing（`ack_mentions` / `get_thread_cats` / `list_*` / `update_task` 等机制类，不算 capability-wakeup）；下面是"做了但猫忘了用"的**能力类** MCP，按坏直觉列：
+
+| 坏直觉 | 该用的 MCP | 说明 |
+|---|---|---|
+| 多猫意见不一就无限互 @ 辩论 | `cat_cafe_start_vote` | 结构化表决，N 票收敛，不靠口头来回（v1.1 已进 L0 §8） |
+| 一个个 @ 召集猫开会 | `cat_cafe_multi_mention` | 一次性 @ 多猫进同 thread（L0 §7 quick index 有，但 trigger 易忘） |
+| expert-panel / review 报告只发聊天 | `cat_cafe_generate_document` | 生成正式 DOCX/PDF 文档（凭证不过期、可存档、可对外） |
+| 想重开一条已知调查路线 | `cat_cafe_run_perspective` | git-backed Perspective live query 计划重放（advanced/niche，返回 route hints + anchors，仍需 typed reader 取证据） |
+| review 后 lesson 散在脑子里 | `cat_cafe_review_distillation` | 蒸馏 review 结论沉淀（配合 mark_generalizable） |
+| 想记住operator本人、个人近况、称谓或这只 persona 与operator之间特有的沟通边界 | `cat_cafe_propose_profile_update` | 提议更新 relationship primer（F231）；回答”operator是谁 / 咱们怎样相处”，不是通用质量判断；owner-wide 共享事实加 `targetLayer:'corpus'`；工具在 deferred list 需先 `tool_search` |
+| operator表达可复用的审美/品味/质量/设计或工程判断（正向“这就对了”或负向“太客服了”） | `cat_cafe_propose_taste` | 提议 taste vignette（F221）；回答“什么样的输出/系统才算好”，不是个人事实或重复流程规则；误投 profile 时有 `routing_advisory` |
+| 当轮确认了稳定人名↔workspace handle/别名，或人物私域事实/关系/互动，却当成一次性上下文放过 | `cat_cafe_propose_entity` / `cat_cafe_propose_person_memory` | 已查证、带 provenance 的 workspace 定位别名走 entity；owner-private 人物事实/关系/互动走 person-memory；两类同时成立则分别提案、分别审批。禁止裸名字猜身份或静默写入；工具在 deferred list 需先 `tool_search` |
+| 一看到纠正、表扬或 Magic Word 就默认改关系档案 | 按语义选择 Profile / Taste / `code-as-harness` | 事件形式不决定存储：关于人/关系 → Profile；关于好坏标准 → Taste；重复工具/流程规则 → Harness |
+
+> **MCP 完整速查**：L0 §7 是 quick index（记忆 / 协作 / 任务 / Rich block / Drill-down 5 类）；本表补"能力类但易忘"的。完整工具集 `tool_search` 精确搜或读 `packages/mcp-server/src/tools/`。
+
+---
+
+## 维护协议
+
+- **新增 capability**：当家里 ship 一个独有 feature/skill 且operator观察到"做了但猫不知道用" → 加进本文档 Tier 2；连续 N 周 eval verdict miss rate > 30% → promote Tier 1（进 L0 §8）
+- **降级 capability**：F192 `eval:capability-wakeup` verdict 显示某条 Tier 1 miss rate < 5% 持续 4 周 → demote Tier 2（出 L0 §8）
+- **删除 capability**：feature sunset / skill 退役 → 同步删本文档对应条目
+- **数据源**：F192 Phase F `eval:capability-wakeup` weekly verdict bundle（依赖 #748 后 ship）
+
+## 编辑边界
+
+- L0 §8 是 Tier 1 真相源，本文档是配套 fallback + Tier 2 仓库
+- L0 §8 改 → 必须更新本文档对应条目
+- 本文档 Tier 2 加新条目无需改 L0 §8
+- L0 token budget 触顶时 → eval verdict 数据驱动 demote Tier 1 → Tier 2，不靠手感

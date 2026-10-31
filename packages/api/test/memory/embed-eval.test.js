@@ -18,10 +18,27 @@ describe('Phase C eval: lexical vs semantic', () => {
     assert.ok(Array.isArray(corpus.queries), 'queries should be an array');
     assert.ok(corpus.queries.length >= 15, `expected >= 15 cases, got ${corpus.queries.length}`);
 
+    const certificate = corpus.metric_birth_certificate;
+    for (const field of [
+      'utility_claim',
+      'estimator',
+      'validity_bounds',
+      'consumer',
+      'calibration_plan',
+      'repeatability_contract',
+    ]) {
+      assert.ok(certificate?.[field]?.trim(), `metric birth certificate must define ${field}`);
+    }
+
     // Verify S-01/S-02 semantic cases exist
     const ids = corpus.queries.map((q) => q.id);
     assert.ok(ids.includes('S-01'), 'corpus should contain semantic case S-01');
     assert.ok(ids.includes('S-02'), 'corpus should contain semantic case S-02');
+    assert.deepEqual(
+      corpus.queries.filter((q) => q.search_mode === 'semantic').map((q) => q.id),
+      ['S-01', 'S-02'],
+      'semantic-only cases must be labeled so the lexical Recall@5 denominator stays honest',
+    );
   });
 
   it('semantic rerank Recall@5 scaffold (requires EMBED_MODE)', () => {

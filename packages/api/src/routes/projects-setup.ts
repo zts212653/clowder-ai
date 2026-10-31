@@ -1,0 +1,270 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
+/**
+ * F113 Phase E: POST /api/projects/setup
+ * Orchestrates project initialization: clone/init/skip only.
+ * Optional governance installation is a separate explicit confirmation flow (F302).
+ */
+
+import { execFile } from 'node:child_process';
+import { readdir, stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import type { FastifyPluginAsync } from 'fastify';
+import { findMonorepoRoot } from '../utils/monorepo-root.js';
+import { redirectRuntimeProjectPath, validateExternalProjectPathDetailed } from '../utils/persistent-project-path.js';
+import { resolveHeaderUserId } from '../utils/request-identity.js';
+
+const VALID_MODES = ['clone', 'init', 'skip'] as const;
+type SetupMode = (typeof VALID_MODES)[number];
+
+export interface ProjectSetupRouteOptions {
+  memoryBootstrapService?: { bootstrap: (projectPath: string, options?: unknown) => Promise<unknown> };
+  socketManager?: { emitToUser(userId: string, event: string, data: unknown): void };
+  /** Override Clowder AI root for testing — avoids polluting real registry (#926) */
+  catCafeRoot?: string;
+}
+
+/** Only allow https:// and git@ URLs */
+const SAFE_URL_PATTERN = /^(https:\/\/|git@)/;
+
+/** Clone timeout in ms */
+const CLONE_TIMEOUT_MS = 120_000;
+/** Remote existence probe timeout in ms */
+const CLONE_PROBE_TIMEOUT_MS = 15_000;
+
+interface CloneResult {
+  ok: boolean;
+  errorKind?: 'auth_failed' | 'network_error' | 'not_found' | 'timeout' | 'unknown';
+  error?: string;
+}
+
+function classifyGitError(exitCode: number | null, stderr: string, killed: boolean): CloneResult {
+  if (killed) return { ok: false, errorKind: 'timeout', error: 'Git clone timed out (120s)' };
+  const lc = stderr.toLowerCase();
+  if (exitCode === 128) {
+    if (lc.includes('authentication') || lc.includes('could not read') || lc.includes('permission denied')) {
+      return { ok: false, errorKind: 'auth_failed', error: 'Authentication failed' };
+    }
+    if (lc.includes('not found') || lc.includes('does not exist') || lc.includes('repository')) {
+      return { ok: false, errorKind: 'not_found', error: 'Repository not found' };
+    }
+  }
+  if (
+    lc.includes('unable to access') ||
+    lc.includes('could not resolve') ||
+    lc.includes('failed to connect') ||
+    lc.includes('connection refused')
+  ) {
+    return { ok: false, errorKind: 'network_error', error: 'Network error' };
+  }
+  return { ok: false, errorKind: 'unknown', error: stderr.slice(0, 500) || 'Clone failed' };
+}
+
+async function gitClone(url: string, targetPath: string): Promise<CloneResult> {
+  return new Promise((resolve) => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), CLONE_TIMEOUT_MS);
+    const child = execFile(
+      'git',
+      ['clone', url, '.'],
+      {
+        cwd: targetPath,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        signal: ac.signal,
+        timeout: CLONE_TIMEOUT_MS,
+      },
+      (err, _stdout, stderr) => {
+        clearTimeout(timer);
+        if (!err) return resolve({ ok: true });
+        const exitCode = (err as NodeJS.ErrnoException & { code?: number | string }).code;
+        const numericExit = typeof exitCode === 'number' ? exitCode : null;
+        const killed = (err as { killed?: boolean }).killed ?? false;
+        resolve(classifyGitError(numericExit, stderr, killed));
+      },
+    );
+    // Extra safety: kill on abort
+    ac.signal.addEventListener('abort', () => {
+      child.kill('SIGTERM');
+    });
+  });
+}
+
+async function gitProbeRemote(url: string): Promise<CloneResult> {
+  return new Promise((resolve) => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), CLONE_PROBE_TIMEOUT_MS);
+    const child = execFile(
+      'git',
+      ['ls-remote', '--heads', url, 'HEAD'],
+      {
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        signal: ac.signal,
+        timeout: CLONE_PROBE_TIMEOUT_MS,
+      },
+      (err, _stdout, stderr) => {
+        clearTimeout(timer);
+        if (!err) return resolve({ ok: true });
+        const exitCode = (err as NodeJS.ErrnoException & { code?: number | string }).code;
+        const numericExit = typeof exitCode === 'number' ? exitCode : null;
+        const killed = (err as { killed?: boolean }).killed ?? false;
+        resolve(classifyGitError(numericExit, stderr, killed));
+      },
+    );
+    ac.signal.addEventListener('abort', () => {
+      child.kill('SIGTERM');
+    });
+  });
+}
+
+async function gitInit(targetPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile('git', ['init'], { cwd: targetPath, timeout: 10_000 }, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
+async function isEmptyDir(dirPath: string): Promise<boolean> {
+  try {
+    const entries = await readdir(dirPath);
+    return entries.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = async (app, opts) => {
+  const catCafeRoot = await redirectRuntimeProjectPath(opts.catCafeRoot ?? findMonorepoRoot(process.cwd()));
+  if (!catCafeRoot)
+    throw new Error(`Unable to resolve persistent ${deploymentDefaults.brand.name} root for project setup`);
+
+  app.post('/api/projects/setup', async (request, reply) => {
+    const userId = resolveHeaderUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required (X-Cat-Cafe-User header)' };
+    }
+
+    const body = request.body as {
+      projectPath?: string;
+      mode?: string;
+      gitCloneUrl?: string;
+    } | null;
+
+    const projectPath = body?.projectPath;
+    const mode = body?.mode as SetupMode | undefined;
+    const gitCloneUrl = body?.gitCloneUrl;
+
+    if (!projectPath) {
+      reply.status(400);
+      return { error: 'projectPath is required' };
+    }
+
+    if (!mode || !VALID_MODES.includes(mode)) {
+      reply.status(400);
+      return { error: `mode must be one of: ${VALID_MODES.join(', ')}` };
+    }
+
+    const validatedResult = await validateExternalProjectPathDetailed(projectPath, catCafeRoot);
+    if (!validatedResult.ok) {
+      const isOwnedPath = validatedResult.reason === 'cat_cafe_owned_path';
+      reply.status(isOwnedPath ? 400 : 403);
+      return {
+        error: isOwnedPath
+          ? `Cannot setup governance inside ${deploymentDefaults.brand.name}; choose an external project`
+          : 'Project path not allowed',
+      };
+    }
+    const validated = validatedResult.path;
+
+    // ── Mode: clone ──
+    if (mode === 'clone') {
+      if (!gitCloneUrl) {
+        reply.status(400);
+        return { error: 'gitCloneUrl is required when mode=clone' };
+      }
+      if (!SAFE_URL_PATTERN.test(gitCloneUrl)) {
+        reply.status(400);
+        return { error: 'Only https:// and git@ URLs are allowed' };
+      }
+      if (!(await isEmptyDir(validated))) {
+        reply.status(409);
+        return {
+          ok: false,
+          errorKind: 'not_empty',
+          error: 'Directory is not empty. Clone requires an empty directory.',
+        };
+      }
+      const probe = await gitProbeRemote(gitCloneUrl);
+      if (!probe.ok) {
+        reply.status(502);
+        return { ok: false, errorKind: probe.errorKind, error: probe.error };
+      }
+      const result = await gitClone(gitCloneUrl, validated);
+      if (!result.ok) {
+        reply.status(502);
+        return { ok: false, errorKind: result.errorKind, error: result.error };
+      }
+    }
+
+    // ── Mode: init ──
+    if (mode === 'init') {
+      // Check if already a git repo (.git can be dir or file in worktrees)
+      try {
+        await stat(join(validated, '.git'));
+        // Already initialized — skip git init.
+      } catch {
+        await gitInit(validated);
+      }
+    }
+
+    // F152 Phase B: indexing is Clowder AI-owned state and remains non-blocking.
+    if (opts?.memoryBootstrapService) {
+      opts.memoryBootstrapService
+        .bootstrap(validated, {
+          onProgress: (p: unknown) => {
+            if (userId && opts.socketManager) {
+              opts.socketManager.emitToUser(userId, 'index:progress', {
+                ...(p as Record<string, unknown>),
+                projectPath: validated,
+              });
+            }
+          },
+        })
+        .then((raw: unknown) => {
+          const result = raw as {
+            status: string;
+            docsIndexed?: number;
+            durationMs?: number;
+            summary?: unknown;
+            error?: string;
+          };
+          if (!userId || !opts.socketManager) return;
+          if (result.status === 'ready') {
+            opts.socketManager.emitToUser(userId, 'index:complete', {
+              projectPath: validated,
+              docsIndexed: result.docsIndexed,
+              durationMs: result.durationMs,
+              summary: result.summary,
+            });
+          } else if (result.status === 'failed') {
+            opts.socketManager.emitToUser(userId, 'index:failed', {
+              projectPath: validated,
+              error: result.error ?? 'Unknown error',
+            });
+          }
+        })
+        .catch((err: unknown) => {
+          app.log.warn({ err, projectPath: validated }, 'Memory bootstrap failed (non-blocking)');
+          if (userId && opts.socketManager) {
+            opts.socketManager.emitToUser(userId, 'index:failed', {
+              projectPath: validated,
+              error: err instanceof Error ? err.message : 'Bootstrap failed',
+            });
+          }
+        });
+    }
+
+    return { ok: true };
+  });
+};

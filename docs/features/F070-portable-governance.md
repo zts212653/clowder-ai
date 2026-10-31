@@ -18,7 +18,7 @@ created: 2026-03-06
 
 根因不是"某个配置没带过去"，而是**能力注入 ≠ 治理继承**：现有能力 Hub（F041）已经能跨项目同步 MCP 配置，但 Skills、SOP、铁律、文档架构、Backlog 治理方法论——这些猫咖知识工程的核心——完全没有跨项目携带机制。
 
-team lead的愿景：**猫咖不只是一个项目，是共创工作站。猫是team lead的永久团队，无论出征哪个项目，都带着完整的知识工程方法论。不需要打开其他 coding agent，不需要从零教规则。**
+operator的愿景：**猫咖不只是一个项目，是共创工作站。猫是operator的永久团队，无论出征哪个项目，都带着完整的知识工程方法论。不需要打开其他 coding agent，不需要从零教规则。**
 
 ## What
 
@@ -26,7 +26,7 @@ team lead的愿景：**猫咖不只是一个项目，是共创工作站。猫是
 
 ### 定位
 
-- Cat Cafe = **方法论中枢**（methodology hub）：SOP/Skills/协作规范/愿景守护的真相源
+- Clowder AI = **方法论中枢**（methodology hub）：SOP/Skills/协作规范/愿景守护的真相源
 - 外部项目 = **独立执行面**（independent execution plane）：用猫咖方法论模板，但拥有自己的 BACKLOG/Feature/ADR
 - **分区控制模型**：猫咖治理的是"怎么做"（方法论），外部项目治理的是"做什么"（自己的 backlog/feature）
 - 猫咖不是外部项目的 BACKLOG 真相源——猫咖只输出方法论模板和工作流规范
@@ -244,7 +244,7 @@ managed block 扩充协作方法论段落：
 
 - R1: codex 审安全边界 + 回归矩阵
 - R2: gpt52 审架构完整性 + 闭环验证
-- 云端 review: PR 级
+- remote review: PR 级
 
 ## 需求点 Checklist
 
@@ -278,6 +278,7 @@ managed block 扩充协作方法论段落：
 | Preflight gate blocks new projects without guidance | clowder-ai#123 | `PreflightResult` extended with `needsBootstrap`/`needsConfirmation`/`bootstrapCommand`; invoke-single-cat emits actionable instructions | #532 |
 | setup.sh missing skills sync step | clowder-ai#21 | Added Step 5/6 to setup.sh: links cat-cafe-skills/* to ~/.{claude,codex,gemini}/skills (ADR-009 pattern) | #532 |
 | Governance blocked shows raw text, no actionable UX | clowder-ai#154 | Structured `governance_blocked` event + `GovernanceBlockedCard` with one-click bootstrap+retry button. All 4 routeExecution consumer paths capture `errorCode`. Inspired by community PR clowder-ai#154. | #602 |
+| New project opens without setup guidance | clowder-ai#321 | `ProjectSetupCard`: thread-open-time clone/init/skip setup flow with anime cat illustrations, `useGovernanceStatus` hook, 3 API endpoints (mkdir/status/setup). Design: `designs/f070-project-setup-card.pen`. From clowder-ai#299 | #888 |
 
 ## Key Decisions
 
@@ -290,8 +291,8 @@ managed block 扩充协作方法论段落：
 | 分区控制模型 | 猫咖管"怎么做"（方法论），外部项目管"做什么"（自己的 backlog） | gpt52 P1-1 修复 |
 | 无损 bootstrap | 已有文件不覆盖，支持 dry-run + 回滚 | gpt52 P1-2 修复 |
 | 回流路径验收化 | 外部执行结果必须在 Mission Hub 可追踪 | gpt52 P1-3 修复 |
-| 能力 Hub 集成方法论更新 | 复用现有多项目管理 UI | team lead指出 |
-| 首次确认后自动写入 | 第一次友好问确认，之后同项目自动同步 | team lead拍板 2026-03-06 |
+| 能力 Hub 集成方法论更新 | 复用现有多项目管理 UI | operator指出 |
+| 首次确认后自动写入 | 第一次友好问确认，之后同项目自动同步 | operator拍板 2026-03-06 |
 | 任务包结构化 5 字段 | mission/work_item/phase/done_when/links — 带方法不带私有账本 | opus+gpt52 共识 2026-03-07 |
 | Hooks spec 目标三家一致 | 实现可分批，但 spec 不降级为 claude-only | gpt52 建议 2026-03-07 |
 | 回流最小可交付 | 做了什么/改了哪些文件/当前状态/是否需要决策 — Hub 可见 | gpt52 建议 2026-03-07 |

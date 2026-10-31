@@ -1,0 +1,67 @@
+.viewOptions {
+  position: absolute;
+  z-index: 6;
+  top: 10px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-xs);
+}
+.menu {
+  position: relative;
+}
+.menu summary {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  list-style: none;
+  cursor: pointer;
+  border-radius: 8px;
+  background: var(--shell-paper, var(--cafe-surface-canvas));
+}
+.menu summary::-webkit-details-marker {
+  display: none;
+}
+.menuBody {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 170px;
+  padding: 6px;
+  border: 1px solid var(--cafe-border-subtle);
+  border-radius: 12px;
+  background: var(--shell-paper, var(--cafe-surface-canvas));
+  box-shadow: var(--shadow-elevation-2);
+}
+.menuBody > * {
+  padding: 8px 10px;
+  text-align: left;
+  border: 0;
+}
+.menuBody > *:hover {
+  background: var(--cafe-surface);
+}
+.tools {
+  position: absolute;
+  z-index: 5;
+  bottom: 14px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.tools > * {
+  pointer-events: auto;
+  max-width: calc(100% - 16px);
+}
+.tools details > div {
+  top: auto;
+  bottom: calc(100% + 10px);
+}

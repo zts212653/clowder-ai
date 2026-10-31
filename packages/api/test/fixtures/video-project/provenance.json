@@ -1,0 +1,187 @@
+{
+  "adapterVersion": "1.0.3",
+  "collectedAt": "2026-10-08T07:54:33Z",
+  "sources": {
+    "ep0": [
+      {
+        "ref": "remotion-studio:src/CucuEp0/Animatic.tsx",
+        "digest": "sha256:b654e861d2362e71c7ebe2fa73404c641e0ba8f9c762b1af12e1cbbe9c18d3ef"
+      },
+      {
+        "ref": "remotion-studio:src/CucuEp0/Credits.tsx",
+        "digest": "sha256:dfa16182192b1f65d377d3f0dc836c14db0755dd7f4126724853398960958807"
+      },
+      {
+        "ref": "remotion-studio:src/CucuEp0/Film.tsx",
+        "digest": "sha256:8eccf9c0cc30ab894e5fcf4f06b3c66b9a4dc43960ddf69f101a0e81514e3670"
+      },
+      {
+        "ref": "remotion-studio:src/CucuEp0/Root.tsx",
+        "digest": "sha256:895a1fc52d5009153f7eb716169ecc3ec56bd5dd86d0e1c82329b85192650cea"
+      },
+      {
+        "ref": "remotion-studio:src/CucuEp0/SbAnimatic.tsx",
+        "digest": "sha256:5af53192b52691691eaf4f3b6b69f20c800eb3c30e9676cb4d63a1e9a15b839a"
+      },
+      {
+        "ref": "remotion-studio:src/CucuEp0/V2Ui.tsx",
+        "digest": "sha256:fbeeaaa61c196613b9d1052034bb728f950b4782ea32053c6d8cf842ccbf8fae"
+      },
+      {
+        "ref": "remotion-studio:src/CucuEp0/VoiceDraft.tsx",
+        "digest": "sha256:f61eb41c33a0bf26bf24060a699e1338a333135d3ae23c7278da3f8753b30ad0"
+      },
+      {
+        "ref": "remotion-studio:src/CucuEp0/index.ts",
+        "digest": "sha256:32185b5fe29233ed658013191cf02a1ba3181fe15dd4c43848136a344887ff0f"
+      },
+      {
+        "ref": "remotion-studio:src/CucuEp0/sbAnimaticCues.json",
+        "digest": "sha256:40290392ea03b9c81f12db682df45d17d5dd9d9330a44d9dbcf41a031131b967"
+      },
+      {
+        "ref": "remotion-studio:src/CucuEp0/voiceDraftCues.json",
+        "digest": "sha256:41820c841ffb794f5ad53d34130f8ca06beab009da981bdb7bc754aac8c9130e"
+      },
+      {
+        "ref": "remotion-studio:scripts/cucu-bgm.py",
+        "digest": "sha256:276ae0f61fbe9e63537a2f75ac0f8140b681fa297685436296c29c32aefc0d44"
+      },
+      {
+        "ref": "remotion-studio:scripts/cucu-sb-animatic.py",
+        "digest": "sha256:31b8fdd25a7c3516c1f231051777ae3a66e2cc50396a47de686cecb19d5b6b27"
+      },
+      {
+        "ref": "remotion-studio:scripts/cucu-voice-draft.py",
+        "digest": "sha256:c8510b9531080cfb744e6ba79485023e3f90b4f6febdf0f4f966a97922bc8751"
+      },
+      {
+        "ref": "ep0-artworks:scene-07/qa/sheets.json",
+        "digest": "sha256:d90e252128841a4a9642d8f061e6da47becb2a914d7fab1d4b9f1a7e8e8ea8ff"
+      },
+      {
+        "ref": "ep0-artworks:scene-08/qa/sheets.json",
+        "digest": "sha256:da8ca0f506620748b5863764a2294c5d23fcbd552c0ca0fda69d20b2b3db2bd3"
+      },
+      {
+        "ref": "ep0-artworks:scene-09/qa/sheets.json",
+        "digest": "sha256:8805987683e8018b4fdae502aaf50eed703946ce0c3fa5b3077decb0b354b29a"
+      }
+    ],
+    "parallelWorld": [
+      {
+        "ref": "remotion-studio:src/ParallelWorld/Film.tsx",
+        "digest": "sha256:5b654107dec11fbcf7e9d827d53993b4a3deb1e78c2024aabd62646af6770c07"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/Ghost.tsx",
+        "digest": "sha256:87690e02e753e258803568a9f046892b1062d9b904f0eefd2eba90e0dd0be961"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/Root.tsx",
+        "digest": "sha256:69fe67c06d36e04a7d9e92daad5846e37f7cb99935f06f67eb25dd5595505f14"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/craft/Reveal.tsx",
+        "digest": "sha256:6629887f5aa135c482a6b13f53605566e6e158348565d414307a831596160fce"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/craft/motion.ts",
+        "digest": "sha256:656d5cbce7e2b20ce5d566fe43df72ce4abe651d5990e140f18a57d52a7e996d"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/index.ts",
+        "digest": "sha256:32185b5fe29233ed658013191cf02a1ba3181fe15dd4c43848136a344887ff0f"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/layers.ts",
+        "digest": "sha256:f923d47ed60389dc2a1c8b6b27299349cfc2f325a1910eb5e43c7f044c70baff"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/parts/Stage.tsx",
+        "digest": "sha256:b37c53a70f1bd3b0f56fcc2ed86b2b2b925e5f08f2e7348a38f7bfec4fb8e68c"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/parts/Ui.tsx",
+        "digest": "sha256:796c6ab8630509d673d882b2a8ed222b848dc8ec85abaec76a1a4ee4fc38b326"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/scenes/Guilty.tsx",
+        "digest": "sha256:40f986d435f34da220471a474d893a960798c6e8920cf5bf3ac7aff6883cdfe1"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/scenes/Intro.tsx",
+        "digest": "sha256:5c76c0e9111695c5ef852e18ea2909dc7277387a49bf2247da5636b7e3ad9576"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/scenes/Outro.tsx",
+        "digest": "sha256:b4bdb89950399fac965f9b854feb1b23b2cbba09c02a4e61684d5b396dc4cd2b"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/scenes/Panels.tsx",
+        "digest": "sha256:a5af07d3e0f4263ddf13dc9a52509936ccc72d8681d5a459906c1ec721455ae9"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/scenes/Reveal.tsx",
+        "digest": "sha256:f5c6288f8e88454b1e9c0692967eb701b76cb83be127aa6d448a2abaa8c7a159"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/scenes/Sound.tsx",
+        "digest": "sha256:3e255776cd15223ffb8afe87579d211ce4f4fcd0212820af150be4f776325f56"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/scenes/Walls.tsx",
+        "digest": "sha256:144471fa3d9a9e1a2fe7c7505e05bbbd51c8c1ef3ec6c0f2873130ee45d7674a"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/theme.ts",
+        "digest": "sha256:1950c7bf0f49f3bd57edc3b9c3398da563967289378a68327e4cb5b7646e040d"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/timeline.ts",
+        "digest": "sha256:2484190b38f7a6df2c53f4cf5d6973c30ed7db39d74cca28872aa474221ea963"
+      },
+      {
+        "ref": "remotion-studio:public/parallel-world/layers.json",
+        "digest": "sha256:a951f8a1e8202aa19a8a9871619d38e65d7701caadaf6758070761facd7404f5"
+      }
+    ]
+  },
+  "proof": {
+    "ep0ProspectiveBgmInputCount": 9,
+    "ep0AllBgmStartEndAndEmergencyBindings": true,
+    "ep0StaleBgmRejected": true,
+    "ep0CoordinatedBgmEditInverse": true,
+    "parallelProspectiveBoundMarkerCount": 39,
+    "parallelSoundBindingCount": 40,
+    "parallelAllNativeSoundAndFilmBindings": true,
+    "parallelStaleSfxRejected": true,
+    "parallelCoordinatedMarkersSourceConsumption": true,
+    "ep0Cuts": 100,
+    "ep0CueEvents": 75,
+    "ep0WithBgmEvents": 83,
+    "ep0C08cFirstVisibleTick": 1429,
+    "ep0SharedResizeC08cFirstVisibleTick": 1431,
+    "ep0NoncanonicalVisualEditRejected": true,
+    "ep0NativeUiIntervalEditRejected": true,
+    "ep0SourcePinnedBgmEditRejected": true,
+    "sheetResults": 36,
+    "missingSheetScenes": ["scene-03", "scene-04"],
+    "parallelDurationTicks": 1035,
+    "parallelSoundEvents": 40,
+    "parallelPullOutDuration": 32,
+    "parallelBeatInterval": 15,
+    "semanticRoundTrips": true,
+    "durationEditInverse": true,
+    "visualSwitchEditInverse": true,
+    "parallelDurationSourcePatch": true,
+    "parallelCommonSfxDurationSourcePatch": true,
+    "parallelPartialSfxDurationRejected": true
+  },
+  "limitations": [
+    "EP0 cue baseline is generated; PLAN/overrides remain read-only provenance, not rewritten. Derived BGM starts/ends/e-stop must coordinate prospective cut/scene bindings; stale edits fail explicitly.",
+    "Parallel inverse covers T/BRANCHES/L/Sound EVENTS/static intervals only; arbitrary TSX layout/procedural motion is source-pinned, not translated or rendered.",
+    "Sheet pages are individually imported historical sheets; subtitles are their existing stated criteria, historical creator/assignee unknown; no inferred coveredBy.",
+    "Byte index is not a media backup. Root bindings here grant no runtime access."
+  ]
+}

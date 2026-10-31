@@ -17,20 +17,20 @@ created: 2026-03-01
 
 ## Why
 
-team lead希望把“想法/任务”的全局调度放进 Cat Café 本体，而不是依赖 IDE 打开 `docs/`：
+operator希望把“想法/任务”的全局调度放进 Clowder AI 本体，而不是依赖 IDE 打开 `docs/`：
 
 - **低摩擦**：随手记录/分拣/派发不该要求打开 VSCode/WebStorm。
 - **跨 thread 协同**：未来可以同时开多个 thread（多组猫猫）并行作战，需要一个全局任务池承载“要做什么”。
-- **演进路径**：早期team lead指挥更安全；未来模型能力提升后，逐步放开自组织协作（权限棘轮）。
+- **演进路径**：早期operator指挥更安全；未来模型能力提升后，逐步放开自组织协作（权限棘轮）。
 
 这条线与 F037（Agent Swarm）中的 “Global Backlog → 领取/批准 → 自动开新 Thread” 强绑定。
 
 ## What
 
-在 Cat Café 里新增一个 **Mission Hub / Backlog Center**：
+在 Clowder AI 里新增一个 **Mission Hub / Backlog Center**：
 
 - 作为**全局任务池（Global）**：收纳 “想法/任务/候选 Feature/Tech Debt”；
-- 支持**建议领取 → team lead批准 → 自动创建执行 thread（Thread）**；
+- 支持**建议领取 → operator批准 → 自动创建执行 thread（Thread）**；
 - 建立**可配置的权限棘轮**：从“建议+批准”逐步演进到“自领”。
 
 > 核心边界：Backlog Center 负责“要做什么 + 派发/领取”，Thread 负责“怎么做 + 执行细节”，用 thread 隔离上下文污染与并发互踩风险。
@@ -40,9 +40,9 @@ team lead希望把“想法/任务”的全局调度放进 Cat Café 本体，�
 - [x] AC-A1: 本文档需在本轮迁移后维持模板核心结构（Status/Why/What/Dependencies/Risk/Timeline）。
 ### MVP（建议+批准）
 - [x] Web/PWA 可打开 Backlog Center（手机可用）。
-- [x] 任何人（team lead/猫）可创建 backlog item（标题 + 简述 + priority + tags）。
+- [x] 任何人（operator/猫）可创建 backlog item（标题 + 简述 + priority + tags）。
 - [x] 猫可以对某 item 发起“建议领取”（suggest claim），并附 Why/Plan 简述。
-- [x] team lead可以一键批准/拒绝该建议。
+- [x] operator可以一键批准/拒绝该建议。
 - [x] 批准后系统自动创建新 thread，并：
   - [x] 关联 `backlogItemId`（backlog ↔ thread 双向可追溯）
   - [x] 写入 thread phase（至少：`coding` / `research` / `brainstorm`）
@@ -65,7 +65,7 @@ team lead希望把“想法/任务”的全局调度放进 Cat Café 本体，�
 ## Key Decisions
 
 1. **两层任务面**：Global Backlog 承载“要做什么”，Thread 承载“怎么做”。
-2. **领取模型**：先做“建议领取 + team lead批准”，再用权限棘轮逐步放开 self-claim。
+2. **领取模型**：先做“建议领取 + operator批准”，再用权限棘轮逐步放开 self-claim。
 3. **存储策略（活数据层）**：Backlog item 的真相源在 **Redis（OLTP）**，以支持 claim/lease/heartbeat/atomic dispatch 等原子语义。
 4. **并发控制**：采用 service 侧 lease（Redis 原子/CAS）而非 repo 内 lock file 作为唯一真相源。
 5. **毕业机制（与 `docs/` 的关系）**：Backlog Center 是“上游 inbox/调度层”；当 backlog item 被确认需要长期追溯时，才“毕业”为 `docs/features/F0xx.md`（F040 管的已立项真相源）。
@@ -84,7 +84,7 @@ F049 的核心操作包含：claim/lease/heartbeat/原子派发/审计。这是�
 - **Redis inbox（高频、易变）**：收集/分拣/建议领取/派发/lease。
 - **`docs/features/`（稳定、可追溯）**：被确认的 Feature/Tech Debt 才进入真相源体系（F040）。
 
-从 inbox 到 `docs/features/` 的“毕业”动作，需要显式确认（team lead批准/立项）并记录链接，避免双真相源漂移。
+从 inbox 到 `docs/features/` 的“毕业”动作，需要显式确认（operator批准/立项）并记录链接，避免双真相源漂移。
 
 ## Rejected Alternatives
 
@@ -120,7 +120,7 @@ F049 的核心操作包含：claim/lease/heartbeat/原子派发/审计。这是�
 - [x] **态势图（F043 对齐）**：Mission Hub 已增加 thread 视图（MVP 基于 `/api/threads` + `backlogItemId` 显示 thread 标题/lastActive/参与猫/跳转），实现“全局任务面 → 线程执行面”可视化（PR #167）。
 - [x] **派发链路语义收敛（PR-A/PR-B）**：`suggest/approve/dispatch` 已收敛为可恢复、可幂等、可预期路径，并补齐崩溃窗口回归与 kickoff 幂等硬化（PR #176, PR #179）。
 - [x] **权限棘轮语义收敛**：`once/thread/global` 运行时约束、幂等重试与错误码/UI 提示已对齐（PR #158, PR #176）。
-- [x] **愿景守护签收**：本地 `@gpt52` 全量复核通过（0 P1 / 0 P2），云端 review 通过后按 merge-gate 合入。
+- [x] **愿景守护签收**：本地 `@gpt52` 全量复核通过（0 P1 / 0 P2），remote review 通过后按 merge-gate 合入。
 
 ## Follow-up（post-merge）
 

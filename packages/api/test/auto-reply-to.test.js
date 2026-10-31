@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function createMockSocketManager() {
   const messages = [];
@@ -62,14 +63,16 @@ describe('auto-replyTo for A2A invocations', () => {
 
   test('auto-fills replyTo from trigger message when cat does not pass replyTo', async () => {
     // 1. Simulate the trigger message (cat A @mentions cat B)
-    const triggerMsg = messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: '请帮忙看一下\n@codex',
-      mentions: ['codex'],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    const triggerMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: '请帮忙看一下\n@codex',
+        mentions: ['codex'],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
 
     // 2. Create InvocationRecordStore record (as enqueueA2ATargets would)
     const createResult = invocationRecordStore.create({
@@ -78,6 +81,7 @@ describe('auto-replyTo for A2A invocations', () => {
       targetCats: ['codex'],
       intent: 'execute',
       idempotencyKey: `a2a:${triggerMsg.id}:codex`,
+      actionLeaseCarrier: { kind: 'none' },
     });
     // Set userMessageId (as callback-a2a-trigger.ts does)
     invocationRecordStore.update(createResult.invocationId, {
@@ -86,7 +90,7 @@ describe('auto-replyTo for A2A invocations', () => {
 
     // 3. Create InvocationRegistry record with parentInvocationId
     //    (as invokeSingleCat does for A2A-triggered cats)
-    const { invocationId, callbackToken } = registry.create(
+    const { invocationId, callbackToken } = await registry.create(
       'user-1',
       'codex',
       'thread-1',
@@ -98,9 +102,8 @@ describe('auto-replyTo for A2A invocations', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '收到！我来看看',
       },
     });
@@ -130,24 +133,28 @@ describe('auto-replyTo for A2A invocations', () => {
 
   test('explicit replyTo takes precedence over auto-fill', async () => {
     // Trigger message
-    const triggerMsg = messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: '请看一下\n@codex',
-      mentions: ['codex'],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    const triggerMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: '请看一下\n@codex',
+        mentions: ['codex'],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
 
     // A different message the cat wants to reply to explicitly
-    const otherMsg = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: '用户的另一条消息',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    const otherMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: '用户的另一条消息',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
 
     // InvocationRecordStore setup
     const createResult = invocationRecordStore.create({
@@ -156,20 +163,25 @@ describe('auto-replyTo for A2A invocations', () => {
       targetCats: ['codex'],
       intent: 'execute',
       idempotencyKey: `a2a:${triggerMsg.id}:codex`,
+      actionLeaseCarrier: { kind: 'none' },
     });
     invocationRecordStore.update(createResult.invocationId, {
       userMessageId: triggerMsg.id,
     });
 
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', 'thread-1', createResult.invocationId);
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'codex',
+      'thread-1',
+      createResult.invocationId,
+    );
 
     const app = await createApp();
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '回复其他消息',
         replyTo: otherMsg.id, // Explicit replyTo
       },
@@ -188,15 +200,14 @@ describe('auto-replyTo for A2A invocations', () => {
 
   test('no auto-fill when invocation has no parentInvocationId (direct user message)', async () => {
     // Direct user invocation — no parentInvocationId
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'thread-1');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-1');
 
     const app = await createApp();
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '直接用户请求的回复',
       },
     });
@@ -214,14 +225,16 @@ describe('auto-replyTo for A2A invocations', () => {
 
   test('P3-2: no auto-fill when parentInvocationRecord threadId mismatches', async () => {
     // Trigger message exists in thread-1
-    const triggerMsg = messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: '请看\n@codex',
-      mentions: ['codex'],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    const triggerMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: '请看\n@codex',
+        mentions: ['codex'],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
 
     // InvocationRecord created for thread-1
     const createResult = invocationRecordStore.create({
@@ -230,6 +243,7 @@ describe('auto-replyTo for A2A invocations', () => {
       targetCats: ['codex'],
       intent: 'execute',
       idempotencyKey: `a2a:${triggerMsg.id}:codex:p3`,
+      actionLeaseCarrier: { kind: 'none' },
     });
     invocationRecordStore.update(createResult.invocationId, {
       userMessageId: triggerMsg.id,
@@ -237,15 +251,19 @@ describe('auto-replyTo for A2A invocations', () => {
 
     // But the cat's invocation is registered in thread-2
     // (simulates a cross-thread A2A where parent record's threadId doesn't match)
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', 'thread-2', createResult.invocationId);
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'codex',
+      'thread-2',
+      createResult.invocationId,
+    );
 
     const app = await createApp();
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'P3-2 hardening test',
       },
     });
@@ -261,14 +279,16 @@ describe('auto-replyTo for A2A invocations', () => {
 
   test('no auto-fill when trigger message is in different thread', async () => {
     // Trigger message in thread-1
-    const triggerMsg = messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: '请看\n@codex',
-      mentions: ['codex'],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    const triggerMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: '请看\n@codex',
+        mentions: ['codex'],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
 
     const createResult = invocationRecordStore.create({
       threadId: 'thread-1',
@@ -276,21 +296,26 @@ describe('auto-replyTo for A2A invocations', () => {
       targetCats: ['codex'],
       intent: 'execute',
       idempotencyKey: `a2a:${triggerMsg.id}:codex`,
+      actionLeaseCarrier: { kind: 'none' },
     });
     invocationRecordStore.update(createResult.invocationId, {
       userMessageId: triggerMsg.id,
     });
 
     // Cat posts in thread-2 (cross-thread scenario — trigger was in thread-1)
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', 'thread-2', createResult.invocationId);
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'codex',
+      'thread-2',
+      createResult.invocationId,
+    );
 
     const app = await createApp();
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '跨 thread 回复',
       },
     });

@@ -6,7 +6,7 @@
  * ~950 chars in every single invocation prompt.
  *
  * Full rules available via (in priority order):
- *   1. Skill: cat-cafe-skills/using-rich-blocks/SKILL.md (primary SOT)
+ *   1. Skill: cat-cafe-skills/rich-messaging/SKILL.md (primary SOT)
  *   2. MCP tool: cat_cafe_get_rich_block_rules (fallback for Claude)
  *   3. HTTP endpoint: GET /api/callbacks/rich-block-rules (fallback for Codex/Gemini)
  *
@@ -16,6 +16,8 @@
 export const RICH_BLOCK_RULES = `### 富消息块使用规则（B 风格：平衡）
 
 **核心原则**：结构化信息默认用富块，普通对话不用。先写 1-2 句自然语言摘要，再发富块。
+
+**适用场景**：不只是对话！定时任务唤醒、主动触发、connector 通知等场景中，猫同样拥有全部 rich block 能力。
 
 **何时使用**（默认触发）：
 - **card** (tone: info/success/warning/danger)
@@ -30,11 +32,21 @@ export const RICH_BLOCK_RULES = `### 富消息块使用规则（B 风格：平�
   - 待办事项 / 下一步行动
   - review 要点清单
   - 验证步骤 / 测试计划
-- **media_gallery**
-  - 截图、设计稿展示
-  - 多图对比
+- **file**（已有文件 / 成片视频）
+  - 发送已有文件、导出物、成片视频
+  - \`url\` + \`fileName\` 必填，\`mimeType\`/\`fileSize\` 可选
+  - \`mimeType\` 以 \`video/\` 开头时，Web UI 渲染内联视频播放器
+  - 本地视频使用已可访问 URL（Workspace raw 可展示媒体）；通用文件使用已发布 URL，不要手写 runtime uploads
+- **media_gallery**（图片展示 — 不一定要现场生成！）
+  - 发送已有图片（头像 \`/avatars/\`、照片 \`/uploads/\`、设计稿）
+  - \`/uploads/xxx\` 的磁盘真身是 \`cat-cafe-runtime/packages/api/uploads/\`（运行中 API 的 uploadDir）；不要手动 cp 到源码仓 \`uploads/\` 或 \`packages/api/uploads/\`
+  - 图片绝对路径仅在已登记 Workspace 内、文件现存可读且为图片（≤10MiB）时转换为 \`/api/workspace/file/raw?worktreeId=...&path=...\`；其他本机路径明确报错
+  - 自动发布仅指原生 image_gen/Antigravity 结果接线；任意富块本机路径不会自动复制到 uploads。持久发布本地 PNG 用 \`cat_cafe_publish_image\`
+  - 截图展示、多图对比
+  - 定时任务/主动触发中展示图片
 - **audio**（语音消息 — 你"说出来"的话）
   - 打招呼、表达情感、庆祝、鼓励
+  - 定时任务中用语音播报（如早安问候、新闻速递）
   - 只填 \`text\`，系统会自动合成语音
   - 不要每条消息都发语音，只在你觉得"说出来比打字更好"时用
 - **interactive**（用户可交互选择/确认）
@@ -44,12 +56,14 @@ export const RICH_BLOCK_RULES = `### 富消息块使用规则（B 风格：平�
   - option 可加 \`customInput: true\` + \`customInputPlaceholder\`，选中后展开文本输入框（如"我有其他想法"选项）
   - 发多个 interactive block 时用相同 \`groupId\` 实现批量提交（用户选完所有再一次提交）
   - 用户选择后 block 自动 disabled，选择结果持久化（刷新不丢）
-- **html_widget**（内嵌交互 HTML 小组件）
+- **html_widget**（内嵌交互 HTML 小组件 — 你自己写的 HTML 直接挂上去）
   - 数据可视化（图表、仪表盘）、交互 demo、mini 工具
+  - 定时任务中动态生成数据面板（如 repo 活跃度图表）
   - \`html\` 必填（完整 HTML 文档，含内联 CSS/JS）
   - \`title\` 可选（显示在 widget 顶部标题栏）
   - \`height\` 可选（像素，默认 300，范围 50-2000）
   - 沙盒隔离：allow-scripts 但无 allow-same-origin，无法访问宿主页面
+  - 内联 \`on*\` 事件属性（如 \`onclick=\`）会被消毒剥掉，按钮点了没反应也不报错；改在 \`<script>\` 里用 \`addEventListener\` 绑定（写法见 rich-messaging skill）
 
 **何时不用**（保持纯文本）：
 - 日常聊天、闲聊、打招呼
@@ -63,6 +77,7 @@ export const RICH_BLOCK_RULES = `### 富消息块使用规则（B 风格：平�
 - card: \`title\` 必填，\`bodyMarkdown\`/\`tone\`/\`fields\` 可选
 - diff: \`filePath\` + \`diff\` 必填，\`languageHint\` 可选
 - checklist: \`items\` 必填（每项需 \`id\` + \`text\`），\`title\` 可选
+- file: \`url\` + \`fileName\` 必填，\`mimeType\`/\`fileSize\` 可选；\`video/*\` 会内联播放
 - media_gallery: \`items\` 必填（每项需 \`url\`），\`title\`/\`alt\`/\`caption\` 可选
 - audio: \`text\` 必填（你想说的话，简短口语化，1-2 句）
 - interactive: \`interactiveType\` + \`options\` (id+label) 必填，优先用 \`icon\` 不用 emoji，多块用 \`groupId\` 批量提交
@@ -70,10 +85,10 @@ export const RICH_BLOCK_RULES = `### 富消息块使用规则（B 风格：平�
 
 /**
  * Condensed rich block reference for injection into system prompts.
- * Full rules: load `using-rich-blocks` skill (primary).
+ * Full rules: load `rich-messaging` skill (primary).
  * Fallback: MCP tool `cat_cafe_get_rich_block_rules` or HTTP endpoint.
  */
 export const RICH_BLOCK_SHORT = `富消息块：结构化信息用富块，普通对话不用。先写 1-2 句摘要再发。
 ⚠️ 字段名是 "kind"（不是 "type"！），必须有 "v": 1 和唯一 id。
-支持: card / diff / checklist / media_gallery / audio / interactive / html_widget。
+支持: card / diff / checklist / file / media_gallery / audio / interactive / html_widget。
 interactive: 用户可交互选择（select/multi-select/card-grid/confirm），详见 rich-blocks rules。`;

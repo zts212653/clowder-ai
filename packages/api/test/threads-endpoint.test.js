@@ -5,26 +5,52 @@
  */
 
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('Thread API', () => {
   let app;
   let threadStore;
+  let conciergeThreadService;
+  let tmpRoots = [];
+  let originalWorkspaceRoot;
+  let originalRuntimeRoot;
 
   beforeEach(async () => {
+    originalWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    originalRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    tmpRoots = [];
+
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { ConciergeThreadService } = await import('../dist/domains/concierge/ConciergeThreadService.js');
     const { threadsRoutes } = await import('../dist/routes/threads.js');
 
     threadStore = new ThreadStore();
+    conciergeThreadService = new ConciergeThreadService({ threadStore });
     app = Fastify();
-    await app.register(threadsRoutes, { threadStore });
+    await app.register(threadsRoutes, { threadStore, conciergeThreadService });
     await app.ready();
   });
 
   afterEach(async () => {
     if (app) await app.close();
+    if (originalWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+    else process.env.CAT_CAFE_WORKSPACE_ROOT = originalWorkspaceRoot;
+    if (originalRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+    else process.env.CAT_CAFE_RUNTIME_ROOT = originalRuntimeRoot;
+    await Promise.all(tmpRoots.map((dir) => rm(dir, { recursive: true, force: true })));
   });
+
+  async function createTempWorkspace() {
+    const dir = await mkdtemp(join(process.cwd(), '.tmp-bootcamp-workspace-'));
+    tmpRoots.push(dir);
+    return realpath(dir);
+  }
 
   it('POST /api/threads creates a thread', async () => {
     const res = await app.inject({
@@ -38,6 +64,153 @@ describe('Thread API', () => {
     assert.equal(body.title, 'My Chat');
     assert.equal(body.createdBy, 'alice');
     assert.deepEqual(body.participants, []);
+  });
+
+  it('POST /api/threads replays one owner-scoped conversation for the same idempotency key', async () => {
+    const request = {
+      method: 'POST',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: {
+        idempotencyKey: '11111111-1111-4111-8111-111111111111',
+        projectPath: 'default',
+      },
+    };
+
+    const first = await app.inject(request);
+    const replay = await app.inject(request);
+    assert.equal(first.statusCode, 201);
+    assert.equal(replay.statusCode, 201);
+    assert.equal(replay.json().id, first.json().id);
+    assert.equal(replay.json().title, null);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+    assert.equal(listed.json().threads.filter((thread) => thread.id === first.json().id).length, 1);
+  });
+
+  it('POST /api/threads scopes the same idempotency key to the authenticated owner', async () => {
+    const payload = { idempotencyKey: '22222222-2222-4222-8222-222222222222' };
+    const alice = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload,
+    });
+    const bob = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'bob' },
+      payload,
+    });
+
+    assert.equal(alice.statusCode, 201);
+    assert.equal(bob.statusCode, 201);
+    assert.notEqual(bob.json().id, alice.json().id);
+  });
+
+  it('POST /api/threads atomically persists the preferred cat and pin for a new meeting destination', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      payload: { userId: 'alice', title: 'Meeting destination', preferredCats: ['codex-sol'], pinned: true },
+    });
+
+    assert.equal(res.statusCode, 201);
+    const body = JSON.parse(res.body);
+    assert.deepEqual(body.preferredCats, ['codex-sol']);
+    assert.equal(body.pinned, true);
+    const stored = await threadStore.get(body.id);
+    assert.deepEqual(stored.preferredCats, ['codex-sol']);
+    assert.equal(stored.pinned, true);
+  });
+
+  it('POST /api/threads keeps omitted projectPath as default', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      payload: { userId: 'alice', title: 'Lobby Chat' },
+    });
+    assert.equal(res.statusCode, 201);
+    const body = JSON.parse(res.body);
+    assert.equal(body.projectPath, 'default');
+  });
+
+  it('POST /api/threads binds bootcamp threads without projectPath to CAT_CAFE_WORKSPACE_ROOT', async () => {
+    const workspaceRoot = await createTempWorkspace();
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      payload: {
+        userId: 'alice',
+        title: '猫猫训练营',
+        bootcampState: { v: 1, phase: 'phase-1-intro', startedAt: Date.now() },
+      },
+    });
+
+    assert.equal(res.statusCode, 201);
+    const body = JSON.parse(res.body);
+    assert.equal(body.projectPath, workspaceRoot);
+  });
+
+  it('POST /api/threads refuses bootcamp threads in runtime mode when workspace root is missing', async () => {
+    const runtimeRoot = await createTempWorkspace();
+    delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      payload: {
+        userId: 'alice',
+        title: '猫猫训练营',
+        bootcampState: { v: 1, phase: 'phase-1-intro', startedAt: Date.now() },
+      },
+    });
+
+    assert.equal(res.statusCode, 500);
+    const body = JSON.parse(res.body);
+    assert.match(body.error, /Bootcamp workspace root/);
+  });
+
+  it('POST /api/threads migrates an explicit runtime path to the persistent workspace', async () => {
+    const runtimeRoot = await createTempWorkspace();
+    const workspaceRoot = await createTempWorkspace();
+    for (const root of [runtimeRoot, workspaceRoot]) {
+      mkdirSync(join(root, 'cat-cafe-skills'), { recursive: true });
+      writeFileSync(join(root, 'cat-cafe-skills', 'manifest.yaml'), 'skills: []\n');
+      execFileSync('git', ['init', '-b', 'main'], { cwd: root, stdio: 'ignore' });
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root, stdio: 'ignore' });
+      execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: root, stdio: 'ignore' });
+      execFileSync('git', ['add', '.'], { cwd: root, stdio: 'ignore' });
+      execFileSync('git', ['commit', '-m', 'baseline'], { cwd: root, stdio: 'ignore' });
+    }
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      payload: { userId: 'alice', title: 'Persistent workspace', projectPath: runtimeRoot },
+    });
+
+    assert.equal(res.statusCode, 201, res.body);
+    const targetRoot = JSON.parse(res.body).projectPath;
+    assert.equal(targetRoot, workspaceRoot);
+
+    // Simulate a page-triggered agent/governance write to a tracked file. The exact
+    // runtime restart predicate (`git status --short -uno`) must remain clean.
+    writeFileSync(join(targetRoot, 'cat-cafe-skills', 'manifest.yaml'), 'skills:\n  - generated\n');
+    assert.equal(execFileSync('git', ['status', '--short', '-uno'], { cwd: runtimeRoot, encoding: 'utf8' }).trim(), '');
+    assert.match(
+      execFileSync('git', ['status', '--short', '-uno'], { cwd: workspaceRoot, encoding: 'utf8' }),
+      /cat-cafe-skills\/manifest\.yaml/,
+    );
   });
 
   it('POST /api/threads with pinned=true creates a pinned thread', async () => {
@@ -153,6 +326,19 @@ describe('Thread API', () => {
     assert.equal(res.statusCode, 401);
   });
 
+  it('POST /api/threads trusts localhost origin fallback and creates thread as default-user', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      headers: { origin: 'http://localhost:3003' },
+      payload: { title: 'Trusted Browser Create' },
+    });
+    assert.equal(res.statusCode, 201);
+    const body = JSON.parse(res.body);
+    assert.equal(body.title, 'Trusted Browser Create');
+    assert.equal(body.createdBy, 'default-user');
+  });
+
   it('GET /api/threads lists user threads', async () => {
     threadStore.create('alice', 'Thread A');
     threadStore.create('alice', 'Thread B');
@@ -160,7 +346,8 @@ describe('Thread API', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/threads?userId=alice',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const body = JSON.parse(res.body);
     // alice has 2 custom + default thread
@@ -170,6 +357,119 @@ describe('Thread API', () => {
     assert.ok(!titles.includes('Thread C'));
   });
 
+  it('GET /api/threads?view=sidebar omits threadMemory without changing the default thread contract', async () => {
+    const thread = threadStore.create('alice', 'Sidebar summary', '/projects/cat-cafe');
+    threadStore.updateThreadMemory(thread.id, {
+      version: 1,
+      updatedAt: Date.now(),
+      sessionsIncorporated: 3,
+      summary: 'A deliberately large memory payload that belongs in thread detail, not the sidebar list.',
+      decisions: ['Keep detailed memory out of list projections.'],
+      openQuestions: [],
+    });
+    threadStore.updatePin(thread.id, true);
+
+    const [defaultRes, sidebarRes] = await Promise.all([
+      app.inject({
+        method: 'GET',
+        url: '/api/threads',
+        headers: { 'x-cat-cafe-user': 'alice' },
+      }),
+      app.inject({
+        method: 'GET',
+        url: '/api/threads?view=sidebar',
+        headers: { 'x-cat-cafe-user': 'alice' },
+      }),
+    ]);
+
+    assert.equal(defaultRes.statusCode, 200);
+    assert.equal(sidebarRes.statusCode, 200);
+    const defaultThread = JSON.parse(defaultRes.body).threads.find((candidate) => candidate.id === thread.id);
+    const sidebarThread = JSON.parse(sidebarRes.body).threads.find((candidate) => candidate.id === thread.id);
+    assert.equal(defaultThread.threadMemory.summary.startsWith('A deliberately large'), true);
+    assert.equal('threadMemory' in sidebarThread, false);
+    assert.equal(sidebarThread.title, 'Sidebar summary');
+    assert.equal(sidebarThread.projectPath, '/projects/cat-cafe');
+    assert.equal(sidebarThread.pinned, true);
+  });
+
+  it('GET /api/threads migrates legacy runtime paths before exposing project selectors', async () => {
+    const runtimeRoot = await createTempWorkspace();
+    const workspaceRoot = await createTempWorkspace();
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    const legacyThread = threadStore.create('alice', 'Legacy runtime thread', runtimeRoot);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const listed = JSON.parse(res.body).threads.find((thread) => thread.id === legacyThread.id);
+    assert.equal(listed.projectPath, workspaceRoot);
+    assert.equal((await threadStore.get(legacyThread.id)).projectPath, workspaceRoot);
+  });
+
+  it('GET /api/threads migrates a legacy runtime thread on the first filtered request', async () => {
+    const runtimeRoot = await createTempWorkspace();
+    const workspaceRoot = await createTempWorkspace();
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    const legacyThread = threadStore.create('alice', 'Filtered legacy runtime thread', runtimeRoot);
+
+    const filteredRes = await app.inject({
+      method: 'GET',
+      url: `/api/threads?projectPath=${encodeURIComponent(runtimeRoot)}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+
+    assert.equal(filteredRes.statusCode, 200);
+    const filteredIds = JSON.parse(filteredRes.body).threads.map((thread) => thread.id);
+    assert.ok(filteredIds.includes(legacyThread.id));
+    assert.equal((await threadStore.get(legacyThread.id)).projectPath, workspaceRoot);
+  });
+
+  it('GET /api/threads resets a stale runtime descendant to the safe default project', async () => {
+    const runtimeRoot = await createTempWorkspace();
+    const workspaceRoot = await createTempWorkspace();
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    const staleRuntimePath = join(runtimeRoot, 'deleted-project');
+    const legacyThread = threadStore.create('alice', 'Stale runtime thread', staleRuntimePath);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const listed = JSON.parse(res.body).threads.find((thread) => thread.id === legacyThread.id);
+    assert.equal(listed.projectPath, 'default');
+    assert.equal((await threadStore.get(legacyThread.id)).projectPath, 'default');
+  });
+
+  it('GET /api/threads trusts localhost origin fallback and lists default-user threads', async () => {
+    threadStore.create('default-user', 'Browser Thread');
+    threadStore.create('bob', 'Bob Thread');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads',
+      headers: { origin: 'http://localhost:3003' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const titles = body.threads.map((t) => t.title);
+    assert.ok(titles.includes('Browser Thread'));
+    assert.ok(!titles.includes('Bob Thread'));
+  });
+
+  // [F155 Phase B] guideState removed from Thread — redaction test no longer applicable
+
   it('GET /api/threads supports case-insensitive title search via q', async () => {
     threadStore.create('alice', 'Frontend polish');
     threadStore.create('alice', 'Backend Thread Search');
@@ -177,7 +477,8 @@ describe('Thread API', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/threads?userId=alice&q=thread',
+      url: '/api/threads?q=thread',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -192,7 +493,8 @@ describe('Thread API', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: `/api/threads?userId=alice&q=${t.id}`,
+      url: `/api/threads?q=${t.id}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -212,7 +514,8 @@ describe('Thread API', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/threads?userId=alice&backlogItemIds=b-alice-1,b-bob-1',
+      url: '/api/threads?backlogItemIds=b-alice-1,b-bob-1',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -230,7 +533,8 @@ describe('Thread API', () => {
     const ids = Array.from({ length: 51 }, (_, i) => `id-${i}`).join(',');
     const res = await app.inject({
       method: 'GET',
-      url: `/api/threads?userId=alice&backlogItemIds=${encodeURIComponent(ids)}`,
+      url: `/api/threads?backlogItemIds=${encodeURIComponent(ids)}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     assert.equal(res.statusCode, 400);
     const body = JSON.parse(res.body);
@@ -241,7 +545,8 @@ describe('Thread API', () => {
     const ids = Array.from({ length: 50 }, (_, i) => `id-${i}`).join(',');
     const res = await app.inject({
       method: 'GET',
-      url: `/api/threads?userId=alice&backlogItemIds=${encodeURIComponent(ids)}`,
+      url: `/api/threads?backlogItemIds=${encodeURIComponent(ids)}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     assert.equal(res.statusCode, 200);
   });
@@ -256,7 +561,8 @@ describe('Thread API', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/threads?userId=alice&hasBacklogItemId=true',
+      url: '/api/threads?hasBacklogItemId=true',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -280,7 +586,8 @@ describe('Thread API', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/threads?userId=alice&hasBacklogItemId=false',
+      url: '/api/threads?hasBacklogItemId=false',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -302,7 +609,8 @@ describe('Thread API', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/threads?userId=alice&featureIds=f058,f042',
+      url: '/api/threads?featureIds=f058,f042',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -320,7 +628,8 @@ describe('Thread API', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/threads?userId=alice&featureIds=F063',
+      url: '/api/threads?featureIds=F063',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -334,7 +643,8 @@ describe('Thread API', () => {
     const ids = Array.from({ length: 51 }, (_, i) => `f${String(i).padStart(3, '0')}`).join(',');
     const res = await app.inject({
       method: 'GET',
-      url: `/api/threads?userId=alice&featureIds=${encodeURIComponent(ids)}`,
+      url: `/api/threads?featureIds=${encodeURIComponent(ids)}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     assert.equal(res.statusCode, 400);
     const body = JSON.parse(res.body);
@@ -353,6 +663,93 @@ describe('Thread API', () => {
     assert.equal(body.id, thread.id);
     assert.equal(body.title, 'Details Test');
   });
+
+  it('the owner can find the one canonical concierge carrier by title or ID and open its exact detail', async () => {
+    const threadId = await conciergeThreadService.getOrCreate('alice');
+    await threadStore.updateTitle(threadId, '砚砚喵Live F317 - 猫猫球线程');
+    const orphan = threadStore.create('alice', 'old concierge orphan');
+    threadStore.updateThreadKind(orphan.id, 'concierge');
+
+    for (const url of ['/api/threads?view=sidebar', '/api/threads?q=砚砚喵Live', `/api/threads?q=${threadId}`]) {
+      const res = await app.inject({ method: 'GET', url, headers: { 'x-cat-cafe-user': 'alice' } });
+      assert.equal(res.statusCode, 200);
+      const ids = JSON.parse(res.body).threads.map((thread) => thread.id);
+      assert.ok(ids.includes(threadId), `canonical carrier missing from ${url}`);
+      assert.ok(!ids.includes(orphan.id), `orphan must not become another entry in ${url}`);
+    }
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${threadId}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+    assert.equal(detail.statusCode, 200);
+    assert.equal(JSON.parse(detail.body).title, '砚砚喵Live F317 - 猫猫球线程');
+    assert.equal(JSON.parse(detail.body).threadKind, 'concierge');
+  });
+
+  it('another owner cannot discover or rename the canonical concierge carrier', async () => {
+    const threadId = await conciergeThreadService.getOrCreate('alice');
+    for (const url of ['/api/threads?view=sidebar', `/api/threads?q=${threadId}`]) {
+      const res = await app.inject({ method: 'GET', url, headers: { 'x-cat-cafe-user': 'bob' } });
+      assert.ok(!JSON.parse(res.body).threads.some((thread) => thread.id === threadId));
+    }
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${threadId}`,
+      headers: { 'x-cat-cafe-user': 'bob' },
+    });
+    assert.equal(detail.statusCode, 404);
+    const rename = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${threadId}`,
+      headers: { 'x-cat-cafe-user': 'bob' },
+      payload: { title: 'stolen title' },
+    });
+    assert.equal(rename.statusCode, 404);
+  });
+
+  it('shows the stored legacy concierge carrier to its key owner without exposing it to others', async () => {
+    const threadId = await conciergeThreadService.getOrCreate('alice');
+    const thread = await threadStore.get(threadId);
+    thread.createdBy = 'concierge-system';
+    thread.title = null;
+    const ownerList = await app.inject({
+      method: 'GET',
+      url: '/api/threads?view=sidebar',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+    const canonical = JSON.parse(ownerList.body).threads.find((entry) => entry.id === threadId);
+    assert.equal(canonical?.title, '猫猫球 · 伴随对话');
+    const ownerDetail = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${threadId}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+    assert.equal(ownerDetail.statusCode, 200);
+    const foreignDetail = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${threadId}`,
+      headers: { 'x-cat-cafe-user': 'bob' },
+    });
+    assert.equal(foreignDetail.statusCode, 404);
+  });
+
+  it('GET /api/threads/:id migrates and persists a legacy runtime projectPath', async () => {
+    const runtimeRoot = await createTempWorkspace();
+    const workspaceRoot = await createTempWorkspace();
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    const legacyThread = threadStore.create('alice', 'Legacy runtime details', runtimeRoot);
+
+    const res = await app.inject({ method: 'GET', url: `/api/threads/${legacyThread.id}` });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).projectPath, workspaceRoot);
+    assert.equal((await threadStore.get(legacyThread.id)).projectPath, workspaceRoot);
+  });
+
+  // [F155 Phase B] guideState removed from Thread — redaction test no longer applicable
 
   it('GET /api/threads/:id returns 404 for nonexistent', async () => {
     const res = await app.inject({
@@ -373,6 +770,109 @@ describe('Thread API', () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.title, 'New Title');
+  });
+
+  it('PATCH /api/threads/:id persists the explicitly selected cat for retry delivery', async () => {
+    const thread = threadStore.create('default-user', 'Meeting destination without a cat');
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { preferredCats: ['codex-sol'] },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.deepEqual(body.preferredCats, ['codex-sol']);
+    assert.deepEqual((await threadStore.get(thread.id)).preferredCats, ['codex-sol']);
+  });
+
+  it('PATCH /api/threads/:id marks renamed threads dirty for evidence search', async () => {
+    const { threadsRoutes } = await import('../dist/routes/threads.js');
+    const calls = [];
+    const indexBuilder = {
+      markThreadDirty(threadId) {
+        calls.push(['mark', threadId]);
+      },
+      async flushDirtyThreads() {
+        calls.push(['flush']);
+        return 1;
+      },
+    };
+    const isolated = Fastify();
+    await isolated.register(threadsRoutes, { threadStore, indexBuilder });
+    await isolated.ready();
+
+    const thread = threadStore.create('alice', 'Old Indexed Title');
+    const res = await isolated.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { title: 'New Indexed Title' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(calls, [['mark', thread.id], ['flush']]);
+
+    await isolated.close();
+  });
+
+  it('PATCH /api/threads/:id persists bubble display overrides via detail and list reads', async () => {
+    const thread = threadStore.create('default-user', 'Bubble Override Test');
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { bubbleThinking: 'collapsed', bubbleCli: 'expanded' },
+    });
+    assert.equal(patchRes.statusCode, 200);
+    const patched = JSON.parse(patchRes.body);
+    assert.equal(patched.bubbleThinking, 'collapsed');
+    assert.equal(patched.bubbleCli, 'expanded');
+
+    const detailRes = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${thread.id}`,
+    });
+    assert.equal(detailRes.statusCode, 200);
+    const detail = JSON.parse(detailRes.body);
+    assert.equal(detail.bubbleThinking, 'collapsed');
+    assert.equal(detail.bubbleCli, 'expanded');
+
+    const listRes = await app.inject({
+      method: 'GET',
+      url: '/api/threads',
+    });
+    assert.equal(listRes.statusCode, 200);
+    const listBody = JSON.parse(listRes.body);
+    const listed = listBody.threads.find((item) => item.id === thread.id);
+    assert.ok(listed, 'thread should be present in list');
+    assert.equal(listed.bubbleThinking, 'collapsed');
+    assert.equal(listed.bubbleCli, 'expanded');
+  });
+
+  it('PATCH /api/threads/:id clears bubble display overrides when set back to global', async () => {
+    const thread = threadStore.create('default-user', 'Bubble Clear Test');
+    threadStore.updateBubbleDisplay(thread.id, 'bubbleThinking', 'collapsed');
+    threadStore.updateBubbleDisplay(thread.id, 'bubbleCli', 'expanded');
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { bubbleThinking: 'global', bubbleCli: 'global' },
+    });
+    assert.equal(patchRes.statusCode, 200);
+    const patched = JSON.parse(patchRes.body);
+    assert.equal(patched.bubbleThinking, undefined);
+    assert.equal(patched.bubbleCli, undefined);
+
+    const detailRes = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${thread.id}`,
+    });
+    assert.equal(detailRes.statusCode, 200);
+    const detail = JSON.parse(detailRes.body);
+    assert.equal(detail.bubbleThinking, undefined);
+    assert.equal(detail.bubbleCli, undefined);
   });
 
   it('PATCH /api/threads/:id persists via threadStore.updateTitle (regression: Redis)', async () => {
@@ -474,6 +974,93 @@ describe('Thread API', () => {
     const body = JSON.parse(res.body);
     assert.equal(body.pinned, false);
     assert.equal(body.pinnedAt, null);
+  });
+
+  it('PATCH /api/threads/:id links and clears an owner-validated backlog item after creation', async () => {
+    const { BacklogStore } = await import('../dist/domains/cats/services/stores/ports/BacklogStore.js');
+    const { threadsRoutes } = await import('../dist/routes/threads.js');
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const backlogStore = new BacklogStore();
+    const localThreadStore = new ThreadStore();
+    const item = backlogStore.create({
+      userId: 'alice',
+      title: 'F322 post-create metadata',
+      summary: 'Move feature choice out of first-message admission',
+      priority: 'medium',
+      tags: ['F322'],
+      createdBy: 'user',
+    });
+    const thread = localThreadStore.create('alice', 'Real conversation');
+    const localApp = Fastify();
+    await localApp.register(threadsRoutes, { threadStore: localThreadStore, backlogStore });
+    await localApp.ready();
+
+    const linked = await localApp.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: { backlogItemId: item.id },
+    });
+    assert.equal(linked.statusCode, 200, linked.body);
+    assert.equal(linked.json().backlogItemId, item.id);
+
+    const cleared = await localApp.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: { backlogItemId: null },
+    });
+    assert.equal(cleared.statusCode, 200, cleared.body);
+    assert.equal(cleared.json().backlogItemId, undefined);
+    await localApp.close();
+  });
+
+  it('PATCH /api/threads/:id refuses foreign backlog items and foreign threads without mutating either', async () => {
+    const { BacklogStore } = await import('../dist/domains/cats/services/stores/ports/BacklogStore.js');
+    const { threadsRoutes } = await import('../dist/routes/threads.js');
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const backlogStore = new BacklogStore();
+    const localThreadStore = new ThreadStore();
+    const aliceItem = backlogStore.create({
+      userId: 'alice',
+      title: 'Alice Feature',
+      summary: 'Alice only',
+      priority: 'medium',
+      tags: [],
+      createdBy: 'user',
+    });
+    const bobItem = backlogStore.create({
+      userId: 'bob',
+      title: 'Bob Feature',
+      summary: 'Bob only',
+      priority: 'medium',
+      tags: [],
+      createdBy: 'user',
+    });
+    const aliceThread = localThreadStore.create('alice', 'Alice Thread');
+    const bobThread = localThreadStore.create('bob', 'Bob Thread');
+    const localApp = Fastify();
+    await localApp.register(threadsRoutes, { threadStore: localThreadStore, backlogStore });
+    await localApp.ready();
+
+    const foreignItem = await localApp.inject({
+      method: 'PATCH',
+      url: `/api/threads/${aliceThread.id}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: { backlogItemId: bobItem.id },
+    });
+    assert.equal(foreignItem.statusCode, 400);
+    assert.equal((await localThreadStore.get(aliceThread.id)).backlogItemId, undefined);
+
+    const foreignThread = await localApp.inject({
+      method: 'PATCH',
+      url: `/api/threads/${bobThread.id}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+      payload: { backlogItemId: aliceItem.id },
+    });
+    assert.equal(foreignThread.statusCode, 404);
+    assert.equal((await localThreadStore.get(bobThread.id)).backlogItemId, undefined);
+    await localApp.close();
   });
 
   it('PATCH /api/threads/:id sets favorited=true', async () => {
@@ -585,6 +1172,90 @@ describe('Thread API', () => {
     });
     assert.equal(res.statusCode, 400);
   });
+
+  it('PATCH /api/threads/:id updates preferredWorkspaceMode', async () => {
+    const thread = threadStore.create('alice', 'Community Thread');
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { preferredWorkspaceMode: 'community' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.preferredWorkspaceMode, 'community');
+
+    const fetched = await app.inject({ method: 'GET', url: `/api/threads/${thread.id}` });
+    assert.equal(JSON.parse(fetched.body).preferredWorkspaceMode, 'community');
+  });
+
+  it('PATCH /api/threads/:id persists the distinct F310 product Schedule destination', async () => {
+    const thread = threadStore.create('alice', 'Entrusted work Schedule');
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { preferredWorkspaceMode: 'product-schedule' },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).preferredWorkspaceMode, 'product-schedule');
+
+    const fetched = await app.inject({ method: 'GET', url: `/api/threads/${thread.id}` });
+    assert.equal(JSON.parse(fetched.body).preferredWorkspaceMode, 'product-schedule');
+  });
+
+  it('PATCH /api/threads/:id rejects invalid preferredWorkspaceMode', async () => {
+    const thread = threadStore.create('alice', 'Bad Mode Thread');
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { preferredWorkspaceMode: 'nonexistent' },
+    });
+    assert.equal(res.statusCode, 400);
+  });
+
+  // 砚砚 re-review P2 regression: F233 Phase C C3 trajectory mode end-to-end through
+  // PATCH route + ThreadStore. Without trajectory in route schema / Thread union /
+  // RedisThreadStore validModes, thread-driven auto-open to trajectory panel blocked.
+  it('PATCH /api/threads/:id accepts preferredWorkspaceMode: trajectory (F233 C3)', async () => {
+    const thread = threadStore.create('alice', 'F188 提包球 Thread');
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { preferredWorkspaceMode: 'trajectory' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.preferredWorkspaceMode, 'trajectory');
+    const fetched = await app.inject({ method: 'GET', url: `/api/threads/${thread.id}` });
+    assert.equal(JSON.parse(fetched.body).preferredWorkspaceMode, 'trajectory');
+  });
+
+  // F246 approval-hub regression (was also missing from route schema before this fix)
+  it('PATCH /api/threads/:id accepts preferredWorkspaceMode: approval (F246)', async () => {
+    const thread = threadStore.create('alice', 'F246 Approval Thread');
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { preferredWorkspaceMode: 'approval' },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).preferredWorkspaceMode, 'approval');
+  });
+
+  it('PATCH /api/threads/:id accepts preferredWorkspaceMode: eval (F248 Phase D)', async () => {
+    const thread = threadStore.create('alice', 'F248 Eval Thread');
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { preferredWorkspaceMode: 'eval' },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).preferredWorkspaceMode, 'eval');
+
+    const fetched = await app.inject({ method: 'GET', url: `/api/threads/${thread.id}` });
+    assert.equal(JSON.parse(fetched.body).preferredWorkspaceMode, 'eval');
+  });
 });
 
 describe('Thread soft-delete preserves data (Phase D)', () => {
@@ -625,22 +1296,26 @@ describe('Thread soft-delete preserves data (Phase D)', () => {
     const threadId = thread.id;
 
     // Add some messages
-    messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: 'test message 1',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
-    messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: 'test message 2',
-      mentions: [],
-      timestamp: Date.now() + 1,
-      threadId,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        content: 'test message 1',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        content: 'test message 2',
+        mentions: [],
+        timestamp: Date.now() + 1,
+        threadId,
+      }),
+    );
 
     // Add a task
     taskStore.create({
@@ -863,7 +1538,8 @@ describe('F095 Phase D: Soft delete + trash bin', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/threads?userId=alice',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const body = JSON.parse(res.body);
     const ids = body.threads.map((t) => t.id);
@@ -884,6 +1560,24 @@ describe('F095 Phase D: Soft delete + trash bin', () => {
 
     const restored = threadStore.get(thread.id);
     assert.ok(!restored.deletedAt, 'deletedAt should be cleared after restore');
+  });
+
+  it('POST /api/threads/:id/restore rejects concierge threads (R17 failure-mode audit)', async () => {
+    // Concierge carrier threads are canonicalized by /api/concierge/thread.
+    // Generic trash restore must not revive a stale concierge carrier and create a
+    // second live concierge thread for the same user.
+    const concierge = threadStore.create('alice', 'Concierge Restore Blocked');
+    threadStore.updateThreadKind(concierge.id, 'concierge');
+    threadStore.softDelete(concierge.id);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${concierge.id}/restore`,
+    });
+    assert.equal(res.statusCode, 400);
+
+    const after = threadStore.get(concierge.id);
+    assert.ok(after.deletedAt, 'concierge thread should remain soft-deleted after rejected restore');
   });
 
   it('POST /api/threads/:id/restore returns 400 for non-deleted thread', async () => {
@@ -913,7 +1607,8 @@ describe('F095 Phase D: Soft delete + trash bin', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/threads?userId=alice&deleted=true',
+      url: '/api/threads?deleted=true',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -921,6 +1616,77 @@ describe('F095 Phase D: Soft delete + trash bin', () => {
     const titles = body.threads.map((t) => t.title);
     assert.ok(titles.includes('Trashed 1'));
     assert.ok(titles.includes('Trashed 2'));
+  });
+
+  it('GET /api/threads?deleted=true migrates and persists legacy runtime projectPaths', async () => {
+    const runtimeDir = await mkdtemp(join(process.cwd(), '.tmp-deleted-runtime-'));
+    const workspaceDir = await mkdtemp(join(process.cwd(), '.tmp-deleted-workspace-'));
+    const runtimeRoot = await realpath(runtimeDir);
+    const workspaceRoot = await realpath(workspaceDir);
+    const savedRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const savedWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    try {
+      const legacyThread = threadStore.create('alice', 'Legacy runtime trash', runtimeRoot);
+      threadStore.softDelete(legacyThread.id);
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/threads?deleted=true',
+        headers: { 'x-cat-cafe-user': 'alice' },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const listed = JSON.parse(res.body).threads.find((thread) => thread.id === legacyThread.id);
+      assert.equal(listed.projectPath, workspaceRoot);
+      assert.equal((await threadStore.get(legacyThread.id)).projectPath, workspaceRoot);
+    } finally {
+      if (savedRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = savedRuntimeRoot;
+      if (savedWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = savedWorkspaceRoot;
+      await rm(runtimeRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('GET /api/threads?deleted=true excludes soft-deleted concierge thread by default (R17 P2)', async () => {
+    // Regression: the deleted branch returned before the concierge filter, so a soft-deleted
+    // concierge thread appeared in the trash view. After restore + getOrCreate creates a
+    // replacement, two live concierge threads could exist for the same user.
+    const normal = threadStore.create('alice', 'Normal Trashed');
+    const concierge = threadStore.create('alice', 'Concierge Thread');
+    threadStore.updateThreadKind(concierge.id, 'concierge');
+    threadStore.softDelete(normal.id);
+    threadStore.softDelete(concierge.id);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads?deleted=true',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const ids = body.threads.map((t) => t.id);
+    assert.ok(ids.includes(normal.id), 'normal trashed thread should be visible');
+    assert.ok(!ids.includes(concierge.id), 'concierge thread must NOT appear in trash by default');
+  });
+
+  it('GET /api/threads?deleted=true&includeConcierge=true surfaces soft-deleted concierge thread (R17 P2)', async () => {
+    const concierge = threadStore.create('alice', 'Concierge Trashed');
+    threadStore.updateThreadKind(concierge.id, 'concierge');
+    threadStore.softDelete(concierge.id);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads?deleted=true&includeConcierge=true',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const ids = body.threads.map((t) => t.id);
+    assert.ok(ids.includes(concierge.id), 'concierge thread must be visible with includeConcierge=true');
   });
 
   it('PATCH /api/threads/:id returns 404 for soft-deleted thread (P1 fix)', async () => {
@@ -986,22 +1752,26 @@ describe('GET /api/messages with threadId', () => {
   });
 
   it('returns only messages for the specified thread', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'thread-a msg',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'thread-a',
-    });
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'thread-b msg',
-      mentions: [],
-      timestamp: 2000,
-      threadId: 'thread-b',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'thread-a msg',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-a',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'thread-b msg',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'thread-b',
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -1013,26 +1783,31 @@ describe('GET /api/messages with threadId', () => {
   });
 
   it('thread query filters by userId (regression: cross-user leak)', async () => {
-    messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: 'alice in thread',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'shared-thread',
-    });
-    messageStore.append({
-      userId: 'bob',
-      catId: null,
-      content: 'bob in thread',
-      mentions: [],
-      timestamp: 2000,
-      threadId: 'shared-thread',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        content: 'alice in thread',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'shared-thread',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'bob',
+        catId: null,
+        content: 'bob in thread',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'shared-thread',
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/messages?threadId=shared-thread&userId=alice',
+      url: '/api/messages?threadId=shared-thread',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const body = JSON.parse(res.body);
     assert.equal(body.messages.length, 1);
@@ -1041,14 +1816,16 @@ describe('GET /api/messages with threadId', () => {
 
   it('thread-scoped pagination with before cursor', async () => {
     for (let i = 0; i < 5; i++) {
-      messageStore.append({
-        userId: 'default-user',
-        catId: null,
-        content: `t-msg ${i}`,
-        mentions: [],
-        timestamp: 1000 + i * 100,
-        threadId: 'paginated-thread',
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'default-user',
+          catId: null,
+          content: `t-msg ${i}`,
+          mentions: [],
+          timestamp: 1000 + i * 100,
+          threadId: 'paginated-thread',
+        }),
+      );
     }
 
     const res = await app.inject({

@@ -1,0 +1,27 @@
+{
+  "id": "0001791331563919-000419-dae4bab4",
+  "content": "",
+  "timestamp": 1791331563919,
+  "threadId": "thread_msheiy8wz5r7qsn4",
+  "userId": "default-user",
+  "contentBlocks": [
+    {
+      "type": "context_attachment",
+      "attachment": {
+        "v": 1,
+        "id": "ctx-quote-f20cf4a6-f884-4773-9e4d-cbc0c57f3dec",
+        "kind": "quote",
+        "text": "有一项要你决定：要不要加一道守卫，同一个 Phase 要合第三个 PR 时，必须写明拆分理由，没有理由就拦下。你说要，就交给缅因猫做；你不说，我不会自己开工。",
+        "comment": "哈哈哈你这个和钛合金裤衩子有啥区别？ 你这样设定规则人家在设计阶段就拆分成10个pr了😈 你让我合了两个不让合了？那好啊 那你的功能就是一半。我就一直报blocker 因为规则不满足咯～ 永远不满足",
+        "selectionStart": 826,
+        "selectionEnd": 905,
+        "source": {
+          "kind": "cli_output",
+          "threadId": "thread_msheiy8wz5r7qsn4",
+          "messageId": "0001791331168883-000399-2f4efee6",
+          "segmentId": "stdout"
+        }
+      }
+    }
+  ]
+}

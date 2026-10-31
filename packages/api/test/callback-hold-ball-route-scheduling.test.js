@@ -1,0 +1,723 @@
+/**
+ * F167 C1 — hold-ball callback route scheduling + error-path tests
+ *
+ * Sibling to `callback-hold-ball-route.test.js` (auth + 400 body validation).
+ * Split per PR #1290 cloud review P2 (file-size guidance: ≤200 lines per file).
+ *
+ * Scope: the side-effect half of /api/callbacks/hold-ball contract —
+ *   - 200 on valid request → scheduler + dynamicTaskStore side effects fired
+ *   - 429 on maxHoldsPerWindow exhaustion (counter guard)
+ *   - 500 when reminder template is missing
+ *
+ * Counter state lives in a module-local Map, so each test uses a distinct
+ * (threadId, catId) pair to avoid cross-test contamination.
+ */
+
+import assert from 'node:assert/strict';
+import { afterEach, beforeEach, describe, test } from 'node:test';
+import Fastify from 'fastify';
+import { formatHoldOwnerName } from '../dist/routes/hold-ball-terminal-visibility.js';
+
+/**
+ * PR-O3: all wakeAfterMs payloads now require waitSourceRef.
+ * This fixture satisfies the schema without distracting from the test's focus.
+ */
+const VALID_WAIT_SOURCE_REF = {
+  kind: 'github_issue',
+  value: 'AgeOfLearning/cat-cafe#999',
+  expectedSignal: 'issue closed',
+  slaUntilMs: 3_600_000,
+};
+
+describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
+  let registry;
+  let threadStore;
+  let holdQuotaStore;
+
+  function makeStubDeps(overrides = {}) {
+    const insertedTasks = [];
+    const registeredDynamic = [];
+    const unregisteredIds = [];
+    const removedIds = [];
+    const appendedMessages = [];
+    const defaultTemplate = {
+      createSpec(taskId, taskParams) {
+        return { taskId, taskParams };
+      },
+    };
+    const deps = {
+      registry,
+      taskRunner: {
+        registerDynamic(spec, taskId) {
+          registeredDynamic.push({ spec, taskId });
+        },
+        unregister(taskId) {
+          unregisteredIds.push(taskId);
+          return true;
+        },
+      },
+      templateRegistry: {
+        get(id) {
+          return id === 'reminder' ? defaultTemplate : undefined;
+        },
+      },
+      dynamicTaskStore: {
+        insert(record) {
+          insertedTasks.push(record);
+        },
+        getAll() {
+          return insertedTasks.filter((t) => !removedIds.includes(t.id));
+        },
+        getById(id) {
+          return insertedTasks.find((task) => task.id === id && !removedIds.includes(id)) ?? null;
+        },
+        updateParams(id, params) {
+          const task = insertedTasks.find((candidate) => candidate.id === id && !removedIds.includes(id));
+          if (!task) return false;
+          task.params = params;
+          return true;
+        },
+        updateParamsIfCurrent(id, current, next) {
+          const task = insertedTasks.find((candidate) => candidate.id === id && !removedIds.includes(id));
+          if (!task || task.params !== current) return false;
+          task.params = next;
+          return true;
+        },
+        setEnabled(id, enabled) {
+          const task = insertedTasks.find((candidate) => candidate.id === id && !removedIds.includes(id));
+          if (!task) return false;
+          task.enabled = enabled;
+          return true;
+        },
+        remove(id) {
+          removedIds.push(id);
+          return true;
+        },
+      },
+      // gpt52 non-blocking cleanup: satisfy deps.messageStore + deps.socketManager
+      // so hold_ball visibility broadcast doesn't emit warn noise in tests.
+      messageStore: {
+        async append(msg) {
+          appendedMessages.push(msg);
+          return { id: `test-msg-${insertedTasks.length}`, ...msg };
+        },
+      },
+      socketManager: {
+        broadcastToRoom() {},
+      },
+      holdQuotaStore,
+      _insertedTasks: insertedTasks,
+      _registeredDynamic: registeredDynamic,
+      _unregisteredIds: unregisteredIds,
+      _removedIds: removedIds,
+      _appendedMessages: appendedMessages,
+    };
+    return { ...deps, ...overrides };
+  }
+
+  beforeEach(async () => {
+    const { InvocationRegistry } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { HoldQuotaStore } = await import('../dist/domains/ball-custody/hold-quota-store.js');
+    registry = new InvocationRegistry();
+    threadStore = new ThreadStore();
+    holdQuotaStore = new HoldQuotaStore({ dbPath: ':memory:' });
+  });
+
+  afterEach(() => {
+    holdQuotaStore?.close();
+    holdQuotaStore = null;
+  });
+
+  test('hold owner prose uses the readable runtime member identity, never its internal id', () => {
+    assert.equal(
+      formatHoldOwnerName('cat-8zfu14fb', { displayName: '布偶猫', variantLabel: 'Fable' }),
+      '布偶猫（Fable）',
+    );
+    assert.equal(formatHoldOwnerName('cat-missing', undefined), '该成员');
+  });
+
+  async function createApp(holdBallDeps) {
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const app = Fastify();
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore: {
+        async getMessagesForThread() {
+          return [];
+        },
+      },
+      socketManager: {
+        broadcastAgentMessage() {},
+        getMessages() {
+          return [];
+        },
+      },
+      threadStore,
+      evidenceStore: {
+        async store() {},
+        async search() {
+          return [];
+        },
+      },
+      markerQueue: { enqueue() {} },
+      reflectionService: { async run() {} },
+      holdBallDeps,
+    });
+    return app;
+  }
+
+  test('200 on valid request — schedules task + increments counter', async () => {
+    const deps = makeStubDeps();
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-200', 'hb200');
+    const { invocationId, callbackToken } = await registry.create('user-hb-200', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        reason: 'CI still running',
+        nextStep: 'check build status',
+        wakeAfterMs: 60_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.status, 'ok');
+    assert.equal(body.held, true);
+    assert.ok(typeof body.taskId === 'string' && body.taskId.startsWith('hold-ball-'));
+    assert.equal(body.holdsInWindow, 1);
+    assert.equal(body.maxHoldsPerWindow, 3);
+    assert.equal(body.windowMs, 3_600_000);
+    assert.ok(typeof body.wakeAt === 'string' && !Number.isNaN(Date.parse(body.wakeAt)));
+
+    assert.equal(deps._insertedTasks.length, 1, 'dynamicTaskStore.insert called once');
+    assert.equal(deps._registeredDynamic.length, 1, 'taskRunner.registerDynamic called once');
+    const [task] = deps._insertedTasks;
+    assert.equal(task.templateId, 'reminder');
+    assert.equal(task.trigger.type, 'once');
+    assert.equal(task.deliveryThreadId, thread.id);
+    assert.equal(task.params.targetCatId, 'codex');
+    assert.equal(task.params.triggerUserId, 'user-hb-200');
+    assert.match(task.params.message, /持球唤醒/);
+    assert.match(task.params.message, /CI still running/);
+    assert.match(task.params.message, /check build status/);
+    assert.equal(task.createdBy, 'hold-ball:codex');
+    assert.equal(deps._appendedMessages.length, 1);
+    assert.equal(deps._appendedMessages[0].idempotencyKey, `hold-ball-waiting:${body.taskId}`);
+  });
+
+  test('410 on soft-deleted invocation thread — does not schedule wake task', async () => {
+    const deps = makeStubDeps({ threadStore });
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-deleted', 'hb-deleted');
+    assert.equal(await threadStore.softDelete(thread.id), true);
+    const { invocationId, callbackToken } = await registry.create('user-hb-deleted', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        reason: 'waiting for external review',
+        nextStep: 'check the review result',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
+    });
+
+    assert.equal(response.statusCode, 410);
+    const body = JSON.parse(response.body);
+    assert.equal(body.code, 'THREAD_DELETED');
+    assert.equal(deps._insertedTasks.length, 0, 'must not insert reminder task');
+    assert.equal(deps._registeredDynamic.length, 0, 'must not register scheduler task');
+  });
+
+  test('F167-G AC-G3/G5: second hold_ball replaces first pending (single-slot semantics, KD-23)', async () => {
+    // KD-23: hold_ball 是单-槽语义。同 (thread, cat) 同时只有一个 pending hold wake；
+    // 二次调用覆盖前者（unregister + terminal tombstone，insert 新的）。
+    // 避免 stale wake 累积（持球中被 external 唤醒，再次 hold_ball 时前一个 wake
+    // 的 nextStep 已经过时——不应仍 fire）。
+    const deps = makeStubDeps();
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-replace', 'hbreplace');
+    const { invocationId, callbackToken } = await registry.create('user-hb-replace', 'codex', thread.id);
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    // First hold_ball
+    const r1 = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers,
+      payload: { reason: 'wait-A', nextStep: 'continue-A', wakeAfterMs: 10_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
+    });
+    assert.equal(r1.statusCode, 200, 'first hold should succeed');
+    const firstTaskId = JSON.parse(r1.body).taskId;
+
+    // Second hold_ball (same thread, same cat)
+    const r2 = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers,
+      payload: { reason: 'wait-B', nextStep: 'continue-B', wakeAfterMs: 20_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
+    });
+    assert.equal(r2.statusCode, 200, 'second hold should succeed');
+    const secondTaskId = JSON.parse(r2.body).taskId;
+    assert.notEqual(firstTaskId, secondTaskId, 'second hold must produce a distinct taskId');
+
+    // First task is unscheduled and retained as a terminal replacement disposition.
+    assert.ok(
+      deps._unregisteredIds.includes(firstTaskId),
+      `first taskId should have been unregistered; got ${JSON.stringify(deps._unregisteredIds)}`,
+    );
+    assert.equal(deps._removedIds.includes(firstTaskId), false);
+    const retired = deps.dynamicTaskStore.getById(firstTaskId);
+    assert.equal(retired.enabled, false);
+    assert.equal(retired.params.holdLifecycle.status, 'retired_by_replacement');
+    assert.equal(retired.params.holdLifecycle.replacedByTaskId, secondTaskId);
+    // Only the second task remains in the store's live view
+    const liveTasks = deps.dynamicTaskStore.getAll().filter((task) => task.enabled);
+    assert.equal(liveTasks.length, 1, `exactly one pending hold task should remain; got ${liveTasks.length}`);
+    assert.equal(liveTasks[0].id, secondTaskId);
+    assert.match(liveTasks[0].params.message, /wait-B/);
+    assert.match(liveTasks[0].params.message, /continue-B/);
+    const replacementTerminal = deps._appendedMessages.find(
+      (message) => message.idempotencyKey === `hold-ball-terminal:${firstTaskId}:retired_by_replacement`,
+    );
+    assert.ok(replacementTerminal, 'replacement must persist a terminal fact for the retired hold');
+    assert.equal(replacementTerminal.userId, 'user-hb-replace');
+    assert.equal(replacementTerminal.source.meta.taskId, firstTaskId);
+    assert.equal(replacementTerminal.source.meta.outcome, 'retired_by_replacement');
+    assert.doesNotMatch(replacementTerminal.content, /\bcodex\b/, 'human prose must not expose the internal cat id');
+  });
+
+  test('F167-G cloud P1: registerDynamic failure rolls back new insert and retains prior hold (atomic swap)', async () => {
+    // Cloud Codex P1 on c04c5552a: if taskRunner.registerDynamic throws AFTER
+    // the prior hold was already cancelled, cat ends up with ZERO scheduled wakes.
+    // Fix: insert + register NEW first; only on success cancel prior. If register
+    // throws: remove the just-inserted row (rollback) + return 500; prior hold
+    // (if any) stays authoritative.
+    const deps = makeStubDeps();
+    // First hold succeeds normally.
+    const app1 = await createApp(deps);
+    const thread = await threadStore.create('user-hb-rollback', 'hbrollback');
+    const { invocationId, callbackToken } = await registry.create('user-hb-rollback', 'codex', thread.id);
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    const r1 = await app1.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers,
+      payload: { reason: 'wait-A', nextStep: 'continue-A', wakeAfterMs: 10_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
+    });
+    assert.equal(r1.statusCode, 200);
+    const firstTaskId = JSON.parse(r1.body).taskId;
+    const firstInsertCount = deps._insertedTasks.length;
+
+    // Now fail the second hold's taskRunner.registerDynamic.
+    deps.taskRunner.registerDynamic = () => {
+      throw new Error('simulated scheduler failure');
+    };
+
+    const r2 = await app1.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers,
+      payload: { reason: 'wait-B', nextStep: 'continue-B', wakeAfterMs: 20_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
+    });
+
+    // Caller must see 500 (clear signal that new hold didn't stick).
+    assert.equal(r2.statusCode, 500, 'failed scheduler register must return 500');
+
+    // New insert must have been rolled back — only firstTaskId remains active.
+    const liveAfterRollback = deps.dynamicTaskStore.getAll();
+    assert.equal(
+      liveAfterRollback.length,
+      1,
+      `after rollback exactly one task should remain; got ${liveAfterRollback.length}`,
+    );
+    assert.equal(liveAfterRollback[0].id, firstTaskId, 'prior hold must be retained after rollback');
+
+    // Prior was NOT cancelled (since new never fully committed).
+    assert.ok(
+      !deps._unregisteredIds.includes(firstTaskId),
+      `prior taskId must NOT have been unregistered on failed swap; got ${JSON.stringify(deps._unregisteredIds)}`,
+    );
+
+    // But we did insert one row and then remove it (the rolled-back attempt).
+    const insertedDuringSecondCall = deps._insertedTasks.length - firstInsertCount;
+    assert.equal(insertedDuringSecondCall, 1, 'second call should have inserted one row (then rolled back)');
+    const rolledBackId = deps._insertedTasks[firstInsertCount].id;
+    assert.ok(
+      deps._removedIds.includes(rolledBackId),
+      `rolled-back taskId must be removed from store; got ${JSON.stringify(deps._removedIds)}`,
+    );
+  });
+
+  test('F167-G: waiting History failure rolls back the new hold and retains the prior wake', async () => {
+    let failWaitingAppend = false;
+    const deps = makeStubDeps({
+      messageStore: {
+        async append(msg) {
+          if (failWaitingAppend) throw new Error('simulated History failure');
+          deps._appendedMessages.push(msg);
+          return { id: `test-msg-${deps._appendedMessages.length}`, ...msg };
+        },
+      },
+    });
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-history-rollback', 'hb-history-rollback');
+    const { invocationId, callbackToken } = await registry.create('user-hb-history-rollback', 'codex', thread.id);
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers,
+      payload: { reason: 'wait-A', nextStep: 'continue-A', wakeAfterMs: 10_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
+    });
+    assert.equal(first.statusCode, 200);
+    const firstTaskId = JSON.parse(first.body).taskId;
+    const firstInsertCount = deps._insertedTasks.length;
+
+    failWaitingAppend = true;
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers,
+      payload: { reason: 'wait-B', nextStep: 'continue-B', wakeAfterMs: 20_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
+    });
+
+    assert.equal(second.statusCode, 503, 'a hold without its persistent waiting fact must fail closed');
+    assert.equal(deps.dynamicTaskStore.getAll().length, 1);
+    assert.equal(deps.dynamicTaskStore.getAll()[0].id, firstTaskId, 'the prior wake remains authoritative');
+    assert.equal(deps._insertedTasks.length, firstInsertCount + 1);
+    const rolledBackTaskId = deps._insertedTasks[firstInsertCount].id;
+    assert.ok(deps._unregisteredIds.includes(rolledBackTaskId));
+    assert.ok(deps._removedIds.includes(rolledBackTaskId));
+    assert.ok(!deps._unregisteredIds.includes(firstTaskId), 'the prior wake is not cancelled before History commits');
+  });
+
+  test('F167-G: a committed waiting row survives a lost append acknowledgement', async () => {
+    const committed = new Map();
+    const deps = makeStubDeps({
+      messageStore: {
+        async append(msg) {
+          const stored = { id: `test-msg-${committed.size + 1}`, ...msg };
+          committed.set(msg.idempotencyKey, stored);
+          throw new Error('waiting commit acknowledgement lost');
+        },
+        getByIdempotencyKey(_userId, _threadId, key) {
+          return committed.get(key) ?? null;
+        },
+      },
+    });
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-history-committed', 'hb-history-committed');
+    const { invocationId, callbackToken } = await registry.create('user-hb-history-committed', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        reason: 'wait after committed write',
+        nextStep: 'resume from the durable waiting row',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(committed.size, 1);
+    assert.equal(deps.dynamicTaskStore.getAll().length, 1, 'the recoverable scheduler carrier must remain live');
+    assert.equal(deps._removedIds.length, 0, 'a committed waiting fact must not be rolled back');
+  });
+
+  test('F167-G: an ambiguous waiting write preserves its recoverable carrier and returns typed 503', async () => {
+    const deps = makeStubDeps({
+      messageStore: {
+        async append() {
+          throw new Error('waiting write outcome unknown');
+        },
+        async getByIdempotencyKey() {
+          throw new Error('waiting lookup unavailable');
+        },
+      },
+    });
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-history-unknown', 'hb-history-unknown');
+    const { invocationId, callbackToken } = await registry.create('user-hb-history-unknown', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        reason: 'wait through an ambiguous write',
+        nextStep: 'recover from the durable carrier',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
+    });
+
+    assert.equal(response.statusCode, 503);
+    assert.equal(JSON.parse(response.body).code, 'HOLD_WAITING_HISTORY_OUTCOME_UNKNOWN');
+    assert.equal(deps.dynamicTaskStore.getAll().length, 1, 'unknown persistence must retain scheduler custody');
+    assert.equal(deps._removedIds.length, 0);
+    assert.equal(deps._unregisteredIds.length, 0);
+  });
+
+  test('F167-G: a live broadcast failure does not roll back a durably persisted waiting fact', async () => {
+    const deps = makeStubDeps({
+      socketManager: {
+        broadcastToRoom() {
+          throw new Error('simulated socket failure');
+        },
+      },
+    });
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-broadcast-failure', 'hb-broadcast-failure');
+    const { invocationId, callbackToken } = await registry.create('user-hb-broadcast-failure', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        reason: 'wait despite socket loss',
+        nextStep: 'continue from durable History',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(deps._appendedMessages.length, 1);
+    assert.equal(deps.dynamicTaskStore.getAll().length, 1);
+    assert.equal(deps._removedIds.length, 0);
+  });
+
+  test('F167-G AC-G3: different cats in same thread do NOT cancel each others holds', async () => {
+    // Single-slot is PER (threadId, catId). Two different cats holding in the
+    // same thread must both have their own pending wake.
+    const deps = makeStubDeps();
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-multicat', 'hbmulticat');
+    const codex = await registry.create('user-hb-multicat', 'codex', thread.id);
+    const opus = await registry.create('user-hb-multicat', 'opus', thread.id);
+
+    // codex holds
+    await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': codex.invocationId, 'x-callback-token': codex.callbackToken },
+      payload: {
+        reason: 'codex-wait',
+        nextStep: 'codex-next',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
+    });
+    // opus holds
+    await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': opus.invocationId, 'x-callback-token': opus.callbackToken },
+      payload: {
+        reason: 'opus-wait',
+        nextStep: 'opus-next',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
+    });
+
+    // Neither should have been cancelled by the other — single-slot is per (thread, cat).
+    assert.equal(deps._unregisteredIds.length, 0, 'different cats should not trigger cross-cancel');
+    const liveTasks = deps.dynamicTaskStore.getAll();
+    assert.equal(liveTasks.length, 2, 'both cats should have their own pending hold');
+  });
+
+  test('F167-G cloud P2 round-2 (gpt52 pushback): forged panel dyn-* task with matching createdBy MUST NOT be cancelled', async () => {
+    // Attack surface: /api/schedule/tasks lets panel callers pass body.createdBy
+    // AND body.display.category (both cast to valid values). A malicious or
+    // accidental task with `createdBy: 'hold-ball:codex' + category: anything`
+    // must NOT be deleted by subsequent hold_ball calls.
+    // Defense: anchor pending-hold match on taskId prefix 'hold-ball-' + templateId.
+    // Panel-created tasks always have `dyn-*` ids (server-generated).
+    const deps = makeStubDeps();
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-forge', 'hbforge');
+    const { invocationId, callbackToken } = await registry.create('user-hb-forge', 'codex', thread.id);
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    // Forge a panel-created reminder task with SAME createdBy + thread,
+    // as if a panel user posted { createdBy: 'hold-ball:codex', ... }.
+    // The dyn-* id prefix is the unforgeable marker.
+    deps._insertedTasks.push({
+      id: 'dyn-forged-12345',
+      templateId: 'reminder',
+      trigger: { type: 'once', fireAt: Date.now() + 900_000 },
+      params: { message: 'unrelated reminder', targetCatId: 'codex', triggerUserId: 'user-hb-forge' },
+      display: { label: 'panel reminder', category: 'system', description: '…' },
+      deliveryThreadId: thread.id,
+      enabled: true,
+      createdBy: 'hold-ball:codex',
+      createdAt: new Date().toISOString(),
+    });
+
+    // Now codex calls hold_ball once. Pending-hold filter must NOT match the
+    // forged dyn-* task even though createdBy matches.
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers,
+      payload: {
+        reason: 'real-hold',
+        nextStep: 'real-next',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
+    });
+    assert.equal(r.statusCode, 200, 'hold_ball must succeed');
+
+    // The forged task must still be present; only the newly-inserted
+    // hold-ball-* task should exist alongside it.
+    assert.ok(
+      !deps._unregisteredIds.includes('dyn-forged-12345'),
+      `forged dyn-* task MUST NOT be unregistered; got ${JSON.stringify(deps._unregisteredIds)}`,
+    );
+    assert.ok(
+      !deps._removedIds.includes('dyn-forged-12345'),
+      `forged dyn-* task MUST NOT be removed; got ${JSON.stringify(deps._removedIds)}`,
+    );
+    const liveTasks = deps.dynamicTaskStore.getAll();
+    assert.equal(liveTasks.length, 2, 'forged task + new hold-ball task both alive');
+    assert.ok(
+      liveTasks.some((t) => t.id === 'dyn-forged-12345'),
+      'forged dyn-* task survives',
+    );
+    assert.ok(
+      liveTasks.some((t) => t.id.startsWith('hold-ball-')),
+      'new hold-ball task was inserted',
+    );
+  });
+
+  test('429 after maxHoldsPerWindow (3) exhaustion — counter guard', async () => {
+    const deps = makeStubDeps();
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-429', 'hb429');
+    const { invocationId, callbackToken } = await registry.create('user-hb-429', 'codex', thread.id);
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const payload = {
+      reason: 'waiting',
+      nextStep: 'continue',
+      wakeAfterMs: 10_000,
+      waitSourceRef: VALID_WAIT_SOURCE_REF,
+    };
+
+    for (let i = 1; i <= 3; i++) {
+      const r = await app.inject({ method: 'POST', url: '/api/callbacks/hold-ball', headers, payload });
+      assert.equal(r.statusCode, 200, `hold #${i} should succeed`);
+      assert.equal(JSON.parse(r.body).holdsInWindow, i);
+    }
+
+    const r4 = await app.inject({ method: 'POST', url: '/api/callbacks/hold-ball', headers, payload });
+    assert.equal(r4.statusCode, 429);
+    const body = JSON.parse(r4.body);
+    assert.match(body.error, /maxHoldsPerWindow/);
+    // F314 Humphrey case: the cap tells the cat to keep working or hand off to a
+    // cat who can act — it no longer routes the ball to the co-creator by default.
+    assert.match(body.error, /Stop re-arming timers/);
+    assert.doesNotMatch(body.error, /co-creator|@co-creator/i);
+    assert.equal(body.maxHoldsPerWindow, 3);
+    assert.equal(body.holdsInWindow, 3);
+    assert.equal(body.windowMs, 3_600_000);
+    // retryAt boundary: must point to first admit moment (lastAt + HOLD_WINDOW_MS + 1)
+    assert.ok(body.retryAt, '429 response must include retryAt ISO timestamp');
+    assert.ok(!Number.isNaN(new Date(body.retryAt).getTime()), 'retryAt must be a valid ISO timestamp');
+    assert.equal(typeof body.retryAfterMs, 'number', 'retryAfterMs must be a number');
+    assert.ok(body.retryAfterMs > 0, 'retryAfterMs should be positive when window is active');
+    assert.ok(body.retryAfterMs <= 3_600_001, 'retryAfterMs should not exceed windowMs + 1');
+    assert.equal(deps._insertedTasks.length, 3, 'blocked hold must NOT schedule a new task');
+  });
+
+  test('retryAt boundary regression: sliding window retryAt points to oldest event + windowMs', async () => {
+    // Pre-load the store via holdQuotaStore.tryAdmit() with controlled timestamps,
+    // then hit the route. retryAt is deterministic: oldest_event.held_at + HOLD_WINDOW_MS.
+    const { HOLD_WINDOW_MS } = await import('../dist/routes/callback-hold-ball-routes.js');
+
+    const deps = makeStubDeps();
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-boundary', 'hb-boundary');
+    const { invocationId, callbackToken } = await registry.create('user-hb-boundary', 'codex', thread.id);
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    // Pre-fill 3 holds with known timestamps via the SQLite store.
+    // The route handler shares the same holdQuotaStore instance.
+    const baseTs = Date.now();
+    holdQuotaStore.tryAdmit(thread.id, 'codex', 3, HOLD_WINDOW_MS, baseTs - 2000);
+    holdQuotaStore.tryAdmit(thread.id, 'codex', 3, HOLD_WINDOW_MS, baseTs - 1000);
+    holdQuotaStore.tryAdmit(thread.id, 'codex', 3, HOLD_WINDOW_MS, baseTs);
+
+    // 4th call via route → 429. The store's tryAdmit computes
+    // retryAt = oldest_in_window.held_at + HOLD_WINDOW_MS.
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers,
+      payload: {
+        reason: 'boundary-test',
+        nextStep: 'verify',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
+    });
+
+    assert.equal(r.statusCode, 429);
+    const body = JSON.parse(r.body);
+    const retryAtMs = new Date(body.retryAt).getTime();
+    // Oldest event is at baseTs - 2000; retryAt = (baseTs - 2000) + HOLD_WINDOW_MS
+    const expectedRetryAtMs = baseTs - 2000 + HOLD_WINDOW_MS;
+
+    assert.equal(
+      retryAtMs,
+      expectedRetryAtMs,
+      `retryAt must be oldest_event + HOLD_WINDOW_MS = ${expectedRetryAtMs}; ` +
+        `got ${retryAtMs} (delta = ${retryAtMs - expectedRetryAtMs})`,
+    );
+
+    // retryAfterMs consistency: retryAt - rejectNow (both within a few ms of baseTs)
+    assert.ok(body.retryAfterMs > 0, 'retryAfterMs must be positive');
+    assert.ok(body.retryAfterMs <= HOLD_WINDOW_MS, 'retryAfterMs must not exceed HOLD_WINDOW_MS');
+
+    // Rejection must NOT advance the window (counter stays at 3, no new task)
+    assert.equal(body.holdsInWindow, 3);
+  });
+
+  test('500 when reminder template is missing', async () => {
+    const deps = makeStubDeps({
+      templateRegistry: { get: () => undefined },
+    });
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-500', 'hb500');
+    const { invocationId, callbackToken } = await registry.create('user-hb-500', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { reason: 'x', nextStep: 'y', wakeAfterMs: 10_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
+    });
+
+    assert.equal(response.statusCode, 500);
+    assert.match(JSON.parse(response.body).error, /reminder template/);
+    assert.equal(deps._insertedTasks.length, 0);
+  });
+});

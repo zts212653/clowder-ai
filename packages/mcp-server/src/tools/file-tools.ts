@@ -1,12 +1,23 @@
+import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
+
 /**
  * File Tools
  * MCP 文件操作工具
  */
 
 import * as fs from 'node:fs';
+import { homedir } from 'node:os';
 import * as path from 'node:path';
+import { createInterface } from 'node:readline';
 import { z } from 'zod';
+import { resolveAbsolutePath } from '../utils/path-utils.js';
 import { ensureDir, isPathAllowed } from '../utils/path-validator.js';
+import { authorizeInvocationTool, resolveInvocationEnv } from './invocation-auth.js';
+
+const defineTool = defineMcpCanonicalFactory('file-tools.ts', undefined, {
+  resourceFamily: 'evidence-navigation',
+  authority: 'local-runtime',
+});
 
 /**
  * MCP 工具返回结果类型
@@ -37,8 +48,16 @@ export function successResult(text: string): ToolResult {
 
 // ============ Tool Input Schemas ============
 
-export const readFileInputSchema = {
+export const readFileSliceInputSchema = {
   path: z.string().describe('The path to the file to read'),
+  startLine: z.number().int().min(1).describe('1-based first line to include'),
+  endLine: z.number().int().min(1).optional().describe('1-based final line to include; defaults to a bounded window'),
+  charOffset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Character offset within startLine, for a long-line continuation'),
 };
 
 export const writeFileInputSchema = {
@@ -53,36 +72,213 @@ export const listFilesInputSchema = {
 
 // ============ Tool Handlers ============
 
-/**
- * read_file handler
- * 读取文件内容，带路径验证
- */
-export async function handleReadFile(input: { path: string }): Promise<ToolResult> {
-  const filePath = path.resolve(input.path);
+const DEFAULT_FILE_SLICE_LINES = 120;
+const MAX_FILE_SLICE_LINES = 400;
+const FILE_SLICE_RESPONSE_MAX_CHARS = 24_000;
+const FILE_SLICE_CONTENT_MAX_CHARS = 20_000;
+const COLLECTION_URI_PREFIX = 'cat-cafe://collection/';
 
-  // 路径验证
+type CollectionManifestRef = {
+  id: string;
+  root: string;
+};
+
+function loadCollectionManifestRefs(): CollectionManifestRef[] {
+  const dataDir = resolveInvocationEnv('CAT_CAFE_DATA_DIR') ?? path.join(homedir(), '.cat-cafe');
+  const manifestPath = path.join(dataDir, 'library', 'collections.json');
+  if (!fs.existsSync(manifestPath)) return [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is CollectionManifestRef => typeof item?.id === 'string' && typeof item?.root === 'string')
+      .map((item) => ({ id: item.id, root: item.root }));
+  } catch {
+    return [];
+  }
+}
+
+function resolveFileSlicePath(inputPath: string): { filePath: string; displayPath: string } | { error: string } {
+  if (!inputPath.startsWith(COLLECTION_URI_PREFIX)) {
+    if (path.isAbsolute(inputPath)) {
+      const filePath = path.resolve(inputPath);
+      return { filePath, displayPath: filePath };
+    }
+    const allowedDirs = (resolveInvocationEnv('ALLOWED_WORKSPACE_DIRS') ?? '')
+      .split(/[:,]/)
+      .map((dir) => dir.trim())
+      .filter(Boolean)
+      .map((dir) => path.resolve(dir));
+    if (allowedDirs.length > 0) {
+      const hits: string[] = [];
+      for (const dir of allowedDirs) {
+        const candidate = path.resolve(dir, inputPath);
+        if (fs.existsSync(candidate)) {
+          hits.push(candidate);
+        }
+      }
+      if (hits.length === 1) {
+        return { filePath: hits[0], displayPath: hits[0] };
+      }
+      if (hits.length > 1) {
+        return {
+          error: `Ambiguous relative path "${inputPath}" matched multiple workspace roots: ${hits.join(', ')}. Use an absolute path.`,
+        };
+      }
+    }
+    const filePath = resolveAbsolutePath(inputPath);
+    return { filePath, displayPath: filePath };
+  }
+
+  const rest = inputPath.slice(COLLECTION_URI_PREFIX.length);
+  const firstSlash = rest.indexOf('/');
+  if (firstSlash <= 0 || firstSlash === rest.length - 1) {
+    return { error: `Invalid collection file path: ${inputPath}` };
+  }
+
+  let collectionId: string;
+  let relativeParts: string[];
+  try {
+    collectionId = decodeURIComponent(rest.slice(0, firstSlash));
+    relativeParts = rest
+      .slice(firstSlash + 1)
+      .split('/')
+      .filter(Boolean)
+      .map((part) => decodeURIComponent(part));
+  } catch {
+    return { error: `Invalid collection file path encoding: ${inputPath}` };
+  }
+
+  const manifest = loadCollectionManifestRefs().find((candidate) => candidate.id === collectionId);
+  if (!manifest) {
+    return { error: `Collection not found for file path: ${collectionId}` };
+  }
+
+  const root = path.resolve(manifest.root);
+  const filePath = path.resolve(root, ...relativeParts);
+  const rel = path.relative(root, filePath);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+    return { error: `Collection file path escapes collection root: ${inputPath}` };
+  }
+
+  return { filePath, displayPath: inputPath };
+}
+
+/**
+ * cat_cafe_read_file_slice handler
+ * Read a bounded, line-numbered file range for evidence drill-down.
+ */
+export async function handleReadFileSlice(input: {
+  path: string;
+  startLine: number;
+  endLine?: number;
+  charOffset?: number;
+}): Promise<ToolResult> {
+  const resolvedPath = resolveFileSlicePath(input.path);
+  if ('error' in resolvedPath) {
+    return errorResult(resolvedPath.error);
+  }
+  const { filePath, displayPath } = resolvedPath;
+  const endLine = input.endLine ?? input.startLine + DEFAULT_FILE_SLICE_LINES - 1;
+
+  if (endLine < input.startLine) {
+    return errorResult('Invalid line range: endLine must be greater than or equal to startLine');
+  }
+  const requestedLines = endLine - input.startLine + 1;
+  if (requestedLines > MAX_FILE_SLICE_LINES) {
+    return errorResult(`Invalid line range: requested ${requestedLines} lines, max is ${MAX_FILE_SLICE_LINES}`);
+  }
+
   if (!isPathAllowed(filePath)) {
     return errorResult(`Access denied: ${filePath} is not within allowed directories`);
   }
-
-  // 检查文件是否存在
+  await authorizeInvocationTool('cat_cafe_read_file_slice');
   if (!fs.existsSync(filePath)) {
     return errorResult(`File not found: ${filePath}`);
   }
 
-  // 检查是否为文件
   const stat = fs.statSync(filePath);
   if (!stat.isFile()) {
     return errorResult(`Not a file: ${filePath}`);
   }
 
+  const lines: string[] = [];
+  let currentLine = 0;
+  let usedContentChars = 0;
+  let nextSlice: { startLine: number; charOffset: number } | undefined;
+  let invalidOffset = false;
+  let inFrontmatter = false;
+  let documentBodyLine: number | undefined;
+  const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+  const reader = createInterface({ input: stream, crlfDelay: Infinity });
+
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    return successResult(content);
+    for await (const line of reader) {
+      currentLine++;
+      if (currentLine > endLine) {
+        nextSlice ??= { startLine: currentLine, charOffset: 0 };
+        // Locate the body without returning unrequested content or scanning an unbounded prelude.
+        if (inFrontmatter && currentLine <= endLine + MAX_FILE_SLICE_LINES) {
+          if (/^(---|\.\.\.)\s*$/.test(line)) documentBodyLine = currentLine + 1;
+          else continue;
+        }
+        reader.close();
+        stream.destroy();
+        break;
+      }
+      if (currentLine === 1) inFrontmatter = /\.md$/i.test(filePath) && line.replace(/^\uFEFF/, '').trim() === '---';
+      else if (inFrontmatter && /^(---|\.\.\.)\s*$/.test(line)) inFrontmatter = false;
+      if (currentLine < input.startLine) continue;
+      const offset = currentLine === input.startLine ? (input.charOffset ?? 0) : 0;
+      if (offset > line.length) {
+        invalidOffset = true;
+        reader.close();
+        stream.destroy();
+        break;
+      }
+      const prefix = `${currentLine}: `;
+      const available = FILE_SLICE_CONTENT_MAX_CHARS - usedContentChars - prefix.length;
+      if (available <= 0) {
+        nextSlice = { startLine: currentLine, charOffset: offset };
+        reader.close();
+        stream.destroy();
+        break;
+      }
+      const content = line.slice(offset, offset + available);
+      lines.push(`${prefix}${content}`);
+      usedContentChars += prefix.length + content.length;
+      if (offset + content.length < line.length) {
+        nextSlice = { startLine: currentLine, charOffset: offset + content.length };
+        reader.close();
+        stream.destroy();
+        break;
+      }
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return errorResult(`Failed to read file: ${message}`);
+    return errorResult(`Failed to read file slice: ${message}`);
   }
+
+  if (invalidOffset) return errorResult(`Invalid charOffset for line ${input.startLine}`);
+
+  if (lines.length === 0) {
+    return errorResult(`Line range starts beyond EOF: ${filePath} has ${currentLine} line(s)`);
+  }
+
+  const actualEndLine = input.startLine + lines.length - 1;
+  const nextEndLine = nextSlice && nextSlice.startLine > endLine ? nextSlice.startLine + requestedLines - 1 : endLine;
+  const bodyNavigation = documentBodyLine
+    ? `\nDocument body: cat_cafe_read_file_slice(path=${JSON.stringify(input.path)}, startLine=${documentBodyLine}, endLine=${documentBodyLine + DEFAULT_FILE_SLICE_LINES - 1})`
+    : '';
+  const continuation = nextSlice
+    ? `\nSource continues beyond this slice; read applicable remaining sections before concluding its current rules.${inFrontmatter ? ' This slice ends inside YAML frontmatter; the document body has not been read.' : ''}\nNext slice: cat_cafe_read_file_slice(path=${JSON.stringify(input.path)}, startLine=${nextSlice.startLine}, endLine=${nextEndLine}, charOffset=${nextSlice.charOffset})`
+    : '';
+  const text = `File slice: ${displayPath}:${input.startLine}-${actualEndLine}${bodyNavigation}\n${lines.join('\n')}${continuation}`;
+  if (text.length > FILE_SLICE_RESPONSE_MAX_CHARS) {
+    return errorResult('File slice source path exceeds the bounded response budget; use a shorter permitted path');
+  }
+  await authorizeInvocationTool('cat_cafe_read_file_slice');
+  return successResult(text);
 }
 
 /**
@@ -90,7 +286,7 @@ export async function handleReadFile(input: { path: string }): Promise<ToolResul
  * 写入文件内容，带路径验证和自动创建父目录
  */
 export async function handleWriteFile(input: { path: string; content: string }): Promise<ToolResult> {
-  const filePath = path.resolve(input.path);
+  const filePath = resolveAbsolutePath(input.path);
 
   // 路径验证
   if (!isPathAllowed(filePath)) {
@@ -138,7 +334,7 @@ function listFilesRecursive(dirPath: string, basePath: string): string[] {
  * 列出目录中的文件，支持递归选项
  */
 export async function handleListFiles(input: { path: string; recursive?: boolean }): Promise<ToolResult> {
-  const dirPath = path.resolve(input.path);
+  const dirPath = resolveAbsolutePath(input.path);
   const recursive = input.recursive ?? false;
 
   // 路径验证
@@ -182,22 +378,37 @@ export async function handleListFiles(input: { path: string; recursive?: boolean
 
 export const fileTools = [
   {
-    name: 'read_file',
-    description: 'Read the contents of a file. Only files within allowed directories can be read.',
-    inputSchema: readFileInputSchema,
-    handler: handleReadFile,
-  },
-  {
     name: 'write_file',
     description:
-      'Write content to a file. Creates parent directories if needed. Only files within allowed directories can be written.',
+      'Write content to a file within allowed directories. Creates parent directories if needed. ' +
+      'GOTCHA: This overwrites the entire file — not a patch/append operation. ' +
+      'Rejects paths outside allowed directories.',
     inputSchema: writeFileInputSchema,
     handler: handleWriteFile,
   },
   {
     name: 'list_files',
-    description: 'List files in a directory. Only directories within allowed paths can be listed.',
+    description:
+      'List files in a directory within allowed paths. Set recursive=true to include all subdirectories. ' +
+      'Directories are suffixed with "/" in the output to distinguish them from files.',
     inputSchema: listFilesInputSchema,
     handler: handleListFiles,
   },
+] as const;
+
+export const fileSliceTools = [
+  defineTool({
+    name: 'cat_cafe_read_file_slice',
+    description:
+      'Read a bounded line range from a file within allowed directories. ' +
+      'Use after search_evidence returns a sourcePath. Returns numbered text within a 24k character budget; follow the returned startLine/charOffset for a long-line continuation. Read-only; rejects paths outside allowed directories.',
+    inputSchema: readFileSliceInputSchema,
+    handler: handleReadFileSlice,
+    governance: {
+      implementationExport: 'handleReadFileSlice',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly', 'desktop:live-companion'],
+    },
+  }),
 ] as const;

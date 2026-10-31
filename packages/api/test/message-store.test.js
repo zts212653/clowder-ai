@@ -5,19 +5,66 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('MessageStore', () => {
+  test('a staged plugin send appends exactly at its reserved id', async () => {
+    const { MessageStore, generateSortableId } = await import(
+      '../dist/domains/cats/services/stores/ports/MessageStore.js'
+    );
+    const store = new MessageStore();
+    const id = generateSortableId(Date.now());
+    const extra = {
+      pluginMessage: {
+        instanceId: 'installed-fixture',
+        revision: 1,
+        provenance: { origin: { kind: 'plugin', instanceId: 'installed-fixture' }, epistemicStatus: 'observation' },
+        elements: [{ elementId: 'body', kind: 'text', payload: { text: 'final' } }],
+        appendOps: [],
+      },
+    };
+    const message = store.append({
+      userId: 'u',
+      from: { kind: 'plugin', instanceId: 'installed-fixture' },
+      extra,
+      threadId: 't',
+      content: 'final',
+      mentions: [],
+      timestamp: Date.now(),
+      reservedId: id,
+    });
+    assert.equal(message.id, id);
+    assert.equal(store.getById(id)?.content, 'final');
+    assert.equal(store.size, 1);
+    assert.equal('reservedId' in message, false);
+    assert.throws(
+      () =>
+        store.append({
+          userId: 'u',
+          from: { kind: 'plugin', instanceId: 'installed-fixture' },
+          extra,
+          threadId: 't',
+          content: 'collision',
+          mentions: [],
+          timestamp: Date.now(),
+          reservedId: id,
+        }),
+      /collision/,
+    );
+  });
   test('append() stores message and returns with id', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     const store = new MessageStore();
-    const result = store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'Hello',
-      mentions: [],
-      timestamp: Date.now(),
-    });
+    const result = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'Hello',
+        mentions: [],
+        timestamp: Date.now(),
+      }),
+    );
 
     assert.ok(typeof result.id === 'string');
     assert.ok(result.id.length > 0);
@@ -26,19 +73,365 @@ describe('MessageStore', () => {
     assert.equal(store.size, 1);
   });
 
+  test('listOwnerMessagesInWindow returns the exact delivered owner timeline with inclusive boundaries', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const append = (overrides) =>
+      store.append(
+        canonicalTestMessageInput({
+          userId: 'owner-1',
+          catId: null,
+          content: 'candidate',
+          mentions: [],
+          threadId: 'thread-a',
+          ...overrides,
+        }),
+      );
+
+    append({ content: 'before', timestamp: 99 });
+    const lower = append({ content: 'lower', timestamp: 100 });
+    append({ content: 'other owner', timestamp: 105, userId: 'owner-2' });
+    append({ content: 'queued', timestamp: 110, deliveryStatus: 'queued' });
+    const delivered = append({ content: 'delivered later', timestamp: 95, deliveryStatus: 'queued' });
+    store.markDelivered(delivered.id, 115);
+    const canceled = append({ content: 'canceled', timestamp: 120, deliveryStatus: 'queued' });
+    store.markCanceled(canceled.id);
+    const restored = append({ content: 'restored', timestamp: 125 });
+    store.softDelete(restored.id, 'owner-1');
+    const upper = append({ content: 'upper', timestamp: 130 });
+    append({ content: 'after', timestamp: 131 });
+
+    assert.deepEqual(
+      store.listOwnerMessagesInWindow('owner-1', 100, 130).map((message) => message.id),
+      [lower.id, delivered.id, upper.id],
+    );
+
+    store.restore(restored.id);
+    assert.deepEqual(
+      store.listOwnerMessagesInWindow('owner-1', 100, 130).map((message) => message.id),
+      [lower.id, delivered.id, restored.id, upper.id],
+    );
+  });
+
+  test('listOwnerMessagesInWindow has no implicit page limit', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+
+    for (let timestamp = 1; timestamp <= 75; timestamp += 1) {
+      store.append(
+        canonicalTestMessageInput({
+          userId: 'owner-1',
+          catId: null,
+          content: `message ${timestamp}`,
+          mentions: [],
+          timestamp,
+        }),
+      );
+    }
+
+    assert.equal(store.listOwnerMessagesInWindow('owner-1', 1, 75).length, 75);
+  });
+
+  test('all append entrypoints reject unsafe timestamps and transition-owned metadata before side effects', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const invalidTimestamps = [
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      8_640_000_000_000_001,
+      -8_640_000_000_000_001,
+    ];
+    const appenders = [
+      ['append', (store, message) => store.append(message)],
+      ['appendAndObservePriorFrontier', (store, message) => store.appendAndObservePriorFrontier(message)],
+    ];
+
+    for (const [name, append] of appenders) {
+      for (const timestamp of invalidTimestamps) {
+        let listenerCalls = 0;
+        const store = new MessageStore({ onAppend: () => listenerCalls++ });
+        assert.throws(
+          () =>
+            append(store, {
+              userId: 'user-1',
+              catId: null,
+              content: `${name} invalid timestamp`,
+              mentions: [],
+              timestamp,
+              threadId: `thread-${name}`,
+              idempotencyKey: `${name}-invalid`,
+            }),
+          { name: 'RangeError', message: /non-negative integer ECMAScript Date/ },
+        );
+        assert.equal(store.size, 0, `${name}: ${String(timestamp)} must not append`);
+        assert.equal(listenerCalls, 0, `${name}: ${String(timestamp)} must not notify`);
+      }
+
+      for (const metadata of [
+        { deliveredAt: undefined },
+        { timelineOrderAt: undefined },
+        { timelinePublishedAtAppend: true },
+        { deliveredAt: 101, deliveryStatus: 'delivered' },
+        { deliveryStatus: 'delivered' },
+        { deliveryStatus: 'canceled' },
+      ]) {
+        let listenerCalls = 0;
+        const store = new MessageStore({ onAppend: () => listenerCalls++ });
+        assert.throws(
+          () =>
+            append(store, {
+              userId: 'user-1',
+              catId: null,
+              content: `${name} forged terminal state`,
+              mentions: [],
+              timestamp: 100,
+              threadId: `thread-${name}`,
+              idempotencyKey: `${name}-terminal`,
+              ...metadata,
+            }),
+          { name: 'TypeError', message: /append.*delivery metadata|transition owner/i },
+        );
+        assert.equal(store.size, 0, `${name}: ownership rejection must not append`);
+        assert.equal(listenerCalls, 0, `${name}: ownership rejection must not notify`);
+      }
+    }
+  });
+
+  test('append admits the sortable-ID-safe Date boundaries and queued-only lifecycle initialization', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+
+    for (const timestamp of [0, 1, 8_640_000_000_000_000]) {
+      const stored = store.append(
+        canonicalTestMessageInput({
+          userId: 'user-1',
+          catId: null,
+          content: 'valid Date input',
+          mentions: [],
+          timestamp,
+          deliveryStatus: 'queued',
+        }),
+      );
+      assert.equal(stored.timestamp, timestamp);
+      assert.equal(stored.deliveryStatus, 'queued');
+      assert.equal(stored.deliveredAt, undefined);
+      assert.equal(stored.timelineOrderAt, undefined);
+    }
+    assert.equal(store.size, 3);
+  });
+
+  test('prepareQueueAdmission adopts only a legacy-visible source and is idempotent', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const legacy = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex-sol',
+        content: 'approved carrier persisted before Queue admission',
+        mentions: ['codex-terra'],
+        timestamp: 100,
+        threadId: 'thread-target',
+      }),
+    );
+
+    const prepared = store.prepareQueueAdmission(legacy.id);
+    assert.equal(prepared.kind, 'prepared');
+    assert.equal(prepared.message.deliveryStatus, 'queued');
+    assert.equal(store.prepareQueueAdmission(legacy.id).kind, 'existing');
+    assert.deepEqual(store.prepareQueueAdmission('missing-message'), { kind: 'not_found' });
+
+    const delivered = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex-sol',
+        content: 'already terminal',
+        mentions: ['codex-terra'],
+        timestamp: 101,
+        threadId: 'thread-target',
+        deliveryStatus: 'queued',
+      }),
+    );
+    store.markDelivered(delivered.id, 102);
+    assert.deepEqual(store.prepareQueueAdmission(delivered.id), { kind: 'conflict' });
+
+    const canceled = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex-sol',
+        content: 'canceled source',
+        mentions: ['codex-terra'],
+        timestamp: 103,
+        threadId: 'thread-target',
+        deliveryStatus: 'queued',
+      }),
+    );
+    store.markCanceled(canceled.id);
+    assert.deepEqual(store.prepareQueueAdmission(canceled.id), { kind: 'conflict' });
+  });
+
+  test('fan-out admission is idempotent and publishes owner work only at first delivery', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const store = new MessageStore();
+    const queue = new InvocationQueue();
+    const message = canonicalTestMessageInput({
+      userId: 'user-1',
+      from: { kind: 'user', userId: 'user-1' },
+      content: 'durable fan-out',
+      mentions: ['codex', 'codex-terra'],
+      timestamp: 200,
+      threadId: 'thread-admission',
+      deliveryStatus: 'queued',
+      idempotencyKey: 'fanout-admission-1',
+    });
+    const admission = {
+      userId: 'user-1',
+      threadId: 'thread-admission',
+      kind: 'conversation_input',
+      from: { kind: 'user', userId: 'user-1' },
+      ownerAuthProvenance: 'unknown',
+      content: 'durable fan-out',
+      intent: 'execute',
+      targetCats: ['codex'],
+      a2aParentInvocationId: 'parent-1',
+      priority: 'normal',
+      autoExecute: true,
+    };
+
+    const first = await queue.send(store, message, admission);
+    const replay = await queue.send(store, message, admission);
+    assert.equal(first.outcome, 'enqueued');
+    assert.equal(replay.outcome, 'enqueued');
+    assert.equal(replay.deduped, true);
+    assert.equal(replay.message.id, first.message.id);
+    assert.equal(first.message.timelinePublishedAtAppend, undefined);
+    assert.equal(store.getById(first.message.id).deliveryStatus, 'queued');
+    assert.deepEqual(store.getByThread('thread-admission', 20, 'user-1'), []);
+    assert.equal(queue.list('thread-admission', 'user-1').length, 1);
+    const delivered = store.markDelivered(first.message.id, 201);
+    assert.equal(delivered.deliveryTransitioned, true);
+    assert.equal(delivered.timelineOrderAt, 201);
+    assert.equal(store.getById(first.message.id).deliveryStatus, 'delivered');
+  });
+
+  test('markDelivered rejects unsafe effective-order timestamps before state mutation and permits a valid retry', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const invalidTimestamps = [
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      8_640_000_000_000_001,
+      -8_640_000_000_000_001,
+    ];
+
+    for (const [index, deliveredAt] of invalidTimestamps.entries()) {
+      const store = new MessageStore();
+      const queued = store.append(
+        canonicalTestMessageInput({
+          userId: 'user-1',
+          catId: null,
+          content: `queued ${index}`,
+          mentions: [],
+          timestamp: 100 + index,
+          deliveryStatus: 'queued',
+        }),
+      );
+      const before = structuredClone(queued);
+
+      assert.throws(() => store.markDelivered(queued.id, deliveredAt), {
+        name: 'RangeError',
+        message: /non-negative integer ECMAScript Date/,
+      });
+      assert.deepEqual(store.getById(queued.id), before);
+
+      const validDeliveredAt = index === 0 ? 0 : index === 1 ? 8_640_000_000_000_000 : 1_000 + index;
+      const delivered = store.markDelivered(queued.id, validDeliveredAt);
+      assert.equal(delivered.deliveryTransitioned, true);
+      assert.equal(delivered.deliveredAt, validDeliveredAt);
+      assert.equal(delivered.timelineOrderAt, validDeliveredAt);
+
+      const afterDelivery = structuredClone(store.getById(queued.id));
+      assert.throws(() => store.markDelivered(queued.id, deliveredAt), RangeError);
+      assert.deepEqual(store.getById(queued.id), afterDelivery, 'validation must not depend on current state');
+    }
+  });
+
+  test('admitted timestamp classes preserve sortable-ID and delivery-cursor monotonicity', async () => {
+    const { generateSortableId } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+    const timestamps = [0, 1, 8_640_000_000_000_000];
+    const ids = timestamps.map((timestamp) => generateSortableId(timestamp));
+
+    assert.deepEqual([...ids].sort(), ids);
+    const cursorStore = new DeliveryCursorStore();
+    for (const id of ids) {
+      await cursorStore.ackCursor('user-1', 'opus', 'thread-sortable-domain', id);
+      assert.equal(await cursorStore.getCursor('user-1', 'opus', 'thread-sortable-domain'), id);
+    }
+  });
+
+  test('augmentStreamMetadata() enriches callback messages without replacing canonical content', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    const callbackMsg = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'Callback content remains canonical',
+        mentions: [],
+        timestamp: 1,
+        origin: 'callback',
+        extra: { rich: { v: 1, blocks: [{ id: 'callback-card', kind: 'card', v: 1, title: 'Callback' }] } },
+      }),
+    );
+
+    const updated = store.augmentStreamMetadata(callbackMsg.id, {
+      thinking: 'stream thinking',
+      metadata: { provider: 'mock', model: 'test' },
+      toolEvents: [{ id: 'tool-1', type: 'tool_use', label: 'post_message', timestamp: 2 }],
+      mentionsUser: true,
+      extra: {
+        stream: { invocationId: 'parent-inv' },
+        tracing: { traceId: 'trace-1', spanId: 'span-1' },
+        rich: { v: 1, blocks: [{ id: 'stream-card', kind: 'card', v: 1, title: 'Stream' }] },
+      },
+    });
+
+    assert.ok(updated);
+    assert.equal(updated.content, 'Callback content remains canonical');
+    assert.equal(updated.origin, 'callback');
+    assert.equal(updated.thinking, 'stream thinking');
+    assert.deepEqual(updated.metadata, { provider: 'mock', model: 'test' });
+    assert.equal(updated.toolEvents.length, 1);
+    assert.equal(updated.mentionsUser, true);
+    assert.deepEqual(updated.extra.stream, { invocationId: 'parent-inv' });
+    assert.deepEqual(updated.extra.tracing, { traceId: 'trace-1', spanId: 'span-1' });
+    assert.deepEqual(
+      updated.extra.rich.blocks.map((block) => block.id),
+      ['callback-card', 'stream-card'],
+    );
+  });
+
   test('getRecent() returns last N messages', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     const store = new MessageStore();
 
     for (let i = 0; i < 5; i++) {
-      store.append({
-        userId: 'user-1',
-        catId: null,
-        content: `Message ${i}`,
-        mentions: [],
-        timestamp: i,
-      });
+      store.append(
+        canonicalTestMessageInput({
+          userId: 'user-1',
+          catId: null,
+          content: `Message ${i}`,
+          mentions: [],
+          timestamp: i,
+        }),
+      );
     }
 
     const recent = store.getRecent(3);
@@ -53,27 +446,33 @@ describe('MessageStore', () => {
 
     const store = new MessageStore();
 
-    store.append({
-      userId: 'user-1',
-      catId: null,
-      content: '@opus help',
-      mentions: ['opus'],
-      timestamp: 1,
-    });
-    store.append({
-      userId: 'user-1',
-      catId: null,
-      content: '@codex review',
-      mentions: ['codex'],
-      timestamp: 2,
-    });
-    store.append({
-      userId: 'user-1',
-      catId: null,
-      content: '@opus and @codex',
-      mentions: ['opus', 'codex'],
-      timestamp: 3,
-    });
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: '@opus help',
+        mentions: ['opus'],
+        timestamp: 1,
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: '@codex review',
+        mentions: ['codex'],
+        timestamp: 2,
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: '@opus and @codex',
+        mentions: ['opus', 'codex'],
+        timestamp: 3,
+      }),
+    );
 
     const opusMentions = store.getMentionsFor('opus', 10);
     assert.equal(opusMentions.length, 2);
@@ -90,13 +489,15 @@ describe('MessageStore', () => {
     const store = new MessageStore({ maxMessages: 5 });
 
     for (let i = 0; i < 8; i++) {
-      store.append({
-        userId: 'user-1',
-        catId: null,
-        content: `Message ${i}`,
-        mentions: [],
-        timestamp: i,
-      });
+      store.append(
+        canonicalTestMessageInput({
+          userId: 'user-1',
+          catId: null,
+          content: `Message ${i}`,
+          mentions: [],
+          timestamp: i,
+        }),
+      );
     }
 
     assert.equal(store.size, 5);
@@ -109,9 +510,33 @@ describe('MessageStore', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     const store = new MessageStore();
-    store.append({ userId: 'user-1', catId: null, content: 'A from user-1', mentions: [], timestamp: 1 });
-    store.append({ userId: 'user-2', catId: null, content: 'B from user-2', mentions: [], timestamp: 2 });
-    store.append({ userId: 'user-1', catId: 'opus', content: 'C from user-1 opus', mentions: [], timestamp: 3 });
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'A from user-1',
+        mentions: [],
+        timestamp: 1,
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-2',
+        catId: null,
+        content: 'B from user-2',
+        mentions: [],
+        timestamp: 2,
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'C from user-1 opus',
+        mentions: [],
+        timestamp: 3,
+      }),
+    );
 
     const user1 = store.getRecent(10, 'user-1');
     assert.equal(user1.length, 2);
@@ -131,8 +556,24 @@ describe('MessageStore', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     const store = new MessageStore();
-    store.append({ userId: 'user-1', catId: null, content: '@opus from user-1', mentions: ['opus'], timestamp: 1 });
-    store.append({ userId: 'user-2', catId: null, content: '@opus from user-2', mentions: ['opus'], timestamp: 2 });
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: '@opus from user-1',
+        mentions: ['opus'],
+        timestamp: 1,
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-2',
+        catId: null,
+        content: '@opus from user-2',
+        mentions: ['opus'],
+        timestamp: 2,
+      }),
+    );
 
     const user1Mentions = store.getMentionsFor('opus', 10, 'user-1');
     assert.equal(user1Mentions.length, 1);
@@ -147,30 +588,36 @@ describe('MessageStore', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     const store = new MessageStore();
-    store.append({
-      userId: 'user-1',
-      catId: null,
-      content: '@opus in thread-A',
-      mentions: ['opus'],
-      timestamp: 1,
-      threadId: 'thread-A',
-    });
-    store.append({
-      userId: 'user-1',
-      catId: null,
-      content: '@opus in thread-B',
-      mentions: ['opus'],
-      timestamp: 2,
-      threadId: 'thread-B',
-    });
-    store.append({
-      userId: 'user-1',
-      catId: null,
-      content: '@opus in thread-A again',
-      mentions: ['opus'],
-      timestamp: 3,
-      threadId: 'thread-A',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: '@opus in thread-A',
+        mentions: ['opus'],
+        timestamp: 1,
+        threadId: 'thread-A',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: '@opus in thread-B',
+        mentions: ['opus'],
+        timestamp: 2,
+        threadId: 'thread-B',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: '@opus in thread-A again',
+        mentions: ['opus'],
+        timestamp: 3,
+        threadId: 'thread-A',
+      }),
+    );
 
     // With threadId: only thread-A mentions
     const threadA = store.getMentionsFor('opus', 10, undefined, 'thread-A');
@@ -192,30 +639,36 @@ describe('MessageStore', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     const store = new MessageStore();
-    store.append({
-      userId: 'user-1',
-      catId: null,
-      content: '@opus u1-tA',
-      mentions: ['opus'],
-      timestamp: 1,
-      threadId: 'thread-A',
-    });
-    store.append({
-      userId: 'user-2',
-      catId: null,
-      content: '@opus u2-tA',
-      mentions: ['opus'],
-      timestamp: 2,
-      threadId: 'thread-A',
-    });
-    store.append({
-      userId: 'user-1',
-      catId: null,
-      content: '@opus u1-tB',
-      mentions: ['opus'],
-      timestamp: 3,
-      threadId: 'thread-B',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: '@opus u1-tA',
+        mentions: ['opus'],
+        timestamp: 1,
+        threadId: 'thread-A',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-2',
+        catId: null,
+        content: '@opus u2-tA',
+        mentions: ['opus'],
+        timestamp: 2,
+        threadId: 'thread-A',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: '@opus u1-tB',
+        mentions: ['opus'],
+        timestamp: 3,
+        threadId: 'thread-B',
+      }),
+    );
 
     // userId + threadId: only user-1 in thread-A
     const filtered = store.getMentionsFor('opus', 10, 'user-1', 'thread-A');
@@ -227,9 +680,9 @@ describe('MessageStore', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     const store = new MessageStore();
-    store.append({ userId: 'u', catId: null, content: 'old', mentions: [], timestamp: 100 });
-    store.append({ userId: 'u', catId: null, content: 'mid', mentions: [], timestamp: 200 });
-    store.append({ userId: 'u', catId: null, content: 'new', mentions: [], timestamp: 300 });
+    store.append(canonicalTestMessageInput({ userId: 'u', catId: null, content: 'old', mentions: [], timestamp: 100 }));
+    store.append(canonicalTestMessageInput({ userId: 'u', catId: null, content: 'mid', mentions: [], timestamp: 200 }));
+    store.append(canonicalTestMessageInput({ userId: 'u', catId: null, content: 'new', mentions: [], timestamp: 300 }));
 
     const before = store.getBefore(300, 10);
     assert.equal(before.length, 2);
@@ -241,9 +694,15 @@ describe('MessageStore', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     const store = new MessageStore();
-    store.append({ userId: 'alice', catId: null, content: 'alice old', mentions: [], timestamp: 100 });
-    store.append({ userId: 'bob', catId: null, content: 'bob old', mentions: [], timestamp: 150 });
-    store.append({ userId: 'alice', catId: null, content: 'alice new', mentions: [], timestamp: 200 });
+    store.append(
+      canonicalTestMessageInput({ userId: 'alice', catId: null, content: 'alice old', mentions: [], timestamp: 100 }),
+    );
+    store.append(
+      canonicalTestMessageInput({ userId: 'bob', catId: null, content: 'bob old', mentions: [], timestamp: 150 }),
+    );
+    store.append(
+      canonicalTestMessageInput({ userId: 'alice', catId: null, content: 'alice new', mentions: [], timestamp: 200 }),
+    );
 
     const before = store.getBefore(200, 10, 'alice');
     assert.equal(before.length, 1);
@@ -265,13 +724,15 @@ describe('MessageStore', () => {
     );
 
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'hi',
-      mentions: [],
-      timestamp: 1,
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        userId: 'u1',
+        catId: null,
+        content: 'hi',
+        mentions: [],
+        timestamp: 1,
+      }),
+    );
     assert.equal(msg.threadId, DEFAULT_THREAD_ID);
   });
 
@@ -279,14 +740,16 @@ describe('MessageStore', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'hi',
-      mentions: [],
-      timestamp: 1,
-      threadId: 'thread-abc',
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        userId: 'u1',
+        catId: null,
+        content: 'hi',
+        mentions: [],
+        timestamp: 1,
+        threadId: 'thread-abc',
+      }),
+    );
     assert.equal(msg.threadId, 'thread-abc');
   });
 
@@ -294,25 +757,29 @@ describe('MessageStore', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     const store = new MessageStore();
-    const first = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'kickoff',
-      mentions: [],
-      timestamp: 10,
-      threadId: 'thread-abc',
-      idempotencyKey: 'backlog:b1:attempt:a1',
-    });
+    const first = store.append(
+      canonicalTestMessageInput({
+        userId: 'u1',
+        catId: null,
+        content: 'kickoff',
+        mentions: [],
+        timestamp: 10,
+        threadId: 'thread-abc',
+        idempotencyKey: 'backlog:b1:attempt:a1',
+      }),
+    );
 
-    const second = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'kickoff retried',
-      mentions: [],
-      timestamp: 20,
-      threadId: 'thread-abc',
-      idempotencyKey: 'backlog:b1:attempt:a1',
-    });
+    const second = store.append(
+      canonicalTestMessageInput({
+        userId: 'u1',
+        catId: null,
+        content: 'kickoff retried',
+        mentions: [],
+        timestamp: 20,
+        threadId: 'thread-abc',
+        idempotencyKey: 'backlog:b1:attempt:a1',
+      }),
+    );
 
     assert.equal(first.id, second.id);
     assert.equal(store.size, 1);
@@ -323,10 +790,37 @@ describe('MessageStore', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     const store = new MessageStore();
-    store.append({ userId: 'u', catId: null, content: 'A', mentions: [], timestamp: 1, threadId: 'th-1' });
-    store.append({ userId: 'u', catId: null, content: 'B', mentions: [], timestamp: 2, threadId: 'th-2' });
-    store.append({ userId: 'u', catId: null, content: 'C', mentions: [], timestamp: 3, threadId: 'th-1' });
-    store.append({ userId: 'u', catId: null, content: 'D', mentions: [], timestamp: 4 }); // default thread
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'u',
+        catId: null,
+        content: 'A',
+        mentions: [],
+        timestamp: 1,
+        threadId: 'th-1',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'u',
+        catId: null,
+        content: 'B',
+        mentions: [],
+        timestamp: 2,
+        threadId: 'th-2',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'u',
+        catId: null,
+        content: 'C',
+        mentions: [],
+        timestamp: 3,
+        threadId: 'th-1',
+      }),
+    );
+    store.append(canonicalTestMessageInput({ userId: 'u', catId: null, content: 'D', mentions: [], timestamp: 4 })); // default thread
 
     const th1 = store.getByThread('th-1');
     assert.equal(th1.length, 2);
@@ -346,15 +840,86 @@ describe('MessageStore', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     const store = new MessageStore();
-    store.append({ userId: 'u', catId: null, content: 'A', mentions: [], timestamp: 100, threadId: 'th-1' });
-    store.append({ userId: 'u', catId: null, content: 'B', mentions: [], timestamp: 200, threadId: 'th-1' });
-    store.append({ userId: 'u', catId: null, content: 'C', mentions: [], timestamp: 300, threadId: 'th-1' });
-    store.append({ userId: 'u', catId: null, content: 'X', mentions: [], timestamp: 250, threadId: 'th-2' }); // different thread
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'u',
+        catId: null,
+        content: 'A',
+        mentions: [],
+        timestamp: 100,
+        threadId: 'th-1',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'u',
+        catId: null,
+        content: 'B',
+        mentions: [],
+        timestamp: 200,
+        threadId: 'th-1',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'u',
+        catId: null,
+        content: 'C',
+        mentions: [],
+        timestamp: 300,
+        threadId: 'th-1',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'u',
+        catId: null,
+        content: 'X',
+        mentions: [],
+        timestamp: 250,
+        threadId: 'th-2',
+      }),
+    ); // different thread
 
     const before300 = store.getByThreadBefore('th-1', 300, 10);
     assert.equal(before300.length, 2);
     assert.equal(before300[0].content, 'A');
     assert.equal(before300[1].content, 'B');
+  });
+
+  test('getByThreadBeforeBounded() accounts for the full in-memory buffer in one pass', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    for (let index = 0; index < 100; index += 1) {
+      store.append(
+        canonicalTestMessageInput({
+          userId: 'u',
+          catId: null,
+          content: `other ${index}`,
+          mentions: [],
+          timestamp: index,
+          threadId: 'other-thread',
+        }),
+      );
+    }
+    for (let index = 0; index < 600; index += 1) {
+      store.append(
+        canonicalTestMessageInput({
+          userId: 'u',
+          catId: null,
+          content: `target ${index}`,
+          mentions: [],
+          timestamp: index + 100,
+          threadId: 'target-thread',
+        }),
+      );
+    }
+
+    const page = store.getByThreadBeforeBounded('target-thread', Number.MAX_SAFE_INTEGER, 500, undefined, 'u', 2_000);
+
+    assert.equal(page.scannedCount, 700, 'raw work includes unrelated rows in the global memory buffer');
+    assert.equal(page.messages.length, 600, 'one pass returns every eligible row for route-level ranking');
+    assert.equal(page.exhausted, true);
   });
 
   test('append() preserves contentBlocks', async () => {
@@ -365,14 +930,16 @@ describe('MessageStore', () => {
       { type: 'text', text: 'hello' },
       { type: 'image', url: '/uploads/test.png' },
     ];
-    const msg = store.append({
-      userId: 'u',
-      catId: null,
-      content: 'hello',
-      mentions: [],
-      timestamp: 1,
-      contentBlocks: blocks,
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        userId: 'u',
+        catId: null,
+        content: 'hello',
+        mentions: [],
+        timestamp: 1,
+        contentBlocks: blocks,
+      }),
+    );
     assert.deepEqual(msg.contentBlocks, blocks);
   });
 
@@ -384,14 +951,16 @@ describe('MessageStore', () => {
       { id: 'tool-1', type: 'tool_use', label: 'opus → Read', detail: '{"path":"/a.ts"}', timestamp: 1000 },
       { id: 'toolr-1', type: 'tool_result', label: 'opus ← result', detail: 'file content...', timestamp: 1001 },
     ];
-    const msg = store.append({
-      userId: 'u',
-      catId: 'opus',
-      content: 'done',
-      mentions: [],
-      timestamp: 1,
-      toolEvents,
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        userId: 'u',
+        catId: 'opus',
+        content: 'done',
+        mentions: [],
+        timestamp: 1,
+        toolEvents,
+      }),
+    );
     assert.deepEqual(msg.toolEvents, toolEvents);
 
     // Verify toolEvents round-trip via getByThread
@@ -404,14 +973,16 @@ describe('MessageStore', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'u',
-      catId: 'opus',
-      content: 'hi',
-      mentions: [],
-      timestamp: 1,
-      toolEvents: [{ id: 't1', type: 'tool_use', label: 'test', timestamp: 1 }],
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        userId: 'u',
+        catId: 'opus',
+        content: 'hi',
+        mentions: [],
+        timestamp: 1,
+        toolEvents: [{ id: 't1', type: 'tool_use', label: 'test', timestamp: 1 }],
+      }),
+    );
     assert.ok(msg.toolEvents);
 
     const deleted = store.hardDelete(msg.id, 'admin');
@@ -423,18 +994,324 @@ describe('MessageStore', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'u',
-      catId: 'opus',
-      content: 'response',
-      mentions: [],
-      timestamp: 1,
-      thinking: 'secret reasoning that must not survive hard delete',
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        userId: 'u',
+        catId: 'opus',
+        content: 'response',
+        mentions: [],
+        timestamp: 1,
+        thinking: 'secret reasoning that must not survive hard delete',
+      }),
+    );
     assert.equal(msg.thinking, 'secret reasoning that must not survive hard delete');
 
     const deleted = store.hardDelete(msg.id, 'admin');
     assert.ok(deleted);
     assert.equal(deleted.thinking, undefined, 'thinking must be cleared on hard delete');
+  });
+
+  // --- System-user visibility (scheduler messages must be visible to all) ---
+
+  test('getByThread() includes scheduler messages when filtering by userId', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'hello',
+        mentions: [],
+        timestamp: 1,
+        threadId: 'th',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'scheduler',
+        catId: 'system',
+        content: '[定时任务] reminder',
+        mentions: [],
+        timestamp: 2,
+        threadId: 'th',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-2',
+        catId: null,
+        content: 'other user',
+        mentions: [],
+        timestamp: 3,
+        threadId: 'th',
+      }),
+    );
+
+    const msgs = store.getByThread('th', 50, 'user-1');
+    assert.equal(msgs.length, 2, 'should include own message + scheduler message');
+    assert.equal(msgs[0].content, 'hello');
+    assert.equal(msgs[1].content, '[定时任务] reminder');
+  });
+
+  test('getByThreadBefore() includes scheduler messages when filtering by userId', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'hello',
+        mentions: [],
+        timestamp: 100,
+        threadId: 'th',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'scheduler',
+        catId: 'system',
+        content: '[定时任务] reminder',
+        mentions: [],
+        timestamp: 200,
+        threadId: 'th',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'follow-up',
+        mentions: [],
+        timestamp: 300,
+        threadId: 'th',
+      }),
+    );
+
+    const msgs = store.getByThreadBefore('th', 350, 50, undefined, 'user-1');
+    assert.equal(msgs.length, 3, 'should include all own messages + scheduler');
+    assert.equal(msgs[1].userId, 'scheduler');
+  });
+
+  test('getByThreadAfter() includes scheduler messages when filtering by userId', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    const first = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'start',
+        mentions: [],
+        timestamp: 100,
+        threadId: 'th',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'scheduler',
+        catId: 'system',
+        content: '[定时任务] digest',
+        mentions: [],
+        timestamp: 200,
+        threadId: 'th',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-2',
+        catId: null,
+        content: 'other',
+        mentions: [],
+        timestamp: 300,
+        threadId: 'th',
+      }),
+    );
+
+    const msgs = store.getByThreadAfter('th', first.id, undefined, 'user-1');
+    assert.equal(msgs.length, 1, 'should include scheduler message after cursor');
+    assert.equal(msgs[0].userId, 'scheduler');
+  });
+
+  test('managed-hold history stays bound to the durable owner before and after terminal delivery', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    const source = {
+      connector: 'hold-ball',
+      label: '持球结果',
+      icon: '🏓',
+      meta: {
+        managedHold: true,
+        phase: 'wake',
+        taskId: 'hold-ball-task-1',
+        threadId: 'th-managed',
+        catId: 'opus5',
+        wakeWhen: true,
+      },
+    };
+    const receipt = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        from: { kind: 'system', service: 'hold-ball' },
+        catId: null,
+        content: '[定时任务] managed result',
+        mentions: [],
+        timestamp: 200,
+        threadId: 'th-managed',
+        deliveryStatus: 'queued',
+        source,
+      }),
+    );
+    const hidden = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        from: { kind: 'system', service: 'hold-ball' },
+        catId: null,
+        content: '[定时任务] hidden trigger',
+        mentions: [],
+        timestamp: 201,
+        threadId: 'th-managed',
+        deliveryStatus: 'queued',
+        extra: { scheduler: { hiddenTrigger: true } },
+        source,
+      }),
+    );
+    const foreignOwned = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-owner',
+        from: { kind: 'system', service: 'hold-ball' },
+        catId: null,
+        content: 'owner-A command result',
+        mentions: [],
+        timestamp: 202,
+        threadId: 'th-managed',
+        deliveryStatus: 'queued',
+        source,
+      }),
+    );
+    const ownerless = store.append(
+      canonicalTestMessageInput({
+        userId: 'scheduler',
+        from: { kind: 'system', service: 'hold-ball' },
+        catId: null,
+        content: 'legacy ownerless result',
+        mentions: [],
+        timestamp: 203,
+        threadId: 'th-managed',
+        deliveryStatus: 'queued',
+        source,
+      }),
+    );
+
+    assert.deepEqual(store.getByThreadAfter('th-managed', undefined, undefined, 'user-1'), []);
+    assert.deepEqual(
+      store
+        .getByThreadAfter('th-managed', undefined, undefined, 'user-1', { includeQueuedUserMessages: true })
+        .map((message) => message.id),
+      [receipt.id],
+    );
+    assert.deepEqual(
+      store.getByThread('th-managed', 50, 'user-foreign', { includeQueuedUserMessages: true }),
+      [],
+      "foreign viewers must not receive another owner's scheduler-authored result",
+    );
+
+    const terminalize = (message, deliveredAt) => {
+      const result = store.markDelivered(message.id, deliveredAt);
+      assert.equal(result.deliveryTransitioned, true);
+    };
+    terminalize(receipt, 300);
+    terminalize(hidden, 301);
+    terminalize(foreignOwned, 302);
+
+    // A legacy ownerless row cannot use the custody transition API, but old
+    // persisted data can still carry delivered status and must fail closed.
+    store.getById(ownerless.id).deliveryStatus = 'delivered';
+    store.getById(ownerless.id).deliveredAt = 303;
+
+    assert.deepEqual(
+      store.getByThreadAfter('th-managed', undefined, undefined, 'user-1').map((message) => message.id),
+      [receipt.id],
+      'terminal delivery must not restore generic system visibility to hidden, foreign, or ownerless rows',
+    );
+    assert.deepEqual(store.getByThread('th-managed', 50, 'user-foreign'), []);
+    assert.deepEqual(store.getByThreadIncludingQueued('th-managed', 50, 'user-foreign'), []);
+    assert.equal(
+      store.getLatestVisibleCursor('th-managed', {
+        evidence: 'durable_owner_read',
+        viewerUserId: 'user-1',
+      }).messageId,
+      receipt.id,
+    );
+    assert.equal(
+      store.getLatestVisibleCursor('th-managed', {
+        evidence: 'durable_owner_read',
+        viewerUserId: 'user-foreign',
+      }),
+      null,
+    );
+  });
+
+  test('P1: forged userId=scheduler with non-system catId does NOT bypass filter', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'legit',
+        mentions: [],
+        timestamp: 1,
+        threadId: 'th',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'scheduler',
+        catId: 'opus',
+        content: 'forged system message',
+        mentions: [],
+        timestamp: 2,
+        threadId: 'th',
+      }),
+    );
+
+    const msgs = store.getByThread('th', 50, 'user-1');
+    assert.equal(msgs.length, 1, 'forged scheduler message must NOT bypass userId filter');
+    assert.equal(msgs[0].content, 'legit');
+  });
+
+  test('getByThread() includes system messages persisted with catId=null when filtering by userId', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'hello',
+        mentions: [],
+        timestamp: 1,
+        threadId: 'th',
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: 'Error: stream_idle_stall: Gemini stopped responding',
+        mentions: [],
+        timestamp: 2,
+        threadId: 'th',
+      }),
+    );
+
+    const msgs = store.getByThread('th', 50, 'user-1');
+    assert.equal(msgs.length, 2, 'should include own message + persisted system error');
+    assert.equal(msgs[1].userId, 'system');
+    assert.equal(msgs[1].catId, null);
   });
 });

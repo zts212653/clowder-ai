@@ -6,6 +6,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 import { buildSelectionMessage, InteractiveBlock } from './InteractiveBlock';
+import { RichBlockSelectionFrame } from './RichBlockSelectionFrame';
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -17,8 +18,8 @@ function patchBlockState(messageId: string, blockId: string, patch: { disabled?:
   });
 }
 
-function dispatchInteractiveSend(text: string) {
-  window.dispatchEvent(new CustomEvent('cat-cafe:interactive-send', { detail: { text } }));
+function dispatchInteractiveSend(text: string, sendContext?: string) {
+  window.dispatchEvent(new CustomEvent('cat-cafe:interactive-send', { detail: { text, sendContext } }));
 }
 
 // ── Pure function (exported for testing) ────────────────────
@@ -54,7 +55,15 @@ function needsCustomText(block: RichInteractiveBlock, selectedIds?: string[]): b
   return block.options.some((o) => o.customInput && selectedIds.includes(o.id));
 }
 
-export function InteractiveBlockGroup({ blocks, messageId }: { blocks: RichInteractiveBlock[]; messageId?: string }) {
+export function InteractiveBlockGroup({
+  blocks,
+  messageId,
+  sendContext,
+}: {
+  blocks: RichInteractiveBlock[];
+  messageId?: string;
+  sendContext?: string;
+}) {
   const allDisabled = blocks.every((b) => b.disabled);
   const [submitted, setSubmitted] = useState(allDisabled);
   const [selections, setSelections] = useState<Map<string, string[]>>(() => {
@@ -104,7 +113,7 @@ export function InteractiveBlockGroup({ blocks, messageId }: { blocks: RichInter
 
     // Build and send combined message
     const text = buildGroupMessage(blocks, selections, customTexts);
-    dispatchInteractiveSend(text);
+    dispatchInteractiveSend(text, sendContext);
 
     // Persist each block
     if (messageId) {
@@ -114,21 +123,23 @@ export function InteractiveBlockGroup({ blocks, messageId }: { blocks: RichInter
         patchBlockState(messageId, block.id, { disabled: true, selectedIds: optionIds }).catch(() => {});
       }
     }
-  }, [allSelected, submitted, blocks, selections, customTexts, messageId]);
+  }, [allSelected, submitted, blocks, selections, customTexts, messageId, sendContext]);
 
   return (
-    <div className="space-y-3 rounded-2xl border-2 border-dashed border-amber-200 dark:border-amber-800/50 p-3">
-      {blocks.map((block) => (
-        <InteractiveBlock
-          key={block.id}
-          block={block}
-          messageId={messageId}
-          pendingMode={!submitted}
-          onPendingChange={(ids) => handlePendingChange(block.id, ids)}
-          onCustomTextChange={(text) => handleCustomTextChange(block.id, text)}
-          groupDisabled={submitted}
-          groupSelectedIds={submitted ? selections.get(block.id) : undefined}
-        />
+    <div className="space-y-3 rounded-2xl border-2 border-dashed border-conn-amber-ring p-3">
+      {blocks.map((block, index) => (
+        <RichBlockSelectionFrame key={block.id} block={block} index={index} messageId={messageId}>
+          <InteractiveBlock
+            block={block}
+            messageId={messageId}
+            pendingMode={!submitted}
+            onPendingChange={(ids) => handlePendingChange(block.id, ids)}
+            onCustomTextChange={(text) => handleCustomTextChange(block.id, text)}
+            groupDisabled={submitted}
+            groupSelectedIds={submitted ? selections.get(block.id) : undefined}
+            sendContext={sendContext}
+          />
+        </RichBlockSelectionFrame>
       ))}
       {!submitted && (
         <button
@@ -138,16 +149,14 @@ export function InteractiveBlockGroup({ blocks, messageId }: { blocks: RichInter
           className={`w-full py-2.5 rounded-full text-sm font-semibold transition-all flex items-center justify-center gap-2
             ${
               allSelected
-                ? 'bg-amber-600 text-white hover:bg-amber-700 cursor-pointer'
-                : 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
+                ? 'bg-[var(--semantic-warning)] text-[var(--cafe-surface)] hover:opacity-90 cursor-pointer'
+                : 'bg-cafe-surface-elevated text-cafe-muted cursor-not-allowed'
             }`}
         >
           全部提交
           <span
             className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-              allSelected
-                ? 'bg-white/20 text-white'
-                : 'bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400'
+              allSelected ? 'bg-cafe-surface/20 text-[var(--cafe-surface)]' : 'bg-conn-amber-bg text-conn-amber-text '
             }`}
           >
             {selections.size}/{blocks.length}

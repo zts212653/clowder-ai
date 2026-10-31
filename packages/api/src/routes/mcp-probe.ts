@@ -1,21 +1,25 @@
 /**
  * MCP Probe Helpers
  *
- * Probes an MCP stdio server with `tools/list` and returns lightweight
- * connection + tool metadata for the Capability Center UI.
+ * Probes an MCP server (stdio or streamableHttp) with `tools/list` and returns
+ * lightweight connection + tool metadata for the Capability Center UI.
  */
 
 import type { CapabilityEntry, McpToolInfo } from '@cat-cafe/shared';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import type { StdioServerParameters } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import type { StdioClientTransport, StdioServerParameters } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { resolvePencilCommand } from '../config/capabilities/capability-orchestrator.js';
+import { resolveEnvReferences } from '../utils/env-references.js';
+import { loadMcpClient, loadMcpHttp, loadMcpStdio } from '../utils/lazy-mcp-sdk.js';
 
 export interface McpProbeResult {
   connectionStatus: 'connected' | 'disconnected' | 'unknown';
   tools?: McpToolInfo[];
+  /** Error detail when connectionStatus is 'disconnected'. */
+  error?: string;
 }
 
 const DEFAULT_PROBE_TIMEOUT_MS = 2500;
+const DEFAULT_HTTP_PROBE_TIMEOUT_MS = 8000;
 const SLOW_START_PROBE_TIMEOUT_MS = 7000;
 const CLOSE_TIMEOUT_MS = 300;
 const MIN_STEP_TIMEOUT_MS = 100;
@@ -36,10 +40,13 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   });
 }
 
-function sanitizeEnv(env: Record<string, string> | undefined): Record<string, string> | undefined {
-  const safe: Record<string, string> = { ...getDefaultEnvironment() };
+function sanitizeEnv(
+  env: Record<string, string> | undefined,
+  defaults: Record<string, string>,
+): Record<string, string> | undefined {
+  const safe: Record<string, string> = { ...defaults };
   if (!env) return safe;
-  for (const [key, value] of Object.entries(env)) {
+  for (const [key, value] of Object.entries(resolveEnvReferences(env))) {
     if (typeof value === 'string') safe[key] = value;
   }
   return safe;
@@ -102,35 +109,110 @@ export async function probeMcpCapability(
   },
 ): Promise<McpProbeResult> {
   if (capability.type !== 'mcp') return { connectionStatus: 'unknown' };
-  if (!capability.mcpServer?.command) return { connectionStatus: 'unknown' };
+  if (!capability.mcpServer) return { connectionStatus: 'unknown' };
+
+  const isHttp = capability.mcpServer.transport === 'streamableHttp';
+  try {
+    if (isHttp) return await probeHttpMcp(capability, options);
+    return await probeStdioMcp(capability, options);
+  } catch (err) {
+    // SDK initialization can now fail at first use rather than route import time.
+    return { connectionStatus: 'disconnected', tools: [], error: (err as Error).message };
+  }
+}
+
+async function probeHttpMcp(capability: CapabilityEntry, options: { timeoutMs?: number }): Promise<McpProbeResult> {
+  const url = capability.mcpServer?.url;
+  if (!url) return { connectionStatus: 'unknown' };
+
+  // #712 review P1-10: validate URL scheme to prevent SSRF via file:// / gopher:// etc.
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { connectionStatus: 'disconnected', error: 'Invalid URL' };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { connectionStatus: 'disconnected', error: `Unsupported scheme: ${parsed.protocol}` };
+  }
+
+  const timeoutMs = options.timeoutMs ?? DEFAULT_HTTP_PROBE_TIMEOUT_MS;
+  const deadlineMs = Date.now() + timeoutMs;
+  const [{ Client }, { StreamableHTTPClientTransport }] = await withTimeout(
+    Promise.all([loadMcpClient(), loadMcpHttp()]),
+    remainingTimeout(deadlineMs),
+  );
+  if (Date.now() >= deadlineMs) throw new Error(`Probe timeout after ${timeoutMs}ms`);
+  const requestInit: RequestInit = {};
+  if (capability.mcpServer?.headers && Object.keys(capability.mcpServer.headers).length > 0) {
+    requestInit.headers = resolveEnvReferences(capability.mcpServer.headers);
+  }
+
+  const transport = new StreamableHTTPClientTransport(parsed, { requestInit });
+  const client = new Client({ name: 'cat-cafe-capability-probe', version: '0.1.0' }, { capabilities: {} });
+
+  try {
+    const connectTimeoutMs = remainingTimeout(deadlineMs);
+    await withTimeout(client.connect(transport, { timeout: connectTimeoutMs }), connectTimeoutMs);
+    const listTimeoutMs = remainingTimeout(deadlineMs);
+    const result = await withTimeout(client.listTools(undefined, { timeout: listTimeoutMs }), listTimeoutMs);
+    return {
+      connectionStatus: 'connected',
+      tools: normalizeTools(result.tools ?? []),
+    };
+  } catch (err) {
+    return { connectionStatus: 'disconnected', tools: [], error: (err as Error).message };
+  } finally {
+    await transport.close().catch(() => {});
+  }
+}
+
+async function probeStdioMcp(
+  capability: CapabilityEntry,
+  options: { projectRoot: string; timeoutMs?: number },
+): Promise<McpProbeResult> {
+  const mcp = capability.mcpServer;
+  if (!mcp) return { connectionStatus: 'unknown' };
+  let command = mcp.command;
+  let args = mcp.args;
+  if ((!command || command.trim().length === 0) && mcp.resolver === 'pencil') {
+    const resolved = await resolvePencilCommand();
+    if (!resolved) return { connectionStatus: 'unknown' };
+    command = resolved.command;
+    args = resolved.args;
+  }
+  if (!command || command.trim().length === 0) return { connectionStatus: 'unknown' };
 
   const timeoutMs = resolveProbeTimeoutMs(capability, options.timeoutMs);
   const deadlineMs = Date.now() + timeoutMs;
+  const [{ Client }, { getDefaultEnvironment, StdioClientTransport }] = await withTimeout(
+    Promise.all([loadMcpClient(), loadMcpStdio()]),
+    remainingTimeout(deadlineMs),
+  );
+  if (Date.now() >= deadlineMs) throw new Error(`Probe timeout after ${timeoutMs}ms`);
   const serverParams: StdioServerParameters = {
-    command: capability.mcpServer.command,
-    args: capability.mcpServer.args,
-    cwd: capability.mcpServer.workingDir ?? options.projectRoot,
-    // Probe only needs tools/list result; discard stderr to avoid pipe backpressure.
+    command,
+    args,
+    cwd: mcp.workingDir ?? options.projectRoot,
     stderr: 'ignore',
   };
-  const env = sanitizeEnv(capability.mcpServer.env);
+  const env = sanitizeEnv(mcp.env, getDefaultEnvironment());
   if (env && Object.keys(env).length > 0) serverParams.env = env;
 
   const transport = new StdioClientTransport(serverParams);
   const client = new Client({ name: 'cat-cafe-capability-probe', version: '0.1.0' }, { capabilities: {} });
 
   try {
-    await withTimeout(client.connect(transport), remainingTimeout(deadlineMs));
-    const result = await withTimeout(client.listTools(), remainingTimeout(deadlineMs));
+    const connectTimeoutMs = remainingTimeout(deadlineMs);
+    await withTimeout(client.connect(transport, { timeout: connectTimeoutMs }), connectTimeoutMs);
+    const listTimeoutMs = remainingTimeout(deadlineMs);
+    const result = await withTimeout(client.listTools(undefined, { timeout: listTimeoutMs }), listTimeoutMs);
     return {
       connectionStatus: 'connected',
       tools: normalizeTools(result.tools ?? []),
     };
-  } catch {
-    return {
-      connectionStatus: 'disconnected',
-      tools: [],
-    };
+  } catch (err) {
+    return { connectionStatus: 'disconnected', tools: [], error: (err as Error).message };
   } finally {
     await closeTransportBounded(transport).catch(() => {});
   }

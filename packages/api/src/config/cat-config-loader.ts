@@ -1,7 +1,7 @@
 /**
  * Cat Config Loader
  * 从 cat-template.json / .cat-cafe/cat-catalog.json 加载 Breed+Variant 配置。
- * Node-only — 前端继续用 shared 包的 CAT_CONFIGS 常量。
+ * Node-only — 前端通过 /api/cats 获取猫数据。
  */
 
 import { readFileSync } from 'node:fs';
@@ -10,20 +10,39 @@ import { fileURLToPath } from 'node:url';
 import type {
   CatBreed,
   CatCafeConfig,
+  CatCarrier,
   CatConfig,
   CatFeatures,
   CatId,
   CatVariant,
   CoCreatorConfig,
-  ContextBudget,
   MissionHubSelfClaimScope,
   ReviewPolicy,
   Roster,
 } from '@cat-cafe/shared';
-import { createCatId } from '@cat-cafe/shared';
+import {
+  backgroundImageUrlSchema,
+  CAT_CARRIERS,
+  type ClientId,
+  catClientSupportsCarrier,
+  catRegistry,
+  createCatId,
+  developmentPlanRefSchema,
+  developmentRevisionSchema,
+  normalizeCliEffortForProvider,
+} from '@cat-cafe/shared';
 import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
-import { bootstrapCatCatalog, readCatCatalogRaw, resolveCatCatalogPath } from './cat-catalog-store.js';
+import { isUserSelectedCatalog } from './cat-catalog-initialization.js';
+import { bootstrapCatCatalog, type CatCatalogReadOptions, readCatCatalogRaw } from './cat-catalog-store.js';
+import { resolveProjectTemplatePath } from './project-template-path.js';
+import {
+  hasOccupiedMentionAlias,
+  isTemplateVariantBackfillAllowed,
+  normalizeMentionAlias,
+} from './template-variant-backfill.js';
+import { collectTemplateVariantTombstoneCatIds, isTemplateVariantTombstoned } from './template-variant-tombstones.js';
+import { isValidTimeZone } from './time-zone.js';
 
 const log = createModuleLogger('cat-config');
 
@@ -36,64 +55,168 @@ const log = createModuleLogger('cat-config');
  */
 const DEFAULT_CAT_TEMPLATE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..', 'cat-template.json');
 
+const DEFAULT_AUTO_COMPACT_RATIO = 0.88;
+
+export function deriveAutoCompactTokenLimit(contextWindow: number): number {
+  return Math.floor(contextWindow * DEFAULT_AUTO_COMPACT_RATIO);
+}
+
+const legacyPositiveContextWindowSchema = z.preprocess(
+  (value) => (typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined),
+  z.number().positive().int().optional(),
+);
+
 const cliConfigSchema = z.object({
   command: z.string().min(1),
   outputFormat: z.string().min(1),
   defaultArgs: z.array(z.string()).optional(),
-  effort: z.enum(['low', 'medium', 'high', 'max', 'xhigh']).optional(),
+  effort: z.string().trim().min(1).optional(),
+  /** F291: Codex OAuth requested service tier. Absent = inherit Codex user config. */
+  serviceTier: z.enum(['standard', 'fast']).optional(),
+  /** Read-only migration input. Invalid legacy values are inert, not catalog-fatal. */
+  contextWindow: legacyPositiveContextWindowSchema,
+  // Legacy autoCompactTokenLimit is intentionally absent: Zod strips it as inert input.
+  /** Legacy F254 read input. Canonical writes use variant.carrier. */
+  carrier: z.enum(['exec_json', 'app_server']).optional(),
 });
 
-const contextBudgetSchema = z.object({
-  maxPromptTokens: z.number().positive(),
-  maxContextTokens: z.number().positive(),
-  maxMessages: z.number().positive().int(),
-  maxContentLengthPerMsg: z.number().positive(),
-});
+const agyProfileSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    carrier: z.enum(['legacy', 'native', 'acp']).optional(),
+    profileId: z.string().min(1).optional(),
+    homeRoot: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
+    autoApprove: z.boolean().optional(),
+    trustedWorkspaces: z.array(z.string().min(1)).optional(),
+  })
+  .nullable()
+  .optional();
 
 /** F32-b: mentionPatterns must start with @ */
 const mentionPatternSchema = z.string().min(2).regex(/^@/, 'mentionPattern must start with @');
 
 const colorSchema = z.object({ primary: z.string(), secondary: z.string() });
+const catCarrierSchema = z.enum(CAT_CARRIERS);
 
-const catVariantSchema = z.object({
-  id: z.string().min(1),
-  catId: z.string().min(1).optional(), // F32-b: variant-level catId
-  displayName: z.string().min(1).optional(), // F32-b: variant-level displayName
-  variantLabel: z.string().min(1).optional(), // F32-b P4: disambiguation label
-  mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
-  accountRef: z.string().min(1).optional(), // F127: concrete account binding
-  providerProfileId: z.string().min(1).optional(), // Legacy migration path
-  provider: z.enum(['anthropic', 'openai', 'google', 'dare', 'antigravity', 'opencode', 'a2a']),
-  defaultModel: z.string().min(1),
-  mcpSupport: z.boolean(),
-  cli: cliConfigSchema,
-  commandArgs: z.array(z.string().min(1)).optional(), // F127: explicit bridge args (e.g. Antigravity)
-  cliConfigArgs: z.array(z.string().min(1)).optional(), // F127: extra CLI args per member
-  roleDescription: z.string().min(1).optional(), // F127 review fix: allow variant-scoped roleDescription override
-  sessionChain: z.boolean().optional(), // F127 review fix: allow variant-scoped sessionChain override
-  personality: z.string().optional(),
-  strengths: z.array(z.string()).optional(),
-  avatar: z.string().min(1).optional(), // F32-b P4c: override breed avatar
-  color: colorSchema.optional(), // F32-b P4c: override breed color
-  contextBudget: contextBudgetSchema.optional(),
-  voiceConfig: z // F103: per-cat TTS voice configuration
-    .object({
-      voice: z.string().min(1),
-      langCode: z.string().min(1),
-      speed: z.number().positive().optional(),
-      refAudio: z.string().min(1).optional(),
-      refText: z.string().min(1).optional(),
-      instruct: z.string().min(1).optional(),
-      temperature: z.number().min(0).max(2).optional(),
-    })
-    .optional(),
-  teamStrengths: z.string().optional(), // F-Ground-3: human-readable strengths
-  caution: z.string().nullable().optional(), // F-Ground-3: null = explicit no-caution (R1 fix)
-});
+const timeZoneSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(isValidTimeZone, { message: 'timeZone must be a valid IANA timezone' });
 
-type LegacyAwareCatVariant = CatVariant & {
-  providerProfileId?: string;
+const catVariantSchema = z
+  .object({
+    id: z.string().min(1),
+    catId: z.string().min(1).optional(), // F32-b: variant-level catId
+    name: z.string().min(1).optional(), // clowder-ai#1090: variant-level editable member name
+    displayName: z.string().min(1).optional(), // F32-b: variant-level displayName
+    nickname: z.string().nullable().optional(), // clowder-ai#1090: null = explicit no nickname
+    variantLabel: z.string().min(1).optional(), // F32-b P4: disambiguation label
+    mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
+    source: z.string().optional(), // #441: legacy field, ignored — kept in schema for old catalog read compat
+    configurationSource: z.enum(['native_tool', 'managed_account']).optional(),
+    agentProvider: z
+      .string()
+      .regex(/^plugin:[a-z0-9][a-z0-9._-]{0,127}\/[a-z0-9][a-z0-9._-]{0,63}$/)
+      .nullable()
+      .optional(),
+    accountRef: z.string().min(1).optional(), // F127: concrete account binding
+    accountBindingMode: z.enum(['follow', 'override']).optional(),
+    creationReceipt: z.object({ requestHash: z.string().length(64), payloadHash: z.string().length(64) }).optional(),
+    clientId: z.string().min(1), // #252: accept unknown providers to avoid full config crash
+    carrier: catCarrierSchema.optional(),
+    /** Legacy member access-mode field. Read only; canonical writes use carrier. */
+    transport: catCarrierSchema.optional(),
+    /** ACP launch details remain config data; carrier decides whether they are active. */
+    acp: z.unknown().optional(),
+
+    defaultModel: z.string(), // OAuth/subscription CLIs have built-in defaults; api_key validated at route level
+    mcpSupport: z.boolean(),
+    cli: cliConfigSchema.optional(),
+    agyProfile: agyProfileSchema,
+    commandArgs: z.array(z.string().min(1)).optional(), // F127: explicit bridge args (e.g. Antigravity)
+    cliConfigArgs: z.array(z.string().min(1)).optional(), // F127: extra CLI args per member
+    /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
+    provider: z
+      .string()
+      .trim()
+      .min(1, 'provider must not be blank')
+      .refine((v) => !v.includes('/'), 'provider must not contain "/"')
+      .optional(),
+    roleDescription: z.string().min(1).optional(), // F127 review fix: allow variant-scoped roleDescription override
+    sessionChain: z.boolean().optional(), // F127 review fix: allow variant-scoped sessionChain override
+    // #1329: explicit member intent outranks breed policy and the legacy byte.
+    sessionStrategy: z.lazy(() => sessionStrategySchema),
+    relationshipKey: z
+      .string()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/, 'relationshipKey must be a safe profile path segment')
+      .optional(),
+    personality: z.string().optional(),
+    strengths: z.array(z.string()).optional(),
+    avatar: z.string().min(1).optional(), // F32-b P4c: override breed avatar
+    banner: backgroundImageUrlSchema.nullable().optional(),
+    color: colorSchema.optional(), // F32-b P4c: override breed color
+    /** clowder-ai#1208: explicit context window cap. undefined=Auto, positive int=Manual. */
+    contextWindow: z.number().int().positive().optional(),
+    voiceConfig: z // F103: per-cat TTS voice configuration
+      .object({
+        voice: z.string().min(1),
+        langCode: z.string().min(1),
+        speed: z.number().positive().optional(),
+        refAudio: z.string().min(1).optional(),
+        refText: z.string().min(1).optional(),
+        instruct: z.string().min(1).optional(),
+        temperature: z.number().min(0).max(2).optional(),
+      })
+      .optional(),
+    teamStrengths: z.string().optional(), // F-Ground-3: human-readable strengths
+    caution: z.string().nullable().optional(), // F-Ground-3: null = explicit no-caution (R1 fix)
+    restrictions: z.array(z.string().min(1)).optional(), // F167 Phase E: hard task bans
+  })
+  .superRefine((variant, ctx) => {
+    const carrier = resolveCatCarrier(variant);
+    if (!catClientSupportsCarrier(variant.clientId, carrier)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['carrier'],
+        message: `carrier "${carrier}" is not supported by clientId "${variant.clientId}"`,
+      });
+    }
+  });
+
+type CarrierCompatInput = {
+  configurationSource?: 'native_tool' | 'managed_account';
+  carrier?: CatCarrier;
+  transport?: CatCarrier;
+  clientId?: string;
+  cli?: { carrier?: 'exec_json' | 'app_server' };
+  acp?: unknown;
 };
+
+/**
+ * The only compatibility boundary for member access-mode configuration.
+ * Canonical carrier wins, followed by the legacy top-level transport field.
+ * When neither exists, migrate the two historical runtime selectors: an ACP
+ * launch block selected ACP before provider routing, while OpenAI's CLI field
+ * (then the retired process env selector) selected app-server vs exec-json.
+ * Every downstream projection receives only the canonical vocabulary.
+ */
+export function resolveCatCarrier(
+  input: CarrierCompatInput,
+  codexCarrierEnv = process.env.CAT_CAFE_CODEX_CARRIER,
+): CatCarrier {
+  if (input.carrier) return input.carrier;
+  if (input.transport) return input.transport;
+  if (input.clientId && input.acp != null) return 'acp';
+  if (input.clientId === 'openai') {
+    if (input.cli?.carrier) return input.cli.carrier === 'app_server' ? 'app_server' : 'cli';
+    if (input.configurationSource === 'native_tool') return 'app_server';
+    const legacy = input.cli?.carrier ?? codexCarrierEnv;
+    if (legacy === 'app_server') return 'app_server';
+  }
+  return 'cli';
+}
 
 /** F33 Phase 2: session strategy config (matches SessionStrategyConfig from shared).
  *  Exported for reuse by Phase 3 API route validation. */
@@ -143,6 +266,10 @@ const catFeaturesSchema = z
 
 const catBreedSchema = z.object({
   id: z.string().min(1),
+  relationshipKey: z
+    .string()
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/, 'relationshipKey must be a safe profile path segment')
+    .optional(),
   catId: z.string().min(1),
   name: z.string().min(1),
   displayName: z.string().min(1),
@@ -156,6 +283,7 @@ const catBreedSchema = z.object({
   features: catFeaturesSchema,
   teamStrengths: z.string().optional(), // F-Ground-3: breed-level default
   caution: z.string().nullable().optional(), // F-Ground-3: null = explicit no-caution (R1 fix)
+  restrictions: z.array(z.string().min(1)).optional(), // F167 Phase E: breed-level hard task bans
 });
 
 // ── F032: Roster schema for collaboration rules ──────────────────────
@@ -182,8 +310,10 @@ const reviewPolicySchema = z.object({
 /** F067: Owner config schema */
 const coCreatorConfigSchema = z.object({
   name: z.string().min(1),
+  nickname: z.string().min(1).optional(),
   aliases: z.array(z.string().min(1)),
   mentionPatterns: z.array(mentionPatternSchema).min(1),
+  timeZone: timeZoneSchema.optional(),
   avatar: z.string().min(1).optional(),
   color: colorSchema.optional(),
 });
@@ -191,14 +321,18 @@ const coCreatorConfigSchema = z.object({
 /** Version 1: breeds only (legacy) */
 const catCafeConfigSchemaV1 = z.object({
   version: z.literal(1),
-  breeds: z.array(catBreedSchema).min(1),
+  memberInitialization: z.string().min(1).optional(),
+  breeds: z.array(catBreedSchema),
+  selectedAccountRefs: z.record(z.string(), z.string().min(1)).optional(),
 });
 
 /** Version 2: breeds + roster + reviewPolicy (F032) + coCreator (F067) */
 const catCafeConfigSchemaV2 = z
   .object({
     version: z.literal(2),
-    breeds: z.array(catBreedSchema).min(1),
+    memberInitialization: z.string().min(1).optional(),
+    breeds: z.array(catBreedSchema),
+    selectedAccountRefs: z.record(z.string(), z.string().min(1)).optional(),
     roster: z.record(z.string(), rosterEntrySchema),
     reviewPolicy: reviewPolicySchema,
     coCreator: coCreatorConfigSchema.optional(),
@@ -214,31 +348,65 @@ const catCafeConfigSchemaV2 = z
     return rest;
   });
 
-/** Union of all versions — loader handles migration */
-const catCafeConfigSchema = z.union([catCafeConfigSchemaV1, catCafeConfigSchemaV2]);
+/** Parse the discriminator before the full config so branch-specific errors retain their exact paths. */
+const catCafeConfigVersionSchema = z.object({
+  version: z.union([z.literal(1), z.literal(2)]),
+});
 
-/**
- * Try cat-config.json (real runtime config with coCreator data) first,
- * then fall back to cat-template.json (generic template for new projects).
- */
-function readConfigWithFallback(projectRoot: string, templatePath: string): string {
-  const legacyPath = resolve(projectRoot, 'cat-config.json');
-  try {
-    return readFileSync(legacyPath, 'utf-8');
-  } catch {
-    // not found — fall through to template
-  }
+/** clowder-ai#340: Read cat-template.json directly — cat-config.json is no longer a runtime source. */
+function readRawTemplate(templatePath: string): string {
   try {
     return readFileSync(templatePath, 'utf-8');
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    throw new Error(`Failed to read cat config at ${legacyPath} or ${templatePath}: ${code ?? 'unknown error'}`);
+    throw new Error(`Failed to read cat-template.json at ${templatePath}: ${code ?? 'unknown error'}`);
   }
 }
 
 /**
+ * Read the project's template as an overlay on the shipped template.
+ *
+ * The desktop installer must not overwrite a project's `cat-template.json`
+ * (users may edit it), so an upgraded install would otherwise keep serving the
+ * template it copied on day one. `CAT_TEMPLATE_BASE_PATH` points at the
+ * read-only template shipped inside the install root; merging it first lets new
+ * role templates (and other id-keyed template data) reach existing projects
+ * while the project copy still wins for any id it defines.
+ */
+function readTemplate(templatePath: string): string {
+  const raw = readRawTemplate(templatePath);
+  const basePath = process.env.CAT_TEMPLATE_BASE_PATH?.trim();
+  if (!basePath) return raw;
+  const resolvedBase = resolve(basePath);
+  if (resolvedBase === resolve(templatePath)) return raw;
+  try {
+    const base = JSON.parse(readRawTemplate(resolvedBase)) as Record<string, unknown>;
+    const overlay = JSON.parse(raw) as Record<string, unknown>;
+    return JSON.stringify(deepMergeConfig(base, overlay));
+  } catch {
+    // A missing or malformed shipped template must not take the project down;
+    // the project copy remains the authoritative fallback.
+    return raw;
+  }
+}
+
+/** Read the merged (shipped base + project overlay) template. */
+export function readResolvedTemplateSource(templatePath: string): string {
+  return readTemplate(templatePath);
+}
+
+/**
+ * Keys that represent atomic config units — overlay replaces base entirely,
+ * even though they are plain objects. Prevents stale sub-fields from leaking
+ * across provider switches (e.g. template cli.defaultArgs surviving into a
+ * catalog variant that switched to a different client).
+ */
+const ATOMIC_OBJECT_KEYS = new Set(['cli', 'agyProfile', 'color', 'voiceConfig', 'acp']);
+
+/**
  * Deep merge two plain objects. `overlay` fields override `base` fields.
- * - Objects: recursively merged (base fields preserved if absent from overlay).
+ * - Atomic keys (cli, color, etc.): overlay replaces base entirely.
+ * - Other objects: recursively merged (base fields preserved if absent from overlay).
  * - Arrays of objects with `id`: key-based merge (matched by id, then deep-merged).
  *   Overlay-only items appended; base-only items preserved.
  * - Other arrays / primitives: overlay replaces base.
@@ -248,7 +416,9 @@ function deepMergeConfig(base: Record<string, unknown>, overlay: Record<string, 
   for (const key of Object.keys(overlay)) {
     const bVal = base[key];
     const oVal = overlay[key];
-    if (Array.isArray(oVal) && Array.isArray(bVal) && oVal.length > 0 && isIdArray(oVal) && isIdArray(bVal)) {
+    if (ATOMIC_OBJECT_KEYS.has(key)) {
+      merged[key] = oVal;
+    } else if (Array.isArray(oVal) && Array.isArray(bVal) && oVal.length > 0 && isIdArray(oVal) && isIdArray(bVal)) {
       merged[key] = mergeById(bVal as HasId[], oVal as HasId[]);
     } else if (isPlainObject(oVal) && isPlainObject(bVal)) {
       merged[key] = deepMergeConfig(bVal as Record<string, unknown>, oVal as Record<string, unknown>);
@@ -281,48 +451,189 @@ function mergeById(base: HasId[], overlay: HasId[]): HasId[] {
     const bItem = baseMap.get(oItem.id);
     result.push(bItem ? (deepMergeConfig(bItem, oItem) as HasId) : oItem);
   }
-  // Preserve base-only items (new items added to cat-config.json but not yet in catalog)
+  // Preserve base-only items (new items added to cat-template.json but not yet in catalog)
   for (const bItem of base) {
     if (!seen.has(bItem.id)) result.push(bItem);
   }
   return result;
 }
 
-/**
- * Load and validate the resolved cat config source.
- * Explicit filePath reads that file directly.
- * Default resolution: cat-config.json is the base, .cat-cafe/cat-catalog.json is a delta overlay.
- * Catalog fields override config fields (deep merge); config fields absent from catalog are preserved.
- */
-export function loadCatConfig(filePath?: string): CatCafeConfig {
-  let raw: string;
-  let resolvedPath = filePath;
-  if (filePath) {
-    try {
-      raw = readFileSync(filePath, 'utf-8');
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      throw new Error(`Failed to read cat config at ${filePath}: ${code ?? 'unknown error'}`);
+type BreedWithResolvedCatIds = HasId & {
+  catId?: string;
+  defaultVariantId?: string;
+  mentionPatterns?: string[];
+  variants?: Array<{
+    id?: string;
+    catId?: string;
+    mentionPatterns?: string[];
+  }>;
+};
+
+type RuntimeIdentityOccupancy = {
+  catIds: Set<string>;
+  mentionAliases: Set<string>;
+};
+
+function resolveVariantMentionPatterns(
+  breed: BreedWithResolvedCatIds,
+  variant: NonNullable<BreedWithResolvedCatIds['variants']>[number],
+  catId: string,
+): string[] {
+  if (Array.isArray(variant.mentionPatterns) && variant.mentionPatterns.length > 0) return variant.mentionPatterns;
+  if (variant.id === breed.defaultVariantId && Array.isArray(breed.mentionPatterns)) return breed.mentionPatterns;
+  return [`@${catId}`];
+}
+
+function collectResolvedIdentityOccupancy(breeds: BreedWithResolvedCatIds[]): RuntimeIdentityOccupancy {
+  const catIds = new Set<string>();
+  const mentionAliases = new Set<string>();
+  for (const breed of breeds) {
+    if (breed.catId) catIds.add(breed.catId);
+    for (const variant of Array.isArray(breed.variants) ? breed.variants : []) {
+      const resolvedCatId = variant.catId ?? breed.catId;
+      if (!resolvedCatId) continue;
+      catIds.add(resolvedCatId);
+      for (const pattern of resolveVariantMentionPatterns(breed, variant, resolvedCatId)) {
+        const normalized = normalizeMentionAlias(pattern);
+        if (normalized) mentionAliases.add(normalized);
+      }
     }
-  } else {
-    const templatePath = process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
-    const projectRoot = dirname(templatePath);
-    const catalogRaw = readCatCatalogRaw(projectRoot);
-    if (catalogRaw !== null) {
-      // Catalog exists — use cat-config.json as base, catalog as overlay
-      const baseRaw = readConfigWithFallback(projectRoot, templatePath);
-      const baseJson = JSON.parse(baseRaw) as Record<string, unknown>;
-      const catalogJson = JSON.parse(catalogRaw) as Record<string, unknown>;
-      raw = JSON.stringify(deepMergeConfig(baseJson, catalogJson));
-      resolvedPath = resolveCatCatalogPath(projectRoot);
-    } else {
-      raw = readConfigWithFallback(projectRoot, templatePath);
-      resolvedPath = templatePath;
+  }
+  return { catIds, mentionAliases };
+}
+
+function collectResolvedCatIds(breeds: BreedWithResolvedCatIds[]): Set<string> {
+  return collectResolvedIdentityOccupancy(breeds).catIds;
+}
+
+function removeUnavailableTemplateVariants(
+  merged: Record<string, unknown>,
+  catalogJson: Record<string, unknown>,
+  catalogBreeds: BreedWithResolvedCatIds[],
+): Set<string> {
+  const removedCatIds = new Set<string>();
+  if (!Array.isArray(merged.breeds)) return removedCatIds;
+
+  const catalogBreedsById = new Map(catalogBreeds.map((breed) => [breed.id, breed]));
+  const occupancy = collectResolvedIdentityOccupancy(catalogBreeds);
+  const catalogRoster = isPlainObject(catalogJson.roster) ? (catalogJson.roster as Record<string, unknown>) : {};
+  for (const breed of merged.breeds as BreedWithResolvedCatIds[]) {
+    if (typeof breed.id !== 'string') continue;
+    if (!Array.isArray(breed.variants)) continue;
+
+    const catalogBreed = catalogBreedsById.get(breed.id);
+    const catalogVariantIds = new Set(
+      (Array.isArray(catalogBreed?.variants) ? catalogBreed.variants : [])
+        .map((variant) => variant.id)
+        .filter((id): id is string => typeof id === 'string'),
+    );
+
+    breed.variants = breed.variants.filter((variant) => {
+      if (typeof variant.id !== 'string') return true;
+      if (catalogVariantIds.has(variant.id)) return true;
+
+      const catId = variant.catId ?? breed.catId;
+      if (!catId) return true;
+      // New installations must not gain unselected variants through read-side merging.
+      if (isUserSelectedCatalog(catalogJson)) {
+        removedCatIds.add(catId);
+        return false;
+      }
+      const input = {
+        breedId: breed.id,
+        variantId: variant.id,
+        catId,
+        mentionPatterns: resolveVariantMentionPatterns(breed, variant, catId),
+      };
+      const rosterEntry = catalogRoster[catId];
+      const ownedByCatalogRoster = isPlainObject(rosterEntry) && rosterEntry.family === breed.id;
+      if (isTemplateVariantTombstoned(catalogJson, input)) {
+        removedCatIds.add(catId);
+        return false;
+      }
+      const hasOccupiedCatId = occupancy.catIds.has(catId);
+      const hasOccupiedAlias = hasOccupiedMentionAlias(input.mentionPatterns, occupancy.mentionAliases);
+      let keep = isTemplateVariantBackfillAllowed(input, occupancy);
+      if (!keep && ownedByCatalogRoster && !hasOccupiedCatId && !hasOccupiedAlias) keep = true;
+      if (!keep) removedCatIds.add(catId);
+      return keep;
+    });
+  }
+  return removedCatIds;
+}
+
+/**
+ * Merge template + catalog with #772 template-only breed filter applied.
+ * Shared by loadCatConfig() and getAcpConfig() to avoid duplicate merge paths.
+ */
+function mergeTemplateWithCatalog(templatePath: string, options: CatCatalogReadOptions = {}): string | null {
+  const projectRoot = dirname(templatePath);
+  const catalogRaw = readCatCatalogRaw(projectRoot, options);
+  if (catalogRaw === null) return null;
+
+  const baseRaw = readTemplate(templatePath);
+  const baseJson = JSON.parse(baseRaw) as Record<string, unknown>;
+  const catalogJson = JSON.parse(catalogRaw) as Record<string, unknown>;
+  const merged = deepMergeConfig(baseJson, catalogJson);
+  // Older explicit owner records never opted into the template's familiar address.
+  // Starting to parse nickname must not silently rename an existing installation.
+  if (
+    catalogJson.coCreator &&
+    typeof catalogJson.coCreator === 'object' &&
+    !Object.hasOwn(catalogJson.coCreator, 'nickname') &&
+    merged.coCreator &&
+    typeof merged.coCreator === 'object'
+  ) {
+    delete (merged.coCreator as Record<string, unknown>).nickname;
+  }
+
+  // #772: Template-only breeds must not leak into runtime.
+  // When a catalog exists, only catalog breeds are runtime members.
+  // breeds: [] (bootstrap state) means "no breeds" — all template breeds are menu data only.
+  const catalogBreeds = Array.isArray(catalogJson.breeds) ? (catalogJson.breeds as BreedWithResolvedCatIds[]) : [];
+  const catalogBreedIds = new Set(catalogBreeds.map((breed) => breed.id));
+  if (Array.isArray(merged.breeds)) {
+    merged.breeds = (merged.breeds as BreedWithResolvedCatIds[]).filter((breed) => catalogBreedIds.has(breed.id));
+  }
+  const unavailableTemplateVariantCatIds = removeUnavailableTemplateVariants(merged, catalogJson, catalogBreeds);
+  const runtimeCatIds = Array.isArray(merged.breeds)
+    ? collectResolvedCatIds(merged.breeds as BreedWithResolvedCatIds[])
+    : new Set<string>();
+
+  // Prune roster entries for template-only breeds — preserve variant, owner,
+  // and other catalog-added entries. Runs even when catalogBreeds is empty
+  // (bootstrap writes breeds:[] + owner roster; template roster must not leak).
+  const baseBreeds = Array.isArray(baseJson.breeds) ? (baseJson.breeds as BreedWithResolvedCatIds[]) : [];
+  const templateOnlyCatIds = collectResolvedCatIds(baseBreeds.filter((breed) => !catalogBreedIds.has(breed.id)));
+  const tombstonedCatIds = collectTemplateVariantTombstoneCatIds(catalogJson);
+  for (const runtimeCatId of runtimeCatIds) templateOnlyCatIds.delete(runtimeCatId);
+  for (const runtimeCatId of runtimeCatIds) tombstonedCatIds.delete(runtimeCatId);
+  for (const runtimeCatId of runtimeCatIds) unavailableTemplateVariantCatIds.delete(runtimeCatId);
+  if (
+    (templateOnlyCatIds.size > 0 || tombstonedCatIds.size > 0 || unavailableTemplateVariantCatIds.size > 0) &&
+    merged.roster &&
+    typeof merged.roster === 'object'
+  ) {
+    for (const key of Object.keys(merged.roster as Record<string, unknown>)) {
+      if (templateOnlyCatIds.has(key)) delete (merged.roster as Record<string, unknown>)[key];
+      if (tombstonedCatIds.has(key)) delete (merged.roster as Record<string, unknown>)[key];
+      if (unavailableTemplateVariantCatIds.has(key)) delete (merged.roster as Record<string, unknown>)[key];
     }
   }
 
+  return JSON.stringify(merged);
+}
+
+function parseCatConfig(raw: string): CatCafeConfig {
   const json: unknown = JSON.parse(raw);
-  const result = catCafeConfigSchema.safeParse(json);
+  const versionResult = catCafeConfigVersionSchema.safeParse(json);
+  if (!versionResult.success) {
+    const issues = versionResult.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`);
+    throw new Error(`Invalid cat config:\n${issues.join('\n')}`);
+  }
+
+  const result =
+    versionResult.data.version === 1 ? catCafeConfigSchemaV1.safeParse(json) : catCafeConfigSchemaV2.safeParse(json);
   if (!result.success) {
     const issues = result.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`);
     throw new Error(`Invalid cat config:\n${issues.join('\n')}`);
@@ -351,11 +662,44 @@ export function loadCatConfig(filePath?: string): CatCafeConfig {
   return result.data as unknown as CatCafeConfig;
 }
 
+/** Validate member shape without dropping fields owned by raw catalog consumers (for example ACP). */
+export function parseRawCatConfig(raw: string): CatCafeConfig {
+  parseCatConfig(raw);
+  return JSON.parse(raw) as CatCafeConfig;
+}
+
+export function loadResolvedCatConfig(templatePath?: string, options: CatCatalogReadOptions = {}): CatCafeConfig {
+  const resolvedTemplatePath = templatePath ?? process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
+  const raw = mergeTemplateWithCatalog(resolvedTemplatePath, options) ?? readTemplate(resolvedTemplatePath);
+  return parseCatConfig(raw);
+}
+
+/**
+ * Load and validate the resolved cat config source.
+ * Explicit filePath reads that file directly.
+ * Default resolution: cat-template.json is the base, .cat-cafe/cat-catalog.json is a delta overlay.
+ * Catalog fields override config fields (deep merge); config fields absent from catalog are preserved.
+ */
+export function loadCatConfig(filePath?: string): CatCafeConfig {
+  if (filePath) {
+    let raw: string;
+    try {
+      raw = readFileSync(filePath, 'utf-8');
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      throw new Error(`Failed to read cat config at ${filePath}: ${code ?? 'unknown error'}`);
+    }
+    return parseCatConfig(raw);
+  }
+
+  return loadResolvedCatConfig();
+}
+
 export function bootstrapDefaultCatCatalog(templatePath?: string): CatCafeConfig {
   const resolvedTemplatePath = templatePath ?? process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
   const projectRoot = dirname(resolvedTemplatePath);
-  const catalogPath = bootstrapCatCatalog(projectRoot, resolvedTemplatePath);
-  return loadCatConfig(catalogPath);
+  bootstrapCatCatalog(projectRoot, resolvedTemplatePath);
+  return loadResolvedCatConfig(resolvedTemplatePath);
 }
 
 /** Get the default variant for a breed */
@@ -372,13 +716,7 @@ export function getDefaultVariant(breed: CatBreed): CatVariant {
  * @throws Error on duplicate catId (fail-fast at startup)
  */
 export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig> {
-  const result: Record<
-    string,
-    CatConfig & {
-      contextBudget?: ContextBudget;
-      providerProfileId?: string;
-    }
-  > = {};
+  const result: Record<string, CatConfig> = {};
   for (const breed of config.breeds) {
     // F32-b P4c: resolve default variant personality for non-default fallback
     const defaultVariant = breed.variants.find((v) => v.id === breed.defaultVariantId);
@@ -404,45 +742,64 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
       // R1 fix: null = "explicitly no caution" (don't inherit breed).
       // undefined (omitted) = inherit from breed. ?? treats null as nullish, so use !== undefined.
       const caution = variant.caution !== undefined ? variant.caution : breed.caution;
+      const nickname = variant.nickname !== undefined ? variant.nickname : breed.nickname;
+      // F167 Phase E (KD-20): variant restrictions override breed (no merge);
+      // undefined (omitted) inherits breed-level restrictions.
+      const restrictions = variant.restrictions ?? breed.restrictions;
       const projectedCommandArgs =
         variant.commandArgs ??
-        (variant.provider === 'antigravity' && variant.cli?.defaultArgs && variant.cli.defaultArgs.length > 0
+        (variant.clientId === 'antigravity' && variant.cli?.defaultArgs && variant.cli.defaultArgs.length > 0
           ? variant.cli.defaultArgs
           : undefined);
 
-      const legacyVariant = variant as LegacyAwareCatVariant;
-
       result[catId] = {
         id: createCatId(catId),
-        name: variant.displayName ?? breed.name,
+        // Identity fields normally follow a clean `variant.<field> ?? breed.<field>` chain.
+        // The `variant.displayName` middle step in `name` is a LEGACY-COMPAT exception:
+        // pre-clowder-ai#1090 catalogs shipped variants with `displayName` overrides but
+        // no `name` field (that field was introduced by this PR), so their resolved name
+        // came from `variant.displayName`. Keep this legacy branch here for read-time
+        // continuity ONLY — write-time coupling is broken in `updateRuntimeCat` (which
+        // snapshots the resolved name into `variant.name` before overwriting
+        // `variant.displayName`). Do NOT extend this cross-field fallback to other
+        // identity fields (nickname / avatar / color / role): they must stay
+        // variant→breed same-field chains to prevent similar leaks.
+        name: variant.name ?? variant.displayName ?? breed.name,
         displayName: variant.displayName ?? breed.displayName,
-        ...(breed.nickname != null ? { nickname: breed.nickname } : {}),
+        ...(nickname != null ? { nickname } : {}),
         avatar: variant.avatar ?? breed.avatar, // F32-b P4c: variant can override
+        ...(variant.banner ? { banner: variant.banner } : {}),
         color: variant.color ?? breed.color, // F32-b P4c: variant can override
         mentionPatterns,
-        ...(variant.accountRef != null
-          ? { accountRef: variant.accountRef }
-          : legacyVariant.providerProfileId != null
-            ? { accountRef: legacyVariant.providerProfileId }
-            : {}),
-        ...(legacyVariant.providerProfileId != null ? { providerProfileId: legacyVariant.providerProfileId } : {}),
-        provider: variant.provider,
+        ...(variant.accountRef != null ? { accountRef: variant.accountRef } : {}),
+        ...(variant.configurationSource ? { configurationSource: variant.configurationSource } : {}),
+        ...(variant.agentProvider !== undefined ? { agentProvider: variant.agentProvider } : {}),
+        ...(variant.accountBindingMode ? { accountBindingMode: variant.accountBindingMode } : {}),
+        clientId: variant.clientId as ClientId, // #252: Zod now accepts any string; downstream switch/case has default branches
+        carrier: resolveCatCarrier(variant as CarrierCompatInput),
         defaultModel: variant.defaultModel,
         mcpSupport: variant.mcpSupport,
+        ...(variant.agyProfile != null ? { agyProfile: variant.agyProfile } : {}),
         ...(projectedCommandArgs != null ? { commandArgs: projectedCommandArgs } : {}),
         ...(variant.cliConfigArgs != null && variant.cliConfigArgs.length > 0
           ? { cliConfigArgs: [...variant.cliConfigArgs] }
           : {}),
-        ...(variant.contextBudget != null ? { contextBudget: variant.contextBudget } : {}),
+        ...(variant.cli != null ? { cli: variant.cli } : {}),
+        ...(variant.provider != null ? { provider: variant.provider } : {}),
+        ...(variant.contextWindow != null ? { contextWindow: variant.contextWindow } : {}),
+        ...(variant.voiceConfig != null ? { voiceConfig: variant.voiceConfig } : {}),
         roleDescription: variant.roleDescription ?? breed.roleDescription,
         personality: variant.personality ?? defaultVariant?.personality ?? '',
         breedId: breed.id,
+        relationshipKey: variant.relationshipKey ?? breed.relationshipKey ?? breed.id,
         breedDisplayName: breed.displayName,
         ...(variant.variantLabel != null ? { variantLabel: variant.variantLabel } : {}),
         isDefaultVariant: isDefault,
         ...(teamStrengths != null ? { teamStrengths } : {}),
         // R1 fix: preserve null (explicit no-caution) in CatConfig; only omit if undefined
         ...(caution !== undefined ? { caution } : {}),
+        // F167 Phase E: preserve restrictions list for teammate roster + self-awareness injection
+        ...(restrictions != null && restrictions.length > 0 ? { restrictions: [...restrictions] } : {}),
         ...(variant.strengths != null ? { strengths: variant.strengths } : {}),
         ...(variant.sessionChain !== undefined
           ? { sessionChain: variant.sessionChain }
@@ -551,11 +908,11 @@ let _catIdToBreedSource: CatCafeConfig | null = null;
 
 /**
  * Check if F24 session chain is enabled for a cat.
- * Returns true by default — only false when explicitly disabled in cat-config.json.
+ * Returns true by default — only false when explicitly disabled in the resolved cat config.
  * Gracefully returns true if config file is unreadable (availability over strictness).
  *
  * F32-b: Now resolves variant catIds to their parent breed via index.
- * Design constraint: Cat Cafe config is loaded once at startup, no hot-reload.
+ * Design constraint: Clowder AI config is loaded once at startup, no hot-reload.
  *
  * @param catId - The cat to check (e.g. 'opus', 'codex', 'opus-45')
  * @param config - Optional config override (for testing)
@@ -578,10 +935,10 @@ export function isSessionChainEnabled(catId: CatId | string, config?: CatCafeCon
 // ── F33 Phase 2: Session Strategy from config ─────────────────────────
 
 /**
- * Get session strategy config from cat-config.json for a cat.
+ * Get session strategy config from the resolved cat config for a cat.
  * Returns undefined if not configured (caller falls back to code defaults).
  *
- * F33 Phase 2: Same lookup pattern as isSessionChainEnabled — catId → breed → features.
+ * #1329 precedence within file config: explicit variant → breed features.
  */
 export function getConfigSessionStrategy(
   catId: string,
@@ -598,12 +955,14 @@ export function getConfigSessionStrategy(
   const breed = _catIdToBreed.get(catId);
   if (!breed) return undefined;
 
-  // features.sessionStrategy is Zod-validated at load time
-  return breed.features?.sessionStrategy;
+  const variant = breed.variants.find((candidate) => (candidate.catId ?? breed.catId) === catId);
+  // Both values are Zod-validated at load time. The explicit member value must
+  // win even when the retained legacy sessionChain byte says false.
+  return variant?.sessionStrategy ?? breed.features?.sessionStrategy;
 }
 
 /**
- * Get Mission Hub self-claim scope from cat-config.json for a cat.
+ * Get Mission Hub self-claim scope from the resolved cat config for a cat.
  * Defaults to 'disabled' when not configured.
  */
 export function getMissionHubSelfClaimScope(catId: string, config?: CatCafeConfig): MissionHubSelfClaimScope {
@@ -624,14 +983,46 @@ export function getMissionHubSelfClaimScope(catId: string, config?: CatCafeConfi
 // ── F32-b: Default cat resolution ─────────────────────────────────────
 
 let _defaultCatId: CatId | null = null;
+/** F154 AC-A4: Runtime override for default cat (set via Hub API, owner-gated). */
+let _runtimeDefaultCatId: CatId | null = null;
+
+function isKnownAvailableDefaultCat(catId: string): boolean {
+  const config = getCachedConfig();
+  if (!config) {
+    const id = createCatId(catId);
+    // Empty registry = bootstrap/no members → nothing is "known available".
+    // Returning true here would let any catId pass (including hardcoded ones
+    // that don't exist), causing "Unknown cat ID" errors downstream (#937).
+    if (catRegistry.getAllIds().length === 0) return false;
+    return catRegistry.has(id);
+  }
+
+  if (!_catIdToBreed || _catIdToBreedSource !== config) {
+    _catIdToBreed = buildCatIdToBreedIndex(config);
+    _catIdToBreedSource = config;
+  }
+
+  return _catIdToBreed.has(catId) && isCatAvailable(catId, config);
+}
 
 /**
- * Get the default cat ID (= breeds[0].defaultVariantId's resolved catId).
+ * Get the default cat ID.
+ * Priority: runtime override (F154) → breeds[0].defaultVariantId (F32-b R4).
  * Used as ultimate fallback in AgentRouter when no mentions/participants/preferredCats.
- *
- * F32-b R4: Explicit derivation from defaultVariantId — NOT registry order dependent.
  */
 export function getDefaultCatId(): CatId {
+  if (_runtimeDefaultCatId) {
+    if (isKnownAvailableDefaultCat(_runtimeDefaultCatId)) return _runtimeDefaultCatId;
+    log.warn({ catId: _runtimeDefaultCatId }, 'Runtime default cat is unavailable or unknown, falling back');
+  }
+
+  const envCatId = process.env.DEFAULT_CAT_ID?.trim();
+  if (envCatId) {
+    const id = createCatId(envCatId);
+    if (isKnownAvailableDefaultCat(id)) return id;
+    log.warn({ envCatId }, 'DEFAULT_CAT_ID references unavailable or unknown cat, falling back');
+  }
+
   if (_defaultCatId) return _defaultCatId;
 
   const config = getCachedConfig();
@@ -643,8 +1034,37 @@ export function getDefaultCatId(): CatId {
     return _defaultCatId;
   }
 
-  // Ultimate fallback (should not trigger — config always has at least 1 breed)
-  return createCatId('opus');
+  // Ultimate fallback: prefer DEFAULT_CAT_ID env even if not yet "known available"
+  // (config may not be loaded yet on first message), then try first registered cat,
+  // then fall back to env value raw. Never hardcode a specific cat ID (#937).
+  const envFallback = process.env.DEFAULT_CAT_ID?.trim();
+  const registeredIds = catRegistry.getAllIds();
+  if (registeredIds.length > 0) return registeredIds[0]!;
+  if (envFallback) return createCatId(envFallback);
+  // Truly empty — no config, no env, no registered cats. Return a sentinel
+  // that callers (AgentRouter) should handle as "no targets available".
+  log.warn('No cats registered and no DEFAULT_CAT_ID set — returning __none__ sentinel');
+  return createCatId('__none__');
+}
+
+/** F154 AC-A4: Set runtime default cat override. Owner-gated at the API layer. */
+export function setRuntimeDefaultCatId(catId: string): void {
+  _runtimeDefaultCatId = createCatId(catId);
+}
+
+/** F154 AC-A4: Clear runtime override — falls back to breeds[0]. */
+export function clearRuntimeDefaultCatId(): void {
+  _runtimeDefaultCatId = null;
+}
+
+/** F154 AC-A4: Check whether a runtime override is active. */
+export function hasRuntimeDefaultCatOverride(): boolean {
+  return _runtimeDefaultCatId !== null && isKnownAvailableDefaultCat(_runtimeDefaultCatId);
+}
+
+/** Unified owner userId: configured env or single-user fallback. */
+export function getOwnerUserId(env: NodeJS.ProcessEnv = process.env): string {
+  return env.DEFAULT_OWNER_USER_ID?.trim() || 'default-user';
 }
 
 // ── Variant CLI effort accessor ──────────────────────────────────────
@@ -664,19 +1084,34 @@ function buildCatIdToVariantIndex(config: CatCafeConfig): Map<string, CatVariant
   return index;
 }
 
-/** Effort level union across all CLI providers */
-export type CliEffortLevel = 'low' | 'medium' | 'high' | 'max' | 'xhigh';
+/** Canonical effort string resolved from the catalog or a client default. */
+export type CliEffortLevel = string;
 
 /**
- * Get CLI effort level for a cat from cat-config.json.
+ * Get CLI effort level for a cat from the resolved cat config.
  * Default when not configured:
  *   claude (anthropic): 'max'
  *   codex (openai):     'xhigh'
+ *   kimi:               'high'
  *   others:             'high'
+ *
+ * effectiveModel remains part of the call contract because invocation-level
+ * thread overrides are model-aware. Member defaults themselves are native
+ * provider values and are not rewritten by a local model whitelist.
  */
-export function getCatEffort(catId: string, config?: CatCafeConfig): CliEffortLevel {
+export function getCatEffort(
+  catId: string,
+  config?: CatCafeConfig,
+  fallbackProvider?: ClientId,
+  _effectiveModel?: string | null,
+): CliEffortLevel {
+  const nativeConfig = config ? undefined : catRegistry.tryGet(catId)?.config;
+  if (nativeConfig?.configurationSource === 'native_tool') return nativeConfig.cli?.effort?.trim() ?? '';
   const cfg = config ?? getCachedConfig();
-  if (!cfg) return 'max';
+  if (!cfg) {
+    const normalized = normalizeCliEffortForProvider(fallbackProvider ?? 'anthropic', undefined);
+    return normalized ?? 'high';
+  }
 
   if (!_catIdToVariant || _catIdToVariantSource !== cfg) {
     _catIdToVariant = buildCatIdToVariantIndex(cfg);
@@ -684,12 +1119,106 @@ export function getCatEffort(catId: string, config?: CatCafeConfig): CliEffortLe
   }
 
   const variant = _catIdToVariant.get(catId);
-  if (variant?.cli.effort) return variant.cli.effort;
+  if (variant?.cli?.effort) {
+    const nativeValue = variant.cli.effort.trim();
+    if (nativeValue) return nativeValue;
+  }
 
-  // Provider-aware defaults
-  if (variant?.provider === 'openai') return 'xhigh';
-  if (variant?.provider === 'anthropic') return 'max';
+  if (variant?.configurationSource === 'native_tool') return '';
+
+  // Client-aware defaults: use variant's clientId if found, otherwise fallbackProvider
+  const effectiveProvider = variant?.clientId ?? fallbackProvider;
+  if (effectiveProvider) {
+    const normalized = normalizeCliEffortForProvider(effectiveProvider, undefined);
+    if (normalized) return normalized;
+  }
   return 'high';
+}
+
+export interface CatContextWindowConfig {
+  contextWindow: number;
+  autoCompactTokenLimit: number;
+}
+
+/**
+ * clowder-ai#1208: Return the member's explicit manual context cap, if any.
+ * This is a compatibility shim for callers that have not yet switched to
+ * `resolveContextCapacity`; the effective window should always be resolved
+ * through the capacity resolver.
+ */
+export function getCatContextWindowConfig(
+  catId: string,
+  _effectiveModel?: string | null,
+): CatContextWindowConfig | undefined {
+  const cfg = getCachedConfig();
+  if (!cfg) return undefined;
+
+  if (!_catIdToVariant || _catIdToVariantSource !== cfg) {
+    _catIdToVariant = buildCatIdToVariantIndex(cfg);
+    _catIdToVariantSource = cfg;
+  }
+
+  const variant = _catIdToVariant.get(catId);
+  // Top-level contextWindow is canonical; compat-read legacy cli.contextWindow.
+  const legacyCli = variant?.cli as { contextWindow?: number } | undefined;
+  const capTokens = variant?.contextWindow ?? (legacyCli?.contextWindow || undefined);
+  if (!capTokens) return undefined;
+  return {
+    contextWindow: capTokens,
+    autoCompactTokenLimit: deriveAutoCompactTokenLimit(capTokens),
+  };
+}
+
+// ── F149: ACP config accessor (raw variant field, not in CatConfig type) ──────
+
+export interface AcpVariantConfig {
+  /** Stable plugin reference; the Host resolves launch settings from the active plugin. */
+  agentProvider?: string;
+  command: string;
+  startupArgs: string[];
+  /** Optional owner-selected absolute root; full directory checks, no automatic relocation. */
+  bootstrapRoot?: string;
+  /** F161 Phase C: ACP wire transport. 'stdio' = NDJSON over stdin/stdout (default). 'httpstream' = spawn process that listens on HTTP port. */
+  transport?: 'stdio' | 'httpstream';
+  /** Required for httpstream until ACP publishes a stable HTTP transport spec. */
+  experimental?: boolean;
+  mcpWhitelist?: string[];
+  supportsMultiplexing?: boolean;
+  /** iCode protocol adapter: switches AcpAgentService onto iCode's ACP dialect (session/set_model, per-turn session/close, no stdio MCP injection). */
+  protocolAdapter?: 'icode';
+  /** iCode: model configuration id sent to session/set_model (distinct from defaultModel). */
+  modelProfileId?: string;
+  /** Phase C: optional pool config overrides */
+  pool?: {
+    maxLiveProcesses?: number;
+    idleTtlMs?: number;
+  };
+}
+
+/**
+ * Get ACP config for a cat from the resolved raw runtime variant.
+ * Returns undefined if the variant has no `acp` section (= use legacy CLI).
+ * Reads raw JSON because `acp` is not in the typed CatConfig (intentionally).
+ */
+export function getAcpConfig(catId: string, projectRoot?: string): AcpVariantConfig | undefined {
+  try {
+    const templatePath = projectRoot
+      ? resolveProjectTemplatePath(projectRoot)
+      : (process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH);
+    const raw = mergeTemplateWithCatalog(templatePath) ?? readTemplate(templatePath);
+    const json = JSON.parse(raw) as {
+      breeds?: Array<{ catId?: string; variants?: Array<{ catId?: string; acp?: AcpVariantConfig | null }> }>;
+    };
+    for (const breed of json.breeds ?? []) {
+      for (const variant of breed.variants ?? []) {
+        const resolvedCatId = variant.catId ?? breed.catId;
+        if (resolvedCatId === catId && variant.acp) return variant.acp;
+      }
+    }
+  } catch {
+    // Config unreadable → no ACP config
+  }
+  return undefined;
 }
 
 /** Reset cached config (for testing) */
@@ -758,7 +1287,7 @@ export function getReviewPolicy(config?: CatCafeConfig): ReviewPolicy {
 
 /**
  * Check if a cat is available (has quota).
- * F032: 铲屎官 40 美刀教训 — 没猫粮的猫不要找！
+ * F032: co-creator 40 美刀教训 — 没猫粮的猫不要找！
  */
 export function isCatAvailable(catId: string, config?: CatCafeConfig): boolean {
   const roster = getRoster(config);
@@ -798,13 +1327,13 @@ export function isCatLead(catId: string, config?: CatCafeConfig): boolean {
 // ── F067: Co-Creator config accessor ────────────────────────────────
 
 /** Default co-creator mention patterns (backward compat when not configured) */
-const DEFAULT_CO_CREATOR_MENTION_PATTERNS = ['@co-creator', '@铲屎官'];
+const DEFAULT_CO_CREATOR_MENTION_PATTERNS = ['@co-creator', '@co-creator', '@co-creator', '@co-creator', '@co-creator'];
 
 let _cachedCoCreator: CoCreatorConfig | null = null;
 
 /**
- * Get coCreator config from cat-config.json.
- * Returns a default config with @co-creator/@铲屎官 patterns when not configured.
+ * Get coCreator config from the resolved cat config.
+ * Returns a default config with @co-creator/@co-creator patterns when not configured.
  */
 export function getCoCreatorConfig(config?: CatCafeConfig): CoCreatorConfig {
   if (_cachedCoCreator && !config) return _cachedCoCreator;
@@ -813,7 +1342,7 @@ export function getCoCreatorConfig(config?: CatCafeConfig): CoCreatorConfig {
 
   // v1 config or no coCreator → return defaults
   if (!cfg || cfg.version === 1 || !cfg.coCreator) {
-    return { name: '铲屎官', aliases: [], mentionPatterns: DEFAULT_CO_CREATOR_MENTION_PATTERNS };
+    return { name: 'co-creator', aliases: [], mentionPatterns: DEFAULT_CO_CREATOR_MENTION_PATTERNS };
   }
 
   _cachedCoCreator = cfg.coCreator;
@@ -822,7 +1351,7 @@ export function getCoCreatorConfig(config?: CatCafeConfig): CoCreatorConfig {
 
 /**
  * Get all co-creator mention patterns (lowercased, with @ prefix).
- * Always includes @co-creator and @铲屎官 as fallback patterns in addition to configured ones.
+ * Always includes @co-creator and @co-creator as fallback patterns in addition to configured ones.
  */
 export function getCoCreatorMentionPatterns(config?: CatCafeConfig): readonly string[] {
   const coCreator = getCoCreatorConfig(config);

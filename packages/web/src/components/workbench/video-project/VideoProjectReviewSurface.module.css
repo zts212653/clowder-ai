@@ -1,0 +1,43 @@
+.surface {
+  container-type: inline-size;
+}
+
+.scenes {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(24px, 1fr);
+  overflow-x: auto;
+}
+
+@container (min-width: 700px) {
+  .stage {
+    grid-template-columns: minmax(0, 1fr) 240px;
+  }
+}
+
+.slider {
+  appearance: none;
+  height: 4px;
+  background: linear-gradient(
+    to right,
+    var(--shell-ink, var(--cafe-text)) 0 var(--progress, 0%),
+    var(--shell-hairline-strong, var(--cafe-border)) var(--progress, 0%) 100%
+  );
+  border-radius: 999px;
+  cursor: pointer;
+}
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--shell-muted, var(--cafe-text-muted));
+  background: var(--shell-paper, var(--cafe-surface));
+}
+.slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--shell-muted, var(--cafe-text-muted));
+  background: var(--shell-paper, var(--cafe-surface));
+}

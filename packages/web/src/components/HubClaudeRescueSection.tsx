@@ -109,34 +109,36 @@ export function HubClaudeRescueSection() {
   }, [addToast, rescuing, scanSessions, selectedTargets]);
 
   return (
-    <section className="rounded-lg border border-amber-200 bg-amber-50/70 p-3 space-y-3">
+    <section className="rounded-lg border border-conn-amber-ring bg-conn-amber-bg/70 p-3 space-y-3">
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-3">
-          <h4 className="text-xs font-semibold text-amber-900">布偶猫救援中心</h4>
+          <h4 className="text-xs font-semibold text-conn-amber-text">布偶猫救援中心</h4>
           <button
             type="button"
             onClick={() => {
               void scanSessions();
             }}
             disabled={loading || rescuing}
-            className="px-2.5 py-1 rounded border border-amber-300 bg-white text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+            className="px-2.5 py-1 rounded border border-conn-amber-ring bg-cafe-surface text-xs text-conn-amber-text hover:bg-conn-amber-bg disabled:opacity-50"
           >
             {loading ? '扫描中...' : '重新扫描'}
           </button>
         </div>
-        <p className="text-xs text-amber-800">
+        <p className="text-xs text-conn-amber-text">
           专治 Claude session 的坏 thinking signature。执行前会自动备份 transcript，只会移除纯 thinking-only assistant
           turn。
         </p>
-        <p className="text-[11px] text-amber-700">扫描范围：当前机器上的 `~/.claude/projects/**/*.jsonl`</p>
+        <p className="text-xs text-conn-amber-text">扫描范围：当前机器上的 `~/.claude/projects/**/*.jsonl`</p>
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
+        <div className="rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-conn-red-text">
+          {error}
+        </div>
       )}
 
       {lastRun && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 space-y-1">
+        <div className="rounded-lg border border-[var(--semantic-success)] bg-[var(--semantic-success-surface)] px-3 py-2 text-xs text-conn-emerald-text space-y-1">
           <p className="font-medium">刚刚救活 {lastRun.rescuedCount} 只布偶猫</p>
           <p>
             跳过 {lastRun.skippedCount} 只，处理 {lastRun.results.length} 个 session。
@@ -145,14 +147,16 @@ export function HubClaudeRescueSection() {
       )}
 
       {loading ? (
-        <p className="text-xs text-amber-700">扫描中...</p>
+        <p className="text-xs text-conn-amber-text">扫描中...</p>
       ) : sessions.length === 0 ? (
-        <p className="text-xs text-amber-700">暂未发现坏掉的布偶猫 session</p>
+        <p className="text-xs text-conn-amber-text">暂未发现坏掉的布偶猫 session</p>
       ) : (
         <div className="space-y-3">
           <div className="space-y-1">
-            <p className="text-xs font-medium text-amber-900">检测到 {sessions.length} 只布偶猫 session 需要救援</p>
-            <p className="text-[11px] text-amber-700">先勾选要动刀的 session，再执行一键救活。</p>
+            <p className="text-xs font-medium text-conn-amber-text">
+              检测到 {sessions.length} 只布偶猫 session 需要救援
+            </p>
+            <p className="text-xs text-conn-amber-text">先勾选要动刀的 session，再执行一键救活。</p>
           </div>
           <div className="space-y-2">
             {sessions.map((session) => {
@@ -160,7 +164,7 @@ export function HubClaudeRescueSection() {
               return (
                 <label
                   key={session.sessionId}
-                  className="flex items-start gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-gray-700"
+                  className="flex items-start gap-2 rounded-lg border border-conn-amber-ring bg-cafe-surface px-3 py-2 text-xs text-cafe-secondary"
                 >
                   <input
                     type="checkbox"
@@ -169,10 +173,12 @@ export function HubClaudeRescueSection() {
                     className="mt-0.5"
                   />
                   <span className="space-y-0.5">
-                    <span className="block font-medium text-gray-900">{session.sessionId}</span>
-                    <span className="block text-amber-800">纯 thinking turn：{session.removableThinkingTurns} 条</span>
-                    <span className="block break-all text-gray-500">{session.transcriptPath}</span>
-                    <span className="block text-gray-500">{describeDetection(session)}</span>
+                    <span className="block font-medium text-cafe">{session.sessionId}</span>
+                    <span className="block text-conn-amber-text">
+                      纯 thinking turn：{session.removableThinkingTurns} 条
+                    </span>
+                    <span className="block break-all text-cafe-secondary">{session.transcriptPath}</span>
+                    <span className="block text-cafe-secondary">{describeDetection(session)}</span>
                   </span>
                 </label>
               );
@@ -184,7 +190,7 @@ export function HubClaudeRescueSection() {
               void rescueSelected();
             }}
             disabled={rescuing || selectedTargets.length === 0}
-            className="px-3 py-1.5 rounded bg-amber-600 text-white text-xs hover:bg-amber-700 disabled:opacity-50"
+            className="px-3 py-1.5 rounded bg-[var(--semantic-warning)] text-[var(--cafe-surface)] text-xs hover:opacity-90 disabled:opacity-50"
           >
             {rescuing ? '救援中...' : `一键救活 ${selectedTargets.length} 只布偶猫`}
           </button>

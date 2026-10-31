@@ -7,28 +7,69 @@
  *   cat-cafe:thread:{threadId}:participants  → Set (参与猫)
  *   cat-cafe:threads:user:{userId}          → Sorted Set (用户对话列表, score=lastActiveAt)
  *
- * TTL 默认 30 天。
+ * 默认持久化；用户可见状态禁止默认 TTL（LL-048）。
  */
 
-import type { CatId, ThreadPhase } from '@cat-cafe/shared';
-import { generateThreadId } from '@cat-cafe/shared';
+import type { CatId, CliEffortPreset, CodexSpeedValue, ThreadKind, ThreadPhase } from '@cat-cafe/shared';
+import { CLI_EFFORT_VALUES, CODEX_SPEED_VALUES, generateThreadId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { type OwnedThreadSeed, ownedThreadFromSeed, requireOwnedThread } from '../ports/OwnedThreadSeed.js';
+import type { StoreReadOptions } from '../ports/StoreReadOptions.js';
+import { awaitStoreRead, throwIfStoreReadAborted } from '../ports/StoreReadOptions.js';
 import type {
   BootcampStateV1,
   ConnectorHubStateV1,
+  EnsureOnboardingThreadResult,
+  ExternalRuntimeAnchorRuntime,
   IThreadStore,
   MentionActionabilityMode,
   Thread,
+  ThreadGoalStateV1,
   ThreadMemoryV1,
   ThreadMentionRoutingFeedback,
+  ThreadMetadataPatch,
+  ThreadMetadataV1,
   ThreadParticipantActivity,
+  ThreadPluginOwnershipV1,
   ThreadRoutingPolicyV1,
+  ThreadSystemKind,
   VotingStateV1,
 } from '../ports/ThreadStore.js';
-import { DEFAULT_THREAD_ID } from '../ports/ThreadStore.js';
+import {
+  buildExternalRuntimeAnchorThreadId,
+  DEFAULT_THREAD_ID,
+  deriveAutoThreadTitle,
+  isThreadGoalStateV1,
+  isThreadPluginOwnershipV1,
+  mergeThreadMetadata,
+  onboardingThreadId,
+  parseThreadMetadataJson,
+  validateMergedTotals,
+} from '../ports/ThreadStore.js';
+import { MessageKeys } from '../redis-keys/message-keys.js';
 import { ThreadKeys } from '../redis-keys/thread-keys.js';
+import { createOwnedThreadAtomically } from './owned-thread-create.js';
+import { readAuthoritativeHash, readAuthoritativeMembers } from './redis-pipeline-reply.js';
+import {
+  backfillThreadProjectMembers,
+  ensureThreadProjectIndex,
+  hasVisibleThreadProject,
+  indexThreadProjectForUser,
+  moveThreadProject,
+  threadProjectIndexKey,
+} from './thread-project-index.js';
 
-const DEFAULT_TTL = 30 * 24 * 60 * 60; // 30 days
+const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
+const CLI_EFFORT_VALUE_SET = new Set<string>(CLI_EFFORT_VALUES);
+const CODEX_SPEED_VALUE_SET = new Set<string>(CODEX_SPEED_VALUES);
+
+function parseCliEffortValue(raw: string | null | undefined): CliEffortPreset | undefined {
+  return raw && CLI_EFFORT_VALUE_SET.has(raw) ? (raw as CliEffortPreset) : undefined;
+}
+
+function parseCodexSpeedValue(raw: string | null | undefined): CodexSpeedValue | undefined {
+  return raw && CODEX_SPEED_VALUE_SET.has(raw) ? (raw as CodexSpeedValue) : undefined;
+}
 
 /**
  * Atomic hash update guard:
@@ -40,6 +81,73 @@ if redis.call('HEXISTS', KEYS[1], 'id') == 0 then
   return 0
 end
 redis.call('HSET', KEYS[1], unpack(ARGV))
+return 1
+`;
+
+/** Atomic first-run thread creation keyed by the stable onboarding journey. */
+const ENSURE_ONBOARDING_THREAD_LUA = `
+if redis.call('HEXISTS', KEYS[1], 'id') == 1 then
+  return 0
+end
+for i = 1, #ARGV - 2, 2 do
+  redis.call('HSET', KEYS[1], ARGV[i], ARGV[i + 1])
+end
+redis.call('ZADD', KEYS[2], ARGV[#ARGV - 1], ARGV[#ARGV])
+return 1
+`;
+
+/**
+ * #872 P2: Compare-And-Swap guard for thread metadata merge atomicity.
+ * Only writes if (a) thread exists (has `id`) AND (b) current field value
+ * matches the snapshot the caller read. Returns 1 on success, 0 on conflict.
+ * KEYS[1] = detail key, ARGV[1] = field, ARGV[2] = expected, ARGV[3] = new.
+ */
+const CAS_HSET_IF_HAS_ID_LUA = `
+if redis.call('HEXISTS', KEYS[1], 'id') == 0 then
+  return 0
+end
+local cur = redis.call('HGET', KEYS[1], ARGV[1])
+if cur == false then cur = '' end
+if cur == ARGV[2] then
+  redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
+  return 1
+end
+return 0
+`;
+
+/** F306 exact-revision CAS for the durable thread goal field. */
+const CAS_THREAD_GOAL_LUA = `
+if redis.call('HEXISTS', KEYS[1], 'id') == 0 then
+  return 0
+end
+local raw = redis.call('HGET', KEYS[1], 'goal')
+if ARGV[3] == '1' then
+  if tonumber(ARGV[1]) ~= -1 or raw == false or raw ~= ARGV[4] then
+    return 0
+  end
+  if ARGV[2] == '' then
+    redis.call('HDEL', KEYS[1], 'goal')
+  else
+    redis.call('HSET', KEYS[1], 'goal', ARGV[2])
+  end
+  return 1
+end
+local currentRevision = -1
+if raw then
+  local ok, parsed = pcall(cjson.decode, raw)
+  if not ok or type(parsed) ~= 'table' or type(parsed.revision) ~= 'number' then
+    return 0
+  end
+  currentRevision = parsed.revision
+end
+if currentRevision ~= tonumber(ARGV[1]) then
+  return 0
+end
+if ARGV[2] == '' then
+  redis.call('HDEL', KEYS[1], 'goal')
+else
+  redis.call('HSET', KEYS[1], 'goal', ARGV[2])
+end
 return 1
 `;
 
@@ -72,11 +180,16 @@ end
 redis.call('SADD', KEYS[2], ARGV[1])
 redis.call('HSET', KEYS[3], ARGV[1] .. ':lastMessageAt', ARGV[2])
 redis.call('HINCRBY', KEYS[3], ARGV[1] .. ':messageCount', 1)
+redis.call('HSET', KEYS[3], ARGV[1] .. ':healthy', ARGV[4])
 local ttl = tonumber(ARGV[3])
 if ttl > 0 then
   redis.call('EXPIRE', KEYS[1], ttl)
   redis.call('EXPIRE', KEYS[2], ttl)
   redis.call('EXPIRE', KEYS[3], ttl)
+else
+  redis.call('PERSIST', KEYS[1])
+  redis.call('PERSIST', KEYS[2])
+  redis.call('PERSIST', KEYS[3])
 end
 return 1
 `;
@@ -91,6 +204,26 @@ if value then
   redis.call('HDEL', KEYS[1], ARGV[1])
 end
 return value
+`;
+
+/**
+ * Atomic thread deletion: DEL detail + related keys + conditional tombstone.
+ * Prevents race where get() → recoverThreadFromMessages() resurrects between
+ * pipeline DEL and non-atomic tombstone SET.
+ * KEYS[1]=detail, KEYS[2]=participants, KEYS[3]=activity,
+ * KEYS[4]=mentionFeedback, KEYS[5]=tombstone [, KEYS[6]=userList]
+ * ARGV[1]=threadId (for optional ZREM from userList)
+ */
+const DELETE_THREAD_LUA = `
+local deleted = redis.call('DEL', KEYS[1])
+redis.call('DEL', KEYS[2], KEYS[3], KEYS[4])
+if #KEYS >= 6 then
+  redis.call('ZREM', KEYS[6], ARGV[1])
+end
+if deleted > 0 then
+  redis.call('SET', KEYS[5], '1')
+end
+return deleted
 `;
 
 /** R1 P2-1: Shared validation for ThreadMemoryV1 JSON — rejects incomplete/corrupt data. */
@@ -114,25 +247,33 @@ function parseThreadMemoryJson(raw: string): ThreadMemoryV1 | null {
 }
 
 export class RedisThreadStore implements IThreadStore {
+  private static readonly LIST_REPAIR_COOLDOWN_MS = 5 * 60 * 1000;
+  private static readonly LIST_READ_BATCH_SIZE = 128;
   private readonly redis: RedisClient;
   /** null means no expiration. */
   private readonly ttlSeconds: number | null;
+  /** Avoid re-scanning every request when a user genuinely only has one thread. */
+  private readonly lastListRepairAt = new Map<string, number>();
 
   constructor(redis: RedisClient, options?: { ttlSeconds?: number }) {
     this.redis = redis;
-    const ttl = options?.ttlSeconds;
-    if (ttl === undefined) {
-      this.ttlSeconds = DEFAULT_TTL;
-    } else if (!Number.isFinite(ttl)) {
-      this.ttlSeconds = DEFAULT_TTL;
-    } else if (ttl <= 0) {
+    const raw = options?.ttlSeconds ?? DEFAULT_TTL;
+    if (!Number.isFinite(raw) || raw <= 0) {
       this.ttlSeconds = null;
     } else {
-      this.ttlSeconds = Math.floor(ttl);
+      this.ttlSeconds = Math.floor(raw);
     }
   }
 
-  async create(userId: string, title?: string, projectPath?: string): Promise<Thread> {
+  async create(
+    userId: string,
+    title?: string,
+    projectPath?: string,
+    parentThreadId?: string,
+    proposalAudit?: import('../ports/ThreadStore.js').ThreadProposalAudit,
+    branchAudit?: import('../ports/ThreadStore.js').ThreadBranchAudit,
+    options?: import('../ports/ThreadStore.js').ThreadCreateOptions,
+  ): Promise<Thread> {
     const now = Date.now();
     const thread: Thread = {
       id: generateThreadId(),
@@ -142,6 +283,20 @@ export class RedisThreadStore implements IThreadStore {
       participants: [],
       lastActiveAt: now,
       createdAt: now,
+      ...(options?.pinned ? { pinned: true, pinnedAt: now } : {}),
+      ...(parentThreadId ? { parentThreadId } : {}),
+      ...(proposalAudit
+        ? {
+            createdFromProposalId: proposalAudit.createdFromProposalId,
+            sourceThreadId: proposalAudit.sourceThreadId,
+            ...(proposalAudit.sourceInvocationId ? { sourceInvocationId: proposalAudit.sourceInvocationId } : {}),
+            ...(proposalAudit.sourceMessageId ? { sourceMessageId: proposalAudit.sourceMessageId } : {}),
+            ...(proposalAudit.declaredWorkMode ? { declaredWorkMode: proposalAudit.declaredWorkMode } : {}),
+            approvedBy: proposalAudit.approvedBy,
+            approvedAt: proposalAudit.approvedAt,
+          }
+        : {}),
+      ...(branchAudit ? { branchAudit: { ...branchAudit } } : {}),
     };
 
     const key = ThreadKeys.detail(thread.id);
@@ -151,51 +306,279 @@ export class RedisThreadStore implements IThreadStore {
       pipeline.expire(key, this.ttlSeconds);
     }
     pipeline.zadd(ThreadKeys.userList(userId), String(now), thread.id);
+    pipeline.sadd(threadProjectIndexKey(thread.projectPath), thread.id);
     if (this.ttlSeconds !== null) {
       pipeline.expire(ThreadKeys.userList(userId), this.ttlSeconds);
+    }
+    // F128: Maintain parent→children secondary index
+    if (parentThreadId) {
+      const childrenKey = ThreadKeys.children(parentThreadId);
+      pipeline.zadd(childrenKey, String(now), thread.id);
+      if (this.ttlSeconds !== null) {
+        pipeline.expire(childrenKey, this.ttlSeconds);
+      }
     }
     await pipeline.exec();
 
     return thread;
   }
 
-  async get(threadId: string): Promise<Thread | null> {
-    const data = await this.redis.hgetall(ThreadKeys.detail(threadId));
+  async ensureOwnedThread(seed: OwnedThreadSeed): Promise<Thread> {
+    const thread = ownedThreadFromSeed(seed);
+    await createOwnedThreadAtomically(this.redis, thread, this.serializeThread(thread), this.ttlSeconds);
+    return requireOwnedThread(await this.get(thread.id), seed.userId);
+  }
+
+  async ensureThread(threadId: string, title: string): Promise<Thread> {
+    const key = ThreadKeys.detail(threadId);
+    const existingId = await this.redis.hget(key, 'id');
+    if (existingId) {
+      const data = await this.redis.hgetall(key);
+      return this.hydrateThread(data);
+    }
+
+    const now = Date.now();
+    const thread: Thread = {
+      id: threadId,
+      projectPath: 'default',
+      title,
+      createdBy: 'system',
+      participants: [],
+      lastActiveAt: now,
+      createdAt: now,
+    };
+
+    await this.redis
+      .multi()
+      .hset(key, this.serializeThread(thread))
+      .sadd(threadProjectIndexKey(thread.projectPath), thread.id)
+      .exec();
+    // System threads are persistent — no TTL applied (W5: user state default persistent)
+    return thread;
+  }
+
+  async ensureOnboardingThread(
+    userId: string,
+    journeyId: string,
+    title: string,
+    projectPath: string,
+    bootcampState?: BootcampStateV1,
+  ): Promise<EnsureOnboardingThreadResult> {
+    const threadId = onboardingThreadId(userId, journeyId);
+    const now = Date.now();
+    const thread: Thread = {
+      id: threadId,
+      projectPath,
+      title,
+      createdBy: userId,
+      participants: [],
+      lastActiveAt: now,
+      createdAt: now,
+      bootcampState,
+    };
+    const fields = this.serializeThread(thread);
+    const args = Object.entries(fields).flatMap(([key, value]) => [key, value]);
+    args.push(String(now), threadId);
+    const created =
+      Number(
+        await this.redis.eval(
+          ENSURE_ONBOARDING_THREAD_LUA,
+          2,
+          ThreadKeys.detail(threadId),
+          ThreadKeys.userList(userId),
+          ...args,
+        ),
+      ) === 1;
+    const existing = await this.get(threadId);
+    if (!existing) throw new Error('Failed to ensure onboarding thread');
+    return { thread: existing, created };
+  }
+
+  async ensureExternalRuntimeAnchorThread(runtime: ExternalRuntimeAnchorRuntime, userId: string): Promise<Thread> {
+    const threadId = buildExternalRuntimeAnchorThreadId(runtime, userId);
+    const key = ThreadKeys.detail(threadId);
+    const existingId = await this.redis.hget(key, 'id');
+    if (existingId) {
+      const data = await this.redis.hgetall(key);
+      return this.hydrateThread(data);
+    }
+
+    const now = Date.now();
+    const thread: Thread = {
+      id: threadId,
+      projectPath: `external-runtime:${runtime}`,
+      title: `External runtime: ${runtime}`,
+      createdBy: 'system',
+      participants: [],
+      lastActiveAt: now,
+      createdAt: now,
+      externalRuntimeAnchorState: {
+        v: 1,
+        runtime,
+        userId,
+        createdAt: now,
+      },
+    };
+
+    await this.redis.hset(key, this.serializeThread(thread));
+    return thread;
+  }
+
+  async get(threadId: string, options?: StoreReadOptions): Promise<Thread | null> {
+    throwIfStoreReadAborted(options);
+    const data = await awaitStoreRead(this.redis.hgetall(ThreadKeys.detail(threadId)), options);
     if (!data || !data.id) {
+      throwIfStoreReadAborted(options);
       if (threadId === DEFAULT_THREAD_ID) {
-        return this.createDefaultThread();
+        return this.createDefaultThread(options);
       }
-      return null;
+      return this.recoverThreadFromMessages(threadId, options);
     }
 
     const thread = this.hydrateThread(data);
     // Load participants from Set
-    const members = await this.redis.smembers(ThreadKeys.participants(threadId));
+    const members = await awaitStoreRead(this.redis.smembers(ThreadKeys.participants(threadId)), options);
     thread.participants = members as CatId[];
     return thread;
   }
 
-  async list(userId: string): Promise<Thread[]> {
-    const ids = await this.redis.zrevrange(ThreadKeys.userList(userId), 0, -1);
+  async list(userId: string, options?: StoreReadOptions): Promise<Thread[]> {
+    throwIfStoreReadAborted(options);
+    const ids = await this.loadUserThreadIds(userId, options);
 
     // Ensure default thread is included
     const hasDefault = ids.includes(DEFAULT_THREAD_ID);
     if (!hasDefault) ids.push(DEFAULT_THREAD_ID);
 
+    return this.readListedThreads(ids, options);
+  }
+
+  private async readListedThreads(ids: readonly string[], options?: StoreReadOptions): Promise<Thread[]> {
     const threads: Thread[] = [];
-    for (const id of ids) {
-      const thread = await this.get(id);
-      if (thread && !thread.deletedAt) threads.push(thread);
+    // Share one bounded round-trip across hash/set reads instead of awaiting
+    // two Redis responses per thread on every navigation and background scan.
+    for (let offset = 0; offset < ids.length; offset += RedisThreadStore.LIST_READ_BATCH_SIZE) {
+      throwIfStoreReadAborted(options);
+      const batchIds = ids.slice(offset, offset + RedisThreadStore.LIST_READ_BATCH_SIZE);
+      const pipeline = this.redis.multi();
+      for (const id of batchIds) {
+        pipeline.hgetall(ThreadKeys.detail(id));
+        pipeline.smembers(ThreadKeys.participants(id));
+      }
+      const results = await awaitStoreRead(pipeline.exec(), options);
+      throwIfStoreReadAborted(options);
+      // Validate every queued reply before recovery can create/repair a hash.
+      // A missing detail does not make its paired participants reply optional.
+      const snapshots = batchIds.map((id, index) => ({
+        id,
+        data: readAuthoritativeHash(results?.[index * 2], `thread list ${id}`),
+        members: readAuthoritativeMembers(results?.[index * 2 + 1], `thread list ${id}`),
+      }));
+      for (const { id, data, members } of snapshots) {
+        throwIfStoreReadAborted(options);
+        let thread: Thread | null;
+        if (!data?.id) {
+          // Preserve default creation and tombstone-aware recovery in their
+          // existing owner. Failed batch reads must never enter this path.
+          thread = await this.get(id, options);
+        } else {
+          thread = this.hydrateThread(data);
+          thread.participants = members as CatId[];
+        }
+        if (thread && !thread.deletedAt && !thread.externalRuntimeAnchorState) threads.push(thread);
+      }
     }
 
+    throwIfStoreReadAborted(options);
     // Sort by lastActiveAt descending
     threads.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
     return threads;
   }
 
+  async repairIndex(
+    userId?: string,
+    options?: StoreReadOptions,
+  ): Promise<{ repairedUsers: number; repairedMembers: number }> {
+    throwIfStoreReadAborted(options);
+    const indexedByUser = await this.collectIndexedThreadsFromDetails(userId, options);
+    let repairedUsers = 0;
+    let repairedMembers = 0;
+
+    for (const [ownerId, members] of indexedByUser) {
+      throwIfStoreReadAborted(options);
+      const userListKey = ThreadKeys.userList(ownerId);
+      const existingIds = new Set(await awaitStoreRead(this.redis.zrange(userListKey, 0, -1), options));
+      const missing = [...members.entries()].filter(([threadId]) => !existingIds.has(threadId));
+      if (missing.length === 0) continue;
+
+      const zaddArgs: string[] = [];
+      for (const [threadId, score] of missing) {
+        zaddArgs.push(String(score), threadId);
+      }
+
+      await backfillThreadProjectMembers(
+        this.redis,
+        missing.map(([id]) => id),
+      );
+      const pipeline = this.redis.multi();
+      pipeline.zadd(userListKey, ...zaddArgs);
+      if (this.ttlSeconds === null) {
+        pipeline.persist(userListKey);
+      } else {
+        pipeline.expire(userListKey, this.ttlSeconds);
+      }
+      await awaitStoreRead(pipeline.exec(), options);
+
+      repairedUsers += 1;
+      repairedMembers += missing.length;
+    }
+
+    return { repairedUsers, repairedMembers };
+  }
+
   async listByProject(userId: string, projectPath: string): Promise<Thread[]> {
-    const all = await this.list(userId);
-    return all.filter((t) => t.projectPath === projectPath);
+    await ensureThreadProjectIndex(this.redis, userId, () => this.loadUserThreadIds(userId));
+    const candidates = await this.redis.smembers(threadProjectIndexKey(projectPath));
+    return this.listProjectCandidates(userId, projectPath, [...candidates, DEFAULT_THREAD_ID]);
+  }
+
+  async listProjectCandidates(userId: string, projectPath: string, threadIds: readonly string[]): Promise<Thread[]> {
+    return (await this.listCandidates(userId, threadIds)).filter((thread) => thread.projectPath === projectPath);
+  }
+
+  async listCandidates(userId: string, threadIds: readonly string[]): Promise<Thread[]> {
+    const candidates = [...new Set(threadIds)];
+    const ids: string[] = [];
+    // The existing user list remains the visibility authority, including
+    // explicitly indexed system threads. Project membership grants no access.
+    for (let offset = 0; offset < candidates.length; offset += 128) {
+      const batch = candidates.slice(offset, offset + 128);
+      const pipeline = this.redis.pipeline();
+      for (const id of batch) pipeline.zscore(ThreadKeys.userList(userId), id);
+      const replies = await pipeline.exec();
+      for (let i = 0; i < batch.length; i++) {
+        const reply = replies?.[i];
+        if (!reply || reply[0]) throw reply?.[0] ?? new Error('Incomplete thread visibility read');
+        if (reply[1] !== null && typeof reply[1] !== 'string') throw new Error('Invalid thread visibility score');
+        const id = batch[i];
+        if (id !== undefined && (reply[1] !== null || id === DEFAULT_THREAD_ID)) ids.push(id);
+      }
+    }
+    return this.readListedThreads(ids);
+  }
+
+  async hasByProject(userId: string, projectPath: string): Promise<boolean> {
+    await ensureThreadProjectIndex(this.redis, userId, () => this.loadUserThreadIds(userId));
+    const defaultThread = await this.get(DEFAULT_THREAD_ID);
+    if (
+      defaultThread &&
+      !defaultThread.deletedAt &&
+      !defaultThread.externalRuntimeAnchorState &&
+      defaultThread.projectPath === projectPath &&
+      (defaultThread.createdBy === userId || defaultThread.createdBy === 'system')
+    )
+      return true;
+    return hasVisibleThreadProject(this.redis, userId, projectPath);
   }
 
   async addParticipants(threadId: string, catIds: CatId[]): Promise<void> {
@@ -219,10 +602,7 @@ export class RedisThreadStore implements IThreadStore {
 
     // Cloud Codex P1 fix: Do NOT update activity here.
     // Activity should only be updated via updateParticipantActivity() after successful message append.
-    // Only refresh TTL for participants key.
-    if (this.ttlSeconds !== null) {
-      await this.redis.expire(participantsKey, this.ttlSeconds);
-    }
+    await this.applyKeyRetention([participantsKey]);
   }
 
   async getParticipants(threadId: string): Promise<CatId[]> {
@@ -241,7 +621,9 @@ export class RedisThreadStore implements IThreadStore {
     const result: ThreadParticipantActivity[] = participants.map((catId) => {
       const lastMessageAt = parseInt(activityData[`${catId}:lastMessageAt`] ?? '0', 10);
       const messageCount = parseInt(activityData[`${catId}:messageCount`] ?? '0', 10);
-      return { catId, lastMessageAt, messageCount };
+      const healthyRaw = activityData[`${catId}:healthy`];
+      const lastResponseHealthy = healthyRaw === undefined ? undefined : healthyRaw === '1';
+      return { catId, lastMessageAt, messageCount, lastResponseHealthy };
     });
 
     // Sort by lastMessageAt descending (most recent first)
@@ -249,8 +631,57 @@ export class RedisThreadStore implements IThreadStore {
     return result;
   }
 
+  /**
+   * F297 AC-B3: pipeline 批量读，把 2×T 次串行往返压成 2 个 pipeline stage。
+   * 排序契约与单条版本一致（lastMessageAt 降序）—— F297 的 done/error 依赖 `[0]` 是最近一次回应。
+   */
+  async getParticipantsWithActivityBatch(
+    threadIds: readonly string[],
+  ): Promise<Map<string, ThreadParticipantActivity[]>> {
+    const result = new Map<string, ThreadParticipantActivity[]>();
+    if (threadIds.length === 0) return result;
+
+    const participantsPipeline = this.redis.pipeline();
+    for (const threadId of threadIds) participantsPipeline.smembers(ThreadKeys.participants(threadId));
+    const participantsReplies = (await participantsPipeline.exec()) ?? [];
+
+    // R10 / cloud R11 P1：两段 pipeline 以前都用 `[, x] = replies[i] ?? []` 丢掉 entry error，
+    // 短 reply 也静默变成空。读失败当时**碰巧**产出 idle（安全方向），但那是碰巧安全不是
+    // 显式安全：一次读故障会让真实回过话的行被显示成 idle，且上层无从得知知识不完整。
+    // 判据统一到 readAuthoritative*，让故障显式抛出，由 composeSidebarPresence 封 idle。
+    const withParticipants: Array<{ threadId: string; participants: CatId[] }> = [];
+    threadIds.forEach((threadId, index) => {
+      const members = readAuthoritativeMembers(participantsReplies[index], `thread participants ${threadId}`);
+      const participants = members as CatId[];
+      if (participants.length === 0) result.set(threadId, []);
+      else withParticipants.push({ threadId, participants });
+    });
+    if (withParticipants.length === 0) return result;
+
+    const activityPipeline = this.redis.pipeline();
+    for (const { threadId } of withParticipants) activityPipeline.hgetall(ThreadKeys.activity(threadId));
+    const activityReplies = (await activityPipeline.exec()) ?? [];
+
+    withParticipants.forEach(({ threadId, participants }, index) => {
+      // 权威空 hash（从未记录过 activity）→ 所有 cat lastMessageAt=0 → idle，这是正确的。
+      const activityData = readAuthoritativeHash(activityReplies[index], `thread activity ${threadId}`) ?? {};
+      const entries: ThreadParticipantActivity[] = participants.map((catId) => {
+        const healthyRaw = activityData[`${catId}:healthy`];
+        return {
+          catId,
+          lastMessageAt: parseInt(activityData[`${catId}:lastMessageAt`] ?? '0', 10),
+          messageCount: parseInt(activityData[`${catId}:messageCount`] ?? '0', 10),
+          lastResponseHealthy: healthyRaw === undefined ? undefined : healthyRaw === '1',
+        };
+      });
+      entries.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+      result.set(threadId, entries);
+    });
+    return result;
+  }
+
   /** F032 P1-2 fix: Update participant activity on every message */
-  async updateParticipantActivity(threadId: string, catId: CatId): Promise<void> {
+  async updateParticipantActivity(threadId: string, catId: CatId, healthy?: boolean): Promise<void> {
     // Cloud Codex P2 fix: Use Lua script to atomically check thread existence
     // and update activity with TTL refresh.
     const detailKey = ThreadKeys.detail(threadId);
@@ -268,32 +699,83 @@ export class RedisThreadStore implements IThreadStore {
       catId,
       String(now),
       String(ttl),
+      healthy === false ? '0' : '1',
     );
   }
 
   async updateTitle(threadId: string, title: string): Promise<void> {
     const key = ThreadKeys.detail(threadId);
-    await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'title', title);
+    await this.setDetailFields(key, 'title', title, 'titleSource', 'user', 'titleCatId', '');
+  }
+
+  async setSessionImport(threadId: string, value: NonNullable<Thread['sessionImport']>): Promise<void> {
+    await this.setDetailFields(
+      ThreadKeys.detail(threadId),
+      'sessionImportSessionId',
+      value.sessionId,
+      'sessionImportCatId',
+      value.catId,
+    );
+  }
+
+  async setAutomaticTitle(
+    threadId: string,
+    title: string,
+    source: 'temporary' | 'cat',
+    catId?: string,
+  ): Promise<boolean> {
+    const key = ThreadKeys.detail(threadId);
+    const changed = await this.redis.eval(
+      `
+      if redis.call('HEXISTS', KEYS[1], 'id') == 0 then return 0 end
+      local deleted = redis.call('HGET', KEYS[1], 'deletedAt')
+      if deleted and deleted ~= '' and deleted ~= '0' then return 0 end
+      local current = redis.call('HGET', KEYS[1], 'title') or ''
+      local source = redis.call('HGET', KEYS[1], 'titleSource')
+      if not source then source = current == '' and 'temporary' or 'user' end
+      if source ~= 'temporary' then return 0 end
+      if ARGV[2] == 'temporary' and current ~= '' then return 0 end
+      redis.call('HSET', KEYS[1], 'title', ARGV[1], 'titleSource', ARGV[2], 'titleCatId', ARGV[3])
+      return 1
+    `,
+      1,
+      key,
+      title,
+      source,
+      catId ?? '',
+    );
+    if (changed === 1) await this.applyKeyRetention([key]);
+    return changed === 1;
+  }
+
+  async compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): Promise<boolean> {
+    const key = ThreadKeys.detail(threadId);
+    const changed = (await this.redis.eval(
+      CAS_HSET_IF_HAS_ID_LUA,
+      1,
+      key,
+      'title',
+      expectedTitle,
+      nextTitle,
+    )) as number;
+    if (changed === 1) await this.applyKeyRetention([key]);
+    return changed === 1;
+  }
+
+  async updateProjectPath(threadId: string, projectPath: string): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    await moveThreadProject(this.redis, threadId, projectPath);
+    await this.applyKeyRetention([key]);
   }
 
   async updatePin(threadId: string, pinned: boolean): Promise<void> {
     const key = ThreadKeys.detail(threadId);
-    await this.redis.eval(
-      HSET_IF_HAS_ID_LUA,
-      1,
-      key,
-      'pinned',
-      String(pinned),
-      'pinnedAt',
-      pinned ? String(Date.now()) : '0',
-    );
+    await this.setDetailFields(key, 'pinned', String(pinned), 'pinnedAt', pinned ? String(Date.now()) : '0');
   }
 
   async updateFavorite(threadId: string, favorited: boolean): Promise<void> {
     const key = ThreadKeys.detail(threadId);
-    await this.redis.eval(
-      HSET_IF_HAS_ID_LUA,
-      1,
+    await this.setDetailFields(
       key,
       'favorited',
       String(favorited),
@@ -304,17 +786,17 @@ export class RedisThreadStore implements IThreadStore {
 
   async updateThinkingMode(threadId: string, mode: 'debug' | 'play'): Promise<void> {
     const key = ThreadKeys.detail(threadId);
-    await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'thinkingMode', mode);
+    await this.setDetailFields(key, 'thinkingMode', mode);
   }
 
   async updateMentionActionabilityMode(threadId: string, mode: MentionActionabilityMode): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     // strict is default behavior; clearing keeps storage backward-compatible.
     if (mode === 'strict') {
-      await this.redis.hdel(key, 'mentionActionabilityMode');
+      await this.deleteDetailFields(key, 'mentionActionabilityMode');
       return;
     }
-    await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'mentionActionabilityMode', mode);
+    await this.setDetailFields(key, 'mentionActionabilityMode', mode);
   }
 
   async updatePreferredCats(threadId: string, catIds: CatId[]): Promise<void> {
@@ -323,21 +805,55 @@ export class RedisThreadStore implements IThreadStore {
     const unique = [...new Set(catIds)];
     // Store as JSON array string; empty array → remove field
     if (unique.length > 0) {
-      await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'preferredCats', JSON.stringify(unique));
+      await this.setDetailFields(key, 'preferredCats', JSON.stringify(unique));
     } else {
       // Remove the field entirely (clear preference)
-      await this.redis.hdel(key, 'preferredCats');
+      await this.deleteDetailFields(key, 'preferredCats');
     }
+  }
+
+  async compareAndSetGoal(
+    threadId: string,
+    expectedRevision: number | null,
+    next: ThreadGoalStateV1 | null,
+  ): Promise<boolean> {
+    if (next && !isThreadGoalStateV1(next)) return false;
+    const key = ThreadKeys.detail(threadId);
+    const currentRaw = await this.redis.hget(key, 'goal');
+    let repairRaw: string | null = null;
+    if (currentRaw !== null) {
+      try {
+        if (!isThreadGoalStateV1(JSON.parse(currentRaw))) repairRaw = currentRaw;
+      } catch {
+        repairRaw = currentRaw;
+      }
+    }
+    const changed = (await this.redis.eval(
+      CAS_THREAD_GOAL_LUA,
+      1,
+      key,
+      String(expectedRevision ?? -1),
+      next ? JSON.stringify(next) : '',
+      repairRaw !== null ? '1' : '0',
+      repairRaw ?? '',
+    )) as number;
+    if (changed === 1) await this.applyKeyRetention([key]);
+    return changed === 1;
   }
 
   async updatePhase(threadId: string, phase: ThreadPhase): Promise<void> {
     const key = ThreadKeys.detail(threadId);
-    await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'phase', phase);
+    await this.setDetailFields(key, 'phase', phase);
   }
 
   async linkBacklogItem(threadId: string, backlogItemId: string): Promise<void> {
+    await this.updateBacklogItem(threadId, backlogItemId);
+  }
+
+  async updateBacklogItem(threadId: string, backlogItemId: string | null): Promise<void> {
     const key = ThreadKeys.detail(threadId);
-    await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'backlogItemId', backlogItemId);
+    if (backlogItemId) await this.setDetailFields(key, 'backlogItemId', backlogItemId);
+    else await this.deleteDetailFields(key, 'backlogItemId');
   }
 
   async setMentionRoutingFeedback(
@@ -378,11 +894,11 @@ export class RedisThreadStore implements IThreadStore {
     const hasScopes = scopes && Object.keys(scopes).length > 0;
 
     if (!policy || policy.v !== 1 || !hasScopes) {
-      await this.redis.hdel(key, 'routingPolicy');
+      await this.deleteDetailFields(key, 'routingPolicy');
       return;
     }
 
-    await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'routingPolicy', JSON.stringify(policy));
+    await this.setDetailFields(key, 'routingPolicy', JSON.stringify(policy));
   }
 
   async getThreadMemory(threadId: string): Promise<ThreadMemoryV1 | null> {
@@ -394,7 +910,7 @@ export class RedisThreadStore implements IThreadStore {
 
   async updateThreadMemory(threadId: string, memory: ThreadMemoryV1): Promise<void> {
     const key = ThreadKeys.detail(threadId);
-    await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'threadMemory', JSON.stringify(memory));
+    await this.setDetailFields(key, 'threadMemory', JSON.stringify(memory));
   }
 
   async getVotingState(threadId: string): Promise<VotingStateV1 | null> {
@@ -411,37 +927,136 @@ export class RedisThreadStore implements IThreadStore {
   async updateVotingState(threadId: string, state: VotingStateV1 | null): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     if (state === null) {
-      await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'votingState', '');
-      await this.redis.hdel(key, 'votingState');
+      await this.deleteDetailFields(key, 'votingState');
     } else {
-      await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'votingState', JSON.stringify(state));
+      await this.setDetailFields(key, 'votingState', JSON.stringify(state));
     }
   }
 
   async updateBootcampState(threadId: string, state: BootcampStateV1 | null): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     if (state === null) {
-      await this.redis.hdel(key, 'bootcampState');
+      await this.deleteDetailFields(key, 'bootcampState');
     } else {
-      await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'bootcampState', JSON.stringify(state));
+      await this.setDetailFields(key, 'bootcampState', JSON.stringify(state));
+    }
+  }
+
+  async updateFirstRunQuestState(
+    threadId: string,
+    state: import('../ports/ThreadStore.js').FirstRunQuestStateV1 | null,
+  ): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    if (state === null) {
+      await this.redis.hdel(key, 'firstRunQuestState');
+    } else {
+      await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'firstRunQuestState', JSON.stringify(state));
+    }
+  }
+
+  async updateSystemKind(threadId: string, kind: ThreadSystemKind | null): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    if (kind === null) {
+      await this.deleteDetailFields(key, 'systemKind');
+    } else {
+      await this.setDetailFields(key, 'systemKind', kind);
+    }
+  }
+
+  async claimSystemKind(threadId: string, ownerUserId: string, kind: ThreadSystemKind): Promise<boolean> {
+    const result = await this.redis.eval(
+      `
+      if redis.call('HGET', KEYS[1], 'id') ~= ARGV[1] then return 0 end
+      if redis.call('HGET', KEYS[1], 'createdBy') ~= ARGV[2] then return 0 end
+      local deleted = redis.call('HGET', KEYS[1], 'deletedAt')
+      if deleted and deleted ~= '' and deleted ~= '0' then return 0 end
+      local previous = redis.call('HGET', KEYS[1], 'systemKind')
+      if previous and previous ~= '' and previous ~= ARGV[3] then return 0 end
+      redis.call('HSET', KEYS[1], 'systemKind', ARGV[3])
+      return 1
+    `,
+      1,
+      ThreadKeys.detail(threadId),
+      threadId,
+      ownerUserId,
+      kind,
+    );
+    return Number(result) === 1;
+  }
+
+  /** F229 / F167: Set or clear threadKind marker for concierge / gate-keeping thread. */
+  async updateThreadKind(threadId: string, kind: ThreadKind | null): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    if (kind === null) {
+      await this.deleteDetailFields(key, 'threadKind');
+    } else {
+      await this.setDetailFields(key, 'threadKind', kind);
     }
   }
 
   async updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     if (state === null) {
-      await this.redis.hdel(key, 'connectorHubState');
+      await this.deleteDetailFields(key, 'connectorHubState');
     } else {
-      await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'connectorHubState', JSON.stringify(state));
+      await this.setDetailFields(key, 'connectorHubState', JSON.stringify(state));
+    }
+  }
+
+  async updatePluginOwnership(threadId: string, ownership: ThreadPluginOwnershipV1 | null): Promise<void> {
+    if (ownership !== null && !isThreadPluginOwnershipV1(ownership)) {
+      throw new TypeError('invalid plugin thread ownership');
+    }
+    const key = ThreadKeys.detail(threadId);
+    if (ownership === null) {
+      await this.deleteDetailFields(key, 'pluginOwnership');
+    } else {
+      await this.setDetailFields(key, 'pluginOwnership', JSON.stringify(ownership));
+    }
+  }
+
+  async updatePreferredWorkspaceMode(
+    threadId: string,
+    mode:
+      | 'dev'
+      | 'recall'
+      | 'product-schedule'
+      | 'schedule'
+      | 'tasks'
+      | 'community'
+      | 'artifacts'
+      | 'approval'
+      | 'trajectory'
+      | 'eval'
+      | null,
+  ): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    if (mode === null) {
+      await this.deleteDetailFields(key, 'preferredWorkspaceMode');
+    } else {
+      await this.setDetailFields(key, 'preferredWorkspaceMode', mode);
+    }
+  }
+
+  async updateBubbleDisplay(
+    threadId: string,
+    field: 'bubbleThinking' | 'bubbleCli',
+    value: 'global' | 'expanded' | 'collapsed',
+  ): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    if (value === 'global') {
+      await this.deleteDetailFields(key, field);
+    } else {
+      await this.setDetailFields(key, field, value);
     }
   }
 
   async updateVoiceMode(threadId: string, voiceMode: boolean): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     if (voiceMode) {
-      await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, 'voiceMode', '1');
+      await this.setDetailFields(key, 'voiceMode', '1');
     } else {
-      await this.redis.hdel(key, 'voiceMode');
+      await this.deleteDetailFields(key, 'voiceMode');
     }
   }
 
@@ -455,7 +1070,34 @@ export class RedisThreadStore implements IThreadStore {
     const createdBy = await this.redis.hget(key, 'createdBy');
     if (createdBy) {
       await this.redis.zadd(ThreadKeys.userList(createdBy), now, threadId);
+      await this.applyKeyRetention([key, ThreadKeys.userList(createdBy)]);
     }
+  }
+
+  /** F128: List child threads that have this thread as parentThreadId. Pipeline to avoid N+1. */
+  async getChildThreads(parentThreadId: string): Promise<Thread[]> {
+    const childIds = await this.redis.zrange(ThreadKeys.children(parentThreadId), 0, -1);
+    if (!childIds.length) return [];
+    // Pipeline: fetch all thread hashes + participant sets in one round-trip
+    const pipeline = this.redis.multi();
+    for (const id of childIds) {
+      pipeline.hgetall(ThreadKeys.detail(id));
+      pipeline.smembers(ThreadKeys.participants(id));
+    }
+    const results = await pipeline.exec();
+    if (!results) return [];
+    const children: Thread[] = [];
+    for (let i = 0; i < childIds.length; i++) {
+      const dataResult = results[i * 2];
+      const membersResult = results[i * 2 + 1];
+      if (!dataResult || dataResult[0]) continue; // error
+      const data = dataResult[1] as Record<string, string>;
+      if (!data || !data.id) continue;
+      const thread = this.hydrateThread(data);
+      thread.participants = ((membersResult?.[1] as string[]) ?? []) as import('@cat-cafe/shared').CatId[];
+      if (!thread.deletedAt) children.push(thread);
+    }
+    return children;
   }
 
   /** F095 Phase D: Soft-delete — set deletedAt timestamp. */
@@ -468,6 +1110,12 @@ export class RedisThreadStore implements IThreadStore {
     const existingDeletedAt = await this.redis.hget(key, 'deletedAt');
     if (existingDeletedAt && parseInt(existingDeletedAt, 10) > 0) return false;
     await this.redis.hset(key, 'deletedAt', String(Date.now()));
+    // P3-4: Remove from parent's children index
+    const parentId = await this.redis.hget(key, 'parentThreadId');
+    if (parentId) {
+      await this.redis.zrem(ThreadKeys.children(parentId), threadId);
+    }
+    await this.applyKeyRetention([key]);
     return true;
   }
 
@@ -479,12 +1127,32 @@ export class RedisThreadStore implements IThreadStore {
     const existingDeletedAt = await this.redis.hget(key, 'deletedAt');
     if (!existingDeletedAt || parseInt(existingDeletedAt, 10) <= 0) return false;
     await this.redis.hset(key, 'deletedAt', '0');
+    // P2 (Codex review): softDelete strips the child from its parent's children ZSET; restore
+    // must put it back so getChildThreads() stays consistent after a soft-delete/restore cycle.
+    const [parentId, createdAt] = await Promise.all([
+      this.redis.hget(key, 'parentThreadId'),
+      this.redis.hget(key, 'createdAt'),
+    ]);
+    if (parentId) {
+      const score = createdAt && parseInt(createdAt, 10) > 0 ? createdAt : String(Date.now());
+      await this.redis.zadd(ThreadKeys.children(parentId), score, threadId);
+      if (this.ttlSeconds !== null) {
+        await this.redis.expire(ThreadKeys.children(parentId), this.ttlSeconds);
+      }
+    }
+    await this.applyKeyRetention([key]);
     return true;
+  }
+
+  /** F192 cloud-review P1: Index a system thread into a user's sidebar list. */
+  async indexForUser(threadId: string, userId: string): Promise<void> {
+    await indexThreadProjectForUser(this.redis, threadId, userId);
+    await this.applyKeyRetention([ThreadKeys.userList(userId)]);
   }
 
   /** F095 Phase D: List soft-deleted threads (trash bin). */
   async listDeleted(userId: string): Promise<Thread[]> {
-    const ids = await this.redis.zrevrange(ThreadKeys.userList(userId), 0, -1);
+    const ids = await this.loadUserThreadIds(userId);
     const threads: Thread[] = [];
     for (const id of ids) {
       const thread = await this.get(id);
@@ -500,26 +1168,27 @@ export class RedisThreadStore implements IThreadStore {
     if (threadId === DEFAULT_THREAD_ID) return false;
 
     const key = ThreadKeys.detail(threadId);
-    const createdBy = await this.redis.hget(key, 'createdBy');
+    const [createdBy, projectPath] = await this.redis.hmget(key, 'createdBy', 'projectPath');
 
-    const pipeline = this.redis.multi();
-    pipeline.del(key);
-    pipeline.del(ThreadKeys.participants(threadId));
-    // F032 Phase C: Clean up activity data
-    pipeline.del(ThreadKeys.activity(threadId));
-    // F046 D3: Clean up one-shot mention-routing feedback data
-    pipeline.del(ThreadKeys.mentionRoutingFeedback(threadId));
+    // Atomic Lua: DEL + tombstone in one round-trip — no race window for
+    // get() → recoverThreadFromMessages() to resurrect between DEL and SET.
+    const keys: string[] = [
+      key,
+      ThreadKeys.participants(threadId),
+      ThreadKeys.activity(threadId),
+      ThreadKeys.mentionRoutingFeedback(threadId),
+      ThreadKeys.tombstone(threadId),
+    ];
     if (createdBy) {
-      pipeline.zrem(ThreadKeys.userList(createdBy), threadId);
+      keys.push(ThreadKeys.userList(createdBy));
     }
-    const results = await pipeline.exec();
-
-    // First del result: [err, count]
-    const delResult = results?.[0];
-    return delResult ? (delResult[1] as number) > 0 : false;
+    const result = await this.redis.eval(DELETE_THREAD_LUA, keys.length, ...keys, threadId);
+    if (createdBy) await this.redis.srem(threadProjectIndexKey(projectPath ?? 'default'), threadId);
+    return (result as number) > 0;
   }
 
-  private async createDefaultThread(): Promise<Thread> {
+  private async createDefaultThread(options?: StoreReadOptions): Promise<Thread> {
+    throwIfStoreReadAborted(options);
     const now = Date.now();
     const thread: Thread = {
       id: DEFAULT_THREAD_ID,
@@ -532,11 +1201,231 @@ export class RedisThreadStore implements IThreadStore {
     };
 
     const key = ThreadKeys.detail(DEFAULT_THREAD_ID);
-    await this.redis.hset(key, this.serializeThread(thread));
+    await awaitStoreRead(this.redis.hset(key, this.serializeThread(thread)), options);
     if (this.ttlSeconds !== null) {
-      await this.redis.expire(key, this.ttlSeconds);
+      await awaitStoreRead(this.redis.expire(key, this.ttlSeconds), options);
     }
     return thread;
+  }
+
+  private async loadUserThreadIds(userId: string, options?: StoreReadOptions): Promise<string[]> {
+    let ids = await awaitStoreRead(this.redis.zrevrange(ThreadKeys.userList(userId), 0, -1), options);
+    throwIfStoreReadAborted(options);
+    if (!this.canAttemptListRepair(userId, ids.length)) {
+      return ids;
+    }
+
+    this.lastListRepairAt.set(userId, Date.now());
+    const repaired = await this.repairIndex(userId, options);
+    throwIfStoreReadAborted(options);
+    if (repaired.repairedMembers === 0) {
+      return ids;
+    }
+    ids = await awaitStoreRead(this.redis.zrevrange(ThreadKeys.userList(userId), 0, -1), options);
+    return ids;
+  }
+
+  private canAttemptListRepair(userId: string, indexedCount: number): boolean {
+    if (indexedCount > 1) return false;
+    const lastAttempt = this.lastListRepairAt.get(userId) ?? 0;
+    return Date.now() - lastAttempt >= RedisThreadStore.LIST_REPAIR_COOLDOWN_MS;
+  }
+
+  private async collectIndexedThreadsFromDetails(
+    userId?: string,
+    options?: StoreReadOptions,
+  ): Promise<Map<string, Map<string, number>>> {
+    throwIfStoreReadAborted(options);
+    const matchPattern = `${this.keyPrefix}${ThreadKeys.detail('thread_*')}`;
+    let cursor = '0';
+    const indexedByUser = new Map<string, Map<string, number>>();
+
+    do {
+      throwIfStoreReadAborted(options);
+      const [nextCursor, rawKeys] = (await awaitStoreRead(
+        this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 200),
+        options,
+      )) as [string, string[]];
+      cursor = nextCursor;
+
+      const detailKeys = rawKeys
+        .map((rawKey) => this.stripKeyPrefix(rawKey))
+        .filter((key) => /^thread:thread_[^:]+$/.test(key));
+      if (detailKeys.length === 0) continue;
+
+      const pipeline = this.redis.multi();
+      for (const key of detailKeys) {
+        throwIfStoreReadAborted(options);
+        pipeline.hgetall(key);
+      }
+      const results = await awaitStoreRead(pipeline.exec(), options);
+
+      for (let i = 0; i < detailKeys.length; i += 1) {
+        throwIfStoreReadAborted(options);
+        const data = results?.[i]?.[1];
+        if (!data || typeof data !== 'object') continue;
+        const hash = data as Record<string, string>;
+        if (!hash.id || !hash.createdBy || hash.createdBy === 'system') continue;
+        if (userId && hash.createdBy !== userId) continue;
+
+        const lastActiveAt = parseInt(hash.lastActiveAt ?? '0', 10);
+        const score = Number.isFinite(lastActiveAt) ? lastActiveAt : 0;
+        let members = indexedByUser.get(hash.createdBy);
+        if (!members) {
+          members = new Map<string, number>();
+          indexedByUser.set(hash.createdBy, members);
+        }
+        members.set(hash.id, score);
+      }
+    } while (cursor !== '0');
+
+    return indexedByUser;
+  }
+
+  private async recoverThreadFromMessages(threadId: string, options?: StoreReadOptions): Promise<Thread | null> {
+    throwIfStoreReadAborted(options);
+    // Don't resurrect intentionally hard-deleted threads
+    const tombstone = await awaitStoreRead(this.redis.get(ThreadKeys.tombstone(threadId)), options);
+    if (tombstone) return null;
+
+    const timelineKey = MessageKeys.thread(threadId);
+    const [firstIds, lastIds] = await awaitStoreRead(
+      Promise.all([this.redis.zrange(timelineKey, 0, 4), this.redis.zrevrange(timelineKey, 0, 4)]),
+      options,
+    );
+    if (firstIds.length === 0 && lastIds.length === 0) {
+      return null;
+    }
+
+    const candidateIds = [...new Set([...firstIds, ...lastIds])];
+    const candidateMessages = await this.loadMessageSnapshots(candidateIds, options);
+    const firstMessage = firstIds.map((id) => candidateMessages.get(id)).find((msg) => msg !== null);
+    const lastMessage = lastIds.map((id) => candidateMessages.get(id)).find((msg) => msg !== null);
+    if (!firstMessage || !lastMessage) {
+      return null;
+    }
+
+    const participants = await this.recoverParticipants(threadId, candidateIds, candidateMessages, options);
+    const recovered: Thread = {
+      id: threadId,
+      projectPath: 'default',
+      title: deriveAutoThreadTitle(firstMessage.content),
+      createdBy: firstMessage.userId,
+      participants,
+      createdAt: firstMessage.timestamp,
+      lastActiveAt: lastMessage.timestamp,
+      thinkingMode: 'debug',
+    };
+
+    const detailKey = ThreadKeys.detail(threadId);
+    const participantsKey = ThreadKeys.participants(threadId);
+    const userListKey = ThreadKeys.userList(recovered.createdBy);
+    const pipeline = this.redis.multi();
+    pipeline.hset(detailKey, this.serializeThread(recovered));
+    pipeline.zadd(userListKey, String(recovered.lastActiveAt), threadId);
+    pipeline.sadd(threadProjectIndexKey(recovered.projectPath), threadId);
+    if (participants.length > 0) {
+      pipeline.sadd(participantsKey, ...participants);
+    }
+    await awaitStoreRead(pipeline.exec(), options);
+    await this.applyKeyRetention([detailKey, participantsKey, userListKey], options);
+    return recovered;
+  }
+
+  private async loadMessageSnapshots(
+    messageIds: string[],
+    options?: StoreReadOptions,
+  ): Promise<Map<string, RecoveredMessageSnapshot | null>> {
+    throwIfStoreReadAborted(options);
+    if (messageIds.length === 0) return new Map();
+    const pipeline = this.redis.multi();
+    for (const messageId of messageIds) {
+      pipeline.hgetall(MessageKeys.detail(messageId));
+    }
+    const results = await awaitStoreRead(pipeline.exec(), options);
+    const snapshots = new Map<string, RecoveredMessageSnapshot | null>();
+    for (let i = 0; i < messageIds.length; i += 1) {
+      const data = results?.[i]?.[1];
+      if (!data || typeof data !== 'object') {
+        snapshots.set(messageIds[i], null);
+        continue;
+      }
+      const hash = data as Record<string, string>;
+      if (!hash.id || !hash.userId) {
+        snapshots.set(messageIds[i], null);
+        continue;
+      }
+      snapshots.set(messageIds[i], {
+        id: hash.id,
+        userId: hash.userId,
+        catId: hash.catId || null,
+        content: hash.content ?? '',
+        timestamp: parseInt(hash.timestamp ?? '0', 10),
+      });
+    }
+    return snapshots;
+  }
+
+  private async recoverParticipants(
+    threadId: string,
+    messageIds: string[],
+    candidateMessages: Map<string, RecoveredMessageSnapshot | null>,
+    options?: StoreReadOptions,
+  ): Promise<CatId[]> {
+    throwIfStoreReadAborted(options);
+    const activityData = await awaitStoreRead(this.redis.hgetall(ThreadKeys.activity(threadId)), options);
+    const fromActivity = [
+      ...new Set(
+        Object.keys(activityData)
+          .map((key) => key.split(':')[0])
+          .filter(Boolean),
+      ),
+    ];
+    if (fromActivity.length > 0) {
+      return fromActivity as CatId[];
+    }
+
+    const fromMessages = messageIds
+      .map((id) => candidateMessages.get(id))
+      .filter((message): message is RecoveredMessageSnapshot => Boolean(message?.catId))
+      .map((message) => message.catId as CatId);
+    return [...new Set(fromMessages)];
+  }
+
+  private async applyKeyRetention(keys: string[], options?: StoreReadOptions): Promise<void> {
+    throwIfStoreReadAborted(options);
+    const uniqueKeys = [...new Set(keys.filter(Boolean))];
+    if (uniqueKeys.length === 0) return;
+    const pipeline = this.redis.multi();
+    for (const key of uniqueKeys) {
+      if (this.ttlSeconds === null) {
+        pipeline.persist(key);
+      } else {
+        pipeline.expire(key, this.ttlSeconds);
+      }
+    }
+    await awaitStoreRead(pipeline.exec(), options);
+  }
+
+  private async setDetailFields(key: string, ...fields: string[]): Promise<void> {
+    const updated = (await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, ...fields)) as number;
+    if (updated === 0) return;
+    await this.applyKeyRetention([key]);
+  }
+
+  private async deleteDetailFields(key: string, ...fields: string[]): Promise<void> {
+    if (fields.length === 0) return;
+    await this.redis.hdel(key, ...fields);
+    await this.applyKeyRetention([key]);
+  }
+
+  private get keyPrefix(): string {
+    return (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
+  }
+
+  private stripKeyPrefix(rawKey: string): string {
+    const prefix = this.keyPrefix;
+    return prefix && rawKey.startsWith(prefix) ? rawKey.slice(prefix.length) : rawKey;
   }
 
   private serializeThread(thread: Thread): Record<string, string> {
@@ -544,6 +1433,14 @@ export class RedisThreadStore implements IThreadStore {
       id: thread.id,
       projectPath: thread.projectPath,
       title: thread.title ?? '',
+      titleSource: thread.titleSource ?? (thread.title ? 'user' : 'temporary'),
+      titleCatId: thread.titleCatId ?? '',
+      ...(thread.sessionImport
+        ? {
+            sessionImportSessionId: thread.sessionImport.sessionId,
+            sessionImportCatId: thread.sessionImport.catId,
+          }
+        : {}),
       createdBy: thread.createdBy,
       lastActiveAt: String(thread.lastActiveAt),
       createdAt: String(thread.createdAt),
@@ -555,6 +1452,9 @@ export class RedisThreadStore implements IThreadStore {
     };
     if (thread.phase) {
       result.phase = thread.phase;
+    }
+    if (thread.goal) {
+      result.goal = JSON.stringify(thread.goal);
     }
     if (thread.backlogItemId) {
       result.backlogItemId = thread.backlogItemId;
@@ -580,8 +1480,63 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.bootcampState) {
       result.bootcampState = JSON.stringify(thread.bootcampState);
     }
+    // F128: Parent thread for orchestration tracking
+    if (thread.parentThreadId) {
+      result.parentThreadId = thread.parentThreadId;
+    }
+    // F128: Proposal audit metadata (only present on threads created via approve flow)
+    if (thread.createdFromProposalId) {
+      result.createdFromProposalId = thread.createdFromProposalId;
+    }
+    if (thread.sourceThreadId) {
+      result.sourceThreadId = thread.sourceThreadId;
+    }
+    if (thread.sourceInvocationId) {
+      result.sourceInvocationId = thread.sourceInvocationId;
+    }
+    if (thread.sourceMessageId) {
+      result.sourceMessageId = thread.sourceMessageId;
+    }
+    if (thread.declaredWorkMode) {
+      result.declaredWorkMode = thread.declaredWorkMode;
+    }
+    if (thread.branchAudit) {
+      result.branchAudit = JSON.stringify(thread.branchAudit);
+    }
+    if (thread.approvedBy) {
+      result.approvedBy = thread.approvedBy;
+    }
+    if (thread.approvedAt) {
+      result.approvedAt = String(thread.approvedAt);
+    }
+    if (thread.firstRunQuestState) {
+      result.firstRunQuestState = JSON.stringify(thread.firstRunQuestState);
+    }
+    if (thread.systemKind) {
+      result.systemKind = thread.systemKind;
+    }
     if (thread.connectorHubState) {
       result.connectorHubState = JSON.stringify(thread.connectorHubState);
+    }
+    if (thread.pluginOwnership) {
+      result.pluginOwnership = JSON.stringify(thread.pluginOwnership);
+    }
+    if (thread.externalRuntimeAnchorState) {
+      result.externalRuntimeAnchorState = JSON.stringify(thread.externalRuntimeAnchorState);
+    }
+    if (thread.preferredWorkspaceMode) {
+      result.preferredWorkspaceMode = thread.preferredWorkspaceMode;
+    }
+    if (thread.labels && thread.labels.length > 0) {
+      result.labels = JSON.stringify(thread.labels);
+    }
+    if (thread.threadMetadata) {
+      result.threadMetadata = JSON.stringify(thread.threadMetadata);
+    }
+    // F229: Concierge thread marker (set separately via updateThreadKind; also persisted here for
+    // cold-create paths where the full thread object is serialized before updateThreadKind is called)
+    if (thread.threadKind) {
+      result.threadKind = thread.threadKind;
     }
     return result;
   }
@@ -593,6 +1548,18 @@ export class RedisThreadStore implements IThreadStore {
       id: data.id ?? '',
       projectPath: data.projectPath ?? 'default',
       title: data.title || null,
+      titleSource:
+        data.titleSource === 'cat' || data.titleSource === 'temporary'
+          ? data.titleSource
+          : data.title
+            ? 'user'
+            : 'temporary',
+      ...(data.titleCatId ? { titleCatId: data.titleCatId } : {}),
+      ...(data.sessionImportSessionId && data.sessionImportCatId
+        ? {
+            sessionImport: { sessionId: data.sessionImportSessionId, catId: data.sessionImportCatId },
+          }
+        : {}),
       createdBy: data.createdBy ?? 'unknown',
       participants: [], // Loaded separately from Set
       lastActiveAt: parseInt(data.lastActiveAt ?? '0', 10),
@@ -605,6 +1572,14 @@ export class RedisThreadStore implements IThreadStore {
     };
     if (data.mentionActionabilityMode === 'relaxed') {
       result.mentionActionabilityMode = 'relaxed';
+    }
+    if (data.goal) {
+      try {
+        const parsed = JSON.parse(data.goal);
+        if (isThreadGoalStateV1(parsed)) result.goal = parsed;
+      } catch {
+        /* ignore malformed goal state */
+      }
     }
     const phase = this.parsePhase(data.phase);
     if (phase) {
@@ -643,6 +1618,12 @@ export class RedisThreadStore implements IThreadStore {
     if (data.voiceMode === '1') {
       result.voiceMode = true;
     }
+    if (data.bubbleThinking === 'expanded' || data.bubbleThinking === 'collapsed') {
+      result.bubbleThinking = data.bubbleThinking;
+    }
+    if (data.bubbleCli === 'expanded' || data.bubbleCli === 'collapsed') {
+      result.bubbleCli = data.bubbleCli;
+    }
     const deletedAt = parseInt(data.deletedAt ?? '0', 10);
     if (deletedAt > 0) {
       result.deletedAt = deletedAt;
@@ -657,6 +1638,76 @@ export class RedisThreadStore implements IThreadStore {
         /* ignore malformed JSON */
       }
     }
+    // F128: Parent thread for orchestration tracking
+    if (data.parentThreadId) {
+      result.parentThreadId = data.parentThreadId;
+    }
+    // F128: Proposal audit metadata
+    if (data.createdFromProposalId) {
+      result.createdFromProposalId = data.createdFromProposalId;
+    }
+    if (data.sourceThreadId) {
+      result.sourceThreadId = data.sourceThreadId;
+    }
+    if (data.sourceInvocationId) {
+      result.sourceInvocationId = data.sourceInvocationId;
+    }
+    if (data.sourceMessageId) {
+      result.sourceMessageId = data.sourceMessageId;
+    }
+    if (
+      data.declaredWorkMode === 'subtask' ||
+      data.declaredWorkMode === 'parallel' ||
+      data.declaredWorkMode === 'investigation' ||
+      data.declaredWorkMode === 'standalone'
+    ) {
+      result.declaredWorkMode = data.declaredWorkMode;
+    }
+    if (data.branchAudit) {
+      try {
+        const parsed = JSON.parse(data.branchAudit) as Record<string, unknown>;
+        if (
+          typeof parsed.sourceThreadId === 'string' &&
+          typeof parsed.sourceMessageId === 'string' &&
+          typeof parsed.branchedAt === 'number'
+        ) {
+          result.branchAudit = {
+            sourceThreadId: parsed.sourceThreadId,
+            sourceMessageId: parsed.sourceMessageId,
+            branchedAt: parsed.branchedAt,
+          };
+        }
+      } catch {
+        /* ignore malformed immutable audit */
+      }
+    }
+    if (data.approvedBy) {
+      result.approvedBy = data.approvedBy;
+    }
+    const approvedAt = parseInt(data.approvedAt ?? '0', 10);
+    if (approvedAt > 0) {
+      result.approvedAt = approvedAt;
+    }
+    if (data.firstRunQuestState) {
+      try {
+        const parsed = JSON.parse(data.firstRunQuestState);
+        if (parsed && typeof parsed === 'object' && parsed.v === 1) {
+          result.firstRunQuestState = parsed as import('../ports/ThreadStore.js').FirstRunQuestStateV1;
+        }
+      } catch {
+        /* ignore malformed JSON */
+      }
+    }
+    if (
+      data.systemKind &&
+      (data.systemKind === 'connector_hub' ||
+        data.systemKind === 'eval_domain' ||
+        data.systemKind === 'cat_bedroom' ||
+        data.systemKind === 'memory_ops' ||
+        data.systemKind === 'collective_channel')
+    ) {
+      result.systemKind = data.systemKind as ThreadSystemKind;
+    }
     if (data.connectorHubState) {
       try {
         const parsed = JSON.parse(data.connectorHubState);
@@ -667,7 +1718,333 @@ export class RedisThreadStore implements IThreadStore {
         /* ignore malformed JSON */
       }
     }
+    if (data.pluginOwnership) {
+      try {
+        const parsed: unknown = JSON.parse(data.pluginOwnership);
+        if (isThreadPluginOwnershipV1(parsed)) {
+          result.pluginOwnership = parsed;
+        }
+      } catch {
+        /* ignore malformed plugin ownership */
+      }
+    }
+    if (data.externalRuntimeAnchorState) {
+      try {
+        const parsed = JSON.parse(data.externalRuntimeAnchorState);
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          parsed.v === 1 &&
+          parsed.runtime === 'antigravity-desktop' &&
+          typeof parsed.userId === 'string' &&
+          typeof parsed.createdAt === 'number'
+        ) {
+          result.externalRuntimeAnchorState = parsed;
+        }
+      } catch {
+        /* ignore malformed JSON */
+      }
+    }
+    const validModes = new Set([
+      'dev',
+      'recall',
+      'product-schedule',
+      'schedule',
+      'tasks',
+      'community',
+      'artifacts',
+      'approval',
+      'trajectory',
+      'eval',
+    ]);
+    if (data.preferredWorkspaceMode && validModes.has(data.preferredWorkspaceMode)) {
+      result.preferredWorkspaceMode = data.preferredWorkspaceMode as Thread['preferredWorkspaceMode'];
+    }
+    if (data.labels) {
+      try {
+        const parsed = JSON.parse(data.labels);
+        if (Array.isArray(parsed)) {
+          result.labels = parsed as string[];
+        }
+      } catch {
+        /* ignore malformed JSON */
+      }
+    }
+    // #872: Thread metadata anchor
+    if (data.threadMetadata) {
+      const meta = parseThreadMetadataJson(data.threadMetadata);
+      if (meta) result.threadMetadata = meta;
+    }
+    // F229 / F167: Restore thread kind marker (written by updateThreadKind; validate value)
+    if (data.threadKind === 'concierge' || data.threadKind === 'gate-keeping') {
+      result.threadKind = data.threadKind;
+    }
     return result;
+  }
+
+  async updateLabels(threadId: string, labelIds: string[]): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    await this.redis.hset(key, { labels: JSON.stringify(labelIds) });
+  }
+
+  async getThreadMetadata(threadId: string): Promise<ThreadMetadataV1 | null> {
+    const key = ThreadKeys.detail(threadId);
+    const raw = await this.redis.hget(key, 'threadMetadata');
+    if (!raw) return null;
+    return parseThreadMetadataJson(raw);
+  }
+
+  async updateThreadMetadata(threadId: string, metadata: ThreadMetadataV1 | null): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    if (metadata === null) {
+      await this.deleteDetailFields(key, 'threadMetadata');
+    } else {
+      await this.setDetailFields(key, 'threadMetadata', JSON.stringify(metadata));
+    }
+  }
+
+  /**
+   * #872 P2: Atomically read-merge-write thread metadata using CAS.
+   * Prevents concurrent callers from losing each other's appends.
+   * Retries up to 5 times on CAS conflict; throws on exhaustion (no fallback).
+   */
+  async atomicMergeThreadMetadata(threadId: string, patch: ThreadMetadataPatch): Promise<ThreadMetadataV1> {
+    const key = ThreadKeys.detail(threadId);
+    const maxRetries = 5;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const raw = await this.redis.hget(key, 'threadMetadata');
+      const existing = raw != null ? parseThreadMetadataJson(raw) : null;
+      // P1-2: if stored data exists but cannot be parsed (malformed / future version / empty string),
+      // refuse to merge rather than silently overwriting it with a fresh v:1 object.
+      // Uses `raw != null` (not truthy) so empty-string fields are correctly rejected.
+      if (raw != null && !existing) {
+        throw new Error(
+          `Thread ${threadId} has unparseable metadata (${raw.length} bytes); refusing merge to prevent data loss`,
+        );
+      }
+      const merged = mergeThreadMetadata(existing ?? undefined, patch);
+      validateMergedTotals(merged);
+      const newJson = JSON.stringify(merged);
+      const ok = (await this.redis.eval(
+        CAS_HSET_IF_HAS_ID_LUA,
+        1,
+        key,
+        'threadMetadata',
+        raw ?? '',
+        newJson,
+      )) as number;
+      if (ok === 1) {
+        // #872 cloud-review P2: CAS bypasses setDetailFields, so refresh retention
+        // explicitly — otherwise metadata-only writes leave TTL stale when THREAD_TTL_SECONDS is set.
+        await this.applyKeyRetention([key]);
+        return merged;
+      }
+    }
+    // P1-1: No fallback write — throwing preserves the concurrent-safety guarantee.
+    throw new Error(`Thread metadata CAS conflict after ${maxRetries} retries for thread ${threadId}`);
+  }
+
+  async updateMemberSessionStrategy(
+    threadId: string,
+    catId: string,
+    strategy: 'resume' | 'reborn' | null,
+  ): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    if (strategy === null || strategy === 'resume') {
+      await this.redis.hdel(key, `memberSS:${catId}`);
+    } else {
+      await this.redis.hset(key, { [`memberSS:${catId}`]: strategy });
+      // #836 P2: Clear stale pending continuations when switching to reborn.
+      // Capsules sealed before the reborn period contain pre-reborn session
+      // context; consuming them after reborn is cleared would resume from
+      // stale state. Lua script atomically scans and deletes matching fields.
+      if (strategy === 'reborn') {
+        const prefix = `pendCont:${catId}:`;
+        await this.redis.eval(
+          `local cursor = "0"
+           repeat
+             local r = redis.call("HSCAN", KEYS[1], cursor, "MATCH", ARGV[1])
+             cursor = r[1]
+             local data = r[2]
+             for i = 1, #data, 2 do
+               redis.call("HDEL", KEYS[1], data[i])
+             end
+           until cursor == "0"`,
+          1,
+          key,
+          `${prefix}*`,
+        );
+      }
+    }
+  }
+
+  async updateMemberEffort(threadId: string, catId: CatId, effort: CliEffortPreset | null): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    const field = `memberEffort:${catId}`;
+    if (effort === null) {
+      await this.deleteDetailFields(key, field);
+    } else {
+      await this.setDetailFields(key, field, effort);
+    }
+  }
+
+  async getMemberEffort(threadId: string, catId: CatId, _userId: string): Promise<CliEffortPreset | undefined> {
+    const raw = await this.redis.hget(ThreadKeys.detail(threadId), `memberEffort:${catId}`);
+    return parseCliEffortValue(raw);
+  }
+
+  async getMemberEfforts(threadId: string, _userId: string): Promise<Partial<Record<CatId, CliEffortPreset>>> {
+    const fields = await this.redis.hgetall(ThreadKeys.detail(threadId));
+    const efforts: Partial<Record<CatId, CliEffortPreset>> = {};
+    for (const [field, raw] of Object.entries(fields)) {
+      if (!field.startsWith('memberEffort:')) continue;
+      const effort = parseCliEffortValue(raw);
+      if (!effort) continue;
+      const catId = field.slice('memberEffort:'.length) as CatId;
+      efforts[catId] = effort;
+    }
+    return efforts;
+  }
+
+  async updateMemberSpeed(threadId: string, catId: CatId, speed: CodexSpeedValue | null): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    const field = `memberSpeed:${catId}`;
+    if (speed === null) {
+      await this.deleteDetailFields(key, field);
+    } else {
+      await this.setDetailFields(key, field, speed);
+    }
+  }
+
+  async getMemberSpeed(threadId: string, catId: CatId, _userId: string): Promise<CodexSpeedValue | undefined> {
+    const raw = await this.redis.hget(ThreadKeys.detail(threadId), `memberSpeed:${catId}`);
+    return parseCodexSpeedValue(raw);
+  }
+
+  async getMemberSpeeds(threadId: string, _userId: string): Promise<Partial<Record<CatId, CodexSpeedValue>>> {
+    const fields = await this.redis.hgetall(ThreadKeys.detail(threadId));
+    const speeds: Partial<Record<CatId, CodexSpeedValue>> = {};
+    for (const [field, raw] of Object.entries(fields)) {
+      if (!field.startsWith('memberSpeed:')) continue;
+      const speed = parseCodexSpeedValue(raw);
+      if (!speed) continue;
+      const catId = field.slice('memberSpeed:'.length) as CatId;
+      speeds[catId] = speed;
+    }
+    return speeds;
+  }
+
+  /** #836: Check if cat uses reborn strategy in this thread. */
+  async getMemberSessionStrategy(
+    threadId: string,
+    catId: string,
+    _userId: string,
+  ): Promise<'resume' | 'reborn' | undefined> {
+    const key = ThreadKeys.detail(threadId);
+    const raw = await this.redis.hget(key, `memberSS:${catId}`);
+    return raw === 'resume' || raw === 'reborn' ? raw : undefined;
+  }
+
+  async isRebornSession(threadId: string, catId: string): Promise<boolean> {
+    const key = ThreadKeys.detail(threadId);
+    const raw = await this.redis.hget(key, `memberSS:${catId}`);
+    return raw === 'reborn';
+  }
+
+  /**
+   * F247 AC-B1c-1: Update a cloud cat's ChatGPT chat URL binding for this thread.
+   *
+   * Stored as individual Redis hash field `cloudBinding:<catId>` (NOT a single
+   * JSON-stringified map). Pattern matches existing `memberSS:<catId>` —
+   * separate fields are NEVER hydrated by `.get()` / `hydrateThread()`, which
+   * gives privacy-by-absence: cloudCatBindings cannot leak through default
+   * thread serialization paths (get_thread_context, thread export, cross-post,
+   * memory index) because it simply isn't on the in-memory Thread object after
+   * a Redis read.
+   *
+   * Owner authorization MUST be enforced at the route/MCP layer; this method
+   * does not check ownership.
+   *
+   * URL format validation is NOT enforced here; callers MUST pre-validate with
+   * `isValidChatGptChatUrl()`.
+   *
+   * **Delete-race guard (gpt52 R1 P2-1)**: HSET path uses `HSET_IF_HAS_ID_LUA`
+   * to fail-closed when the canonical `id` field is gone (thread deleted
+   * between route's `get()` and this write). Without the guard, raw HSET would
+   * resurrect a deleted thread's detail hash with only `cloudBinding:*` fields —
+   * an orphan hash inconsistent with the rest of this store's atomic update
+   * convention (see line 40, 568, 637, 972 for the existing pattern).
+   *
+   * HDEL path remains bare: Redis HDEL on a non-existent key is a safe no-op
+   * (returns 0, does not create the hash), so the same race cannot resurrect.
+   */
+  async updateCloudCatBinding(threadId: string, catId: string, chatUrl: string | null): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    const field = `cloudBinding:${catId}`;
+    if (chatUrl === null) {
+      // HDEL on missing hash returns 0 — no orphan resurrection risk.
+      await this.redis.hdel(key, field);
+    } else {
+      // HSET via guarded Lua: returns 0 (silently skipped) if thread.id field is gone.
+      // Callers are expected to validate thread existence via the route layer; this
+      // is defense-in-depth against TOCTOU between route.get() and store write.
+      await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, field, chatUrl);
+    }
+  }
+
+  /**
+   * F247 AC-B1c-1: Read all cloud cat bindings for this thread.
+   *
+   * Scans the thread detail hash for `cloudBinding:<catId>` fields and returns
+   * them as a flat `Record<catId, chatUrl>`. Empty object when no bindings.
+   *
+   * Owner authorization MUST be enforced at the route/MCP layer.
+   */
+  async getCloudCatBindings(threadId: string): Promise<Record<string, string>> {
+    const key = ThreadKeys.detail(threadId);
+    const data = await this.redis.hgetall(key);
+    const result: Record<string, string> = {};
+    for (const [field, value] of Object.entries(data)) {
+      if (field.startsWith('cloudBinding:') && typeof value === 'string' && value.length > 0) {
+        const catId = field.slice('cloudBinding:'.length);
+        if (catId.length > 0) result[catId] = value;
+      }
+    }
+    return result;
+  }
+
+  async setPendingContinuation(
+    threadId: string,
+    catId: string,
+    userId: string,
+    entry: { capsule: Record<string, unknown>; createdAt: number },
+  ): Promise<void> {
+    // #813 P2 fix: per-cat hash field (atomic HSET, no read-modify-write race).
+    // Cloud Codex P1: scope by userId to prevent cross-user continuation leakage
+    // in shared threads. Field key: `pendCont:<catId>:<userId>`.
+    const key = ThreadKeys.detail(threadId);
+    await this.redis.hset(key, { [`pendCont:${catId}:${userId}`]: JSON.stringify(entry) });
+  }
+
+  async consumePendingContinuation(
+    threadId: string,
+    catId: string,
+    userId: string,
+  ): Promise<{ capsule: Record<string, unknown>; createdAt: number } | null> {
+    // Cloud Codex P2: atomic read-and-delete via Lua script to prevent
+    // concurrent same-thread/cat/user invocations from both consuming the capsule.
+    const key = ThreadKeys.detail(threadId);
+    const field = `pendCont:${catId}:${userId}`;
+    const raw = (await this.redis.eval(
+      `local v = redis.call('hget', KEYS[1], ARGV[1])
+       if v then redis.call('hdel', KEYS[1], ARGV[1]) end
+       return v`,
+      1,
+      key,
+      field,
+    )) as string | null;
+    if (!raw) return null;
+    return JSON.parse(raw) as { capsule: Record<string, unknown>; createdAt: number };
   }
 
   private parsePhase(raw: string | undefined): ThreadPhase | undefined {
@@ -678,3 +2055,11 @@ export class RedisThreadStore implements IThreadStore {
     return undefined;
   }
 }
+
+type RecoveredMessageSnapshot = {
+  id: string;
+  userId: string;
+  catId: string | null;
+  content: string;
+  timestamp: number;
+};

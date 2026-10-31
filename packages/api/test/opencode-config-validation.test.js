@@ -32,11 +32,11 @@ describe('cat-template.json — 金渐层 (opencode) validation', () => {
     assert.ok(breed.mentionPatterns.includes('@金渐层'));
   });
 
-  test('opencode-default variant has correct provider and model', () => {
+  test('opencode-default variant has correct clientId and model', () => {
     const breed = config.breeds.find((b) => b.id === 'golden-chinchilla');
     const variant = breed.variants.find((v) => v.id === 'opencode-default');
     assert.ok(variant, 'opencode-default variant should exist');
-    assert.strictEqual(variant.provider, 'opencode');
+    assert.strictEqual(variant.clientId, 'opencode');
     assert.strictEqual(variant.defaultModel, 'claude-opus-4-6');
     assert.strictEqual(variant.mcpSupport, true);
   });

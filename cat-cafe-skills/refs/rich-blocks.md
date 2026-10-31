@@ -1,10 +1,12 @@
 # Rich Blocks Reference
 
-> 降级自 `using-rich-blocks` skill。按需查阅。
+> 降级自 `rich-messaging` skill。按需查阅。
 
 ## 何时用 Rich Block
 
 结构化信息默认用 rich block；随意聊天用纯文本。发 block 前先写 1-2 句自然语言摘要。
+
+**适用场景**：不只是对话！定时任务唤醒、主动触发、connector 通知等场景中，猫同样拥有全部 rich block 能力。
 
 ### 用 rich block
 
@@ -13,10 +15,11 @@
 | card | Review 结论、状态报告、决策摘要 |
 | diff | 代码修改建议、重构前后对比 |
 | checklist | 待办项、检查清单、验证步骤 |
-| media_gallery | 截图、设计稿、多图对比 |
-| audio | 问候、情感表达（系统自动合成语音） |
+| file | 已有文件、成片视频、导出物；`video/*` 文件会内联播放 |
+| media_gallery | 发送已有图片（头像、照片）、截图、设计稿、多图对比 — 不需要现场生成！ |
+| audio | 问候、情感表达、定时播报（系统自动合成语音） |
 | interactive | 需要用户选择/确认的场景（选方案、选猫、确认操作） |
-| html_widget | 数据可视化、交互 demo、mini 工具（沙盒 iframe） |
+| html_widget | 数据可视化、自己写的 HTML 面板、交互 demo、mini 工具（沙盒 iframe） |
 
 ### 不用 rich block
 
@@ -31,15 +34,64 @@
 | card | title | bodyMarkdown, tone (info/success/warning/danger), fields |
 | diff | filePath, diff | languageHint |
 | checklist | items (id+text) | title |
+| file | url, fileName | mimeType, fileSize |
 | media_gallery | items (url) | title, alt, caption |
 | audio | text | — |
 | interactive | interactiveType, options (id+label) | title, description, maxSelect, allowRandom, messageTemplate |
 | html_widget | html | title, height (50-2000, default 300) |
 
+### media_gallery 图片 URL 规范
+
+`items[].url` 只接受以下四种格式（路径遍历 `../` 会被 `safeResolve` 拦截）：
+
+| 格式 | 示例 | 说明 |
+|------|------|------|
+| `/uploads/xxx.png` | `/uploads/opus-happy.png` | **推荐**，文件在 **runtime** `packages/api/uploads/` |
+| `/api/connector-media/xxx` | `/api/connector-media/img.jpg` | 文件在 `data/connector-media/` |
+| `data:image/png;base64,...` | 完整 base64 编码 | 小图可用，会自动转临时文件上传 |
+| `https://...` | `https://example.com/img.png` | 外部链接 |
+
+**禁止**：`/api/connector-media/../assets/...` 等含 `../` 的路径 — 会被路径遍历保护拒绝，前端裂图。
+
+> ⚠️ **落盘路径陷阱（多只猫踩过）**
+>
+> `/uploads/xxx.png` 对应的磁盘真身是 **`cat-cafe-runtime/packages/api/uploads/`**（运行中 API 的 `getDefaultUploadDir()`）。
+> 以下路径**全都是错误投放点**，文件放进去也 404：
+>
+> | 错误路径 | 为什么错 |
+> |----------|----------|
+> | `cat-cafe/uploads/` | 开发仓根目录，不被任何 server 静态路由 serve |
+> | `cat-cafe/packages/api/uploads/` | 开发仓 packages 目录，非 runtime 检出 |
+> | `cat-cafe-runtime/uploads/` | runtime 根目录，API 不 serve 这一层 |
+>
+> **成员入口**：原生生成图由 provider 自动发布；普通成员的本地 PNG 用 `cat_cafe_publish_image` 取得持久 URL / messageId / revision。调用方式见 [Rich Messaging](../rich-messaging/SKILL.md#发送方式)。
+> `publishGeneratedImage()` 是内部函数；用户上传的 multipart 路由不是成员上传接口。不要 import 内部模块或手动 `cp` 到 runtime uploads。
+
+### 关于本地生成图的额外说明（F172 共享发布合约）
+
+Codex `image_gen` 和 Antigravity 生成的图片现已**自动发布**：
+- Codex：`CodexAgentService` 在 invocation 结束后自动扫描 `~/.codex/generated_images/<sessionId>/` 并发布
+- Antigravity：`AntigravityAgentService` 自动从工具结果中检测图片路径并发布
+- 两者都通过 `publishGeneratedImage()` 合约，自动解析当前 runtime 的 `uploadDir`、生成幂等文件名、返回 `/uploads/...` URL + `media_gallery` 富块
+
+**图片绝对路径只用于展示**：`create_rich_block` 会将已登记 Workspace 中现存、可读的图片（≤10MiB）安全转换为 `/api/workspace/file/raw?worktreeId=...&path=...`；未知工作区、受保护路径或不可展示文件明确报错。这不是复制到 uploads，也不是持久的图片发布。
+
+**其他本地 PNG**：调用 `cat_cafe_publish_image({path, publicationKey, title?, alt?})`，图片与当前 thread 的消息已持久化，不要重复贴同一 URL。相同请求可重试，改图换 key；后续沿原 Task/content lineage 审阅。Workspace raw URL 只是文件展示，不能用于 Task 媒体导入。具体步骤与限制见 [Rich Messaging](../rich-messaging/SKILL.md#发送方式)。
+
+不要把”源码仓里存在这个文件”和”当前 API 正在服务这个文件”混为一谈。runtime 可能跑在另一套 worktree / 另一份 `packages/api/uploads/`。
+
+### file 文件 / 视频 URL 规范
+
+`file.url` 同样只接受 `/uploads/...`、`/api/...` 或 `https://...`。
+
+- 文档、压缩包等普通文件：显示下载卡片
+- `mimeType` 以 `video/` 开头，或文件名扩展是 `mp4/mov/webm/avi/mkv/m4v/ogv`：Web UI 直接渲染内联 `<video>` 播放器
+- 自动发布仅覆盖原生 image_gen/Antigravity 图片结果，不覆盖任意富块 URL；**本地视频/通用文件还没有自动 publish helper**，使用已有可访问 URL（视频也可用 Workspace raw 媒体地址），不要手写 runtime uploads
+
 ## 创建方式
 
-1. **HTTP Callback（推荐）** — 见 `refs/mcp-callbacks.md` create-rich-block 端点
-2. **MCP Tool** — `cat_cafe_create_rich_block`
+1. **MCP Tool（推荐）** — `cat_cafe_create_rich_block`
+2. **Callback surface reference** — 见 `refs/mcp-callbacks.md` 的工具映射表；不要手写第一方 HTTP callback 作为主路径
 3. **Inline Text（fallback）**：
 ````
 ```cc_rich
@@ -47,13 +99,13 @@
 ```
 ````
 
-优先用 HTTP callback。`cc_rich` 仅在 HTTP 不可用时使用。
+优先用 `cat_cafe_create_rich_block`。`cc_rich` 仅在 MCP/callback surface 不可用时使用。
 
 ### interactive 类型
 
 | interactiveType | 说明 | 用户操作 | 自动发送消息 |
 |-----------------|------|---------|-------------|
-| select | 单选列表 | 点一个选项 | "我选了：方案 A" |
+| select | 单选列表 | 点选→确认 | "我选了：方案 A" |
 | multi-select | 多选列表 | 勾选多个→确认 | "我选了：Node.js, pnpm" |
 | card-grid | 卡片网格 | 点一张卡片 | "我选了：🎲 猫猫盲盒" |
 | confirm | 确认/取消 | 点按钮 | "确认" / "取消" |
@@ -61,6 +113,10 @@
 - `messageTemplate`：自定义模板，`{selection}` 占位符。例："我选了 {selection} 作为引导猫"
 - `allowRandom`：card-grid 显示"🎲 随机抽"按钮
 - `maxSelect`：multi-select 最大选择数
+- `options[].customInput: true`：点该选项后展开理由输入框；可用
+  `customInputPlaceholder` 定制提示。当前 UI 在输入为空时禁用确认，因此适合
+  “不同意【请写理由】 / 其他【请写处理方式】”。
+- 普通 option 不要求输入文字，适合“同意，按建议执行”这类免打字路径。
 - 用户选择后 block 自动变 disabled，选择结果持久化（刷新不丢）
 
 ### card tone 语义

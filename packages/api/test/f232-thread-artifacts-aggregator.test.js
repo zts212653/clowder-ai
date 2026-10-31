@@ -1,0 +1,355 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
+
+const { aggregateThreadArtifacts, collectAllThreadMessages, projectRecentMessageArtifactPage } = await import(
+  '../dist/domains/cats/services/agents/routing/thread-artifacts-aggregator.js'
+);
+
+function msg(id, timestamp, blocks, catId = 'opus-48') {
+  return { id, catId, timestamp, extra: { rich: { blocks } } };
+}
+
+test('media_gallery block → one image artifact per item', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [
+      msg('m1', 100, [
+        {
+          kind: 'media_gallery',
+          v: 1,
+          id: 'b1',
+          items: [{ url: '/uploads/a.png', caption: '架构图' }, { url: '/uploads/b.png' }],
+        },
+      ]),
+    ],
+    prTasks: [],
+    fileLedger: [],
+  });
+  assert.equal(r.length, 2);
+  assert.ok(r.every((a) => a.type === 'image'));
+  const names = r.map((a) => a.name);
+  assert.ok(names.includes('架构图')); // caption
+  assert.ok(names.includes('image')); // fallback when no caption/alt
+  assert.ok(r.every((a) => a.sourceMessageId === 'm1'));
+});
+
+test('bounded recent projection caps a huge gallery while preserving canonical publication order', () => {
+  const itemCount = 20_000;
+  const limit = 12;
+  const page = projectRecentMessageArtifactPage(
+    msg('large-gallery', 100, [
+      {
+        kind: 'media_gallery',
+        v: 1,
+        id: 'gallery',
+        items: Array.from({ length: itemCount }, (_, index) => ({ url: `/uploads/${index}.png` })),
+      },
+    ]),
+    limit,
+  );
+  const result = page.artifacts;
+
+  const expectedIndices = Array.from({ length: itemCount }, (_, index) => index)
+    .sort((left, right) => `gallery:gallery:${left}`.localeCompare(`gallery:gallery:${right}`))
+    .slice(0, limit);
+  assert.equal(result.length, limit);
+  assert.equal(page.total, itemCount);
+  assert.deepEqual(
+    result.map((artifact) => artifact.publicationItem.itemIndex),
+    expectedIndices,
+  );
+});
+
+test('file block → file artifact with url + fileName', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [msg('m2', 50, [{ kind: 'file', v: 1, id: 'b1', url: '/uploads/report.pdf', fileName: '报告.pdf' }])],
+    prTasks: [],
+    fileLedger: [],
+  });
+  assert.equal(r.length, 1);
+  assert.equal(r[0].type, 'file');
+  assert.equal(r[0].name, '报告.pdf');
+  assert.equal(r[0].url, '/uploads/report.pdf');
+  assert.equal(r[0].sourceMessageId, 'm2');
+});
+
+test('diff block → code artifact (no url, ref=filePath)', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [msg('m3', 60, [{ kind: 'diff', v: 1, id: 'b1', filePath: 'src/x.ts', diff: '@@ ...' }])],
+    prTasks: [],
+    fileLedger: [],
+  });
+  assert.equal(r[0].type, 'code');
+  assert.equal(r[0].name, 'src/x.ts');
+  assert.equal(r[0].url, undefined);
+  assert.equal(r[0].ref, 'src/x.ts');
+});
+
+test('audio block → audio artifact (title preferred, else truncated text)', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [
+      msg('m4', 70, [
+        {
+          kind: 'audio',
+          v: 1,
+          id: 'b1',
+          url: '/uploads/v.mp3',
+          text: '这是一段很长很长很长很长很长很长很长的语音总结内容',
+        },
+      ]),
+    ],
+    prTasks: [],
+    fileLedger: [],
+  });
+  assert.equal(r[0].type, 'audio');
+  assert.equal(r[0].url, '/uploads/v.mp3');
+  assert.equal(r[0].name.length, 24); // truncated to AUDIO_NAME_MAX
+});
+
+test('PR task → pr artifact (ref strips pr: prefix, catId from owner)', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [],
+    fileLedger: [],
+    prTasks: [
+      { subjectKey: 'pr:org/repo#123', title: 'cache fix', ownerCatId: 'opus-47', status: 'open', updatedAt: 80 },
+    ],
+  });
+  assert.equal(r[0].type, 'pr');
+  assert.equal(r[0].name, 'cache fix');
+  assert.equal(r[0].ref, 'org/repo#123');
+  assert.equal(r[0].catId, 'opus-47');
+});
+
+test('PR task without subjectKey is skipped', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [],
+    fileLedger: [],
+    prTasks: [{ subjectKey: null, title: 'x', ownerCatId: 'c', status: 'open', updatedAt: 1 }],
+  });
+  assert.equal(r.length, 0);
+});
+
+test('file ledger entry for source code → code artifact', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [],
+    prTasks: [],
+    fileLedger: [
+      { ref: 'src/foo.ts', label: 'foo.ts', updatedAt: 91, updatedBy: 'opus-48' },
+      { ref: 'packages/web/index.html', label: 'index.html', updatedAt: 90, updatedBy: 'opus-48' },
+    ],
+  });
+  assert.equal(r[0].type, 'code');
+  assert.equal(r[0].name, 'foo.ts');
+  assert.equal(r[0].ref, 'src/foo.ts');
+  assert.equal(r[0].catId, 'opus-48');
+  assert.equal(r[1].type, 'code');
+  assert.equal(r[1].name, 'index.html');
+  assert.equal(r[1].ref, 'packages/web/index.html');
+  assert.equal(r[1].catId, 'opus-48');
+});
+
+test('file ledger entry for tracked script extensions → code artifact', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [],
+    prTasks: [],
+    fileLedger: [
+      { ref: 'scripts/install.ps1', label: 'install.ps1', updatedAt: 96, updatedBy: 'opus-48' },
+      { ref: 'scripts/start.bat', label: 'start.bat', updatedAt: 95, updatedBy: 'opus-48' },
+      { ref: 'scripts/_sanitize-rules.pl', label: '_sanitize-rules.pl', updatedAt: 94, updatedBy: 'opus-48' },
+    ],
+  });
+  assert.deepEqual(
+    r.map((a) => [a.ref, a.type]),
+    [
+      ['scripts/install.ps1', 'code'],
+      ['scripts/start.bat', 'code'],
+      ['scripts/_sanitize-rules.pl', 'code'],
+    ],
+  );
+});
+
+test('file ledger entry for markdown stays file artifact', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [],
+    prTasks: [],
+    fileLedger: [{ ref: 'docs/features/F232.md', label: 'F232.md', updatedAt: 95, updatedBy: 'opus-48' }],
+  });
+  assert.equal(r[0].type, 'file');
+  assert.equal(r[0].name, 'F232.md');
+  assert.equal(r[0].ref, 'docs/features/F232.md');
+});
+
+test('dedup by ref keeps latest createdAt; result is time-desc', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [],
+    prTasks: [{ subjectKey: 'pr:o/r#1', title: 'pr', ownerCatId: 'c', status: 'open', updatedAt: 10 }],
+    fileLedger: [
+      { ref: 'a.ts', label: 'a.ts', updatedAt: 30, updatedBy: 'c' },
+      { ref: 'a.ts', label: 'a.ts', updatedAt: 50, updatedBy: 'c' }, // dup ref, newer wins
+    ],
+  });
+  assert.equal(r.length, 2); // a.ts deduped + pr#1
+  assert.equal(r[0].createdAt, 50); // newest first
+  assert.equal(r[1].createdAt, 10);
+});
+
+test('empty input → empty array', () => {
+  assert.deepEqual(aggregateThreadArtifacts({ messages: [], prTasks: [], fileLedger: [] }), []);
+});
+
+test('non-collected blocks (card / checklist) are ignored', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [
+      msg('m', 1, [
+        { kind: 'card', v: 1, id: 'b1', title: 'x' },
+        { kind: 'checklist', v: 1, id: 'b2', items: [] },
+      ]),
+    ],
+    prTasks: [],
+    fileLedger: [],
+  });
+  assert.equal(r.length, 0);
+});
+
+// Widget artifact tests extracted to f232-widget-artifacts.test.js (350-line limit)
+
+test('collectAllThreadMessages paginates a REAL store with no overlap (oldest→newest cursor)', async () => {
+  // 砚砚 P1: mock 不能伪造分页顺序——必须用真实 MessageStore（返回 oldest→newest），
+  // 否则错 cursor（page[last]）会重叠重扫，250 条返回上万条。
+  const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+  const store = new MessageStore();
+  const base = Date.now();
+  // 250 > THREAD_SCAN_PAGE(200) → 强制多页
+  for (let i = 0; i < 250; i++) {
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'u',
+        catId: 'opus-48',
+        content: `m${i}`,
+        mentions: [],
+        timestamp: base + i,
+        threadId: 'T',
+      }),
+    );
+  }
+  const all = await collectAllThreadMessages(store, 'T');
+  const uniqueIds = new Set(all.map((m) => m.id));
+  assert.equal(all.length, 250, 'no page overlap — returned count equals message count');
+  assert.equal(uniqueIds.size, 250, 'all unique — no duplicate re-scan');
+});
+
+// ── F232 Phase A.2: video artifact detection ──────────────────
+
+test('file block with video mimeType → type=video (AC-A9)', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [
+      msg('m-v1', 200, [
+        { kind: 'file', v: 1, id: 'b1', url: '/uploads/demo.mp4', fileName: 'demo.mp4', mimeType: 'video/mp4' },
+      ]),
+    ],
+    prTasks: [],
+    fileLedger: [],
+  });
+  assert.equal(r.length, 1);
+  assert.equal(r[0].type, 'video');
+  assert.equal(r[0].name, 'demo.mp4');
+  assert.equal(r[0].url, '/uploads/demo.mp4');
+});
+
+test('file block with video extension but no mimeType → type=video (extension fallback)', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [msg('m-v2', 210, [{ kind: 'file', v: 1, id: 'b2', url: '/uploads/clip.webm', fileName: 'clip.webm' }])],
+    prTasks: [],
+    fileLedger: [],
+  });
+  assert.equal(r[0].type, 'video');
+});
+
+test('file block with non-video mimeType stays type=file', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [
+      msg('m-v3', 220, [
+        {
+          kind: 'file',
+          v: 1,
+          id: 'b3',
+          url: '/uploads/report.pdf',
+          fileName: 'report.pdf',
+          mimeType: 'application/pdf',
+        },
+      ]),
+    ],
+    prTasks: [],
+    fileLedger: [],
+  });
+  assert.equal(r[0].type, 'file');
+});
+
+test('file block with non-video mimeType wins over misleading video-looking filename', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [
+      msg('m-v3b', 225, [
+        {
+          kind: 'file',
+          v: 1,
+          id: 'b3b',
+          url: '/uploads/report.mp4',
+          fileName: 'report.mp4',
+          mimeType: 'application/pdf',
+        },
+      ]),
+    ],
+    prTasks: [],
+    fileLedger: [],
+  });
+  assert.equal(r[0].type, 'file');
+  assert.equal(r[0].mime, 'application/pdf');
+});
+
+test('file block with mov extension → type=video', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [
+      msg('m-v4', 230, [{ kind: 'file', v: 1, id: 'b4', url: '/uploads/screen.mov', fileName: 'screen.mov' }]),
+    ],
+    prTasks: [],
+    fileLedger: [],
+  });
+  assert.equal(r[0].type, 'video');
+});
+
+test('getByThreadBefore (in-memory) keeps queued user work at its authored timeline position', async () => {
+  // Queue execution is a separate ledger. Processing a persisted user message
+  // must not move that message to the end of History; both Redis and memory
+  // pagination therefore retain the original authored timestamp.
+  const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+  const store = new MessageStore();
+  const base = Date.now();
+  store.append(
+    canonicalTestMessageInput({
+      userId: 'u',
+      catId: null,
+      content: 'older',
+      mentions: [],
+      timestamp: base + 50,
+      threadId: 'T',
+    }),
+  );
+  const queued = store.append(
+    canonicalTestMessageInput({
+      userId: 'u',
+      catId: null,
+      content: 'queued',
+      mentions: [],
+      timestamp: base + 100,
+      threadId: 'T',
+      deliveryStatus: 'queued',
+    }),
+  );
+  store.markDelivered(queued.id, base + 300);
+
+  const page = store.getByThreadBefore('T', base + 100, 200, queued.id);
+  const ids = page.map((m) => m.id);
+  assert.ok(!ids.includes(queued.id), 'cursor message must not reappear in its own before-page');
+  assert.equal(page.length, 1, 'only the genuinely-older message precedes the cursor');
+  assert.equal(page[0].content, 'older');
+});

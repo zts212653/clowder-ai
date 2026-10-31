@@ -1,0 +1,486 @@
+import assert from 'node:assert/strict';
+import { beforeEach, describe, it } from 'node:test';
+
+describe('F200 recall correlation integration', () => {
+  let Database;
+  let db;
+
+  beforeEach(async () => {
+    Database = (await import('better-sqlite3')).default;
+    const schema = await import('../../dist/domains/memory/schema.js');
+
+    db = new Database(':memory:');
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec(schema.SCHEMA_V1);
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(1, new Date().toISOString());
+    schema.applyMigrations(db);
+  });
+
+  it('end-to-end: search_evidence → Read → RecallEvent persisted', async () => {
+    const { triggerRecallCorrelation } = await import(
+      `../../dist/domains/memory/recall-correlation-hook.js?v=${Date.now()}`
+    );
+
+    const now = Date.now();
+    const events = [
+      {
+        threadId: 'th-1',
+        catId: 'opus',
+        invocationId: 'inv-1',
+        toolName: 'search_evidence',
+        summary: {
+          query: 'memory adapter',
+          mode: 'hybrid',
+          scope: 'docs',
+          resultCount: 1,
+          _f200Candidates: [
+            { anchor: 'F102', rank: 0, sourcePath: 'docs/features/F102-memory-adapter.md', docKind: 'feature' },
+          ],
+        },
+        timestamp: now - 5000,
+      },
+      {
+        threadId: 'th-1',
+        catId: 'opus',
+        invocationId: 'inv-1',
+        toolName: 'Read',
+        summary: { file_path: '/path/cat-cafe/docs/features/F102-memory-adapter.md' },
+        timestamp: now - 3000,
+      },
+    ];
+
+    await triggerRecallCorrelation(db, events, 'inv-1', 'opus');
+
+    const rows = db.prepare('SELECT * FROM recall_events').all();
+    assert.equal(rows.length, 1, 'one RecallEvent persisted');
+    assert.equal(rows[0].tool_name, 'search_evidence');
+    assert.equal(rows[0].cat_id, 'opus');
+
+    const consumed = JSON.parse(rows[0].consumed_json);
+    assert.equal(consumed.length, 1, 'one consumed entry');
+    assert.equal(consumed[0].anchor, 'F102');
+    assert.equal(consumed[0].method, 'Read');
+  });
+
+  it('no memory tools → no RecallEvents', async () => {
+    const { triggerRecallCorrelation } = await import(
+      `../../dist/domains/memory/recall-correlation-hook.js?v2=${Date.now()}`
+    );
+
+    const events = [
+      {
+        threadId: 'th-1',
+        catId: 'opus',
+        invocationId: 'inv-1',
+        toolName: 'Edit',
+        toolInput: { file_path: '/src/foo.ts' },
+        summary: {},
+        timestamp: Date.now(),
+      },
+    ];
+
+    await triggerRecallCorrelation(db, events, 'inv-1', 'opus');
+
+    const rows = db.prepare('SELECT * FROM recall_events').all();
+    assert.equal(rows.length, 0, 'no recall events for non-memory tools');
+  });
+
+  it('edge traversals recorded from graph_resolve with edges', async () => {
+    const { triggerRecallCorrelation } = await import(
+      `../../dist/domains/memory/recall-correlation-hook.js?v3=${Date.now()}`
+    );
+
+    // Pre-populate edges
+    db.prepare("INSERT INTO edges (from_anchor, to_anchor, relation) VALUES ('F102', 'F042', 'feature_ref')").run();
+    db.prepare("INSERT INTO edges (from_anchor, to_anchor, relation) VALUES ('F102', 'ADR-019', 'doc_link')").run();
+
+    const now = Date.now();
+    const events = [
+      {
+        threadId: 'th-1',
+        catId: 'opus',
+        invocationId: 'inv-1',
+        toolName: 'graph_resolve',
+        toolInput: { query: 'F102' },
+        summary: {
+          centerAnchor: 'F102',
+          nodeCount: 3,
+          edgeCount: 2,
+          _f200Candidates: [{ anchor: 'F102', rank: 0 }],
+          _f200Edges: [
+            { from: 'F102', to: 'F042', relation: 'feature_ref' },
+            { from: 'F102', to: 'ADR-019', relation: 'doc_link' },
+          ],
+        },
+        timestamp: now,
+      },
+    ];
+
+    await triggerRecallCorrelation(db, events, 'inv-1', 'opus');
+
+    // P1-2 fix: only edges whose target was consumed should be recorded
+    // graph_resolve with no follow-up Read = no consumption = no edge traversal
+    const e1 = db.prepare("SELECT traversal_count FROM edges WHERE from_anchor = 'F102' AND to_anchor = 'F042'").get();
+    const e2 = db
+      .prepare("SELECT traversal_count FROM edges WHERE from_anchor = 'F102' AND to_anchor = 'ADR-019'")
+      .get();
+    assert.equal(e1.traversal_count, 0, 'no consumption = no edge traversal');
+    assert.equal(e2.traversal_count, 0, 'no consumption = no edge traversal');
+  });
+
+  it('edge traversals only recorded for consumed targets', async () => {
+    const { triggerRecallCorrelation } = await import(
+      `../../dist/domains/memory/recall-correlation-hook.js?v4=${Date.now()}`
+    );
+
+    db.prepare("INSERT INTO edges (from_anchor, to_anchor, relation) VALUES ('F102', 'F042', 'feature_ref')").run();
+    db.prepare("INSERT INTO edges (from_anchor, to_anchor, relation) VALUES ('F102', 'ADR-019', 'doc_link')").run();
+
+    const now = Date.now();
+    const events = [
+      {
+        threadId: 'th-1',
+        catId: 'opus',
+        invocationId: 'inv-1',
+        toolName: 'graph_resolve',
+        summary: {
+          centerAnchor: 'F102',
+          nodeCount: 3,
+          edgeCount: 2,
+          query: 'F102',
+          _f200Candidates: [
+            { anchor: 'F102', rank: 0 },
+            { anchor: 'F042', rank: 1 },
+            { anchor: 'ADR-019', rank: 2 },
+          ],
+          _f200Edges: [
+            { from: 'F102', to: 'F042', relation: 'feature_ref' },
+            { from: 'F102', to: 'ADR-019', relation: 'doc_link' },
+          ],
+        },
+        timestamp: now - 5000,
+      },
+      {
+        threadId: 'th-1',
+        catId: 'opus',
+        invocationId: 'inv-1',
+        toolName: 'Read',
+        summary: { file_path: '/path/cat-cafe/docs/features/F042-something.md' },
+        timestamp: now - 3000,
+      },
+    ];
+
+    await triggerRecallCorrelation(db, events, 'inv-1', 'opus');
+
+    const e1 = db.prepare("SELECT traversal_count FROM edges WHERE from_anchor = 'F102' AND to_anchor = 'F042'").get();
+    const e2 = db
+      .prepare("SELECT traversal_count FROM edges WHERE from_anchor = 'F102' AND to_anchor = 'ADR-019'")
+      .get();
+    assert.equal(e1.traversal_count, 1, 'consumed target edge recorded');
+    assert.equal(e2.traversal_count, 0, 'unconsumed target edge NOT recorded');
+  });
+
+  it('reading center anchor does NOT record outbound edges', async () => {
+    const { triggerRecallCorrelation } = await import(
+      `../../dist/domains/memory/recall-correlation-hook.js?v5=${Date.now()}`
+    );
+
+    db.prepare("INSERT INTO edges (from_anchor, to_anchor, relation) VALUES ('F102', 'F042', 'feature_ref')").run();
+
+    const now = Date.now();
+    const events = [
+      {
+        threadId: 'th-1',
+        catId: 'opus',
+        invocationId: 'inv-1',
+        toolName: 'graph_resolve',
+        summary: {
+          centerAnchor: 'F102',
+          nodeCount: 2,
+          edgeCount: 1,
+          query: 'F102',
+          _f200Candidates: [
+            { anchor: 'F102', rank: 0 },
+            { anchor: 'F042', rank: 1 },
+          ],
+          _f200Edges: [{ from: 'F102', to: 'F042', relation: 'feature_ref' }],
+        },
+        timestamp: now - 5000,
+      },
+      {
+        threadId: 'th-1',
+        catId: 'opus',
+        invocationId: 'inv-1',
+        toolName: 'Read',
+        summary: { file_path: '/path/cat-cafe/docs/features/F102-memory-adapter.md' },
+        timestamp: now - 3000,
+      },
+    ];
+
+    await triggerRecallCorrelation(db, events, 'inv-1', 'opus');
+
+    const e1 = db.prepare("SELECT traversal_count FROM edges WHERE from_anchor = 'F102' AND to_anchor = 'F042'").get();
+    assert.equal(e1.traversal_count, 0, 'reading center does NOT count as traversing outbound edges');
+  });
+
+  it('private collection hits are not persisted in recall_events', async () => {
+    const { triggerRecallCorrelation } = await import(
+      `../../dist/domains/memory/recall-correlation-hook.js?v6=${Date.now()}`
+    );
+
+    const now = Date.now();
+    const events = [
+      {
+        threadId: 'th-1',
+        catId: 'opus',
+        invocationId: 'inv-1',
+        toolName: 'search_evidence',
+        summary: {
+          query: 'secret plot',
+          mode: 'hybrid',
+          scope: 'all',
+          resultCount: 1,
+          _f200Candidates: [{ anchor: 'world:lexander:doc/secret-plot', rank: 0, docKind: 'doc' }],
+          _f200HasPrivateHits: true,
+        },
+        timestamp: now - 5000,
+      },
+      {
+        threadId: 'th-1',
+        catId: 'opus',
+        invocationId: 'inv-1',
+        toolName: 'Read',
+        summary: { file_path: '/path/library/world-lexander/doc/secret-plot.md' },
+        timestamp: now - 3000,
+      },
+    ];
+
+    await triggerRecallCorrelation(db, events, 'inv-1', 'opus');
+
+    const rows = db.prepare('SELECT * FROM recall_events').all();
+    assert.equal(rows.length, 0, 'no RecallEvent for private collection hits');
+  });
+
+  it('private pull recall does not suppress a safe push presentation from the same invocation', async () => {
+    const { triggerRecallCorrelation } = await import(
+      `../../dist/domains/memory/recall-correlation-hook.js?privatePush=${Date.now()}`
+    );
+    const now = Date.now();
+    const events = [
+      {
+        threadId: 'th-private-push',
+        catId: 'codex-sol',
+        invocationId: 'inv-private-push',
+        toolName: 'session_bootstrap',
+        summary: {
+          query: 'F263',
+          scope: 'docs',
+          resultCount: 1,
+          resultStatus: 'counted',
+          _f263PushSurface: 'session_bootstrap',
+          _f200Candidates: [{ anchor: 'F263', rank: 0, sourcePath: 'docs/features/F263.md' }],
+        },
+        timestamp: now - 6000,
+      },
+      {
+        threadId: 'th-private-push',
+        catId: 'codex-sol',
+        invocationId: 'inv-private-push',
+        toolName: 'search_evidence',
+        summary: {
+          query: 'private source',
+          resultCount: 1,
+          _f200HasPrivateHits: true,
+          _f200Candidates: [{ anchor: 'domain:user-profile/private', rank: 0 }],
+        },
+        timestamp: now - 5000,
+      },
+      {
+        threadId: 'th-private-push',
+        catId: 'codex-sol',
+        invocationId: 'inv-private-push',
+        toolName: 'Read',
+        summary: { file_path: '/repo/docs/features/F263.md' },
+        timestamp: now - 3000,
+      },
+    ];
+
+    await triggerRecallCorrelation(db, events, 'inv-private-push', 'codex-sol');
+
+    const rows = db.prepare('SELECT tool_name, source, outcome FROM recall_events').all();
+    assert.deepEqual(rows, [{ tool_name: 'session_bootstrap', source: 'push', outcome: 'used' }]);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM task_trajectories').get().count, 0);
+  });
+
+  it('F263 correlates push presentations into used/ignored events idempotently', async () => {
+    const { triggerRecallCorrelation } = await import(
+      `../../dist/domains/memory/recall-correlation-hook.js?push=${Date.now()}`
+    );
+    const now = Date.now();
+    const events = [
+      {
+        threadId: 'th-push',
+        catId: 'codex-sol',
+        invocationId: 'inv-push',
+        toolName: 'session_bootstrap',
+        summary: {
+          query: 'thread title',
+          scope: 'docs',
+          _f263PushSurface: 'session_bootstrap',
+          _f200Candidates: [
+            { anchor: 'F263', rank: 0, sourcePath: 'docs/features/F263-memory-lifecycle-repair-and-metrics.md' },
+          ],
+        },
+        timestamp: now - 5000,
+      },
+      {
+        threadId: 'th-push',
+        catId: 'codex-sol',
+        invocationId: 'inv-push',
+        toolName: 'Read',
+        summary: { file_path: '/repo/docs/features/F263-memory-lifecycle-repair-and-metrics.md' },
+        timestamp: now - 4000,
+      },
+      {
+        threadId: 'th-push',
+        catId: 'codex-sol',
+        invocationId: 'inv-push',
+        toolName: 'cold_context',
+        summary: {
+          query: 'cold context evidence',
+          scope: 'docs',
+          _f263PushSurface: 'cold_context',
+          _f200Candidates: [{ anchor: 'ADR-038', rank: 0, sourcePath: 'docs/decisions/ADR-038.md' }],
+        },
+        timestamp: now - 3000,
+      },
+    ];
+
+    await triggerRecallCorrelation(db, events, 'inv-push', 'codex-sol');
+    await triggerRecallCorrelation(db, events, 'inv-push', 'codex-sol');
+
+    const rows = db
+      .prepare(
+        `SELECT source, push_surface, presented, inspected, outcome, consumed_json
+         FROM recall_events WHERE invocation_id = ? ORDER BY timestamp`,
+      )
+      .all('inv-push');
+    assert.equal(rows.length, 2, 'route-finalization retry must not duplicate push presentations');
+    assert.deepEqual(
+      rows.map((row) => [row.source, row.push_surface, row.presented, row.inspected, row.outcome]),
+      [
+        ['push', 'session_bootstrap', 1, 1, 'used'],
+        ['push', 'cold_context', 1, 0, 'ignored'],
+      ],
+    );
+    assert.equal(JSON.parse(rows[0].consumed_json)[0].anchor, 'F263');
+  });
+
+  it('oversized real F200 summary survives the ToolEventLog storage boundary (PR #3613 R1 gpt52)', async () => {
+    // R1 blocking finding: sanitizeToolEventSummary must not convert structural
+    // arrays (_f200Candidates) into marker strings — recall-correlation-hook
+    // consumes them with .map(), so a marker string throws TypeError and the
+    // fire-and-forget .catch(() => {}) silently kills the whole batch.
+    // This test pushes a realistic MAX-size summary through the REAL storage
+    // path (ToolEventLog.updateSummary → readByThread) into the REAL consumer
+    // (triggerRecallCorrelation) and asserts the RecallEvent still lands.
+    const { ToolEventLog } = await import('../../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+    const { triggerRecallCorrelation } = await import(
+      `../../dist/domains/memory/recall-correlation-hook.js?v3613=${Date.now()}`
+    );
+
+    // Minimal fake redis — only the ops ToolEventLog uses.
+    const lists = new Map();
+    const getList = (k) => {
+      if (!lists.has(k)) lists.set(k, []);
+      return lists.get(k);
+    };
+    const fakeRedis = {
+      async zadd(key, score, member) {
+        const list = getList(key);
+        if (list.some((e) => e[1] === member)) return 0;
+        list.push([score, member]);
+        list.sort((a, b) => a[0] - b[0]);
+        return 1;
+      },
+      async zrange(key, start, stop, withScores) {
+        const list = getList(key);
+        const end = stop === -1 ? list.length : stop + 1;
+        const slice = list.slice(start, end);
+        return withScores === 'WITHSCORES' ? slice.flatMap(([s, m]) => [m, String(s)]) : slice.map(([, m]) => m);
+      },
+      async zrem(key, member) {
+        const list = getList(key);
+        const idx = list.findIndex((e) => e[1] === member);
+        if (idx >= 0) {
+          list.splice(idx, 1);
+          return 1;
+        }
+        return 0;
+      },
+      async zremrangebyrank(key, start, stop) {
+        const list = getList(key);
+        const len = list.length;
+        const s = Math.max(0, start < 0 ? len + start : start);
+        const e = Math.min(len - 1, stop < 0 ? len + stop : stop);
+        if (s > e) return 0;
+        return list.splice(s, e - s + 1).length;
+      },
+      async expire() {},
+    };
+
+    const eventLog = new ToolEventLog(fakeRedis);
+    const now = Date.now();
+
+    // tool_use append (raw toolInput summary, like route-serial wires it)
+    await eventLog.append({
+      invocationId: 'inv-r1',
+      sessionId: 'inv-r1',
+      threadId: 'th-r1',
+      catId: 'opus',
+      toolName: 'search_evidence',
+      timestamp: now - 5000,
+      turnIndex: 0,
+      status: 'success',
+      summary: { query: 'memory adapter coverage', _toolUseId: 'tu-r1' },
+    });
+
+    // Result-side patch: realistic MAX-size F200 payload — 20 candidates
+    // (COVERAGE_MAX_LIMIT), the shape deriveResultSummary emits (~2.4KB).
+    const cands = Array.from({ length: 20 }, (_, i) => ({
+      anchor: i === 0 ? 'F102' : `docs/features/F${100 + i}-some-longer-feature-name.md`,
+      rank: i,
+      docKind: 'feature',
+      sourcePath: `docs/features/F${100 + i}-some-longer-feature-name.md`,
+    }));
+    const merged = await eventLog.updateSummary(
+      'th-r1',
+      { toolUseId: 'tu-r1' },
+      { resultCount: 20, resultStatus: 'hit', _f200Candidates: cands },
+    );
+    assert.equal(merged, true, 'result patch must merge');
+
+    // Real storage roundtrip → real consumer.
+    const storedEvents = await eventLog.readByThread('th-r1');
+    assert.ok(Array.isArray(storedEvents[0].summary._f200Candidates), 'stored _f200Candidates must remain an array');
+    assert.equal(storedEvents[0].summary._f200Candidates.length, 20, 'all 20 candidates survive storage');
+
+    const events = [
+      ...storedEvents,
+      {
+        threadId: 'th-r1',
+        catId: 'opus',
+        invocationId: 'inv-r1',
+        toolName: 'Read',
+        summary: { file_path: '/path/cat-cafe/docs/features/F102-memory-adapter.md' },
+        timestamp: now - 3000,
+      },
+    ];
+    await triggerRecallCorrelation(db, events, 'inv-r1', 'opus');
+
+    const rows = db.prepare('SELECT * FROM recall_events').all();
+    assert.equal(rows.length, 1, 'RecallEvent persisted — correlation not poisoned by sanitize');
+    const consumed = JSON.parse(rows[0].consumed_json);
+    assert.equal(consumed[0].anchor, 'F102', 'consumed anchor extracted from intact candidate array');
+  });
+});

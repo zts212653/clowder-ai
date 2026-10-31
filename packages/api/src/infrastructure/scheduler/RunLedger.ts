@@ -1,0 +1,89 @@
+import type Database from 'better-sqlite3';
+import type { RunLedgerRow, RunStats } from './types.js';
+
+export class RunLedger {
+  private db: Database.Database;
+
+  constructor(db: Database.Database) {
+    this.db = db;
+  }
+
+  record(row: RunLedgerRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO task_run_ledger (
+           task_id, subject_key, outcome, signal_summary, duration_ms, started_at,
+           assigned_cat_id, error_summary, scheduled_at, fired_at, lateness_ms,
+           missed_slots, trigger_kind, misfire_policy
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        row.task_id,
+        row.subject_key,
+        row.outcome,
+        row.signal_summary,
+        row.duration_ms,
+        row.started_at,
+        row.assigned_cat_id,
+        row.error_summary ?? null,
+        row.scheduled_at ?? null,
+        row.fired_at ?? null,
+        row.lateness_ms ?? null,
+        row.missed_slots ?? null,
+        row.trigger_kind ?? null,
+        row.misfire_policy ?? null,
+      );
+  }
+
+  query(taskId: string, limit: number): RunLedgerRow[] {
+    return this.db
+      .prepare(
+        `SELECT task_id, subject_key, outcome, signal_summary, duration_ms, started_at,
+                assigned_cat_id, error_summary, scheduled_at, fired_at, lateness_ms,
+                missed_slots, trigger_kind, misfire_policy
+         FROM task_run_ledger WHERE task_id = ? ORDER BY id DESC LIMIT ?`,
+      )
+      .all(taskId, limit) as RunLedgerRow[];
+  }
+
+  /** Phase 2: query runs filtered by exact subject_key */
+  queryBySubject(taskId: string, subjectKey: string, limit: number): RunLedgerRow[] {
+    return this.db
+      .prepare(
+        `SELECT task_id, subject_key, outcome, signal_summary, duration_ms, started_at,
+                assigned_cat_id, error_summary, scheduled_at, fired_at, lateness_ms,
+                missed_slots, trigger_kind, misfire_policy
+         FROM task_run_ledger WHERE task_id = ? AND subject_key = ? ORDER BY id DESC LIMIT ?`,
+      )
+      .all(taskId, subjectKey, limit) as RunLedgerRow[];
+  }
+
+  /** Membership needs one indexed witness per candidate, never its retained history. */
+  findTaskIdsBySubjects(taskIds: readonly string[], subjectKeys: readonly string[]): Set<string> {
+    if (taskIds.length === 0 || subjectKeys.length === 0) return new Set();
+    const rows = this.db
+      .prepare(
+        `SELECT candidate.value AS task_id FROM json_each(?) AS candidate
+         WHERE EXISTS (
+           SELECT 1 FROM task_run_ledger
+           WHERE task_id = candidate.value AND subject_key IN (SELECT value FROM json_each(?))
+         )`,
+      )
+      .all(JSON.stringify(taskIds), JSON.stringify(subjectKeys)) as { task_id: string }[];
+    return new Set(rows.map((row) => row.task_id));
+  }
+
+  /** Read exact counters maintained in the same transaction as the canonical run. */
+  stats(taskId: string): RunStats {
+    const row = this.db
+      .prepare('SELECT total, delivered, failed, skipped FROM task_run_stats WHERE task_id = ?')
+      .get(taskId) as { total: number; delivered: number; failed: number; skipped: number } | undefined;
+    return {
+      total: row?.total ?? 0,
+      delivered: row?.delivered ?? 0,
+      failed: row?.failed ?? 0,
+      skipped: row?.skipped ?? 0,
+    };
+  }
+}

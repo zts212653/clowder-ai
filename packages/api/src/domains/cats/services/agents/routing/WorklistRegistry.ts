@@ -1,50 +1,159 @@
 /**
- * WorklistRegistry — per-invocation worklist for A2A unification (F27 + F108)
+ * WorklistRegistry — live per-invocation A2A guard state.
  *
- * When routeSerial is running, it registers its worklist here.
- * Callback A2A triggers (MCP post_message with @mention) push
- * targets into the worklist instead of spawning independent invocations.
+ * A2A execution itself is owned by the durable message_wake Queue path. This
+ * registry only lets callbacks in the currently running invocation share the
+ * depth/ping-pong projection rebuilt from persisted causal history.
  *
- * F108: Registry key is `parentInvocationId` (unique per invocation) when
- * provided, falling back to `threadId` for backward compatibility.
- * A reverse index (threadId → Set<registryKey>) enables thread-level
- * lookups (`hasWorklist(threadId)`) for routing decisions.
+ * Registry key is `parentInvocationId` (unique per invocation) when provided,
+ * with `threadId` as the direct-callback coordinate. A reverse index lets a
+ * fresh user input reset all live streak projections for its thread.
  *
- * All A2A chains share the parent's AbortController, isFinal semantics,
- * and MAX_A2A_DEPTH limit.
+ * It does not own or extend an execution worklist.
  */
 
 import type { CatId } from '@cat-cafe/shared';
 
-/** F122: Structured result from pushToWorklist — reason explains empty adds */
-export type PushReason = 'not_found' | 'depth_limit' | 'caller_mismatch' | 'all_duplicate';
-export interface PushResult {
-  added: CatId[];
-  reason?: PushReason;
-}
-
 export interface WorklistEntry {
-  /** The mutable worklist array — push to extend */
-  list: CatId[];
-  /** Number of original user-selected targets at registration time */
-  originalCount: number;
-  /** A2A depth counter — incremented on each push */
+  /** A2A depth reconstructed from durable response ancestry. */
   a2aCount: number;
   /** Max allowed A2A depth */
   maxDepth: number;
-  /** Index of the cat currently being executed (updated by routeSerial).
-   *  Used for dedup: cats already executed can be re-enqueued. */
-  executedIndex: number;
   /**
-   * A2A sender mapping — for each enqueued target, record who @mentioned it.
-   * Used to inject "Direct message from ...; reply to ..." into the target's prompt.
+   * F167 L1: ping-pong streak tracking — records the last same-pair (A↔B) push run.
+   * Incremented on every admitted 1-target A2A wake where {caller, target} matches this pair
+   * (order-insensitive). Reset to {new pair, count=1} when the pair changes, or
+   * cleared by `resetStreak()` (called on user messages). See `streakPair.count`
+   * thresholds: >=2 warn, >=4 block.
    */
-  a2aFrom: Map<CatId, CatId>;
-  /**
-   * A2A trigger message mapping — for each enqueued target, record which message triggered it.
-   * Used by auto-replyTo to thread replies back to the triggering @mention message.
-   */
-  a2aTriggerMessageId: Map<CatId, string>;
+  streakPair?: { from: CatId; to: CatId; count: number };
+}
+
+/** F167 L1: streak thresholds. Hardcoded per KD (YAGNI — no config). */
+const PINGPONG_WARN_THRESHOLD = 2;
+const PINGPONG_BLOCK_THRESHOLD = 4;
+
+/**
+ * F167 Phase D (KD-18): tools that are routing/holding themselves, not work evidence.
+ * These MUST NOT count as "substantive work" — otherwise MCP routing paths would
+ * always bypass the ping-pong breaker (breaker 被打穿).
+ *
+ * Match via substring so provider-prefixed names like
+ * `mcp__cat-cafe__cat_cafe_post_message` also match.
+ */
+const NON_SUBSTANTIVE_TOOL_PATTERNS: readonly string[] = [
+  'cat_cafe_post_message',
+  'cat_cafe_multi_mention',
+  'cat_cafe_hold_ball',
+] as const;
+
+/**
+ * F167 Phase D: returns true iff the given tool name represents substantive work
+ * (anything except pure routing / holding). Empty string → false (defensive).
+ */
+export function isSubstantiveTool(toolName: string): boolean {
+  if (!toolName) return false;
+  return !NON_SUBSTANTIVE_TOOL_PATTERNS.some((p) => toolName.includes(p));
+}
+
+/** F167 L1: two cat pairs are the same if they share the same unordered set of cats. */
+function samePair(a: { from: CatId; to: CatId }, bFrom: CatId, bTo: CatId): boolean {
+  return (a.from === bFrom && a.to === bTo) || (a.from === bTo && a.to === bFrom);
+}
+
+/** Shared streak verdict used by callback admission and completed-response admission. */
+export interface StreakResult {
+  warnPingPong: boolean;
+  blockPingPong: boolean;
+  count: number;
+}
+
+/**
+ * F167 Phase D: upstream caller's activity signature, used to decide whether
+ * a same-pair push is "work" (exempt from streak) or "language inertia" (streak++).
+ */
+export interface CallerActivity {
+  /** True iff any tool_use in this turn passed `isSubstantiveTool()` (non-routing). */
+  hadSubstantiveToolCall: boolean;
+  /** Length of the stored output text in characters. */
+  outputLength: number;
+}
+
+/** F167 Phase D: output length threshold above which text is considered real discussion. */
+const OUTPUT_LEN_T = 200;
+
+/**
+ * F167 Phase D: a same-pair push is exempt from streak accumulation iff the
+ * caller was doing real work (substantive tool call) OR producing long content
+ * (architecture discussion). Both-false (short text + only routing tools) is
+ * the "pure language inertia" signature that deserves to be counted.
+ */
+function isSubstantiveActivity(activity?: CallerActivity): boolean {
+  if (!activity) return false;
+  return activity.hadSubstantiveToolCall || activity.outputLength > OUTPUT_LEN_T;
+}
+
+/** F167 L1: pure verdict from a (possibly predicted) post-push streak count. */
+function streakVerdict(count: number): StreakResult {
+  return {
+    warnPingPong: count >= PINGPONG_WARN_THRESHOLD && count < PINGPONG_BLOCK_THRESHOLD,
+    blockPingPong: count >= PINGPONG_BLOCK_THRESHOLD,
+    count,
+  };
+}
+
+/**
+ * F167 Phase D rule, factored out as a PURE prediction (no mutation):
+ * same-pair inertia (short text + no substantive tool) → count+1;
+ * same-pair substantive work / long discussion → RESET to 1 (a real-work round breaks inertia,
+ * otherwise `3 short + 1 substantive + 1 short` would still block on round 5 — gpt52 P1-1);
+ * different/new pair → 1.
+ */
+function predictStreakCount(
+  entry: Pick<WorklistEntry, 'streakPair'>,
+  callerCatId: CatId,
+  target: CatId,
+  activity?: CallerActivity,
+): number {
+  if (entry.streakPair && samePair(entry.streakPair, callerCatId, target)) {
+    return isSubstantiveActivity(activity) ? 1 : entry.streakPair.count + 1;
+  }
+  return 1;
+}
+
+/**
+ * Read-only streak prediction. Durable admission must decide before it mutates
+ * either the live guard state or Queue custody.
+ * `wouldBlock` mirrors StreakResult.blockPingPong (parity test guards this).
+ */
+export function peekStreakOnPush(
+  entry: Pick<WorklistEntry, 'streakPair'>,
+  callerCatId: CatId,
+  target: CatId,
+  activity?: CallerActivity,
+): { wouldBlock: boolean; wouldWarn: boolean; count: number } {
+  const count = predictStreakCount(entry, callerCatId, target, activity);
+  const v = streakVerdict(count);
+  return { wouldBlock: v.blockPingPong, wouldWarn: v.warnPingPong, count };
+}
+
+/** F167 L1: ping-pong streak record — see WorklistEntry.streakPair. Mutates entry.streakPair. */
+export function updateStreakOnPush(
+  entry: Pick<WorklistEntry, 'streakPair'>,
+  callerCatId: CatId,
+  target: CatId,
+  activity?: CallerActivity,
+): StreakResult {
+  // Shared rule with peekStreakOnPush (parity): compute predicted count, then write it.
+  const count = predictStreakCount(entry, callerCatId, target, activity);
+  if (entry.streakPair && samePair(entry.streakPair, callerCatId, target)) {
+    entry.streakPair.count = count;
+    entry.streakPair.from = callerCatId;
+    entry.streakPair.to = target;
+  } else {
+    entry.streakPair = { from: callerCatId, to: target, count };
+  }
+  return streakVerdict(count);
 }
 
 /** Primary registry: registryKey → WorklistEntry */
@@ -62,24 +171,21 @@ function registryKey(threadId: string, parentInvocationId?: string): string {
  * Register a worklist for an invocation. Called by routeSerial at start.
  * Returns the entry for routeSerial to read a2aCount updates.
  *
- * @param parentInvocationId - F108: unique invocation ID for concurrent isolation.
- *   When omitted, threadId is used as the key (backward compat).
+ * @param parentInvocationId - unique invocation ID for concurrent isolation.
+ *   When omitted, the direct callback is coordinated by thread ID.
  */
 export function registerWorklist(
   threadId: string,
-  worklist: CatId[],
+  _worklist: readonly CatId[],
   maxDepth: number,
   parentInvocationId?: string,
+  initialLineage?: Pick<WorklistEntry, 'a2aCount' | 'streakPair'>,
 ): WorklistEntry {
   const key = registryKey(threadId, parentInvocationId);
   const entry: WorklistEntry = {
-    list: worklist,
-    originalCount: worklist.length,
-    a2aCount: 0,
+    a2aCount: initialLineage?.a2aCount ?? 0,
     maxDepth,
-    executedIndex: 0,
-    a2aFrom: new Map(),
-    a2aTriggerMessageId: new Map(),
+    ...(initialLineage?.streakPair ? { streakPair: { ...initialLineage.streakPair } } : {}),
   };
   registry.set(key, entry);
 
@@ -117,89 +223,33 @@ export function unregisterWorklist(threadId: string, owner?: WorklistEntry, pare
 }
 
 /**
- * Push cats to an invocation's worklist (callback A2A path).
- * Dedup only against pending (not-yet-executed) portion — cats that already
- * ran can be re-enqueued for another round (e.g. A→B→A review ping-pong).
+ * F167 L1: Reset streak for a thread's active worklist (user-message hook).
+ * Called when a user message arrives — fresh turn, streak shouldn't carry over.
  *
- * Caller guard (cloud Codex P1): if `callerCatId` is provided, only the cat
- * currently being executed by routeSerial may push to the worklist. This
- * prevents stale callbacks from a preempted invocation from injecting targets
- * into a newer invocation's worklist.
- *
- * @param parentInvocationId - F108: target specific invocation's worklist.
- *   When omitted, uses threadId as key (backward compat).
- *
- * F122: Returns structured PushResult with reason explaining empty adds.
+ * When `parentInvocationId` is omitted, clears streak on ALL worklists for the
+ * thread via the reverse index. This matches the user-POST caller (messages.ts)
+ * which has no parentInvocationId — route-serial registers entries keyed by
+ * parentInvocationId (F108), so a single-key lookup would miss them.
  */
-export function pushToWorklist(
-  threadId: string,
-  cats: CatId[],
-  callerCatId?: CatId,
-  parentInvocationId?: string,
-  triggerMessageId?: string,
-): PushResult {
-  const key = registryKey(threadId, parentInvocationId);
-  const entry = registry.get(key);
-  if (!entry) return { added: [], reason: 'not_found' };
-
-  // Caller authorization: only the currently-executing cat may push
-  if (callerCatId !== undefined) {
-    const currentCat = entry.list[entry.executedIndex];
-    if (currentCat !== callerCatId) return { added: [], reason: 'caller_mismatch' };
+export function resetStreak(threadId: string, parentInvocationId?: string): void {
+  if (parentInvocationId !== undefined) {
+    const key = registryKey(threadId, parentInvocationId);
+    const entry = registry.get(key);
+    if (entry) entry.streakPair = undefined;
+    return;
   }
-
-  // Only dedup against pending tail (from executedIndex onward)
-  const pending = entry.list.slice(entry.executedIndex);
-
-  const added: CatId[] = [];
-  let hitDepthLimit = false;
-  for (const cat of cats) {
-    if (entry.a2aCount >= entry.maxDepth) {
-      hitDepthLimit = true;
-      break;
-    }
-    if (!pending.includes(cat)) {
-      entry.list.push(cat);
-      entry.a2aCount++;
-      added.push(cat);
-      pending.push(cat); // Keep local dedup view in sync
-      if (callerCatId !== undefined) {
-        entry.a2aFrom.set(cat, callerCatId);
-      }
-      if (triggerMessageId !== undefined) {
-        entry.a2aTriggerMessageId.set(cat, triggerMessageId);
-      }
-    } else if (callerCatId !== undefined) {
-      // Target already pending:
-      // - original targets must keep replying to user (no A2A sender override)
-      // - A2A-enqueued targets may update to latest sender before execution
-      const existingIndex = entry.list.findIndex((id, idx) => idx >= entry.executedIndex && id === cat);
-      const isOriginalPendingTarget = existingIndex !== -1 && existingIndex < entry.originalCount;
-      if (!isOriginalPendingTarget) {
-        entry.a2aFrom.set(cat, callerCatId);
-        // F121: Keep triggerMessageId in sync with a2aFrom (same "latest sender" semantics)
-        if (triggerMessageId !== undefined) {
-          entry.a2aTriggerMessageId.set(cat, triggerMessageId);
-        }
-      }
-    }
-  }
-  if (added.length === 0) {
-    return { added: [], reason: hitDepthLimit ? 'depth_limit' : 'all_duplicate' };
-  }
-  return { added };
-}
-
-/** Check if a thread has any active worklist (any invocation running). */
-export function hasWorklist(threadId: string): boolean {
   const keys = threadIndex.get(threadId);
-  return keys !== undefined && keys.size > 0;
+  if (!keys) return;
+  for (const key of keys) {
+    const entry = registry.get(key);
+    if (entry) entry.streakPair = undefined;
+  }
 }
 
 /**
  * Get the worklist entry for a specific invocation or thread.
- * @param parentInvocationId - F108: get specific invocation's worklist.
- *   When omitted, uses threadId as key (backward compat / legacy single-invocation).
+ * @param parentInvocationId - get a specific invocation's live guard state.
+ *   When omitted, uses the direct callback's thread coordinate.
  */
 export function getWorklist(threadId: string, parentInvocationId?: string): WorklistEntry | undefined {
   const key = registryKey(threadId, parentInvocationId);

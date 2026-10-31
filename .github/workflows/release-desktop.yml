@@ -1,0 +1,79 @@
+name: Release Desktop Installers
+
+# Orchestrator: triggers platform-specific reusable workflows in parallel.
+# Resolves version once, then fans out to macOS DMG (arm64 + x64 matrix)
+# and Windows (.exe + portable .zip) builds.
+#
+# Triggers:
+#   - release.published — automatic on release publish (uploads to release)
+#   - workflow_dispatch — manual dry-run (produces workflow artifacts only)
+#
+# Architecture:
+#   release-desktop.yml (this file)
+#     ├── build-mac-dmg.yml      (matrix: arm64, x64 — parallel)
+#     └── build-windows-desktop.yml
+#
+# F179: Desktop Installer Release Pipeline
+# See docs/features/F179-desktop-installer-release-pipeline.md
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version override (e.g. 0.9.1) for dry-run builds without a release"
+        required: false
+        type: string
+
+concurrency:
+  group: release-desktop-${{ github.event.release.tag_name || github.event.inputs.version || github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  resolve-version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Resolve version from release tag or input
+        id: version
+        shell: bash
+        run: |
+          if [[ -n "${{ github.event.release.tag_name }}" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          # Strip leading 'v' if present (v0.9.1 -> 0.9.1)
+          VERSION="${VERSION#v}"
+          if [[ -z "$VERSION" ]]; then
+            echo "::error::No version resolved (need release.tag_name or workflow_dispatch.inputs.version)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+  build-mac:
+    name: macOS DMG
+    needs: resolve-version
+    uses: ./.github/workflows/build-mac-dmg.yml
+    with:
+      version: ${{ needs.resolve-version.outputs.version }}
+      upload-to-release: ${{ github.event_name == 'release' }}
+    permissions:
+      contents: write
+
+  build-windows:
+    name: Windows Desktop
+    needs: resolve-version
+    uses: ./.github/workflows/build-windows-desktop.yml
+    with:
+      version: ${{ needs.resolve-version.outputs.version }}
+      upload-to-release: ${{ github.event_name == 'release' }}
+    permissions:
+      contents: write

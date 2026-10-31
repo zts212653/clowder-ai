@@ -1,23 +1,26 @@
 ---
-feature_ids: []
+feature_ids: [F118, F212, F325]
 topics: [architecture, cli, integration]
 doc_kind: note
 created: 2026-02-26
+tips_exempt: Automatic CLI process-ownership repair with no new user action or discoverable capability.
 ---
 
-# CLI 集成架构：Claude Code / Codex / Gemini CLI
+# CLI 集成架构：Claude Code / Codex / Google CLI
 
-> Cat Cafe 项目如何对接三个不同厂商的 AI CLI 工具
-> 作者：Ragdoll | 最后更新：2026-02-07
+> Clowder AI 项目如何对接三个不同厂商的 AI CLI / adapter 工具
+> 原作者：Ragdoll | Google/AGY 接线更新：2026-10-14（Astra）
 
 ## 概述
 
-Cat Cafe 需要调用三个不同厂商的 AI Agent：
+Clowder AI 需要调用三个不同厂商的 AI Agent：
 - **Ragdoll** → Claude Code CLI (`claude`)
 - **Maine Coon** → OpenAI Codex CLI (`codex`)
-- **Siamese** → Google Gemini CLI (`gemini`)
+- **Google/AGY 成员** → 官方 Antigravity CLI (`agy`)，显式 Native profile、个人 OAuth、原生 agent 指令与 stream-json。身份由成员目录决定；旧 Gemini CLI / IDE 执行入口已退役。
 
-这三个 CLI 有不同的调用方式、输出格式和 Session 管理机制。本文档记录我们的集成方案和踩过的坑。
+这些载体有不同的调用方式、输出格式和会话机制。Google/AGY 当前由 `AgyNativeAgentService` 接入；普通 MCP、技能发现和宿主保护沿用共享真相源。历史错误保留作诊断，不再用旧 plain-text/SQLite 轮询兜底。下面 Claude/Codex 的旧命令示例保留其原时点，当前 app-server 细节以对应实现与 ownership cell 为准。
+
+Native 在官方 CLI `init` 确认实际会话后才经 F296 组装正文、经 F299 记录并写入 stdin；错误会话不能先拿到正文。`/compact` 的已完成 checkpoint 进入现有 context epoch owner，不新建会话状态源。
 
 ---
 
@@ -31,21 +34,28 @@ Cat Cafe 需要调用三个不同厂商的 AI Agent：
                 │                 │                 │
                 ▼                 ▼                 ▼
 ┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
-│ ClaudeAgentService│ │ CodexAgentService │ │ GeminiAgentService│
-│  (Ragdoll Opus)     │ │  (Maine Coon Codex)    │ │  (Siamese Gemini)   │
+│ ClaudeAgentService│ │ CodexAgentService │ │ AgyNativeService  │
+│  (Ragdoll Opus)     │ │  (Maine Coon Codex)    │ │  (Google/AGY CLI) │
 └─────────┬─────────┘ └─────────┬─────────┘ └─────────┬─────────┘
           │                     │                     │
           └─────────────────────┼─────────────────────┘
                                 ▼
                     ┌───────────────────────┐
                     │      spawnCli()       │
-                    │  (通用子进程管理器)     │
+                    │ lifecycle + liveness │
                     └───────────┬───────────┘
                                 │
                     ┌───────────▼───────────┐
-                    │   parseNDJSON()       │
-                    │  (NDJSON 流解析器)     │
-                    └───────────────────────┘
+                    │ cli-supervisor (Unix) │
+                    │ process-group signals │
+                    └───────────┬───────────┘
+                                │
+              ┌─────────────────┴─────────────────┐
+              ▼                                   ▼
+    ┌───────────────────────┐         ┌────────────────────────────┐
+    │   parseNDJSON()       │         │ antigravity-cli parser     │
+    │  (Claude/Codex/gemini)│         │ (`agy --print` plain text) │
+    └───────────────────────┘         └────────────────────────────┘
 ```
 
 **核心设计决策：CLI 子进程而非 SDK**
@@ -63,7 +73,7 @@ Cat Cafe 需要调用三个不同厂商的 AI Agent：
 
 ### 1. NDJSON 流解析器 (`ndjson-parser.ts`)
 
-三个 CLI 都支持 NDJSON（Newline-Delimited JSON）流式输出，每行一个 JSON 对象。
+Claude、Codex 和 legacy `gemini-cli` 支持 NDJSON（Newline-Delimited JSON）流式输出，每行一个 JSON 对象。默认的 `antigravity-cli` 不走这里：`agy --print` 只在 stdout 输出 plain text，使用 `antigravity-cli-event-parser.ts` 分类 timeout、missing-model、fresh-conversation warning 和最终文本。
 
 ```typescript
 // 核心实现
@@ -92,12 +102,13 @@ export async function* parseNDJSON(stream: Readable): AsyncGenerator<unknown> {
 
 ```typescript
 export async function* spawnCli(options: CliSpawnOptions): AsyncGenerator<unknown> {
-  const child = spawn(options.command, options.args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawnSupervisor(options);
 
-  // ... 超时、取消、清理逻辑
+  // valid stdout activity resets the response timer;
+  // ProcessLivenessProbe independently samples PID/CPU.
 
   for await (const event of parseNDJSON(child.stdout)) {
-    resetTimeout();  // 每次输出重置超时计时器
+    resetTimeout();
     yield event;
   }
 }
@@ -107,19 +118,56 @@ export async function* spawnCli(options: CliSpawnOptions): AsyncGenerator<unknow
 
 | 问题 | 解决方案 |
 |------|----------|
-| 进程超时 | 可配置超时 (`CLI_TIMEOUT_MS`)，默认 30 分钟，`0` 禁用 |
-| 优雅终止 | 先 SIGTERM，3 秒后 SIGKILL |
+| 进程超时 | 默认 `CLI_TIMEOUT_MS=0`，不自动终止；显式正数配置才 opt in response timeout 与 bounded extension |
+| Stall 处理 | `alive_but_silent` / `suspected_stall` 只告警；不自动发信号，由用户 Cancel 决定是否终止 |
+| 有界返回 | 终止提交后停止等待新 stdout；等 child exit 或最终 SIGKILL attempt，再给 100ms stdio drain，不依赖 wrapper 永远正确 close |
+| 活性检测 | CPU/PID 每 60s sample；warning queue 每 ≤1s drain，避免 threshold 后再拖两个 sample interval |
+| Unix 进程组 | `cli-supervisor` 原样转发 SIGINT；SIGTERM 进入 supervisor 自有 SIGTERM→SIGKILL orphan cleanup |
 | 僵尸进程 | `process.on('exit')` 钩子强制清理 |
-| 用户取消 | 支持 `AbortSignal` |
-| 错误上报 | CLI 退出码非零时 yield `{ __cliError: true, ... }` |
+| 用户取消 | `AbortSignal` 是默认唯一终止入口；取消后才进入既有有界清理链 |
+| 错误上报 | timeout 固定为 `cli_response_timeout` / `cli_stall_timeout`；kill 后 exit 只放 `terminalContext.postKill*`，不覆盖 timeout cause |
 
-**重要教训：stderr 活跃也算"活着"**
+**长驻 carrier 也必须走同一 ownership seam（2026-08-13）**：
+
+| Carrier | 生命周期归属 |
+|---------|------------|
+| Claude / Codex `exec` / Gemini / AGY headless / Kimi / OpenCode | `spawnCli` → `cli-supervisor` |
+| Codex app-server（stdio 与 pooled Unix socket） | `cli-supervisor` 持有 host 整棵进程树 |
+| ACP stdio / HTTP stream | `cli-supervisor` 持有 pool process 整棵进程树 |
+| Claude `--bg` daemon | job manifest 持有 daemon short id + allowlisted native stop context；dispatcher 正常退出不代表 job 结束 |
+| Codex tmux carrier | tmux pane 是 owner；关闭时 kill pane |
+| Antigravity Desktop callback adapter | 外部 GUI 会话，不把整个用户 App 当作 invocation 子树回收 |
+
+Unix 清理不能只依赖一个 PGID：Codex 的 `code-mode-host` 等子孙可以自行创建新进程组。每个 supervisor
+在 provider root 执行前先原子写入 `${CAT_CAFE_DATA_DIR}/cli-process-owners/<ownerId>.json`，再把随机
+`CAT_CAFE_PROCESS_OWNER_ID` 注入 root 环境；正常 fork / exec / 重父化 / 新 PGID 会继承这个 owner token。
+因此默认 1 秒循环只检查原 API parent 是否存活，不做全量 `ps`；SIGINT、TERM、leader exit 等生命周期边缘
+才扫描 token 投影，先 TERM，超时后重新扫描并只 KILL 当前仍匹配的 owner 进程。安全的完整 PGID 才走组信号，
+混合 PGID 退回逐 PID；整树归零即撤销 escalation 并删除 manifest。
+
+supervisor 自身遭 `SIGKILL` 时无法执行清理，所以 owner manifest 是 crash recovery 真相源。API 在开始监听前
+读取 manifests，以 supervisor PID + `lstart` 栅栏跳过活 owner，只回收死亡 owner 的 token 子树；扫描失败或
+无法证明归零时保留 manifest 下次重试。Codex socket 目录也记录在同一 manifest 中，且仅在 matching processes
+归零后删除。这个 reaper 不按 `codex` / `claude` 等命令名匹配，禁止退化为 `pkill -f`。
+
+Claude `--bg` 是 dispatcher-first 生命周期，不能把短命的 `claude --bg` dispatcher 套进 leader-exit
+supervisor：dispatcher 成功退出时 worker 才刚开始工作。carrier 在 dispatch 前写
+`${CAT_CAFE_DATA_DIR}/claude-bg-job-owners/<ownerId>.json` 的 `pending` 记录；记录只持严格 allowlist 的
+native stop context（当前为归一化绝对路径 `CLAUDE_CONFIG_DIR`），不持 credential，也不向 shared daemon
+注入 process-owner token。拿到严格校验的 8 位 short id 后原子激活。正常 abort/timeout 与 API startup
+recovery 都在该 context 下执行 exact `claude stop <shortId>`；只有 stop exit 0 或 daemon 的 native
+job-terminal state 才退休 active manifest。这里 UI turn completion 与 job lifecycle 严格分离：daemon
+`done` / `error` / `failed` / `stopped` 可证明 job 已终止；`blocked` 表示 daemon 仍在等待，transcript
+`turn_duration` 也只表示当前一轮完成，二者都继续保留 manifest。stop 失败、namespace 不可证或只有 pending
+记录时同样保留 manifest、零 process signal；无 manifest 的其他 Claude job 和 shared daemon 始终不受影响。
+
+**重要教训：stderr 是诊断证据，不是续命信号**
 
 ```typescript
-// Bug: Claude CLI 的 thinking/工具调用输出到 stderr，不是 stdout
-// 如果只监听 stdout，会误判为"超时无响应"
-child.stderr?.on('data', () => {
-  resetTimeout();  // stderr 有输出也重置超时！
+// reconnect/debug chatter 曾让真正卡死的 CLI 永远重置 timeout。
+// 现在只缓存 stderr；有效 stdout + PID/CPU probe 共同判断活性。
+child.stderr?.on('data', (chunk) => {
+  stderrBuffer += chunk.toString();
 });
 ```
 
@@ -175,7 +223,7 @@ claude -p "prompt" \
 ```
 
 **特殊处理：**
-- **MCP 支持**：通过 `--mcp-config` 注入我们的 MCP Server，让 Claude 能回调 Cat Cafe
+- **MCP 支持**：通过 `--mcp-config` 注入我们的 MCP Server，让 Claude 能回调 Clowder AI
 - **图片传递**：通过 `--images` flag 传递本地图片路径
 - **Session 恢复**：通过 `--resume <sessionId>` 恢复上下文
 
@@ -253,88 +301,40 @@ function transformCodexEvent(event, catId): AgentMessage | null {
 
 ---
 
-### Gemini CLI (`gemini`)
+### Google / AGY Native (`agy`)
 
-**双 Adapter 架构：**
+`AgyNativeAgentService` 每回合启动一个受监督的官方 CLI。独立 HOME 绑定当前成员 profile；`--agent` 指向 canonical L0 compiler 生成的原生 agent，`--model` 使用已选择型号，`--input-format stream-json --output-format stream-json` 通过 stdin 传递消息，`--conversation` 只接续已有且核验一致的绑定。权限模式来自用户显式设置，Native hook 复用共享目标保护。
 
-| Adapter | 命令 | 场景 |
-|---------|------|------|
-| `gemini-cli` (默认) | `gemini -p "..." -o stream-json -y` | 全自动 headless |
-| `antigravity` | `open -a Antigravity` | IDE 模式，MCP 回传 |
+- `init` 先核对 agent、cwd、model、permission 与请求 session，再立即对宿主可见；`step_update` 增量转换文字和工具进度。进程清理完成后发一次终态。
+- 普通工具错误保留给模型处理；未知工具在执行前拒绝。后续解释和成功回复不会被一次找不到文件或测试失败抹掉。
+- `result.usage` 是会话累计值。账单与当前上下文来自唯一 model step 的 usage，缓存计入输入，thinking 不重复加到输出。
+- 当前固定 CLI 1.3.5 可能保留上轮 `result.error`。只有本轮完成事件、最终文字匹配及干净退出等证据齐全，才把它识别为历史错误；新失败仍失败。
+- canonical SessionChainStore 保存 Native binding。L0/模型/权限/工作区变化必须有可见边界和历史重建；部分输出或 exact resume 不能静默 fresh。
+- 已验证 `/compact` 通过官方 headless 协议产生 checkpoint。沿现有 `requestNativeCompaction` / F296 epoch owner 路径接入，空回复只有明确控制请求及当前 checkpoint 证据才有效。普通空回复仍为异常。
+- 图片、PDF、音频/视频等上传文件通过受约束的真实文件引用与 native `view_file` 读取；不谎称 stream-json 接受任意原生 image input block。
+- 长任务经 `ManagedJobService` 与既有 `hold_ball` 暴露，独立于本轮 CLI；普通插话不会取消 job。日志、终态、取消及显式重试有持久证据。
 
-**gemini-cli 调用方式：**
-```bash
-gemini -p "prompt" -o stream-json -y [-i image.png]
-```
-
-**NDJSON 事件格式 (v0.27.2)：**
-```jsonc
-// Session 初始化
-{"type": "init", "session_id": "abc123"}
-
-// 文本输出
-{"type": "message", "role": "assistant", "content": "..."}
-
-// 工具调用
-{"type": "tool_use", "tool_name": "Read", "parameters": {...}}
-
-// 工具结果 (跳过)
-{"type": "tool_result", ...}
-
-// 成功 (跳过)
-{"type": "result", "status": "success"}
-
-// 错误
-{"type": "result", "status": "error", "error": "..."}
-```
-
-**特殊处理：**
-- **Session 恢复（F053，2026-03-03）**：在当前环境（Gemini CLI 0.31.0）支持 `gemini --resume <sessionId>`（UUID），provider 已启用 resume；prompt prepend 继续用于跨猫历史补全
-- **图片支持**：通过 `-i` flag 传递
-- **Antigravity fallback**：IDE 模式不输出 NDJSON，需要通过 MCP 回传
-
-**事件转换：**
-```typescript
-function transformGeminiEvent(event, catId): AgentMessage | null {
-  // init → session_init
-  if (e['type'] === 'init') {
-    return { type: 'session_init', catId, sessionId: e['session_id'], ... };
-  }
-  // message + assistant → text
-  if (e['type'] === 'message' && e['role'] === 'assistant') {
-    return { type: 'text', catId, content: e['content'], ... };
-  }
-  // tool_use → tool_use
-  if (e['type'] === 'tool_use') {
-    return { type: 'tool_use', catId, toolName: e['tool_name'], toolInput: e['parameters'], ... };
-  }
-  // result + error → error
-  if (e['type'] === 'result' && e['status'] !== 'success') {
-    return { type: 'error', catId, error: e['error'], ... };
-  }
-  return null;
-}
-```
+旧 `GeminiAgentService`、IDE Bridge、plain-text 执行 parser 和 Task 专属测试工具已删除。旧历史 import/lifecycle reader、通用 ACP transport 与独立 MCP consumer 保留。迁移、版本边界和实测范围见 F325 证据 (internal)。
 
 ---
 
 ## 踩坑记录
 
-### 1. stderr 不是错误，是 thinking
+### 1. stderr chatter 不能无限延长 invocation
 
-**问题**：Claude CLI 的 thinking 输出和工具调用日志都走 stderr，不是 stdout。如果只监听 stdout 来判断"CLI 是否活着"，会导致误杀正在工作的进程。
+**问题**：部分 CLI 会把 thinking、重连或 transport debug 写到 stderr。把任意 stderr 当活动曾让重连 chatter 不断重置 timer，真实卡死 invocation 最长拖到约 30 分钟。
 
-**解决**：stderr 有输出时也重置超时计时器。
+**解决**：stderr 只缓存作脱敏诊断，不重置 response timer，也不调用 `probe.notifyActivity()`。长工具/思考期由 PID + CPU growth 判为 `busy-silent`，可以 bounded extension，但不能无限续命。
 
 ```typescript
-child.stderr?.on('data', () => {
-  resetTimeout();  // stderr 活跃 = CLI 还在工作
+child.stderr?.on('data', (chunk) => {
+  stderrBuffer += chunk.toString();
 });
 ```
 
 ### 2. CLI_TIMEOUT_MS=0 不生效
 
-**问题**：`Number(env['CLI_TIMEOUT_MS']) || 300000` 对 `0` 无效，因为 `0 || 300000 = 300000`。
+**问题**：`Number(env['CLI_TIMEOUT_MS']) || 1800000` 对 `0` 无效，因为 `0 || 1800000 = 1800000`。
 
 **解决**：显式判断：
 ```typescript
@@ -361,66 +361,42 @@ const args = options?.sessionId
 
 **背景**：2026-02 阶段我们曾按“index/latest only”实现降级路径。
 
-**当前结论（2026-03-03）**：Gemini CLI 0.31.0 已支持 UUID `--resume <sessionId>`，`GeminiAgentService` 已接入；prompt prepend 保留为跨猫上下文补充，不再作为 resume 的替代策略。
+**历史结论（2026-03-03）**：Gemini CLI 0.31.0 当时已支持 UUID resume。F325 已退役该执行 consumer；当前使用上述 Native conversation binding，不复用旧载体 ID。
 
 ### 5. stderr 不能暴露给用户
 
 **问题**：stderr 可能包含 debug 信息、API key 或内部 trace。
 
-**解决**：stderr 只写 `console.error` 供开发调试，不 yield 给前端。错误消息用脱敏的固定文案。
+**解决**：raw stderr 永不进入用户消息。只有 `LOG_CLI_STDERR=1` 时才把经过共享 sanitizer 且截断后的 excerpt 写后台日志；前端只接收 whitelist reason、humanized text 与安全的 `debugRef`。
 
 ```typescript
-// 日志（开发用）
-console.error(`[cli-spawn] ${command} stderr (debug only):\n${stderrBuffer}`);
+const stderrForLog = formatCliStderrForLog(stderrBuffer);
+if (stderrForLog) diagnosticLogger.error({ command, stderr: stderrForLog }, 'CLI stderr');
 
-// yield 给用户（脱敏）
-yield { __cliError: true, message: `CLI 异常退出 (code: ${exitCode})` };
+yield { __cliError: true, message: humanizedMessage, cliDiagnostics };
 ```
 
 ---
 
 ## 配置管理
 
-模型配置支持三层优先级：
+模型配置的运行时来源是 `.cat-cafe/cat-catalog.json`（由 `cat-template.json` 首次启动时 bootstrap 生成）。
 
-```
-环境变量 > cat-config.json > 硬编码默认值
-```
+- `cat-template.json`（repo 根）：种子模板，仅在首次启动且 catalog 不存在时复制生成 catalog。后续不参与运行时读取
+- `.cat-cafe/cat-catalog.json`：唯一运行时配置源。所有猫的增删改查都直接操作此文件
+- 环境变量 `CAT_{CATID}_MODEL`（如 `CAT_OPUS_MODEL`）：可 override 运行时配置，用于调试或临时切换模型。正常使用不需要
 
-**环境变量：**
-```bash
-CAT_OPUS_MODEL=claude-opus-4-6
-CAT_CODEX_MODEL=gpt-5.3-codex
-CAT_GEMINI_MODEL=gemini-3-pro
-```
-
-**配置文件 (`cat-config.json`)：**
+**配置文件格式：**
 ```json
 {
-  "version": 1,
+  "version": 2,
   "breeds": [
     {
-      "catId": "opus",
-      "variants": [{ "defaultModel": "claude-opus-4-6", ... }]
-    },
-    ...
+      "id": "ragdoll",
+      "defaultVariantId": "opus",
+      "variants": [{ "id": "opus", "defaultModel": "claude-opus-4-6", ... }]
+    }
   ]
-}
-```
-
-**读取逻辑 (`cat-models.ts`)：**
-```typescript
-export function getCatModel(catName: 'opus' | 'codex' | 'gemini'): string {
-  // 1. 环境变量最高优先
-  const envValue = process.env[MODEL_ENV_KEYS[catName]];
-  if (envValue?.trim()) return envValue.trim();
-
-  // 2. cat-config.json 次优先
-  const jsonModels = loadModelsFromJson();
-  if (jsonModels[catName]) return jsonModels[catName];
-
-  // 3. 硬编码默认值
-  return CAT_CONFIGS[catName].defaultModel;
 }
 ```
 
@@ -428,30 +404,9 @@ export function getCatModel(catName: 'opus' | 'codex' | 'gemini'): string {
 
 ## 测试策略
 
-通过依赖注入 mock spawn 函数进行单元测试：
+Native 单元测试通过 `spawnCliFn` / `spawnCliOverride` 输入原始事件，覆盖拒绝、工具恢复、断流、计费及绑定变化。固定官方 CLI 回环探针证明真正的工具、hooks、skills、压缩与系统指令接线；真实 OAuth、普通 Chat、用户停止和后台任务证据另记，不用 scripted provider 冒充真实模型行为。
 
-```typescript
-// 测试用的 mock spawn
-function mockSpawn(command, args, options) {
-  const child = new EventEmitter();
-  child.stdout = new PassThrough();
-  child.stderr = new PassThrough();
-  child.kill = jest.fn();
-
-  // 模拟 NDJSON 输出
-  setTimeout(() => {
-    child.stdout.write('{"type": "init", "session_id": "test-session"}\n');
-    child.stdout.write('{"type": "message", "role": "assistant", "content": "Hello!"}\n');
-    child.stdout.end();
-    child.emit('exit', 0, null);
-  }, 10);
-
-  return child;
-}
-
-// 注入 mock
-const service = new GeminiAgentService({ spawnFn: mockSpawn });
-```
+脚本：`scripts/probes/f325-agy-native-{mcp-wire,outcome-wire,compaction-wire}.mjs`。测试入口和实测版本见 F325 证据 (internal)。
 
 ---
 
@@ -459,8 +414,8 @@ const service = new GeminiAgentService({ spawnFn: mockSpawn });
 
 1. **进程池**：避免每次 spawn 的 500ms-2s 启动开销
 2. **CLI 版本检测**：不同版本 NDJSON 格式可能变化，需要版本锁定或适配
-3. **Cancel 协议**：目前是 SIGTERM/SIGKILL 硬杀，理想情况应该有优雅取消协议
-4. **MCP 双向通信**：让非 Claude 猫也能通过 MCP 回传（目前用 HTTP callback 模拟）
+3. **Provider capability negotiation**：Codex stall 已支持 SIGINT-first；若其他 CLI 也提供稳定 cooperative cancel，再按 provider 显式 opt in，不扩大全局默认
+4. **MCP 接线**：Native 已消费 canonical discovery 与真实 callback auth；新载体继续复用该边界。
 
 ---
 
@@ -470,6 +425,8 @@ const service = new GeminiAgentService({ spawnFn: mockSpawn });
 packages/api/src/
 ├── utils/
 │   ├── cli-spawn.ts          # 通用子进程管理
+│   ├── CliTerminationController.ts # 单向有界信号状态机
+│   ├── cli-supervisor.ts     # Unix 进程组守护 + 原样信号转发
 │   ├── cli-types.ts          # 类型定义
 │   ├── cli-format.ts         # 错误格式化
 │   └── ndjson-parser.ts      # NDJSON 解析
@@ -479,5 +436,5 @@ packages/api/src/
 └── domains/cats/services/
     ├── ClaudeAgentService.ts # Ragdoll
     ├── CodexAgentService.ts  # Maine Coon
-    └── GeminiAgentService.ts # Siamese
+    └── agents/providers/agy-native/AgyNativeAgentService.ts # Google/AGY Native
 ```

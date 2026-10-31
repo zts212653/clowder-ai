@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>F322 isolated preview owner</title>
+<style>body{margin:0;background:#f7f2ea;color:#3d3d3a;font:16px system-ui;padding:32px}button,textarea{font:inherit;margin:12px 0;padding:12px}textarea{display:block;width:80%;min-height:120px}</style>
+<h1>页面预览 owner</h1>
+<p>隔离 HTTP 夹具；只用于核对原 iframe 状态在专注与整窗往返中保持。</p>
+<button id="move" type="button">下一步</button>
+<output id="moves">0</output>
+<textarea id="owner-draft" aria-label="预览页草稿"></textarea>
+<script>
+let moves = 0;
+document.getElementById('move').onclick = () => { document.getElementById('moves').textContent = String(++moves); };
+</script>
+</html>

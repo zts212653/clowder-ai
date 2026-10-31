@@ -1,0 +1,88 @@
+.group {
+  container: subexecution / inline-size;
+  inline-size: 36rem;
+  max-inline-size: 100%;
+}
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) 5.2rem 4.2rem 0.625rem;
+}
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin-inline-start: 0.25rem;
+  padding: 0.375rem 0 0.375rem 0.5rem;
+  border-inline-start: 1px solid var(--shell-hairline);
+}
+.summaryCompact {
+  display: none;
+}
+@container reply (max-width: 26rem) {
+  .lastLineWorking {
+    gap: 0.125rem;
+  }
+  .lastLineWorking .trajectoryLabel {
+    display: none;
+  }
+  .lastLineChildren {
+    gap: 0.125rem;
+  }
+  .lastLineChildren .recordToggle {
+    flex: none;
+    gap: 0;
+  }
+  .lastLineChildren .recordToggle > svg {
+    inline-size: 8px;
+  }
+  .summaryFull,
+  .recordExtras,
+  .lastLineChildren .trajectoryLabel {
+    display: none;
+  }
+  .summaryCompact {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .lastLineChildren .statusText {
+    flex: 0 1 auto;
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+/* The 300px app leaves less than 14rem for this reply; preserve every count and the ticking clock. */
+@container reply (max-width: 14rem) {
+  .lastLineChildren {
+    gap: 0;
+  }
+  .lastLineChildren .separator,
+  .lastLineChildren .totalLabel {
+    display: none;
+  }
+  .lastLineChildren .summaryCompact {
+    gap: 0.125rem;
+  }
+}
+@container subexecution (max-width: 26rem) {
+  .row {
+    grid-template-columns: minmax(0, 1fr) 5.2rem 0.625rem;
+    row-gap: 0.125rem;
+  }
+  .name {
+    grid-area: 1 / 1;
+  }
+  .task {
+    grid-area: 2 / 1;
+  }
+  .state {
+    grid-area: 1 / 2;
+  }
+  .duration {
+    grid-area: 2 / 2;
+  }
+  .chevron {
+    grid-area: 1 / 3 / 3 / 4;
+  }
+}

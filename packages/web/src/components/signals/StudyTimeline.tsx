@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { fetchStudyTimeline, type TimelineEntry } from '@/utils/signals-api';
+import { HubIcon } from '../hub-icons';
 
 function formatDate(iso: string): string {
   const d = Date.parse(iso);
@@ -10,13 +11,22 @@ function formatDate(iso: string): string {
 function formatTime(iso: string): string {
   const d = Date.parse(iso);
   if (Number.isNaN(d)) return '';
-  return new Date(d).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return new Date(d).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function localDateKey(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function groupByDate(entries: readonly TimelineEntry[]): Map<string, TimelineEntry[]> {
   const groups = new Map<string, TimelineEntry[]>();
   for (const entry of entries) {
-    const dateKey = entry.lastStudiedAt.slice(0, 10);
+    const dateKey = localDateKey(entry.lastStudiedAt);
     const existing = groups.get(dateKey) ?? [];
     existing.push(entry);
     groups.set(dateKey, existing);
@@ -24,10 +34,10 @@ function groupByDate(entries: readonly TimelineEntry[]): Map<string, TimelineEnt
   return groups;
 }
 
-const ARTIFACT_ICONS: Record<string, string> = {
-  note: '📝',
-  podcast: '🎙️',
-  'research-report': '📊',
+const ARTIFACT_ICON_NAMES: Record<string, string> = {
+  note: 'notebook',
+  podcast: 'podcast',
+  'research-report': 'bar-chart',
 };
 
 interface StudyTimelineProps {
@@ -62,14 +72,14 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-800">学习时间线</h3>
+        <h3 className="text-sm font-semibold text-cafe-black">学习时间线</h3>
         <div className="flex gap-1">
           {[7, 14, 30].map((d) => (
             <button
               key={d}
               type="button"
               onClick={() => setSelectedDays(d)}
-              className={`rounded-full px-2 py-0.5 text-xs ${selectedDays === d ? 'bg-opus-primary text-white' : 'border border-gray-200 text-gray-500 hover:bg-gray-100'}`}
+              className={`rounded-full px-2 py-0.5 text-xs ${selectedDays === d ? 'bg-opus-primary text-[var(--cafe-surface)]' : 'border border-[var(--console-border-soft)] text-cafe-secondary hover:bg-[var(--console-hover-bg)]'}`}
             >
               {d}天
             </button>
@@ -77,19 +87,19 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
         </div>
       </div>
 
-      {loading && <p className="text-xs text-gray-400">加载中...</p>}
-      {error && <p className="text-xs text-red-500">{error}</p>}
+      {loading && <p className="text-xs text-cafe-muted">加载中...</p>}
+      {error && <p className="text-xs text-conn-red-text">{error}</p>}
 
       {!loading && entries.length === 0 && (
-        <p className="text-xs text-gray-400">最近 {selectedDays} 天没有学习活动。</p>
+        <p className="text-xs text-cafe-muted">最近 {selectedDays} 天没有学习活动。</p>
       )}
 
       {Array.from(dateGroups.entries()).map(([dateKey, group]) => (
         <div key={dateKey}>
-          <div className="mb-2 text-xs font-semibold text-gray-500">{formatDate(group[0].lastStudiedAt)}</div>
+          <div className="mb-2 text-xs font-semibold text-cafe-secondary">{formatDate(group[0].lastStudiedAt)}</div>
           <div className="space-y-2 border-l-2 border-opus-light pl-3">
             {group.map((entry) => (
-              <div key={entry.articleId} className="rounded-lg border border-gray-200 bg-white p-2.5">
+              <div key={entry.articleId} className="rounded-lg bg-[var(--console-card-bg)] p-2.5">
                 <div className="flex items-start justify-between gap-2">
                   <a
                     href={`/signals?article=${encodeURIComponent(entry.articleId)}`}
@@ -97,14 +107,18 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
                   >
                     {entry.articleTitle}
                   </a>
-                  <span className="shrink-0 text-[10px] text-gray-400">{formatTime(entry.lastStudiedAt)}</span>
+                  <span className="shrink-0 text-micro text-cafe-muted">{formatTime(entry.lastStudiedAt)}</span>
                 </div>
-                <span className="text-[10px] text-gray-400">{entry.source}</span>
+                <span className="text-micro text-cafe-muted">{entry.source}</span>
                 {entry.artifacts.length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {entry.artifacts.map((a) => (
-                      <span key={a.id} className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">
-                        {ARTIFACT_ICONS[a.kind] ?? '📄'} {a.kind} · {a.state}
+                      <span
+                        key={a.id}
+                        className="rounded-full bg-[var(--console-field-bg)] px-1.5 py-0.5 text-micro text-cafe-secondary"
+                      >
+                        <HubIcon name={ARTIFACT_ICON_NAMES[a.kind] ?? 'file-text'} className="inline h-3 w-3" />{' '}
+                        {a.kind} · {a.state}
                       </span>
                     ))}
                   </div>
@@ -115,9 +129,9 @@ export function StudyTimeline({ days = 7 }: StudyTimelineProps) {
                       <a
                         key={t.threadId}
                         href={`/thread/${encodeURIComponent(t.threadId)}`}
-                        className="rounded-full bg-opus-bg px-1.5 py-0.5 text-[10px] text-opus-dark hover:underline"
+                        className="rounded-full bg-opus-bg px-1.5 py-0.5 text-micro text-opus-dark hover:underline"
                       >
-                        💬 {t.threadId.slice(0, 12)}...
+                        <HubIcon name="message-circle" className="inline h-3 w-3" /> {t.threadId.slice(0, 12)}...
                       </a>
                     ))}
                   </div>

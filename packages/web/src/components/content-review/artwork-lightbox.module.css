@@ -1,0 +1,91 @@
+.window {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: calc(100vw - 48px);
+  height: calc(100dvh - 80px);
+  max-width: 1440px;
+  min-height: 0;
+  gap: 6px;
+}
+.owner {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 12px;
+}
+.owner > * {
+  flex: 1;
+  min-height: 0;
+}
+.opening {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.openingOwner {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.openingOwner > * {
+  flex: 1;
+}
+.openingMedia {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--cafe-surface);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.composer {
+  max-height: 30%;
+  overflow-y: auto;
+  position: relative;
+  z-index: 10;
+  flex: none;
+  width: min(880px, 100%);
+  margin: 0 auto;
+  border-radius: 20px;
+  background: var(--cafe-surface);
+  color: var(--cafe-text);
+}
+.owner [data-testid="workspace-content-review-surface"] {
+  background: transparent;
+}
+@media (max-width: 600px) {
+  .window {
+    width: calc(100vw - 16px);
+    height: calc(100dvh - 64px);
+    gap: 6px;
+  }
+  .composer {
+    border-radius: 14px;
+  }
+}
+
+/* The original textarea stays mounted; long prose scrolls rather than displacing the artwork. */
+.composer textarea {
+  max-height: 56px;
+}
+@media (max-width: 600px) {
+  /* Keep the draft in its original input and scroll longer prose within one line. */
+  .composer textarea {
+    max-height: 32px;
+    overflow-y: auto;
+  }
+}
+.composer [data-testid="chat-input-composer-row"] {
+  margin: 4px 8px 8px;
+  gap: 2px;
+  padding: 6px 8px;
+}
+.composer [data-testid="context-attachment-list"] {
+  padding: 4px 8px 0;
+}

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================
-# Cat Cafe / Clowder AI — Interactive Setup
+# Clowder AI — Interactive Setup
 # 猫猫咖啡交互式安装向导
 #
 # Usage: ./scripts/setup.sh [--install-missing] [--npm-registry=URL] [--pip-index-url=URL] [--pip-extra-index-url=URL] [--hf-endpoint=URL]
@@ -34,8 +34,21 @@ for arg in "$@"; do
 done
 apply_manual_download_source_overrides
 
+sync_agent_hooks_best_effort() {
+    echo "  Syncing Agent CLI hooks..."
+    local log_file
+    log_file="$(mktemp)"
+    if pnpm exec tsx scripts/sync-system-prompts.ts --apply --agent-hooks-only >"$log_file" 2>&1; then
+        echo -e "  ${GREEN}✓${NC} Agent CLI hooks synced"
+    else
+        echo -e "  ${YELLOW}⚠${NC} Agent CLI hook sync failed — continuing; Hub health check can repair it later"
+        tail -5 "$log_file" 2>/dev/null | sed 's/^/    /' || true
+    fi
+    rm -f "$log_file"
+}
+
 echo ""
-echo -e "${BOLD}🐱 Cat Cafe — Interactive Setup${NC}"
+echo -e "${BOLD}🐱 Clowder AI — Interactive Setup${NC}"
 echo -e "${BOLD}猫猫咖啡 — 交互式安装向导${NC}"
 echo "=================================="
 echo ""
@@ -44,7 +57,7 @@ print_manual_download_source_summary
 
 # ── Step 1: Check prerequisites ─────────────────────────────
 
-echo -e "${CYAN}[1/6] Checking prerequisites / 检查前置依赖...${NC}"
+echo -e "${CYAN}[1/5] Checking prerequisites / 检查前置依赖...${NC}"
 echo ""
 
 MISSING=()
@@ -52,14 +65,15 @@ MISSING=()
 if command -v node &>/dev/null; then
     NODE_VER=$(node -v)
     echo -e "  ${GREEN}✓${NC} Node.js $NODE_VER"
-    # Check minimum version (v20+)
+    # Check supported version range (v24/v25)
     MAJOR=$(echo "$NODE_VER" | sed 's/v//' | cut -d. -f1)
-    if [ "$MAJOR" -lt 20 ]; then
-        echo -e "  ${YELLOW}⚠ Node.js v20+ recommended (you have $NODE_VER)${NC}"
+    if [ "$MAJOR" -lt 24 ] || [ "$MAJOR" -ge 26 ]; then
+        echo -e "  ${RED}✗${NC} Node.js $NODE_VER unsupported (need >= 24 and < 26)"
+        MISSING+=("Node.js (>= 24 and < 26) — https://nodejs.org/")
     fi
 else
     echo -e "  ${RED}✗${NC} Node.js not found"
-    MISSING+=("Node.js (v20+) — https://nodejs.org/")
+    MISSING+=("Node.js (v24+) — https://nodejs.org/")
 fi
 
 if command -v pnpm &>/dev/null; then
@@ -106,7 +120,7 @@ fi
 # ── Step 2: Install packages ────────────────────────────────
 
 echo ""
-echo -e "${CYAN}[2/6] Installing packages / 安装依赖包...${NC}"
+echo -e "${CYAN}[2/5] Installing packages / 安装依赖包...${NC}"
 echo ""
 
 if [ -d "node_modules" ]; then
@@ -118,10 +132,10 @@ echo -e "  ${GREEN}✓${NC} Packages installed"
 # ── Step 3: Choose optional features ────────────────────────
 
 echo ""
-echo -e "${CYAN}[3/6] Optional features / 可选功能${NC}"
+echo -e "${CYAN}[3/5] Optional features / 可选功能${NC}"
 echo ""
-echo "Cat Cafe works with just a model API key."
-echo "猫猫咖啡只需一个模型 API Key 即可运行。"
+echo "Clowder AI works out of the box. Add model API keys via UI after launch."
+echo "猫猫咖啡开箱即用。启动后在前端 UI 添加模型 API Key。"
 echo ""
 echo "The following features are optional. Choose what you want:"
 echo "以下功能均为可选，选择你需要的："
@@ -218,7 +232,37 @@ echo ""
 
 # --- API Gateway Proxy ---
 ENABLE_PROXY=false
-echo -e "${BOLD}  [D] API Gateway Proxy / API 网关代理${NC}"
+ENABLE_EMBED=false
+echo -e "${BOLD}  [D] Semantic Retrieval / 语义检索 (Embedding)${NC}"
+echo "      Enable local vector rerank for the memory system."
+echo "      为记忆系统启用本地向量 rerank。"
+echo ""
+if [ "$HAS_PYTHON" = true ]; then
+    echo "      Engine: Qwen3-Embedding-0.6B (MLX primary, sentence-transformers fallback)"
+    echo "      Requirements / 要求:"
+    echo "        - ~350MB disk for first model download / 首次模型下载约 350MB"
+    echo "        - 4GB+ RAM recommended / 建议 4GB+ 内存"
+    echo "        - Apple Silicon recommended / Apple Silicon 体验最佳"
+    echo ""
+    if [ "$INSTALL_MISSING" = true ]; then
+        ENABLE_EMBED=true
+        echo -e "      ${GREEN}✓${NC} Semantic retrieval enabled (--install-missing)"
+    else
+        read -p "      Enable semantic retrieval? (y/N): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            ENABLE_EMBED=true
+            echo -e "      ${GREEN}✓${NC} Semantic retrieval enabled"
+        fi
+    fi
+else
+    echo -e "      ${YELLOW}⚠ Requires Python3 (not installed). Skipping.${NC}"
+fi
+echo ""
+
+# --- API Gateway Proxy ---
+ENABLE_PROXY=false
+echo -e "${BOLD}  [E] API Gateway Proxy / API 网关代理${NC}"
 echo "      Route Claude API calls through a custom gateway."
 echo "      通过自定义网关路由 Claude API 调用。"
 echo ""
@@ -239,9 +283,52 @@ else
 fi
 echo ""
 
+# ── Resolve ASR default model (after all interactive prompts) ──
+# MLX requires BOTH arm64 hardware AND arm64 Python (#1061).
+# We source the CANONICAL Python resolver (python-resolve.sh) and run the
+# complete no-download probe chain -- the same resolution order the
+# installer uses. This runs after the user committed to features, so no
+# wasted work; and before .env generation, so the model is determined
+# when we write it.
+#
+# Probe order mirrors resolve_python_312 exactly (minus _install_project_python
+# which downloads):
+#   1. _try_system_pythons  (python3.13, python3.12, python3, ...)
+#   2. _try_uv              (if user has uv)
+#   3. _try_pyenv           (if user has pyenv)
+#   4. _try_brew            (macOS Homebrew)
+#   5. _try_project_python  (cached ~/.cat-cafe/python/)
+#   6. _try_legacy_project_python (pre-move cache at ~/.cat-cafe/python)
+# If none finds 3.12+, installer will download via _pbs_target_triple
+# (sysctl-based → arm64 on Apple Silicon).
+if [ "$ENABLE_ASR" = true ]; then
+    _setup_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    ASR_DEFAULT_MODEL="large-v3-turbo"  # safe default
+    if [ "$(uname -s)" = "Darwin" ] && sysctl -n hw.optional.arm64 2>/dev/null | grep -q '^1$'; then
+        # Apple Silicon -- resolve Python to match installer's truth source.
+        source "$_setup_script_dir/services/python-resolve.sh"
+        if _try_system_pythons 2>/dev/null; then
+            _py_arch="$RESOLVED_PYTHON_ARCH"
+        elif _try_uv 2>/dev/null || _try_pyenv 2>/dev/null || _try_brew 2>/dev/null; then
+            _py_arch="$RESOLVED_PYTHON_ARCH"
+        elif _try_project_python 2>/dev/null || _try_legacy_project_python 2>/dev/null; then
+            # Cached project-local Python (may be x86_64 from a prior
+            # Rosetta install). Installer will reuse this, not bootstrap.
+            _py_arch="$RESOLVED_PYTHON_ARCH"
+        else
+            # No Python 3.12+ anywhere. Installer will download via
+            # _pbs_target_triple (sysctl-based → arm64 on Apple Silicon).
+            _py_arch="arm64"
+        fi
+        if [ "$_py_arch" = "arm64" ] || [ "$_py_arch" = "aarch64" ]; then
+            ASR_DEFAULT_MODEL="mlx-community/Qwen3-ASR-1.7B-8bit"
+        fi
+    fi
+fi
+
 # ── Step 4: Generate .env ───────────────────────────────────
 
-echo -e "${CYAN}[4/6] Generating .env / 生成配置文件...${NC}"
+echo -e "${CYAN}[4/5] Generating .env / 生成配置文件...${NC}"
 echo ""
 
 if [ -f .env ]; then
@@ -252,23 +339,20 @@ else
     ENV_FILE=".env"
 fi
 
+DEPLOYMENT_API_PORT="$(node "$SCRIPT_DIR/read-deployment-default.mjs" apiPort)"
+DEPLOYMENT_WEB_PORT="$(node "$SCRIPT_DIR/read-deployment-default.mjs" webPort)"
+DEPLOYMENT_API_URL="$(node "$SCRIPT_DIR/read-deployment-default.mjs" apiBaseUrl)"
+
 cat > "$ENV_FILE" <<ENVEOF
-# Generated by Cat Cafe setup.sh — $(date +%Y-%m-%d)
+# Generated by Clowder AI setup.sh — $(date +%Y-%m-%d)
 # 由 setup.sh 自动生成
 
 # ── Core 核心 ────────────────────────────────────────────────
-FRONTEND_PORT=3003
-API_SERVER_PORT=3004
-NEXT_PUBLIC_API_URL=http://localhost:3004
+FRONTEND_PORT=$DEPLOYMENT_WEB_PORT
+API_SERVER_PORT=$DEPLOYMENT_API_PORT
+NEXT_PUBLIC_API_URL=$DEPLOYMENT_API_URL
 REDIS_PORT=6399
 REDIS_URL=redis://localhost:6399
-
-# ── Model API Keys 模型密钥 ──────────────────────────────────
-# Optional if your CLI subscription already handles auth.
-# 如果 CLI 订阅已管理认证，这里可以留空。
-# ANTHROPIC_API_KEY=
-# OPENAI_API_KEY=
-# GOOGLE_API_KEY=
 
 # ── API Gateway Proxy 反向代理 ───────────────────────────────
 ANTHROPIC_PROXY_ENABLED=$([ "$ENABLE_PROXY" = true ] && echo "1" || echo "0")
@@ -280,6 +364,7 @@ if [ "$ENABLE_ASR" = true ]; then
 
 # ── Voice Input (ASR) 语音输入 ───────────────────────────────
 ASR_ENABLED=1
+WHISPER_MODEL=${ASR_DEFAULT_MODEL}
 WHISPER_URL=http://localhost:9876
 NEXT_PUBLIC_WHISPER_URL=http://localhost:9876
 ENVEOF
@@ -297,7 +382,6 @@ if [ "$ENABLE_TTS" = true ]; then
 # ── Voice Output (TTS) 语音输出 ──────────────────────────────
 TTS_ENABLED=1
 TTS_URL=http://localhost:9879
-TTS_CACHE_DIR=./data/tts-cache
 ENVEOF
 else
     cat >> "$ENV_FILE" <<ENVEOF
@@ -322,6 +406,24 @@ LLM_POSTPROCESS_ENABLED=0
 ENVEOF
 fi
 
+if [ "$ENABLE_EMBED" = true ]; then
+    cat >> "$ENV_FILE" <<ENVEOF
+
+# ── Semantic Retrieval 语义检索（Embedding）────────────────
+EMBED_MODE=on
+# EMBED_PORT=9880
+# EMBED_URL=http://127.0.0.1:9880
+ENVEOF
+else
+    cat >> "$ENV_FILE" <<ENVEOF
+
+# ── Semantic Retrieval 语义检索（Embedding）────────────────
+EMBED_MODE=off
+# EMBED_PORT=9880
+# EMBED_URL=http://127.0.0.1:9880
+ENVEOF
+fi
+
 echo -e "  ${GREEN}✓${NC} $ENV_FILE generated"
 
 # ── Step 4b: Install sidecar venvs (--install-missing) ──────
@@ -331,16 +433,16 @@ echo -e "  ${GREEN}✓${NC} $ENV_FILE generated"
 install_sidecar_venvs() {
     local venv_base="${HOME}/.cat-cafe"
 
-    # ASR venv
-    local asr_venv="$venv_base/asr-venv"
-    if [ ! -d "$asr_venv" ]; then
-        echo "  Creating ASR venv: $asr_venv ..."
-        python3 -m venv "$asr_venv"
-    else
-        echo "  Updating ASR venv: $asr_venv ..."
-    fi
-    "$asr_venv/bin/pip" install --quiet -U pip
-    "$asr_venv/bin/pip" install --quiet mlx-audio fastapi uvicorn python-multipart
+    # ASR venv — unified whisper-stt service (#863).
+    # Delegates to whisper-install.sh so deps, venv path, and model preload
+    # all go through the same pipeline as the UI-triggered install.
+    # Uses ASR_DEFAULT_MODEL (set during feature selection) so the installer
+    # and the generated .env use the exact same model value.
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    echo "  Installing ASR service (whisper-stt) via unified installer..."
+    WHISPER_MODEL="${ASR_DEFAULT_MODEL}" \
+      bash "$script_dir/services/whisper-install.sh"
 
     # TTS venv
     local tts_venv="$venv_base/tts-venv"
@@ -351,7 +453,7 @@ install_sidecar_venvs() {
         echo "  Updating TTS venv: $tts_venv ..."
     fi
     "$tts_venv/bin/pip" install --quiet -U pip
-    "$tts_venv/bin/pip" install --quiet mlx-audio 'misaki[zh]' fastapi uvicorn 'httpx[socks]' num2words spacy phonemizer
+    "$tts_venv/bin/pip" install --quiet 'mlx-audio>=0.4.7' 'misaki[zh]' fastapi uvicorn 'httpx[socks]' num2words spacy phonemizer
 
     # LLM post-processing venv
     local llm_venv="$venv_base/llm-venv"
@@ -363,77 +465,72 @@ install_sidecar_venvs() {
     fi
     "$llm_venv/bin/pip" install --quiet -U pip
     "$llm_venv/bin/pip" install --quiet mlx-vlm "httpx[socks]" torchvision fastapi uvicorn pydantic
+
+    # Embedding venv
+    local embed_venv="$venv_base/embed-venv"
+    if [ ! -d "$embed_venv" ]; then
+        echo "  Creating Embedding venv: $embed_venv ..."
+        python3 -m venv "$embed_venv"
+    else
+        echo "  Updating Embedding venv: $embed_venv ..."
+    fi
+    "$embed_venv/bin/pip" install --quiet -U pip
+    if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+        "$embed_venv/bin/pip" install --quiet mlx mlx-embeddings fastapi uvicorn numpy 'transformers<5' 'huggingface-hub<1.0'
+    else
+        "$embed_venv/bin/pip" install --quiet sentence-transformers torch fastapi uvicorn numpy
+    fi
 }
 
 if [ "$INSTALL_MISSING" = true ] && [ "$HAS_PYTHON" = true ]; then
     echo ""
-    echo -e "${CYAN}[4b/6] Installing sidecar venvs / 安装语音服务依赖...${NC}"
+    echo -e "${CYAN}[4b/5] Installing sidecar venvs / 安装语音服务依赖...${NC}"
     echo ""
     install_sidecar_venvs
     echo -e "  ${GREEN}✓${NC} Sidecar venvs installed"
 fi
 
-# ── Step 5: Link skills (ADR-009) ───────────────────────────
+sync_agent_hooks_best_effort
+
+# ── Step 5: Summary ─────────────────────────────────────────
 
 echo ""
-echo -e "${CYAN}[5/6] Linking skills / 链接技能包...${NC}"
-echo ""
-
-SKILLS_SOURCE="$PROJECT_DIR/cat-cafe-skills"
-if [[ -d "$SKILLS_SOURCE" ]]; then
-    for tdir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.gemini/skills"; do
-        mkdir -p "$tdir"
-        for sd in "$SKILLS_SOURCE"/*/; do
-            [[ -d "$sd" ]] || continue
-            sn=$(basename "$sd")
-            [[ "$sn" == "refs" ]] && continue
-            ln -sfn "$sd" "$tdir/$sn"
-        done
-    done
-    echo -e "  ${GREEN}✓${NC} Skills linked to ~/.claude/skills, ~/.codex/skills, ~/.gemini/skills"
-else
-    echo -e "  ${YELLOW}⚠${NC} cat-cafe-skills/ not found — skills will not be available"
-    echo "     You can link them later by re-running this script after cloning cat-cafe-skills."
-fi
-
-# ── Step 6: Summary ─────────────────────────────────────────
-
-echo ""
-echo -e "${CYAN}[6/6] Setup complete! / 安装完成！${NC}"
+echo -e "${CYAN}[5/5] Setup complete! / 安装完成！${NC}"
 echo ""
 echo "=================================="
-echo -e "${GREEN}🎉 Cat Cafe is ready!${NC}"
+echo -e "${GREEN}🎉 Clowder AI is ready!${NC}"
 echo ""
 echo "  Enabled features / 已启用功能:"
 echo "    ✓ Core (API + Frontend + Redis)"
 [ "$ENABLE_ASR" = true ] && echo "    ✓ Voice Input (ASR)"
 [ "$ENABLE_TTS" = true ] && echo "    ✓ Voice Output (TTS)"
 [ "$ENABLE_LLM_PP" = true ] && echo "    ✓ Speech Correction (LLM)"
+[ "$ENABLE_EMBED" = true ] && echo "    ✓ Semantic Retrieval (Embedding)"
 [ "$ENABLE_PROXY" = true ] && echo "    ✓ API Gateway Proxy"
 echo ""
 echo "  Next steps / 下一步:"
-echo "    1. Edit $ENV_FILE and add your API key(s)"
-echo "       编辑 $ENV_FILE 填入你的 API Key"
+echo "    1. Open http://localhost:3003 → Hub → System Settings → Account Configuration"
+echo "       打开 http://localhost:3003 → Hub → 系统配置 → 账号配置，添加模型 API Key"
 echo ""
 if [ "$HAS_REDIS" = true ]; then
     echo "    2. Start: pnpm start"
     echo "       启动: pnpm start"
 else
-    echo "    2. Start (no Redis): pnpm start --memory"
-    echo "       启动（无 Redis）: pnpm start --memory"
+    echo "    2. Start (no Redis): pnpm start -- --memory"
+    echo "       启动（无 Redis）: pnpm start -- --memory"
 fi
 echo ""
-echo "    3. Open http://localhost:3003"
-echo "       打开 http://localhost:3003"
+echo "    3. Open http://localhost:$DEPLOYMENT_WEB_PORT"
+echo "       打开 http://localhost:$DEPLOYMENT_WEB_PORT"
 echo ""
 
-if [ "$ENABLE_ASR" = true ] || [ "$ENABLE_TTS" = true ] || [ "$ENABLE_LLM_PP" = true ]; then
+if [ "$ENABLE_ASR" = true ] || [ "$ENABLE_TTS" = true ] || [ "$ENABLE_LLM_PP" = true ] || [ "$ENABLE_EMBED" = true ]; then
     if [ "$INSTALL_MISSING" = true ]; then
         echo -e "  ${GREEN}✓${NC} Sidecar venvs pre-installed. Models download on first use."
-        echo "  语音服务 venv 已预装。模型将在首次使用时下载。"
+        echo "  Sidecar venv 已预装。模型将在首次使用时下载。"
     else
-        echo -e "  ${YELLOW}Note:${NC} Voice models will be downloaded on first use."
-        echo "  语音模型将在首次使用时自动下载。"
+        echo -e "  ${YELLOW}Note:${NC} Sidecar models will be downloaded on first use."
+        echo "  Sidecar 模型将在首次使用时自动下载。"
     fi
     echo ""
 fi
@@ -441,3 +538,76 @@ fi
 echo "  Documentation / 文档: SETUP.md"
 echo "  Issues: https://github.com/your-org/clowder-ai/issues"
 echo ""
+
+# ─── F239 Phase B: stale HOME-level skill link detection (ADR-025 第 8 条) ───
+# Pre-flight scan only — never auto-runs cleanup (per ADR-025: 不自动删除).
+# Tells the user how many legacy HOME-level skill symlinks point at this repo
+# and how to review/remove them.
+#
+# Source detection: legacy HOME symlinks were created by sync-skills.sh using
+# MAIN_REPO from `git worktree list` (cloud P2 round 2 PR #2328). Setup may be
+# run from a linked worktree where `pwd/cat-cafe-skills` is the worktree-local
+# copy, not the main one. Both candidate sources are tracked and stale links
+# matching either are counted.
+STALE_COUNT=0
+SKILLS_SRC_MAIN=""
+SKILLS_SRC_LOCAL=""
+MAIN_REPO="$(git worktree list --porcelain 2>/dev/null | head -1 | sed 's/^worktree //' || true)"
+if [ -n "$MAIN_REPO" ] && [ -d "$MAIN_REPO/cat-cafe-skills" ]; then
+  SKILLS_SRC_MAIN="$(cd "$MAIN_REPO/cat-cafe-skills" && pwd -P)"
+fi
+if [ -d "$(pwd)/cat-cafe-skills" ]; then
+  SKILLS_SRC_LOCAL="$(cd "$(pwd)/cat-cafe-skills" && pwd -P)"
+fi
+SKILLS_SRC_REAL="${SKILLS_SRC_MAIN:-$SKILLS_SRC_LOCAL}"
+if [ -n "$SKILLS_SRC_REAL" ]; then
+  for provider in claude codex gemini kimi; do
+    provider_dir="$HOME/.${provider}/skills"
+    [ -d "$provider_dir" ] || continue
+    for entry in "$provider_dir"/*; do
+      [ -L "$entry" ] || continue
+      target="$(readlink "$entry" 2>/dev/null)" || continue
+      case "$target" in
+        /*) real_target="$target" ;;
+        *)  real_target="$provider_dir/$target" ;;
+      esac
+      # Canonicalize when target exists; for dangling symlinks the realpath
+      # cannot resolve so fall back to the unresolved string (which cannot
+      # match SKILLS_SRC_REAL → entry preserved). Avoids `cd ...` chain that
+      # would trip `set -e` on dangling user-owned symlinks (砚砚 review).
+      canon_target=""
+      if [ -d "$real_target" ]; then
+        canon_target="$(cd "$real_target" 2>/dev/null && pwd -P)"
+      elif [ -e "$real_target" ] || [ -L "$real_target" ]; then
+        rt_dir="$(dirname "$real_target")"
+        if [ -d "$rt_dir" ]; then
+          canon_target="$(cd "$rt_dir" 2>/dev/null && pwd -P)/$(basename "$real_target")"
+        fi
+      fi
+      [ -z "$canon_target" ] && canon_target="$real_target"
+      # Match against EITHER main-repo source or worktree-local source; legacy
+      # HOME symlinks may point at either depending on when/where they were created.
+      matched=0
+      case "$canon_target" in
+        "$SKILLS_SRC_REAL"/*|"$SKILLS_SRC_REAL") matched=1 ;;
+      esac
+      if [ "$matched" = "0" ] && [ -n "$SKILLS_SRC_MAIN" ] && [ "$SKILLS_SRC_MAIN" != "$SKILLS_SRC_REAL" ]; then
+        case "$canon_target" in
+          "$SKILLS_SRC_MAIN"/*|"$SKILLS_SRC_MAIN") matched=1 ;;
+        esac
+      fi
+      if [ "$matched" = "0" ] && [ -n "$SKILLS_SRC_LOCAL" ] && [ "$SKILLS_SRC_LOCAL" != "$SKILLS_SRC_REAL" ]; then
+        case "$canon_target" in
+          "$SKILLS_SRC_LOCAL"/*|"$SKILLS_SRC_LOCAL") matched=1 ;;
+        esac
+      fi
+      [ "$matched" = "1" ] && STALE_COUNT=$((STALE_COUNT + 1))
+    done
+  done
+fi
+if [ "$STALE_COUNT" -gt 0 ]; then
+  echo "  Note: found $STALE_COUNT stale HOME-level skill symlinks pointing at this repo."
+  echo "        Run \`pnpm clean:stale-skill-links\` to review them (dry-run default)."
+  echo "        Re-run with the apply flag to remove. (ADR-025 第 8 条: 不自动删除)"
+  echo ""
+fi

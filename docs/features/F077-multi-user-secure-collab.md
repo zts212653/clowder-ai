@@ -1,9 +1,10 @@
 ---
 feature_ids: [F077]
-related_features: [F044, F059, F074]
+related_features: [F044, F059, F074, F156]
 topics: [auth, oauth, multi-user, security, session, thread-acl, github]
 doc_kind: spec
 created: 2026-03-07
+tips_exempt: "Spec-stage security/auth feature with no runtime implementation; capability tips will be contributed when Phase 1 MVP delivers a user-facing authentication surface."
 ---
 
 # F077 — Multi-User Secure Collaboration（多用户安全协作）
@@ -13,9 +14,9 @@ created: 2026-03-07
 
 ## Why
 
-Cat Café Hub 当前 3001 端口零认证裸跑，同 WiFi 下任何人可直接访问所有 thread、以team lead身份操作猫猫、浏览项目文件。team lead想让朋友也能用 Hub 与猫猫协作，但需要独立身份、私有空间隔离、传输安全。
+Clowder AI Hub 当前 3001 端口零认证裸跑，同 WiFi 下任何人可直接访问所有 thread、以operator身份操作猫猫、浏览项目文件。operator想让朋友也能用 Hub 与猫猫协作，但需要独立身份、私有空间隔离、传输安全。
 
-**team experience**："我朋友喊你们搞的哈哈哈哈 我们的 3001 没做任何防护 直接同个 wifi 就能访问到 好像很危险？能让他们以其他team lead的身份接入吗？而不是 landy 以及我的这些 thread 能不让他们看见吗？他们只能看见共享区的 thread"
+**operator experience**："我朋友喊你们搞的哈哈哈哈 我们的 3001 没做任何防护 直接同个 wifi 就能访问到 好像很危险？能让他们以其他operator的身份接入吗？而不是 operator 以及我的这些 thread 能不让他们看见吗？他们只能看见共享区的 thread"
 
 ## What
 
@@ -47,7 +48,7 @@ GitHub OAuth 认证 + Thread ACL + Redis Session，实现安全的多用户协�
 - [ ] AC-A1: 本文档需在本轮迁移后维持模板核心结构（Status/Why/What/Dependencies/Risk/Timeline）。
 - [ ] AC1: GitHub OAuth 登录流程完整（authorize → callback → session → /api/me）
 - [ ] AC2: 未登录用户访问任何 API 返回 401（除 /api/auth/* 和健康检查）
-- [ ] AC3: team lead（admin）可生成邀请链接，朋友用 GitHub 登录后成为 member
+- [ ] AC3: operator（admin）可生成邀请链接，朋友用 GitHub 登录后成为 member
 - [ ] AC4: 私有 thread 对非 owner 不可见（API + WS 双重校验）
 - [ ] AC5: 共享 thread 对所有 member 可见，非 member 不可见
 - [ ] AC6: WS 连接从 session 取身份，伪造 userId 无效
@@ -55,6 +56,7 @@ GitHub OAuth 认证 + Thread ACL + Redis Session，实现安全的多用户协�
 - [ ] AC8: 现有路由越权审计完成，所有读写路由有 owner/member 校验
 - [ ] AC9: 现有单用户部署不受影响（auth 可选，默认关闭 = 向后兼容）
 - [ ] AC10: 用户只能在自己被授权的 projectPath 下操作，Agent 执行命令受 projectPath 沙盒约束
+- [ ] AC11: 多设备接入 — 同一用户从手机/平板/另一台电脑通过 Tailscale 访问 Hub，GitHub OAuth 保证身份一致，各设备独立 session 但共享 thread 权限和数据
 
 ## 需求点 Checklist
 
@@ -71,6 +73,15 @@ GitHub OAuth 认证 + Thread ACL + Redis Session，实现安全的多用户协�
 | R9 | Route audit 三级分类 | AC8 | test | [ ] |
 | R10 | 向后兼容（auth 可选） | AC9 | test | [ ] |
 | R11 | projectPath 沙盒（Agent 只在授权目录执行） | AC10 | test | [ ] |
+| R12 | 多设备 Tailscale 接入（同 userId 多 session） | AC11 | test + manual | [ ] |
+
+### Route Audit 已知越权实例（R9/AC8 — 已修复，留作同类模式参考）
+
+> 以下越权路由在 #786 sync review 中发现。**单用户部署下零实际风险**（系统仅一个 owner，无第二个用户可越权），多用户启用后为 P1。**已修复**，留作 R9 route audit 时的同类模式参考（owner / 默认大厅 public / 其余按 caller 索引校验，三态）。
+
+- **`GET /api/recall/events`**（`packages/api/src/routes/recall-metrics.ts`）：原守卫 `thread.createdBy !== 'system' && thread.createdBy !== userId` 把**所有** `createdBy === 'system'` 的 thread 当 public，任何登录用户可读其 recall events。
+  - **已修复**（Maine Coon GPT-5.5，2026-05-28 合入 main）：收紧为 `canAccessThread(thread, userId)`（owner + 默认大厅 `DEFAULT_THREAD_ID`）**或** `system thread 且在 caller thread 索引里`（`threadStore.list(userId)`）——非默认 system thread 不再无条件 public，对齐 Phase 1 What #8「默认公共大厅收口」。带 84 行 `recall-events-route.test.js` 覆盖。
+  - 溯源：clowder-ai #786 Maine Coonremote review（2026-05-27）发现 → Maine Coon修复 → 本 PR 合入 cat-cafe main（真相源）。R9 route audit 实施其余路由时可参照此 owner / 默认大厅 / index 三态模式。
 
 ## Key Decisions
 
@@ -105,7 +116,7 @@ GitHub OAuth 认证 + Thread ACL + Redis Session，实现安全的多用户协�
    - 默认关闭 = 单用户模式（现有行为不变）
    - `AUTH_ENABLED=true` 开启多用户模式
 
-7. **projectPath 即权限沙盒（team lead灵感）**
+7. **projectPath 即权限沙盒（operator灵感）**
    - 三层安全模型：认证（你是谁）→ Thread ACL（你看到什么）→ projectPath ACL（猫能碰什么文件）
    - 每个用户绑定 `allowedProjectPaths[]`，Agent 只在授权目录执行
    - 共享挂载目录（F074）天然成为协作边界：各人挂自己的目录，共享目录大家都能访问

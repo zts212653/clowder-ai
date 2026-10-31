@@ -1,0 +1,36 @@
+{
+  "verdictId": "2026-06-30-eval-a2a-no-data-telemetry-gap-build",
+  "featureId": "F167",
+  "evalSnapshotId": "eval-F167-2026-06-17",
+  "generatedAt": "2026-06-17T03:00:00.229Z",
+  "findings": [
+    {
+      "id": "AR-2026-06-17-001",
+      "relatedFeature": "F167",
+      "frictionSignal": {
+        "type": "observability-gap",
+        "severity": "medium",
+        "confidence": 0.9
+      },
+      "attribution": {
+        "primaryLayer": "tool_gap",
+        "pipelineOrHuman": "pipeline",
+        "evidence": [
+          {
+            "type": "telemetry-gap",
+            "anchor": "L1/streak_warn_count",
+            "excerpt": "streak_warn_count: no_counter — Cannot measure L1 activation frequency"
+          }
+        ]
+      },
+      "proposedAction": [
+        {
+          "action": "add-counter",
+          "target": "L1/streak_warn_count",
+          "rationale": "Cannot measure L1 activation frequency"
+        }
+      ],
+      "status": "open"
+    }
+  ]
+}

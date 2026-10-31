@@ -1,0 +1,194 @@
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
+import { DEFAULT_THREAD_STATE, useChatStore } from '@/stores/chatStore';
+import { ThreadExecutionBar } from '../ThreadExecutionBar';
+
+const mocks = vi.hoisted(() => ({
+  apiFetch: vi.fn(async () => new Response('{}', { status: 200 })),
+}));
+
+vi.mock('@/hooks/useCatData', () => ({
+  formatCatName: (cat: { displayName?: string; id: string }) => cat.displayName ?? cat.id,
+  useCatData: () => ({
+    getCatById: (id: string) => ({
+      id,
+      displayName: id === 'opus' ? '布偶猫（Opus 4.7）' : id,
+      color: { primary: '#9B7EBD' },
+    }),
+  }),
+}));
+
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: mocks.apiFetch,
+}));
+
+function resetStore() {
+  useActiveExecutionStore.getState().reset();
+  useChatStore.setState({
+    messages: [],
+    isLoading: false,
+    isLoadingHistory: false,
+    hasMore: true,
+    hasActiveInvocation: false,
+    hasDraft: false,
+    intentMode: null,
+    targetCats: [],
+    catStatuses: {},
+    catInvocations: {},
+    activeInvocations: {},
+    threadStates: {},
+    viewMode: 'single',
+    splitPaneThreadIds: [],
+    splitPaneTargetId: null,
+    currentThreadId: 'thread-a',
+    currentProjectPath: 'default',
+    threads: [],
+    isLoadingThreads: false,
+  });
+}
+
+function seedThreadBExecution() {
+  const request = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
+  useActiveExecutionStore.getState().applySnapshot('thread-a', request, {
+    projectPath: '/project/cafe',
+    executions: [
+      {
+        executionId: 'inv-b',
+        threadId: 'thread-b',
+        threadTitle: 'Background thread',
+        catId: 'opus',
+        kind: 'live_invocation',
+        startedAt: 1000,
+        cancelability: {
+          state: 'cancelable',
+          target: {
+            kind: 'live_invocation',
+            threadId: 'thread-b',
+            catId: 'opus',
+            executionId: 'inv-b',
+          },
+        },
+      },
+    ],
+  });
+}
+
+describe('thread-scoped liveness chrome', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeAll(() => {
+    (globalThis as { React?: typeof React }).React = React;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterAll(() => {
+    delete (globalThis as { React?: typeof React }).React;
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  beforeEach(() => {
+    resetStore();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    vi.clearAllMocks();
+  });
+
+  it('ThreadExecutionBar reads the requested thread liveness, not the flat current-thread mirror', () => {
+    seedThreadBExecution();
+    useChatStore.setState({
+      currentThreadId: 'thread-a',
+      activeInvocations: {},
+      threadStates: {
+        'thread-b': {
+          ...DEFAULT_THREAD_STATE,
+          hasActiveInvocation: true,
+          activeInvocations: { 'inv-b': { catId: 'opus', mode: 'execute', startedAt: 1000 } },
+          targetCats: ['opus'],
+          catStatuses: { opus: 'streaming' },
+          catInvocations: {
+            opus: {
+              activeRun: {
+                threadId: 'thread-b',
+                targetId: 'opus',
+                invocationId: 'inv-b',
+                responseMessageId: 'response-inv-b',
+                inputEntryIds: [],
+                inputMessageIds: [],
+                privateInputEntryIds: [],
+                startedAt: 1000,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    act(() => {
+      root.render(React.createElement(ThreadExecutionBar, { threadId: 'thread-b' }));
+    });
+
+    expect(container.textContent).toContain('执行中');
+    expect(container.textContent).toContain('布偶猫（Opus 4.7）');
+  });
+
+  it('ThreadExecutionBar cancel uses the requested thread id', async () => {
+    seedThreadBExecution();
+    useChatStore.setState({
+      currentThreadId: 'thread-a',
+      activeInvocations: {},
+      threadStates: {
+        'thread-b': {
+          ...DEFAULT_THREAD_STATE,
+          hasActiveInvocation: true,
+          activeInvocations: { 'inv-b': { catId: 'opus', mode: 'execute', startedAt: 1000 } },
+          targetCats: ['opus'],
+          catStatuses: { opus: 'streaming' },
+          catInvocations: {
+            opus: {
+              activeRun: {
+                threadId: 'thread-b',
+                targetId: 'opus',
+                invocationId: 'inv-b',
+                responseMessageId: 'response-inv-b',
+                inputEntryIds: [],
+                inputMessageIds: [],
+                privateInputEntryIds: [],
+                startedAt: 1000,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    act(() => {
+      root.render(React.createElement(ThreadExecutionBar, { threadId: 'thread-b' }));
+    });
+
+    const stopButton = container.querySelector(
+      'button[aria-label="Stop opus live_invocation inv-b"]',
+    ) as HTMLButtonElement | null;
+    expect(stopButton).not.toBeNull();
+
+    await act(async () => {
+      stopButton?.click();
+    });
+
+    expect(mocks.apiFetch).toHaveBeenCalledWith('/api/threads/thread-b/executions/live/inv-b/cancel', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ catId: 'opus' }),
+    });
+  });
+});

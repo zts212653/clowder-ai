@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ThreadChatHistoryAdmissionProvider } from '@/components/thread-chat/ThreadChatRuntimeProvider';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { useChatHistory } from '../useChatHistory';
@@ -9,9 +10,13 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(),
 }));
 
-function HookHost({ threadId }: { threadId: string }) {
+function HookProbe({ threadId }: { threadId: string }) {
   useChatHistory(threadId);
   return null;
+}
+
+function HookHost({ threadId }: { threadId: string }) {
+  return React.createElement(ThreadChatHistoryAdmissionProvider, null, React.createElement(HookProbe, { threadId }));
 }
 
 describe('useChatHistory task-progress hydration', () => {
@@ -44,7 +49,6 @@ describe('useChatHistory task-progress hydration', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
 
       threadStates: {},
       currentThreadId: 'thread-progress',
@@ -55,7 +59,6 @@ describe('useChatHistory task-progress hydration', () => {
       threads: [],
       isLoadingThreads: false,
       queue: [],
-      queuePaused: false,
     });
   });
 
@@ -137,7 +140,14 @@ describe('useChatHistory task-progress hydration', () => {
       }
       if (typeof url === 'string' && url.includes('/queue')) {
         return Promise.resolve(
-          new Response(JSON.stringify({ queue: [], paused: false, activeInvocations: ['codex'] }), { status: 200 }),
+          new Response(
+            JSON.stringify({
+              queue: [],
+              paused: false,
+              activeInvocations: [{ catId: 'codex', startedAt: Date.now() }],
+            }),
+            { status: 200 },
+          ),
         );
       }
       return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));

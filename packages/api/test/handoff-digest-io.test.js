@@ -119,6 +119,55 @@ describe('handoff digest IO', () => {
     assert.deepEqual(events, []);
   });
 
+  test('scanEvents visits a transcript incrementally without returning an event array', async () => {
+    const dir = join(tempDir, 'threads', 'thread1', 'cat1', 'sessions', 'sess-scan');
+    await mkdir(dir, { recursive: true });
+    const lines = Array.from({ length: 10_000 }, (_, index) =>
+      JSON.stringify({
+        v: 1,
+        t: 1709700000000 + index,
+        threadId: 'thread1',
+        catId: 'cat1',
+        sessionId: 'sess-scan',
+        eventNo: index,
+        event: { type: 'status', content: 'x'.repeat(1_024) },
+      }),
+    );
+    await writeFile(join(dir, 'events.jsonl'), lines.join('\n'));
+    let visited = 0;
+
+    const result = await reader.scanEvents('sess-scan', 'thread1', 'cat1', () => {
+      visited += 1;
+    });
+
+    assert.deepEqual(result, { present: true, eventCount: 10_000 });
+    assert.equal(visited, 10_000);
+  });
+
+  test('scanEvents propagates visitor failures instead of silently skipping safety budgets', async () => {
+    const dir = join(tempDir, 'threads', 'thread1', 'cat1', 'sessions', 'sess-budget');
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, 'events.jsonl'),
+      JSON.stringify({
+        v: 1,
+        t: 1709700000000,
+        threadId: 'thread1',
+        catId: 'cat1',
+        sessionId: 'sess-budget',
+        eventNo: 0,
+        event: { type: 'status' },
+      }),
+    );
+
+    await assert.rejects(
+      reader.scanEvents('sess-budget', 'thread1', 'cat1', () => {
+        throw new Error('budget_exceeded');
+      }),
+      /budget_exceeded/,
+    );
+  });
+
   // --- getSessionDir (public accessor) ---
 
   test('getSessionDir returns correct path', () => {

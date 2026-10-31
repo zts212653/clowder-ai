@@ -36,7 +36,7 @@ describe('F118 finally block audit fallback (AC-C5)', () => {
           invocationId: `inv-finally-${++counter}`,
           callbackToken: `tok-${counter}`,
         }),
-        verify: () => null,
+        verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
       },
       sessionManager: {
         get: async () => undefined,

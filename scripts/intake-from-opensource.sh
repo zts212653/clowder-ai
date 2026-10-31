@@ -1,0 +1,2080 @@
+#!/usr/bin/env bash
+# intake-from-opensource.sh — Clowder AI → Clowder AI 社区贡献吸收
+#
+# Usage: see --help. Proven mechanical intake is delegated to the Node executor.
+# Design consensus (2026-03-13): no bidirectional sync, no reverse transform,
+# intake by PR, 3-class: safe-cherry-pick / manual-port / public-only.
+
+set -euo pipefail
+
+# ── 颜色 ──
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# ── 路径 ──
+SOURCE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TARGET_DIR="$SOURCE_DIR/../clowder-ai"
+INTAKE_LEDGER="$SOURCE_DIR/docs/ops/opensource-intake-ledger.json"
+
+resolve_target_main_head() {
+  if git -C "$TARGET_DIR" remote get-url origin >/dev/null 2>&1; then
+    if git -C "$TARGET_DIR" fetch origin main --quiet >/dev/null 2>&1; then
+      if git -C "$TARGET_DIR" rev-parse --verify refs/remotes/origin/main >/dev/null 2>&1; then
+        git -C "$TARGET_DIR" rev-parse refs/remotes/origin/main 2>/dev/null
+        return 0
+      fi
+    fi
+  fi
+
+  git -C "$TARGET_DIR" rev-parse HEAD 2>/dev/null
+}
+
+# ── 参数 ──
+PR_NUMBER=""
+MODE="plan"
+ADVANCE_LEDGER=false
+FORCE_OVERWRITE=false
+RECORD_DECISION=false
+DECISION=""
+VALIDATE_INBOUND=false
+FROM_INDEX=false
+STATE_MIGRATION_ADVISORY=false
+INTENT_ISSUE=""
+ABSORB_PR=""
+REVIEW_PROOF=""
+SKIP_ABSORBED_GUARD=false
+VERIFY_MERGE_READY=false
+MECHANICAL_PROOF=""
+CLASSIFY_INTAKE_PATH=""
+ORIGINAL_ARGS=("$@")
+
+for arg in "$@"; do
+  case "$arg" in
+    --pr=*) PR_NUMBER="${arg#--pr=}" ;;
+    --pr) ;; # handled below with next arg
+    --mode=*) MODE="${arg#--mode=}" ;;
+    --decision=*) DECISION="${arg#--decision=}" ;;
+    --intent-issue=*) INTENT_ISSUE="${arg#--intent-issue=}" ;;
+    --absorb-pr=*) ABSORB_PR="${arg#--absorb-pr=}" ;;
+    --review-proof=*) REVIEW_PROOF="${arg#--review-proof=}" ;;
+    --classify-intake-path=*) CLASSIFY_INTAKE_PATH="${arg#--classify-intake-path=}" ;;
+    --mechanical-proof=*) MECHANICAL_PROOF="${arg#--mechanical-proof=}"; REVIEW_PROOF="$MECHANICAL_PROOF" ;;
+    --advance-ledger) ADVANCE_LEDGER=true ;;
+    --force-overwrite) FORCE_OVERWRITE=true ;;
+    --skip-absorbed-guard) SKIP_ABSORBED_GUARD=true ;;
+    --verify-merge-ready) VERIFY_MERGE_READY=true ;;
+    --record) RECORD_DECISION=true ;;
+    --validate-inbound) VALIDATE_INBOUND=true ;;
+    --from-index) FROM_INDEX=true ;;
+    --state-migration-advisory) STATE_MIGRATION_ADVISORY=true ;;
+  esac
+done
+# Handle space-separated args
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --pr) PR_NUMBER="$2"; shift 2 ;;
+    --mode) MODE="$2"; shift 2 ;;
+    --decision) DECISION="$2"; shift 2 ;;
+    --intent-issue) INTENT_ISSUE="$2"; shift 2 ;;
+    --absorb-pr) ABSORB_PR="$2"; shift 2 ;;
+    --review-proof) REVIEW_PROOF="$2"; shift 2 ;;
+    --classify-intake-path) CLASSIFY_INTAKE_PATH="$2"; shift 2 ;;
+    --mechanical-proof) MECHANICAL_PROOF="$2"; REVIEW_PROOF="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+# Explicit write modes share the proven executor; no skip-guard path is used.
+case "$MODE" in
+  mechanical-plan|prepare|apply)
+    NODE_ARGS=()
+    for arg in "${ORIGINAL_ARGS[@]}"; do
+      if [ "$arg" = "--mode=mechanical-plan" ]; then NODE_ARGS+=("--mode=plan"); elif [ "$arg" = "mechanical-plan" ]; then NODE_ARGS+=("plan"); else NODE_ARGS+=("$arg"); fi
+    done
+    exec node "$SOURCE_DIR/scripts/intake-mechanical.mjs" "${NODE_ARGS[@]}"
+    ;;
+esac
+
+# ── Path classification ──
+# Files that are COMPLETELY REPLACED during outbound sync (never absorb)
+is_public_only() {
+  local path="$1"
+  case "$path" in
+    .github/FUNDING.yml|.github/ISSUE_TEMPLATE/*|.github/DISCUSSION_TEMPLATE/*) return 0 ;;
+    CHANGELOG.md|docs/community/*) return 0 ;;
+    # Generated/replaced files
+    LICENSE|.env.example) return 0 ;;
+    .github/pull_request_template.md) return 0 ;;
+    cat-config.json) return 0 ;;
+    docs/ROADMAP.md|docs/public-lessons.md|docs/README.md) return 0 ;;
+    .sync-provenance.json) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# ── Dictionary-driven path classification (F238 Phase C) ──
+# Single source of truth: assets/brand-dictionary.yaml
+# Helper: scripts/brand-dictionary-helper.mjs provides CLI + module interface.
+#
+# Classify a path via the dictionary helper.  Returns the inbound classification
+# from path_policies (manual-port / public-source / brand-sensitive / public-only / pass-through / safe-cherry-pick).
+classify_path() {
+  local path="$1"
+  local result
+  # Fail-closed: if the helper is unavailable, default to manual-port (not safe-cherry-pick).
+  # This ensures P0/P1 paths are never silently downgraded when the helper or js-yaml is missing.
+  result=$(node "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" --classify-path "$path" 2>/dev/null || echo '{"classification":"manual-port","risk":"P1","reason":"helper unavailable — fail-closed"}')
+  echo "$result" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.classification)"
+}
+
+is_manual_port() {
+  local path="$1"
+  local cls
+  cls=$(classify_path "$path")
+  [ "$cls" = "manual-port" ]
+}
+
+# public-source: canonical home source intentionally contains public brand copy.
+# It is exempt from public-term contamination checks, but community changes must
+# still be manually ported into that source instead of being skipped as public-only.
+is_public_source() {
+  local path="$1"
+  local cls
+  cls=$(classify_path "$path")
+  [ "$cls" = "public-source" ]
+}
+
+# pass-through: file is exempt from both brand guard and intake classification.
+# Typical use: internal tracking files (e.g. intake ledger) that naturally contain
+# cross-repo brand references but are not sync-managed roots — never reach the
+# public repo, so intake classification is moot. Must be handled explicitly to
+# avoid falling through to safe-cherry-pick (PR #2482 review finding).
+is_pass_through() {
+  local path="$1"
+  local cls
+  cls=$(classify_path "$path")
+  [ "$cls" = "pass-through" ]
+}
+
+# Everything else = safe to cherry-pick (only cosmetic sanitization applied)
+# packages/api/**, packages/web/**, packages/shared/**, packages/mcp-server/**
+
+# ── Brand-sensitive files (Inbound Guard) ──
+# Dictionary-driven + legacy fallback for paths not yet in dictionary.
+# Legacy patterns will be migrated to brand-dictionary.yaml in a follow-up.
+BRAND_SENSITIVE_LEGACY=(
+  "packages/web/src/app/layout.tsx"
+  "packages/web/src/components/SplitPaneView.tsx"
+  "packages/web/src/components/ChatContainerHeader.tsx"
+  "packages/web/src/utils/api-client.ts"
+)
+
+is_brand_sensitive() {
+  local path="$1"
+  # Dictionary first
+  local cls
+  cls=$(classify_path "$path")
+  if [ "$cls" = "brand-sensitive" ]; then return 0; fi
+  # Legacy fallback
+  for pattern in "${BRAND_SENSITIVE_LEGACY[@]}"; do
+    if [ "$path" = "$pattern" ]; then return 0; fi
+  done
+  # Icon files
+  case "$path" in
+    packages/web/public/icons/*) return 0 ;;
+  esac
+  return 1
+}
+
+# ── High-risk files (Intake Guard) ──
+# These files often carry route wiring, dependency injection, auth/callback,
+# env, allowlist, or sync behavior. They may still be mechanically mergeable,
+# but plan mode must not classify them as plain safe-cherry-pick.
+HIGH_RISK_PATTERNS=(
+  "packages/api/src/index.ts"
+  "packages/api/src/routes/*.ts"
+  "*/route-*.ts"
+  "packages/api/src/config/env-registry.ts"
+  "packages/api/src/infrastructure/telemetry/metric-allowlist.ts"
+  "*callback*.ts"
+  "*auth*.ts"
+  "scripts/intake-from-opensource.sh"
+  "scripts/sync-*.sh"
+)
+
+is_test_or_doc_path() {
+  local path="$1"
+  case "$path" in
+    docs/*|*/test/*|*/tests/*|*.test.*|*.spec.*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# A 1224-class change is not identified by one scary filename. It is a
+# distributed state-machine migration: persistent representation + multiple
+# readers/writers + an activation/backfill surface. Keeping these dimensions
+# separate avoids quarantining an ordinary isolated store fix.
+is_stateful_migration_core() {
+  local path="$1"
+  if is_test_or_doc_path "$path"; then return 1; fi
+  case "$path" in
+    packages/api/src/*/stores/*|packages/api/src/*Store.ts|packages/api/src/*store*.ts) return 0 ;;
+    packages/api/src/*redis*.ts|packages/shared/src/*redis*.ts|*lua*.ts) return 0 ;;
+    packages/api/src/*cursor*.ts|packages/shared/src/*cursor*.ts) return 0 ;;
+    packages/api/scripts/*cursor*|packages/api/scripts/*migrat*|packages/api/scripts/*persist*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_stateful_migration_consumer() {
+  local path="$1"
+  if is_test_or_doc_path "$path"; then return 1; fi
+  case "$path" in
+    packages/api/src/routes/*.ts) return 0 ;;
+    packages/api/src/*freshness*|packages/api/src/*read-state*|packages/api/src/*unseen*) return 0 ;;
+    packages/api/src/*briefing*|packages/api/src/*closure*|packages/api/src/*supplement*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_stateful_migration_rollout() {
+  local path="$1"
+  if is_test_or_doc_path "$path"; then return 1; fi
+  case "$path" in
+    *activation*|*feature-flag*|*migration*|*migrate*|*backfill*|*persist*) return 0 ;;
+    packages/api/src/config/env-registry.ts) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+detect_stateful_migration_quarantine() {
+  local files="$1"
+  local file
+  STATE_CORE_FILES=""
+  STATE_CORE_COUNT=0
+  STATE_CONSUMER_FILES=""
+  STATE_CONSUMER_COUNT=0
+  STATE_ROLLOUT_FILES=""
+  STATE_ROLLOUT_COUNT=0
+  STATEFUL_MIGRATION_QUARANTINE=false
+
+  while IFS= read -r -d '' file; do
+    [ -z "$file" ] && continue
+    if is_stateful_migration_core "$file"; then
+      STATE_CORE_FILES="${STATE_CORE_FILES}  ${file}\n"
+      STATE_CORE_COUNT=$((STATE_CORE_COUNT + 1))
+    fi
+    if is_stateful_migration_consumer "$file"; then
+      STATE_CONSUMER_FILES="${STATE_CONSUMER_FILES}  ${file}\n"
+      STATE_CONSUMER_COUNT=$((STATE_CONSUMER_COUNT + 1))
+    fi
+    if is_stateful_migration_rollout "$file"; then
+      STATE_ROLLOUT_FILES="${STATE_ROLLOUT_FILES}  ${file}\n"
+      STATE_ROLLOUT_COUNT=$((STATE_ROLLOUT_COUNT + 1))
+    fi
+  done < <(printf '%s' "$files" | node -e 'const t=require("fs").readFileSync(0,"utf8"); const p=t.startsWith("[")?JSON.parse(t):t.split("\n").filter(Boolean);process.stdout.write(p.map(x=>x+"\0").join(""));')
+
+  # Aggregate risk matters more than any one path. The threshold requires a
+  # persistent-state core, at least two downstream consumers, and rollout or a
+  # broad enough core to imply migration. An isolated store correction does
+  # not satisfy this shape.
+  if [ "$STATE_CORE_COUNT" -ge 3 ] && [ "$STATE_CONSUMER_COUNT" -ge 2 ] \
+    && { [ "$STATE_ROLLOUT_COUNT" -ge 1 ] || [ "$STATE_CORE_COUNT" -ge 5 ]; }; then
+    STATEFUL_MIGRATION_QUARANTINE=true
+  fi
+}
+
+evaluate_source_head_soak() {
+  local pr_info="$1"
+  local soak_end_at="${2:-}"
+  local evaluation
+
+  evaluation=$(PR_JSON="$pr_info" SOAK_END_AT="$soak_end_at" node -e '
+const pr = JSON.parse(process.env.PR_JSON || "{}");
+const headRefOid = String(pr.headRefOid || "");
+const endRaw = String(process.env.SOAK_END_AT || "");
+const end = endRaw ? Date.parse(endRaw) : Date.now();
+if (!headRefOid || !Number.isFinite(end)) {
+  process.exit(2);
+}
+
+// Commit author/committer dates are contributor-controlled and do not prove
+// when an exact candidate first existed on the PR. Use only GitHub-created
+// evidence that is bound to the current HEAD: a check on statusCheckRollup,
+// or a submitted review whose commit oid matches headRefOid.
+const checks = Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : [];
+const reviews = Array.isArray(pr.reviews) ? pr.reviews : [];
+const witnesses = [
+  ...checks.flatMap((check) => [
+    { at: check?.startedAt, kind: "check" },
+    { at: check?.createdAt, kind: "check" },
+    { at: check?.completedAt, kind: "check" },
+  ]),
+  ...reviews
+    .filter((review) => String(review?.commit?.oid || "") === headRefOid)
+    .map((review) => ({ at: review?.submittedAt, kind: "review" })),
+]
+  .map((witness) => ({ ...witness, timestamp: Date.parse(String(witness.at || "")) }))
+  .filter((witness) => Number.isFinite(witness.timestamp) && witness.timestamp <= end)
+  .sort((a, b) => a.timestamp - b.timestamp);
+
+if (witnesses.length === 0) {
+  process.stdout.write("||UNVERIFIABLE|none");
+  process.exit(0);
+}
+
+const firstWitness = witnesses[0];
+const start = firstWitness.timestamp;
+const fullDays = Math.floor((end - start) / 86400000);
+process.stdout.write(
+  `${String(firstWitness.at)}|${fullDays}|${fullDays >= 7 ? "PASS" : "MISSED"}|${firstWitness.kind}`,
+);
+' 2>/dev/null || true)
+
+  if [ -z "$evaluation" ]; then
+    SOURCE_HEAD_WITNESSED_AT=""
+    SOURCE_HEAD_SOAK_DAYS=""
+    SOURCE_HEAD_SOAK_STATUS=""
+    SOURCE_HEAD_WITNESS_KIND=""
+    return 1
+  fi
+
+  IFS='|' read -r SOURCE_HEAD_WITNESSED_AT SOURCE_HEAD_SOAK_DAYS SOURCE_HEAD_SOAK_STATUS SOURCE_HEAD_WITNESS_KIND <<< "$evaluation"
+  [ -n "$SOURCE_HEAD_SOAK_STATUS" ] && [ -n "$SOURCE_HEAD_WITNESS_KIND" ]
+}
+
+print_stateful_migration_quarantine() {
+  echo -e "${RED}⛔ STATEFUL MIGRATION QUARANTINE (1224-class)${NC}"
+  echo "  Detected: $STATE_CORE_COUNT persistent-state core, $STATE_CONSUMER_COUNT consumer, $STATE_ROLLOUT_COUNT rollout/backfill file(s)"
+  echo -e "  ${RED}HOLD: split representation contract, historical backfill, consumer migration, and activation/rollback into reviewable stages.${NC}"
+  echo "  Public merge requires a minimum 7-day source quarantine on the exact final source/fork HEAD."
+  echo "  The clock starts at the first durable GitHub check/review witness for that SHA; commit dates are not proof."
+  echo "  A new final SHA resets that pre-merge clock; post-merge waiting cannot repair a miss."
+  echo "  Required proof: historical-state replay, mixed-version consumer matrix, rollback/off-mode semantics, and exact-HEAD review."
+  echo "  Source/fork soak is additional evidence; it cannot replace home historical-state replay."
+}
+
+is_high_risk() {
+  local path="$1"
+  local pattern
+  if is_test_or_doc_path "$path"; then return 1; fi
+  if is_stateful_migration_core "$path" || is_stateful_migration_consumer "$path" || is_stateful_migration_rollout "$path"; then
+    return 0
+  fi
+  for pattern in "${HIGH_RISK_PATTERNS[@]}"; do
+    case "$path" in
+      $pattern) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# ── Brand Expectations (single source of truth) ──
+# Format: file|check_type|pattern|description
+# check_type: must_not_contain, must_contain, file_exists
+# Both --validate-inbound and pre-commit hook consume this list.
+BRAND_EXPECTATIONS=(
+  # layout.tsx
+  "packages/web/src/app/layout.tsx|must_not_contain|Clowder AI|title should be Clowder AI"
+  "packages/web/src/app/layout.tsx|must_not_contain|Your AI team collaboration space|description should be Chinese"
+  "packages/web/src/app/layout.tsx|must_contain|favicon.svg|favicon declaration required"
+  "packages/web/src/app/layout.tsx|must_contain|icon-192x192.png|PWA icon declaration required"
+  "packages/web/src/app/layout.tsx|must_contain|deploymentDefaults[.]brand[.]name|metadata reads the selected deployment brand"
+  "packages/web/src/app/layout.tsx|must_contain|deploymentDefaults[.]brand[.]tagline|description reads the selected deployment tagline"
+  # SplitPaneView.tsx
+  "packages/web/src/components/SplitPaneView.tsx|must_not_contain|Clowder AI|brand should be Clowder AI"
+  "packages/web/src/components/SplitPaneView.tsx|must_contain|deploymentDefaults[.]brand[.]name|split header reads the selected deployment brand"
+  # manifest.json
+  "packages/web/public/manifest.json|must_not_contain|Clowder|name should be Clowder AI"
+  # ChatContainerHeader.tsx — surface text AND semantic fields
+  "packages/web/src/components/ChatContainerHeader.tsx|must_not_contain|Clowder AI|brand should be Clowder AI"
+  "packages/web/src/components/ChatContainerHeader.tsx|must_contain|deploymentDefaults[.]brand[.]displayName|header reads the selected deployment brand"
+  "packages/web/src/components/ThreadIndicator.tsx|must_contain|'cat-cafe'|INTERNAL_BASENAMES must include cat-cafe"
+  "packages/web/src/components/ThreadIndicator.tsx|must_contain|'cat-cafe-runtime'|INTERNAL_BASENAMES must include cat-cafe-runtime"
+  # api-client.ts — comment AND real brand identity (F156: header → session cookie)
+  "packages/web/src/utils/api-client.ts|must_not_contain|client for Clowder AI|comment should reference Clowder AI"
+  "packages/web/src/utils/api-client.ts|must_contain|HttpOnly session cookie|identity uses session cookie (F156 D-1)"
+  # Edition data is owned by the home deployment, even when consumers are shared.
+  "packages/shared/src/deployment-profiles.json|must_contain|\"activeProfile\"[[:space:]]*:[[:space:]]*\"home\"|active deployment profile must remain home"
+  "packages/shared/src/deployment-profiles.json|file_exists||deployment display configuration must exist"
+  # API port drift guard — outbound sync transforms 3002→3004; intake must catch un-reversed drift.
+  # These are high-risk files checked out from clowder-ai during intake.
+  "packages/api/src/index.ts|must_not_contain|?? '3004'|API server port fallback should be 3002 (home), not 3004 (opensource)"
+  "packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts|must_not_contain|?? '3004'|AgentRouter API port fallback should be 3002 (home), not 3004 (opensource)"
+  # favicon.svg file
+  "packages/web/public/icons/favicon.svg|file_exists||favicon SVG must exist"
+)
+
+# ── Validate Inbound (Brand Guard) ──
+# Checks files for brand contamination from clowder-ai.
+# --from-index: read staged (index) content instead of working tree.
+#   This is critical for pre-commit hooks where index and worktree may differ.
+_BRAND_VIOLATION_COUNT=0
+
+# Index-aware file helpers
+_brand_file_exists() {
+  if [ "$FROM_INDEX" = true ]; then
+    git -C "$SOURCE_DIR" ls-files --stage -- ":(literal)$1" 2>/dev/null | grep . >/dev/null
+  else
+    [ -f "$SOURCE_DIR/$1" ]
+  fi
+}
+
+_brand_file_contains() {
+  local file="$1" pattern="$2"
+  if [ "$FROM_INDEX" = true ]; then
+    git -C "$SOURCE_DIR" show :"$file" 2>/dev/null | grep -- "$pattern" >/dev/null
+  else
+    grep -- "$pattern" "$SOURCE_DIR/$file" >/dev/null 2>&1
+  fi
+}
+
+_brand_scope_contains() {
+  if [ -z "$1" ]; then return 0; fi
+  local scoped_path
+  for scoped_path in ${_BRAND_SCOPE_ARRAY[@]+"${_BRAND_SCOPE_ARRAY[@]}"}; do
+    if [ "$scoped_path" = "$2" ]; then return 0; fi
+  done
+  return 1
+}
+_brand_scope_count() {
+  if [ -z "$1" ]; then echo 0; return; fi
+  printf '%s' "$1" | node "$SOURCE_DIR/scripts/lib/intake-brand-paths.mjs" count "$SOURCE_DIR"
+}
+
+# gh retry + stderr-capture helpers. See scripts/lib/intake-gh-retry.sh for
+# rationale (subshell-safe via tempfile after gpt52's cat-cafe#2549 V1 finding).
+# shellcheck source=lib/intake-gh-retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/intake-gh-retry.sh"
+
+resolve_pr_path_scope() {
+  local repo="$1" number="$2" out
+  if ! out=$(_gh_with_retry api --paginate --slurp "repos/$repo/pulls/$number/files"); then return 1; fi
+  printf '%s' "$out" | node -e 'const pages=JSON.parse(require("fs").readFileSync(0,"utf8"));if(!Array.isArray(pages))process.exit(1);const files=pages.flat();if(files.some(f=>typeof f.filename!=="string"||!f.filename||f.filename.includes("\0")))process.exit(1);console.log(JSON.stringify(files.map(f=>f.filename)))'
+}
+resolve_absorb_pr_brand_scope() {
+  if [ -z "$ABSORB_PR" ]; then return 1; fi
+  resolve_pr_path_scope "$SOURCE_REPO" "$ABSORB_PR"
+}
+
+resolve_local_brand_scope() {
+  if ! git -C "$SOURCE_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then return 1; fi
+  local mode=worktree
+  if [ "$FROM_INDEX" = true ]; then mode=index; fi
+  node "$SOURCE_DIR/scripts/lib/intake-brand-paths.mjs" local "$SOURCE_DIR" "$mode"
+}
+
+run_brand_validation() {
+  local scope_files="${1:-}"
+  local scope_label="${2:-absorb PR}"
+  # A public export has provenance and no home exporter. Its sanitizer has
+  # transformed the home-only expectations below; validate the public domain
+  # instead. The checker validates provenance and HEAD as well as index state.
+  if _brand_file_exists ".sync-provenance.json" && ! _brand_file_exists "scripts/sync-to-opensource.sh"; then
+    local public_args=()
+    if [ "$FROM_INDEX" = true ]; then public_args+=(--from-index); fi
+    _BRAND_VIOLATION_COUNT=0
+    if ! printf '%s\n' "$scope_files" | node "$SOURCE_DIR/scripts/public-brand-validation.mjs" "${public_args[@]}"; then
+      _BRAND_VIOLATION_COUNT=1
+    fi
+    return
+  fi
+  local -a _BRAND_SCOPE_ARRAY=()
+  local scope_path_list scoped_path scope_path_count=0
+  if [ -n "$scope_files" ]; then
+    scope_files=$(printf '%s' "$scope_files" | node -e 'const t=require("fs").readFileSync(0,"utf8"); console.log(JSON.stringify(t.startsWith("[")?JSON.parse(t):t.split("\n").filter(Boolean)))')
+    scope_path_list=$(mktemp) || return 1
+    if ! printf '%s' "$scope_files" | node "$SOURCE_DIR/scripts/lib/intake-brand-paths.mjs" null "$SOURCE_DIR" > "$scope_path_list"; then rm -f "$scope_path_list"; return 1; fi
+    while IFS= read -r -d '' scoped_path; do _BRAND_SCOPE_ARRAY+=("$scoped_path"); scope_path_count=$((scope_path_count + 1)); done < "$scope_path_list"
+    rm -f "$scope_path_list"
+    echo "  Brand Guard scope: $scope_path_count $scope_label file(s)"
+  fi
+  _BRAND_VIOLATION_COUNT=0
+  # Validate generated display data against the same staged dictionary. Public
+  # profile vocabulary is legitimate here; replacing home display values is not.
+  if _brand_file_exists 'packages/shared/src/deployment-profiles.json'; then
+    local brand_args=("$SOURCE_DIR/scripts/project-deployment-defaults.mjs" "$SOURCE_DIR/packages/shared/src/deployment-profiles.json" --check-brands home)
+    if [ "$FROM_INDEX" = true ]; then brand_args+=(--from-index); fi
+    local brand_status=0
+    node "${brand_args[@]}" || brand_status=$?
+    if [ "$brand_status" -ne 0 ]; then
+      if [ "$brand_status" -eq 2 ]; then
+        echo -e "${RED}  ✗ deployment brand failed canonical dictionary validation${NC}"
+      else
+        echo -e "${RED}  ✗ deployment brand checker failed (exit $brand_status); see diagnostic above${NC}"
+      fi
+      _BRAND_VIOLATION_COUNT=$((_BRAND_VIOLATION_COUNT + 1))
+    fi
+  fi
+  # ── Phase 1: Legacy BRAND_EXPECTATIONS (specific must_contain/must_not_contain rules) ──
+  for expectation in "${BRAND_EXPECTATIONS[@]}"; do
+    IFS='|' read -r file check_type pattern desc <<< "$expectation"
+    if ! _brand_scope_contains "$scope_files" "$file"; then continue; fi
+    case "$check_type" in
+      must_not_contain)
+        if _brand_file_exists "$file" && _brand_file_contains "$file" "$pattern"; then
+          echo -e "${RED}  ✗ $file: contains '$pattern' ($desc)${NC}"
+          _BRAND_VIOLATION_COUNT=$((_BRAND_VIOLATION_COUNT + 1))
+        fi
+        ;;
+      must_contain)
+        if _brand_file_exists "$file" && ! _brand_file_contains "$file" "$pattern"; then
+          echo -e "${RED}  ✗ $file: missing '$pattern' ($desc)${NC}"
+          _BRAND_VIOLATION_COUNT=$((_BRAND_VIOLATION_COUNT + 1))
+        fi
+        ;;
+      file_exists)
+        if ! _brand_file_exists "$file"; then
+          echo -e "${RED}  ✗ $file: file missing ($desc)${NC}"
+          _BRAND_VIOLATION_COUNT=$((_BRAND_VIOLATION_COUNT + 1))
+        fi
+        ;;
+    esac
+  done
+
+  # ── Phase 2: Dictionary-driven public-term contamination scan (F238 Phase C) ──
+  # For every brand-protected file (brand-sensitive OR manual-port from dictionary),
+  # check that it does not contain public-side P1 brand terms. Both classifications
+  # need guarding — manual-port paths are often the highest-risk (P0 system prompts).
+  # Fail-closed: smoke-test ALL subcommand categories before trusting output.
+  # If helper doesn't exist, skip Phase 2 (legacy Phase 1 still runs).
+  local public_terms_json=""
+  if [ -f "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" ]; then
+    # Category 1: --classify-path (classification pipeline)
+    local _smoke _smoke_cls
+    _smoke=$(node "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" --classify-path "assets/system-prompts/x" 2>/dev/null) || _smoke=""
+    _smoke_cls=$(echo "$_smoke" | node -e "try{const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8'));console.log(d.classification)}catch{console.log('BROKEN')}" 2>/dev/null) || _smoke_cls="BROKEN"
+    if [ "$_smoke_cls" != "manual-port" ]; then
+      echo -e "${RED}  ✗ Dictionary helper broken (classify) — Phase 2 fail-closed${NC}"
+      _BRAND_VIOLATION_COUNT=$((_BRAND_VIOLATION_COUNT + 1))
+      return
+    fi
+    # Category 2: --public-terms (JSON term data)
+    public_terms_json=$(node "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" --public-terms 2>/dev/null) || public_terms_json=""
+    local _pt_count
+    _pt_count=$(echo "$public_terms_json" | node -e "try{const t=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8'));console.log(t.length)}catch{console.log(0)}" 2>/dev/null) || _pt_count=0
+    if [ "$_pt_count" -lt 1 ] 2>/dev/null; then
+      echo -e "${RED}  ✗ Dictionary helper broken (--public-terms returned empty/garbage) — Phase 2 fail-closed${NC}"
+      _BRAND_VIOLATION_COUNT=$((_BRAND_VIOLATION_COUNT + 1))
+      return
+    fi
+    # Category 3: --manual-port-patterns (glob lists — validated below after fetch)
+  fi
+  if [ -n "$public_terms_json" ]; then
+    # Extract P1 public brand patterns (one per line)
+    local public_p1_patterns
+    public_p1_patterns=$(echo "$public_terms_json" | node -e "
+      const terms = JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8'));
+      for (const t of terms) {
+        if (t.severity === 'P1' && t.termClass === 'brand') {
+          for (const p of t.publicPatterns) console.log(p);
+        }
+      }
+    " 2>/dev/null) || public_p1_patterns=""
+
+    if [ -n "$public_p1_patterns" ]; then
+      # Get list of brand-protected globs from dictionary (both classifications)
+      local bs_raw mp_raw
+      bs_raw=$(node "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" --brand-sensitive-patterns 2>/dev/null) || bs_raw=""
+      mp_raw=$(node "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" --manual-port-patterns 2>/dev/null) || mp_raw=""
+      # Category 3 cross-validation: verify pattern output matches THREE known anchors
+      # from different glob families. A correct-subset that hits some but drops others fails.
+      _glob_to_re() { echo "$1" | sed 's/\./\\./g; s/\*\*/__GLOBSTAR__/g; s/\*/[^\/]*/g; s/__GLOBSTAR__/.*/g'; }
+      local _bs_anchors=("packages/web/public/manifest.json" "packages/web/public/icons/logo.png" "packages/web/public/concierge/skins/ragdoll-v1/pet.json")
+      for _anchor in "${_bs_anchors[@]}"; do
+        local _bs_hit=""
+        while IFS= read -r pat; do
+          [ -z "$pat" ] && continue
+          if echo "$_anchor" | grep -qE "^$(_glob_to_re "$pat")$"; then
+            _bs_hit="yes"; break
+          fi
+        done <<< "$bs_raw"
+        if [ -z "$_bs_hit" ]; then
+          echo -e "${RED}  ✗ Dictionary helper broken (--brand-sensitive-patterns misses anchor: $_anchor) — fail-closed${NC}"
+          _BRAND_VIOLATION_COUNT=$((_BRAND_VIOLATION_COUNT + 1))
+          return
+        fi
+      done
+      while IFS= read -r pat; do
+        [ -z "$pat" ] && continue
+        if echo "assets/system-prompts/test.md" | grep -qE "^$(_glob_to_re "$pat")$"; then
+          _mp_match="yes"; break
+        fi
+      done <<< "$mp_raw"
+      if [ -z "$_mp_match" ]; then
+        echo -e "${RED}  ✗ Dictionary helper broken (--manual-port-patterns doesn't match known anchor) — fail-closed${NC}"
+        _BRAND_VIOLATION_COUNT=$((_BRAND_VIOLATION_COUNT + 1))
+        return
+      fi
+      local bs_patterns
+      bs_patterns=$(printf '%s\n%s' "$bs_raw" "$mp_raw" | sort -u)
+
+      if [ -n "$bs_patterns" ]; then
+        # JSON carries escaped names; only NUL transports raw paths to Bash.
+        local path_scope="$scope_files" path_list glob_pat
+        path_list=$(mktemp) || return 1
+        if [ -n "$path_scope" ]; then
+          if ! printf '%s' "$path_scope" | node "$SOURCE_DIR/scripts/lib/intake-brand-paths.mjs" protected "$SOURCE_DIR" > "$path_list"; then rm -f "$path_list"; return 1; fi
+        elif [ "$FROM_INDEX" = true ]; then
+          path_scope=$(resolve_local_brand_scope) || { rm -f "$path_list"; return 1; }
+          if ! printf '%s' "$path_scope" | node "$SOURCE_DIR/scripts/lib/intake-brand-paths.mjs" protected "$SOURCE_DIR" > "$path_list"; then rm -f "$path_list"; return 1; fi
+        else
+          # Preserve the legacy full-scan glob scope, but never serialize names by line.
+          while IFS= read -r glob_pat; do
+            [ -z "$glob_pat" ] && continue
+            find "$SOURCE_DIR" -path "$SOURCE_DIR/$glob_pat" -type f -print0 >> "$path_list" || { rm -f "$path_list"; return 1; }
+          done <<< "$bs_patterns"
+        fi
+        local -a checked_paths=()
+        while IFS= read -r -d '' bsf; do
+          bsf=${bsf#"$SOURCE_DIR"/}
+          local already_checked=false checked_path
+          for checked_path in ${checked_paths[@]+"${checked_paths[@]}"}; do if [ "$checked_path" = "$bsf" ]; then already_checked=true; break; fi; done
+          if [ "$already_checked" = true ]; then continue; fi
+          checked_paths+=("$bsf")
+          local legacy_hit=false expectation_file
+          for expectation in "${BRAND_EXPECTATIONS[@]}"; do
+            expectation_file=${expectation%%|*}
+            if [ "$expectation_file" = "$bsf" ]; then legacy_hit=true; break; fi
+          done
+          if [ "$legacy_hit" = true ]; then continue; fi
+          case "$bsf" in
+            scripts/intake-from-opensource.sh|scripts/sync-to-opensource.sh|scripts/brand-dictionary-helper.mjs|scripts/brand-dictionary-helper.test.mjs) continue ;;
+          esac
+
+          while IFS= read -r pub_term; do
+            [ -z "$pub_term" ] && continue
+            if _brand_file_exists "$bsf" && _brand_file_contains "$bsf" "$pub_term"; then
+              echo -e "${RED}  ✗ $bsf: contains public brand term '$pub_term' (dictionary-driven)${NC}"
+              _BRAND_VIOLATION_COUNT=$((_BRAND_VIOLATION_COUNT + 1))
+            fi
+          done <<< "$public_p1_patterns"
+        done < "$path_list"
+        rm -f "$path_list"
+      fi
+    fi
+  fi
+}
+
+review_proof_contains_head() {
+  local content="$1"
+  local head_full="$2"
+  local head_short="$3"
+
+  if echo "$content" | grep -qi "$head_full"; then return 0; fi
+  if echo "$content" | grep -qi "$head_short"; then return 0; fi
+  return 1
+}
+
+review_proof_has_blocking_verdict() {
+  REVIEW_PROOF_TEXT="$1" node - <<'NODE'
+const text = String(process.env.REVIEW_PROOF_TEXT || '').replace(/[`*_]/g, ' ');
+const blockingPatterns = [
+  /\bCHANGES[_ -]?REQUESTED\b/i,
+  /\bREQUEST(?:ED)?[_ -]?CHANGES\b/i,
+  /\bBLOCKED\b/i,
+  /\bBLOCKING\s*[:#-]/i,
+  /(?:^|\n)\s*(?:VERDICT\s*[:#-]\s*)?BLOCK\s*(?:$|\n|[:#-])/i,
+  /\b(?:do\s+not|don't|cannot|can't|can\s+not|unable\s+to)\s+approve\b/i,
+  /\b(?:not|never)\s+(?:yet\s+)?(?:approved?|approval|LGTM|pass(?:ed)?)\b/i,
+  /\bno\s+LGTM\b/i,
+  /\b(?:approv(?:e|ed|al)|LGTM|pass(?:ed)?)\s+(?:pending|withheld)\b/i,
+  /\b(?:pending|withheld|awaiting)\s+(?:approv(?:e|ed|al)|LGTM|pass(?:ed)?)\b/i,
+  /\bwaiting\s+for\s+(?:approval|approve|approved|LGTM|pass(?:ed)?)\b/i,
+];
+process.exit(blockingPatterns.some((pattern) => pattern.test(text)) ? 0 : 1);
+NODE
+}
+
+review_proof_has_non_blocking_verdict() {
+  REVIEW_PROOF_TEXT="$1" node - <<'NODE'
+const text = String(process.env.REVIEW_PROOF_TEXT || '').replace(/[`*_]/g, ' ');
+const passPatterns = [
+  /\bAPPROV(?:E|ED)\b/i,
+  /\bLGTM\b/i,
+  /\bPASS(?:ED)?\b/i,
+  /\bNO\s+(?:BLOCKING|P[12]|MAJOR)\s+(?:FINDINGS?|ISSUES?)\b/i,
+  /\bNO\s+FINDINGS?\b/i,
+  /\bDID(?:\s+NOT|N'T)\s+FIND\s+(?:ANY\s+)?(?:(?:BLOCKING|P[12]|MAJOR)\s+)?(?:FINDINGS?|ISSUES?)\b/i,
+];
+process.exit(passPatterns.some((pattern) => pattern.test(text)) ? 0 : 1);
+NODE
+}
+
+validate_review_proof_verdict() {
+  local proof_kind="$1"
+  local proof_id="$2"
+  local proof_body="$3"
+  local proof_state="${4:-}"
+  local proof_label="$proof_kind"
+  if [ -n "$proof_id" ]; then
+    proof_label="$proof_kind:$proof_id"
+  fi
+
+  local proof_state_upper
+  proof_state_upper="$(printf '%s' "$proof_state" | tr '[:lower:]' '[:upper:]')"
+  case "$proof_state_upper" in
+    CHANGES_REQUESTED|DISMISSED|PENDING)
+      echo -e "${RED}✗ review-proof ($proof_label) has blocking GitHub review state $proof_state_upper${NC}"
+      return 1
+      ;;
+    APPROVED)
+      return 0
+      ;;
+  esac
+
+  if review_proof_has_blocking_verdict "$proof_body"; then
+    echo -e "${RED}✗ review-proof ($proof_label) contains a blocking verdict${NC}"
+    return 1
+  fi
+
+  if ! review_proof_has_non_blocking_verdict "$proof_body"; then
+    echo -e "${RED}✗ review-proof ($proof_label) must include explicit non-blocking verdict (APPROVE/LGTM/PASS or the standard Codex clean verdict)${NC}"
+    return 1
+  fi
+}
+
+validate_review_proof_continuity() {
+  if [ -n "$MECHANICAL_PROOF" ]; then
+    node "$SOURCE_DIR/scripts/intake-mechanical-proof.mjs" "$MECHANICAL_PROOF" "$PR_NUMBER" "$ABSORB_PR" record
+    return $?
+  fi
+
+  local absorb_pr_head="$1"
+  local review_proof_mode="$2"
+  local absorb_pr_head_short="${absorb_pr_head:0:8}"
+
+  if [ "$review_proof_mode" = "file" ]; then
+    local proof_body
+    proof_body="$(cat "$REVIEW_PROOF" 2>/dev/null || true)"
+    if [[ "$proof_body" == *mechanical-continuity* ]]; then
+      echo "Typed mechanical proof requires --mechanical-proof; it is not a home reviewer verdict."
+      return 1
+    fi
+    if review_proof_contains_head "$proof_body" "$absorb_pr_head" "$absorb_pr_head_short"; then
+      validate_review_proof_verdict "file" "" "$proof_body" || return 1
+      return 0
+    fi
+    echo -e "${RED}✗ --review-proof file must mention absorb PR current HEAD ($absorb_pr_head_short)${NC}"
+    return 1
+  fi
+
+  local expected_prefix="https://github.com/${SOURCE_REPO}/pull/${ABSORB_PR}"
+  if [[ "$REVIEW_PROOF" != "$expected_prefix"* ]]; then
+    echo -e "${RED}✗ --review-proof URL must point to absorb PR #$ABSORB_PR (${SOURCE_REPO})${NC}"
+    return 1
+  fi
+
+  local proof_json=""
+  local proof_body=""
+  local proof_commit=""
+  local proof_kind=""
+  local proof_id=""
+  local proof_state=""
+
+  if [[ "$REVIEW_PROOF" =~ \#issuecomment-([0-9]+)$ ]]; then
+    proof_kind="issuecomment"
+    proof_id="${BASH_REMATCH[1]}"
+    proof_json=$(gh api "repos/$SOURCE_REPO/issues/comments/$proof_id" 2>/dev/null || true)
+    if [ -z "$proof_json" ]; then
+      echo -e "${RED}✗ Cannot fetch review-proof issue comment #$proof_id from $SOURCE_REPO${NC}"
+      return 1
+    fi
+    proof_body=$(echo "$proof_json" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.body||''))")
+  elif [[ "$REVIEW_PROOF" =~ \#pullrequestreview-([0-9]+)$ ]]; then
+    proof_kind="pullrequestreview"
+    proof_id="${BASH_REMATCH[1]}"
+    proof_json=$(gh api "repos/$SOURCE_REPO/pulls/$ABSORB_PR/reviews/$proof_id" 2>/dev/null || true)
+    if [ -z "$proof_json" ]; then
+      echo -e "${RED}✗ Cannot fetch review-proof pull request review #$proof_id from $SOURCE_REPO${NC}"
+      return 1
+    fi
+    proof_body=$(echo "$proof_json" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.body||''))")
+    proof_commit=$(echo "$proof_json" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.commit_id||''))")
+    proof_state=$(echo "$proof_json" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.state||''))")
+  elif [[ "$REVIEW_PROOF" =~ \#discussion_r([0-9]+)$ ]]; then
+    proof_kind="discussion"
+    proof_id="${BASH_REMATCH[1]}"
+    proof_json=$(gh api "repos/$SOURCE_REPO/pulls/comments/$proof_id" 2>/dev/null || true)
+    if [ -z "$proof_json" ]; then
+      echo -e "${RED}✗ Cannot fetch review-proof inline comment #$proof_id from $SOURCE_REPO${NC}"
+      return 1
+    fi
+    proof_body=$(echo "$proof_json" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.body||''))")
+    proof_commit=$(echo "$proof_json" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.commit_id||''))")
+  else
+    echo -e "${RED}✗ --review-proof URL must include #issuecomment-*, #pullrequestreview-*, or #discussion_r*${NC}"
+    echo "  This guard must verify review evidence against absorb PR current HEAD."
+    return 1
+  fi
+
+  if [[ "$proof_body" == *cat-cafe:mechanical-continuity* ]]; then
+    echo "Typed mechanical proof requires --mechanical-proof; it is not a home reviewer verdict."
+    return 1
+  fi
+  validate_review_proof_verdict "$proof_kind" "$proof_id" "$proof_body" "$proof_state" || return 1
+
+  if [ -n "$proof_commit" ] && [ "$proof_commit" = "$absorb_pr_head" ]; then
+    return 0
+  fi
+
+  if review_proof_contains_head "$proof_body" "$absorb_pr_head" "$absorb_pr_head_short"; then
+    return 0
+  fi
+
+  echo -e "${RED}✗ review-proof ($proof_kind:$proof_id) does not cover absorb PR current HEAD $absorb_pr_head_short${NC}"
+  echo "  Ask reviewer to explicitly extend pass to current HEAD, then use that URL as --review-proof."
+  return 1
+}
+
+resolve_intake_source_projections() {
+  node --input-type=module -e '
+import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
+const root = process.argv[1];
+const { loadPublicExportCoverage } = await import(pathToFileURL(resolve(root, "scripts/lib/sync-public-export-coverage.mjs")));
+const coverage = loadPublicExportCoverage(root);
+if (!coverage) throw new Error("Intake source projection guard requires sync-manifest.yaml");
+const entries = [...coverage.transformExactByTarget].filter(([, entry]) =>
+  entry.type === "generate" && !entry.target.includes("/") && entry.target.endsWith(".md") &&
+  typeof entry.source === "string" && entry.source.length > 0);
+console.log(JSON.stringify(Object.fromEntries(entries.map(([target, entry]) => [target, entry.source]))));
+' "$SOURCE_DIR"
+}
+
+validate_absorb_source_projections() {
+  local missing_projections
+  missing_projections=$(PUBLIC_PR_FILES="$1" ABSORB_PR_FILES="$2" SOURCE_PROJECTIONS_JSON="$3" node -e '
+const paths = (value) => String(value||"").startsWith("[") ? JSON.parse(value) : String(value||"").split("\n").filter(Boolean);
+const absorbed = new Set(paths(process.env.ABSORB_PR_FILES));
+const mappings = JSON.parse(process.env.SOURCE_PROJECTIONS_JSON);
+const missing = paths(process.env.PUBLIC_PR_FILES)
+  .filter((path) => mappings[path] && !absorbed.has(mappings[path]))
+  .map((path) => `${path} -> ${mappings[path]}`);
+process.stdout.write(missing.join("\n"));
+') || return 1
+  if [ -n "$missing_projections" ]; then
+    echo -e "${RED}✗ Absorbed intake omits canonical source projection(s):${NC}"
+    printf '%s\n' "$missing_projections" | sed 's/^/    - /'
+    echo "  Port each public document into its mapped source in the reviewed absorb PR."
+    echo "  An existing source template or PR-level absorbed decision is not preservation proof."
+    return 1
+  fi
+}
+
+validate_absorb_pr_scope_alignment() {
+  local scope_issue_bodies_b64="$1"
+  local absorb_pr_files="${2:-}"
+  local source_projections_json="${3:-\{\}}"
+
+  if [ -z "$absorb_pr_files" ]; then
+    absorb_pr_files=$(resolve_absorb_pr_brand_scope || true)
+  fi
+  if [ "$(_brand_scope_count "$absorb_pr_files")" = 0 ]; then
+    echo -e "${RED}✗ Cannot resolve absorb PR #$ABSORB_PR file list for Path Guard${NC}"
+    return 1
+  fi
+
+  local out_of_scope_files
+  out_of_scope_files=$(INTENT_BODIES_B64="$scope_issue_bodies_b64" ABSORB_PR_FILES="$absorb_pr_files" SOURCE_PROJECTIONS_JSON="$source_projections_json" node -e '
+const sourceProjections = JSON.parse(process.env.SOURCE_PROJECTIONS_JSON);
+const scopeBodies = String(process.env.INTENT_BODIES_B64 || "")
+  .split("\n")
+  .map((line) => line.trim())
+  .filter(Boolean)
+  .map((line) => Buffer.from(line, "base64").toString("utf8").replace(/\r/g, ""));
+const rawFiles=process.env.ABSORB_PR_FILES || "[]";
+const absorbFiles = rawFiles.startsWith("[")?JSON.parse(rawFiles):rawFiles.split("\n").filter(Boolean);
+const decisionTokenRe = /\b(absorb(?:ed)?|safe[- ]?cherry[- ]?pick|manual[- ]?port|high[- ]?risk|skip|public[- ]?only)\b/i;
+
+function normalizeToken(value) {
+  return String(value || "").trim().replace(/^`|`$/g, "");
+}
+
+function getMarkdownLinkTarget(value) {
+  const match = String(value || "").trim().match(/^\[[^\]]*]\(([^)\n]+)\)$/);
+  return match ? normalizeToken(match[1]) : "";
+}
+
+function matchesDeclaredToken(fragment, file) {
+  const value = String(fragment || "").trim();
+  if (!value) return false;
+  if (value === file) return true;
+  if (value === `\`${file}\``) return true;
+  return getMarkdownLinkTarget(value) === file;
+}
+
+function matchesDeclaredException(rawLine, file) {
+  const withoutBullet = String(rawLine || "").replace(/^[-*]\s+/, "").trim();
+  if (!withoutBullet) return false;
+  if (matchesDeclaredToken(withoutBullet, file)) return true;
+
+  const beforeReason = withoutBullet.split(":", 1)[0].trim();
+  return matchesDeclaredToken(beforeReason, file);
+}
+
+function isDeclaredInDecisionTable(file) {
+  for (const body of scopeBodies) {
+    const lines = body.split("\n");
+    for (const rawLine of lines) {
+      if (!rawLine.trim().startsWith("|")) continue;
+      const cells = rawLine
+        .split("|")
+        .slice(1, -1)
+        .map((cell) => cell.trim());
+      if (cells.length < 3) continue;
+      if (cells.every((cell) => /^:?-{3,}:?$/.test(cell))) continue;
+      if (!decisionTokenRe.test(cells.slice(1).join(" | "))) continue;
+      if (matchesDeclaredToken(cells[0], file)) return true;
+      const absorbs = cells.slice(1).some((cell) => /^(absorb(?:ed)?|safe[- ]?cherry[- ]?pick|manual[- ]?port|high[- ]?risk)$/i.test(normalizeToken(cell)));
+      if (absorbs && Object.entries(sourceProjections).some(([target, source]) =>
+        source === file && matchesDeclaredToken(cells[0], target))) return true;
+    }
+  }
+  return false;
+}
+
+function isDeclaredInExceptions(file) {
+  for (const body of scopeBodies) {
+    const lines = body.split("\n");
+    let inExceptions = false;
+    for (const rawLine of lines) {
+      const headingMatch = rawLine.match(/^##+\s+(.+)$/);
+      if (headingMatch) {
+        inExceptions = /exceptions?/i.test(headingMatch[1]);
+        continue;
+      }
+      if (!inExceptions) continue;
+      if (/^\s*(none|none\.)\s*$/i.test(rawLine)) continue;
+      if (matchesDeclaredException(rawLine, file)) return true;
+    }
+  }
+  return false;
+}
+
+const extras = absorbFiles.filter((file) => !isDeclaredInDecisionTable(file) && !isDeclaredInExceptions(file));
+process.stdout.write(extras.join("\n"));
+')
+
+  if [ -n "$out_of_scope_files" ]; then
+    echo -e "${RED}✗ Absorb PR #$ABSORB_PR includes file(s) outside Intake Intent Issue #$INTENT_ISSUE${NC}"
+    echo "  Allowed scope = decision-table files + explicit Exceptions section."
+    echo "  Extra files:"
+    printf '%s\n' "$out_of_scope_files" | sed 's/^/    - /'
+    echo "  Fix: split the extra file into another PR, or declare it explicitly under ## Exceptions."
+    return 1
+  fi
+
+  return 0
+}
+
+validate_absorb_pr_validation_evidence() {
+  local absorb_pr_files="${1:-}"
+  local absorb_pr_body="${2:-}"
+
+  if [ -z "$absorb_pr_files" ]; then
+    absorb_pr_files=$(resolve_absorb_pr_brand_scope || true)
+  fi
+
+  local evidence_ok
+  evidence_ok=$(ABSORB_PR_FILES="$absorb_pr_files" ABSORB_PR_BODY="$absorb_pr_body" node -e '
+const rawFiles=process.env.ABSORB_PR_FILES || "[]";
+const files = rawFiles.startsWith("[")?JSON.parse(rawFiles):rawFiles.split("\n").filter(Boolean);
+const body = String(process.env.ABSORB_PR_BODY || "").replace(/\r/g, "");
+const touchesA2A = files.includes("packages/api/src/domains/cats/services/agents/routing/a2a-mentions.ts");
+if (!touchesA2A) {
+  console.log("yes");
+  process.exit(0);
+}
+
+const hasFullA2ATest = body.split("\n").some((rawLine) => {
+  const line = rawLine.replace(/[`*_]/g, "").trim();
+  if (!/(^|[\s/])(?:packages\/api\/)?test\/a2a-mentions\.test\.js\b/.test(line)) return false;
+  if (/--test-name-pattern(?:\b|=)/.test(line)) return false;
+  return /\b(node\s+--test|--test|pnpm|with-test-home\.sh)\b/.test(line);
+});
+
+console.log(hasFullA2ATest ? "yes" : "no");
+')
+
+  if [ "$evidence_ok" != "yes" ]; then
+    echo -e "${RED}✗ Absorb PR #$ABSORB_PR changes a2a-mentions routing but Validation lacks a full a2a-mentions.test.js run${NC}"
+    echo "  Required evidence: node --test packages/api/test/a2a-mentions.test.js"
+    echo "  Named subtest runs with --test-name-pattern are not enough for routing-surface intake."
+    return 1
+  fi
+
+  return 0
+}
+
+run_absorbed_record_guard() {
+  SOURCE_STATEFUL_MIGRATION_QUARANTINE=false
+  SOURCE_HEAD_SOAK_STATUS=""
+  local source_pr_info
+  source_pr_info=$(gh pr view "$PR_NUMBER" --repo "$TARGET_REPO" --json state,mergedAt,mergeCommit,changedFiles,headRefOid,reviews,statusCheckRollup 2>/dev/null || true)
+  if [ -z "$source_pr_info" ]; then
+    echo -e "${RED}✗ Cannot fetch source PR #$PR_NUMBER from $TARGET_REPO for migration quarantine${NC}"
+    return 1
+  fi
+
+  local source_pr_state
+  source_pr_state=$(echo "$source_pr_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.state||''))")
+  local source_pr_files
+  if ! source_pr_files=$(resolve_pr_path_scope "$TARGET_REPO" "$PR_NUMBER"); then
+    echo -e "${RED}✗ Cannot fetch source PR #$PR_NUMBER files for migration quarantine${NC}"
+    return 1
+  fi
+  if [ "$(_brand_scope_count "$source_pr_files")" = 0 ]; then
+    local source_changed_files
+    source_changed_files=$(echo "$source_pr_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const n=d.changedFiles; console.log(Number.isInteger(n)&&n>=0?String(n):'invalid')")
+    if [ "$SKIP_ABSORBED_GUARD" = true ] && [ "$source_pr_state" = "MERGED" ] && [ "$source_changed_files" = "0" ]; then
+      echo -e "${YELLOW}⚠ Source PR #$PR_NUMBER is a merged zero-diff historical backfill; no source files exist to quarantine${NC}"
+      return 0
+    fi
+    echo -e "${RED}✗ Cannot resolve source PR #$PR_NUMBER files for migration quarantine${NC}"
+    return 1
+  fi
+  detect_stateful_migration_quarantine "$source_pr_files"
+
+  if [ "$STATEFUL_MIGRATION_QUARANTINE" = true ]; then
+    SOURCE_STATEFUL_MIGRATION_QUARANTINE=true
+    if [ "$SKIP_ABSORBED_GUARD" = true ]; then
+      echo -e "${RED}✗ 1224-class stateful migration quarantine cannot use --skip-absorbed-guard${NC}"
+      echo "  Reject it or use the default intake lane with quarantine and replay evidence."
+      return 1
+    fi
+
+    local source_merged_at
+    source_merged_at=$(echo "$source_pr_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.mergedAt||''))")
+    if [ "$source_pr_state" != "MERGED" ] || [ -z "$source_merged_at" ]; then
+      echo -e "${RED}✗ 1224-class source PR must be MERGED before home absorption${NC}"
+      echo "  Its quarantine clock belongs to the final source/fork HEAD before public merge."
+      return 1
+    fi
+
+    if ! evaluate_source_head_soak "$source_pr_info" "$source_merged_at"; then
+      echo -e "${RED}✗ Cannot evaluate the exact source/fork HEAD soak for 1224-class intake${NC}"
+      echo "  Required GitHub facts: headRefOid, mergedAt, and exact-HEAD check/review evidence."
+      return 1
+    fi
+
+    if [ "$SOURCE_HEAD_SOAK_STATUS" = "PASS" ]; then
+      echo -e "${YELLOW}⚠ Source/fork pre-merge soak: PASS — exact HEAD witnessed for ${SOURCE_HEAD_SOAK_DAYS} full day(s). Evidence guard remains active.${NC}"
+    elif [ "$SOURCE_HEAD_SOAK_STATUS" = "MISSED" ]; then
+      echo -e "${YELLOW}⚠ Source/fork pre-merge soak: MISSED — exact HEAD witnessed for only ${SOURCE_HEAD_SOAK_DAYS} full day(s).${NC}"
+      echo "  Post-merge waiting cannot turn MISSED into PASS; an explicit disposition and all migration proofs remain required."
+    else
+      echo -e "${YELLOW}⚠ Source/fork pre-merge soak: UNVERIFIABLE — no durable pre-merge check/review witness binds the exact final HEAD.${NC}"
+      echo "  Commit timestamps are not accepted as soak evidence; an explicit disposition and all migration proofs remain required."
+    fi
+  fi
+
+  if [ "$SKIP_ABSORBED_GUARD" = true ]; then
+    echo -e "${YELLOW}⚠ --skip-absorbed-guard enabled: bypassing absorbed intake strict guard${NC}"
+    return 0
+  fi
+
+  if [ -z "$INTENT_ISSUE" ]; then
+    echo -e "${RED}✗ absorbed record requires --intent-issue <cat-cafe issue number>${NC}"
+    return 1
+  fi
+  if [ -z "$ABSORB_PR" ]; then
+    echo -e "${RED}✗ absorbed record requires --absorb-pr <cat-cafe PR number>${NC}"
+    return 1
+  fi
+  if [ -z "$REVIEW_PROOF" ]; then
+    echo -e "${RED}✗ absorbed record requires --review-proof <GitHub review URL or local proof file>${NC}"
+    return 1
+  fi
+  if ! [[ "$INTENT_ISSUE" =~ ^[0-9]+$ ]]; then
+    echo -e "${RED}✗ --intent-issue must be a numeric GitHub issue id${NC}"
+    return 1
+  fi
+  if ! [[ "$ABSORB_PR" =~ ^[0-9]+$ ]]; then
+    echo -e "${RED}✗ --absorb-pr must be a numeric GitHub PR id${NC}"
+    return 1
+  fi
+
+  local review_proof_mode="url"
+  if [[ "$REVIEW_PROOF" =~ ^https?:// ]]; then
+    if ! [[ "$REVIEW_PROOF" =~ github\.com/ ]]; then
+      echo -e "${RED}✗ --review-proof URL must point to GitHub evidence${NC}"
+      return 1
+    fi
+  elif [ -f "$REVIEW_PROOF" ]; then
+    review_proof_mode="file"
+  else
+    echo -e "${RED}✗ --review-proof must be a GitHub URL or an existing local file path${NC}"
+    return 1
+  fi
+
+  local intent_info
+  intent_info=$(gh issue view "$INTENT_ISSUE" --repo "$SOURCE_REPO" --json state,stateReason,labels,body,url,title 2>/dev/null || true)
+  if [ -z "$intent_info" ]; then
+    echo -e "${RED}✗ Cannot fetch Intake Intent Issue #$INTENT_ISSUE from $SOURCE_REPO${NC}"
+    return 1
+  fi
+
+  local issue_state
+  local issue_state_reason
+  local issue_is_closed=false
+  issue_state=$(echo "$intent_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.state||'')")
+  issue_state_reason=$(echo "$intent_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.stateReason||'')")
+  if [ "$issue_state" = "OPEN" ]; then
+    issue_is_closed=false
+  elif [ "$issue_state" = "CLOSED" ]; then
+    issue_is_closed=true
+    if [ "$issue_state_reason" = "NOT_PLANNED" ]; then
+      echo -e "${RED}✗ Intake Intent Issue #$INTENT_ISSUE is CLOSED as NOT_PLANNED; cannot use as absorbed proof${NC}"
+      echo "  If this is historical backfill or outbound-filed hotfix, rerun with --skip-absorbed-guard"
+      return 1
+    fi
+  else
+    echo -e "${RED}✗ Intake Intent Issue #$INTENT_ISSUE is $issue_state (expected OPEN or CLOSED)${NC}"
+    echo "  If this is historical backfill or outbound-filed hotfix, rerun with --skip-absorbed-guard"
+    return 1
+  fi
+
+  local issue_label_ok
+  issue_label_ok=$(echo "$intent_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const labels=(d.labels||[]).map(l=>String(l.name||'').toLowerCase()); console.log(labels.includes('intake') ? 'yes' : 'no')")
+  if [ "$issue_label_ok" != "yes" ]; then
+    echo -e "${RED}✗ Intake Intent Issue #$INTENT_ISSUE is missing required label: intake${NC}"
+    return 1
+  fi
+
+  # cat-cafe#2519: Strict Guard schema is loosened to accept the natural
+  # intake vocabulary used by SKILL.md (safe-cherry-pick / manual-port /
+  # HIGH-RISK / public-only) and Markdown-link source PR references — not
+  # just the canonical `## Per-File Decision Table` + literal `absorb`/`skip`
+  # keywords. The intent (file table present + source PR linked) is what we
+  # actually verify; the prior regex forced a parallel "canonical" body shape
+  # that no skill ref documented, causing repeated false-block retries.
+  local issue_table_ok
+  issue_table_ok=$(echo "$intent_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const normalized=body.replace(/[*_\`~]/g,''); const hasHeader=/##+\\s*[^\\n]*?(?:逐文件决策表|Per[- ]?file\\s+decision|Cluster[- ]?level\\s+decision\\s+table|Decision\\s+Table|决策|Classification|Plan\\s+v\\d|Lane)/i.test(normalized); const hasRow=/\\|\\s*[^|\\n]+\\s*\\|\\s*[^|\\n]+\\s*\\|[^|\\n]*(absorb(?:ed)?|safe[- ]?cherry[- ]?pick|manual[- ]?port|high[- ]?risk|skip|public[- ]?only)\\b/i.test(normalized); console.log(hasHeader && hasRow ? 'yes' : 'no')")
+  if [ "$issue_table_ok" != "yes" ]; then
+    echo -e "${RED}✗ Intake Intent Issue #$INTENT_ISSUE is missing a valid per-file decision table${NC}"
+    echo "  Expected: a markdown table with a heading containing 'Decision' / '决策' / 'Plan vN' / 'Classification' / 'Lane',"
+    echo "  and rows containing one of: absorbed, safe-cherry-pick, manual-port, high-risk, skip, public-only."
+    return 1
+  fi
+
+  # cat-cafe#2519: source ref guard KEPT strict on owner-qualified form
+  # (zts212653/clowder-ai/pull/N) to preserve provenance — markdown links
+  # like [#N](https://github.com/zts212653/clowder-ai/pull/N) already match
+  # via substring inclusion, so no loosening was needed. The earlier #2519
+  # friction was caused by the Plan v2 body omitting the source PR line
+  # entirely, not by the regex shape. (砚砚 review of cat-cafe#2520 caught
+  # an over-loosening that would have accepted `evil/clowder-ai/pull/N`.)
+  local issue_source_ref_ok
+  issue_source_ref_ok=$(echo "$intent_info" | SOURCE_PR="$PR_NUMBER" PUBLIC_REPOSITORY="$TARGET_REPO" node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const n=process.env.SOURCE_PR; const ok=body.includes('clowder-ai#'+n) || body.includes(process.env.PUBLIC_REPOSITORY+'/pull/'+n); console.log(ok ? 'yes' : 'no')")
+  if [ "$issue_source_ref_ok" != "yes" ]; then
+    echo -e "${RED}✗ Intake Intent Issue #$INTENT_ISSUE must reference source PR clowder-ai#$PR_NUMBER${NC}"
+    echo "  Expected one of: literal 'clowder-ai#$PR_NUMBER' substring,"
+    echo "  OR a Markdown/URL containing '$TARGET_REPO/pull/$PR_NUMBER'."
+    return 1
+  fi
+
+  local absorb_pr_info
+  absorb_pr_info=$(gh pr view "$ABSORB_PR" --repo "$SOURCE_REPO" --json state,body,url,title,headRefOid 2>/dev/null || true)
+  if [ -z "$absorb_pr_info" ]; then
+    echo -e "${RED}✗ Cannot fetch absorb PR #$ABSORB_PR from $SOURCE_REPO${NC}"
+    return 1
+  fi
+
+  local absorb_pr_state
+  absorb_pr_state=$(echo "$absorb_pr_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.state||'')")
+  if [ "$absorb_pr_state" != "OPEN" ] && [ "$absorb_pr_state" != "MERGED" ]; then
+    echo -e "${RED}✗ Absorb PR #$ABSORB_PR is $absorb_pr_state (expected OPEN or MERGED)${NC}"
+    return 1
+  fi
+  if [ "$issue_is_closed" = true ] && [ "$absorb_pr_state" != "MERGED" ]; then
+    echo -e "${RED}✗ Intake Intent Issue #$INTENT_ISSUE is CLOSED, so absorb PR #$ABSORB_PR must be MERGED${NC}"
+    echo "  Closed issue + open absorb PR indicates a broken intake chain."
+    return 1
+  fi
+
+  local absorb_pr_head
+  absorb_pr_head=$(echo "$absorb_pr_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.headRefOid||''))")
+  if [ -z "$absorb_pr_head" ]; then
+    echo -e "${RED}✗ Cannot resolve absorb PR #$ABSORB_PR headRefOid${NC}"
+    return 1
+  fi
+
+  local absorb_pr_closes_ok
+  absorb_pr_closes_ok=$(echo "$absorb_pr_info" | INTENT_ISSUE_ID="$INTENT_ISSUE" node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const i=process.env.INTENT_ISSUE_ID; const re=new RegExp('Closes\\\\s+(?:cat-cafe#|#)'+i+'\\\\b','i'); console.log(re.test(body) ? 'yes' : 'no')")
+  if [ "$absorb_pr_closes_ok" != "yes" ]; then
+    echo -e "${RED}✗ Absorb PR #$ABSORB_PR body must contain: Closes #$INTENT_ISSUE${NC}"
+    return 1
+  fi
+
+  local absorb_pr_source_ref_ok
+  absorb_pr_source_ref_ok=$(echo "$absorb_pr_info" | SOURCE_PR="$PR_NUMBER" PUBLIC_REPOSITORY="$TARGET_REPO" node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const n=process.env.SOURCE_PR; const ok=body.includes('clowder-ai#'+n) || body.includes(process.env.PUBLIC_REPOSITORY+'/pull/'+n); console.log(ok ? 'yes' : 'no')")
+  if [ "$absorb_pr_source_ref_ok" != "yes" ]; then
+    echo -e "${RED}✗ Absorb PR #$ABSORB_PR body must reference source PR clowder-ai#$PR_NUMBER${NC}"
+    return 1
+  fi
+
+  if [ "$SOURCE_STATEFUL_MIGRATION_QUARANTINE" = true ]; then
+    if [ "$SOURCE_HEAD_SOAK_STATUS" != "PASS" ]; then
+      local source_soak_disposition_ok
+      source_soak_disposition_ok=$(ISSUE_JSON="$intent_info" ABSORB_JSON="$absorb_pr_info" EXPECTED_STATUS="$SOURCE_HEAD_SOAK_STATUS" node -e '
+const issue = JSON.parse(process.env.ISSUE_JSON || "{}");
+const absorb = JSON.parse(process.env.ABSORB_JSON || "{}");
+const text = `${String(issue.body || "")}\n${String(absorb.body || "")}`
+  .replace(/[`*_]/g, " ");
+const expected = String(process.env.EXPECTED_STATUS || "");
+const marker = new RegExp(`Source\\/fork pre-merge soak\\s*:\\s*${expected}`, "i");
+console.log(marker.test(text) ? "yes" : "no");
+')
+      if [ "$source_soak_disposition_ok" != "yes" ]; then
+        echo -e "${RED}✗ 1224-class source pre-merge soak is ${SOURCE_HEAD_SOAK_STATUS} and lacks an explicit disposition marker${NC}"
+        echo "  Required exact marker (in Intake Issue or absorb PR):"
+        echo "    Source/fork pre-merge soak: ${SOURCE_HEAD_SOAK_STATUS}"
+        echo "  This records the defect honestly; it does not replace replay evidence or exact-HEAD review."
+        return 1
+      fi
+    fi
+
+    local migration_evidence_ok
+    migration_evidence_ok=$(ISSUE_JSON="$intent_info" ABSORB_JSON="$absorb_pr_info" node -e '
+const issue = JSON.parse(process.env.ISSUE_JSON || "{}");
+const absorb = JSON.parse(process.env.ABSORB_JSON || "{}");
+const text = `${String(issue.body || "")}\n${String(absorb.body || "")}`
+  .replace(/[`*_]/g, " ");
+const required = [
+  /Historical[- ]state replay\s*:\s*PASS/i,
+  /Mixed[- ]version consumer matrix\s*:\s*PASS/i,
+  /Rollback\/off[- ]mode semantics\s*:\s*PASS/i,
+];
+console.log(required.every((pattern) => pattern.test(text)) ? "yes" : "no");
+')
+    if [ "$migration_evidence_ok" != "yes" ]; then
+      echo -e "${RED}✗ 1224-class absorb PR is missing mandatory migration evidence${NC}"
+      echo "  Required exact evidence markers (in Intake Issue or absorb PR):"
+      echo "    Historical-state replay: PASS"
+      echo "    Mixed-version consumer matrix: PASS"
+      echo "    Rollback/off-mode semantics: PASS"
+      return 1
+    fi
+  fi
+
+  local scope_issue_ids
+  scope_issue_ids=$(echo "$absorb_pr_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const ids=[...body.matchAll(/Closes\\s+(?:cat-cafe#|#)(\\d+)\\b/ig)].map((m)=>m[1]); process.stdout.write([...new Set(ids)].join('\\n'))")
+
+  local scope_issue_bodies_b64=""
+  local scope_issue_id
+  while IFS= read -r scope_issue_id; do
+    [ -z "$scope_issue_id" ] && continue
+
+    local scope_issue_info
+    if [ "$scope_issue_id" = "$INTENT_ISSUE" ]; then
+      scope_issue_info="$intent_info"
+    else
+      scope_issue_info=$(gh issue view "$scope_issue_id" --repo "$SOURCE_REPO" --json state,stateReason,labels,body,url,title 2>/dev/null || true)
+      if [ -z "$scope_issue_info" ]; then
+        echo -e "${RED}✗ Cannot fetch Intake Intent Issue #$scope_issue_id from $SOURCE_REPO${NC}"
+        return 1
+      fi
+
+      local scope_issue_state
+      local scope_issue_state_reason
+      scope_issue_state=$(echo "$scope_issue_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.state||'')")
+      scope_issue_state_reason=$(echo "$scope_issue_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.stateReason||'')")
+      if [ "$scope_issue_state" = "OPEN" ]; then
+        :
+      elif [ "$scope_issue_state" = "CLOSED" ]; then
+        if [ "$scope_issue_state_reason" = "NOT_PLANNED" ]; then
+          echo -e "${RED}✗ Intake Intent Issue #$scope_issue_id is CLOSED as NOT_PLANNED; cannot widen absorb PR scope with it${NC}"
+          return 1
+        fi
+        if [ "$absorb_pr_state" != "MERGED" ]; then
+          echo -e "${RED}✗ Intake Intent Issue #$scope_issue_id is CLOSED, so absorb PR #$ABSORB_PR must be MERGED${NC}"
+          echo "  Closed sibling issue + open absorb PR indicates a broken multi-intent intake chain."
+          return 1
+        fi
+      else
+        echo -e "${RED}✗ Intake Intent Issue #$scope_issue_id is $scope_issue_state (expected OPEN or CLOSED)${NC}"
+        return 1
+      fi
+
+      local scope_issue_label_ok
+      scope_issue_label_ok=$(echo "$scope_issue_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const labels=(d.labels||[]).map(l=>String(l.name||'').toLowerCase()); console.log(labels.includes('intake') ? 'yes' : 'no')")
+      if [ "$scope_issue_label_ok" != "yes" ]; then
+        echo -e "${RED}✗ Intake Intent Issue #$scope_issue_id is missing required label: intake${NC}"
+        return 1
+      fi
+
+      local scope_issue_table_ok
+      scope_issue_table_ok=$(echo "$scope_issue_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const normalized=body.replace(/[*_\`~]/g,''); const hasHeader=/##+\\s*[^\\n]*?(?:逐文件决策表|Per[- ]?file\\s+decision|Cluster[- ]?level\\s+decision\\s+table|Decision\\s+Table|决策|Classification|Plan\\s+v\\d|Lane)/i.test(normalized); const hasRow=/\\|\\s*[^|\\n]+\\s*\\|\\s*[^|\\n]+\\s*\\|[^|\\n]*(absorb(?:ed)?|safe[- ]?cherry[- ]?pick|manual[- ]?port|high[- ]?risk|skip|public[- ]?only)\\b/i.test(normalized); console.log(hasHeader && hasRow ? 'yes' : 'no')")
+      if [ "$scope_issue_table_ok" != "yes" ]; then
+        echo -e "${RED}✗ Intake Intent Issue #$scope_issue_id is missing a valid per-file decision table${NC}"
+        return 1
+      fi
+    fi
+
+    local scope_issue_body_b64
+    scope_issue_body_b64=$(echo "$scope_issue_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); process.stdout.write(Buffer.from(String(d.body||''),'utf8').toString('base64'))")
+    if [ -n "$scope_issue_bodies_b64" ]; then
+      scope_issue_bodies_b64+=$'\n'
+    fi
+    scope_issue_bodies_b64+="$scope_issue_body_b64"
+  done <<< "$scope_issue_ids"
+
+  local absorb_scope_files="${BRAND_SCOPE_FILES:-}"
+  if [ -z "$absorb_scope_files" ]; then
+    absorb_scope_files=$(resolve_absorb_pr_brand_scope) || return 1
+  fi
+  local source_projection_map
+  source_projection_map=$(resolve_intake_source_projections) || return 1
+  validate_absorb_source_projections "$source_pr_files" "$absorb_scope_files" "$source_projection_map" || return 1
+  validate_absorb_pr_scope_alignment "$scope_issue_bodies_b64" "$absorb_scope_files" "$source_projection_map" || return 1
+  validate_absorb_pr_validation_evidence "${BRAND_SCOPE_FILES:-}" "$(echo "$absorb_pr_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.body||''))")" || return 1
+  validate_review_proof_continuity "$absorb_pr_head" "$review_proof_mode" || return 1
+
+  echo -e "${GREEN}✓ Absorbed intake strict guard passed.${NC}"
+  echo "  intent issue: #$INTENT_ISSUE ($issue_state)"
+  echo "  absorb PR:    #$ABSORB_PR ($absorb_pr_state)"
+  echo "  review head:  ${absorb_pr_head:0:8}"
+  echo "  review proof: $REVIEW_PROOF ($review_proof_mode)"
+  return 0
+}
+
+if [ -n "$CLASSIFY_INTAKE_PATH" ]; then
+  if is_public_only "$CLASSIFY_INTAKE_PATH"; then echo public-only
+  elif is_brand_sensitive "$CLASSIFY_INTAKE_PATH"; then echo brand-sensitive
+  elif is_high_risk "$CLASSIFY_INTAKE_PATH"; then echo manual-port
+  else classify_path "$CLASSIFY_INTAKE_PATH"
+  fi
+  exit 0
+fi
+
+if [ "$VALIDATE_INBOUND" = true ]; then
+  echo -e "${GREEN}=== 🛡 Inbound Guard ===${NC}"
+  echo ""
+  VALIDATION_SCOPE_FILES=""
+  VALIDATION_SCOPE_LABEL="local changed"
+  if [ "$FROM_INDEX" = true ]; then
+    VALIDATION_SCOPE_LABEL="staged"
+  fi
+  if VALIDATION_SCOPE_FILES=$(resolve_local_brand_scope); then
+    # Preserve the existing migration policy; classify each raw path, not display text.
+    detect_stateful_migration_quarantine "$VALIDATION_SCOPE_FILES"
+    if [ "$STATEFUL_MIGRATION_QUARANTINE" = true ]; then
+      print_stateful_migration_quarantine
+      echo ""
+      if [ "$STATE_MIGRATION_ADVISORY" = true ]; then
+        echo -e "${YELLOW}⚠ Pre-commit advisory: this commit is not blocked.${NC}"
+        echo "  If this staged shape came from a community PR, stop and run --mode=risk-check;"
+        echo "  the intake record lane remains fail-closed for quarantine and evidence."
+        echo ""
+      else
+        echo -e "${RED}✗ 1224-class staged migration blocked before commit.${NC}"
+        exit 2
+      fi
+    fi
+    if [ "$(_brand_scope_count "$VALIDATION_SCOPE_FILES")" = 0 ]; then
+      echo "  Brand Guard scope: 0 $VALIDATION_SCOPE_LABEL file(s)"
+      echo -e "${GREEN}✓ No brand violations detected. Safe to commit.${NC}"
+      exit 0
+    fi
+    run_brand_validation "$VALIDATION_SCOPE_FILES" "$VALIDATION_SCOPE_LABEL"
+  else
+    if [ "$FROM_INDEX" = true ] || git -C "$SOURCE_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      echo "Cannot resolve authoritative Git path scope" >&2; exit 1
+    fi
+    run_brand_validation
+  fi
+  if [ "$_BRAND_VIOLATION_COUNT" -gt 0 ]; then
+    echo ""
+    echo -e "${RED}✗ Found $_BRAND_VIOLATION_COUNT brand violation(s)!${NC}"
+    echo "  These files contain clowder-ai brand strings that should be cat-cafe values."
+    echo "  Fix them before committing. See SKILL.md principle 12-13 for reference values."
+    exit 1
+  else
+    echo -e "${GREEN}✓ No brand violations detected. Safe to commit.${NC}"
+    exit 0
+  fi
+fi
+
+# ── Record decision (happy path) ──
+# Records a per-PR decision in entries[]. Does NOT advance last_reviewed_target_head.
+# Use --advance-ledger after recording all PRs to advance the gate.
+# GitHub operations use fixed source/target roles, independent of runtime edition.
+TARGET_REPO="$(node "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" --repository public)"
+SOURCE_REPO="$(node "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" --repository home)"
+
+if [ "$RECORD_DECISION" = true ]; then
+  if [ -z "$PR_NUMBER" ]; then
+    echo -e "${RED}✗ --record requires --pr <number>${NC}"; exit 1
+  fi
+  if [ -z "$DECISION" ]; then
+    echo -e "${RED}✗ --record requires --decision <absorbed|public-only|rejected>${NC}"; exit 1
+  fi
+  # P2 fix: mandatory Brand Guard before recording absorbed intake
+  if [ "$DECISION" = "absorbed" ]; then
+    if [ "$SKIP_ABSORBED_GUARD" = true ] && [ -z "$ABSORB_PR" ]; then
+      # outbound-filed hotfix or historical backfill: NO absorb PR to scope against.
+      # Source code is already in cat-cafe main (verified during original intake or
+      # filed-then-merged hotfix). The record commit only touches
+      # docs/ops/opensource-intake-ledger.json. Previous logic fell through with
+      # empty scope and silently degraded to whole-repo scan, hitting pre-existing
+      # legitimate brand mentions in public docs / README.opensource.* files
+      # (recurring friction across PR #943 / #944 / #899 / #996 intake records).
+      # Skip mandatory Brand Guard on this lane — strict guard already skipped by
+      # the same flag for symmetry. Callers concerned about source-code drift can
+      # still run `--validate-inbound` explicitly.
+      #
+      # IMPORTANT: --skip-absorbed-guard WITH --absorb-pr still runs the scoped
+      # Brand Guard below — that mixed-mode caller has a concrete PR to scope
+      # against and the bypass would otherwise widen to a real source-code PR
+      # (gpt52 review on cat-cafe#2497 caught this widening regression).
+      echo -e "${YELLOW}⚠ --skip-absorbed-guard with no --absorb-pr: skipping mandatory Brand Guard${NC}"
+      echo "  Reason: outbound-filed hotfix / historical backfill has no absorb PR to scope Brand Guard against."
+      echo "  Source code is already in cat-cafe main; this record commit only touches docs/ops/opensource-intake-ledger.json."
+      echo "  For explicit brand check, run: bash scripts/intake-from-opensource.sh --validate-inbound"
+    else
+      echo -e "${BLUE}── Mandatory Brand Guard (pre-record) ──${NC}"
+      BRAND_SCOPE_FILES=""
+      if [ -n "$ABSORB_PR" ]; then
+        BRAND_SCOPE_FILES=$(resolve_absorb_pr_brand_scope || true)
+        if [ -z "$BRAND_SCOPE_FILES" ] || [ "$(_brand_scope_count "$BRAND_SCOPE_FILES")" = 0 ]; then
+          echo -e "${RED}✗ Could not resolve absorb PR #$ABSORB_PR file list for scoped Brand Guard (after 3 retries with backoff)${NC}"
+          echo "  Refusing to fall back to whole-repo scan during absorbed record; whole-repo scan has known pre-existing false positives."
+          echo "  Check: gh pr diff $ABSORB_PR --repo $SOURCE_REPO --name-only"
+          _captured_stderr=$(_gh_last_stderr || true)
+          if [ -n "$_captured_stderr" ]; then
+            echo ""
+            echo "  Last gh stderr captured (for diagnosis):"
+            printf '%s\n' "$_captured_stderr" | sed 's/^/    /'
+          fi
+          exit 1
+        fi
+      fi
+      run_brand_validation "$BRAND_SCOPE_FILES" "absorb PR"
+      if [ "$_BRAND_VIOLATION_COUNT" -gt 0 ]; then
+        echo ""
+        echo -e "${RED}✗ $_BRAND_VIOLATION_COUNT brand violation(s) detected. Fix before recording absorbed intake.${NC}"
+        echo "  Run: bash scripts/intake-from-opensource.sh --validate-inbound  (for details)"
+        exit 1
+      fi
+      echo -e "${GREEN}✓ Brand Guard passed.${NC}"
+    fi
+    echo ""
+    echo -e "${BLUE}── Mandatory Intake Strict Guard (pre-record) ──${NC}"
+    run_absorbed_record_guard || exit 1
+    echo ""
+  fi
+  case "$DECISION" in
+    absorbed|public-only|rejected|outbound-sync) ;;
+    *) echo -e "${RED}✗ Invalid decision '$DECISION'. Use: absorbed | public-only | rejected | outbound-sync${NC}"; exit 1 ;;
+  esac
+  if [ ! -f "$INTAKE_LEDGER" ]; then
+    echo -e "${RED}✗ Intake ledger not found${NC}"; exit 1
+  fi
+  PR_MERGE_INFO=$(gh pr view "$PR_NUMBER" --repo "$TARGET_REPO" --json state,mergeCommit 2>/dev/null || true)
+  if [ -z "$PR_MERGE_INFO" ]; then
+    echo -e "${RED}✗ Cannot fetch PR #$PR_NUMBER from $TARGET_REPO${NC}"; exit 1
+  fi
+  PR_REC_STATE=$(echo "$PR_MERGE_INFO" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.state)")
+  if [ "$PR_REC_STATE" != "MERGED" ]; then
+    echo -e "${RED}✗ PR #$PR_NUMBER is $PR_REC_STATE, not MERGED.${NC}"; exit 1
+  fi
+  PR_MERGE_SHA=$(echo "$PR_MERGE_INFO" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log((d.mergeCommit||{}).oid||'')")
+  if [ -z "$PR_MERGE_SHA" ]; then
+    echo -e "${RED}✗ PR #$PR_NUMBER has no merge commit SHA; refusing to record intake provenance.${NC}"
+    exit 1
+  fi
+  PR_NUMBER_ENV="$PR_NUMBER" \
+  PR_MERGE_SHA_ENV="$PR_MERGE_SHA" \
+  DECISION_ENV="$DECISION" \
+  INTENT_ISSUE_ENV="$INTENT_ISSUE" \
+  ABSORB_PR_ENV="$ABSORB_PR" \
+  REVIEW_PROOF_ENV="$REVIEW_PROOF" \
+  SKIP_ABSORBED_GUARD_ENV="$SKIP_ABSORBED_GUARD" \
+  node -e "
+    const fs = require('fs');
+    const prNumber = Number(process.env.PR_NUMBER_ENV || '0');
+    const decision = process.env.DECISION_ENV || '';
+    const ledger = JSON.parse(fs.readFileSync('$INTAKE_LEDGER', 'utf-8'));
+    const existing = ledger.entries.find(e => e.pr_number === prNumber && e.action !== 'force_advance');
+    if (existing && existing.decision === decision) {
+      console.log('⚠ PR #' + prNumber + ' already recorded as ' + decision + '. Skipping.'); process.exit(0);
+    }
+    if (existing && !(existing.decision === 'public-only' && decision === 'absorbed')) {
+      console.error('✗ PR #' + prNumber + ' is already recorded as ' + existing.decision +
+        '; only the monotonic public-only → absorbed upgrade is supported.');
+      process.exit(1);
+    }
+    const mergeCommit = process.env.PR_MERGE_SHA_ENV || '';
+    if (existing && existing.target_merge_commit && existing.target_merge_commit !== mergeCommit) {
+      console.error('✗ PR #' + prNumber + ' merge commit changed since the provisional record; refusing reclassification.');
+      process.exit(1);
+    }
+    const entry = {
+      pr_number: prNumber,
+      target_merge_commit: mergeCommit,
+      decision,
+      timestamp: new Date().toISOString(),
+    };
+    if (decision === 'absorbed') {
+      const skip = (process.env.SKIP_ABSORBED_GUARD_ENV || '').toLowerCase() === 'true';
+      const intentIssue = Number(process.env.INTENT_ISSUE_ENV || '0');
+      const absorbPr = Number(process.env.ABSORB_PR_ENV || '0');
+      const reviewProof = process.env.REVIEW_PROOF_ENV || '';
+      if (skip) {
+        entry.note = 'absorbed record created with --skip-absorbed-guard (outbound-filed hotfix or historical backfill)';
+        if (intentIssue > 0) entry.intake_intent_issue = intentIssue;
+        if (absorbPr > 0) entry.absorb_pr = absorbPr;
+        if (reviewProof) entry.review_proof = reviewProof;
+      } else {
+        entry.intake_intent_issue = intentIssue;
+        entry.absorb_pr = absorbPr;
+        entry.review_proof = reviewProof;
+      }
+    }
+    if (existing) {
+      entry.previous_decision = existing.decision;
+      entry.previous_timestamp = existing.timestamp;
+      Object.assign(existing, entry);
+    } else {
+      ledger.entries.push(entry);
+    }
+    const bytes = JSON.stringify(ledger, null, 2) + '\n';
+    if (process.env.CAT_CAFE_INTAKE_JOURNAL) {
+      require('child_process').execFileSync('node', ['$SOURCE_DIR/scripts/lib/intake-ledger-write.mjs', '$INTAKE_LEDGER'], { input: bytes });
+    } else fs.writeFileSync('$INTAKE_LEDGER', bytes);
+    const mergeShort = (process.env.PR_MERGE_SHA_ENV || '').slice(0, 12);
+    if (existing) {
+      console.log('✓ Upgraded PR #' + prNumber + ': public-only → absorbed (merge: ' + mergeShort + ')');
+    } else {
+      console.log('✓ Recorded PR #' + prNumber + ' → ' + decision + ' (merge: ' + mergeShort + ')');
+    }
+  "
+  # Auto-attempt advance-ledger after successful record
+  echo ""
+  echo -e "${BLUE}── Auto-attempting ledger advance ──${NC}"
+  bash "$0" --advance-ledger
+  _advance_rc=$?
+  if [ $_advance_rc -eq 0 ] && [ -n "$ABSORB_PR" ]; then
+    echo ""
+    echo -e "${BLUE}── Post-record continuity advisory ──${NC}"
+    echo "  Review proof was validated against absorb PR HEAD at record time."
+    echo "  After committing the ledger update, the absorb PR HEAD will advance."
+    echo -e "  Before merging, run:"
+    echo -e "    ${GREEN}bash scripts/intake-from-opensource.sh --verify-merge-ready --absorb-pr $ABSORB_PR${NC}"
+    echo "  This verifies the post-review delta is ledger-only (non-behavioral)."
+  fi
+  exit $_advance_rc
+fi
+
+# ── Advance ledger ──
+if [ "$ADVANCE_LEDGER" = true ]; then
+  if [ ! -d "$TARGET_DIR/.git" ]; then
+    echo -e "${RED}✗ Target repo not found at $TARGET_DIR${NC}"
+    exit 1
+  fi
+  CURRENT_HEAD=$(resolve_target_main_head)
+  if [ ! -f "$INTAKE_LEDGER" ]; then
+    echo -e "${RED}✗ Intake ledger not found at $INTAKE_LEDGER${NC}"
+    exit 1
+  fi
+  OLD_HEAD=$(node -e "const l=JSON.parse(require('fs').readFileSync('$INTAKE_LEDGER','utf-8')); console.log(l.last_reviewed_target_head || '')" 2>/dev/null || true)
+  if [ "$OLD_HEAD" = "$CURRENT_HEAD" ]; then
+    echo -e "${GREEN}✓ Ledger already at target HEAD ($CURRENT_HEAD)${NC}"
+    exit 0
+  fi
+  # Enumerate landed non-sync commits on the target repo mainline (first-parent only).
+  # A long community PR may merge multiple branch commits under one recorded merge commit;
+  # those child commits should not block advance-ledger.
+  UNREVIEWED=""
+  UNREVIEWED_COUNT=0
+  if [ -n "$OLD_HEAD" ]; then
+    # Build set of recorded merge commits from entries[]
+    RECORDED_SHAS=$(node -e "const l=JSON.parse(require('fs').readFileSync('$INTAKE_LEDGER','utf-8')); l.entries.filter(e=>e.target_merge_commit).forEach(e=>console.log(String(e.target_merge_commit||'').trim().toLowerCase()))" 2>/dev/null || true)
+    for c in $(git -C "$TARGET_DIR" rev-list --first-parent "$OLD_HEAD".."$CURRENT_HEAD" 2>/dev/null); do
+      MSG=$(git -C "$TARGET_DIR" log --format=%s -1 "$c" 2>/dev/null || true)
+      # Skip sync commits: matches both squash-merge format ("sync: ..." as commit subject)
+      # AND GitHub UI's default merge commit format ("Merge pull request #N from <user>/sync/<topic>").
+      # Without the second alternative, sync PRs merged via the UI's "Create a merge commit" path
+      # were misclassified as non-sync and blocked advance-ledger (clowder-ai#1020 regression).
+      if echo "$MSG" | grep -qE "^sync:.*(cat-cafe|clowder-ai|v[0-9]+\.[0-9]+|outbound)|^Merge pull request #[0-9]+ from [^ ]+/sync/"; then continue; fi
+      # Check if this landed mainline commit is covered by an entries[] record
+      recorded_match=false
+      while IFS= read -r recorded; do
+        [ -z "$recorded" ] && continue
+        case "$recorded" in
+          [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*)
+            if [[ "$c" == "$recorded"* ]]; then
+              recorded_match=true
+              break
+            fi
+            ;;
+        esac
+      done <<< "$RECORDED_SHAS"
+      if [ "$recorded_match" = true ]; then continue; fi
+      UNREVIEWED_COUNT=$((UNREVIEWED_COUNT + 1))
+      SHORT=$(git -C "$TARGET_DIR" log --format="%h %s" -1 "$c" 2>/dev/null)
+      UNREVIEWED="${UNREVIEWED}    → ${SHORT}\n"
+    done
+  fi
+  if [ "$UNREVIEWED_COUNT" -gt 0 ]; then
+    echo -e "${RED}✗ Cannot advance: $UNREVIEWED_COUNT unrecorded non-sync commit(s)${NC}"
+    echo -e "$UNREVIEWED"
+    echo ""
+    echo "  For each community PR, run:"
+    echo "    bash scripts/intake-from-opensource.sh --pr <N> --mode=plan"
+    echo "    bash scripts/intake-from-opensource.sh --record --pr <N> --decision <absorbed|public-only|rejected|outbound-sync>"
+    echo "      (absorbed requires --intent-issue <I> --absorb-pr <P> --review-proof <URL|file>)"
+    echo "      review-proof must explicitly cover absorb PR current HEAD SHA"
+    echo ""
+    echo "  Or force-advance (DANGEROUS — skips per-PR review):"
+    echo "    bash scripts/intake-from-opensource.sh --advance-ledger --force-overwrite"
+    if [ "$FORCE_OVERWRITE" != true ]; then
+      exit 1
+    fi
+    echo -e "${YELLOW}⚠ --force-overwrite: force-advancing ledger${NC}"
+    # Record forced advance in entries for audit
+    node -e "
+      const fs = require('fs');
+      const ledger = JSON.parse(fs.readFileSync('$INTAKE_LEDGER', 'utf-8'));
+      ledger.entries.push({
+        action: 'force_advance',
+        from: '$OLD_HEAD',
+        to: '$CURRENT_HEAD',
+        skipped_community_commits: $UNREVIEWED_COUNT,
+        timestamp: new Date().toISOString(),
+        notes: 'Force-advanced without per-PR review'
+      });
+      ledger.last_reviewed_target_head = '$CURRENT_HEAD';
+      const bytes = JSON.stringify(ledger, null, 2) + '\n';
+    if (process.env.CAT_CAFE_INTAKE_JOURNAL) {
+      require('child_process').execFileSync('node', ['$SOURCE_DIR/scripts/lib/intake-ledger-write.mjs', '$INTAKE_LEDGER'], { input: bytes });
+    } else fs.writeFileSync('$INTAKE_LEDGER', bytes);
+      console.log('⚠ Ledger force-advanced to: $CURRENT_HEAD');
+    "
+    exit 0
+  fi
+  # No unreviewed commits — safe to auto-advance
+  node -e "
+    const fs = require('fs');
+    const ledger = JSON.parse(fs.readFileSync('$INTAKE_LEDGER', 'utf-8'));
+    ledger.last_reviewed_target_head = '$CURRENT_HEAD';
+    const bytes = JSON.stringify(ledger, null, 2) + '\n';
+    if (process.env.CAT_CAFE_INTAKE_JOURNAL) {
+      require('child_process').execFileSync('node', ['$SOURCE_DIR/scripts/lib/intake-ledger-write.mjs', '$INTAKE_LEDGER'], { input: bytes });
+    } else fs.writeFileSync('$INTAKE_LEDGER', bytes);
+    console.log('✓ Ledger advanced to: $CURRENT_HEAD (only sync commits since last review)');
+  "
+  exit 0
+fi
+
+post_review_continuity_comment() {
+  local absorb_pr="$1"
+  local proof_url="$2"
+  local proof_commit="$3"
+  local current_head="$4"
+  local delta_files="$5"
+  local marker="<!-- cat-cafe:intake-review-continuity:$absorb_pr:$current_head -->"
+
+  if gh api --paginate "repos/$SOURCE_REPO/issues/$absorb_pr/comments" --jq '.[].body' 2>/dev/null | grep -Fq "$marker"; then
+    echo -e "${GREEN}✓ Review continuity evidence comment already exists.${NC}"
+    return 0
+  fi
+
+  {
+    echo "$marker"
+    echo "## Intake Review Continuity"
+    echo ""
+    echo '`--verify-merge-ready` passed after the intake ledger commit advanced this PR beyond the formal review commit.'
+    echo ""
+    echo "- Review proof: $proof_url"
+    echo "- Reviewed commit: \`$proof_commit\`"
+    echo "- Current PR HEAD: \`$current_head\`"
+    echo "- Continuity verdict: post-review delta is non-behavioral."
+    echo ""
+    echo "Delta files:"
+    if [ -z "$delta_files" ]; then
+      echo "- none"
+    else
+      while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        echo "- \`$f\`"
+      done <<< "$delta_files"
+    fi
+    echo ""
+    echo "[intake-from-opensource.sh]"
+  } | gh pr comment "$absorb_pr" --repo "$SOURCE_REPO" --body-file - >/dev/null
+  echo -e "${GREEN}✓ Posted review continuity evidence comment.${NC}"
+}
+
+# ── Verify merge readiness (post-record continuity check) ──
+if [ "$VERIFY_MERGE_READY" = true ]; then
+  if [ -n "$MECHANICAL_PROOF" ]; then
+    echo "Mechanical file proof does not approve merge. Use the existing home validation and merge-gate; --mechanical-proof remains a post-merge record consumer."
+    exit 1
+  fi
+
+  if [ -z "$ABSORB_PR" ]; then
+    echo -e "${RED}✗ --verify-merge-ready requires --absorb-pr <number>${NC}"; exit 1
+  fi
+
+  echo -e "${GREEN}=== 🔍 Post-Record Merge Readiness Check ===${NC}"
+  echo ""
+
+  absorb_info=$(gh pr view "$ABSORB_PR" --repo "$SOURCE_REPO" --json headRefOid,state,headRefName 2>/dev/null || true)
+  if [ -z "$absorb_info" ]; then
+    echo -e "${RED}✗ Cannot fetch absorb PR #$ABSORB_PR from $SOURCE_REPO${NC}"; exit 1
+  fi
+
+  vmr_current_head=$(echo "$absorb_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.headRefOid||''))")
+  vmr_pr_state=$(echo "$absorb_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.state||''))")
+  vmr_branch=$(echo "$absorb_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.headRefName||''))")
+
+  if [ "$vmr_pr_state" = "MERGED" ]; then
+    echo -e "${GREEN}✓ Absorb PR #$ABSORB_PR is already MERGED. No pre-merge check needed.${NC}"
+    exit 0
+  fi
+  if [ "$vmr_pr_state" != "OPEN" ]; then
+    echo -e "${RED}✗ Absorb PR #$ABSORB_PR is $vmr_pr_state (expected OPEN or MERGED)${NC}"; exit 1
+  fi
+
+  vmr_proof_url="$REVIEW_PROOF"
+  if [ -z "$vmr_proof_url" ]; then
+    vmr_proof_url=$(ABSORB_PR_NUM="$ABSORB_PR" node -e "
+      const fs = require('fs');
+      const l = JSON.parse(fs.readFileSync('$INTAKE_LEDGER', 'utf-8'));
+      const n = Number(process.env.ABSORB_PR_NUM);
+      const entry = [...l.entries].reverse().find(e => e.absorb_pr === n);
+      console.log(String(entry?.review_proof || ''));
+    " 2>/dev/null || true)
+  fi
+  if [ -z "$vmr_proof_url" ]; then
+    echo -e "${RED}✗ No review proof found. Provide --review-proof <URL> or ensure ledger has a recorded entry.${NC}"
+    exit 1
+  fi
+
+  vmr_proof_commit=""
+  if [[ "$vmr_proof_url" =~ \#pullrequestreview-([0-9]+)$ ]]; then
+    vmr_proof_json=$(gh api "repos/$SOURCE_REPO/pulls/$ABSORB_PR/reviews/${BASH_REMATCH[1]}" 2>/dev/null || true)
+    if [ -n "$vmr_proof_json" ]; then
+      vmr_proof_commit=$(echo "$vmr_proof_json" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.commit_id||''))")
+    fi
+  elif [[ "$vmr_proof_url" =~ \#discussion_r([0-9]+)$ ]]; then
+    vmr_proof_json=$(gh api "repos/$SOURCE_REPO/pulls/comments/${BASH_REMATCH[1]}" 2>/dev/null || true)
+    if [ -n "$vmr_proof_json" ]; then
+      vmr_proof_commit=$(echo "$vmr_proof_json" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.commit_id||''))")
+    fi
+  elif [[ "$vmr_proof_url" =~ \#issuecomment-([0-9]+)$ ]]; then
+    vmr_proof_json=$(gh api "repos/$SOURCE_REPO/issues/comments/${BASH_REMATCH[1]}" 2>/dev/null || true)
+    if [ -n "$vmr_proof_json" ]; then
+      vmr_proof_body=$(echo "$vmr_proof_json" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.body||''))")
+      vmr_proof_commit=$(echo "$vmr_proof_body" | grep -oE '[0-9a-f]{40}' | head -1 || true)
+      if [ -z "$vmr_proof_commit" ]; then
+        vmr_proof_commit=$(echo "$vmr_proof_body" | grep -oE '[0-9a-f]{7,12}' | head -1 || true)
+      fi
+    fi
+  elif [ -f "$vmr_proof_url" ]; then
+    vmr_proof_commit=$(grep -oE '[0-9a-f]{40}' "$vmr_proof_url" | head -1 || true)
+  fi
+
+  if [ -z "$vmr_proof_commit" ]; then
+    echo -e "${YELLOW}⚠ Could not extract proof commit SHA from review proof.${NC}"
+    echo "  Review proof: $vmr_proof_url"
+    echo "  Cannot verify continuity automatically. Manual check required."
+    exit 1
+  fi
+
+  echo "  Absorb PR:     #$ABSORB_PR ($vmr_pr_state)"
+  echo "  Review proof:  ${vmr_proof_commit:0:8}"
+  echo "  Current HEAD:  ${vmr_current_head:0:8}"
+
+  if [ "$vmr_proof_commit" = "$vmr_current_head" ]; then
+    echo ""
+    echo -e "${GREEN}✓ Merge ready: current HEAD matches review proof exactly.${NC}"
+    exit 0
+  fi
+
+  echo ""
+  echo "  HEAD advanced since review. Checking delta..."
+
+  git fetch origin "$vmr_branch" --quiet 2>/dev/null || true
+
+  vmr_delta_files=$(git diff --name-only "$vmr_proof_commit".."$vmr_current_head" 2>/dev/null || true)
+  if [ -z "$vmr_delta_files" ]; then
+    echo -e "${GREEN}✓ Merge ready: no file changes between review proof and current HEAD.${NC}"
+    post_review_continuity_comment "$ABSORB_PR" "$vmr_proof_url" "$vmr_proof_commit" "$vmr_current_head" "$vmr_delta_files"
+    exit 0
+  fi
+
+  vmr_has_behavioral=false
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    case "$f" in
+      docs/ops/opensource-intake-ledger.json) ;;
+      docs/mailbox/*) ;;
+      *) vmr_has_behavioral=true ;;
+    esac
+  done <<< "$vmr_delta_files"
+
+  if [ "$vmr_has_behavioral" = false ]; then
+    echo -e "${GREEN}✓ Merge ready: post-review delta is non-behavioral (ledger/mailbox only).${NC}"
+    echo "  Delta files:"
+    echo "$vmr_delta_files" | sed 's/^/    /'
+    post_review_continuity_comment "$ABSORB_PR" "$vmr_proof_url" "$vmr_proof_commit" "$vmr_current_head" "$vmr_delta_files"
+    exit 0
+  else
+    echo -e "${RED}✗ Post-review delta contains behavioral changes:${NC}"
+    echo "$vmr_delta_files" | sed 's/^/    /'
+    echo ""
+    echo "  Ask reviewer to extend review to current HEAD (${vmr_current_head:0:8}),"
+    echo "  then re-run this check."
+    exit 1
+  fi
+fi
+
+# ── Plan mode ──
+if [ -z "$PR_NUMBER" ]; then
+  echo "Usage:"
+  echo "  bash scripts/intake-from-opensource.sh --pr <N> --mode=plan              # Analyze PR"
+  echo "  bash scripts/intake-from-opensource.sh --pr <N> --mode=risk-check        # Pre-merge 1224-class risk alarm"
+  echo "  bash scripts/intake-from-opensource.sh --record --pr <N> --decision <D>  # Record decision"
+  echo "    absorbed (default lane) requires: --intent-issue <I> --absorb-pr <P> --review-proof <URL|file>"
+  echo "      review-proof must cover absorb PR current HEAD (comment/review URL or file with SHA)"
+  echo "    optional override: --skip-absorbed-guard  (direct-main historical backfill or outbound-filed hotfix)"
+  echo "      override may omit issue / absorb PR / review-proof; do not invent placeholder fields"
+  echo "  bash scripts/intake-from-opensource.sh --advance-ledger                  # Advance ledger (sync-only commits)"
+  echo "  bash scripts/intake-from-opensource.sh --verify-merge-ready --absorb-pr <P> [--review-proof <URL>]"
+  echo "                                                                            # Post-record continuity check"
+  echo "  bash scripts/intake-from-opensource.sh --validate-inbound                # 🛡 Check brand contamination (working tree)"
+  echo "  bash scripts/intake-from-opensource.sh --validate-inbound --from-index   # 🛡 Check brand contamination (staged/index)"
+  echo ""
+  echo "Decisions: absorbed | public-only | rejected | outbound-sync"
+  exit 1
+fi
+
+echo -e "${GREEN}=== Clowder AI → Clowder AI Intake ===${NC}"
+echo "PR: #$PR_NUMBER"
+echo "Mode: $MODE"
+echo ""
+
+# Fetch PR info
+PR_INFO=$(gh pr view "$PR_NUMBER" --repo "$TARGET_REPO" --json title,state,author,mergedAt,mergeCommit,headRefOid,reviews,statusCheckRollup 2>/dev/null || true)
+if [ -z "$PR_INFO" ]; then
+  echo -e "${RED}✗ Cannot fetch PR #$PR_NUMBER from $TARGET_REPO${NC}"
+  exit 1
+fi
+
+PR_TITLE=$(echo "$PR_INFO" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.title)")
+PR_STATE=$(echo "$PR_INFO" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.state)")
+PR_AUTHOR=$(echo "$PR_INFO" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.author.login)")
+PR_MERGED=$(echo "$PR_INFO" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.mergedAt || 'not merged')")
+
+echo -e "${BLUE}Title:${NC}  $PR_TITLE"
+echo -e "${BLUE}Author:${NC} $PR_AUTHOR"
+echo -e "${BLUE}State:${NC}  $PR_STATE"
+echo -e "${BLUE}Merged:${NC} $PR_MERGED"
+echo ""
+
+# P1-2: Plan operates on landed facts. Risk-check intentionally runs before
+# merge so a 1224-class change can be stopped while it is still cheap to split.
+if [ "$PR_STATE" != "MERGED" ] && [ "$MODE" != "risk-check" ]; then
+  echo -e "${RED}✗ PR #$PR_NUMBER is $PR_STATE, not MERGED.${NC}"
+  echo "  Intake operates on PRs that have landed in clowder-ai main."
+  echo "  Merge the PR first, then re-run intake."
+  exit 1
+fi
+
+# Get changed files.
+# `gh pr view --json files` only returns the first page for large PRs; use
+# the REST files endpoint with pagination so the intake table cannot silently
+# miss files beyond the first 100.
+FILES=$(resolve_pr_path_scope "$TARGET_REPO" "$PR_NUMBER") || { echo "Cannot resolve complete source path scope" >&2; exit 1; }
+
+if [ "$(_brand_scope_count "$FILES")" = 0 ]; then
+  # cat-cafe#2518: PR_STATE was verified MERGED above (line 1101). An empty
+  # FILES list here means the GitHub files API returned no rows — almost
+  # certainly a transient flake, NOT a legitimate empty PR. Silently exiting
+  # 0 with "No files found" would produce a fake plan, leading downstream
+  # `--record` to register an "absorbed" intake with zero file decisions —
+  # the real PR contents never get absorbed. Hard-fail instead.
+  echo -e "${RED}✗ Could not resolve PR #${PR_NUMBER} file list (files API returned empty).${NC}"
+  echo "  PR is MERGED but \`gh api repos/${TARGET_REPO}/pulls/${PR_NUMBER}/files\` returned no rows."
+  echo "  Likely cause: transient GitHub API flake. Retry the plan command."
+  echo "  Direct check: gh pr diff ${PR_NUMBER} --repo ${TARGET_REPO} --name-only"
+  echo "  Refusing to produce an empty plan — would create a fake intake (no files to absorb)."
+  exit 1
+fi
+
+# Classify files
+SAFE_FILES=""
+SAFE_COUNT=0
+MANUAL_FILES=""
+MANUAL_COUNT=0
+PUBLIC_FILES=""
+PUBLIC_COUNT=0
+BRAND_FILES=""
+BRAND_COUNT=0
+HIGH_RISK_FILES=""
+HIGH_RISK_COUNT=0
+PASSTHROUGH_FILES=""
+PASSTHROUGH_COUNT=0
+detect_stateful_migration_quarantine "$FILES"
+
+while IFS= read -r -d '' file; do
+  [ -z "$file" ] && continue
+  if is_public_only "$file"; then
+    PUBLIC_FILES="${PUBLIC_FILES}  ${file}\n"
+    PUBLIC_COUNT=$((PUBLIC_COUNT + 1))
+  elif is_pass_through "$file"; then
+    PASSTHROUGH_FILES="${PASSTHROUGH_FILES}  ${file}\n"
+    PASSTHROUGH_COUNT=$((PASSTHROUGH_COUNT + 1))
+  elif is_brand_sensitive "$file"; then
+    BRAND_FILES="${BRAND_FILES}  ${file}\n"
+    BRAND_COUNT=$((BRAND_COUNT + 1))
+  elif is_high_risk "$file"; then
+    HIGH_RISK_FILES="${HIGH_RISK_FILES}  ${file}\n"
+    HIGH_RISK_COUNT=$((HIGH_RISK_COUNT + 1))
+  elif is_public_source "$file" || is_manual_port "$file"; then
+    MANUAL_FILES="${MANUAL_FILES}  ${file}\n"
+    MANUAL_COUNT=$((MANUAL_COUNT + 1))
+  else
+    SAFE_FILES="${SAFE_FILES}  ${file}\n"
+    SAFE_COUNT=$((SAFE_COUNT + 1))
+  fi
+done < <(printf '%s' "$FILES" | node "$SOURCE_DIR/scripts/lib/intake-brand-paths.mjs" null "$SOURCE_DIR")
+
+# Report
+echo -e "${GREEN}── Intake Classification ──${NC}"
+echo ""
+
+if [ "$SAFE_COUNT" -gt 0 ]; then
+  echo -e "${GREEN}✓ safe-cherry-pick ($SAFE_COUNT files)${NC} — path candidate only; byte proof required"
+  echo -e "$SAFE_FILES"
+fi
+
+if [ "$BRAND_COUNT" -gt 0 ]; then
+  echo -e "${RED}🛡 BRAND GUARD ($BRAND_COUNT files)${NC} — contains brand identity, DO NOT cherry-pick directly!"
+  echo -e "$BRAND_FILES"
+  echo -e "  ${YELLOW}→ Must diff-merge manually: take logic changes, keep cat-cafe brand values${NC}"
+  echo -e "  ${YELLOW}→ After merge, run: bash scripts/intake-from-opensource.sh --validate-inbound${NC}"
+  echo ""
+fi
+
+if [ "$HIGH_RISK_COUNT" -gt 0 ]; then
+  echo -e "${RED}⚠ HIGH-RISK GUARD ($HIGH_RISK_COUNT files)${NC} — route/DI/env/auth/sync surface, do not treat as plain safe-cherry-pick"
+  echo -e "$HIGH_RISK_FILES"
+  echo -e "  ${YELLOW}→ Upgrade to manual-port/manual-merge in the Intake Intent Issue${NC}"
+  echo -e "  ${YELLOW}→ Fill Source Behavior + Must Preserve Home Behavior + Proof${NC}"
+  echo ""
+fi
+
+if [ "$STATEFUL_MIGRATION_QUARANTINE" = true ]; then
+  print_stateful_migration_quarantine
+  if [ "$MODE" = "risk-check" ]; then
+    RISK_SOAK_END_AT=""
+    if [ "$PR_STATE" = "MERGED" ]; then
+      RISK_SOAK_END_AT="$PR_MERGED"
+    fi
+    if ! evaluate_source_head_soak "$PR_INFO" "$RISK_SOAK_END_AT"; then
+      echo -e "  ${RED}Source/fork pre-merge soak: UNVERIFIABLE — cannot resolve the final HEAD or evaluation boundary.${NC}"
+    elif [ "$SOURCE_HEAD_SOAK_STATUS" = "PASS" ]; then
+      echo -e "  ${YELLOW}Source/fork pre-merge soak: PASS — exact HEAD has a ${SOURCE_HEAD_SOAK_DAYS}-day durable GitHub witness; the 1224-class HOLD still requires maintainer disposition and proofs.${NC}"
+    elif [ "$SOURCE_HEAD_SOAK_STATUS" = "UNVERIFIABLE" ]; then
+      echo -e "  ${RED}Source/fork pre-merge soak: UNVERIFIABLE — no durable check/review witness binds the exact final HEAD.${NC}"
+      echo "  Commit timestamps do not start the clock; run an exact-HEAD check or review to create a witness."
+    elif [ "$PR_STATE" = "MERGED" ]; then
+      echo -e "  ${RED}Source/fork pre-merge soak: MISSED — exact HEAD was witnessed for only ${SOURCE_HEAD_SOAK_DAYS} full day(s) before public merge.${NC}"
+      echo "  Post-merge waiting cannot turn MISSED into PASS; record the disposition and keep all migration proofs."
+    else
+      echo -e "  ${RED}Source/fork pre-merge soak: INCOMPLETE — exact HEAD has a ${SOURCE_HEAD_SOAK_DAYS}-day durable GitHub witness; a new final SHA resets the clock.${NC}"
+    fi
+  fi
+  echo ""
+fi
+
+if [ "$MANUAL_COUNT" -gt 0 ]; then
+  echo -e "${YELLOW}⚠ manual-port ($MANUAL_COUNT files)${NC} — has outbound transforms, review diff manually"
+  echo -e "$MANUAL_FILES"
+fi
+
+if [ "$PUBLIC_COUNT" -gt 0 ]; then
+  echo -e "${BLUE}○ public-only ($PUBLIC_COUNT files)${NC} — skip (generated/replaced during sync)"
+  echo -e "$PUBLIC_FILES"
+fi
+
+if [ "$PASSTHROUGH_COUNT" -gt 0 ]; then
+  echo -e "${BLUE}○ pass-through ($PASSTHROUGH_COUNT files)${NC} — exempt from intake (not a managed sync root)"
+  echo -e "$PASSTHROUGH_FILES"
+fi
+
+echo ""
+echo -e "${BLUE}── Summary ──${NC}"
+echo "  Total files: $((SAFE_COUNT + BRAND_COUNT + HIGH_RISK_COUNT + MANUAL_COUNT + PUBLIC_COUNT + PASSTHROUGH_COUNT))"
+echo -e "  ${GREEN}Safe:${NC}   $SAFE_COUNT  (path candidates; NOT mechanical approval)"
+if [ "$BRAND_COUNT" -gt 0 ]; then
+  echo -e "  ${RED}Brand:${NC} $BRAND_COUNT  (🛡 manual diff-merge only!)"
+fi
+if [ "$HIGH_RISK_COUNT" -gt 0 ]; then
+  echo -e "  ${RED}High-risk:${NC} $HIGH_RISK_COUNT  (manual-port + preserve proof)"
+fi
+echo -e "  ${YELLOW}Manual:${NC} $MANUAL_COUNT  (needs human review)"
+echo -e "  ${BLUE}Skip:${NC}   $PUBLIC_COUNT  (public-only)"
+if [ "$PASSTHROUGH_COUNT" -gt 0 ]; then
+  echo -e "  ${BLUE}Pass:${NC}   $PASSTHROUGH_COUNT  (exempt)"
+fi
+
+if [ "$MODE" = "risk-check" ]; then
+  echo ""
+  if [ "$STATEFUL_MIGRATION_QUARANTINE" = true ]; then
+    echo -e "${RED}✗ 1224-class risk-check failed closed.${NC}"
+    exit 2
+  fi
+  echo -e "${GREEN}✓ No 1224-class stateful migration risk detected.${NC}"
+  exit 0
+fi
+
+if [ "$MODE" = "plan" ]; then
+  echo ""
+  echo "── Mechanical eligibility (separate from path candidates) ──"
+  if git -C "$SOURCE_DIR" rev-parse --verify origin/main >/dev/null 2>&1 && git -C "$TARGET_DIR" rev-parse --verify HEAD >/dev/null 2>&1; then
+    if ! node "$SOURCE_DIR/scripts/intake-mechanical.mjs" --pr "$PR_NUMBER" --mode=plan; then
+      echo "Mechanical eligibility: INSUFFICIENT — retain manual review; no writer is admitted."
+    fi
+  else
+    echo "Mechanical eligibility: UNPROVED — source/home Git baselines unavailable; retain manual review."
+  fi
+  echo ""
+  echo -e "${BLUE}── Recommended Actions ──${NC}"
+  if [ "$BRAND_COUNT" -gt 0 ]; then
+    echo -e "  ${RED}0. 🛡 BRAND GUARD: Manually diff-merge $BRAND_COUNT brand-sensitive file(s)${NC}"
+    echo "     Compare clowder-ai version with cat-cafe version, keep cat-cafe brand values"
+    echo "     Run: bash scripts/intake-from-opensource.sh --validate-inbound"
+  fi
+  if [ "$HIGH_RISK_COUNT" -gt 0 ]; then
+    echo -e "  ${RED}0. ⚠ HIGH-RISK GUARD: Treat $HIGH_RISK_COUNT high-risk file(s) as manual-port/manual-merge${NC}"
+    echo "     Write Source Behavior + Must Preserve Home Behavior + Proof in the Intake Intent Issue"
+  fi
+  if [ "$SAFE_COUNT" -gt 0 ]; then
+    echo "  1. Cherry-pick safe files from clowder-ai PR #$PR_NUMBER"
+    echo "     Prove first: --mode=mechanical-plan; authorized execution: --mode=apply --config <file>"
+  fi
+  if [ "$MANUAL_COUNT" -gt 0 ]; then
+    echo "  2. Manually review and port transformed files"
+    echo "     Compare clowder-ai diff with cat-cafe source"
+  fi
+  echo "  3. Default lane: open the cat-cafe absorb PR with PR body lines:"
+  echo "     Closes #<IntakeIntentIssue>   (one line per issue; auto-close on merge)"
+  echo "  4. Record decision:"
+  echo "     default lane:"
+  echo "       --record --pr $PR_NUMBER --decision absorbed --intent-issue <I> --absorb-pr <P> --review-proof <URL|file>"
+  echo "       (review-proof must explicitly cover current absorb PR HEAD SHA)"
+  echo "     exception lane (direct-main historical backfill / outbound-filed hotfix):"
+  echo "       --record --pr $PR_NUMBER --decision absorbed --skip-absorbed-guard"
+  echo "       (issue / absorb PR / review-proof may be omitted; keep backfill note truthful)"
+  echo "     (or: --decision public-only | --decision rejected)"
+  echo "  5. After all PRs recorded: --advance-ledger"
+  echo "  6. Default lane only: after absorb PR merge, confirm the Intake Intent Issue is closed"
+fi

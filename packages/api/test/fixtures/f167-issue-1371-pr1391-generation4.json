@@ -1,0 +1,32 @@
+{
+  "leaseId": "52752674-4234-4f23-97fd-8bcb25c86025",
+  "tenantScope": "default-user",
+  "subjectRef": "pr:zts212653/clowder-ai#1391",
+  "actionFamily": "review",
+  "successorSlot": "reviewer",
+  "mode": "single",
+  "holderCatIds": ["codex-sol"],
+  "holderThreadId": "thread_mp3ab0r9xqxrkrc5",
+  "predecessorCatId": "fable-5",
+  "predecessorThreadId": "thread_msue27hp8grwfwwj",
+  "dispatchId": "cross-post:f300-pr1391-replace-gen3-v1",
+  "generation": 4,
+  "status": "replaceable",
+  "terminalPredicate": {
+    "kind": "review_delivered",
+    "headSha": "ea25d80245c73b0c396d55ecd9f80615122e3401",
+    "freshnessKey": "head:ea25d80245c73b0c396d55ecd9f80615122e3401"
+  },
+  "holderOutcomes": {
+    "codex-sol": {
+      "outcome": "canceled",
+      "evidenceRef": "queue:cross-post:f300-pr1391-replace-gen3-v1:codex-sol:canceled",
+      "at": 1787628192678
+    }
+  },
+  "grounding": {
+    "source": "read-only Redis 6399 observation",
+    "observedOn": "2026-08-24",
+    "trackingTaskPresent": false
+  }
+}

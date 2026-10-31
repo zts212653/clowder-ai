@@ -1,169 +1,680 @@
+import { advanceEntrustedTaskAuthority } from '../ports/EntrustedWorkRevision.js';
+import { reconcilePluginWaitTaskMutation } from '../ports/TaskPluginWait.js';
+import type { ReplacePluginWaitInput } from '../ports/TaskStoreContract.js';
 /**
  * Redis Task Store (毛线球)
  * Redis-backed task storage with same interface as in-memory TaskStore.
  *
+ * #320: Unified model — PR tracking merged into Task system.
+ *
  * Redis 数据结构:
  *   cat-cafe:task:{taskId}              → Hash (任务详情)
  *   cat-cafe:tasks:thread:{threadId}    → Sorted Set (每线程任务列表, score=createdAt)
+ *   cat-cafe:tasks:kind:{kind}          → Sorted Set (按类型索引, score=createdAt)
+ *   cat-cafe:tasks:subject:{subjectKey} → String (subject→taskId 唯一映射)
  *
- * TTL 默认 30 天。
+ * TTL: 30 days default. Tracking tasks (pr_tracking/issue_tracking) with status!=done have no TTL.
  */
 
-import type { CatId, CreateTaskInput, TaskItem, UpdateTaskInput } from '@cat-cafe/shared';
+import type {
+  AutomationState,
+  CreateTaskInput,
+  DevelopmentScopeV1,
+  ManagedWorkBinding,
+  TaskItem,
+  TaskKind,
+  UpdateTaskInput,
+} from '@cat-cafe/shared';
+import { isTrackingKind } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import { generateSortableId } from '../ports/MessageStore.js';
+import {
+  assertTypedWaitRegistrationInstallation,
+  TYPED_WAIT_REGISTRATION_FIELD,
+  type TypedWaitRegistrationSnapshot,
+} from '../../../../ball-custody/TypedWaitRegistration.js';
+import type { DevelopmentWorkTransition } from '../ports/DevelopmentWorkTransition.js';
+import type { AttachEntrustedWorkArtifactInput } from '../ports/EntrustedWorkArtifactEvidence.js';
+import { advanceOrdinaryTaskAssignment, type OrdinaryTaskMutation } from '../ports/OrdinaryTaskMutation.js';
+import { automationGeneration, mergeTaskAutomationState } from '../ports/TaskAutomationState.js';
+import type { EntrustedTaskDataControllerTransition } from '../ports/TaskDataControllerTransition.js';
+import { reconcileDeploymentWaitTaskMutation } from '../ports/TaskDeploymentWaitState.js';
+import { createEntrustedTaskItem, createGenericTaskItem } from '../ports/TaskItemFactory.js';
 import type { ITaskStore } from '../ports/TaskStore.js';
+import {
+  type AdmitEntrustedWorkStoreInput,
+  type AdmitEntrustedWorkStoreResult,
+  assertEntrustedWorkGenericUpdateAllowed,
+  assertEntrustedWorkGenericUpsertAllowed,
+  assertEntrustedWorkReplayCompatible,
+  assertEntrustedWorkStatusUpdateAllowed,
+  assertGenericTaskSubjectNamespaceAllowed,
+  type CloseEntrustedWorkStoreInput,
+  type CloseEntrustedWorkStoreResult,
+  createTaskSubjectAlreadyExistsError,
+  isEntrustedWorkSubjectKey,
+  type ReplaceAutomationStateIfGenerationInput,
+  type ReplaceDeploymentWaitIfGenerationInput,
+  type TaskMutationWriteFence,
+  type TaskSubjectUpsertCondition,
+  type UpdateEntrustedWorkStoreInput,
+  type UpdateEntrustedWorkStoreResult,
+} from '../ports/TaskStoreContract.js';
+import { buildSubjectTaskUpdate } from '../ports/TaskSubjectUpsert.js';
+import { buildTaskWaitReplacement } from '../ports/TaskWaitReplacement.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
+import { DEPLOYMENT_WAIT_INDEX, listDeploymentWaitProjectionCandidates } from './deployment-wait-index.js';
+import { mutateOrdinaryRedisTask } from './RedisOrdinaryTaskMutation.js';
+import { hydrateTask, hydrateWaitRegistration, serializeTask } from './RedisTaskCodec.js';
+import { fetchRedisTasksByIds, readRedisTaskThreadPage } from './RedisTaskCollectionReader.js';
+import { RedisTaskDataControllerStore } from './RedisTaskDataControllerStore.js';
+import { RedisTaskDevelopmentWorkStore } from './RedisTaskDevelopmentWorkStore.js';
+import { RedisTaskEntrustedWorkMutationStore } from './RedisTaskEntrustedWorkMutationStore.js';
+import { deleteGenericTasks } from './RedisTaskGenericDeletion.js';
+import { RedisTaskManagedWorkBindingStore } from './RedisTaskManagedWorkBindingStore.js';
+import { RedisTaskManagedWorkRegistrationStore } from './RedisTaskManagedWorkRegistrationStore.js';
+import {
+  type AtomicSubjectCreateResult,
+  createEntrustedTaskWithPolicy,
+  tryCreateTaskWithAtomicSubject,
+  upsertTaskWithSubjectSnapshot,
+  writeTaskForSubjectOwner,
+} from './RedisTaskSubjectTransactions.js';
+import { replaceDeploymentWaitInSession, replacePluginWait } from './RedisTaskWaitTransactions.js';
+import { runWithExclusiveRedisWatchSession } from './RedisWatchSession.js';
 
-const DEFAULT_TTL = 30 * 24 * 60 * 60; // 30 days
+const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
+const MAX_SUBJECT_LOOKUP_NULL_RETRIES = 3;
+const MAX_MISSING_TASK_RETRIES = 3;
+const MAX_AUTOMATION_STATE_PATCH_RETRIES = 5;
+const MAX_CONDITIONAL_TASK_UPDATE_RETRIES = 5;
+const MAX_ANCHOR_LIFETIME_RECONCILIATION_RETRIES = 5;
+const MAX_UNIQUE_SUBJECT_CREATE_RETRIES = 8;
 
 export class RedisTaskStore implements ITaskStore {
+  async mutateOrdinaryTask(command: OrdinaryTaskMutation, writeFence?: TaskMutationWriteFence) {
+    const result = await mutateOrdinaryRedisTask(this.redis, command, writeFence);
+    if (result.kind === 'updated') await this.applyTtl(result.task);
+    return result;
+  }
+  async replacePluginWait(taskId: string, input: ReplacePluginWaitInput): Promise<TaskItem | null> {
+    return replacePluginWait(this.redis, taskId, input);
+  }
+
+  async getWaitRegistration(taskId: string): Promise<TypedWaitRegistrationSnapshot | null> {
+    return hydrateWaitRegistration(await this.redis.hgetall(TaskKeys.detail(taskId)));
+  }
   private readonly redis: RedisClient;
-  /** null means no expiration. */
+  private readonly developmentWork: RedisTaskDevelopmentWorkStore;
+  private readonly dataControllers: RedisTaskDataControllerStore;
+  findDevelopmentWork(userId: string, scope: DevelopmentScopeV1) {
+    return this.developmentWork.find(userId, scope);
+  }
+  transitionDevelopmentWork(input: DevelopmentWorkTransition) {
+    return this.developmentWork.transition(input);
+  }
+  hasDevelopmentSource(query: import('../ports/DevelopmentWorkTransition.js').DevelopmentSourceQuery) {
+    return this.developmentWork.hasSource(query);
+  }
   private readonly ttlSeconds: number | null;
+  private readonly managedWorkBindings: RedisTaskManagedWorkBindingStore;
+  private readonly managedWorkRegistration: RedisTaskManagedWorkRegistrationStore;
+  private readonly entrustedWorkMutations: RedisTaskEntrustedWorkMutationStore;
 
   constructor(redis: RedisClient, options?: { ttlSeconds?: number }) {
     this.redis = redis;
-    const ttl = options?.ttlSeconds;
-    if (ttl === undefined) {
-      this.ttlSeconds = DEFAULT_TTL;
-    } else if (!Number.isFinite(ttl)) {
-      this.ttlSeconds = DEFAULT_TTL;
-    } else if (ttl <= 0) {
+    this.developmentWork = new RedisTaskDevelopmentWorkStore(redis);
+    this.dataControllers = new RedisTaskDataControllerStore(
+      redis,
+      (task) => this.applyTtl(task),
+      () => this.waitForInFlightTaskWrite(),
+    );
+    this.managedWorkBindings = new RedisTaskManagedWorkBindingStore(redis);
+    this.managedWorkRegistration = new RedisTaskManagedWorkRegistrationStore(redis, {
+      mergeAutomationState: mergeTaskAutomationState,
+      applyThreadTtl: (threadId) => this.applyThreadTtl(threadId),
+      compareAndDeleteSubject: (subjectKey, staleTaskId) => this.compareAndDeleteSubject(subjectKey, staleTaskId),
+      waitForInFlightTaskWrite: () => this.waitForInFlightTaskWrite(),
+    });
+    this.entrustedWorkMutations = new RedisTaskEntrustedWorkMutationStore(
+      redis,
+      (task) => this.applyTtl(task),
+      () => this.waitForInFlightTaskWrite(),
+    );
+    const raw = options?.ttlSeconds ?? DEFAULT_TTL;
+    if (!Number.isFinite(raw) || raw <= 0) {
       this.ttlSeconds = null;
     } else {
-      this.ttlSeconds = Math.floor(ttl);
+      this.ttlSeconds = Math.floor(raw);
     }
   }
 
+  transitionEntrustedTaskDataController(
+    input: EntrustedTaskDataControllerTransition,
+    writeFence?: TaskMutationWriteFence,
+  ) {
+    return this.dataControllers.transition(input, writeFence);
+  }
+
   async create(input: CreateTaskInput): Promise<TaskItem> {
-    const now = Date.now();
-    const task: TaskItem = {
-      id: generateSortableId(now),
-      threadId: input.threadId,
-      title: input.title,
-      ownerCatId: input.ownerCatId ?? null,
-      status: 'todo',
-      why: input.why,
-      createdBy: input.createdBy,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    const key = TaskKeys.detail(task.id);
-    const pipeline = this.redis.multi();
-    pipeline.hset(key, this.serializeTask(task));
-    if (this.ttlSeconds !== null) {
-      pipeline.expire(key, this.ttlSeconds);
+    const subjectKey = input.subjectKey;
+    if (subjectKey) {
+      assertGenericTaskSubjectNamespaceAllowed(subjectKey);
+      return this.createWithUniqueSubject(input);
     }
-    pipeline.zadd(TaskKeys.thread(task.threadId), String(now), task.id);
-    if (this.ttlSeconds !== null) {
-      pipeline.expire(TaskKeys.thread(task.threadId), this.ttlSeconds);
-    }
-    await pipeline.exec();
 
+    const task = createGenericTaskItem(input);
+    await this.writeTask(task);
     return task;
+  }
+
+  private async createWithUniqueSubject(input: CreateTaskInput): Promise<TaskItem> {
+    const subjectKey = input.subjectKey;
+    if (!subjectKey) throw new Error('createWithUniqueSubject requires a subject key');
+
+    let missingTaskRetries = 0;
+    for (let attempt = 0; attempt < MAX_UNIQUE_SUBJECT_CREATE_RETRIES; attempt += 1) {
+      const task = createGenericTaskItem(input);
+      const result = await this.tryAtomicSubjectCreate(task);
+      if (result === 'created') return task;
+      if (result === 'task_id_exists') continue;
+
+      const existingId = await this.redis.get(TaskKeys.subject(subjectKey));
+      if (!existingId) {
+        await this.waitForInFlightTaskWrite();
+        continue;
+      }
+      const existing = await this.get(existingId);
+      if (existing) throw createTaskSubjectAlreadyExistsError(subjectKey);
+
+      if (missingTaskRetries < MAX_MISSING_TASK_RETRIES) {
+        missingTaskRetries += 1;
+        await this.waitForInFlightTaskWrite();
+        continue;
+      }
+      await this.compareAndDeleteSubject(subjectKey, existingId);
+      missingTaskRetries = 0;
+    }
+
+    throw new Error(`RedisTaskStore create: failed to establish unique subject ${subjectKey}`);
+  }
+
+  private async tryAtomicSubjectCreate(task: TaskItem): Promise<AtomicSubjectCreateResult> {
+    const result = await tryCreateTaskWithAtomicSubject(this.redis, task);
+    if (result === 'created') await this.applyTtl(task);
+    return result;
   }
 
   async get(taskId: string): Promise<TaskItem | null> {
     const data = await this.redis.hgetall(TaskKeys.detail(taskId));
-    if (!data || !data.id) return null;
-    return this.hydrateTask(data);
+    if (!data || !data.id) {
+      await this.redis.del(TaskKeys.managedWorkBinding(taskId));
+      return null;
+    }
+    return hydrateTask(data);
+  }
+
+  async getBySubject(subjectKey: string): Promise<TaskItem | null> {
+    const taskId = await this.redis.get(TaskKeys.subject(subjectKey));
+    if (!taskId) return null;
+    const task = await this.get(taskId);
+    if (task) return task;
+    await this.compareAndDeleteSubject(subjectKey, taskId);
+    return null;
+  }
+
+  async upsertBySubject(input: CreateTaskInput, condition?: TaskSubjectUpsertCondition): Promise<TaskItem> {
+    const subjectKey = input.subjectKey;
+    if (subjectKey && isEntrustedWorkSubjectKey(subjectKey)) {
+      const existingId = await this.redis.get(TaskKeys.subject(subjectKey));
+      if (existingId) {
+        const existing = await this.get(existingId);
+        if (existing) assertEntrustedWorkGenericUpsertAllowed(existing);
+      }
+      assertGenericTaskSubjectNamespaceAllowed(subjectKey);
+    }
+    if (!subjectKey) {
+      if (condition) throw new Error('Conditional subject upsert requires a subject key');
+      return this.create(input);
+    }
+    if (condition) {
+      const updated = await upsertTaskWithSubjectSnapshot(this.redis, input, condition);
+      await this.applyTtl(updated);
+      if (condition.expected && condition.expected.threadId !== updated.threadId) {
+        await this.applyThreadTtl(condition.expected.threadId);
+      }
+      return updated;
+    }
+
+    const existingId = await this.redis.get(TaskKeys.subject(subjectKey));
+    if (!existingId) {
+      return this.createWithUniqueSubject(input);
+    }
+    return this.upsertExistingSubject(input, existingId, 0);
+  }
+
+  async upsertBySubjectWithManagedWorkBinding(input: CreateTaskInput, binding: ManagedWorkBinding): Promise<TaskItem> {
+    return this.managedWorkRegistration.upsert(input, binding);
+  }
+
+  private async upsertExistingSubject(
+    input: CreateTaskInput,
+    existingId: string,
+    missingTaskRetries: number,
+    writeRetries = 0,
+  ): Promise<TaskItem> {
+    const sk = input.subjectKey;
+    if (!sk) throw new Error('upsertExistingSubject requires a subject key');
+
+    const existing = await this.get(existingId);
+    if (!existing) {
+      if (missingTaskRetries < MAX_MISSING_TASK_RETRIES) {
+        await this.waitForInFlightTaskWrite();
+        return this.upsertExistingSubject(input, existingId, missingTaskRetries + 1);
+      }
+      await this.compareAndDeleteSubject(sk, existingId);
+      return this.createWithUniqueSubject(input);
+    }
+
+    const updated = buildSubjectTaskUpdate(sk, existing, input);
+
+    const written = await writeTaskForSubjectOwner(this.redis, existing, updated);
+    if (written === 'stale') {
+      if (writeRetries >= MAX_CONDITIONAL_TASK_UPDATE_RETRIES) {
+        throw new Error(`RedisTaskStore upsertBySubject: CAS exhausted for ${existingId}`);
+      }
+      return this.upsertExistingSubject(input, existingId, missingTaskRetries, writeRetries + 1);
+    }
+    if (written === 'subject_mismatch') {
+      throw createTaskSubjectAlreadyExistsError(sk);
+    }
+    await this.applyTtl(updated);
+    if (existing.threadId !== updated.threadId) {
+      await this.redis.zrem(TaskKeys.thread(existing.threadId), existing.id);
+      await this.applyThreadTtl(existing.threadId);
+    }
+    return updated;
+  }
+
+  listDeploymentWaitProjectionCandidates(): Promise<TaskItem[]> {
+    return listDeploymentWaitProjectionCandidates(this.redis);
+  }
+
+  async listByKind(kind: TaskKind): Promise<TaskItem[]> {
+    const ids = await this.redis.zrange(TaskKeys.kind(kind), 0, -1);
+    if (ids.length === 0) return [];
+    return fetchRedisTasksByIds(this.redis, ids, { cleanupKey: TaskKeys.kind(kind) });
+  }
+
+  async patchAutomationState(taskId: string, patch: Partial<AutomationState>): Promise<TaskItem | null> {
+    const key = TaskKeys.detail(taskId);
+    for (let attempt = 0; attempt < MAX_AUTOMATION_STATE_PATCH_RETRIES; attempt += 1) {
+      const outcome = await runWithExclusiveRedisWatchSession<TaskItem | null | undefined>(
+        this.redis,
+        key,
+        async (session) => {
+          const data = await session.hgetall(key);
+          if (!data || !data.id) {
+            return null;
+          }
+
+          const existing = hydrateTask(data);
+          const updated = advanceEntrustedTaskAuthority(existing, {
+            ...existing,
+            automationState: mergeTaskAutomationState(existing.automationState, patch),
+            updatedAt: Date.now(),
+          });
+
+          const pipeline = session.multi();
+          pipeline.hset(key, serializeTask(updated));
+          const result = await pipeline.exec();
+          return result ? updated : undefined;
+        },
+      );
+      if (outcome !== undefined) return outcome;
+      await this.waitForInFlightTaskWrite();
+    }
+
+    throw new Error(`RedisTaskStore patchAutomationState: failed to apply atomic patch for ${taskId}`);
+  }
+
+  async bindManagedWorkBinding(taskId: string, binding: ManagedWorkBinding): Promise<ManagedWorkBinding | null> {
+    return this.managedWorkBindings.bind(taskId, binding);
+  }
+
+  async getManagedWorkBinding(taskId: string): Promise<ManagedWorkBinding | null> {
+    return this.managedWorkBindings.get(taskId);
+  }
+
+  async admitEntrustedWork(input: AdmitEntrustedWorkStoreInput): Promise<AdmitEntrustedWorkStoreResult> {
+    if (input.entrustedWork.developmentScope) throw new Error('Development scope requires its typed Task action');
+    if (input.createOptions) return createEntrustedTaskWithPolicy(this.redis, input);
+    return this.admitEntrustedWorkInternal(input, 0, 0);
+  }
+
+  private async admitEntrustedWorkInternal(
+    input: AdmitEntrustedWorkStoreInput,
+    missingTaskRetries: number,
+    subjectLookupNullRetries: number,
+  ): Promise<AdmitEntrustedWorkStoreResult> {
+    const task = createEntrustedTaskItem(input);
+    const result = await this.tryAtomicSubjectCreate(task);
+
+    if (result === 'created') {
+      return { kind: 'admitted', task };
+    }
+    if (result === 'task_id_exists') return this.admitEntrustedWorkInternal(input, 0, 0);
+
+    const existingId = await this.redis.get(TaskKeys.subject(input.subjectKey));
+    if (!existingId) {
+      if (subjectLookupNullRetries >= MAX_SUBJECT_LOOKUP_NULL_RETRIES) {
+        throw new Error(
+          `RedisTaskStore admitEntrustedWork: subject lookup kept returning null for ${input.subjectKey}`,
+        );
+      }
+      await this.waitForInFlightTaskWrite();
+      return this.admitEntrustedWorkInternal(input, missingTaskRetries, subjectLookupNullRetries + 1);
+    }
+
+    const existing = await this.get(existingId);
+    if (!existing) {
+      if (missingTaskRetries < MAX_MISSING_TASK_RETRIES) {
+        await this.waitForInFlightTaskWrite();
+        return this.admitEntrustedWorkInternal(input, missingTaskRetries + 1, 0);
+      }
+      await this.compareAndDeleteSubject(input.subjectKey, existingId);
+      return this.admitEntrustedWorkInternal(input, 0, 0);
+    }
+
+    assertEntrustedWorkReplayCompatible(input.subjectKey, existing, input.entrustedWork);
+    return { kind: 'resumed', task: existing };
+  }
+
+  async closeEntrustedWork(
+    taskId: string,
+    input: CloseEntrustedWorkStoreInput,
+    writeFence?: TaskMutationWriteFence,
+  ): Promise<CloseEntrustedWorkStoreResult> {
+    return this.entrustedWorkMutations.close(taskId, input, writeFence);
+  }
+
+  attachEntrustedWorkArtifactEvidence(taskId: string, input: AttachEntrustedWorkArtifactInput) {
+    return this.entrustedWorkMutations.attachArtifact(taskId, input);
+  }
+
+  async updateEntrustedWork(
+    taskId: string,
+    input: UpdateEntrustedWorkStoreInput,
+    writeFence?: TaskMutationWriteFence,
+  ): Promise<UpdateEntrustedWorkStoreResult> {
+    return this.entrustedWorkMutations.update(taskId, input, writeFence);
+  }
+
+  async replaceAutomationStateIfGeneration(
+    taskId: string,
+    input: ReplaceAutomationStateIfGenerationInput,
+  ): Promise<TaskItem | null> {
+    const key = TaskKeys.detail(taskId);
+    for (let attempt = 0; attempt < MAX_AUTOMATION_STATE_PATCH_RETRIES; attempt += 1) {
+      const outcome = await runWithExclusiveRedisWatchSession<TaskItem | null | undefined>(
+        this.redis,
+        key,
+        async (session) => {
+          // Read the private binding before the Task aggregate. A concurrent
+          // atomic registration may otherwise pair an old Task snapshot with
+          // its new binding and throw before WATCH can reject the stale CAS.
+          const binding = input.trackingRegistration?.managedWorkBinding;
+          if (binding) await session.watch(TaskKeys.managedWorkBinding(taskId));
+          const currentBinding = binding ? await new RedisTaskManagedWorkBindingStore(session).get(taskId) : null;
+          const data = await session.hgetall(key);
+          if (!data || !data.id) {
+            return null;
+          }
+          const existing = hydrateTask(data);
+          assertEntrustedWorkStatusUpdateAllowed(existing, input);
+          if (!this.matchesAutomationReplacementExpectation(existing, input)) {
+            return null;
+          }
+          const updated = buildTaskWaitReplacement(existing, input, currentBinding);
+          if (input.waitRegistration) assertTypedWaitRegistrationInstallation(updated, input.waitRegistration);
+          const pipeline = session.multi();
+          pipeline.hset(key, serializeTask(updated));
+          if (updated.threadId !== existing.threadId) {
+            pipeline.zrem(TaskKeys.thread(existing.threadId), taskId);
+            pipeline.zadd(TaskKeys.thread(updated.threadId), String(updated.createdAt), taskId);
+          }
+          if (binding && !currentBinding) {
+            pipeline.set(
+              TaskKeys.managedWorkBinding(taskId),
+              JSON.stringify({ workId: binding.workId, attemptId: binding.attemptId }),
+            );
+          }
+          if (input.waitRegistration)
+            pipeline.hset(key, TYPED_WAIT_REGISTRATION_FIELD, JSON.stringify(input.waitRegistration));
+          else if (automationGeneration(existing.automationState) !== automationGeneration(updated.automationState)) {
+            pipeline.hdel(key, TYPED_WAIT_REGISTRATION_FIELD);
+          }
+          const result = await pipeline.exec();
+          return result ? updated : undefined;
+        },
+      );
+      if (outcome !== undefined) {
+        if (outcome) await this.applyTtl(outcome);
+        return outcome;
+      }
+      await this.waitForInFlightTaskWrite();
+    }
+    throw new Error(`RedisTaskStore replaceAutomationStateIfGeneration: CAS exhausted for ${taskId}`);
+  }
+
+  async replaceDeploymentWaitIfGeneration(
+    taskId: string,
+    input: ReplaceDeploymentWaitIfGenerationInput,
+  ): Promise<TaskItem | null> {
+    const key = TaskKeys.detail(taskId);
+    for (let attempt = 0; attempt < MAX_AUTOMATION_STATE_PATCH_RETRIES; attempt += 1) {
+      const outcome = await runWithExclusiveRedisWatchSession<TaskItem | null | undefined>(this.redis, key, (session) =>
+        replaceDeploymentWaitInSession(session, key, input),
+      );
+      if (outcome !== undefined) {
+        if (outcome) await this.applyTtl(outcome);
+        return outcome;
+      }
+      await this.waitForInFlightTaskWrite();
+    }
+    throw new Error(`RedisTaskStore replaceDeploymentWaitIfGeneration: CAS exhausted for ${taskId}`);
   }
 
   async update(taskId: string, input: UpdateTaskInput): Promise<TaskItem | null> {
     const existing = await this.get(taskId);
     if (!existing) return null;
+    // Re-read and fence the entire aggregate: a concurrent typed adoption owns it now.
+    return this.updateIfThreadId(taskId, existing.threadId, input);
+  }
 
-    const updated: TaskItem = {
-      ...existing,
-      ...(input.title !== undefined ? { title: input.title } : {}),
-      ...(input.ownerCatId !== undefined ? { ownerCatId: input.ownerCatId } : {}),
-      ...(input.status !== undefined ? { status: input.status } : {}),
-      ...(input.why !== undefined ? { why: input.why } : {}),
-      updatedAt: Date.now(),
-    };
+  async updateIfThreadId(taskId: string, expectedThreadId: string, input: UpdateTaskInput): Promise<TaskItem | null> {
+    const key = TaskKeys.detail(taskId);
+    for (let attempt = 0; attempt < MAX_CONDITIONAL_TASK_UPDATE_RETRIES; attempt += 1) {
+      const outcome = await runWithExclusiveRedisWatchSession<TaskItem | null | undefined>(
+        this.redis,
+        key,
+        async (session) => {
+          const data = await session.hgetall(key);
+          if (!data || !data.id) {
+            return null;
+          }
 
-    await this.redis.hset(TaskKeys.detail(taskId), this.serializeTask(updated));
-    return updated;
+          const existing = hydrateTask(data);
+          if (existing.threadId !== expectedThreadId) {
+            return null;
+          }
+
+          const updated = this.applyTaskUpdate(existing, input);
+          const pipeline = session.multi();
+          pipeline.hset(key, serializeTask(updated));
+          if (input.threadId !== undefined && input.threadId !== existing.threadId) {
+            pipeline.zrem(TaskKeys.thread(existing.threadId), taskId);
+            pipeline.zadd(TaskKeys.thread(input.threadId), updated.updatedAt, taskId);
+          }
+
+          const result = await pipeline.exec();
+          return result ? updated : undefined;
+        },
+      );
+      if (outcome !== undefined) {
+        if (outcome) await this.applyTtl(outcome);
+        return outcome;
+      }
+      await this.waitForInFlightTaskWrite();
+    }
+
+    throw new Error(`RedisTaskStore updateIfThreadId: failed to apply conditional update for ${taskId}`);
   }
 
   async listByThread(threadId: string): Promise<TaskItem[]> {
     const ids = await this.redis.zrange(TaskKeys.thread(threadId), 0, -1);
     if (ids.length === 0) return [];
+    return fetchRedisTasksByIds(this.redis, ids, { cleanupKey: TaskKeys.thread(threadId) });
+  }
 
-    const pipeline = this.redis.multi();
-    for (const id of ids) {
-      pipeline.hgetall(TaskKeys.detail(id));
-    }
-    const results = await pipeline.exec();
-    if (!results) return [];
-
-    const tasks: TaskItem[] = [];
-    for (const [err, data] of results) {
-      if (err || !data || typeof data !== 'object') continue;
-      const d = data as Record<string, string>;
-      if (!d.id) continue;
-      tasks.push(this.hydrateTask(d));
-    }
-    return tasks;
+  listByThreadPage(threadId: string, limit: number, afterId?: string) {
+    return readRedisTaskThreadPage(this.redis, threadId, limit, afterId);
   }
 
   async delete(taskId: string): Promise<boolean> {
-    const data = await this.redis.hgetall(TaskKeys.detail(taskId));
-    if (!data || !data.id) return false;
+    const task = await this.get(taskId);
+    const deleted = await deleteGenericTasks(this.redis, { taskId });
+    if (task) await this.applyThreadTtl(task.threadId);
+    return deleted > 0;
+  }
 
-    const threadId = data.threadId ?? '';
+  private applyTaskUpdate(existing: TaskItem, input: UpdateTaskInput): TaskItem {
+    assertEntrustedWorkGenericUpdateAllowed(existing);
+    return advanceOrdinaryTaskAssignment(
+      existing,
+      reconcilePluginWaitTaskMutation(
+        existing,
+        reconcileDeploymentWaitTaskMutation(
+          existing,
+          {
+            ...existing,
+            ...(input.title !== undefined ? { title: input.title } : {}),
+            ...(input.ownerCatId !== undefined ? { ownerCatId: input.ownerCatId } : {}),
+            ...(input.status !== undefined ? { status: input.status } : {}),
+            ...(input.why !== undefined ? { why: input.why } : {}),
+            ...(input.automationState !== undefined ? { automationState: input.automationState } : {}),
+            ...(input.probe !== undefined ? { probe: input.probe } : {}),
+            ...(input.resolveMode !== undefined ? { resolveMode: input.resolveMode } : {}),
+            // Generic task move support: callers that change threadId own the UX contract.
+            ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
+            // F193-E1 P1-4: allow patching dispatchGate
+            ...(input.dispatchGate !== undefined ? { dispatchGate: input.dispatchGate } : {}),
+            updatedAt: Date.now(),
+          },
+          { statusIsExplicit: input.status !== undefined },
+        ),
+      ),
+    );
+  }
+
+  async deleteByThread(threadId: string): Promise<number> {
+    return deleteGenericTasks(this.redis, { threadId });
+  }
+
+  // --- private helpers ---
+
+  private async writeTask(task: TaskItem, options?: { syncSubject?: boolean }): Promise<boolean> {
+    const subjectKey = task.subjectKey;
+    const key = TaskKeys.detail(task.id);
+
     const pipeline = this.redis.multi();
-    pipeline.del(TaskKeys.detail(taskId));
-    if (threadId) {
-      pipeline.zrem(TaskKeys.thread(threadId), taskId);
+    pipeline.hset(key, serializeTask(task));
+    pipeline.zadd(TaskKeys.thread(task.threadId), String(task.createdAt), task.id);
+    pipeline.zadd(TaskKeys.kind(task.kind), String(task.createdAt), task.id);
+    if ((options?.syncSubject ?? true) && subjectKey) {
+      pipeline.set(TaskKeys.subject(subjectKey), task.id);
     }
     await pipeline.exec();
+    await this.applyTtl(task);
     return true;
   }
 
-  /** Delete all tasks in a thread. Returns count of deleted tasks. */
-  async deleteByThread(threadId: string): Promise<number> {
-    const key = TaskKeys.thread(threadId);
-    const ids = await this.redis.zrange(key, 0, -1);
-    if (ids.length === 0) return 0;
+  private async waitForInFlightTaskWrite(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
 
-    const pipeline = this.redis.multi();
-    for (const id of ids) {
-      pipeline.del(TaskKeys.detail(id));
+  private matchesAutomationReplacementExpectation(
+    existing: TaskItem,
+    input: ReplaceAutomationStateIfGenerationInput,
+  ): boolean {
+    if (input.expectedUpdatedAt !== undefined && existing.updatedAt !== input.expectedUpdatedAt) return false;
+    return automationGeneration(existing.automationState) === input.expectedGeneration;
+  }
+
+  /** Tracking tasks (pr_tracking/issue_tracking) with status!=done never expire; others get default TTL. */
+  private async applyTtl(task: TaskItem): Promise<void> {
+    if (this.ttlSeconds === null) return;
+    let current = task;
+    for (let attempt = 0; attempt < MAX_ANCHOR_LIFETIME_RECONCILIATION_RETRIES; attempt += 1) {
+      const mode =
+        current.entrustedWork?.developmentScope ||
+        current.entrustedWork?.dataController ||
+        current.deploymentWait ||
+        (isTrackingKind(current.kind) && current.status !== 'done')
+          ? 'persist'
+          : 'expire';
+      const result = await this.managedWorkBindings.applyAnchorLifetime(current.id, mode, this.ttlSeconds, {
+        updatedAt: current.updatedAt,
+        status: current.status,
+      });
+      if (result !== 'stale') {
+        await this.applyThreadTtl(current.threadId);
+        return;
+      }
+
+      const latest = await this.get(current.id);
+      if (!latest) {
+        await this.applyThreadTtl(current.threadId);
+        return;
+      }
+      current = latest;
     }
-    pipeline.del(key);
-    await pipeline.exec();
 
-    return ids.length;
+    throw new Error(`RedisTaskStore applyTtl: task ${task.id} kept changing during lifetime reconciliation`);
   }
 
-  private serializeTask(task: TaskItem): Record<string, string> {
-    return {
-      id: task.id,
-      threadId: task.threadId,
-      title: task.title,
-      ownerCatId: task.ownerCatId ?? '',
-      status: task.status,
-      why: task.why,
-      createdBy: task.createdBy,
-      createdAt: String(task.createdAt),
-      updatedAt: String(task.updatedAt),
-    };
+  private async applyThreadTtl(threadId: string): Promise<void> {
+    if (this.ttlSeconds === null) return;
+    const threadKey = TaskKeys.thread(threadId);
+
+    // Fence both membership and adoption: an old generic snapshot cannot expire a scoped index.
+    for (let attempt = 0; attempt < MAX_ANCHOR_LIFETIME_RECONCILIATION_RETRIES; attempt++) {
+      const committed = await runWithExclusiveRedisWatchSession(this.redis, threadKey, async (session) => {
+        const ids = await session.zrange(threadKey, 0, -1);
+        let durable = false;
+        for (const id of ids) {
+          await session.watch(TaskKeys.detail(id));
+          const raw = await session.hgetall(TaskKeys.detail(id));
+          if (!raw.id) continue;
+          const item = hydrateTask(raw);
+          if (item.entrustedWork?.developmentScope || (isTrackingKind(item.kind) && item.status !== 'done'))
+            durable = true;
+        }
+        const tx = session.multi();
+        if (durable) tx.persist(threadKey);
+        else tx.expire(threadKey, this.ttlSeconds ?? 0);
+        return await tx.exec();
+      });
+      if (committed) return;
+    }
+    throw new Error(`Task thread lifetime contention: ${threadId}`);
   }
 
-  private hydrateTask(data: Record<string, string>): TaskItem {
-    return {
-      id: data.id ?? '',
-      threadId: data.threadId ?? '',
-      title: data.title ?? '',
-      ownerCatId: (data.ownerCatId || null) as CatId | null,
-      status: (data.status ?? 'todo') as TaskItem['status'],
-      why: data.why ?? '',
-      createdBy: (data.createdBy ?? 'user') as TaskItem['createdBy'],
-      createdAt: parseInt(data.createdAt ?? '0', 10),
-      updatedAt: parseInt(data.updatedAt ?? '0', 10),
-    };
+  private async compareAndDeleteSubject(subjectKey: string, staleTaskId: string): Promise<void> {
+    await this.redis.eval(
+      "if redis.call('get', KEYS[1]) == ARGV[1] then redis.call('del', KEYS[1]) return 1 end return 0",
+      1,
+      TaskKeys.subject(subjectKey),
+      staleTaskId,
+    );
   }
 }

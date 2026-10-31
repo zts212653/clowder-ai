@@ -4,10 +4,11 @@
  * 从 messages.ts 提取，降低文件复杂度。
  */
 
-import type { ImageContent, MessageContent, TextContent } from '@cat-cafe/shared';
+import type { FileContent, ImageContent, MessageContent } from '@cat-cafe/shared';
 import type { Multipart } from '@fastify/multipart';
+import { isImageFile, saveUploadedFiles, type UploadFileEntry } from '../utils/file-storage.js';
 import { ImageUploadError, saveUploadedImages, type UploadImageFile } from './image-upload.js';
-import { sendMessageSchema } from './messages.schema.js';
+import { buildMessageContentBlocks, sendMessageSchema } from './messages.schema.js';
 
 export type ParsedMultipart =
   | {
@@ -15,10 +16,14 @@ export type ParsedMultipart =
       userId?: string;
       threadId?: string;
       idempotencyKey?: string;
+      composerDraftRevision?: number;
       contentBlocks: MessageContent[];
       visibility?: string;
       whisperTo?: string[];
-      deliveryMode?: 'immediate' | 'queue' | 'force';
+      mentions?: string[];
+      messageDisposition?: 'continue_current' | 'next_work';
+      /** #699: ID of message being replied to (quote). */
+      replyTo?: string;
     }
   | { error: string };
 
@@ -29,27 +34,29 @@ export async function parseMultipart(
 ): Promise<ParsedMultipart> {
   // F35: Use string | string[] to support multi-value fields like whisperTo
   const fields: Record<string, string | string[]> = {};
-  const files: UploadImageFile[] = [];
+  const imageFiles: UploadImageFile[] = [];
+  const otherFiles: UploadFileEntry[] = [];
 
   for await (const part of request.parts()) {
     if (part.type === 'field' && typeof part.value === 'string') {
       const existing = fields[part.fieldname];
       if (existing !== undefined) {
-        // Multi-value field (e.g. whisperTo): collect into array
         fields[part.fieldname] = Array.isArray(existing) ? [...existing, part.value] : [existing, part.value];
       } else {
         fields[part.fieldname] = part.value;
       }
     } else if (part.type === 'file') {
-      // IMPORTANT: multipart file streams must be drained during iteration.
-      // If we defer `toBuffer()` until after the loop, parser may block waiting
-      // for this stream to be consumed and request hangs.
       const buffer = await part.toBuffer();
-      files.push({
+      const entry = {
         filename: part.filename,
         mimetype: part.mimetype,
         toBuffer: async () => buffer,
-      });
+      };
+      if (isImageFile(part.mimetype)) {
+        imageFiles.push(entry);
+      } else {
+        otherFiles.push(entry);
+      }
     }
   }
 
@@ -57,20 +64,39 @@ export async function parseMultipart(
   if (fields.whisperTo !== undefined && !Array.isArray(fields.whisperTo)) {
     fields.whisperTo = [fields.whisperTo];
   }
+  if (fields.mentions !== undefined && !Array.isArray(fields.mentions)) {
+    fields.mentions = [fields.mentions];
+  }
+
+  // F294 v1 deliberately admits Bundle carriers only through JSON. Detect the
+  // reserved field explicitly so multipart cannot degrade into an ordinary
+  // message or surface an ambiguous generic validation error.
+  if (fields.messageBundle !== undefined) {
+    return { error: 'Message Bundle does not support multipart uploads' };
+  }
 
   const parseResult = sendMessageSchema.safeParse(fields);
   if (!parseResult.success) {
     return { error: 'Invalid form fields' };
   }
 
-  const { content, userId, threadId, idempotencyKey } = parseResult.data;
-  const blocks: MessageContent[] = [{ type: 'text', text: content } as TextContent];
+  const { content, contextAttachments, userId, threadId, idempotencyKey } = parseResult.data;
+  const uploadedContent: Array<ImageContent | FileContent> = [];
 
-  if (files.length > 0) {
+  const totalFiles = imageFiles.length + otherFiles.length;
+  if (totalFiles > 0) {
     try {
-      const saved = await saveUploadedImages(files, uploadDir);
-      for (const img of saved) {
-        blocks.push(img.content as ImageContent);
+      if (imageFiles.length > 0) {
+        const savedImages = await saveUploadedImages(imageFiles, uploadDir);
+        for (const img of savedImages) {
+          uploadedContent.push(img.content as ImageContent);
+        }
+      }
+      if (otherFiles.length > 0) {
+        const savedFiles = await saveUploadedFiles(otherFiles, uploadDir);
+        for (const f of savedFiles) {
+          uploadedContent.push(f.content as FileContent);
+        }
       }
     } catch (err) {
       if (err instanceof ImageUploadError) {
@@ -85,9 +111,14 @@ export async function parseMultipart(
     ...(userId ? { userId } : {}),
     ...(threadId ? { threadId } : {}),
     ...(idempotencyKey ? { idempotencyKey } : {}),
+    ...(parseResult.data.composerDraftRevision !== undefined
+      ? { composerDraftRevision: parseResult.data.composerDraftRevision }
+      : {}),
     ...(parseResult.data.visibility ? { visibility: parseResult.data.visibility } : {}),
     ...(parseResult.data.whisperTo ? { whisperTo: parseResult.data.whisperTo as string[] } : {}),
-    ...(parseResult.data.deliveryMode ? { deliveryMode: parseResult.data.deliveryMode } : {}),
-    contentBlocks: blocks,
+    ...(parseResult.data.mentions ? { mentions: parseResult.data.mentions as string[] } : {}),
+    ...(parseResult.data.messageDisposition ? { messageDisposition: parseResult.data.messageDisposition } : {}),
+    ...(parseResult.data.replyTo ? { replyTo: parseResult.data.replyTo } : {}),
+    contentBlocks: buildMessageContentBlocks(content, contextAttachments, uploadedContent),
   };
 }

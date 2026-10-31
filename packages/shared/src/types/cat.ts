@@ -3,14 +3,30 @@
  * 三只 AI 猫猫的类型定义和配置
  */
 
-import type { ContextBudget } from './cat-breed.js';
+import type { CliConfig } from './cat-breed.js';
+import type { CatCarrier } from './cat-carrier.js';
 import type { CatId, SessionId } from './ids.js';
 import { createCatId } from './ids.js';
+import type { VoiceConfig } from './tts.js';
 
 /**
- * AI provider behind a cat
+ * CLI client identity used to invoke a cat (e.g. 'anthropic' → claude CLI, 'openai' → codex CLI).
+ * Renamed from CatProvider in clowder-ai#340 P5.
  */
-export type CatProvider = 'anthropic' | 'openai' | 'google' | 'dare' | 'antigravity' | 'opencode' | 'a2a';
+export type ClientId =
+  | 'anthropic'
+  | 'openai'
+  | 'google'
+  | 'kimi'
+  | 'pi'
+  | 'antigravity'
+  | 'opencode'
+  | 'a2a'
+  | 'catagent'
+  | 'acp'; // F161: Generic ACP client for unknown/user-provided ACP agents
+
+/** @deprecated clowder-ai#340: Use {@link ClientId} instead. Kept as alias for backward compatibility. */
+export type CatProvider = ClientId;
 
 /**
  * Cat status in the system
@@ -26,27 +42,57 @@ export interface CatColor {
 }
 
 /**
+ * F210 Phase G: Isolated Antigravity CLI profile binding.
+ * The API runtime uses this to create a per-cat HOME sandbox before invoking `agy`.
+ */
+export interface AgyProfileConfig {
+  readonly enabled?: boolean;
+  /** F325 staged migration: each profile has exactly one selected execution carrier. */
+  readonly carrier?: 'legacy' | 'native' | 'acp';
+  readonly profileId?: string;
+  readonly homeRoot?: string;
+  readonly model?: string;
+  readonly autoApprove?: boolean;
+  readonly trustedWorkspaces?: readonly string[];
+}
+
+/**
  * Cat configuration (immutable)
  */
 export interface CatConfig {
+  readonly accountBindingMode?: 'follow' | 'override';
   readonly id: CatId;
   readonly name: string;
   readonly displayName: string;
-  /** Nickname given by 铲屎官 (e.g. 宪宪, 砚砚). See docs/stories/cat-names/ */
+  /** Nickname given by co-creator (e.g. 宪宪, 砚砚). See docs/stories/cat-names/ */
   readonly nickname?: string;
   readonly avatar: string;
+  readonly banner?: string;
   readonly color: CatColor;
   readonly mentionPatterns: readonly string[];
   readonly accountRef?: string;
-  readonly provider: CatProvider;
+  /** Native tools own authentication and omitted model/effort defaults. */
+  readonly configurationSource?: 'native_tool' | 'managed_account';
+  /** Explicit runtime choice: null uses the member's native/manual carrier; absent keeps legacy bindings. */
+  readonly agentProvider?: string | null;
+  /** clowder-ai#340 P5: CLI client identity (renamed from `provider`). */
+  readonly clientId: ClientId;
+  /** Canonical, config-resolved member access mode. */
+  readonly carrier: CatCarrier;
   readonly defaultModel: string;
   readonly mcpSupport: boolean;
+  readonly cli?: CliConfig;
+  readonly agyProfile?: AgyProfileConfig;
   readonly commandArgs?: readonly string[];
-  readonly contextBudget?: ContextBudget;
+  /** clowder-ai#1208: explicit member-level context window cap (tokens).
+   *  undefined = Auto; positive integer = Manual cap. */
+  readonly contextWindow?: number;
   readonly roleDescription: string;
   readonly personality: string;
   /** F32-b: Which breed this cat belongs to (for frontend grouping) */
   readonly breedId?: string;
+  /** F231: Stable relationship persona key. Explicitly independent from routing/model/breed grouping. */
+  readonly relationshipKey?: string;
   /** F32-b P4: Human-readable variant label (e.g. "4.5", "Sonnet") */
   readonly variantLabel?: string;
   /** F32-b P4: Whether this is the default variant for its breed */
@@ -57,12 +103,22 @@ export interface CatConfig {
   readonly teamStrengths?: string;
   /** F-Ground-3: Caution note for teammate roster. null = explicitly no warning (overrides breed). */
   readonly caution?: string | null;
+  /** F167 Phase E (KD-20): hard task restrictions — natural-language bans
+   *  (e.g. `["禁止写代码"]`). Surfaced to teammates via buildTeammateRoster
+   *  and to the cat itself via buildStaticIdentity. Data-driven replacement
+   *  for the retired L3 role-gate hardcoded regex. */
+  readonly restrictions?: readonly string[];
   /** F127 Screen 3: editable strength tags */
   readonly strengths?: readonly string[];
   /** F127 Screen 3: whether session chain is enabled for this member */
   readonly sessionChain?: boolean;
+  /** F103/F190: Per-cat TTS voice configuration, including optional refAudio. */
+  readonly voiceConfig?: VoiceConfig;
   /** F127: Extra CLI --config key=value pairs passed to the client at invocation time. */
   readonly cliConfigArgs?: readonly string[];
+  /** clowder-ai#340 P5: Model provider name for api_key routing (renamed from `ocProviderName`).
+   *  e.g. "openrouter", "maas", "deepseek". Runtime assembles provider/model for the -m flag. */
+  readonly provider?: string;
 }
 
 /**
@@ -74,95 +130,4 @@ export interface CatState {
   readonly currentTask?: string;
   readonly lastActiveAt: Date;
   readonly sessionId?: SessionId;
-}
-
-/**
- * Default configurations for built-in cats.
- * At runtime, catRegistry is the authoritative source (populated at startup).
- * This constant is retained as fallback for code that hasn't migrated yet
- * and for frontend (which doesn't use the registry).
- */
-export const CAT_CONFIGS: Record<string, CatConfig> = {
-  opus: {
-    id: createCatId('opus'),
-    name: '布偶猫',
-    displayName: '布偶猫',
-    nickname: '宪宪',
-    avatar: '/avatars/opus.png',
-    color: {
-      primary: '#9B7EBD',
-      secondary: '#E8DFF5',
-    },
-    mentionPatterns: ['@opus', '@布偶猫', '@布偶', '@ragdoll', '@宪宪'],
-    provider: 'anthropic',
-    defaultModel: 'claude-sonnet-4-5-20250929',
-    mcpSupport: true,
-    breedId: 'ragdoll',
-    roleDescription: '主架构师和核心开发者，擅长深度思考和系统设计',
-    personality: '温柔但有主见，喜欢深入分析问题，写代码快但注重质量',
-  },
-  codex: {
-    id: createCatId('codex'),
-    name: '缅因猫',
-    displayName: '缅因猫',
-    nickname: '砚砚',
-    avatar: '/avatars/codex.png',
-    color: {
-      primary: '#5B8C5A',
-      secondary: '#D4E6D3',
-    },
-    mentionPatterns: ['@codex', '@缅因猫', '@缅因', '@maine', '@砚砚'],
-    provider: 'openai',
-    defaultModel: 'codex',
-    mcpSupport: false,
-    breedId: 'maine-coon',
-    roleDescription: '代码审查专家，擅长安全分析、测试覆盖和代码质量把控',
-    personality: '严谨认真，注重细节，会直言不讳地指出问题',
-  },
-  gemini: {
-    id: createCatId('gemini'),
-    name: '暹罗猫',
-    displayName: '暹罗猫',
-    avatar: '/avatars/gemini.png',
-    color: {
-      primary: '#5B9BD5',
-      secondary: '#D6E9F8',
-    },
-    mentionPatterns: ['@gemini', '@暹罗猫', '@暹罗', '@siamese', '@暄罗猫', '@暄罗'],
-    provider: 'google',
-    defaultModel: 'gemini-2.5-pro',
-    mcpSupport: false,
-    breedId: 'siamese',
-    roleDescription: '视觉设计师和创意顾问，擅长 UI/UX 设计和视觉表达',
-    personality: '活泼有创意，善于用视觉语言表达想法，喜欢尝试新事物',
-  },
-} as const;
-
-/**
- * Find a cat by mention pattern in text.
- * Reads from CAT_CONFIGS (static fallback, frontend-safe).
- * API-side code should use catRegistry directly for dynamic lookups.
- * @param text - The text to search for mentions
- * @returns The CatConfig if found, undefined otherwise
- */
-export function findCatByMention(text: string): CatConfig | undefined {
-  const lowerText = text.toLowerCase();
-
-  for (const config of Object.values(CAT_CONFIGS)) {
-    for (const pattern of config.mentionPatterns) {
-      if (lowerText.includes(pattern.toLowerCase())) {
-        return config;
-      }
-    }
-  }
-
-  return undefined;
-}
-
-/**
- * Get all cat IDs from static defaults.
- * API-side code should use catRegistry.getAllIds() instead.
- */
-export function getAllCatIds(): readonly CatId[] {
-  return Object.values(CAT_CONFIGS).map((config) => config.id);
 }

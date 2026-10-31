@@ -1,0 +1,37 @@
+---
+domainId: eval:task-outcome
+displayName: Task Outcome Eval
+descriptionForHuman: 猫干活结果怎么样——做完了吗、质量行吗、有没有返工
+metricGlossaryRef: eval-task-outcome.metrics.yaml
+systemThreadId: thread_eval_task_outcome
+evalCat:
+  catId: opus-47
+  handle: "@opus47"
+  model: claude-opus-4-7
+frequency: daily
+triggerPolicy:
+  mode: time_only
+  maxDetectionDelayHours: 24
+sourceAdapter: task-outcome-eval
+sourceRefsKind: task-outcome-snapshot
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds: []
+handoffTargetResolver:
+  featureId: F192
+  ownerCatId: opus
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 48
+  reevalWithinHours: 168
+# 2026-10-01 dormant: see feature-discussions/2026-10-01-eval-into-f311/README.md
+dormancy:
+  reason: "No consumer acts on it; its one actioned change is already a guard, and F275/F286 cut the key measure pipelines."
+  revivalPath: "Revive when F275 lands and a real Program names task delivery quality as its measure with a named consumer."
+  decisionRef: "private-thread-id#private-source-id"
+enabled: false

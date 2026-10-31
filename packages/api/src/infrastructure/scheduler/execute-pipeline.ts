@@ -1,0 +1,369 @@
+import { randomUUID } from 'node:crypto';
+import type { IBallCustodyIngest } from '../../domains/ball-custody/BallCustodyIngest.js';
+import type { EmissionStore } from './EmissionStore.js';
+import type { GlobalControlStore } from './GlobalControlStore.js';
+import type { RunLedger } from './RunLedger.js';
+import type {
+  ActorRole,
+  CostTier,
+  DeliverOpts,
+  FetchResult,
+  GateCtx,
+  RunLedgerRow,
+  RunOutcome,
+  ScheduleRunTiming,
+  TaskSpec_P1,
+} from './types.js';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyTaskSpec = TaskSpec_P1<any>;
+
+export interface PipelineContext {
+  task: AnyTaskSpec;
+  ledger: RunLedger;
+  logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void };
+  running: Map<string, boolean>;
+  tickCounts: Map<string, number>;
+  lastRunAt: Map<string, number | null>;
+  actorResolver?: (role: ActorRole, costTier: CostTier) => string | null;
+  /** Phase 3B (AC-D1): governance store — optional for backwards compat */
+  globalControlStore?: GlobalControlStore;
+  /** Phase 3B (AC-D2): emission store for self-echo suppression */
+  emissionStore?: EmissionStore;
+  /** Phase 3B (AC-D1): manual triggers bypass global pause + task overrides */
+  isManualTrigger?: boolean;
+  /** Wall-clock schedule metadata for this fire, if known. */
+  schedule?: ScheduleRunTiming;
+  /** Phase 4 (AC-H1): deliver message to a thread */
+  deliver?: (opts: DeliverOpts) => Promise<string>;
+  deliverPrivate?: (opts: import('./types.js').PrivateDeliverOpts) => Promise<void>;
+  /** Cancel a scheduler-owned queued message that failed before Queue admission. */
+  cancelQueuedDelivery?: (messageId: string) => Promise<boolean>;
+  /** Phase 4 (AC-H2): fetch web content with browser-automation routing */
+  fetchContent?: (url: string, signal?: AbortSignal) => Promise<FetchResult>;
+  /** Phase 4b: invoke a cat to handle a scheduled task (fire-and-forget) */
+  /** F233 PR3: optional ball-custody event sink for scheduler-originated events. */
+  ballCustody?: IBallCustodyIngest;
+  managedCommandWakeRecovery?: (taskId: string) => Promise<'missing' | 'pending' | 'recovered'>;
+  /** #415: per-workItem outcome callback (used for failure notifications) */
+  onItemOutcome?: (taskId: string, subjectKey: string, outcome: RunOutcome, errorSummary: string | null) => void;
+}
+
+function ledgerTimingFields(
+  task: AnyTaskSpec,
+  schedule: ScheduleRunTiming | undefined,
+  isManualTrigger: boolean | undefined,
+): Pick<
+  RunLedgerRow,
+  'scheduled_at' | 'fired_at' | 'lateness_ms' | 'missed_slots' | 'trigger_kind' | 'misfire_policy'
+> {
+  return {
+    scheduled_at: schedule?.scheduledAt ?? null,
+    fired_at: schedule?.firedAt ?? null,
+    lateness_ms: schedule?.latenessMs ?? null,
+    missed_slots: schedule?.missedSlots ?? null,
+    trigger_kind: schedule?.triggerKind ?? (isManualTrigger ? 'manual' : task.trigger.type),
+    misfire_policy: schedule?.misfirePolicy ?? null,
+  };
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  taskId: string,
+  controller: AbortController,
+  phase = 'execute',
+): Promise<T> {
+  let timeoutError: Error | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      timeoutError = new Error(`[scheduler] ${taskId}: ${phase} timed out after ${ms}ms`);
+      reject(timeoutError);
+      controller.abort(timeoutError);
+    }, ms);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } catch (error) {
+    if (timeoutError) {
+      // Cancellation is not terminal until the underlying execution has
+      // observed the signal and finished its cleanup. This preserves the
+      // existing task-level overlap lock without inventing another lock.
+      await promise.catch(() => {});
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
+  const {
+    task,
+    ledger,
+    logger,
+    running,
+    tickCounts,
+    lastRunAt,
+    actorResolver,
+    globalControlStore,
+    emissionStore,
+    isManualTrigger,
+    schedule,
+    deliver,
+    deliverPrivate,
+    cancelQueuedDelivery,
+    fetchContent,
+    ballCustody,
+    managedCommandWakeRecovery,
+    onItemOutcome,
+  } = ctx;
+  const startMs = Date.now();
+  const timing = ledgerTimingFields(task, schedule, isManualTrigger);
+  const suppressSelfEcho = task.admission.dependsOnThreadActivity !== false;
+  const tickCount = (tickCounts.get(task.id) ?? 0) + 1;
+  tickCounts.set(task.id, tickCount);
+
+  // Step 1: Enabled check
+  if (!task.enabled()) return;
+
+  // Step 1b: Governance checks (AC-D1) — skipped for manual triggers
+  if (globalControlStore && !isManualTrigger) {
+    if (!globalControlStore.getGlobalEnabled()) {
+      ledger.record({
+        task_id: task.id,
+        subject_key: task.id,
+        outcome: 'SKIP_GLOBAL_PAUSE',
+        signal_summary: null,
+        duration_ms: Date.now() - startMs,
+        started_at: new Date(startMs).toISOString(),
+        assigned_cat_id: null,
+        error_summary: null,
+        ...timing,
+      });
+      return;
+    }
+    const taskOverride = globalControlStore.getTaskOverride(task.id);
+    if (taskOverride && !taskOverride.enabled) {
+      ledger.record({
+        task_id: task.id,
+        subject_key: task.id,
+        outcome: 'SKIP_TASK_OVERRIDE',
+        signal_summary: null,
+        duration_ms: Date.now() - startMs,
+        started_at: new Date(startMs).toISOString(),
+        assigned_cat_id: null,
+        error_summary: null,
+        ...timing,
+      });
+      return;
+    }
+  }
+
+  // Step 2: Overlap guard (task-level — prevents gate re-entry)
+  if (running.get(task.id)) {
+    logger.info(`[scheduler] ${task.id}: still running, skipping tick`);
+    ledger.record({
+      task_id: task.id,
+      subject_key: task.id,
+      outcome: 'SKIP_OVERLAP',
+      signal_summary: null,
+      duration_ms: Date.now() - startMs,
+      started_at: new Date(startMs).toISOString(),
+      assigned_cat_id: null,
+      error_summary: null,
+      ...timing,
+    });
+    return;
+  }
+  running.set(task.id, true);
+
+  try {
+    // Step 3: Gate — returns workItems[]
+    const gateController = new AbortController();
+    const gateTimeoutMs = task.admission.timeoutMs ?? 30_000;
+    const gateCtx: GateCtx = {
+      taskId: task.id,
+      lastRunAt: lastRunAt.get(task.id) ?? null,
+      tickCount,
+      signal: gateController.signal,
+      deadlineMs: Date.now() + gateTimeoutMs,
+    };
+
+    const gateResult = await withTimeout(
+      Promise.resolve().then(() => task.admission.gate(gateCtx)),
+      gateTimeoutMs,
+      task.id,
+      gateController,
+      'admission',
+    ).catch((error: unknown) => {
+      if (gateController.signal.aborted)
+        ledger.record({
+          task_id: task.id,
+          subject_key: task.id,
+          outcome: 'RUN_FAILED',
+          signal_summary: null,
+          duration_ms: Date.now() - startMs,
+          started_at: new Date(startMs).toISOString(),
+          assigned_cat_id: null,
+          error_summary: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
+          ...timing,
+        });
+      throw error;
+    });
+
+    if (!gateResult.run) {
+      if (task.outcome.whenNoSignal === 'record') {
+        ledger.record({
+          task_id: task.id,
+          subject_key: task.id,
+          outcome: 'SKIP_NO_SIGNAL',
+          signal_summary: null,
+          duration_ms: Date.now() - startMs,
+          started_at: new Date(startMs).toISOString(),
+          assigned_cat_id: null,
+          error_summary: null,
+          ...timing,
+        });
+      }
+      return;
+    }
+
+    // Phase 1b: Actor resolution — resolve once per task tick, not per workItem
+    const assignedCatId = task.actor && actorResolver ? actorResolver(task.actor.role, task.actor.costTier) : null;
+    // A planned slot survives re-entry; interval/manual executions are distinct
+    // fires. Mint once here, never once per deliver() retry inside a template.
+    const occurrenceId =
+      !isManualTrigger && schedule?.scheduledAt
+        ? `${schedule.triggerKind}:${schedule.scheduledAt}`
+        : !isManualTrigger && task.trigger.type === 'once'
+          ? `once:${task.trigger.fireAt}`
+          : randomUUID();
+
+    // Step 4 + 5: Execute per workItem → ledger per subject
+    for (const item of gateResult.workItems) {
+      const itemStartMs = Date.now();
+
+      // AC-D2: Only thread-driven admission can feed back on this task's posts.
+      if (suppressSelfEcho && emissionStore && item.subjectKey.startsWith('thread-')) {
+        const threadId = item.subjectKey.slice(7);
+        if (emissionStore.isSuppressed(task.id, threadId)) {
+          ledger.record({
+            task_id: task.id,
+            subject_key: item.subjectKey,
+            outcome: 'SKIP_SELF_ECHO',
+            signal_summary: null,
+            duration_ms: Date.now() - itemStartMs,
+            started_at: new Date(itemStartMs).toISOString(),
+            assigned_cat_id: null,
+            error_summary: null,
+            ...timing,
+          });
+          continue;
+        }
+      }
+
+      let outcome: RunOutcome = 'RUN_DELIVERED';
+      const executeController = new AbortController();
+      const deliveredMessageIds = new Set<string>();
+      const pendingTriggerEffects = new Set<Promise<unknown>>();
+      const cancellationAwareDeliver = deliver
+        ? async (opts: DeliverOpts): Promise<string> => {
+            executeController.signal.throwIfAborted();
+            const messageId = await deliver(opts);
+            deliveredMessageIds.add(messageId);
+            return messageId;
+          }
+        : undefined;
+      const cancellationAwareFetch = fetchContent
+        ? async (url: string): Promise<FetchResult> => {
+            executeController.signal.throwIfAborted();
+            const result = await fetchContent(url, executeController.signal);
+            executeController.signal.throwIfAborted();
+            return result;
+          }
+        : undefined;
+      const cancellationAwareCancelQueuedDelivery = cancelQueuedDelivery
+        ? async (messageId: string): Promise<boolean> => {
+            if (!deliveredMessageIds.has(messageId)) executeController.signal.throwIfAborted();
+            return cancelQueuedDelivery(messageId);
+          }
+        : undefined;
+      const cancellationAwareWakeRecovery = managedCommandWakeRecovery
+        ? async (taskId: string): Promise<'missing' | 'pending' | 'recovered'> => {
+            executeController.signal.throwIfAborted();
+            const result = await managedCommandWakeRecovery(taskId);
+            return result;
+          }
+        : undefined;
+      // Phase 2: pass context spec through ExecuteContext
+      const rawExecute = Promise.resolve().then(async () => {
+        try {
+          await task.run.execute(item.signal, item.subjectKey, {
+            occurrenceId,
+            signal: executeController.signal,
+            assignedCatId,
+            context: task.context,
+            schedule,
+            deliver: cancellationAwareDeliver,
+            ...(deliverPrivate ? { deliverPrivate } : {}),
+            cancelQueuedDelivery: cancellationAwareCancelQueuedDelivery,
+            fetchContent: cancellationAwareFetch,
+            ballCustody,
+            managedCommandWakeRecovery: cancellationAwareWakeRecovery,
+          });
+        } finally {
+          // Some legacy templates intentionally detach best-effort triggers.
+          // They may ignore the result, but terminal truth must still wait for
+          // the external dispatch attempt to settle.
+          await Promise.allSettled([...pendingTriggerEffects]);
+        }
+      });
+      let errorSummary: string | null = null;
+      try {
+        await withTimeout(rawExecute, task.run.timeoutMs, task.id, executeController);
+      } catch (err) {
+        outcome = 'RUN_FAILED';
+        errorSummary = err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500);
+        logger.error(`[scheduler] ${task.id}/${item.subjectKey}: failed`, err);
+      }
+
+      ledger.record({
+        task_id: task.id,
+        subject_key: item.subjectKey,
+        outcome,
+        signal_summary: typeof item.signal === 'string' ? item.signal : JSON.stringify(item.signal).slice(0, 200),
+        duration_ms: Date.now() - itemStartMs,
+        started_at: new Date(itemStartMs).toISOString(),
+        assigned_cat_id: assignedCatId,
+        error_summary: errorSummary,
+        ...timing,
+      });
+
+      // #415: notify on outcome (used for failure notifications)
+      if (onItemOutcome) onItemOutcome(task.id, item.subjectKey, outcome, errorSummary);
+
+      // Independent gates neither consume nor create self-echo windows.
+      if (suppressSelfEcho && outcome === 'RUN_DELIVERED' && emissionStore && item.subjectKey.startsWith('thread-')) {
+        const threadId = item.subjectKey.slice(7);
+        const suppressionMs = task.trigger.type === 'interval' ? Math.max(task.trigger.ms * 2, 60_000) : 300_000;
+        emissionStore.record({
+          originTaskId: task.id,
+          threadId,
+          messageId: `run-${task.id}-${Date.now()}`,
+          suppressionMs,
+        });
+      }
+    }
+
+    lastRunAt.set(task.id, Date.now());
+    logger.info(
+      `[scheduler] ${task.id}: tick completed, ${gateResult.workItems.length} items (${Date.now() - startMs}ms)`,
+    );
+  } finally {
+    running.set(task.id, false);
+  }
+}

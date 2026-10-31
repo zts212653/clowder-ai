@@ -1,0 +1,534 @@
+import { reconcileSettledIndexTime } from '../../../../utils/reconcile-settled-index-time.js';
+import { readRedisSettledPage } from '../../../../utils/redis-settled-page.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../utils/settled-history-page.js';
+/**
+ * F221 Phase B: Redis-backed TasteProposal store.
+ *
+ * Persists taste proposals pending operator approval in the Approval Hub.
+ * State machine: pending → approving → approved (two-phase CAS), pending → rejected.
+ * Rollback: approving → pending (on vignette writer failure).
+ *
+ * Iron Law #5 (LL-048): TTL=0 — all proposals and settled history are persistent.
+ */
+
+import type {
+  ApprovalEnvelope,
+  ApprovalPublication,
+  TasteDimension,
+  TasteProposal,
+  TasteProposalStatus,
+} from '@cat-cafe/shared';
+import { assertApprovalEnvelopeIdentity, generateProposalId } from '@cat-cafe/shared';
+import type { RedisClient } from '@cat-cafe/shared/utils';
+import type { ApprovalPublicationStore } from '../../../approval-hub/ports/ApprovalPublicationStore.js';
+import {
+  abortRedisStaged,
+  commitRedisApprovalEnvelope,
+  hydrateApprovalPublication,
+  serializeApprovalPublication,
+} from '../../../cats/services/stores/redis/RedisApprovalPublication.js';
+import {
+  matchesTasteDecisionSnapshot,
+  TASTE_DECISION_FIELDS,
+  type TasteDecisionSnapshot,
+} from '../../services/taste-decision-snapshot.js';
+import type {
+  CreateTasteProposalInput,
+  ITasteProposalStore,
+  TasteWriteCheckpoint,
+} from '../ports/TasteProposalStore.js';
+import { TasteProposalKeys } from '../redis-keys/taste-proposal-keys.js';
+
+/** CAS: pending → approving (claim for approval). */
+const CAS_CLAIM_LUA = `
+  local key = KEYS[1]
+  local status = redis.call('HGET', key, 'status')
+  if status ~= 'pending' then return 0 end
+  if ARGV[1] == '1' then
+    for i = 2, #ARGV, 2 do
+      if (redis.call('HGET', key, ARGV[i]) or '') ~= ARGV[i + 1] then return 0 end
+    end
+  end
+  redis.call('HSET', key, 'status', 'approving')
+  return 1
+`;
+
+/** Persist durable writer output without settling the proposal. */
+const CAS_CHECKPOINT_LUA = `
+  local key = KEYS[1]
+  local status = redis.call('HGET', key, 'status')
+  if status ~= 'approving' then return 0 end
+  redis.call('HSET', key,
+    'vignetteSlug', ARGV[1],
+    'vignettePath', ARGV[2])
+  return 1
+`;
+
+/** CAS: approving → approved (finalize after vignette write). */
+const CAS_FINALIZE_LUA = `
+  local key = KEYS[1]
+  local pendingKey = KEYS[2]
+  local settledKey = KEYS[3]
+  local status = redis.call('HGET', key, 'status')
+  if status ~= 'approving' then return 0 end
+  redis.call('HSET', key, 'status', 'approved',
+    'approvedBy', ARGV[1],
+    'approvedAt', ARGV[2],
+    'vignetteSlug', ARGV[4],
+    'vignettePath', ARGV[5])
+  redis.call('ZREM', pendingKey, ARGV[3])
+  redis.call('ZADD', settledKey, ARGV[2], ARGV[3])
+  if ARGV[6] == '1' then redis.call('ZREM', KEYS[4], ARGV[3]) end
+  return 1
+`;
+
+/** CAS: approving → pending (rollback on writer failure). */
+const CAS_ROLLBACK_LUA = `
+  local key = KEYS[1]
+  local status = redis.call('HGET', key, 'status')
+  if status ~= 'approving' then return 0 end
+  redis.call('HSET', key, 'status', 'pending')
+  redis.call('HDEL', key, 'approvedBy', 'vignetteSlug', 'vignettePath')
+  return 1
+`;
+
+/** CAS: pending → rejected. */
+const CAS_REJECT_LUA = `
+  local key = KEYS[1]
+  local pendingKey = KEYS[2]
+  local settledKey = KEYS[3]
+  local status = redis.call('HGET', key, 'status')
+  if status ~= 'pending' then return 0 end
+  if ARGV[6] == '1' then
+    for i = 7, #ARGV, 2 do
+      if (redis.call('HGET', key, ARGV[i]) or '') ~= ARGV[i + 1] then return 0 end
+    end
+  end
+  redis.call('HSET', key, 'status', 'rejected',
+    'rejectedBy', ARGV[1],
+    'rejectedAt', ARGV[2],
+    'rejectionReason', ARGV[4])
+  redis.call('ZREM', pendingKey, ARGV[3])
+  redis.call('ZADD', settledKey, ARGV[2], ARGV[3])
+  if ARGV[5] == '1' then redis.call('ZREM', KEYS[4], ARGV[3]) end
+  return 1
+`;
+
+/**
+ * Atomically persist a staged proposal and promote its bounded reservation to
+ * a durable retry identity. The reservation fence prevents a delayed creator
+ * from publishing after another request has acquired the same client key.
+ */
+const CREATE_WITH_DEDUP_LUA = `
+  if redis.call('GET', KEYS[3]) ~= ARGV[1] then return 0 end
+  redis.call('HSET', KEYS[1], unpack(ARGV, 5))
+  redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
+  if ARGV[4] == '1' then redis.call('ZADD', KEYS[4], ARGV[2], ARGV[3]) end
+  redis.call('PERSIST', KEYS[3])
+  return 1
+`;
+
+export class RedisTasteProposalStore implements ITasteProposalStore, ApprovalPublicationStore {
+  private redis: RedisClient;
+
+  constructor(redis: RedisClient) {
+    this.redis = redis;
+  }
+
+  async create(input: CreateTasteProposalInput): Promise<TasteProposal> {
+    const id = input.proposalId ?? generateProposalId();
+    const now = Date.now();
+    const proposal: TasteProposal = {
+      id,
+      userId: input.userId,
+      catId: input.catId,
+      threadId: input.threadId,
+      sourceMessageId: input.sourceMessageId,
+      scene: input.scene,
+      quote: input.quote,
+      ...(input.takeaway ? { takeaway: input.takeaway } : {}),
+      tags: [...input.tags],
+      dimension: input.dimension as TasteDimension,
+      privacy: input.privacy as 'public' | 'sensitive',
+      status: 'pending',
+      createdAt: now,
+      clientRequestId: input.clientRequestId,
+      approvalOriginRef: input.approvalOriginRef,
+      ...(input.correctionTarget ? { correctionTarget: structuredClone(input.correctionTarget) } : {}),
+      publication: { state: 'staged', stagedAt: now },
+    };
+
+    const key = TasteProposalKeys.detail(id);
+    const pendingKey = TasteProposalKeys.userPending(input.userId);
+
+    if (input.clientRequestId) {
+      const created = await this.redis.eval(
+        CREATE_WITH_DEDUP_LUA,
+        4,
+        key,
+        pendingKey,
+        TasteProposalKeys.dedup(input.userId, input.clientRequestId),
+        correctionSourceKey(proposal),
+        id,
+        String(now),
+        id,
+        proposal.correctionTarget ? '1' : '0',
+        ...serializeProposal(proposal),
+      );
+      if (created !== 1) {
+        throw new Error(`taste proposal dedup reservation lost before create: ${id}`);
+      }
+      return proposal;
+    }
+
+    const pipeline = this.redis.multi();
+    pipeline.hset(key, ...serializeProposal(proposal));
+    pipeline.zadd(pendingKey, now, id);
+    if (proposal.correctionTarget) pipeline.zadd(correctionSourceKey(proposal), now, id);
+    await pipeline.exec();
+
+    return proposal;
+  }
+
+  async get(id: string): Promise<TasteProposal | null> {
+    const raw = await this.redis.hgetall(TasteProposalKeys.detail(id));
+    if (!raw || Object.keys(raw).length === 0) return null;
+    return hydrateProposal(raw);
+  }
+
+  async listPending(userId: string): Promise<TasteProposal[]> {
+    const pendingKey = TasteProposalKeys.userPending(userId);
+    const ids = await this.redis.zrevrange(pendingKey, 0, 99);
+    if (!ids.length) return [];
+    return this.batchGet(ids, (p) => p.status === 'pending');
+  }
+
+  async listActionable(userId: string, limit = 100): Promise<TasteProposal[]> {
+    const pendingKey = TasteProposalKeys.userPending(userId);
+    const ids = await this.redis.zrevrange(pendingKey, 0, limit - 1);
+    if (!ids.length) return [];
+    return this.batchGet(ids, (p) => p.status === 'pending' || p.status === 'approving');
+  }
+
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<TasteProposal>> {
+    return readRedisSettledPage(this.redis, TasteProposalKeys.userSettled(owner), options, async (id, at) => {
+      const p = await this.get(id);
+      if (!p) return null;
+      if (p.userId !== owner || !['approved', 'rejected'].includes(p.status))
+        throw new Error('Settled index canonical owner/status mismatch');
+      if (p.id !== id) throw new Error('Settled index identity mismatch');
+      await reconcileSettledIndexTime(
+        this.redis,
+        TasteProposalKeys.userSettled(owner),
+        id,
+        at,
+        p.approvedAt ?? p.rejectedAt ?? 0,
+        [
+          {
+            key: TasteProposalKeys.detail(id),
+            fields: { status: p.status, userId: p.userId, approvedAt: p.approvedAt, rejectedAt: p.rejectedAt },
+          },
+        ],
+      );
+      return p;
+    });
+  }
+
+  async listSettledByUser(userId: string, limit = 50): Promise<TasteProposal[]> {
+    const settledKey = TasteProposalKeys.userSettled(userId);
+    const ids = await this.redis.zrevrange(settledKey, 0, limit - 1);
+    if (!ids.length) return [];
+    return this.batchGet(ids);
+  }
+
+  async listCorrectionsBySource(userId: string, sourceAnchor: string, limit = 100): Promise<TasteProposal[]> {
+    const ids = await this.redis.zrevrange(TasteProposalKeys.correctionSource(userId, sourceAnchor), 0, limit - 1);
+    if (!ids.length) return [];
+    return this.batchGet(
+      ids,
+      (proposal) =>
+        proposal.userId === userId &&
+        proposal.correctionTarget?.sourceAnchor === sourceAnchor &&
+        (proposal.status === 'pending' || proposal.status === 'approving'),
+    );
+  }
+
+  async claimForApproval(id: string, userId: string, expected?: TasteDecisionSnapshot): Promise<TasteProposal | null> {
+    const proposal = await this.get(id);
+    if (!proposal) return null;
+    if (expected && (userId !== expected.ownerUserId || !matchesTasteDecisionSnapshot(proposal, expected))) return null;
+
+    const key = TasteProposalKeys.detail(id);
+    const result = await this.redis.eval(CAS_CLAIM_LUA, 1, key, ...snapshotArgs(expected));
+    if (result === 0) return null;
+
+    return { ...proposal, status: 'approving' };
+  }
+
+  async recordWriteCheckpoint(id: string, checkpoint: TasteWriteCheckpoint): Promise<TasteProposal | null> {
+    const proposal = await this.get(id);
+    if (!proposal) return null;
+    const result = await this.redis.eval(
+      CAS_CHECKPOINT_LUA,
+      1,
+      TasteProposalKeys.detail(id),
+      checkpoint.vignetteSlug,
+      checkpoint.vignettePath,
+    );
+    if (result === 0) return null;
+    return { ...proposal, ...checkpoint };
+  }
+
+  async finalizeApproval(
+    id: string,
+    userId: string,
+    vignetteSlug: string,
+    vignettePath: string,
+  ): Promise<TasteProposal | null> {
+    const proposal = await this.get(id);
+    if (!proposal) return null;
+
+    const key = TasteProposalKeys.detail(id);
+    const pendingKey = TasteProposalKeys.userPending(proposal.userId);
+    const settledKey = TasteProposalKeys.userSettled(proposal.userId);
+    const now = Date.now();
+
+    const result = await this.redis.eval(
+      CAS_FINALIZE_LUA,
+      4,
+      key,
+      pendingKey,
+      settledKey,
+      correctionSourceKey(proposal),
+      userId,
+      String(now),
+      id,
+      vignetteSlug,
+      vignettePath,
+      proposal.correctionTarget ? '1' : '0',
+    );
+    if (result === 0) return null;
+
+    return {
+      ...proposal,
+      status: 'approved',
+      approvedBy: userId,
+      approvedAt: now,
+      vignetteSlug,
+      vignettePath,
+    };
+  }
+
+  async rollbackClaim(id: string): Promise<boolean> {
+    const key = TasteProposalKeys.detail(id);
+    const result = await this.redis.eval(CAS_ROLLBACK_LUA, 1, key);
+    return result === 1;
+  }
+
+  async markRejected(
+    id: string,
+    reason: string,
+    userId: string,
+    expected?: TasteDecisionSnapshot,
+  ): Promise<TasteProposal | null> {
+    const proposal = await this.get(id);
+    if (!proposal) return null;
+    if (expected && (userId !== expected.ownerUserId || !matchesTasteDecisionSnapshot(proposal, expected))) return null;
+
+    const key = TasteProposalKeys.detail(id);
+    const pendingKey = TasteProposalKeys.userPending(proposal.userId);
+    const settledKey = TasteProposalKeys.userSettled(proposal.userId);
+    const now = Date.now();
+
+    const result = await this.redis.eval(
+      CAS_REJECT_LUA,
+      4,
+      key,
+      pendingKey,
+      settledKey,
+      correctionSourceKey(proposal),
+      userId,
+      String(now),
+      id,
+      reason,
+      proposal.correctionTarget ? '1' : '0',
+      ...snapshotArgs(expected),
+    );
+    if (result === 0) return null;
+
+    return { ...proposal, status: 'rejected', rejectedBy: userId, rejectedAt: now, rejectionReason: reason };
+  }
+
+  async getDedupProposalId(userId: string, clientRequestId: string): Promise<string | null> {
+    const key = TasteProposalKeys.dedup(userId, clientRequestId);
+    return this.redis.get(key);
+  }
+
+  async reserveDedup(userId: string, clientRequestId: string, proposalId: string): Promise<string> {
+    const key = TasteProposalKeys.dedup(userId, clientRequestId);
+    // The bounded reservation protects the pre-create crash window. create()
+    // atomically promotes the winning mapping to TTL=0 with the proposal write.
+    const result = await this.redis.set(key, proposalId, 'EX', 300, 'NX');
+    if (result === 'OK') return proposalId;
+    // Someone else won the race — return their ID
+    const existing = await this.redis.get(key);
+    return existing ?? proposalId;
+  }
+
+  async releaseDedup(userId: string, clientRequestId: string, expectedProposalId: string): Promise<void> {
+    const key = TasteProposalKeys.dedup(userId, clientRequestId);
+    // Release only an unmaterialized reservation. If create() committed but its
+    // acknowledgement was lost, the durable proposal keeps the retry identity.
+    await this.redis.eval(
+      `if redis.call('GET', KEYS[1]) == ARGV[1] and redis.call('EXISTS', KEYS[2]) == 0 then
+        return redis.call('DEL', KEYS[1])
+      end
+      return 0`,
+      2,
+      key,
+      TasteProposalKeys.detail(expectedProposalId),
+      expectedProposalId,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // ApprovalPublicationStore (Phase-I publication envelope)
+  // ---------------------------------------------------------------------------
+
+  async getPublication(proposalId: string): Promise<ApprovalPublication | null> {
+    return (await this.get(proposalId))?.publication ?? null;
+  }
+
+  async commitEnvelope(proposalId: string, envelope: ApprovalEnvelope): Promise<void> {
+    const proposal = await this.get(proposalId);
+    if (!proposal) throw new Error(`proposal not found: ${proposalId}`);
+    assertApprovalEnvelopeIdentity(envelope, {
+      canonicalProposalId: proposal.id,
+      sourceFeatureId: 'F221',
+      ownerUserId: proposal.userId,
+      requesterCatId: proposal.catId,
+      createdAt: proposal.createdAt,
+    });
+    await commitRedisApprovalEnvelope(this.redis, TasteProposalKeys.detail(proposalId), envelope);
+  }
+
+  async abortStaged(proposalId: string, _reason: string): Promise<void> {
+    const proposal = await this.get(proposalId);
+    if (!proposal) return;
+    await abortRedisStaged(
+      this.redis,
+      TasteProposalKeys.detail(proposalId),
+      [
+        TasteProposalKeys.userPending(proposal.userId),
+        ...(proposal.correctionTarget
+          ? [TasteProposalKeys.correctionSource(proposal.userId, proposal.correctionTarget.sourceAnchor)]
+          : []),
+      ],
+      proposalId,
+      proposal.clientRequestId ? TasteProposalKeys.dedup(proposal.userId, proposal.clientRequestId) : undefined,
+    );
+  }
+
+  private async batchGet(ids: string[], filter?: (p: TasteProposal) => boolean): Promise<TasteProposal[]> {
+    const pipeline = this.redis.pipeline();
+    for (const id of ids) {
+      pipeline.hgetall(TasteProposalKeys.detail(id));
+    }
+    const results = await pipeline.exec();
+    if (!results) return [];
+
+    const proposals: TasteProposal[] = [];
+    for (const [err, raw] of results) {
+      if (err || !raw || typeof raw !== 'object' || Object.keys(raw as Record<string, string>).length === 0) continue;
+      const p = hydrateProposal(raw as Record<string, string>);
+      if (!filter || filter(p)) proposals.push(p);
+    }
+    return proposals;
+  }
+}
+
+function snapshotArgs(expected?: TasteDecisionSnapshot): string[] {
+  if (!expected) return ['0'];
+  return ['1', ...TASTE_DECISION_FIELDS.flatMap((field) => [field, expected.fields[field]])];
+}
+
+// ---- Serialize / Hydrate ----
+
+function serializeProposal(p: TasteProposal): string[] {
+  const fields: string[] = [
+    'id',
+    p.id,
+    'userId',
+    p.userId,
+    'catId',
+    p.catId,
+    'threadId',
+    p.threadId,
+    'scene',
+    p.scene,
+    'quote',
+    p.quote,
+    'tags',
+    JSON.stringify(p.tags),
+    'dimension',
+    p.dimension,
+    'privacy',
+    p.privacy,
+    'status',
+    p.status,
+    'createdAt',
+    String(p.createdAt),
+  ];
+  if (p.sourceMessageId) fields.push('sourceMessageId', p.sourceMessageId);
+  if (p.takeaway) fields.push('takeaway', p.takeaway);
+  if (p.clientRequestId) fields.push('clientRequestId', p.clientRequestId);
+  if (p.approvalOriginRef) fields.push('approvalOriginRef', JSON.stringify(p.approvalOriginRef));
+  if (p.correctionTarget) fields.push('correctionTarget', JSON.stringify(p.correctionTarget));
+  if (p.approvedBy) fields.push('approvedBy', p.approvedBy);
+  if (p.approvedAt) fields.push('approvedAt', String(p.approvedAt));
+  if (p.rejectedBy) fields.push('rejectedBy', p.rejectedBy);
+  if (p.rejectedAt) fields.push('rejectedAt', String(p.rejectedAt));
+  if (p.rejectionReason) fields.push('rejectionReason', p.rejectionReason);
+  if (p.vignetteSlug) fields.push('vignetteSlug', p.vignetteSlug);
+  if (p.vignettePath) fields.push('vignettePath', p.vignettePath);
+  if (p.publication) fields.push('publication', serializeApprovalPublication(p.publication));
+  return fields;
+}
+
+function hydrateProposal(raw: Record<string, string>): TasteProposal {
+  return {
+    id: raw.id,
+    userId: raw.userId,
+    catId: raw.catId,
+    threadId: raw.threadId,
+    scene: raw.scene,
+    quote: raw.quote,
+    ...(raw.takeaway ? { takeaway: raw.takeaway } : {}),
+    tags: JSON.parse(raw.tags || '[]'),
+    dimension: raw.dimension as TasteDimension,
+    privacy: raw.privacy as 'public' | 'sensitive',
+    status: raw.status as TasteProposalStatus,
+    createdAt: Number(raw.createdAt),
+    ...(raw.sourceMessageId ? { sourceMessageId: raw.sourceMessageId } : {}),
+    ...(raw.clientRequestId ? { clientRequestId: raw.clientRequestId } : {}),
+    ...(raw.approvalOriginRef ? { approvalOriginRef: JSON.parse(raw.approvalOriginRef) } : {}),
+    ...(raw.correctionTarget ? { correctionTarget: JSON.parse(raw.correctionTarget) } : {}),
+    ...(raw.approvedBy ? { approvedBy: raw.approvedBy } : {}),
+    ...(raw.approvedAt ? { approvedAt: Number(raw.approvedAt) } : {}),
+    ...(raw.rejectedBy ? { rejectedBy: raw.rejectedBy } : {}),
+    ...(raw.rejectedAt ? { rejectedAt: Number(raw.rejectedAt) } : {}),
+    ...(raw.rejectionReason ? { rejectionReason: raw.rejectionReason } : {}),
+    ...(raw.vignetteSlug ? { vignetteSlug: raw.vignetteSlug } : {}),
+    ...(raw.vignettePath ? { vignettePath: raw.vignettePath } : {}),
+    ...(raw.publication ? { publication: hydrateApprovalPublication(raw.publication) } : {}),
+  };
+}
+
+function correctionSourceKey(proposal: Pick<TasteProposal, 'userId' | 'correctionTarget'>): string {
+  return proposal.correctionTarget
+    ? TasteProposalKeys.correctionSource(proposal.userId, proposal.correctionTarget.sourceAnchor)
+    : TasteProposalKeys.noCorrectionSource;
+}

@@ -1,3 +1,4 @@
+import { inspectSecretValue } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import type { AuditEventInput } from '../../orchestration/EventAuditLog.js';
 
 export interface AuditLogSink {
@@ -18,7 +19,7 @@ export interface CommandExecutionLifecycle {
 }
 
 const REDACTED = '[redacted]';
-const MAX_REDACT_DEPTH = 2;
+const MAX_REDACT_DEPTH = 64;
 
 export function extractCommandExecutionLifecycle(event: unknown): CommandExecutionLifecycle | null {
   if (typeof event !== 'object' || event === null) return null;
@@ -55,11 +56,15 @@ export function extractCommandExecutionLifecycle(event: unknown): CommandExecuti
  * We intentionally bound recursion depth for M1 to keep this best-effort and predictable.
  */
 export function sanitizeRawEvent(event: unknown): unknown {
-  return redactSensitiveFields(event, 0);
+  try {
+    return redactSensitiveFields(inspectSecretValue(event).value, 0);
+  } catch {
+    return { type: 'redacted_event', reason: 'secret_result_uninspectable' };
+  }
 }
 
 function redactSensitiveFields(value: unknown, depth: number): unknown {
-  if (depth > MAX_REDACT_DEPTH) return value;
+  if (depth > MAX_REDACT_DEPTH) return REDACTED;
 
   if (Array.isArray(value)) {
     return value.map((entry) => redactSensitiveFields(entry, depth + 1));

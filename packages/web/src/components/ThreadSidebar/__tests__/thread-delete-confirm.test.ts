@@ -6,6 +6,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { markApiGetGeneration } from '@/utils/api-get-generation';
 import { ThreadSidebar } from '../ThreadSidebar';
 
 // ── Mocks ─────────────────────────────────────────────────────
@@ -49,8 +50,10 @@ const mockStore: Record<string, unknown> = {
   updateThreadFavorite: vi.fn(),
   updateThreadPreferredCats: vi.fn(),
   threadStates: {},
+  clearUnread: vi.fn(),
   clearAllUnread: vi.fn(),
   initThreadUnread: vi.fn(),
+  fetchGlobalBubbleDefaults: vi.fn(),
 };
 vi.mock('@/stores/chatStore', () => {
   const hook = Object.assign(
@@ -64,8 +67,15 @@ vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({ getCatById: () => null, cats: [] }),
 }));
 
+let nextMockGetGeneration = 0;
+
 function jsonOk(data: unknown) {
-  return Promise.resolve({ ok: true, status: 204, json: () => Promise.resolve(data) });
+  const response = new Response(JSON.stringify(data), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+  markApiGetGeneration(response, ++nextMockGetGeneration);
+  return Promise.resolve(response);
 }
 
 describe('Thread delete confirmation (I-1)', () => {
@@ -85,7 +95,7 @@ describe('Thread delete confirmation (I-1)', () => {
     mockApiFetch.mockReset();
     mockPush.mockReset();
     mockApiFetch.mockImplementation((path: string) => {
-      if (path === '/api/threads') return jsonOk({ threads: [TEST_THREAD] });
+      if (path === '/api/threads?view=sidebar') return jsonOk({ threads: [TEST_THREAD] });
       return jsonOk({});
     });
     // Provide localStorage stub for collapse-state persistence
@@ -122,7 +132,17 @@ describe('Thread delete confirmation (I-1)', () => {
   }
 
   function findDeleteButton(): HTMLButtonElement | undefined {
-    return Array.from(container.querySelectorAll('button')).find((b) => b.getAttribute('title') === '删除对话');
+    return Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.trim() === '删除对话');
+  }
+
+  function openActionsMenu() {
+    const moreBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.getAttribute('title') === '更多操作',
+    );
+    expect(moreBtn, 'more actions button should exist for non-default thread').toBeTruthy();
+    act(() => {
+      moreBtn?.click();
+    });
   }
 
   /** F095 defaults all sections collapsed. Click expand-all first. */
@@ -136,13 +156,14 @@ describe('Thread delete confirmation (I-1)', () => {
 
   it('shows confirmation dialog when clicking delete', async () => {
     act(() => {
-      root.render(React.createElement(ThreadSidebar));
+      root.render(React.createElement(ThreadSidebar, { routeThreadId: mockStore.currentThreadId as string }));
     });
     await flush();
     expandAll();
+    openActionsMenu();
 
     const deleteBtn = findDeleteButton();
-    expect(deleteBtn, 'delete button should exist for non-default thread').toBeTruthy();
+    expect(deleteBtn, 'delete menu item should exist for non-default thread').toBeTruthy();
 
     act(() => {
       deleteBtn?.click();
@@ -162,10 +183,11 @@ describe('Thread delete confirmation (I-1)', () => {
 
   it('dismisses dialog when clicking cancel', async () => {
     act(() => {
-      root.render(React.createElement(ThreadSidebar));
+      root.render(React.createElement(ThreadSidebar, { routeThreadId: mockStore.currentThreadId as string }));
     });
     await flush();
     expandAll();
+    openActionsMenu();
 
     const deleteBtn = findDeleteButton();
     act(() => {
@@ -185,10 +207,11 @@ describe('Thread delete confirmation (I-1)', () => {
 
   it('calls DELETE API only after clicking confirm', async () => {
     act(() => {
-      root.render(React.createElement(ThreadSidebar));
+      root.render(React.createElement(ThreadSidebar, { routeThreadId: mockStore.currentThreadId as string }));
     });
     await flush();
     expandAll();
+    openActionsMenu();
 
     const deleteBtn = findDeleteButton();
     act(() => {

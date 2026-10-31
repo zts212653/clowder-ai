@@ -172,12 +172,12 @@ describe('usage route', () => {
     await app.close();
   });
 
-  test('query param userId without header → 401 (no spoofing)', async () => {
+  test('request without identity header → 401', async () => {
     const store = makeMockStore([]);
     const app = await buildApp(store);
 
-    const res = await app.inject({ method: 'GET', url: '/api/usage/daily?userId=bob' });
-    assert.equal(res.statusCode, 401, 'query param userId must not bypass header auth');
+    const res = await app.inject({ method: 'GET', url: '/api/usage/daily' });
+    assert.equal(res.statusCode, 401, 'missing header must return 401');
     assert.equal(scanAllCallCount, 0);
 
     await app.close();

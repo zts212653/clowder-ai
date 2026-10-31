@@ -1,0 +1,348 @@
+import type { CatData } from '@/hooks/useCatData';
+import { buildAgyProfilePatch, usesAgyAcp } from './hub-cat-editor.agy';
+import {
+  type ClientId,
+  DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
+  defaultAcpCommandForClient,
+  defaultAcpStartupArgsForClient,
+  type HubCatEditorFormState,
+  initialState,
+  normalizeMentionPattern,
+  splitCommandArgs,
+  splitMentionPatterns,
+  splitStrengthTags,
+  usesCliCarrier,
+} from './hub-cat-editor.model';
+
+function trimText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function usesOpenCodeProvider(form: HubCatEditorFormState): boolean {
+  // F161: the `provider` field is an OpenCode-only concept — it selects the env-map template
+  // (BUILTIN_ENV_MAPS[provider]) for OpenCode's multi-provider backend routing. Generic ACP
+  // carriers (clientId='acp') are NOT provider carriers: the field renders only for opencode
+  // (there is no UI to set it for acp), BUILTIN_ENV_MAPS has no 'acp' entry, and env
+  // customization flows through the account's envVars templates (env-map priority 1). A stale
+  // provider on a generic ACP member (e.g. migrated from clientId='opencode') is therefore
+  // cleared on save by the !providerCarrier branch below — not preserved. For OpenCode
+  // provider management, use clientId='opencode' (cli or acp transport).
+  return form.clientId === 'opencode';
+}
+
+function buildProviderPatch(form: HubCatEditorFormState, cat?: CatData | null): Record<string, unknown> {
+  const providerCarrier = usesOpenCodeProvider(form);
+  const trimmedProvider = trimText(form.provider);
+  if (providerCarrier && trimmedProvider.length > 0) return { provider: trimmedProvider };
+  if (cat?.provider && (form.clientId === 'opencode' || !providerCarrier)) return { provider: null as null };
+  return {};
+}
+
+/**
+ * Returns a hint string when the model does not follow "providerId/modelId" convention for opencode.
+ * Advisory only — callers should display as a warning, not block submission.
+ */
+export function hintModelFormatForClient(client: ClientId, model: string): string | null {
+  if (client !== 'opencode') return null;
+  const trimmed = model.trim();
+  const slashIndex = trimmed.indexOf('/');
+  if (slashIndex > 0 && slashIndex < trimmed.length - 1) return null;
+  return 'OpenCode 建议使用 providerId/modelId 格式（例如 openai/gpt-5.4）';
+}
+
+/** @deprecated Use {@link hintModelFormatForClient} — kept for backward compatibility. */
+export const validateModelFormatForClient = hintModelFormatForClient;
+
+function resolveFormAccountRef(form: HubCatEditorFormState): string {
+  return trimText(form.accountRef);
+}
+
+function buildVoiceConfig(form: HubCatEditorFormState) {
+  const voice = trimText(form.voiceVoice);
+  const langCode = trimText(form.voiceLangCode);
+  if (!voice) return undefined;
+  if (!langCode) return undefined;
+  const speed = Number.parseFloat(form.voiceSpeed);
+  const temperature = Number.parseFloat(form.voiceTemperature);
+  return {
+    voice,
+    langCode,
+    ...(Number.isFinite(speed) && speed > 0 ? { speed } : {}),
+    ...(trimText(form.voiceRefAudio) ? { refAudio: trimText(form.voiceRefAudio) } : {}),
+    ...(trimText(form.voiceRefText) ? { refText: trimText(form.voiceRefText) } : {}),
+    ...(trimText(form.voiceInstruct) ? { instruct: trimText(form.voiceInstruct) } : {}),
+    ...(Number.isFinite(temperature) && temperature >= 0 ? { temperature } : {}),
+  };
+}
+
+function optionalPositiveInteger(raw: string, fieldName: string): number | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0 || String(parsed) !== trimmed) {
+    throw new Error(`${fieldName} 必须是正整数`);
+  }
+  return parsed;
+}
+
+const ACP_FORM_OWNED_KEYS = new Set(['agentProvider', 'command', 'startupArgs', 'transport', 'pool']);
+
+function preserveHiddenAcpFields(cat?: CatData | null): Record<string, unknown> {
+  if (!cat?.acp) return {};
+  return Object.fromEntries(Object.entries(cat.acp).filter(([key]) => !ACP_FORM_OWNED_KEYS.has(key)));
+}
+
+function buildAcpTransportConfig(form: HubCatEditorFormState, cat?: CatData | null) {
+  if (form.acpAgentProvider) return { command: 'plugin-agent', startupArgs: [] };
+  const transport = form.acpTransport ?? 'stdio';
+  const officialAgy = usesAgyAcp(form);
+  const command =
+    trimText(form.acpCommand) || (officialAgy ? 'agy_acp_server.par' : defaultAcpCommandForClient(form.clientId));
+  if (!command) throw new Error('ACP Command 不能为空');
+  const startupArgs = splitCommandArgs(
+    trimText(form.acpStartupArgs) || (officialAgy ? '' : defaultAcpStartupArgsForClient(form.clientId, transport)),
+  );
+  const maxLiveProcesses = optionalPositiveInteger(form.acpMaxLiveProcesses, 'ACP Max Processes');
+  const idleTtlMinutes = optionalPositiveInteger(form.acpIdleTtlMinutes, 'ACP Idle TTL');
+  const savedTtl = cat?.acp?.pool?.idleTtlMs;
+  const untouchedTtl =
+    cat?.acp && form.acpIdleTtlMinutes === (savedTtl === undefined ? '' : String(Math.round(savedTtl / 60_000)));
+  const idleTtlMs = untouchedTtl
+    ? cat.acp?.pool?.idleTtlMs
+    : idleTtlMinutes === undefined
+      ? undefined
+      : idleTtlMinutes * 60_000;
+  const pool =
+    maxLiveProcesses !== undefined || idleTtlMs !== undefined
+      ? {
+          ...Object.fromEntries(
+            Object.entries(cat?.acp?.pool ?? {}).filter(([key]) => key !== 'maxLiveProcesses' && key !== 'idleTtlMs'),
+          ),
+          ...(maxLiveProcesses !== undefined ? { maxLiveProcesses } : {}),
+          ...(idleTtlMs !== undefined ? { idleTtlMs } : {}),
+        }
+      : undefined;
+  return {
+    ...preserveHiddenAcpFields(cat),
+    command,
+    startupArgs,
+    // F161 Phase C: include transport only when non-default (httpstream)
+    ...(transport !== 'stdio' ? { transport } : {}),
+    ...(pool ? { pool } : {}),
+  };
+}
+
+function buildAcpPatch(form: HubCatEditorFormState, cat?: CatData | null): Record<string, unknown> {
+  if (form.carrier === 'acp') return { acp: buildAcpTransportConfig(form, cat) };
+  if (form.clientId === 'google' && form.agyNativeEnabled && cat?.acp) return { acp: null };
+  return {};
+}
+
+/**
+ * Parse the contextWindow form field.
+ * clowder-ai#1208: empty or 0 = Auto (undefined), positive integer = Manual cap.
+ */
+export function buildContextWindow(form: HubCatEditorFormState): number | undefined {
+  const raw = form.contextWindow.trim();
+  if (raw.length === 0) return undefined;
+  // Strict: reject non-integer inputs like "1.5", "12abc", "0xFF"
+  if (!/^[0-9]+$/.test(raw)) {
+    throw new Error('Context Window 必须是正整数（留空或 0 = Auto）');
+  }
+  const parsed = Number.parseInt(raw, 10);
+  // 0 = Auto (same as empty).
+  if (parsed === 0) return undefined;
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error('Context Window 必须是正整数（留空或 0 = Auto）');
+  }
+  return parsed;
+}
+
+export interface CatPayloadContext {
+  accountAuthType?: 'oauth' | 'api_key' | null;
+  /** Rollback writes the original semantic value even when it matches the current read model. */
+  forceServiceTier?: boolean;
+}
+
+export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | null, context: CatPayloadContext = {}) {
+  const contextWindow = buildContextWindow(form);
+  const hasExistingWindow = cat?.contextWindow != null;
+  const contextWindowPatch =
+    contextWindow !== undefined ? { contextWindow } : cat && hasExistingWindow ? { contextWindow: null as null } : {};
+  const name = trimText(form.name);
+  const displayName = trimText(form.displayName) || name;
+  const createName = name || displayName;
+  const updateName = name || displayName || cat?.name || cat?.displayName || '';
+  const nativeTool = form.configurationSource === 'native_tool';
+  const changedRuntime =
+    cat &&
+    (form.clientId !== cat.clientId ||
+      (cat.carrier !== undefined && form.carrier !== cat.carrier) ||
+      (form.carrier === 'acp' &&
+        cat.acp &&
+        (form.acpCommand.trim() !== cat.acp.command ||
+          JSON.stringify(splitCommandArgs(form.acpStartupArgs)) !== JSON.stringify(cat.acp.startupArgs) ||
+          form.acpTransport !== (cat.acp.transport ?? 'stdio'))));
+  const agentProvider = form.acpAgentProvider !== undefined ? form.acpAgentProvider : changedRuntime ? null : undefined;
+  const trimmedAccountRef = resolveFormAccountRef(form);
+  const accountRefPatch =
+    trimmedAccountRef.length > 0
+      ? { accountRef: trimmedAccountRef }
+      : cat?.accountRef
+        ? { accountRef: null as null }
+        : {};
+  // #712: always send the form's mcpSupport value so the user can toggle it explicitly
+  const mcpSupportPatch = { mcpSupport: form.mcpSupport };
+  const cliCarrier = usesCliCarrier(form);
+  const trimmedCliEffort = trimText(form.cliEffort);
+  const cliFields: Record<string, unknown> = {};
+  if ((cliCarrier || nativeTool) && trimmedCliEffort.length > 0) {
+    cliFields.effort = trimmedCliEffort;
+  } else if (cat?.cli?.effort) {
+    cliFields.effort = null as null;
+  }
+  const nextServiceTier = form.codexSpeed ?? '';
+  const currentServiceTier = cat?.cli?.serviceTier ?? '';
+  const serviceTierEligible = form.clientId === 'openai' && context.accountAuthType === 'oauth';
+  if (serviceTierEligible && (context.forceServiceTier || nextServiceTier !== currentServiceTier)) {
+    cliFields.serviceTier = nextServiceTier || (null as null);
+  }
+  const cliPatch = Object.keys(cliFields).length > 0 ? { cli: cliFields } : {};
+  const nextCliConfigArgs = (form.cliConfigArgs ?? []).filter((arg) => arg.trim().length > 0);
+  const cliConfigArgsPatch = cliCarrier
+    ? { cliConfigArgs: nextCliConfigArgs }
+    : cat?.cliConfigArgs?.length
+      ? { cliConfigArgs: [] as string[] }
+      : {};
+  const voiceConfig = buildVoiceConfig(form);
+  const voiceConfigPatch: Record<string, unknown> =
+    voiceConfig !== undefined ? { voiceConfig } : cat?.voiceConfig ? { voiceConfig: null } : {};
+  const common = {
+    ...(agentProvider !== undefined ? { agentProvider: form.carrier === 'acp' ? agentProvider || null : null } : {}),
+    ...(form.configurationSource && !cat?.identityProtection ? { configurationSource: form.configurationSource } : {}),
+    displayName,
+    variantLabel: trimText(form.variantLabel),
+    nickname: trimText(form.nickname),
+    avatar: trimText(form.avatar),
+    ...(form.banner?.trim() ? { banner: form.banner.trim() } : cat?.banner ? { banner: null } : {}),
+    color: {
+      primary: trimText(form.colorPrimary),
+      secondary: trimText(form.colorSecondary),
+    },
+    mentionPatterns: Array.from(
+      new Set(splitMentionPatterns(form.mentionPatterns).map(normalizeMentionPattern).filter(Boolean)),
+    ),
+    roleDescription: trimText(form.roleDescription),
+    personality: trimText(form.personality),
+    teamStrengths: trimText(form.teamStrengths),
+    caution: trimText(form.caution) || null,
+    strengths: splitStrengthTags(form.strengths),
+    ...contextWindowPatch,
+    ...voiceConfigPatch,
+    carrier: form.carrier,
+    ...buildAcpPatch(form, cat),
+    ...buildAgyProfilePatch(form, cat, context.accountAuthType),
+  };
+
+  if (form.clientId === 'antigravity') {
+    const commandArgsSource = trimText(form.commandArgs) || DEFAULT_ANTIGRAVITY_COMMAND_ARGS;
+    return {
+      ...common,
+      ...(cat ? { name: updateName } : { catId: trimText(form.catId), name: createName }),
+      clientId: 'antigravity' as const,
+      ...accountRefPatch,
+      ...mcpSupportPatch,
+      defaultModel: trimText(form.defaultModel),
+      commandArgs: splitCommandArgs(commandArgsSource),
+    };
+  }
+
+  return {
+    ...common,
+    ...(cat ? { name: updateName } : { catId: trimText(form.catId), name: createName }),
+    clientId: form.clientId,
+    ...accountRefPatch,
+    ...mcpSupportPatch,
+    ...cliPatch,
+    defaultModel: trimText(form.defaultModel),
+    ...cliConfigArgsPatch,
+    ...buildProviderPatch(form, cat),
+  };
+}
+
+function normalizeOptionalText(value: unknown): string | null {
+  const trimmed = trimText(value);
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export function buildCatPatchPayload(form: HubCatEditorFormState, cat: CatData, context: CatPayloadContext = {}) {
+  const payload = buildCatPayload(form, cat, context) as Record<string, unknown>;
+  if (form.accountBindingMode && form.accountBindingMode !== cat.accountBindingMode)
+    payload.accountBindingMode = form.accountBindingMode;
+
+  if (form.clientId === cat.clientId) {
+    delete payload.clientId;
+  }
+  if (trimText(form.defaultModel) === trimText(cat.defaultModel)) {
+    delete payload.defaultModel;
+  }
+
+  if ((form.configurationSource ?? 'managed_account') === (cat.configurationSource ?? 'managed_account'))
+    delete payload.configurationSource;
+  const nextAccountRef = normalizeOptionalText(form.accountRef);
+  const currentAccountRef = normalizeOptionalText(cat.accountRef);
+  if (nextAccountRef === currentAccountRef) {
+    delete payload.accountRef;
+  }
+
+  const nextProvider =
+    usesOpenCodeProvider(form) && trimText(form.provider).length > 0 ? trimText(form.provider) : null;
+  const currentProvider = normalizeOptionalText(cat.provider);
+  if (nextProvider === currentProvider) {
+    delete payload.provider;
+  }
+
+  // #712: skip mcpSupport when it hasn't changed
+  if (form.mcpSupport === (cat.mcpSupport ?? true)) {
+    delete payload.mcpSupport;
+  }
+
+  // Built-in cloud members expose profile fields through this editor, but their
+  // transport identity is a product invariant. Do not let generic form defaults
+  // turn an innocent nickname/avatar save into a provider or CLI mutation.
+  if (cat.identityProtection?.kind === 'builtin-cloud') {
+    delete payload.configurationSource;
+    for (const field of cat.identityProtection.lockedFields) {
+      delete payload[field];
+    }
+    const nextMentions = Array.isArray(payload.mentionPatterns) ? payload.mentionPatterns : [];
+    const currentMentions = Array.from(new Set(cat.mentionPatterns.map(normalizeMentionPattern).filter(Boolean)));
+    if (JSON.stringify(nextMentions) === JSON.stringify(currentMentions)) {
+      delete payload.mentionPatterns;
+    }
+  }
+
+  return payload;
+}
+
+export function buildMemberPatchPayload(form: HubCatEditorFormState, cat: CatData, context: CatPayloadContext = {}) {
+  const payload = buildCatPatchPayload(form, cat, context);
+  if (cat.visualAssets && cat.visualAssets.state !== 'unlinked') delete payload.avatar;
+  // Compare form projections, not normalized persisted objects: a name-only save
+  // must not round ACP TTLs, rewrite voice extensions or persist inferred defaults.
+  const baseline = buildCatPayload(initialState(cat), cat, context) as Record<string, unknown>;
+  for (const key of Object.keys(payload)) {
+    if (key === 'cli' && payload.cli && baseline.cli) {
+      const cli = payload.cli as Record<string, unknown>;
+      const original = baseline.cli as Record<string, unknown>;
+      for (const field of Object.keys(cli)) {
+        if (field === 'serviceTier' && context.forceServiceTier) continue;
+        if (JSON.stringify(cli[field]) === JSON.stringify(original[field])) delete cli[field];
+      }
+      if (Object.keys(cli).length === 0) delete payload.cli;
+    } else if (JSON.stringify(payload[key]) === JSON.stringify(baseline[key])) {
+      delete payload[key];
+    }
+  }
+  return payload;
+}

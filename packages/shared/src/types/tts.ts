@@ -44,12 +44,32 @@ export interface TtsSynthesizeResult {
   };
 }
 
+export type TtsSynthesizeStreamEvent =
+  | {
+      readonly type: 'chunk';
+      readonly audio: Uint8Array;
+      readonly format: string;
+      readonly durationSec?: number;
+      readonly isFinalChunk: boolean;
+    }
+  | {
+      readonly type: 'final';
+      readonly result: TtsSynthesizeResult;
+    };
+
+export interface TtsSynthesizeStreamOptions {
+  /** Cancels work that no longer has a playback consumer. */
+  readonly signal?: AbortSignal;
+}
+
 /** Interface that all TTS providers must implement */
 export interface ITtsProvider {
   readonly id: string;
   /** Model identifier — included in cache key to avoid stale hits across model swaps */
   readonly model: string;
   synthesize(request: TtsSynthesizeRequest): Promise<TtsSynthesizeResult>;
+  /** Native model streaming when supported; final carries the complete cacheable asset. */
+  stream?(request: TtsSynthesizeRequest, options?: TtsSynthesizeStreamOptions): AsyncIterable<TtsSynthesizeStreamEvent>;
 }
 
 // F111: Streaming TTS types
@@ -65,6 +85,8 @@ export interface TtsStreamEvent {
   readonly type: 'chunk' | 'done' | 'error';
   readonly index?: number;
   readonly total?: number;
+  readonly sourceIndex?: number;
+  readonly sourceTotal?: number;
   readonly audioBase64?: string;
   readonly text?: string;
   readonly durationSec?: number;

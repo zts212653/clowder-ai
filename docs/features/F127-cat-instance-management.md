@@ -1,19 +1,20 @@
 ---
 feature_ids: [F127]
-related_features: [F062, F032, F050]
+related_features: [F062, F032, F050, F262]
 topics: [cat-management, provider-profile, hub, alias, routing, dynamic-config]
 doc_kind: spec
 created: 2026-03-17
+updated: 2026-07-15
 community_issue: "#109"
 ---
 
 # F127: 猫猫管理重构 — 账户配置与猫猫实例分离，支持动态创建猫 + 自定义别名 @ 路由
 
-> **Status**: in-progress (intake + fix done, AC 部分验收) | **Owner**: 金渐层 + Maine Coon | **Priority**: P1
+> **Status**: done | **Completed**: 2026-04-29 | **Owner**: 金渐层 + Maine Coon | **Priority**: P1
 
 ## Why
 
-> team experience（社区 issue #109）：
+> operator experience（社区 issue #109）：
 > "想加一只新猫（比如用 API key 接入的 GLM-5）或者给猫改个 @ 别名，都得手动改配置文件重启。"
 
 当前猫猫管理是静态 `cat-config.json` 一锅端模式：provider/model/认证/别名/@路由/角色全部写死在一个 JSON 里。用户想加一只新猫或给猫改个 @ 别名，都得手动改配置文件重启。
@@ -33,16 +34,16 @@ community_issue: "#109"
 
 管理认证凭据，和具体哪只猫无关：
 
-| 账户类型 | 配置项 | 示例 |
+| authType | 配置项 | 示例 |
 |---------|--------|------|
-| Claude 订阅 (OAuth) | 订阅类型 | Max Plan |
-| Claude API Key | apiKey + baseUrl + 可选 modelOverride | `<your-api-key>` + `https://api.anthropic.com` |
-| Codex 订阅 (OAuth) | 订阅类型 | ChatGPT Pro |
-| Codex API Key | apiKey + baseUrl | `sk-...` + `https://api.openai.com` |
-| Gemini 订阅 | CLI 内部 auth | — |
-| 自定义 API Key | apiKey + baseUrl + provider hint | 兼容 OpenAI 协议的任意端点 |
+| `oauth` — Claude | 订阅类型 | Max Plan |
+| `api_key` — Claude | apiKey + baseUrl + 可选 modelOverride | `<your-api-key>` + `https://api.anthropic.com` |
+| `oauth` — Codex | 订阅类型 | ChatGPT Pro |
+| `api_key` — Codex | apiKey + baseUrl | `sk-...` + `https://api.openai.com` |
+| `oauth` — Gemini | CLI 内部 auth | — |
+| `api_key` — 自定义 | apiKey + baseUrl + provider hint | 兼容 OpenAI 协议的任意端点 |
 
-这层是 F062（done）的泛化扩展。
+账号类型由 `authType: 'oauth' | 'api_key'` 唯一决定（F171 移除了冗余的 `builtin` 标记）。这层是 F062（done）的泛化扩展。
 
 #### 第二层：猫猫实例管理（Cat Instances）
 
@@ -119,12 +120,12 @@ community_issue: "#109"
 ### Phase B（猫猫实例管理）
 - [x] AC-B1: Hub 里可以创建新的猫猫实例，绑定到某个账户配置
 - [x] AC-B2: CatRegistry 支持运行时增删改猫猫实例
-- [ ] AC-B3: 动态创建的猫可以正常被 @ 调用、正常响应 — **未验证：动态创建的猫需要重启 CLI 才能被 @ 调用**
+- [x] AC-B3: 动态创建的猫可以正常被 @ 调用、正常响应 — close-gate 覆盖新会话动态猫响应 + resumed session registry-change reinjection（`invoke-single-cat.test.js` / `system-prompt-builder.test.js`）
 - [x] AC-B4: 现有预设猫（opus/codex/gemini 等）作为 seed 数据保留，不受影响
 
 ### Phase C（动态别名 @ 路由）
 - [x] AC-C1: 猫猫实例支持自定义别名，@ 路由基于别名工作
-- [ ] AC-C2: API key 接入的猫，默认别名包含实际模型名 — **未验证：无 API key 猫的端到端测试**
+- [x] AC-C2: API key 接入的猫，默认别名包含实际模型名 — Hub 新建 API key 猫在用户未显式填写别名时默认派生 `@{model}`（例如 `@gpt-5.4-mini`）
 - [x] AC-C3: @ 自动补全候选列表基于动态 registry
 
 ### Phase D（Hub 管理 UI）
@@ -142,9 +143,11 @@ community_issue: "#109"
 
 | 组件 | 当前 | 目标 |
 |------|------|------|
-| `cat-config.json` | 唯一真相源，静态 | 预设/seed 数据，可被运行时覆盖 |
+| `cat-template.json` | 品种模板（进 git） | 只读 seed，首次启动 bootstrap 创建空 catalog |
+| `.cat-cafe/cat-catalog.json` | — | 运行时猫实例状态（breeds + roster），支持 CRUD |
+| `.cat-cafe/accounts.json` | — | 运行时账户元数据（authType/clientId/models） |
 | `CatRegistry` | 启动时一次性加载 | 支持运行时增删改 |
-| `provider-profiles` | Anthropic-only | 通用账户管理 |
+| `provider-profiles` | Anthropic-only | 已被 `accounts.json` + `credentials.json` 取代（F136/clowder-ai#340） |
 | `mention-parser.ts` | 从静态 config 读 patterns | 从动态 registry 读 aliases |
 | `a2a-mentions.ts` | 同上 | 同上 |
 | Hub 猫猫总览 | 只读展示 | 可管理（CRUD） |
@@ -152,7 +155,7 @@ community_issue: "#109"
 
 ## 涉及文件
 
-- `cat-config.json` — 保留为 seed/fallback
+- `cat-template.json` — 品种模板（只读 seed，不参与运行时写入）
 - `packages/shared/src/types/cat.ts` — CatConfig 类型增加 `accountRef`、`aliases`
 - `packages/shared/src/registry/CatRegistry.ts` — 支持运行时 mutation
 - `packages/api/src/config/cat-config-loader.ts` — 合并 seed + 动态配置
@@ -179,24 +182,59 @@ community_issue: "#109"
 | KD-1 | 两层分离：账户配置 × 猫猫实例 | 认证凭据和猫猫身份是正交关注点，解耦后可独立扩展 | 2026-03-17 |
 | KD-2 | 持久化用文件（`.cat-cafe/cat-catalog.json`），不用 Redis | 社区 PR #130 选择了文件方案。原因：开源用户不一定有 Redis；文件方案零外部依赖。**代价**：引入了"两个 JSON 文件存同类数据"的双真相源风险。已通过 PR #632 的 deep merge 缓解（catalog 只是 delta overlay，不再整体替换 config） | 2026-03-21 |
 | KD-3 | config loader 做字段级 deep merge | catalog 是 overlay 而非替代品。`cat-config.json` 新增字段不会被 catalog 吞掉。解决了头像/颜色丢失的根因 | 2026-03-21 |
-| KD-4 | `owner` → `coCreator` 术语统一 | F127 intake 引入了 `owner` 概念（指team lead），但 `owner` 在 CS 领域是过载术语（repo owner, worklist owner），改为 `coCreator` 对齐愿景（共创者） | 2026-03-21 |
+| KD-4 | `owner` → `coCreator` 术语统一 | F127 intake 引入了 `owner` 概念（指operator），但 `owner` 在 CS 领域是过载术语（repo owner, worklist owner），改为 `coCreator` 对齐愿景（共创者） | 2026-03-21 |
 
 ## 遗留项（未来可能需要调整）
 
 | # | 遗留项 | 影响 | 触发点 | 建议处理 |
 |---|--------|------|--------|----------|
 | R-1 | **持久化层用文件而非 Redis** — 双 JSON 文件的复杂度已通过 deep merge 缓解，但仍比单一 Redis 存储多一层。社区 PR 选文件是合理的（零外部依赖），但如果未来需要多节点/分布式部署，文件方案不够 | 低（单节点够用） | 多节点部署需求 | 可在未来版本将 catalog 迁移到 Redis，接口层已解耦 |
-| R-2 | **动态创建猫仍需重启 CLI** — CatRegistry 运行时 mutation 只更新 API 进程内存 + catalog 文件，CLI 子进程不会热重载新猫 | 中（社区愿景是免重启） | 用户真的要通过 Hub 动态加猫时 | 需要 CLI hot-reload 或 IPC 通知机制，scope 较大，建议独立 Feature |
-| R-3 | **AC-B3 / AC-C2 未端到端验证** — 动态创建猫的 @ 路由和 API key 猫的默认别名，缺少端到端测试 | 低（代码路径存在，但没有集成测试覆盖） | 有人真的通过 Hub 创建 API key 猫时 | 补集成测试 |
+| R-2 | ~~**resumed session 下动态猫 roster 可能过时**~~ — ✅ 已修复。CatRegistry 维护 revision；同一 user/cat/thread 的 resume 会话若 registry revision 变化，会重新注入 static identity 刷新 roster，同时保留普通 resume 跳过注入 | ~~中~~ done | — | — |
+| R-3 | ~~**AC-B3 / AC-C2 未端到端验证**~~ — ✅ 已补齐。AC-C2 覆盖 API key 新建默认模型别名；AC-B3 覆盖动态猫新会话响应和 resume registry-change reinjection | ~~低~~ done | — | — |
 | R-4 | **猫猫模板机制未做** — 社区 issue 里提到的"预设品种→一键创建变体"能力，当前 Hub 只有完全手动填表 | 低（非 MVP 范围） | 用户量增长后 onboarding 体验优化 | 未来 Feature |
 | R-5 | **社区 issue #109 仍 OPEN** — 应同步更新状态 | 低 | 和开源同步时 | 发 comment 说明进度 + 关闭或标为 phase 2 |
-| R-6 | **Hub 编辑器滚动时右上角 X 按钮跟着滚** — X 应该是 fixed/sticky 定位，不该随内容滚动 | 中（UX bug） | 编辑长表单时 | 改 X 按钮为 `position: sticky; top: 0` |
+| R-6 | ~~**Hub 编辑器滚动时右上角 X 按钮跟着滚**~~ — ✅ 已修复（PR #665 初版 + PR #714 二修）。3 个 modal 统一改为 flex-col 布局，header/footer 固定，仅 content 滚动 | ~~中~~ done | — | — |
 | R-7 | **API key 账号需手动逐个填支持的 model 列表** — 应该自动探测或提供预设列表 | 中（UX 痛点） | 添加 API key 账号时 | 自动探测 endpoint 支持的 model（`/v1/models`）或提供常用 model 预设 |
-| R-8 | **切换认证方式（订阅↔API key）没有一键切换** — 要一只猫一只猫改 provider profile binding | 高（UX 痛点） | team lead想批量切换认证方式时 | 加"一键切换所有猫的 provider profile"功能 |
+| R-8 | **切换认证方式（订阅↔API key）没有一键切换** — 要一只猫一只猫改 provider profile binding | 高（UX 痛点） | operator想批量切换认证方式时 | 加"一键切换所有猫的 provider profile"功能 |
 | R-9 | **nuoda.vip 代理 model name 格式混淆** — API 代理用 `claude-opus-4-6`（Anthropic 原生），但 opencode CLI 需要 `anthropic/claude-opus-4-6`（provider/model 格式），Hub 不知道该用哪个 | 中（配置困惑） | 用第三方 API 代理时 | Hub 编辑器应按 client 类型自动处理 model name 格式 |
 | R-10 | **本地反代 `anthropic-proxy.mjs` 的 upstream 配置未初始化** — `start-dev.sh` 启动的反代（端口 9877）依赖 `.cat-cafe/proxy-upstreams.json` 配置上游，但 F127 intake 后 runtime 里该文件不存在。API key profile 创建应自动注册 upstream 到反代 | 中（反代功能不可用） | 配置 API key profile 用本地反代时 | profile 创建/更新时自动写 `proxy-upstreams.json` |
+| R-11 | ~~**Hub 缺少结构化、provider-aware 的 `cli.effort` 编辑**~~ — ✅ PR #882 提供按 provider/model 维护的建议值；clowder-ai#1152 / Clowder AI #2967 进一步允许 effort-aware 成员输入任意非空 provider 原生值并原样持久化，由 CLI 做最终校验并返回错误。成员默认只对新 invocation 生效，不强切旧 session；F262 的 thread-scoped override 仍使用严格的 model-aware 建议值集合，不随本项放宽。 | ~~高（易错 + UX 差）~~ done | — | — |
+| R-12 | ~~**跨项目 homedir legacy 账号污染 runtime 账号配置**~~ — ✅ 已修复（PR #1457）。启动迁移与 installer import 现在只导入项目显式引用的 homedir legacy account；引用源覆盖 `accountRef`、legacy `providerProfileId`、catalog `accounts` keys、credential refs，并保留 installer 内置账号 | ~~中（账号配置 UI 出现 Agent Teams / Local 等外部项目垃圾项）~~ done | — | — |
+
+## AC-B3 验收矩阵（E2E 验证清单）
+
+| # | 场景 | 预期 | 状态 |
+|---|------|------|------|
+| V-1 | 新会话：Hub 创建动态猫后，新对话中 @ 该猫 | API 路由成功，猫正常响应 | ✅ `invoke-single-cat.test.js` 覆盖 runtime-created cat 新会话响应；`system-prompt-builder.test.js` 覆盖新 roster |
+| V-2 | resume 会话（无 reinjection）：已有 session 中 @ 新动态猫 | 需确认 roster 是否包含新猫 | ✅ CatRegistry revision 变化触发 static identity reinjection；测试确认保留同一 CLI sessionId 且刷新 roster |
+| V-3 | resume + forceReinjection（压缩触发）：压缩后 @ 新动态猫 | reinjection 刷新 roster，路由成功 | ⬜ 待验证 |
+| V-4 | API 路由链（connector/A2A）：外部消息 @ 动态猫 | catRegistry 实时生效，路由成功 | ⬜ 待验证 |
+
+> **F127 close 前提**：V-1 + V-2 已覆盖。V-3/V-4 仍属于增强验证，不阻塞 close。
+
+## Close Gate Report
+
+| AC | 处置 | Evidence |
+|----|------|----------|
+| AC-A1 | ✅ met | PR #626/#631 建立 Hub 账户配置 CRUD；F127 status 已在 #1464 后置为 done |
+| AC-A2 | ✅ met | 账户层支持 API Key + baseUrl；R-12 修复未改变显式项目账户导入 |
+| AC-A3 | ✅ met | provider-profile 迁移已由 F127 intake / F136 路径吸收，legacy `providerProfileId` 仍被 R-12 allowlist 识别 |
+| AC-B1 | ✅ met | Hub 猫猫实例 CRUD 已随 Phase B/D 落地 |
+| AC-B2 | ✅ met | CatRegistry 支持 runtime mutation；#1464 增加 registry revision |
+| AC-B3 | ✅ met | #1464 覆盖 runtime-created cat 新会话响应 + resume registry-change reinjection |
+| AC-B4 | ✅ met | seed/preconfigured cats 继续保留；运行时 catalog 是 overlay，不修改 `cat-config.json` |
+| AC-C1 | ✅ met | mention parser / A2A alias routing 从动态 registry 读取 aliases |
+| AC-C2 | ✅ met | #1464：Hub 新建 API key 猫且别名为空时从模型名派生默认 alias |
+| AC-C3 | ✅ met | 自动补全基于动态 registry 候选 |
+| AC-D1 | ✅ met | Hub 猫猫总览支持新建/编辑/删除猫猫实例 |
+| AC-D2 | ✅ met | Hub 编辑器支持别名、昵称、角色描述、账户绑定等配置 |
+| R-12 | ✅ met | #1457：homedir legacy account import 只保留项目显式引用账号，阻断 runtime account pollution |
+
+**Close review**:
+- `gpt52` close-gate review：确认 AC-C2 / V-1 / V-2 补齐，放行 PR #1464。
+- `opus` 愿景守护：确认原始痛点与当前状态匹配，放行 F127 close。
 
 ## Review Gate
 
 - Phase A~D: 每 Phase 独立 review + merge
-- 前端 UI: Design Gate 必须team lead确认
+- 前端 UI: Design Gate 必须operator确认

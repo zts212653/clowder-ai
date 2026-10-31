@@ -24,6 +24,15 @@ export class MemoryTaskProgressStore implements TaskProgressStore {
     if (thread.size === 0) this.byThread.delete(threadId);
   }
 
+  async deleteSnapshotIfOwner(threadId: string, catId: CatId, invocationId: string): Promise<boolean> {
+    const thread = this.byThread.get(threadId);
+    const snapshot = thread?.get(catId);
+    if (!thread || snapshot?.lastInvocationId !== invocationId) return false;
+    thread.delete(catId);
+    if (thread.size === 0) this.byThread.delete(threadId);
+    return true;
+  }
+
   async getThreadSnapshots(threadId: string): Promise<Record<string, TaskProgressSnapshot>> {
     const thread = this.byThread.get(threadId);
     if (!thread) return {};

@@ -4,7 +4,7 @@ related_features: [F042, F086, F038, F102]
 topics: [skills, sop, governance, self-improvement, knowledge-management, mode-c, knowledge-evolution]
 doc_kind: spec
 created: 2026-03-11
-updated: 2026-03-16
+updated: 2026-09-07
 ---
 
 # F100: Self-Evolution — 猫猫自我进化机制
@@ -12,14 +12,14 @@ updated: 2026-03-16
 > **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
 > Phase 1 完成：行为层 skill（A/B/C 三模式触发规则）
 > Phase 2 完成：三模式知识对象化（A 守护记录 + B 流程提案闭环 + C 知识蒸馏验证 + 五级阶梯 + 元认知）
-> Phase 3 待建：可观测层 — **blocked on F102 close**，需基于 F102 终态重新定义
+> Phase 3（可观测层）不再单独建：事件/轨迹由 F299 + F153 承接，效果评估由 F192 承接；本 feat 当前角色 = **进化资产 owner**（如 `cat-cafe-skills/request-review/SKILL.md`）+ 行为协议（Mode A/B/C），进化机制由 F311 Program 编排（`evolution-program:ba0f4524…`）
 
 ## Why
 
 三个缺口：
-1. team lead有 ADHD，聊 feat 时 scope 无限发散，猫猫不主动提醒"要不要拆？"
+1. operator有 ADHD，聊 feat 时 scope 无限发散，猫猫不主动提醒"要不要拆？"
 2. 猫猫被反复纠正同类错误，不主动提改 SOP/skills/家规
-3. **（team lead追加）** 猫猫只从错误中学习，不从有价值的经验中成长——比如帮team lead分析医学报告、法律探讨、deep research，这些知识/方法论没有沉淀机制
+3. **（operator追加）** 猫猫只从错误中学习，不从有价值的经验中成长——比如帮operator分析医学报告、法律探讨、deep research，这些知识/方法论没有沉淀机制
 
 根因：P2 说猫猫是共创伙伴，但只落地了"被动执行"，没有"主动护栏 + 主动改进 + 主动成长"。
 
@@ -28,12 +28,12 @@ updated: 2026-03-16
 一个 skill 三个模式：
 
 ### Mode A: Scope Guard（防御）
-- 发现team lead讨论偏离当前 feat 愿景时，温柔提醒"要不要拆？"
+- 发现operator讨论偏离当前 feat 愿景时，温柔提醒"要不要拆？"
 - 4 信号判断法：不服务愿景 / 新旅程 / 新依赖 / 验收说不清
 - 同一 phase 最多提醒两次
 
 ### Mode B: Process Evolution（防御→改进）
-- 触发：memory ≥2 次同类错误 / team lead纠正可泛化 / SOP 流程缺口 / review 系统性问题
+- 触发：memory ≥2 次同类错误 / operator纠正可泛化 / SOP 流程缺口 / review 系统性问题
 - 5 槽提案模板 + 4 硬护栏 + 最小杠杆排序
 
 ### Mode C: Knowledge Evolution（进攻→成长）
@@ -47,12 +47,28 @@ updated: 2026-03-16
 1. **一个 skill 三模式** — 本质都是"主动感知 + 主动行动"
 2. **不发明新沉淀库** — 路由到现有真相源
 3. **L0 只加一句许可** — 三模式都提到，细节放 skill
-4. **Mode C 是team lead追加** — 原设计只有 A+B（防御），team lead指出格局太小
+4. **Mode C 是operator追加** — 原设计只有 A+B（防御），operator指出格局太小
 
 ## Discussion
 
-- Thread: `thread_mmlv4v2oq6dxefr6`（Ragdoll + Maine Coon GPT-5.4 讨论 A+B 模式）
-- team lead追加 Mode C（知识进化）：不只从错误学，也从有价值的经验成长
+- Thread: `[thread-id]`（Ragdoll + Maine Coon GPT-5.4 讨论 A+B 模式）
+- operator追加 Mode C（知识进化）：不只从错误学，也从有价值的经验成长
+
+## User Journey
+
+### Primary Journey: 从一次真实协作中形成可见、可验证的改进
+
+- **Scope unit**: 一个 thread / feature 内的一次协作 episode；每次只处理一个已发生的 scope 偏移、重复流程问题或可复用知识线索。
+- **Actor**: operator、正在协作的猫、对应流程或知识资产 owner。
+- **Entry**: 协作进行中出现 scope 漂移，或任务闭环后确认了重复流程缺口、值得复用的方法。
+- **Flow**:
+  1. 猫猫先判断意图的时间方向：面向过去收束经验留在 F100；面向未来主动改变某个能力则转入 F311 Capability Evolution。
+  2. Scope 漂移走 Mode A：猫猫复述当前愿景，提出继续、拆 feature、parking lot 或碰头的明确出口，并记录operator实际选择。
+  3. 重复流程问题走 Mode B：先修完当前任务并扫描当前 scope 的同型问题，再用至少两份证据提出最小杠杆改进；获接受后绑定真实 commit / PR，30 天后复查是否仍发生。
+  4. 可复用知识走 Mode C：通过复用性、非显然性、衰减性三问后形成 Episode Card；只有经过蒸馏与 replay eval 的内容才逐级成为 Method 或 Skill。
+  5. 产物进入既有真相源并保持可回看；猫猫随后返回原任务，不把记录动作冒充当前交付，也不静默替operator批准规则变化。
+- **Success evidence**: Scope Guard outcome、Evolution Proposal 的 source refs 与落地 commit / PR、或 Episode → Method / Skill → Eval Ledger 的可追溯链；单次触发不产生未经验证的团队标准。
+- **Non-goals**: 要求operator给每次对话打标签；把一次性 bug 自动升级为规则；把 F100 当成面向未来创建 Program 的入口；自建 Dashboard、事件总线或新的知识仓库。
 
 ## Deliverables
 
@@ -97,8 +113,8 @@ Phase 1 状态：4 信号判断 + 频率限制 + 出口表。
 
 Phase 2 补齐：
 - **Scope Guard Log** (`docs/scope-guard-log.md`)：每次触发记录 `{date, feat_id, signal_type, action_taken, outcome}`
-- **发散模式识别**：累积 ≥3 次同一 feat 触发 → 自动建议team lead拆 feat
-- **Scope Guard 效果追踪**：guardian 成功率（提醒后team lead确实聚焦 vs 忽略），用于调节触发灵敏度
+- **发散模式识别**：累积 ≥3 次同一 feat 触发 → 自动建议operator拆 feat
+- **Scope Guard 效果追踪**：guardian 成功率（提醒后operator确实聚焦 vs 忽略），用于调节触发灵敏度
 - **知识对象**：Scope Guard 的经验纳入五级阶梯（哪些信号组合最有效 → Method Card）
 
 ### Mode B Phase 2: Process Evolution 对象化
@@ -145,7 +161,7 @@ Episode Card（原料）→ Dual Distillation（蒸馏成品）→ Eval Ledger�
 | **L1 Pattern** | 草稿 | ≥2 个相似 episode（180天内），或人类要求；5Q ≥ 7/10 | 一次性特例 → rejected |
 | **L2 Draft** | Method Card / Skill Draft | smoke gate ≥3 cases（≥2/3 通过）；promotion gate ≥5 cases（≥3/5 通过，覆盖 3 类） | 最近 3 次 <50% → 退 L1 |
 | **L3 Validated** | 正式 method/skill | ≥6 uses，≥2 agents，≥80%，无 critical breach | 最近 5 次 <60% → 退 L2 |
-| **L4 Standard** | 团队标准 | ≥12 uses，最近 10 次 ≥90%，CVO 批准 | 1 次高风险越界 → freeze |
+| **L4 Standard** | 团队标准 | ≥12 uses，最近 10 次 ≥90%，operator 批准 | 1 次高风险越界 → freeze |
 
 **双车道**：常规车道（标准数字）+ 长尾/高风险车道（`long_tail: true`，允许长期停 L2/L3）
 

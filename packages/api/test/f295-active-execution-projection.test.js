@@ -1,0 +1,1822 @@
+/**
+ * F295 — one read/cancel truth for live invocations and managed commands.
+ *
+ * These route-level journeys deliberately use two threads with the same cat. A
+ * catId-only projection would make the assertions ambiguous and is therefore
+ * incapable of passing this contract.
+ */
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, it, mock } from 'node:test';
+import Fastify from 'fastify';
+import { canonicalTestMessageInput, canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
+
+const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { DraftStore } = await import('../dist/domains/cats/services/stores/ports/DraftStore.js');
+const { InvocationRecordStore } = await import('../dist/domains/cats/services/stores/ports/InvocationRecordStore.js');
+const { InMemoryTurnExecutionStore } = await import(
+  '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js'
+);
+const { queueRoutes } = await import('../dist/routes/queue.js');
+
+const USER_ID = 'user-a';
+
+function makeManagedCommandTask() {
+  return {
+    id: 'hold-ball-command-b',
+    templateId: 'reminder',
+    trigger: { type: 'once', fireAt: 90_000 },
+    params: {
+      triggerUserId: USER_ID,
+      holdLifecycle: {
+        mode: 'wake_when',
+        status: 'active',
+        createdBy: 'hold-ball:kimi',
+        managedCommand: {
+          state: 'command_running',
+          command: 'pnpm gate',
+          startedAt: 300,
+        },
+      },
+    },
+    display: { label: 'managed command', category: 'system', description: 'test' },
+    deliveryThreadId: 'thread-b',
+    enabled: true,
+    createdBy: 'hold-ball:kimi',
+    createdAt: new Date(300).toISOString(),
+  };
+}
+
+function makeSchedulerTriggeredCommandTask() {
+  // A scheduler round occupies the same cat slot, but its trigger principal is
+  // not the viewing user.
+  const task = makeManagedCommandTask();
+  return {
+    ...task,
+    id: 'hold-ball-command-scheduler',
+    params: { ...task.params, triggerUserId: 'scheduler' },
+  };
+}
+
+function makeUserMessageRetiredRunningCommandTask() {
+  const task = makeManagedCommandTask();
+  return {
+    ...task,
+    id: 'hold-ball-command-retired-wake',
+    enabled: false,
+    params: {
+      ...task.params,
+      holdLifecycle: {
+        ...task.params.holdLifecycle,
+        status: 'cancelled_by_user',
+        managedCommand: {
+          ...task.params.holdLifecycle.managedCommand,
+          command: 'pnpm --filter @cat-cafe/api test',
+          startedAt: 350,
+        },
+      },
+    },
+  };
+}
+
+function fixtureActiveRun(threadId, catId, invocationId, startedAt) {
+  return {
+    threadId,
+    targetId: catId,
+    invocationId,
+    responseMessageId: `response-${invocationId}`,
+    inputEntryIds: [],
+    inputMessageIds: [],
+    privateInputEntryIds: [],
+    startedAt,
+  };
+}
+
+function buildDeps() {
+  const threads = new Map([
+    [
+      'thread-a',
+      {
+        id: 'thread-a',
+        title: 'Alpha work',
+        projectPath: '/project/cafe',
+        createdBy: USER_ID,
+      },
+    ],
+    [
+      'thread-b',
+      {
+        id: 'thread-b',
+        title: 'Background work',
+        projectPath: '/project/cafe',
+        createdBy: USER_ID,
+      },
+    ],
+  ]);
+  const indexedThreadIds = new Set();
+  const executions = new Map([
+    [
+      'thread-a:kimi',
+      { executionId: 'inv-a', startedAt: 100, activeRun: fixtureActiveRun('thread-a', 'kimi', 'inv-a', 100) },
+    ],
+    [
+      'thread-b:kimi',
+      { executionId: 'inv-b', startedAt: 200, activeRun: fixtureActiveRun('thread-b', 'kimi', 'inv-b', 200) },
+    ],
+  ]);
+  const cancelCalls = [];
+  const processOwnerCancelCalls = [];
+  const turnTerminalCalls = [];
+  const processOwners = [];
+  const managedTasks = [makeManagedCommandTask()];
+  const activeRunDispatchers = new Map();
+  const invocationTracker = {
+    has(threadId, catId) {
+      return executions.has(`${threadId}:${catId}`);
+    },
+    getUserId(threadId, catId) {
+      return executions.has(`${threadId}:${catId}`) ? USER_ID : null;
+    },
+    getExecutionId(threadId, catId) {
+      return executions.get(`${threadId}:${catId}`)?.executionId;
+    },
+    getSlotState(threadId, catId) {
+      return executions.has(`${threadId}:${catId}`) ? 'active' : 'absent';
+    },
+    getCanceledSlotIdentity() {
+      return undefined;
+    },
+    getActiveSlots(threadId) {
+      return [...executions.entries()]
+        .filter(([key]) => key.startsWith(`${threadId}:`))
+        .map(([key, value]) => ({
+          catId: key.slice(threadId.length + 1),
+          startedAt: value.startedAt,
+          ...(value.activeRun ? { activeRun: value.activeRun } : {}),
+        }));
+    },
+    getAgentClientActiveRunDispatcher(threadId, catId) {
+      return activeRunDispatchers.get(`${threadId}:${catId}`);
+    },
+    cancel(threadId, catId, requestUserId, reason) {
+      cancelCalls.push({ threadId, catId, requestUserId, reason });
+      const key = `${threadId}:${catId}`;
+      const execution = executions.get(key);
+      if (!execution) return { cancelled: false, catIds: [] };
+      executions.delete(key);
+      return { cancelled: true, catIds: [catId], executionIds: [execution.executionId] };
+    },
+  };
+  const requestDrain = mock.fn(async () => {});
+  const invocationQueue = new InvocationQueue(undefined, {
+    onAdmitted: ({ threadId }) => {
+      void requestDrain(threadId);
+    },
+  });
+  return {
+    threadStore: {
+      get: mock.fn(async (threadId) => threads.get(threadId) ?? null),
+      list: mock.fn(async (userId) =>
+        userId === USER_ID
+          ? [...threads.values()].filter(
+              (thread) => thread.createdBy === userId || thread.id === 'default' || indexedThreadIds.has(thread.id),
+            )
+          : [],
+      ),
+      listByProject: mock.fn(async (userId, projectPath) =>
+        userId === USER_ID
+          ? [...threads.values()].filter(
+              (thread) =>
+                thread.projectPath === projectPath &&
+                (thread.createdBy === userId || thread.id === 'default' || indexedThreadIds.has(thread.id)),
+            )
+          : [],
+      ),
+    },
+    invocationQueue,
+    invocationTracker,
+    dynamicTaskStore: {
+      getAll: mock.fn(() => managedTasks),
+      getById: mock.fn((taskId) => managedTasks.find((task) => task.id === taskId) ?? null),
+    },
+    queueProcessor: {
+      canReleaseSlotForUser: mock.fn(() => true),
+      hasProcessingSlotReservation: mock.fn((threadId, catId) =>
+        Boolean(invocationQueue.findProcessingByCat(threadId, catId)),
+      ),
+      retirePrestartProcessingGroup: mock.fn(async () => 'retired'),
+      processNext: mock.fn(async () => ({ started: false })),
+      requestDrain,
+      isPaused: mock.fn(() => false),
+      getPauseReason: mock.fn(() => undefined),
+      clearPause: mock.fn(),
+      releaseSlot: mock.fn(),
+      releaseThread: mock.fn(),
+    },
+    messageStore: {
+      getByIdempotencyKey: mock.fn(async () => null),
+    },
+    invocationRecordStore: {
+      get: mock.fn(async () => null),
+      update: mock.fn(async () => null),
+      listRunningByThread: mock.fn(async () => []),
+    },
+    socketManager: {
+      broadcastAgentMessage: mock.fn(),
+      broadcastToRoom: mock.fn(),
+      emitToUser: mock.fn(),
+    },
+    agentSessionMutex: {
+      forceReleaseByScope: mock.fn(() => ({ releasedHolders: 0, rejectedWaiters: 0, catIds: [] })),
+    },
+    getManagedCommandWakeRecovery: () => undefined,
+    cliExecutionOwnerService: {
+      listLive: mock.fn(async () => ({ owners: processOwners, complete: true })),
+      terminateExact: mock.fn(async (execution) => {
+        processOwnerCancelCalls.push(execution);
+        return { matched: 1, signaled: 1, complete: true };
+      }),
+    },
+    turnExecutionStore: {
+      listByParent: mock.fn(async () => []),
+      transitionTerminal: mock.fn(async (invocationId, terminal) => {
+        turnTerminalCalls.push({ invocationId, terminal });
+        return { outcome: 'transitioned', record: null };
+      }),
+      clearResponsePending: mock.fn(async () => {}),
+    },
+    _executions: executions,
+    _cancelCalls: cancelCalls,
+    _managedTasks: managedTasks,
+    _activeRunDispatchers: activeRunDispatchers,
+    _processOwners: processOwners,
+    _processOwnerCancelCalls: processOwnerCancelCalls,
+    _turnTerminalCalls: turnTerminalCalls,
+    _threads: threads,
+    _indexedThreadIds: indexedThreadIds,
+  };
+}
+
+describe('F295 active execution projection', () => {
+  let app;
+  let deps;
+
+  beforeEach(async () => {
+    deps = buildDeps();
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app?.close();
+  });
+
+  it('discovers all visible projects and unassigned work without widening thread access', async () => {
+    deps._threads.get('thread-b').projectPath = '/project/planet';
+    for (const [id, createdBy, projectPath] of [
+      ['unassigned', USER_ID, 'default'],
+      ['hidden-system', 'system', '/project/planet'],
+      ['foreign-user', 'other-user', '/project/planet'],
+    ]) {
+      deps._threads.set(id, { id, title: id, createdBy, projectPath });
+      deps._executions.set(`${id}:kimi`, {
+        executionId: `inv-${id}`,
+        startedAt: 400,
+        activeRun: fixtureActiveRun(id, 'kimi', `inv-${id}`, 400),
+      });
+    }
+    // A foreign-owned hash cannot become readable through candidate enumeration.
+    deps._indexedThreadIds.add('foreign-user');
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?scope=all',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().scope, 'all');
+    assert.deepEqual(
+      response.json().executions.map(({ threadId, projectPath }) => [threadId, projectPath]),
+      [
+        ['thread-a', '/project/cafe'],
+        ['thread-b', '/project/planet'],
+        ['thread-b', '/project/planet'],
+        ['unassigned', 'default'],
+      ],
+    );
+    const crossProject = response.json().executions.find((row) => row.executionId === 'inv-b');
+    const canceled = await app.inject({
+      method: 'POST',
+      url: `/api/threads/thread-b/executions/live/${crossProject.executionId}/cancel`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'kimi' },
+    });
+    assert.equal(canceled.statusCode, 200);
+    assert.equal(deps._executions.has('thread-a:kimi'), true);
+    assert.equal(deps._executions.has('thread-b:kimi'), false);
+    assert.equal(deps._managedTasks[0].params.holdLifecycle.managedCommand.state, 'command_running');
+  });
+
+  it('returns an honest empty global snapshot for an unknown user and requires identity', async () => {
+    const empty = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?scope=all',
+      headers: { 'x-cat-cafe-user': 'empty-user' },
+    });
+    assert.equal(empty.statusCode, 200);
+    assert.deepEqual(empty.json(), { scope: 'all', executions: [] });
+    const anonymous = await app.inject({ method: 'GET', url: '/api/executions/active?scope=all' });
+    assert.equal(anonymous.statusCode, 401);
+    const mixed = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?scope=all&projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    assert.equal(mixed.statusCode, 400);
+  });
+
+  it('keeps one production execution-owner service wired into queue routes', () => {
+    const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+    assert.match(source, /const cliExecutionOwnerService = createCliExecutionOwnerService\(\{ log: app\.log \}\)/);
+    assert.match(source, /await app\.register\(queueRoutes, \{[\s\S]*?\n\s+cliExecutionOwnerService,\n/);
+  });
+
+  it('cold-discovers same-cat live work in every project thread and a post-invocation managed command', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), {
+      projectPath: '/project/cafe',
+      executions: [
+        {
+          executionId: 'inv-a',
+          threadId: 'thread-a',
+          threadTitle: 'Alpha work',
+          catId: 'kimi',
+          kind: 'live_invocation',
+          startedAt: 100,
+          cancelability: {
+            state: 'cancelable',
+            target: {
+              kind: 'live_invocation',
+              threadId: 'thread-a',
+              catId: 'kimi',
+              executionId: 'inv-a',
+            },
+          },
+        },
+        {
+          executionId: 'inv-b',
+          threadId: 'thread-b',
+          threadTitle: 'Background work',
+          catId: 'kimi',
+          kind: 'live_invocation',
+          startedAt: 200,
+          cancelability: {
+            state: 'cancelable',
+            target: {
+              kind: 'live_invocation',
+              threadId: 'thread-b',
+              catId: 'kimi',
+              executionId: 'inv-b',
+            },
+          },
+        },
+        {
+          executionId: 'hold-ball-command-b',
+          threadId: 'thread-b',
+          threadTitle: 'Background work',
+          catId: 'kimi',
+          kind: 'managed_command',
+          activity: 'full_gate',
+          startedAt: 300,
+          cancelability: {
+            state: 'cancelable',
+            target: { kind: 'managed_command', taskId: 'hold-ball-command-b' },
+          },
+        },
+      ],
+    });
+  });
+
+  it('projects Append only from the exact request-owned live dispatcher', async () => {
+    const activeRun = {
+      threadId: 'thread-a',
+      targetId: 'kimi',
+      invocationId: 'turn-a',
+      responseMessageId: 'response-a',
+      inputEntryIds: ['entry-a'],
+      inputMessageIds: ['message-a'],
+      privateInputEntryIds: [],
+      startedAt: 100,
+    };
+    deps._executions.set('thread-a:kimi', { executionId: 'inv-a', startedAt: 100, activeRun });
+    deps._activeRunDispatchers.set('thread-a:kimi', {
+      invocationId: 'turn-a',
+      capabilities: { append: true, steer: true },
+      handle: {},
+      dispatch: mock.fn(),
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-a/executions/active',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    const execution = response.json().executions.find((item) => item.executionId === 'inv-a');
+
+    assert.deepEqual(execution.inputCapabilities, {
+      append: {
+        kind: 'append',
+        expectedRun: { targetId: 'kimi', invocationId: 'turn-a', responseMessageId: 'response-a' },
+      },
+    });
+
+    deps._activeRunDispatchers.set('thread-a:kimi', {
+      invocationId: 'replacement-turn',
+      capabilities: { append: true, steer: true },
+      handle: {},
+      dispatch: mock.fn(),
+    });
+    const stale = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-a/executions/active',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    const staleExecution = stale.json().executions.find((item) => item.executionId === 'inv-a');
+    assert.equal(staleExecution.inputCapabilities, undefined);
+  });
+
+  it('treats a stale exact Stop as the same per-cat intent and stops the current replacement', async () => {
+    deps._executions.set('thread-a:kimi', { executionId: 'inv-new', startedAt: 400 });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-a/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'kimi' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().replaced, true);
+    assert.equal(deps._cancelCalls.length, 1);
+    assert.equal(deps._executions.has('thread-a:kimi'), false);
+  });
+
+  it('treats Stop on a confirmed-dead exact execution as reconciliation, not an error', async () => {
+    deps._executions.delete('thread-a:kimi');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-a/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'kimi' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { ok: true, cancelled: false, reconciled: true });
+    assert.deepEqual(deps._cancelCalls, []);
+    assert.equal(deps.queueProcessor.releaseSlot.mock.callCount(), 1);
+    assert.deepEqual(deps.queueProcessor.releaseSlot.mock.calls[0].arguments, ['thread-a', 'kimi']);
+  });
+
+  it('keeps a command visible and exactly cancelable after an ordinary message retires only its wake', async () => {
+    deps._managedTasks.push(makeUserMessageRetiredRunningCommandTask());
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const execution = response.json().executions.find((item) => item.executionId === 'hold-ball-command-retired-wake');
+    assert.deepEqual(execution, {
+      executionId: 'hold-ball-command-retired-wake',
+      threadId: 'thread-b',
+      threadTitle: 'Background work',
+      catId: 'kimi',
+      kind: 'managed_command',
+      activity: 'test',
+      startedAt: 350,
+      cancelability: {
+        state: 'cancelable',
+        target: { kind: 'managed_command', taskId: 'hold-ball-command-retired-wake' },
+      },
+    });
+  });
+
+  it('cancels only the exact thread execution when the same cat runs elsewhere', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-a/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'kimi' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().cancelled, true);
+    assert.deepEqual(deps._cancelCalls, [
+      { threadId: 'thread-a', catId: 'kimi', requestUserId: USER_ID, reason: 'user_cancel' },
+    ]);
+    assert.equal(deps._executions.has('thread-a:kimi'), false);
+    assert.equal(deps._executions.get('thread-b:kimi').executionId, 'inv-b');
+  });
+
+  it('keeps a canceled Queue execution reservation until its completion drains the next row', async () => {
+    const queued = deps.invocationQueue.enqueueDurableNow(
+      canonicalTestQueueInput({
+        threadId: 'thread-a',
+        userId: USER_ID,
+        kind: 'conversation_input',
+        content: 'currently executing',
+        source: 'user',
+        sourceId: 'f295-cancel-reservation',
+        targetCats: ['kimi'],
+        intent: 'execute',
+      }),
+    );
+    assert.equal(queued.outcome, 'enqueued');
+    const processing = await deps.invocationQueue.markProcessingDurable('thread-a', USER_ID, {
+      entryId: queued.entry.id,
+      targetCats: ['kimi'],
+    });
+    assert.ok(processing);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-a/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'kimi' },
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(deps.queueProcessor.releaseSlot.mock.calls.length, 0);
+  });
+
+  it('surfaces a scheduler-owned command as occupancy instead of hiding the busy cat slot', async () => {
+    // Reported downstream: the console filters executions by the viewing user, so a
+    // scheduler round holding the cat slot vanished and Queue looked idle while new
+    // work silently queued behind an invisible occupant.
+    deps._managedTasks.push(makeSchedulerTriggeredCommandTask());
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const schedulerExecution = response
+      .json()
+      .executions.find(
+        (execution) =>
+          execution.kind === 'managed_command' &&
+          execution.catId === 'kimi' &&
+          execution.cancelability.state === 'not_cancelable',
+      );
+
+    assert.ok(schedulerExecution, 'an occupied cat slot must be visible to whoever shares the thread');
+    assert.equal(schedulerExecution.kind, 'managed_command');
+    assert.equal(schedulerExecution.catId, 'kimi');
+    // Occupancy only: this viewer does not own the run and must not be offered a stop.
+    assert.equal(schedulerExecution.cancelability.state, 'not_cancelable');
+    assert.equal(schedulerExecution.cancelability.reason, 'foreign_principal');
+    // The durable task id is a capability handle for the hold-ball status/cancel
+    // routes. A foreign row must not hand it out.
+    assert.notEqual(schedulerExecution.executionId, 'hold-ball-command-scheduler');
+    assert.match(schedulerExecution.executionId, /^occupied:/);
+  });
+
+  it('projects a scheduler-owned provider process after tracker loss and lets the user-owned thread owner stop it', async () => {
+    deps._processOwners.push({
+      executionId: 'inv-scheduler-process',
+      invocationId: 'turn-scheduler-process',
+      threadId: 'thread-a',
+      catId: 'opus5',
+      userId: 'scheduler',
+      startedAt: 450,
+    });
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    const processExecution = projection
+      .json()
+      .executions.find((execution) => execution.executionId === 'inv-scheduler-process');
+    assert.deepEqual(processExecution?.cancelability, {
+      state: 'cancelable',
+      target: {
+        kind: 'live_invocation',
+        threadId: 'thread-a',
+        catId: 'opus5',
+        executionId: 'inv-scheduler-process',
+      },
+    });
+
+    const cancel = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-scheduler-process/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'opus5' },
+    });
+    assert.equal(cancel.statusCode, 200);
+    assert.equal(cancel.json().cancelled, true);
+    assert.deepEqual(deps._processOwnerCancelCalls, [
+      {
+        executionId: 'inv-scheduler-process',
+        invocationId: 'turn-scheduler-process',
+        threadId: 'thread-a',
+        catId: 'opus5',
+        userId: 'scheduler',
+      },
+    ]);
+    assert.deepEqual(deps._turnTerminalCalls, [
+      {
+        invocationId: 'turn-scheduler-process',
+        terminal: {
+          status: 'canceled',
+          endedAt: deps._turnTerminalCalls[0]?.terminal.endedAt,
+          terminalReason: 'user_cancel',
+        },
+      },
+    ]);
+    assert.equal(Number.isFinite(deps._turnTerminalCalls[0]?.terminal.endedAt), true);
+    assert.equal(
+      deps.queueProcessor.releaseSlot.mock.calls.length,
+      0,
+      'signalling a live supervisor must not dispatch its successor before the tree exits',
+    );
+  });
+
+  it('shows another human principal as masked occupancy without granting cancellation', async () => {
+    deps._processOwners.push({
+      executionId: 'inv-foreign-human',
+      invocationId: 'turn-foreign-human',
+      threadId: 'thread-a',
+      catId: 'opus5',
+      userId: 'user-b',
+      startedAt: 460,
+    });
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    const occupied = projection.json().executions.find((execution) => execution.catId === 'opus5');
+    assert.match(occupied.executionId, /^occupied:/);
+    assert.equal(occupied.turnInvocationId, undefined, 'foreign occupancy must not expose a child handle');
+    assert.deepEqual(occupied.cancelability, { state: 'not_cancelable', reason: 'foreign_principal' });
+
+    const cancel = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-foreign-human/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'opus5' },
+    });
+    assert.equal(cancel.statusCode, 409);
+    assert.deepEqual(deps._processOwnerCancelCalls, []);
+  });
+
+  it('treats an owner-less canonical candidate as viewer-owned without inventing a foreign principal', async () => {
+    deps._processOwners.push({
+      executionId: 'inv-owner-unknown',
+      invocationId: 'turn-owner-unknown',
+      threadId: 'thread-a',
+      catId: 'opus5',
+      startedAt: 465,
+    });
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    const execution = projection.json().executions.find((item) => item.executionId === 'inv-owner-unknown');
+    assert.deepEqual(execution?.cancelability, {
+      state: 'cancelable',
+      target: {
+        kind: 'live_invocation',
+        threadId: 'thread-a',
+        catId: 'opus5',
+        executionId: 'inv-owner-unknown',
+      },
+    });
+  });
+
+  it('merges tracker and process-owner truth for one execution without duplicating or weakening tracker control', async () => {
+    deps._processOwners.push({
+      executionId: 'inv-a',
+      invocationId: 'turn-process-owner-a',
+      threadId: 'thread-a',
+      catId: 'kimi',
+      userId: USER_ID,
+      startedAt: 999,
+    });
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    const merged = projection.json().executions.filter((execution) => execution.executionId === 'inv-a');
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0].turnInvocationId, 'turn-process-owner-a', 'detail navigation uses the child invocation');
+    assert.equal(merged[0].cancelability.target.executionId, 'inv-a', 'Stop retains the parent control identity');
+    assert.equal(merged[0].startedAt, 100, 'tracker age remains canonical when both sources describe one execution');
+
+    const cancel = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-a/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'kimi' },
+    });
+    assert.equal(cancel.statusCode, 200);
+    assert.equal(deps._cancelCalls.length, 1, 'tracker remains the preferred control plane');
+    assert.deepEqual(deps._processOwnerCancelCalls, []);
+  });
+
+  it('replaces an unresolved same-cat tracker row with exact process-owner identity', async () => {
+    deps.invocationTracker.getExecutionId = () => undefined;
+    deps._processOwners.push({
+      executionId: 'inv-process-exact',
+      invocationId: 'turn-process-exact',
+      threadId: 'thread-a',
+      catId: 'kimi',
+      userId: USER_ID,
+      startedAt: 470,
+    });
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    const kimiRows = projection
+      .json()
+      .executions.filter(
+        (execution) =>
+          execution.kind === 'live_invocation' && execution.threadId === 'thread-a' && execution.catId === 'kimi',
+      );
+    assert.deepEqual(
+      kimiRows.map((execution) => execution.executionId),
+      ['inv-process-exact'],
+    );
+  });
+
+  it('keeps Stop available when the server must reconcile an unavailable control source', async () => {
+    deps.invocationTracker.getExecutionId = () => undefined;
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    const execution = projection
+      .json()
+      .executions.find((item) => item.kind === 'live_invocation' && item.threadId === 'thread-a');
+    assert.match(execution.executionId, /^unresolved:/);
+    assert.equal(execution.cancelability.state, 'cancelable');
+  });
+
+  it('treats a process that exits between projection and signal as an idempotent successful cancel', async () => {
+    deps._processOwners.push({
+      executionId: 'inv-natural-exit',
+      invocationId: 'turn-natural-exit',
+      threadId: 'thread-a',
+      catId: 'opus5',
+      userId: USER_ID,
+      startedAt: 472,
+    });
+    deps.cliExecutionOwnerService.terminateExact.mock.mockImplementationOnce(async (execution) => {
+      deps._processOwnerCancelCalls.push(execution);
+      return { matched: 1, signaled: 0, complete: true };
+    });
+
+    const cancel = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-natural-exit/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'opus5' },
+    });
+
+    assert.equal(cancel.statusCode, 200);
+    assert.equal(cancel.json().cancelled, true);
+    assert.equal(deps._turnTerminalCalls.at(-1)?.invocationId, 'turn-natural-exit');
+  });
+
+  it('keeps process cancellation successful when tracker-less terminalization needs recovery', async () => {
+    deps._processOwners.push({
+      executionId: 'inv-terminal-write-fails',
+      invocationId: 'turn-terminal-write-fails',
+      threadId: 'thread-a',
+      catId: 'opus5',
+      userId: USER_ID,
+      startedAt: 473,
+    });
+    deps.turnExecutionStore.transitionTerminal.mock.mockImplementationOnce(async () => {
+      throw new Error('ledger unavailable');
+    });
+
+    const cancel = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-terminal-write-fails/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'opus5' },
+    });
+
+    assert.equal(cancel.statusCode, 200);
+    assert.equal(cancel.json().cancelled, true);
+  });
+
+  it('keeps a process-owner-only execution inside a complete sparse project snapshot', async () => {
+    await app.close();
+    deps._executions.clear();
+    deps._processOwners.push({
+      executionId: 'inv-sparse-process',
+      invocationId: 'turn-sparse-process',
+      threadId: 'thread-a',
+      catId: 'opus5',
+      userId: 'scheduler',
+      startedAt: 475,
+    });
+    const buildLiveCandidateSnapshot = mock.fn(async () => ({ threadIds: [], complete: true }));
+    deps.activeExecutionService = { buildLiveCandidateSnapshot };
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    await app.ready();
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(projection.statusCode, 200, projection.body);
+    assert.ok(
+      projection.json().executions.some((execution) => execution.executionId === 'inv-sparse-process'),
+      'durable process ownership must nominate its thread after the tracker handle is gone',
+    );
+    assert.equal(buildLiveCandidateSnapshot.mock.callCount(), 1);
+    assert.equal(
+      deps.cliExecutionOwnerService.listLive.mock.callCount(),
+      1,
+      'candidate discovery and projection must share one process-owner snapshot per request',
+    );
+    assert.equal(
+      deps.dynamicTaskStore.getAll.mock.callCount(),
+      1,
+      'managed-command truth must still be read exactly once by its projection',
+    );
+  });
+
+  it('fails open to canonical liveness when the process-owner snapshot is unavailable', async () => {
+    await app.close();
+    deps.activeExecutionService = {
+      buildLiveCandidateSnapshot: mock.fn(async () => ({ threadIds: [], complete: true })),
+    };
+    deps.cliExecutionOwnerService.listLive.mock.mockImplementation(async () => ({ owners: [], complete: false }));
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    await app.ready();
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(projection.statusCode, 200, projection.body);
+    assert.deepEqual(
+      projection
+        .json()
+        .executions.filter((execution) => execution.kind === 'live_invocation')
+        .map((execution) => execution.executionId)
+        .sort(),
+      ['inv-a', 'inv-b'],
+      'an incomplete process-owner source must trigger the full canonical scan instead of hiding known work',
+    );
+    assert.equal(
+      deps.cliExecutionOwnerService.listLive.mock.callCount(),
+      1,
+      'the unavailable process-owner source must not be retried once per candidate thread',
+    );
+  });
+
+  it('read-repairs a stale running record only after complete owner absence is proven', async () => {
+    await app.close();
+    deps._executions.clear();
+    const record = {
+      id: 'inv-stale-record',
+      threadId: 'thread-a',
+      userId: USER_ID,
+      userMessageId: null,
+      targetCats: ['kimi'],
+      intent: 'execute',
+      status: 'running',
+      idempotencyKey: 'stale-running-record',
+      actionLeaseCarrier: { kind: 'none' },
+      createdAt: Date.now() - 60_000,
+      updatedAt: Date.now() - 60_000,
+    };
+    deps.draftStore = { getByThread: mock.fn(async () => []), delete: mock.fn(async () => {}) };
+    deps.invocationRecordStore = {
+      listRunningByThread: mock.fn(async () => (record.status === 'running' ? [record] : [])),
+      get: mock.fn(async (id) => (id === record.id ? record : null)),
+      update: mock.fn(async (id, update) => {
+        if (id !== record.id || (update.expectedStatus && update.expectedStatus !== record.status)) return null;
+        Object.assign(record, update, { updatedAt: Date.now() });
+        return record;
+      }),
+    };
+    deps.cliExecutionOwnerService.listLive.mock.mockImplementation(async () => ({ owners: [], complete: true }));
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    await app.ready();
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-a/executions/active',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(projection.statusCode, 200, projection.body);
+    assert.equal(record.status, 'failed');
+    assert.equal(record.error, 'execution_owner_lost');
+    assert.equal(
+      projection.json().executions.some((execution) => execution.executionId === record.id),
+      false,
+      'a record terminalized by read-repair must not remain projected as running',
+    );
+  });
+
+  it('F117 KD-23: a slot this process still holds keeps a slow-starting running record from read-repair', async () => {
+    await app.close();
+    deps._executions.set('thread-a:kimi', { executionId: 'inv-a', startedAt: 100 });
+    // kimi's slot is held for inv-a (buildDeps), but the record turned running a minute ago and no
+    // response exists yet, e.g. invoke-single-cat still waits for session custody.
+    const record = {
+      id: 'inv-a',
+      threadId: 'thread-a',
+      userId: USER_ID,
+      userMessageId: null,
+      targetCats: ['kimi'],
+      intent: 'execute',
+      status: 'running',
+      idempotencyKey: 'slow-prestart',
+      actionLeaseCarrier: { kind: 'none' },
+      createdAt: Date.now() - 60_000,
+      updatedAt: Date.now() - 60_000,
+    };
+    const updates = [];
+    deps.draftStore = { getByThread: mock.fn(async () => []), delete: mock.fn(async () => {}) };
+    deps.invocationRecordStore = {
+      listRunningByThread: mock.fn(async () => [record]),
+      get: mock.fn(async (id) => (id === record.id ? record : null)),
+      update: mock.fn(async (id, update) => {
+        updates.push({ id, update });
+        return null;
+      }),
+    };
+    deps.cliExecutionOwnerService.listLive.mock.mockImplementation(async () => ({ owners: [], complete: true }));
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    await app.ready();
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-a/executions/active',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(projection.statusCode, 200, projection.body);
+    assert.deepEqual(updates, [], 'a record whose slot is still held is never failed by read-repair');
+    assert.equal(
+      projection.json().executions.some((execution) => execution.executionId === 'inv-a' && execution.catId === 'kimi'),
+      false,
+      'a held reservation has no executing reply before response admission',
+    );
+  });
+
+  it('F117 KD-23: a running child whose owner a complete snapshot lacks neither lists the record nor blocks read-repair', async () => {
+    await app.close();
+    deps._executions.clear();
+    const record = {
+      id: 'inv-orphan-child',
+      threadId: 'thread-a',
+      userId: USER_ID,
+      userMessageId: null,
+      targetCats: ['kimi'],
+      intent: 'execute',
+      status: 'running',
+      idempotencyKey: 'orphan-child',
+      actionLeaseCarrier: { kind: 'none' },
+      createdAt: Date.now() - 60_000,
+      updatedAt: Date.now() - 60_000,
+    };
+    deps.draftStore = { getByThread: mock.fn(async () => []), delete: mock.fn(async () => {}) };
+    deps.invocationRecordStore = {
+      listRunningByThread: mock.fn(async () => (record.status === 'running' ? [record] : [])),
+      get: mock.fn(async (id) => (id === record.id ? record : null)),
+      update: mock.fn(async (id, update) => {
+        if (id !== record.id || (update.expectedStatus && update.expectedStatus !== record.status)) return null;
+        Object.assign(record, update, { updatedAt: Date.now() });
+        return record;
+      }),
+    };
+    // The previous owner died: its durable child is still running, and the complete snapshot has no owner.
+    deps.turnExecutionStore.listByParent.mock.mockImplementation(async (parentId) =>
+      parentId === record.id
+        ? [
+            {
+              invocationId: 'child-orphan',
+              parentInvocationId: record.id,
+              threadId: 'thread-a',
+              userId: USER_ID,
+              catId: 'kimi',
+              executionKind: 'ordinary',
+              startedAt: Date.now() - 55_000,
+              status: 'running',
+            },
+          ]
+        : [],
+    );
+    deps.cliExecutionOwnerService.listLive.mock.mockImplementation(async () => ({ owners: [], complete: true }));
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    await app.ready();
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-a/executions/active',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(projection.statusCode, 200, projection.body);
+    assert.equal(record.status, 'failed', 'read-repair still ends the record');
+    assert.equal(record.error, 'execution_owner_lost');
+    assert.equal(
+      projection.json().executions.some((execution) => execution.executionId === record.id),
+      false,
+      'a running child without an owner does not keep the record listed',
+    );
+  });
+
+  it('does not rewrite a just-canceled tracker tombstone as execution_owner_lost', async () => {
+    await app.close();
+    deps._executions.clear();
+    const record = {
+      id: 'inv-cancel-teardown',
+      threadId: 'thread-a',
+      userId: USER_ID,
+      userMessageId: null,
+      targetCats: ['kimi'],
+      intent: 'execute',
+      status: 'running',
+      idempotencyKey: 'cancel-teardown-record',
+      actionLeaseCarrier: { kind: 'none' },
+      createdAt: Date.now() - 60_000,
+      updatedAt: Date.now() - 60_000,
+    };
+    deps.invocationTracker.getSlotState = mock.fn(() => 'canceled');
+    deps.invocationTracker.getCanceledSlotIdentity = mock.fn(() => ({
+      executionId: record.id,
+      userId: USER_ID,
+    }));
+    deps.draftStore = { getByThread: mock.fn(async () => []), delete: mock.fn(async () => {}) };
+    deps.invocationRecordStore = {
+      listRunningByThread: mock.fn(async () => [record]),
+      get: mock.fn(async (id) => (id === record.id ? record : null)),
+      update: mock.fn(async (_id, update) => {
+        Object.assign(record, update, { updatedAt: Date.now() });
+        return record;
+      }),
+    };
+    deps.cliExecutionOwnerService.listLive.mock.mockImplementation(async () => ({ owners: [], complete: true }));
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    await app.ready();
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-a/executions/active',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(projection.statusCode, 200, projection.body);
+    assert.equal(record.status, 'running', 'provider teardown still owns the canonical canceled terminal');
+    assert.equal(deps.invocationRecordStore.update.mock.calls.length, 0);
+  });
+
+  it('protects only the exact canceled execution while repairing an older orphan for the same cat', async () => {
+    await app.close();
+    deps._executions.clear();
+    const records = [
+      {
+        id: 'inv-cancel-current',
+        threadId: 'thread-a',
+        userId: USER_ID,
+        userMessageId: null,
+        targetCats: ['kimi'],
+        intent: 'execute',
+        status: 'running',
+        idempotencyKey: 'cancel-current-record',
+        actionLeaseCarrier: { kind: 'none' },
+        createdAt: Date.now() - 60_000,
+        updatedAt: Date.now() - 60_000,
+      },
+      {
+        id: 'inv-orphan-older',
+        threadId: 'thread-a',
+        userId: USER_ID,
+        userMessageId: null,
+        targetCats: ['kimi'],
+        intent: 'execute',
+        status: 'running',
+        idempotencyKey: 'orphan-older-record',
+        actionLeaseCarrier: { kind: 'none' },
+        createdAt: Date.now() - 120_000,
+        updatedAt: Date.now() - 120_000,
+      },
+    ];
+    deps.invocationTracker.getSlotState = mock.fn(() => 'canceled');
+    deps.invocationTracker.getCanceledSlotIdentity = mock.fn(() => ({
+      executionId: 'inv-cancel-current',
+      userId: USER_ID,
+    }));
+    deps.draftStore = { getByThread: mock.fn(async () => []), delete: mock.fn(async () => {}) };
+    deps.invocationRecordStore = {
+      listRunningByThread: mock.fn(async () => records.filter((record) => record.status === 'running')),
+      get: mock.fn(async (id) => records.find((record) => record.id === id) ?? null),
+      update: mock.fn(async (id, update) => {
+        const record = records.find((candidate) => candidate.id === id);
+        if (!record || (update.expectedStatus && update.expectedStatus !== record.status)) return null;
+        Object.assign(record, update, { updatedAt: Date.now() });
+        return record;
+      }),
+    };
+    deps.cliExecutionOwnerService.listLive.mock.mockImplementation(async () => ({ owners: [], complete: true }));
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    await app.ready();
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-a/executions/active',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(projection.statusCode, 200, projection.body);
+    assert.equal(records[0].status, 'running', 'the exact canceled execution remains owned by provider teardown');
+    assert.equal(records[1].status, 'failed', 'an unrelated orphan must not inherit the current cancel fence');
+    assert.equal(records[1].error, 'execution_owner_lost');
+    assert.equal(deps.invocationRecordStore.update.mock.calls.length, 1);
+  });
+
+  it('never mutates a stale running record while process-owner truth is incomplete', async () => {
+    await app.close();
+    deps._executions.clear();
+    const record = {
+      id: 'inv-stale-unverified',
+      threadId: 'thread-a',
+      userId: USER_ID,
+      userMessageId: null,
+      targetCats: ['kimi'],
+      intent: 'execute',
+      status: 'running',
+      idempotencyKey: 'stale-unverified-record',
+      actionLeaseCarrier: { kind: 'none' },
+      createdAt: Date.now() - 60_000,
+      updatedAt: Date.now() - 60_000,
+    };
+    const update = mock.fn(async () => null);
+    deps.draftStore = { getByThread: mock.fn(async () => []), delete: mock.fn(async () => {}) };
+    deps.invocationRecordStore = {
+      listRunningByThread: mock.fn(async () => [record]),
+      get: mock.fn(async (id) => (id === record.id ? record : null)),
+      update,
+    };
+    deps.cliExecutionOwnerService.listLive.mock.mockImplementation(async () => ({ owners: [], complete: false }));
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    await app.ready();
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-a/executions/active',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(projection.statusCode, 200, projection.body);
+    assert.equal(record.status, 'running');
+    assert.equal(update.mock.callCount(), 0);
+    assert.ok(
+      projection.json().executions.some((execution) => execution.executionId === record.id),
+      'unknown process truth must preserve the running projection until Stop performs bounded reconciliation',
+    );
+  });
+
+  it('keeps known process-owner liveness visible and stoppable while owner truth is incomplete', async () => {
+    const owner = {
+      executionId: 'inv-owner-incomplete',
+      invocationId: 'turn-owner-incomplete',
+      threadId: 'thread-a',
+      catId: 'opus5',
+      userId: USER_ID,
+      startedAt: 475,
+    };
+    deps.cliExecutionOwnerService.listLive.mock.mockImplementation(async () => ({
+      owners: [owner],
+      complete: false,
+    }));
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    const execution = projection.json().executions.find((candidate) => candidate.executionId === owner.executionId);
+    assert.ok(execution, 'known liveness remains visible during control-plane degradation');
+    assert.equal(execution.cancelability.state, 'cancelable');
+
+    const cancel = await app.inject({
+      method: 'POST',
+      url: `/api/threads/thread-a/executions/live/${owner.executionId}/cancel`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: owner.catId },
+    });
+    assert.equal(cancel.statusCode, 200);
+    assert.equal(cancel.json().reconciled, true);
+    assert.deepEqual(deps._cancelCalls, []);
+  });
+
+  it('terminalizes a hidden exact execution after bounded control-plane degradation', async () => {
+    await app.close();
+    deps._executions.clear();
+    deps.cliExecutionOwnerService.listLive.mock.mockImplementation(async () => ({ owners: [], complete: false }));
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    await app.ready();
+
+    const cancel = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-hidden-by-degraded-scan/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'opus5' },
+    });
+
+    assert.equal(cancel.statusCode, 200);
+    assert.equal(cancel.json().reconciled, true);
+    assert.equal(deps.cliExecutionOwnerService.listLive.mock.callCount(), 3);
+  });
+
+  it('terminalizes failed after a degraded exact termination scan', async () => {
+    deps._processOwners.push({
+      executionId: 'inv-terminate-degraded',
+      invocationId: 'turn-terminate-degraded',
+      threadId: 'thread-a',
+      catId: 'opus5',
+      userId: USER_ID,
+      startedAt: 476,
+    });
+    deps.cliExecutionOwnerService.terminateExact.mock.mockImplementation(async () => ({
+      matched: 0,
+      signaled: 0,
+      complete: false,
+    }));
+
+    const cancel = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-terminate-degraded/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'opus5' },
+    });
+
+    assert.equal(cancel.statusCode, 200);
+    assert.equal(cancel.json().reconciled, true);
+    assert.equal(deps.cliExecutionOwnerService.terminateExact.mock.callCount(), 3);
+    assert.equal(deps._turnTerminalCalls.at(-1)?.terminal.status, 'failed');
+    assert.equal(deps._turnTerminalCalls.at(-1)?.terminal.terminalReason, 'control_plane_unavailable');
+  });
+
+  it('persists control-plane failure through the ordinary response and input settlement chain', async () => {
+    await app.close();
+    deps._executions.clear();
+    const messageStore = new MessageStore();
+    const recordStore = new InvocationRecordStore();
+    const turnStore = new InMemoryTurnExecutionStore();
+    const source = messageStore.append(
+      canonicalTestMessageInput({
+        userId: USER_ID,
+        threadId: 'thread-a',
+        catId: 'opus5',
+        content: '@kimi continue',
+        mentions: ['kimi'],
+        timestamp: 100,
+        lifecycle: {
+          kind: 'response',
+          orderKey: '100:source',
+          invocationId: 'source-turn',
+          targetId: 'opus5',
+          inputEntryIds: ['source-entry'],
+          inputMessageIds: ['source-input'],
+          status: 'completed',
+          startedAt: 90,
+          completedAt: 100,
+          dispatchRefs: [],
+        },
+      }),
+    );
+    const parent = recordStore.create({
+      threadId: 'thread-a',
+      userId: USER_ID,
+      targetCats: ['kimi'],
+      intent: 'execute',
+      idempotencyKey: 'control-plane-failure-parent',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    recordStore.update(parent.invocationId, { status: 'running' });
+    const childInvocationId = 'turn-control-plane-failed';
+    turnStore.createRunning({
+      invocationId: childInvocationId,
+      parentInvocationId: parent.invocationId,
+      threadId: 'thread-a',
+      userId: USER_ID,
+      catId: 'kimi',
+      executionKind: 'ordinary',
+      startedAt: 110,
+    });
+    const response = messageStore.append(
+      canonicalTestMessageInput({
+        userId: USER_ID,
+        threadId: 'thread-a',
+        catId: 'kimi',
+        content: '已完成一部分分析。',
+        mentions: [],
+        timestamp: 110,
+        replyTo: source.id,
+        idempotencyKey: `message-lifecycle-response:${childInvocationId}`,
+        extra: {
+          a2aFailureReturn: {
+            triggerMessageId: source.id,
+            callerCatId: 'opus5',
+            ownerAuthProvenance: 'strict',
+            parentInvocationId: parent.invocationId,
+            isFailureReport: false,
+          },
+        },
+        lifecycle: {
+          kind: 'response',
+          orderKey: '110:response',
+          invocationId: childInvocationId,
+          targetId: 'kimi',
+          inputEntryIds: ['child-entry'],
+          inputMessageIds: [source.id],
+          status: 'processing',
+          startedAt: 110,
+        },
+      }),
+    );
+    assert.equal(
+      messageStore.advanceLifecycleInputDispatch(source.id, {
+        orderKey: '100:source',
+        from: { kind: 'agent', catId: 'opus5' },
+        targetId: 'kimi',
+        phase: 'dispatched',
+        statusMessageId: response.id,
+      }).kind,
+      'applied',
+    );
+    deps.messageStore = messageStore;
+    deps.invocationRecordStore = recordStore;
+    deps.turnExecutionStore = turnStore;
+    deps.cliExecutionOwnerService.listLive.mock.mockImplementation(async () => ({ owners: [], complete: false }));
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    await app.ready();
+
+    const stopped = await app.inject({
+      method: 'POST',
+      url: `/api/threads/thread-a/executions/live/${parent.invocationId}/cancel`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'kimi' },
+    });
+
+    assert.equal(stopped.statusCode, 200, stopped.body);
+    assert.equal(stopped.json().reconciled, true);
+    assert.equal(messageStore.getById(response.id).lifecycle.status, 'failed');
+    assert.equal(messageStore.getById(response.id).lifecycle.reason, 'control_plane_unavailable');
+    assert.match(messageStore.getById(response.id).content, /已完成一部分分析/);
+    assert.match(messageStore.getById(response.id).content, /执行控制面不可用/);
+    assert.doesNotMatch(messageStore.getById(response.id).content, /@kimi 处理失败/);
+    assert.doesNotMatch(messageStore.getById(response.id).content, /control_plane_unavailable/);
+    assert.doesNotMatch(messageStore.getById(response.id).content, /来源消息：/);
+    assert.deepEqual(messageStore.getById(source.id).lifecycle.dispatchRefs, [
+      { targetId: 'kimi', phase: 'settled', statusMessageId: response.id },
+    ]);
+    assert.equal(recordStore.get(parent.invocationId).status, 'failed');
+    assert.equal(turnStore.get(childInvocationId).status, 'failed');
+    const wakes = await deps.invocationQueue.listAllDurable('thread-a');
+    assert.equal(wakes.length, 1);
+    assert.equal(wakes[0].sourceCategory, 'a2a_failure');
+    assert.deepEqual(wakes[0].targets, ['opus5']);
+    assert.equal(wakes[0].payload.messageId, response.id);
+    assert.equal(deps.queueProcessor.requestDrain.mock.callCount(), 1);
+  });
+
+  /** F117 KD-21: stops a turn whose R is processing while its streamed body lives only in its draft. */
+  async function stopDraftedTurn({ failCommit = false } = {}) {
+    await app.close();
+    deps._executions.clear();
+    const messageStore = new MessageStore();
+    const recordStore = new InvocationRecordStore();
+    const turnStore = new InMemoryTurnExecutionStore();
+    const draftStore = new DraftStore();
+    const parent = recordStore.create({
+      threadId: 'thread-a',
+      userId: USER_ID,
+      targetCats: ['kimi'],
+      intent: 'execute',
+      idempotencyKey: 'control-plane-failure-draft-parent',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    recordStore.update(parent.invocationId, { status: 'running' });
+    const childInvocationId = 'turn-control-plane-draft';
+    turnStore.createRunning({
+      invocationId: childInvocationId,
+      parentInvocationId: parent.invocationId,
+      threadId: 'thread-a',
+      userId: USER_ID,
+      catId: 'kimi',
+      executionKind: 'ordinary',
+      startedAt: 110,
+    });
+    // Production shape: R is admitted empty and the streamed body lives only in its draft.
+    const response = messageStore.append(
+      canonicalTestMessageInput({
+        userId: USER_ID,
+        threadId: 'thread-a',
+        catId: 'kimi',
+        content: '',
+        mentions: [],
+        timestamp: 110,
+        idempotencyKey: `message-lifecycle-response:${childInvocationId}`,
+        lifecycle: {
+          kind: 'response',
+          orderKey: '110:response-draft',
+          invocationId: childInvocationId,
+          targetId: 'kimi',
+          inputEntryIds: ['child-entry'],
+          inputMessageIds: [],
+          status: 'processing',
+          startedAt: 110,
+        },
+      }),
+    );
+    const toolEvent = { id: 'tool-1', type: 'tool_use', label: 'Read', timestamp: 120 };
+    draftStore.upsert({
+      userId: USER_ID,
+      threadId: 'thread-a',
+      invocationId: childInvocationId,
+      catId: 'kimi',
+      content: '已经读完三个文件，正在对比。',
+      toolEvents: [toolEvent],
+      thinking: '先看调用方',
+      updatedAt: Date.now(),
+    });
+    if (failCommit) {
+      messageStore.commitLifecycleResponseTerminal = async () => {
+        throw new Error('redis unavailable');
+      };
+    }
+    deps.messageStore = messageStore;
+    deps.invocationRecordStore = recordStore;
+    deps.turnExecutionStore = turnStore;
+    deps.draftStore = draftStore;
+    deps.cliExecutionOwnerService.listLive.mock.mockImplementation(async () => ({ owners: [], complete: false }));
+    deps.socketManager.emitToUser.mock.resetCalls();
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    await app.ready();
+
+    const stopped = await app.inject({
+      method: 'POST',
+      url: `/api/threads/thread-a/executions/live/${parent.invocationId}/cancel`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'kimi' },
+    });
+
+    return { stopped, response, messageStore, turnStore, draftStore, childInvocationId, toolEvent };
+  }
+
+  it('F117 KD-21: a stopped response keeps what its draft streamed, then the draft goes', async () => {
+    const { stopped, response, messageStore, turnStore, draftStore, childInvocationId, toolEvent } =
+      await stopDraftedTurn();
+
+    assert.equal(stopped.statusCode, 200);
+    const failed = messageStore.getById(response.id);
+    assert.equal(failed.lifecycle.status, 'failed');
+    assert.equal(failed.content, '已经读完三个文件，正在对比。\n\n执行控制面不可用');
+    assert.deepEqual(failed.toolEvents, [toolEvent]);
+    assert.equal(failed.thinking, '先看调用方');
+    assert.deepEqual(draftStore.getByThread(USER_ID, 'thread-a'), []);
+    // The turn ended before its R settled, entering the response-pending ledger, and left it once R committed.
+    assert.equal(turnStore.get(childInvocationId).status, 'failed');
+    assert.deepEqual(turnStore.listResponsePending(), []);
+    const published = deps.socketManager.emitToUser.mock.calls
+      .map((call) => call.arguments)
+      .filter(([, event, payload]) => event === 'message_lifecycle_updated' && payload.message.id === response.id);
+    assert.equal(published.length, 1);
+    assert.deepEqual(published[0][2].message.toolEvents, [toolEvent]);
+    assert.equal(published[0][2].message.thinking, '先看调用方');
+  });
+
+  it('F117 KD-21: a stop whose R cannot commit ends the turn and leaves it for the next startup', async () => {
+    const { stopped, response, messageStore, turnStore, draftStore, childInvocationId } = await stopDraftedTurn({
+      failCommit: true,
+    });
+
+    assert.equal(stopped.statusCode, 503);
+    assert.equal(messageStore.getById(response.id).lifecycle.status, 'processing');
+    assert.equal(turnStore.get(childInvocationId).status, 'failed');
+    assert.deepEqual(
+      turnStore.listResponsePending().map((turn) => turn.invocationId),
+      [childInvocationId],
+    );
+    assert.equal(draftStore.getByThread(USER_ID, 'thread-a').length, 1);
+  });
+
+  it('fails only the uncontrollable child while a sibling remains live and cancelable', async () => {
+    await app.close();
+    deps._executions.clear();
+    const messageStore = new MessageStore();
+    const recordStore = new InvocationRecordStore();
+    const turnStore = new InMemoryTurnExecutionStore();
+    const source = messageStore.append(
+      canonicalTestMessageInput({
+        userId: USER_ID,
+        threadId: 'thread-a',
+        catId: 'opus5',
+        content: '@opus5 @kimi compare',
+        mentions: ['opus5', 'kimi'],
+        timestamp: 200,
+        lifecycle: {
+          kind: 'input',
+          orderKey: '200:source',
+          dispatchRefs: [],
+        },
+      }),
+    );
+    const parent = recordStore.create({
+      threadId: 'thread-a',
+      userId: USER_ID,
+      targetCats: ['opus5', 'kimi'],
+      intent: 'execute',
+      idempotencyKey: 'sibling-control-plane-parent',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    recordStore.update(parent.invocationId, { status: 'running' });
+    const failedChildId = 'turn-sibling-uncontrollable';
+    turnStore.createRunning({
+      invocationId: failedChildId,
+      parentInvocationId: parent.invocationId,
+      threadId: 'thread-a',
+      userId: USER_ID,
+      catId: 'opus5',
+      executionKind: 'ordinary',
+      startedAt: 210,
+    });
+    const response = messageStore.append(
+      canonicalTestMessageInput({
+        userId: USER_ID,
+        threadId: 'thread-a',
+        catId: 'opus5',
+        content: '',
+        mentions: [],
+        timestamp: 210,
+        replyTo: source.id,
+        idempotencyKey: `message-lifecycle-response:${failedChildId}`,
+        extra: {
+          a2aFailureReturn: {
+            triggerMessageId: source.id,
+            callerCatId: 'opus5',
+            ownerAuthProvenance: 'strict',
+            parentInvocationId: parent.invocationId,
+            isFailureReport: false,
+          },
+        },
+        lifecycle: {
+          kind: 'response',
+          orderKey: '210:response',
+          invocationId: failedChildId,
+          targetId: 'opus5',
+          inputEntryIds: ['entry-opus'],
+          inputMessageIds: [source.id],
+          status: 'processing',
+          startedAt: 210,
+        },
+      }),
+    );
+    messageStore.advanceLifecycleInputDispatch(source.id, {
+      orderKey: '200:source',
+      from: { kind: 'agent', catId: 'opus5' },
+      targetId: 'opus5',
+      phase: 'dispatched',
+      statusMessageId: response.id,
+    });
+    deps._executions.set('thread-a:kimi', {
+      executionId: parent.invocationId,
+      startedAt: 210,
+      activeRun: fixtureActiveRun('thread-a', 'kimi', 'turn-sibling-live', 210),
+    });
+    turnStore.createRunning({
+      invocationId: 'turn-sibling-live',
+      parentInvocationId: parent.invocationId,
+      threadId: 'thread-a',
+      userId: USER_ID,
+      catId: 'kimi',
+      executionKind: 'ordinary',
+      startedAt: 210,
+    });
+    deps.messageStore = messageStore;
+    deps.invocationRecordStore = recordStore;
+    deps.turnExecutionStore = turnStore;
+    deps.cliExecutionOwnerService.listLive.mock.mockImplementation(async () => ({ owners: [], complete: false }));
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    await app.ready();
+
+    const failed = await app.inject({
+      method: 'POST',
+      url: `/api/threads/thread-a/executions/live/${parent.invocationId}/cancel`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'opus5' },
+    });
+
+    assert.equal(failed.statusCode, 200);
+    assert.equal(failed.json().reconciled, true);
+    assert.equal(turnStore.get(failedChildId).status, 'failed');
+    assert.equal(messageStore.getById(response.id).lifecycle.status, 'failed');
+    assert.equal(recordStore.get(parent.invocationId).status, 'running');
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-a/executions/active',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    assert.equal(projection.statusCode, 200, projection.body);
+    const sibling = projection
+      .json()
+      .executions.find((execution) => execution.catId === 'kimi' && execution.executionId === parent.invocationId);
+    assert.equal(sibling?.cancelability.state, 'cancelable');
+
+    const stoppedSibling = await app.inject({
+      method: 'POST',
+      url: `/api/threads/thread-a/executions/live/${parent.invocationId}/cancel`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'kimi' },
+    });
+    assert.equal(stoppedSibling.statusCode, 200);
+    assert.equal(stoppedSibling.json().cancelled, true);
+  });
+
+  it('shows but never leaks or cancels a scheduler process on an indexed system thread', async () => {
+    const systemThread = {
+      id: 'thread-system',
+      title: 'Shared system thread',
+      projectPath: '/project/cafe',
+      createdBy: 'system',
+    };
+    deps._threads.set(systemThread.id, systemThread);
+    deps._indexedThreadIds.add(systemThread.id);
+    deps._processOwners.push({
+      executionId: 'inv-system-scheduler',
+      invocationId: 'turn-system-scheduler',
+      threadId: 'thread-system',
+      catId: 'opus5',
+      userId: 'scheduler',
+      startedAt: 500,
+    });
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    assert.equal(
+      deps.threadStore.list.mock.callCount() + deps.threadStore.listByProject.mock.callCount(),
+      1,
+      'indexed system admission and projection should share one thread-index enumeration',
+    );
+    const processExecution = projection.json().executions.find((execution) => execution.catId === 'opus5');
+    assert.equal(processExecution.cancelability.reason, 'foreign_principal');
+    assert.match(processExecution.executionId, /^occupied:/);
+    assert.notEqual(processExecution.executionId, 'inv-system-scheduler');
+
+    const cancel = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-system/executions/live/inv-system-scheduler/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'opus5' },
+    });
+    assert.equal(cancel.statusCode, 409);
+    assert.deepEqual(deps._processOwnerCancelCalls, []);
+  });
+
+  it('denies an unindexed system thread before resolving liveness for read or cancel', async () => {
+    const systemThread = {
+      id: 'thread-system-private',
+      title: 'Private system thread',
+      projectPath: '/project/private',
+      createdBy: 'system',
+    };
+    deps._threads.set(systemThread.id, systemThread);
+    deps._processOwners.push({
+      executionId: 'inv-private-system',
+      invocationId: 'turn-private-system',
+      threadId: systemThread.id,
+      catId: 'opus5',
+      userId: 'scheduler',
+      startedAt: 510,
+    });
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fprivate',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    const cancel = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${systemThread.id}/executions/live/inv-private-system/cancel`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'opus5' },
+    });
+    const invalid = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(projection.statusCode, 404);
+    assert.equal(projection.json().code, 'PROJECT_NOT_FOUND');
+    assert.equal(cancel.statusCode, 403);
+    assert.equal(cancel.json().code, 'THREAD_ACCESS_DENIED');
+    assert.equal(cancel.json().reason, 'not_visible_to_user');
+    assert.equal(invalid.statusCode, 400);
+    assert.equal(invalid.json().code, 'INVALID_REQUEST');
+    assert.equal(deps.threadStore.listByProject.mock.callCount(), 1);
+    assert.equal(deps.cliExecutionOwnerService.listLive.mock.callCount(), 0);
+    assert.deepEqual(deps._processOwnerCancelCalls, []);
+  });
+
+  it('still hides executions on threads this user cannot access', async () => {
+    const foreign = makeSchedulerTriggeredCommandTask();
+    foreign.id = 'hold-ball-command-foreign-thread';
+    foreign.deliveryThreadId = 'thread-not-in-project';
+    deps._managedTasks.push(foreign);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(
+      response.json().executions.some((execution) => execution.executionId === 'hold-ball-command-foreign-thread'),
+      false,
+    );
+  });
+
+  it('the occupancy id resolves to no hold task, so it cannot read or cancel the foreign run', async () => {
+    // The hold-ball status/cancel routes both start by resolving the path param
+    // through the dynamic task store; an id that resolves to nothing 404s before
+    // any thread-scoped authorization is even consulted.
+    deps._managedTasks.push(makeSchedulerTriggeredCommandTask());
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    const foreign = response
+      .json()
+      .executions.find((execution) => execution.cancelability.reason === 'foreign_principal');
+    assert.ok(foreign);
+
+    assert.equal(deps.dynamicTaskStore.getById(foreign.executionId), null);
+    // ...while the owner's own row still carries a usable handle.
+    const owned = response.json().executions.find((execution) => execution.executionId === 'hold-ball-command-b');
+    assert.ok(owned);
+    assert.ok(deps.dynamicTaskStore.getById(owned.executionId));
+  });
+});

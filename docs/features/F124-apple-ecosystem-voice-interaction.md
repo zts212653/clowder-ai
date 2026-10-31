@@ -6,25 +6,25 @@ doc_kind: spec
 created: 2026-03-15
 ---
 
-# F124: Apple Ecosystem × Cat Café 语音交互系统
+# F124: Apple Ecosystem × Clowder AI 语音交互系统
 
 > **Status**: spec | **Owner**: Ragdoll | **Priority**: P1
 
 ## Why
 
-team lead的苹果手表到了。核心场景：team lead戴着 AirPods，双手被占（撸铁/跑步/做饭），通过语音和猫猫协作——猫猫主动汇报 feat 进度，team lead语音拍板决策，Watch 抬腕看状态。
+operator的苹果手表到了。核心场景：operator戴着 AirPods，双手被占（撸铁/跑步/做饭），通过语音和猫猫协作——猫猫主动汇报 feat 进度，operator语音拍板决策，Watch 抬腕看状态。
 
 > "我在外面跑步/撸铁，能不能通过 AirPods + Apple Watch 和你们语音互动？你们做完 feat 主动汇报，我语音拍板决策，还能切换 thread、随时发灵感给你们执行"
 
 **商业目标**：演示给华子看——苹果全家桶 + Multi-Agent = 未来企业协作形态 → 猫粮自由。
 
-## 产品定义（team lead确认 2026-03-15）
+## 产品定义（operator确认 2026-03-15）
 
 ### 核心交互模型
 
 **Watch = 独立设备，不依赖 iPhone**。Watch 有 eSIM，直连后端。跑步时谁带 iPhone？
 
-**Watch 上几乎所有交互靠语音**。猫必须知道team lead在用 Watch 模式，所有回复发语音消息。
+**Watch 上几乎所有交互靠语音**。猫必须知道operator在用 Watch 模式，所有回复发语音消息。
 
 **原生 App ≠ iMessage**：iMessage（F088 Phase F）是消息通道走 connector 管线，原生 App 是专属猫咖入口，用途不同，两条路共存。
 
@@ -43,7 +43,7 @@ team lead的苹果手表到了。核心场景：team lead戴着 AirPods，双手
 
 ### 部署策略
 
-先 Xcode free provisioning sideload 测试（每 7 天重签），成熟后交 $99 上 TestFlight/App Store。
+先 Xcode free provisioning sideload 测试（每 7 天重签），成熟后交 operational cost 上 TestFlight/App Store。
 
 ## What
 
@@ -61,12 +61,12 @@ team lead的苹果手表到了。核心场景：team lead戴着 AirPods，双手
 ### Phase C: watchOS App — MVP（Watch 优先）
 
 SwiftUI 实现 watchOS App MVP：
-- Watch 直连 Cat Café 后端（URLSession / WebSocket over eSIM/WiFi）
+- Watch 直连 Clowder AI 后端（URLSession / WebSocket over eSIM/WiFi）
 - Thread 列表 + 切换（表冠/手势/语音）
 - 语音输入：Watch 麦克风 → SFSpeechRecognizer 本地离线识别 → 文字发到 thread（不传音频到后端）
 - 语音输出：猫猫消息 → TTS → Watch 扬声器/蓝牙耳机自动播报
 - 推送通知：猫猫汇报 → APNs → Watch 震动
-- Watch 模式标识：后端知道team lead在用 Watch，猫猫自动发语音
+- Watch 模式标识：后端知道operator在用 Watch，猫猫自动发语音
 
 ### Phase D: iPhone App + Watch 联动
 
@@ -90,12 +90,12 @@ iPhone companion App：
 - [ ] AC-A3: 回归测试——桌面浏览器 autoplay 不受影响
 
 ### Phase B（UX 设计）
-- [ ] AC-B1: iPhone App wireframe team lead确认
-- [ ] AC-B2: Watch App wireframe team lead确认
+- [ ] AC-B1: iPhone App wireframe operator确认
+- [ ] AC-B2: Watch App wireframe operator确认
 - [ ] AC-B3: iPhone ↔ Watch 交互流程图确认
 
 ### Phase C（watchOS App MVP）
-- [ ] AC-C1: Watch 独立联网（eSIM/WiFi）直连 Cat Café 后端
+- [ ] AC-C1: Watch 独立联网（eSIM/WiFi）直连 Clowder AI 后端
 - [ ] AC-C2: Thread 列表显示 + 表冠滚动切换
 - [ ] AC-C3: Watch 麦克风语音输入 → SFSpeechRecognizer 本地识别 → 文字发到 thread
 - [ ] AC-C4: 猫猫消息 → TTS → Watch 扬声器/蓝牙自动播报
@@ -126,12 +126,12 @@ iPhone companion App：
 
 | 风险 | 缓解 |
 |------|------|
-| Apple Developer 账号 $99/年 | 先 free provisioning sideload，成熟后交钱 |
-| iOS/watchOS 开发需要 Xcode + 真机调试 | team lead有 M4 Max + 手表实机 |
+| Apple Developer 账号 operational cost/年 | 先 free provisioning sideload，成熟后交钱 |
+| iOS/watchOS 开发需要 Xcode + 真机调试 | operator有 M4 Max + 手表实机 |
 | AirPods 硬件事件（单击/双击/长按）浏览器/App 能否捕获 | Phase B 调研，降级方案用语音指令 |
-| Cat Café 后端 API 需要适配移动端 | 现有 REST API 基本可用，需补鉴权 |
-| **Cloudflare Tunnel 延迟** | 之前体验很卡，Watch 语音交互需要 <300ms 延迟。**Blocker 级**——需要team lead和之前的Ragdoll讨论优化方案 |
-| 域名未注册 | 公网入口的域名还没注册，需要team lead处理 |
+| Clowder AI 后端 API 需要适配移动端 | 现有 REST API 基本可用，需补鉴权 |
+| **Cloudflare Tunnel 延迟** | 之前体验很卡，Watch 语音交互需要 <300ms 延迟。**Blocker 级**——需要operator和之前的Ragdoll讨论优化方案 |
+| 域名未注册 | 公网入口的域名还没注册，需要operator处理 |
 
 ## Tooling: Xcode 26.3 MCP 原生支持
 
@@ -166,7 +166,7 @@ Apple 与 Anthropic/OpenAI 官方合作，Claude Agent 是第一方适配的 age
 Ragdoll写 SwiftUI 代码 → Xcode MCP build → 截 Preview 截图验证 → 推到真机测试
 ```
 
-**Action Item**: team lead配置 Xcode MCP Server，让Ragdoll可以直接 build + 截图验证。
+**Action Item**: operator配置 Xcode MCP Server，让Ragdoll可以直接 build + 截图验证。
 
 ### 参考链接
 
@@ -179,20 +179,20 @@ Ragdoll写 SwiftUI 代码 → Xcode MCP build → 截 Preview 截图验证 → �
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
 | KD-1 | Phase A 先修 F092 autoplay bug 再做原生 App | autoplay 是语音基础能力，修好后 web 版也受益；且可验证 iOS + AirPods 音频链路 | 2026-03-15 |
-| KD-2 | Watch UX = iOS App 手表版，保持一致 | team lead要求：和未来 iOS app 手表的一样的 UX 就够了 | 2026-03-15 |
+| KD-2 | Watch UX = iOS App 手表版，保持一致 | operator要求：和未来 iOS app 手表的一样的 UX 就够了 | 2026-03-15 |
 | KD-3 | Watch 独立模式（eSIM 直连后端），不依赖 iPhone | 跑步时谁带 iPhone？现代 Watch 都有 eSIM | 2026-03-15 |
 | KD-4 | Watch 交互以语音为主，猫猫在 Watch 模式必须发语音 | Watch 屏幕小，几乎所有交互靠语音 | 2026-03-15 |
 | KD-5 | 猫猫状态是 per-thread 而非全局 | 全局看所有猫太杂，进具体 thread 再看该 thread 的猫 | 2026-03-15 |
 | KD-6 | 原生 App 和 iMessage (F088 Phase F) 是两条独立路径 | 用途不同：iMessage 是消息通道走 connector，原生 App 是专属猫咖入口 | 2026-03-15 |
-| KD-7 | 先 sideload 测试，成熟后再交 $99 | team lead确认：free provisioning 先跑起来 | 2026-03-15 |
+| KD-7 | 先 sideload 测试，成熟后再交 operational cost | operator确认：free provisioning 先跑起来 | 2026-03-15 |
 | KD-8 | Watch 走公网 API（Cloudflare Tunnel），不走 Tailscale | Watch 装不了 Tailscale，复用飞书/Telegram 同一条公网入口 | 2026-03-15 |
 | KD-9 | ~~ASR 用 Watch 本地 SFSpeechRecognizer（离线）~~ → 改为录音上传 + 后端 ASR | watchOS 26.2 的 Speech framework 在真机 watch target 不可用（`#if canImport(Speech)` 走到 else 分支）；改用系统原生 `presentTextInputController` 或录音上传后端 ASR | 2026-03-15 |
-| KD-10 | 目标设备：Apple Watch Ultra 3（S10 芯片） | team lead实机，最新最强 | 2026-03-15 |
-| KD-11 | Voice-First 等待设计：本地内置猫猫即时语音反馈遮罩延迟 | team lead创意：录音发送后立刻播本地预生成的猫猫语音（"Ragdoll收到啦，等等哦"），把异步等待变成被猫接住的陪伴。用 F066 TTS pipeline 预生成约 27 条音频（3 猫 × 3 场景 × 3 说法，每条 1-1.5s，< 1MB） | 2026-03-15 |
+| KD-10 | 目标设备：Apple Watch Ultra 3（S10 芯片） | operator实机，最新最强 | 2026-03-15 |
+| KD-11 | Voice-First 等待设计：本地内置猫猫即时语音反馈遮罩延迟 | operator创意：录音发送后立刻播本地预生成的猫猫语音（"Ragdoll收到啦，等等哦"），把异步等待变成被猫接住的陪伴。用 F066 TTS pipeline 预生成约 27 条音频（3 猫 × 3 场景 × 3 说法，每条 1-1.5s，< 1MB） | 2026-03-15 |
 | KD-12 | 语音输入双轨：系统听写（短期）+ 录音上传 ASR（中期） | 系统 `presentTextInputController` 不能强制跳到语音页（需用户手动切），体验不够 voice-first；中期改为一键录音 → 上传后端 ASR，短指令延迟约 2-5s 可接受 | 2026-03-15 |
 
 ## Review Gate
 
 - Phase A: Ragdoll修 → Maine Coon review
-- Phase B: UX 设计 → Siamese参与 → team lead拍板
+- Phase B: UX 设计 → Siamese参与 → operator拍板
 - Phase C-E: Ragdoll开发 → Maine Coon review

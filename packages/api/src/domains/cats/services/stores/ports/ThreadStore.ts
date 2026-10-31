@@ -6,11 +6,46 @@
  * Phase 3.3 可扩展 Redis 版本。
  */
 
-import type { CatId, ThreadPhase } from '@cat-cafe/shared';
-import { generateThreadId } from '@cat-cafe/shared';
+import type {
+  CatId,
+  CliEffortPreset,
+  CodexSpeedValue,
+  DeclaredWorkMode,
+  ThreadKind,
+  ThreadPhase,
+} from '@cat-cafe/shared';
+import { generateThreadId, normalizeThreadGoalObjective } from '@cat-cafe/shared';
+import { type OwnedThreadSeed, ownedThreadFromSeed, requireOwnedThread } from './OwnedThreadSeed.js';
+import type { StoreReadOptions } from './StoreReadOptions.js';
+import { throwIfStoreReadAborted } from './StoreReadOptions.js';
+import { mergeThreadRoadmap, type RoadmapMutation, type ThreadRoadmap, threadRoadmapSchema } from './ThreadRoadmap.js';
 
 /** Default thread ID for the lobby (backwards-compatible single-thread mode) */
 export const DEFAULT_THREAD_ID = 'default';
+
+/** Stable, user-scoped identity for a first-run thread retry. */
+export function onboardingThreadId(userId: string, journeyId: string): string {
+  // Preserve every code point in a reversible, key-safe representation. The
+  // previous cleanup + truncation mapped `user.a`/`usera` and long journeys to
+  // the same Redis key, which could return another user's thread on retry.
+  const encode = (value: string) => Buffer.from(value, 'utf8').toString('base64url') || 'unknown';
+  return `onboarding-${encode(userId)}-${encode(journeyId)}`;
+}
+
+export interface EnsureOnboardingThreadResult {
+  thread: Thread;
+  created: boolean;
+}
+
+/** Canonical first-message title derivation shared by append, recovery, and true recall. */
+export function deriveAutoThreadTitle(content: string): string | null {
+  const normalized = content.trim();
+  if (!normalized) return null;
+  return normalized.length > 30 ? `${normalized.slice(0, 30)}...` : normalized;
+}
+
+/** System-owned thread surfaces that stay distinct from ordinary user conversations. */
+export type ThreadSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom' | 'memory_ops' | 'collective_channel';
 
 /**
  * F032 Phase C: Participant activity data for reviewer matching.
@@ -21,6 +56,8 @@ export interface ThreadParticipantActivity {
   lastMessageAt: number;
   /** Total message count from this cat in the thread */
   messageCount: number;
+  /** #267: false when the cat's last response was an error (API failure, capacity, etc.) */
+  lastResponseHealthy?: boolean;
 }
 
 /**
@@ -49,7 +86,15 @@ export interface ThreadRoutingPolicyV1 {
   scopes?: Partial<Record<ThreadRoutingScope, ThreadRoutingRule>>;
 }
 
-/** F065 Phase B: Rolling thread-level memory across sealed sessions. */
+/** F065 Phase B + F148 VG-3: Rolling thread-level memory across sealed sessions. */
+export interface ThreadMemorySourceRef {
+  threadId: string;
+  sessionId?: string;
+  eventNo?: number;
+  invocationId?: string;
+  messageId?: string;
+}
+
 export interface ThreadMemoryV1 {
   v: 1;
   /** Rolling summary text */
@@ -58,9 +103,41 @@ export interface ThreadMemoryV1 {
   sessionsIncorporated: number;
   /** Unix timestamp of last update */
   updatedAt: number;
+  /** VG-3: Key decisions extracted from sessions (max 8) */
+  decisions?: string[];
+  /** Drill coordinates aligned by index with decisions. */
+  decisionRefs?: ThreadMemorySourceRef[];
+  /** VG-3: Open questions extracted from sessions (max 5) */
+  openQuestions?: string[];
+  /** Drill coordinates aligned by index with openQuestions. */
+  openQuestionRefs?: ThreadMemorySourceRef[];
+  /** VG-3: Referenced artifacts — ADRs, Feature IDs (max 8) */
+  artifacts?: string[];
+  /** F148 Phase H: Deterministic file/PR artifacts from session seal (max 5) */
+  recentArtifacts?: Array<{
+    type: string;
+    ref: string;
+    label: string;
+    updatedAt: number;
+    updatedBy: string;
+    ops?: string[];
+  }>;
 }
 
-export type MentionRoutingSuppressionReason = 'no_action' | 'cross_paragraph';
+export type ExternalRuntimeAnchorRuntime = 'antigravity-desktop';
+
+export interface ExternalRuntimeAnchorStateV1 {
+  v: 1;
+  runtime: ExternalRuntimeAnchorRuntime;
+  userId: string;
+  createdAt: number;
+}
+
+export function buildExternalRuntimeAnchorThreadId(runtime: ExternalRuntimeAnchorRuntime, userId: string): string {
+  return `external-runtime:${runtime}:${userId}`;
+}
+
+export type MentionRoutingSuppressionReason = 'no_action' | 'cross_paragraph' | 'inline_action' | 'void_hold';
 export type MentionActionabilityMode = 'strict' | 'relaxed';
 
 export interface ThreadMentionRoutingFeedbackItem {
@@ -77,6 +154,62 @@ export interface ThreadMentionRoutingFeedback {
   items: ThreadMentionRoutingFeedbackItem[];
 }
 
+export type ThreadGoalStatus = 'active' | 'paused' | 'blocked' | 'usageLimited' | 'budgetLimited' | 'complete';
+export type ThreadGoalSyncState = 'syncing' | 'synced' | 'clearing' | 'unavailable';
+
+/** F306: durable Clowder AI goal intent plus an honest provider-sync projection. */
+export interface ThreadGoalStateV1 {
+  v: 1;
+  intent: 'set' | 'clear';
+  objective?: string;
+  status?: ThreadGoalStatus;
+  tokenBudget?: number | null;
+  revision: number;
+  updatedAt: number;
+  /** Durable provider-clear fence; prevents an older native update from resurrecting a cleared goal. */
+  clearedAt?: number;
+  sync: {
+    state: ThreadGoalSyncState;
+    source: 'cat_cafe' | 'codex_app_server';
+    catId?: string;
+    sessionId?: string;
+    observedAt?: number;
+    reason?: string;
+  };
+}
+
+const THREAD_GOAL_STATUSES = new Set<string>([
+  'active',
+  'paused',
+  'blocked',
+  'usageLimited',
+  'budgetLimited',
+  'complete',
+]);
+
+export function isThreadGoalStateV1(value: unknown): value is ThreadGoalStateV1 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  const sync = candidate.sync as Record<string, unknown> | undefined;
+  return (
+    candidate.v === 1 &&
+    (candidate.intent === 'set' || candidate.intent === 'clear') &&
+    Number.isInteger(candidate.revision) &&
+    Number(candidate.revision) > 0 &&
+    typeof candidate.updatedAt === 'number' &&
+    Number.isFinite(candidate.updatedAt) &&
+    (candidate.clearedAt === undefined ||
+      (typeof candidate.clearedAt === 'number' && Number.isFinite(candidate.clearedAt))) &&
+    (candidate.intent === 'clear' ||
+      (normalizeThreadGoalObjective(candidate.objective) === candidate.objective &&
+        typeof candidate.status === 'string' &&
+        THREAD_GOAL_STATUSES.has(candidate.status))) &&
+    !!sync &&
+    ['syncing', 'synced', 'clearing', 'unavailable'].includes(String(sync.state)) &&
+    (sync.source === 'cat_cafe' || sync.source === 'codex_app_server')
+  );
+}
+
 /**
  * A conversation thread
  */
@@ -84,6 +217,10 @@ export interface Thread {
   id: string;
   projectPath: string;
   title: string | null;
+  titleSource?: 'user' | 'temporary' | 'cat';
+  titleCatId?: string;
+  /** Successful import coordinate; the chain record remains the origin authority. */
+  sessionImport?: { sessionId: string; catId: string };
   createdBy: string;
   participants: CatId[];
   lastActiveAt: number;
@@ -92,6 +229,8 @@ export interface Thread {
   pinnedAt?: number | null;
   favorited?: boolean;
   favoritedAt?: number | null;
+  /** F306: ThreadStore-owned goal intent and provider reconciliation state. */
+  goal?: ThreadGoalStateV1;
   /** Thinking visibility mode: play = cats can't see each other's thinking, debug = cats share thinking. Default: debug */
   thinkingMode?: 'debug' | 'play';
   /**
@@ -112,14 +251,126 @@ export interface Thread {
   threadMemory?: ThreadMemoryV1;
   /** F079: Active voting state */
   votingState?: VotingStateV1;
+  /** UI bubble display override: thinking block expand/collapse. 'global' = follow config hub default. */
+  bubbleThinking?: 'global' | 'expanded' | 'collapsed';
+  /** UI bubble display override: CLI output block expand/collapse. 'global' = follow config hub default. */
+  bubbleCli?: 'global' | 'expanded' | 'collapsed';
   /** F092: Voice companion mode — when true, cats should prioritize audio rich blocks. */
   voiceMode?: boolean;
   /** F095 Phase D: Soft-delete timestamp. null/undefined = not deleted. */
   deletedAt?: number | null;
-  /** F087: CVO Bootcamp onboarding state. */
+  /** F087: operator Bootcamp onboarding state. */
   bootcampState?: BootcampStateV1;
+  /** F128: Parent thread ID for orchestration tracking (sub-threads report back here). */
+  parentThreadId?: string;
+  /** F128: Proposal that led to this thread being created (audit metadata). */
+  createdFromProposalId?: string;
+  /** F128: Source thread the proposal was raised in (audit metadata). */
+  sourceThreadId?: string;
+  /** F128: User who approved the proposal (audit metadata). */
+  approvedBy?: string;
+  /** F128: Unix ms when the proposal was approved (audit metadata). */
+  approvedAt?: number;
+  /** F277: exact invocation that proposed this thread. */
+  sourceInvocationId?: string;
+  /** F277: exact message that caused the proposal. */
+  sourceMessageId?: string;
+  /** F277: declared placement role; absent only on legacy threads. */
+  declaredWorkMode?: DeclaredWorkMode;
+  /** F277: immutable message-branch birth provenance. */
+  branchAudit?: ThreadBranchAudit;
+  /** F171: First-Run Quest onboarding state. */
+  firstRunQuestState?: FirstRunQuestStateV1;
+  /** System thread kind — determines sidebar "系统" section visibility.
+   *  connector_hub = IM Hub, eval_domain = harness eval, cat_bedroom = F255 private bedroom,
+   *  memory_ops = owner-scoped background memory operations. */
+  systemKind?: ThreadSystemKind;
   /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub for command isolation. */
   connectorHubState?: ConnectorHubStateV1;
+  /** F202 C1: Carrier-neutral plugin ownership for threads created on behalf of one plugin instance. */
+  pluginOwnership?: ThreadPluginOwnershipV1;
+  /** F211 Phase B: Hidden per-user runtime anchor for orphan external runtime sessions. */
+  externalRuntimeAnchorState?: ExternalRuntimeAnchorStateV1;
+  /** F168: Auto-switch workspace panel when this thread is opened. */
+  preferredWorkspaceMode?:
+    | 'dev'
+    | 'recall'
+    | 'product-schedule'
+    | 'schedule'
+    | 'tasks'
+    | 'community'
+    | 'artifacts'
+    | 'approval'
+    | 'trajectory'
+    | 'eval';
+  /** F187: User-defined label IDs for thread categorization. */
+  labels?: string[];
+  /** #872: Thread metadata anchor for session recovery (worktrees, PRs, issues, features, notes). */
+  threadMetadata?: ThreadMetadataV1;
+  /** F229 / F167: Thread kind marker.
+   *  'concierge' = 专属前台猫载体（per-user，canonical 载体在 sidebar 可发现，F317）
+   *  'gate-keeping' = 守门 thread (per-repo inbox / community ops 看板载体，F167 trigger-time guard)
+   *  undefined/absence = 普通 thread。 */
+  threadKind?: ThreadKind;
+  /** #813: Per-cat pending continuation capsule — written at session seal,
+   *  consumed at next invocation start. Passive/lazy session renewal. */
+  pendingContinuation?: Record<string, PendingContinuationEntry>;
+  /** #836: Per-cat session strategy override at thread member level.
+   *  'resume' (default) = normal session continuation / bootstrap / continuation capsule.
+   *  'reborn' = force new session every invocation, skip bootstrap digest, skip continuation. */
+  memberSessionStrategy?: Record<string, 'resume' | 'reborn'>;
+  /** F262: In-memory raw thread × cat effort overrides. Redis keeps these as sidecar hash fields. */
+  memberEffortOverrides?: Partial<Record<CatId, CliEffortPreset>>;
+  /** F291: In-memory raw thread × cat speed overrides. Redis keeps these as persistent sidecar hash fields. */
+  memberSpeedOverrides?: Partial<Record<CatId, CodexSpeedValue>>;
+  /** F247 AC-B1c-1 (KD-20 + KD-21): Local-only operational sidecar — per-cloud-cat
+   *  ChatGPT chat URL binding.
+   *
+   *  Map of `catId` → ChatGPT chat URL (`^https://chatgpt\.com/c/[a-zA-Z0-9-]+/?$`,
+   *  see `utils/chatgpt-chat-url.ts`).
+   *
+   *  PRIVACY GUARANTEES (AC-B1c-8): Stripped from default `GET /api/threads/:id` via
+   *  `sanitizeThreadForResponse`. Owner-only access via dedicated
+   *  `/api/threads/:id/cloud-bindings` GET/PATCH endpoints. NOT serialized into
+   *  `get_thread_context` MCP tool / cross-post payloads / memory index / thread
+   *  export. Forbidden in plain `PATCH /api/threads/:id` body (rejected by
+   *  `updateThreadSchema.strict()`).
+   *
+   *  See `docs/features/F247-cloud-cat-family.md` KD-20 / KD-21 for design. */
+  cloudCatBindings?: Record<CatId, string>;
+}
+
+/** #813: Pending continuation state per cat. Written by seal, consumed at next invocation. */
+export interface PendingContinuationEntry {
+  /** The serialized continuation capsule (CollaborationContinuityCapsuleV1). */
+  capsule: Record<string, unknown>;
+  /** Unix ms when the seal wrote this entry. */
+  createdAt: number;
+}
+
+/** Initial mutable preferences included in the first durable thread write. */
+export interface ThreadCreateOptions {
+  pinned?: boolean;
+}
+
+/**
+ * F128: Audit metadata written to a thread when it is created from an approved proposal.
+ */
+export interface ThreadProposalAudit {
+  createdFromProposalId: string;
+  sourceThreadId: string;
+  sourceInvocationId?: string;
+  sourceMessageId?: string;
+  declaredWorkMode?: DeclaredWorkMode;
+  approvedBy: string;
+  approvedAt: number;
+}
+
+/** F277: immutable birth audit for message-created branches. */
+export interface ThreadBranchAudit {
+  sourceThreadId: string;
+  sourceMessageId: string;
+  branchedAt: number;
 }
 
 /** F088 Phase G: Connector Hub thread state for IM command isolation. */
@@ -135,31 +386,320 @@ export interface ConnectorHubStateV1 {
   lastCommandAt?: number;
 }
 
-/** F087: Bootcamp phase for CVO onboarding */
+/** F202 C1: Durable, provider-neutral ownership of one thread by one installed plugin instance. */
+export interface ThreadPluginOwnershipV1 {
+  v: 1;
+  pluginInstanceId: string;
+}
+
+export function isThreadPluginOwnershipV1(value: unknown): value is ThreadPluginOwnershipV1 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    Object.keys(candidate).length === 2 &&
+    candidate.v === 1 &&
+    typeof candidate.pluginInstanceId === 'string' &&
+    candidate.pluginInstanceId.length > 0 &&
+    candidate.pluginInstanceId.trim() === candidate.pluginInstanceId
+  );
+}
+
+/** F087: Bootcamp phase for operator onboarding (F171 v2 flow) */
 export type BootcampPhase =
-  | 'phase-0-select-cat'
   | 'phase-1-intro'
   | 'phase-2-env-check'
   | 'phase-3-config-help'
-  | 'phase-3.5-advanced'
   | 'phase-4-task-select'
   | 'phase-5-kickoff'
   | 'phase-6-design'
   | 'phase-7-dev'
-  | 'phase-8-review'
+  | 'phase-7.5-add-teammate'
+  | 'phase-8-collab'
   | 'phase-9-complete'
   | 'phase-10-retro'
   | 'phase-11-farewell';
+
+/** F171: Sub-step for add-teammate console guide overlay */
+export type BootcampGuideStep = 'preview-result' | 'open-hub' | 'click-add-member' | 'fill-form' | 'done';
 
 export interface BootcampStateV1 {
   v: 1;
   phase: BootcampPhase;
   leadCat?: CatId;
   selectedTaskId?: string;
+  /** F171: sub-step for add-teammate console guide overlay */
+  guideStep?: BootcampGuideStep | null;
   envCheck?: Record<string, { ok: boolean; version?: string; note?: string }>;
   advancedFeatures?: Record<string, 'available' | 'unavailable' | 'skipped'>;
   startedAt: number;
+  journeyId?: string;
   completedAt?: number;
+}
+
+/** F171: First-Run Quest phase */
+export type FirstRunQuestPhase =
+  | 'quest-0-welcome'
+  | 'quest-1-create-first-cat'
+  | 'quest-2-cat-intro'
+  | 'quest-3-task-select'
+  | 'quest-4-task-running'
+  | 'quest-5-error-encountered'
+  | 'quest-6-second-cat-prompt'
+  | 'quest-7-second-cat-created'
+  | 'quest-8-collaboration-demo'
+  | 'quest-9-completion';
+
+/** F171: First-Run Quest state stored in thread metadata */
+export interface FirstRunQuestStateV1 {
+  v: 1;
+  phase: FirstRunQuestPhase;
+  startedAt: number;
+  completedAt?: number;
+  firstCatId?: string;
+  firstCatName?: string;
+  secondCatId?: string;
+  secondCatName?: string;
+  selectedTaskId?: string;
+  errorDetected?: boolean;
+}
+
+/** F155: Guide session status */
+export type GuideStatus = 'offered' | 'awaiting_choice' | 'active' | 'completed' | 'cancelled';
+
+/** F155: Scene-based bidirectional guide state — thread-level authority */
+export interface GuideStateV1 {
+  v: 1;
+  guideId: string;
+  status: GuideStatus;
+  /** Owning user for default-thread guide state. */
+  userId?: string;
+  currentStep?: number;
+  offeredAt: number;
+  startedAt?: number;
+  completedAt?: number;
+  /** True after the first agent turn has seen the completion (one-shot consumption). */
+  completionAcked?: boolean;
+  /** catId that offered this guide (prevents multi-cat duplicate offers). */
+  offeredBy?: string;
+}
+
+/** #872: Thread-level metadata anchor for session recovery.
+ *  Low-frequency anchors (worktree paths, PR/issue refs, feature links, free-form notes)
+ *  that survive session seal / handoff / new-member join. */
+export interface ThreadMetadataV1 {
+  v: 1;
+  /** Original work-line roadmap coordinates; derived file state never lives here. */
+  roadmap?: ThreadRoadmap;
+  /** Dev worktree absolute paths */
+  worktrees?: string[];
+  /** Associated PRs — dedupe key: `${repo.toLowerCase()}#${number}` */
+  prs?: Array<{ repo: string; number: number }>;
+  /** Associated issues — dedupe key: `${repo.toLowerCase()}#${number}` */
+  issues?: Array<{ repo: string; number: number }>;
+  /** Associated feature IDs (e.g. "F095", "F187") */
+  features?: string[];
+  /** Free-form stable KV for any thread type */
+  notes?: Record<string, string>;
+  /** F277: owner-created Sidebar Group membership. Absent means the default ungrouped list. */
+  attentionGroup?: ThreadAttentionGroupMembershipV1;
+}
+
+/** F277: typed per-thread membership written only by an explicit owner organize action. */
+export interface ThreadAttentionGroupMembershipV1 {
+  v: 1;
+  groupId: string;
+  order: number;
+}
+
+/** #872: Dedupe key for PR/issue refs */
+export function refKey(ref: { repo: string; number: number }): string {
+  return `${ref.repo.toLowerCase()}#${ref.number}`;
+}
+
+/** #872: Patch shape for thread metadata merge operations. */
+export type ThreadMetadataPatch = {
+  roadmap?: RoadmapMutation;
+  worktrees?: string[];
+  prs?: Array<{ repo: string; number: number }>;
+  issues?: Array<{ repo: string; number: number }>;
+  features?: string[];
+  notes?: Record<string, string | null>;
+  /** F277: set or clear this thread's explicit Group membership. */
+  attentionGroup?: ThreadAttentionGroupMembershipV1 | null;
+  removeWorktrees?: string[];
+  removePrs?: Array<{ repo: string; number: number }>;
+  removeIssues?: Array<{ repo: string; number: number }>;
+  removeFeatures?: string[];
+};
+
+/** #872: Merge thread metadata with append-dedupe semantics for arrays and merge semantics for notes.
+ *  - Arrays: incoming items appended, deduped; removeX items removed.
+ *  - Notes: incoming keys overwrite, null deletes, absent keys unchanged. */
+export function mergeThreadMetadata(
+  existing: ThreadMetadataV1 | undefined,
+  patch: ThreadMetadataPatch,
+): ThreadMetadataV1 {
+  const base: ThreadMetadataV1 = existing ? { ...existing } : { v: 1 };
+  if (patch.roadmap) base.roadmap = mergeThreadRoadmap(base.roadmap, patch.roadmap);
+
+  // --- worktrees: append + dedupe, then remove ---
+  if (patch.worktrees || patch.removeWorktrees) {
+    const set = new Set(base.worktrees ?? []);
+    for (const w of patch.worktrees ?? []) set.add(w);
+    for (const w of patch.removeWorktrees ?? []) set.delete(w);
+    base.worktrees = set.size > 0 ? [...set] : undefined;
+  }
+
+  // --- prs: append + dedupe by repo#number, then remove ---
+  if (patch.prs || patch.removePrs) {
+    const map = new Map<string, { repo: string; number: number }>();
+    for (const pr of base.prs ?? []) map.set(refKey(pr), pr);
+    for (const pr of patch.prs ?? []) {
+      const key = refKey(pr);
+      if (!map.has(key)) map.set(key, { repo: pr.repo.toLowerCase(), number: pr.number });
+    }
+    for (const pr of patch.removePrs ?? []) map.delete(refKey(pr));
+    base.prs = map.size > 0 ? [...map.values()] : undefined;
+  }
+
+  // --- issues: append + dedupe by repo#number, then remove ---
+  if (patch.issues || patch.removeIssues) {
+    const map = new Map<string, { repo: string; number: number }>();
+    for (const issue of base.issues ?? []) map.set(refKey(issue), issue);
+    for (const issue of patch.issues ?? []) {
+      const key = refKey(issue);
+      if (!map.has(key)) map.set(key, { repo: issue.repo.toLowerCase(), number: issue.number });
+    }
+    for (const issue of patch.removeIssues ?? []) map.delete(refKey(issue));
+    base.issues = map.size > 0 ? [...map.values()] : undefined;
+  }
+
+  // --- features: append + dedupe, then remove ---
+  if (patch.features || patch.removeFeatures) {
+    const set = new Set(base.features ?? []);
+    for (const f of patch.features ?? []) set.add(f);
+    for (const f of patch.removeFeatures ?? []) set.delete(f);
+    base.features = set.size > 0 ? [...set] : undefined;
+  }
+
+  // --- notes: merge with null-delete ---
+  if (patch.notes) {
+    const merged = { ...(base.notes ?? {}) };
+    for (const [k, v] of Object.entries(patch.notes)) {
+      if (v === null) {
+        delete merged[k];
+      } else {
+        merged[k] = v;
+      }
+    }
+    base.notes = Object.keys(merged).length > 0 ? merged : undefined;
+  }
+
+  if (patch.attentionGroup !== undefined) {
+    if (patch.attentionGroup === null) delete base.attentionGroup;
+    else base.attentionGroup = { ...patch.attentionGroup };
+  }
+
+  return base;
+}
+
+/**
+ * #872: Post-merge total caps.
+ * Per-request schema caps only bound a single patch; accumulated totals can grow unbounded.
+ * This validator rejects (throws) when the merged result exceeds contract limits.
+ * Callers invoke this AFTER merge, BEFORE write — no silent truncation.
+ */
+export const METADATA_TOTAL_LIMITS = {
+  worktrees: 100,
+  prs: 200,
+  issues: 200,
+  features: 200,
+  notes: 200,
+} as const;
+
+export function validateMergedTotals(merged: ThreadMetadataV1): void {
+  const violations: string[] = [];
+  if (merged.worktrees && merged.worktrees.length > METADATA_TOTAL_LIMITS.worktrees) {
+    violations.push(`worktrees: ${merged.worktrees.length}/${METADATA_TOTAL_LIMITS.worktrees}`);
+  }
+  if (merged.prs && merged.prs.length > METADATA_TOTAL_LIMITS.prs) {
+    violations.push(`prs: ${merged.prs.length}/${METADATA_TOTAL_LIMITS.prs}`);
+  }
+  if (merged.issues && merged.issues.length > METADATA_TOTAL_LIMITS.issues) {
+    violations.push(`issues: ${merged.issues.length}/${METADATA_TOTAL_LIMITS.issues}`);
+  }
+  if (merged.features && merged.features.length > METADATA_TOTAL_LIMITS.features) {
+    violations.push(`features: ${merged.features.length}/${METADATA_TOTAL_LIMITS.features}`);
+  }
+  if (merged.notes && Object.keys(merged.notes).length > METADATA_TOTAL_LIMITS.notes) {
+    violations.push(`notes: ${Object.keys(merged.notes).length}/${METADATA_TOTAL_LIMITS.notes}`);
+  }
+  if (violations.length > 0) {
+    throw new Error(`Thread metadata total limits exceeded: ${violations.join(', ')}`);
+  }
+}
+
+/** #872: Validate a PR/issue ref shape: { repo: string, number: positive int } */
+function isValidRef(r: unknown): boolean {
+  return (
+    !!r &&
+    typeof r === 'object' &&
+    typeof (r as Record<string, unknown>).repo === 'string' &&
+    Number.isInteger((r as Record<string, unknown>).number) &&
+    ((r as Record<string, unknown>).number as number) > 0
+  );
+}
+
+/**
+ * #872: Parse threadMetadata JSON with shape validation.
+ * Returns null for anything that isn't a well-formed ThreadMetadataV1:
+ * malformed JSON, wrong version, or fields with wrong types.
+ * Read path: fail-open (caller treats null as "no metadata").
+ * Write path: fail-closed (caller rejects merge when raw exists but parse returns null).
+ */
+export function parseThreadMetadataJson(raw: string): ThreadMetadataV1 | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || parsed.v !== 1) return null;
+    if (parsed.roadmap !== undefined && !threadRoadmapSchema.safeParse(parsed.roadmap).success) return null;
+
+    // Shape validation — reject malformed v1 to prevent merge corruption
+    if (parsed.worktrees !== undefined) {
+      if (!Array.isArray(parsed.worktrees) || parsed.worktrees.some((w: unknown) => typeof w !== 'string')) return null;
+    }
+    if (parsed.prs !== undefined) {
+      if (!Array.isArray(parsed.prs) || parsed.prs.some((p: unknown) => !isValidRef(p))) return null;
+    }
+    if (parsed.issues !== undefined) {
+      if (!Array.isArray(parsed.issues) || parsed.issues.some((i: unknown) => !isValidRef(i))) return null;
+    }
+    if (parsed.features !== undefined) {
+      if (!Array.isArray(parsed.features) || parsed.features.some((f: unknown) => typeof f !== 'string')) return null;
+    }
+    if (parsed.notes !== undefined) {
+      if (!parsed.notes || typeof parsed.notes !== 'object' || Array.isArray(parsed.notes)) return null;
+      if (Object.values(parsed.notes).some((v: unknown) => typeof v !== 'string')) return null;
+    }
+    if (parsed.attentionGroup !== undefined) {
+      const group = parsed.attentionGroup as Record<string, unknown> | null;
+      if (
+        !group ||
+        typeof group !== 'object' ||
+        Array.isArray(group) ||
+        group.v !== 1 ||
+        typeof group.groupId !== 'string' ||
+        !/^attention_[A-Za-z0-9_-]+$/.test(group.groupId) ||
+        !Number.isInteger(group.order) ||
+        Number(group.order) < 0
+      ) {
+        return null;
+      }
+    }
+
+    return parsed as ThreadMetadataV1;
+  } catch {
+    return null;
+  }
 }
 
 /** F079: Voting state stored in thread metadata */
@@ -178,28 +718,97 @@ export interface VotingStateV1 {
   initiatedByCat?: string;
 }
 
+/** F187: A user-defined label for categorizing threads. */
+export interface ThreadLabel {
+  id: string;
+  name: string;
+  color: string;
+  sortOrder: number;
+  createdBy: string;
+  createdAt: number;
+}
+
+/** F187: Store for thread label CRUD operations. */
+export interface ILabelStore {
+  create(label: ThreadLabel): Promise<ThreadLabel>;
+  list(userId: string): Promise<ThreadLabel[]>;
+  get(id: string): Promise<ThreadLabel | null>;
+  update(
+    id: string,
+    userId: string,
+    fields: Partial<Pick<ThreadLabel, 'name' | 'color' | 'sortOrder'>>,
+  ): Promise<ThreadLabel | null>;
+  delete(id: string, userId: string): Promise<boolean>;
+}
+
 /**
  * Common interface for thread stores (in-memory and future Redis).
  */
 export interface IThreadStore {
-  create(userId: string, title?: string, projectPath?: string): Thread | Promise<Thread>;
-  get(threadId: string): Thread | null | Promise<Thread | null>;
-  list(userId: string): Thread[] | Promise<Thread[]>;
+  ensureOwnedThread(seed: OwnedThreadSeed): Thread | Promise<Thread>;
+  create(
+    userId: string,
+    title?: string,
+    projectPath?: string,
+    parentThreadId?: string,
+    proposalAudit?: ThreadProposalAudit,
+    branchAudit?: ThreadBranchAudit,
+    options?: ThreadCreateOptions,
+  ): Thread | Promise<Thread>;
+  get(threadId: string, options?: StoreReadOptions): Thread | null | Promise<Thread | null>;
+  list(userId: string, options?: StoreReadOptions): Thread[] | Promise<Thread[]>;
   listByProject(userId: string, projectPath: string): Thread[] | Promise<Thread[]>;
+  /** Read only candidate threads admitted by the durable user visibility index. */
+  listCandidates?(userId: string, threadIds: readonly string[]): Thread[] | Promise<Thread[]>;
+  listProjectCandidates?(
+    userId: string,
+    projectPath: string,
+    threadIds: readonly string[],
+  ): Thread[] | Promise<Thread[]>;
+  hasByProject?(userId: string, projectPath: string): boolean | Promise<boolean>;
   addParticipants(threadId: string, catIds: CatId[]): void | Promise<void>;
   getParticipants(threadId: string): CatId[] | Promise<CatId[]>;
   /** F032 Phase C: Get participants sorted by activity (lastMessageAt desc) */
   getParticipantsWithActivity(threadId: string): ThreadParticipantActivity[] | Promise<ThreadParticipantActivity[]>;
+  /**
+   * F297 AC-B3: batched variant for list-scale reads (Sidebar snapshot).
+   *
+   * 逐 thread 调用 `getParticipantsWithActivity` 在 Redis 后端下是 2×T 次串行往返；
+   * Sidebar 现网 ~1760 行，必须 pipeline。实现方**必须**保持与单条版本相同的
+   * lastMessageAt 降序契约（F297 的 done/error 取 `[0]` 作为"最近一次回应"）。
+   */
+  getParticipantsWithActivityBatch(
+    threadIds: readonly string[],
+  ): Map<string, ThreadParticipantActivity[]> | Promise<Map<string, ThreadParticipantActivity[]>>;
   /** F032 P1-2 fix: Update participant activity on every message (not just join) */
-  updateParticipantActivity(threadId: string, catId: CatId): void | Promise<void>;
+  updateParticipantActivity(threadId: string, catId: CatId, healthy?: boolean): void | Promise<void>;
   updateTitle(threadId: string, title: string): void | Promise<void>;
+  setSessionImport(threadId: string, value: NonNullable<Thread['sessionImport']>): void | Promise<void>;
+  setAutomaticTitle(
+    threadId: string,
+    title: string,
+    source: 'temporary' | 'cat',
+    catId?: string,
+  ): boolean | Promise<boolean>;
+  /** Exact title CAS used to scrub/restore message-derived copies without clobbering user edits. */
+  compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): boolean | Promise<boolean>;
+  /** ISSUE-16: backfill projectPath for threads created before the fix */
+  updateProjectPath(threadId: string, projectPath: string): void | Promise<void>;
   updatePin(threadId: string, pinned: boolean): void | Promise<void>;
   updateFavorite(threadId: string, favorited: boolean): void | Promise<void>;
   updateThinkingMode(threadId: string, mode: 'debug' | 'play'): void | Promise<void>;
   updateMentionActionabilityMode(threadId: string, mode: MentionActionabilityMode): void | Promise<void>;
   updatePreferredCats(threadId: string, catIds: CatId[]): void | Promise<void>;
+  /** F306: exact-revision CAS; null means the field must be absent. */
+  compareAndSetGoal(
+    threadId: string,
+    expectedRevision: number | null,
+    next: ThreadGoalStateV1 | null,
+  ): boolean | Promise<boolean>;
   updatePhase(threadId: string, phase: ThreadPhase): void | Promise<void>;
   linkBacklogItem(threadId: string, backlogItemId: string): void | Promise<void>;
+  /** Post-create Feature association. `null` clears the thread's association. */
+  updateBacklogItem(threadId: string, backlogItemId: string | null): void | Promise<void>;
   /**
    * F046 D3: Persist one-shot feedback for suppressed A2A mentions.
    * The next invocation of this cat in this thread should consume and clear it.
@@ -222,20 +831,166 @@ export interface IThreadStore {
   /** F079: Get/update voting state */
   getVotingState(threadId: string): VotingStateV1 | null | Promise<VotingStateV1 | null>;
   updateVotingState(threadId: string, state: VotingStateV1 | null): void | Promise<void>;
+  /** Update bubble display overrides (thinking/CLI expand/collapse). */
+  updateBubbleDisplay(
+    threadId: string,
+    field: 'bubbleThinking' | 'bubbleCli',
+    value: 'global' | 'expanded' | 'collapsed',
+  ): void | Promise<void>;
   /** F092: Update voice companion mode. */
   updateVoiceMode(threadId: string, voiceMode: boolean): void | Promise<void>;
   /** F087: Get/update bootcamp state. */
   updateBootcampState(threadId: string, state: BootcampStateV1 | null): void | Promise<void>;
+  /** F171: Get/update first-run quest state. */
+  updateFirstRunQuestState(threadId: string, state: FirstRunQuestStateV1 | null): void | Promise<void>;
+  /** F192 livefix: Set/clear system thread kind for sidebar "系统" section visibility. */
+  updateSystemKind(threadId: string, kind: ThreadSystemKind | null): void | Promise<void>;
+  /** Atomically claim an unclassified owner thread; never overwrite another system kind. */
+  claimSystemKind(threadId: string, ownerUserId: string, kind: ThreadSystemKind): boolean | Promise<boolean>;
   /** F088 Phase G: Get/update connector hub state. */
   updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): void | Promise<void>;
+  /** F202 C1: Set or clear the plugin instance that owns this thread. */
+  updatePluginOwnership(threadId: string, ownership: ThreadPluginOwnershipV1 | null): void | Promise<void>;
+  updatePreferredWorkspaceMode(
+    threadId: string,
+    mode:
+      | 'dev'
+      | 'recall'
+      | 'product-schedule'
+      | 'schedule'
+      | 'tasks'
+      | 'community'
+      | 'artifacts'
+      | 'approval'
+      | 'trajectory'
+      | 'eval'
+      | null,
+  ): void | Promise<void>;
+  /** F187: Update thread labels (replaces entire array). */
+  updateLabels(threadId: string, labelIds: string[]): void | Promise<void>;
+  /** #872: Get thread metadata anchor. */
+  getThreadMetadata(threadId: string): ThreadMetadataV1 | null | Promise<ThreadMetadataV1 | null>;
+  /** #872: Update thread metadata (replace entire object). Use mergeThreadMetadata() to build the merged value. */
+  updateThreadMetadata(threadId: string, metadata: ThreadMetadataV1 | null): void | Promise<void>;
+  /** #872 P2: Atomically read-merge-write thread metadata so concurrent callers cannot lose appends. */
+  atomicMergeThreadMetadata(threadId: string, patch: ThreadMetadataPatch): ThreadMetadataV1 | Promise<ThreadMetadataV1>;
+  /** #836: Update per-cat session strategy for a thread member. `null` clears. */
+  updateMemberSessionStrategy(
+    threadId: string,
+    catId: string,
+    strategy: 'resume' | 'reborn' | null,
+  ): void | Promise<void>;
+  /** F262: Set or clear one raw thread × cat effort override. */
+  updateMemberEffort(threadId: string, catId: CatId, effort: CliEffortPreset | null): void | Promise<void>;
+  /**
+   * F262: Read one raw effort override.
+   * `userId` carries the caller's authenticated scope for port consistency; implementations key only by
+   * `(threadId, catId)`, so the route/invocation caller MUST enforce thread ownership before this read.
+   */
+  getMemberEffort(
+    threadId: string,
+    catId: CatId,
+    userId: string,
+  ): CliEffortPreset | undefined | Promise<CliEffortPreset | undefined>;
+  /**
+   * F262: Bulk read all raw overrides for one thread.
+   * `userId` is caller-enforced context, not part of the persisted key; ownership checks stay above the store.
+   */
+  getMemberEfforts(
+    threadId: string,
+    userId: string,
+  ): Partial<Record<CatId, CliEffortPreset>> | Promise<Partial<Record<CatId, CliEffortPreset>>>;
+  /** F291: Set or clear one raw thread × cat requested speed override. */
+  updateMemberSpeed(threadId: string, catId: CatId, speed: CodexSpeedValue | null): void | Promise<void>;
+  /** F291: Read one raw speed override. Authorization is enforced by the caller. */
+  getMemberSpeed(
+    threadId: string,
+    catId: CatId,
+    userId: string,
+  ): CodexSpeedValue | undefined | Promise<CodexSpeedValue | undefined>;
+  /** F291: Bulk read all raw speed overrides for one thread. */
+  getMemberSpeeds(
+    threadId: string,
+    userId: string,
+  ): Partial<Record<CatId, CodexSpeedValue>> | Promise<Partial<Record<CatId, CodexSpeedValue>>>;
+  /** F247 AC-B1c-1: Set or clear a cloud cat's ChatGPT chat URL binding for this thread.
+   *  `chatUrl=null` clears the specific catId binding (stale binding recovery / explicit unbind).
+   *  Owner-only — authorization MUST be enforced at the route/MCP layer; this store method
+   *  does not check ownership.
+   *
+   *  URL format validation is NOT enforced here either — callers MUST validate via
+   *  `isValidChatGptChatUrl()` from `utils/chatgpt-chat-url.ts` before writing.
+   *  See `docs/features/F247-cloud-cat-family.md` AC-B1c-11 for URL contract. */
+  updateCloudCatBinding(threadId: string, catId: CatId, chatUrl: string | null): void | Promise<void>;
+  /** F247 AC-B1c-1: Read all cloud cat bindings for this thread. Returns empty object
+   *  when no bindings exist (never returns undefined for ergonomic callers).
+   *
+   *  Owner-only — authorization MUST be enforced at the route/MCP layer; this store method
+   *  does not check ownership. */
+  getCloudCatBindings(threadId: string): Record<CatId, string> | Promise<Record<CatId, string>>;
+  /** F224: Coordinator-facing strategy read. Undefined means default resume. */
+  getMemberSessionStrategy?(
+    threadId: string,
+    catId: string,
+    userId: string,
+  ): 'resume' | 'reborn' | undefined | Promise<'resume' | 'reborn' | undefined>;
+  /** #836: Check if a cat uses reborn session strategy in this thread.
+   *  Must be used instead of reading thread.memberSessionStrategy directly,
+   *  because Redis stores strategy in separate hash fields (memberSS:<catId>)
+   *  that are NOT hydrated by get().
+   *  Optional for backward compat with test mocks — absent = never reborn. */
+  isRebornSession?(threadId: string, catId: string): boolean | Promise<boolean>;
+  /** #813: Write pending continuation state for a cat+user (passive seal). */
+  setPendingContinuation(
+    threadId: string,
+    catId: string,
+    userId: string,
+    entry: PendingContinuationEntry,
+  ): void | Promise<void>;
+  /** #813: Consume (read + delete) pending continuation for a cat+user. Returns null if none. */
+  consumePendingContinuation(
+    threadId: string,
+    catId: string,
+    userId: string,
+  ): PendingContinuationEntry | null | Promise<PendingContinuationEntry | null>;
+  /**
+   * Ensure a thread with a specific ID exists. If it doesn't exist, create it
+   * with the given title and createdBy='system'. If it already exists, no-op.
+   * Returns the thread (existing or newly created).
+   */
+  ensureThread(threadId: string, title: string): Thread | Promise<Thread>;
+  /** First-run onboarding creation with a store-level journey idempotency key. */
+  ensureOnboardingThread?(
+    userId: string,
+    journeyId: string,
+    title: string,
+    projectPath: string,
+    bootcampState?: BootcampStateV1,
+  ): EnsureOnboardingThreadResult | Promise<EnsureOnboardingThreadResult>;
+  ensureExternalRuntimeAnchorThread(runtime: ExternalRuntimeAnchorRuntime, userId: string): Thread | Promise<Thread>;
   updateLastActive(threadId: string): void | Promise<void>;
   delete(threadId: string): boolean | Promise<boolean>;
+  /** F128: List child threads that have this thread as parentThreadId. */
+  getChildThreads(parentThreadId: string): Thread[] | Promise<Thread[]>;
   /** F095 Phase D: Soft-delete — mark thread as deleted without removing data. */
   softDelete(threadId: string): boolean | Promise<boolean>;
   /** F095 Phase D: Restore a soft-deleted thread. */
   restore(threadId: string): boolean | Promise<boolean>;
   /** F095 Phase D: List soft-deleted threads (trash bin). */
   listDeleted(userId: string): Thread[] | Promise<Thread[]>;
+  /**
+   * F192 cloud-review P1: Add an existing thread to a user's thread list so it appears in their sidebar.
+   * Used for system threads (eval domain, connector hub) created by ensureThread() which
+   * skips user-list indexing. Idempotent — re-indexing an already-visible thread is a no-op.
+   */
+  indexForUser(threadId: string, userId: string): void | Promise<void>;
+  /** F229 / F167: Set or clear threadKind marker.
+   *  'concierge' = 专属前台猫载体（canonical 载体在 sidebar 可发现）。
+   *  'gate-keeping' = 守门 thread (per-repo inbox / community ops)，F167 guard 用此标记 default-block 三端点。
+   *  null 清除。 */
+  updateThreadKind(threadId: string, kind: ThreadKind | null): void | Promise<void>;
+  /** Repair sparse/missing per-user thread indexes from authoritative thread detail hashes. */
+  repairIndex?(userId?: string): Promise<{ repairedUsers: number; repairedMembers: number }>;
 }
 
 const MAX_THREADS = 100;
@@ -245,10 +1000,16 @@ const MAX_THREADS = 100;
  */
 export class ThreadStore implements IThreadStore {
   private threads: Map<string, Thread> = new Map();
+  private ownedThreadTombstones = new Set<string>();
   /** F032 Phase C: Track participant activity per thread. Key: `${threadId}:${catId}` */
-  private participantActivity: Map<string, { lastMessageAt: number; messageCount: number }> = new Map();
+  private participantActivity: Map<
+    string,
+    { lastMessageAt: number; messageCount: number; lastResponseHealthy?: boolean }
+  > = new Map();
   /** F046 D3: one-shot suppressed mention feedback per thread+cat */
   private mentionRoutingFeedback: Map<string, ThreadMentionRoutingFeedback> = new Map();
+  /** F192 cloud P1: extra user→threadId index for system threads surfaced via indexForUser */
+  private userThreadIndex: Map<string, Set<string>> = new Map();
   private readonly maxThreads: number;
 
   constructor(options?: { maxThreads?: number }) {
@@ -264,24 +1025,136 @@ export class ThreadStore implements IThreadStore {
     return `${threadId}:${catId}`;
   }
 
-  create(userId: string, title?: string, projectPath?: string): Thread {
+  private isVisibleToUser(thread: Thread, userId: string, indexed: ReadonlySet<string> | undefined): boolean {
+    if (thread.deletedAt || thread.externalRuntimeAnchorState) return false;
+    return thread.createdBy === userId || thread.id === DEFAULT_THREAD_ID || (indexed?.has(thread.id) ?? false);
+  }
+
+  create(
+    userId: string,
+    title?: string,
+    projectPath?: string,
+    parentThreadId?: string,
+    proposalAudit?: ThreadProposalAudit,
+    branchAudit?: ThreadBranchAudit,
+    options?: ThreadCreateOptions,
+  ): Thread {
     this.evictIfNeeded();
 
     const thread: Thread = {
       id: generateThreadId(),
       projectPath: projectPath ?? 'default',
       title: title ?? null,
+      titleSource: title ? 'user' : 'temporary',
       createdBy: userId,
       participants: [],
       lastActiveAt: Date.now(),
       createdAt: Date.now(),
+      ...(options?.pinned ? { pinned: true, pinnedAt: Date.now() } : {}),
+      ...(parentThreadId ? { parentThreadId } : {}),
+      ...(proposalAudit
+        ? {
+            createdFromProposalId: proposalAudit.createdFromProposalId,
+            sourceThreadId: proposalAudit.sourceThreadId,
+            ...(proposalAudit.sourceInvocationId ? { sourceInvocationId: proposalAudit.sourceInvocationId } : {}),
+            ...(proposalAudit.sourceMessageId ? { sourceMessageId: proposalAudit.sourceMessageId } : {}),
+            ...(proposalAudit.declaredWorkMode ? { declaredWorkMode: proposalAudit.declaredWorkMode } : {}),
+            approvedBy: proposalAudit.approvedBy,
+            approvedAt: proposalAudit.approvedAt,
+          }
+        : {}),
+      ...(branchAudit ? { branchAudit: { ...branchAudit } } : {}),
     };
 
     this.threads.set(thread.id, thread);
     return thread;
   }
 
-  get(threadId: string): Thread | null {
+  ensureOwnedThread(seed: OwnedThreadSeed): Thread {
+    const candidate = ownedThreadFromSeed(seed);
+    if (this.ownedThreadTombstones.has(candidate.id)) return requireOwnedThread(null, seed.userId);
+    const existing = this.threads.get(candidate.id);
+    if (existing) return requireOwnedThread(existing, seed.userId);
+    this.evictIfNeeded();
+    this.threads.set(candidate.id, candidate);
+    return candidate;
+  }
+
+  ensureThread(threadId: string, title: string): Thread {
+    const existing = this.threads.get(threadId);
+    if (existing) return existing;
+
+    this.evictIfNeeded();
+
+    const now = Date.now();
+    const thread: Thread = {
+      id: threadId,
+      projectPath: 'default',
+      title,
+      createdBy: 'system',
+      participants: [],
+      lastActiveAt: now,
+      createdAt: now,
+    };
+    this.threads.set(threadId, thread);
+    return thread;
+  }
+
+  ensureOnboardingThread(
+    userId: string,
+    journeyId: string,
+    title: string,
+    projectPath: string,
+    bootcampState?: BootcampStateV1,
+  ): EnsureOnboardingThreadResult {
+    const threadId = onboardingThreadId(userId, journeyId);
+    const existing = this.threads.get(threadId);
+    if (existing) return { thread: existing, created: false };
+    this.evictIfNeeded();
+    const now = Date.now();
+    const thread: Thread = {
+      id: threadId,
+      projectPath,
+      title,
+      createdBy: userId,
+      participants: [],
+      lastActiveAt: now,
+      createdAt: now,
+      bootcampState,
+    };
+    this.threads.set(threadId, thread);
+    return { thread, created: true };
+  }
+
+  ensureExternalRuntimeAnchorThread(runtime: ExternalRuntimeAnchorRuntime, userId: string): Thread {
+    const threadId = buildExternalRuntimeAnchorThreadId(runtime, userId);
+    const existing = this.threads.get(threadId);
+    if (existing) return existing;
+
+    this.evictIfNeeded();
+
+    const now = Date.now();
+    const thread: Thread = {
+      id: threadId,
+      projectPath: `external-runtime:${runtime}`,
+      title: `External runtime: ${runtime}`,
+      createdBy: 'system',
+      participants: [],
+      lastActiveAt: now,
+      createdAt: now,
+      externalRuntimeAnchorState: {
+        v: 1,
+        runtime,
+        userId,
+        createdAt: now,
+      },
+    };
+    this.threads.set(threadId, thread);
+    return thread;
+  }
+
+  get(threadId: string, options?: StoreReadOptions): Thread | null {
+    throwIfStoreReadAborted(options);
     // Auto-create default thread on first access
     if (threadId === DEFAULT_THREAD_ID && !this.threads.has(DEFAULT_THREAD_ID)) {
       const defaultThread: Thread = {
@@ -299,16 +1172,28 @@ export class ThreadStore implements IThreadStore {
     return this.threads.get(threadId) ?? null;
   }
 
-  list(userId: string): Thread[] {
+  list(userId: string, options?: StoreReadOptions): Thread[] {
+    throwIfStoreReadAborted(options);
+    const indexed = this.userThreadIndex.get(userId);
     const result: Thread[] = [];
     for (const thread of this.threads.values()) {
-      if ((thread.createdBy === userId || thread.id === DEFAULT_THREAD_ID) && !thread.deletedAt) {
-        result.push(thread);
-      }
+      throwIfStoreReadAborted(options);
+      if (this.isVisibleToUser(thread, userId, indexed)) result.push(thread);
     }
+    throwIfStoreReadAborted(options);
     // Sort by lastActiveAt descending (most recent first)
     result.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
     return result;
+  }
+
+  listCandidates(userId: string, threadIds: readonly string[]): Thread[] {
+    const indexed = this.userThreadIndex.get(userId);
+    const result: Thread[] = [];
+    for (const id of new Set(threadIds)) {
+      const thread = this.threads.get(id);
+      if (thread && this.isVisibleToUser(thread, userId, indexed)) result.push(thread);
+    }
+    return result.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
   }
 
   listByProject(userId: string, projectPath: string): Thread[] {
@@ -343,6 +1228,7 @@ export class ThreadStore implements IThreadStore {
         catId,
         lastMessageAt: activity?.lastMessageAt ?? 0,
         messageCount: activity?.messageCount ?? 0,
+        lastResponseHealthy: activity?.lastResponseHealthy,
       };
     });
     // Sort by lastMessageAt descending (most recent first)
@@ -350,8 +1236,17 @@ export class ThreadStore implements IThreadStore {
     return result;
   }
 
+  /** F297 AC-B3: in-memory 无 I/O，逐条复用单查即可；契约同单条版本（lastMessageAt 降序）。 */
+  getParticipantsWithActivityBatch(threadIds: readonly string[]): Map<string, ThreadParticipantActivity[]> {
+    const result = new Map<string, ThreadParticipantActivity[]>();
+    for (const threadId of threadIds) {
+      result.set(threadId, this.getParticipantsWithActivity(threadId));
+    }
+    return result;
+  }
+
   /** F032 P1-2 fix: Update participant activity on every message */
-  updateParticipantActivity(threadId: string, catId: CatId): void {
+  updateParticipantActivity(threadId: string, catId: CatId, healthy?: boolean): void {
     const thread = this.get(threadId);
     if (!thread) return;
 
@@ -366,12 +1261,45 @@ export class ThreadStore implements IThreadStore {
     this.participantActivity.set(key, {
       lastMessageAt: Date.now(),
       messageCount: (existing?.messageCount ?? 0) + 1,
+      lastResponseHealthy: healthy ?? true,
     });
   }
 
   updateTitle(threadId: string, title: string): void {
     const thread = this.get(threadId);
-    if (thread) thread.title = title;
+    if (thread) {
+      thread.title = title;
+      thread.titleSource = 'user';
+      delete thread.titleCatId;
+    }
+  }
+
+  setSessionImport(threadId: string, value: NonNullable<Thread['sessionImport']>): void {
+    const thread = this.get(threadId);
+    if (thread) thread.sessionImport = value;
+  }
+
+  setAutomaticTitle(threadId: string, title: string, source: 'temporary' | 'cat', catId?: string): boolean {
+    const thread = this.get(threadId);
+    if (!thread || thread.deletedAt || (thread.titleSource ?? (thread.title ? 'user' : 'temporary')) !== 'temporary')
+      return false;
+    if (source === 'temporary' && thread.title !== null) return false;
+    thread.title = title;
+    thread.titleSource = source;
+    if (source === 'cat' && catId) thread.titleCatId = catId;
+    return true;
+  }
+
+  compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): boolean {
+    const thread = this.get(threadId);
+    if (!thread || thread.title !== expectedTitle) return false;
+    thread.title = nextTitle;
+    return true;
+  }
+
+  updateProjectPath(threadId: string, projectPath: string): void {
+    const thread = this.get(threadId);
+    if (thread) thread.projectPath = projectPath;
   }
 
   updatePin(threadId: string, pinned: boolean): void {
@@ -418,14 +1346,30 @@ export class ThreadStore implements IThreadStore {
     }
   }
 
+  compareAndSetGoal(threadId: string, expectedRevision: number | null, next: ThreadGoalStateV1 | null): boolean {
+    const thread = this.get(threadId);
+    if (!thread || (next && !isThreadGoalStateV1(next)) || (thread.goal?.revision ?? null) !== expectedRevision) {
+      return false;
+    }
+    if (next) thread.goal = { ...next, sync: { ...next.sync } };
+    else delete thread.goal;
+    return true;
+  }
+
   updatePhase(threadId: string, phase: ThreadPhase): void {
     const thread = this.get(threadId);
     if (thread) thread.phase = phase;
   }
 
   linkBacklogItem(threadId: string, backlogItemId: string): void {
+    this.updateBacklogItem(threadId, backlogItemId);
+  }
+
+  updateBacklogItem(threadId: string, backlogItemId: string | null): void {
     const thread = this.get(threadId);
-    if (thread) thread.backlogItemId = backlogItemId;
+    if (!thread) return;
+    if (backlogItemId) thread.backlogItemId = backlogItemId;
+    else delete thread.backlogItemId;
   }
 
   setMentionRoutingFeedback(threadId: string, catId: CatId, feedback: ThreadMentionRoutingFeedback): void {
@@ -491,6 +1435,20 @@ export class ThreadStore implements IThreadStore {
     }
   }
 
+  updateBubbleDisplay(
+    threadId: string,
+    field: 'bubbleThinking' | 'bubbleCli',
+    value: 'global' | 'expanded' | 'collapsed',
+  ): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (value === 'global') {
+      delete thread[field];
+    } else {
+      thread[field] = value;
+    }
+  }
+
   updateVoiceMode(threadId: string, voiceMode: boolean): void {
     const thread = this.get(threadId);
     if (!thread) return;
@@ -511,6 +1469,50 @@ export class ThreadStore implements IThreadStore {
     }
   }
 
+  updateFirstRunQuestState(threadId: string, state: FirstRunQuestStateV1 | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (state === null) {
+      delete thread.firstRunQuestState;
+    } else {
+      thread.firstRunQuestState = state;
+    }
+  }
+
+  updateSystemKind(threadId: string, kind: ThreadSystemKind | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (kind === null) {
+      delete thread.systemKind;
+    } else {
+      thread.systemKind = kind;
+    }
+  }
+
+  claimSystemKind(threadId: string, ownerUserId: string, kind: ThreadSystemKind): boolean {
+    const thread = this.get(threadId);
+    if (
+      !thread ||
+      thread.deletedAt ||
+      thread.createdBy !== ownerUserId ||
+      (thread.systemKind !== undefined && thread.systemKind !== kind)
+    )
+      return false;
+    thread.systemKind = kind;
+    return true;
+  }
+
+  /** F229 / F167: Set or clear threadKind marker for concierge / gate-keeping thread. */
+  updateThreadKind(threadId: string, kind: ThreadKind | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (kind === null) {
+      delete thread.threadKind;
+    } else {
+      thread.threadKind = kind;
+    }
+  }
+
   updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): void {
     const thread = this.get(threadId);
     if (!thread) return;
@@ -519,6 +1521,200 @@ export class ThreadStore implements IThreadStore {
     } else {
       thread.connectorHubState = state;
     }
+  }
+
+  updatePluginOwnership(threadId: string, ownership: ThreadPluginOwnershipV1 | null): void {
+    if (ownership !== null && !isThreadPluginOwnershipV1(ownership)) {
+      throw new TypeError('invalid plugin thread ownership');
+    }
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (ownership === null) {
+      delete thread.pluginOwnership;
+    } else {
+      thread.pluginOwnership = ownership;
+    }
+  }
+
+  updatePreferredWorkspaceMode(
+    threadId: string,
+    mode:
+      | 'dev'
+      | 'recall'
+      | 'product-schedule'
+      | 'schedule'
+      | 'tasks'
+      | 'community'
+      | 'artifacts'
+      | 'approval'
+      | 'trajectory'
+      | 'eval'
+      | null,
+  ): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (mode === null) {
+      delete thread.preferredWorkspaceMode;
+    } else {
+      thread.preferredWorkspaceMode = mode;
+    }
+  }
+
+  updateLabels(threadId: string, labelIds: string[]): void {
+    const thread = this.get(threadId);
+    if (thread) thread.labels = labelIds;
+  }
+
+  getThreadMetadata(threadId: string): ThreadMetadataV1 | null {
+    const thread = this.get(threadId);
+    return thread?.threadMetadata ?? null;
+  }
+
+  updateThreadMetadata(threadId: string, metadata: ThreadMetadataV1 | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (metadata === null) {
+      delete thread.threadMetadata;
+    } else {
+      thread.threadMetadata = metadata;
+    }
+  }
+
+  atomicMergeThreadMetadata(threadId: string, patch: ThreadMetadataPatch): ThreadMetadataV1 {
+    const existing = this.getThreadMetadata(threadId);
+    const merged = mergeThreadMetadata(existing ?? undefined, patch);
+    validateMergedTotals(merged);
+    this.updateThreadMetadata(threadId, merged);
+    return merged;
+  }
+
+  updateMemberSessionStrategy(threadId: string, catId: string, strategy: 'resume' | 'reborn' | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (strategy === null || strategy === 'resume') {
+      // null or default: remove override
+      if (thread.memberSessionStrategy) {
+        delete thread.memberSessionStrategy[catId];
+        if (Object.keys(thread.memberSessionStrategy).length === 0) {
+          delete thread.memberSessionStrategy;
+        }
+      }
+    } else {
+      if (!thread.memberSessionStrategy) thread.memberSessionStrategy = {};
+      thread.memberSessionStrategy[catId] = strategy;
+      // #836 P2: Clear stale pending continuations when switching to reborn.
+      // Capsules sealed before the reborn period contain pre-reborn session
+      // context; if reborn is later cleared back to resume, consuming them
+      // would resume from stale state instead of the post-reborn session.
+      if (strategy === 'reborn' && thread.pendingContinuation) {
+        const prefix = `${catId}:`;
+        for (const key of Object.keys(thread.pendingContinuation)) {
+          if (key.startsWith(prefix)) {
+            delete thread.pendingContinuation[key];
+          }
+        }
+        if (Object.keys(thread.pendingContinuation).length === 0) {
+          delete thread.pendingContinuation;
+        }
+      }
+    }
+  }
+
+  updateMemberEffort(threadId: string, catId: CatId, effort: CliEffortPreset | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (effort === null) {
+      if (!thread.memberEffortOverrides) return;
+      delete thread.memberEffortOverrides[catId];
+      if (Object.keys(thread.memberEffortOverrides).length === 0) delete thread.memberEffortOverrides;
+      return;
+    }
+    if (!thread.memberEffortOverrides) thread.memberEffortOverrides = {};
+    thread.memberEffortOverrides[catId] = effort;
+  }
+
+  getMemberEffort(threadId: string, catId: CatId, _userId: string): CliEffortPreset | undefined {
+    return this.get(threadId)?.memberEffortOverrides?.[catId];
+  }
+
+  getMemberEfforts(threadId: string, _userId: string): Partial<Record<CatId, CliEffortPreset>> {
+    return { ...(this.get(threadId)?.memberEffortOverrides ?? {}) };
+  }
+
+  updateMemberSpeed(threadId: string, catId: CatId, speed: CodexSpeedValue | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (speed === null) {
+      if (!thread.memberSpeedOverrides) return;
+      delete thread.memberSpeedOverrides[catId];
+      if (Object.keys(thread.memberSpeedOverrides).length === 0) delete thread.memberSpeedOverrides;
+      return;
+    }
+    if (!thread.memberSpeedOverrides) thread.memberSpeedOverrides = {};
+    thread.memberSpeedOverrides[catId] = speed;
+  }
+
+  getMemberSpeed(threadId: string, catId: CatId, _userId: string): CodexSpeedValue | undefined {
+    return this.get(threadId)?.memberSpeedOverrides?.[catId];
+  }
+
+  getMemberSpeeds(threadId: string, _userId: string): Partial<Record<CatId, CodexSpeedValue>> {
+    return { ...(this.get(threadId)?.memberSpeedOverrides ?? {}) };
+  }
+
+  updateCloudCatBinding(threadId: string, catId: CatId, chatUrl: string | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (chatUrl === null) {
+      if (thread.cloudCatBindings) {
+        delete thread.cloudCatBindings[catId];
+        if (Object.keys(thread.cloudCatBindings).length === 0) {
+          delete thread.cloudCatBindings;
+        }
+      }
+      return;
+    }
+    if (!thread.cloudCatBindings) thread.cloudCatBindings = {};
+    thread.cloudCatBindings[catId] = chatUrl;
+  }
+
+  getCloudCatBindings(threadId: string): Record<CatId, string> {
+    const thread = this.get(threadId);
+    if (!thread || !thread.cloudCatBindings) return {};
+    // Defensive copy — callers should not mutate internal state.
+    return { ...thread.cloudCatBindings };
+  }
+
+  /** #836: Check if cat uses reborn strategy in this thread. */
+  getMemberSessionStrategy(threadId: string, catId: string, _userId: string): 'resume' | 'reborn' | undefined {
+    const thread = this.get(threadId);
+    return thread?.memberSessionStrategy?.[catId];
+  }
+
+  isRebornSession(threadId: string, catId: string): boolean {
+    const thread = this.get(threadId);
+    return thread?.memberSessionStrategy?.[catId] === 'reborn';
+  }
+
+  setPendingContinuation(threadId: string, catId: string, userId: string, entry: PendingContinuationEntry): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (!thread.pendingContinuation) thread.pendingContinuation = {};
+    const scopeKey = `${catId}:${userId}`;
+    thread.pendingContinuation[scopeKey] = entry;
+  }
+
+  consumePendingContinuation(threadId: string, catId: string, userId: string): PendingContinuationEntry | null {
+    const thread = this.get(threadId);
+    const scopeKey = `${catId}:${userId}`;
+    if (!thread?.pendingContinuation?.[scopeKey]) return null;
+    const entry = thread.pendingContinuation[scopeKey]!;
+    delete thread.pendingContinuation[scopeKey];
+    // Clean up empty container
+    if (Object.keys(thread.pendingContinuation).length === 0) {
+      delete thread.pendingContinuation;
+    }
+    return entry;
   }
 
   updateLastActive(threadId: string): void {
@@ -532,11 +1728,23 @@ export class ThreadStore implements IThreadStore {
   }
 
   delete(threadId: string): boolean {
+    if (threadId.startsWith('thread_owned_') && this.threads.has(threadId)) this.ownedThreadTombstones.add(threadId);
     if (threadId === DEFAULT_THREAD_ID) return false; // Cannot delete default
     // Cloud Codex R3 P2 fix: Clean up activity entries to prevent memory leak
     this.clearActivityForThread(threadId);
     this.clearMentionRoutingFeedbackForThread(threadId);
     return this.threads.delete(threadId);
+  }
+
+  /** F128: List child threads that have this thread as parentThreadId. */
+  getChildThreads(parentThreadId: string): Thread[] {
+    const children: Thread[] = [];
+    for (const thread of this.threads.values()) {
+      if (thread.parentThreadId === parentThreadId && !thread.deletedAt) {
+        children.push(thread);
+      }
+    }
+    return children.sort((a, b) => a.createdAt - b.createdAt);
   }
 
   /** F095 Phase D: Soft-delete — mark thread as deleted. */
@@ -557,6 +1765,17 @@ export class ThreadStore implements IThreadStore {
   }
 
   /** F095 Phase D: List soft-deleted threads (trash bin). */
+  indexForUser(threadId: string, userId: string): void {
+    const thread = this.threads.get(threadId);
+    if (!thread) return;
+    let indexed = this.userThreadIndex.get(userId);
+    if (!indexed) {
+      indexed = new Set();
+      this.userThreadIndex.set(userId, indexed);
+    }
+    indexed.add(threadId);
+  }
+
   listDeleted(userId: string): Thread[] {
     const result: Thread[] = [];
     for (const thread of this.threads.values()) {

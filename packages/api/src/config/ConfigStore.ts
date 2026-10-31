@@ -6,6 +6,7 @@
  */
 
 import { clearBudgetCache } from './cat-budgets.js';
+import { configEventBus, createChangeSetId } from './config-event-bus.js';
 
 export type ConfigSnapshotPath = readonly [string, ...string[]];
 
@@ -59,6 +60,18 @@ const CONFIG_KEY_DEFINITIONS: Record<string, ConfigKeyDefinition> = {
     validate: (value) => ['true', 'false'].includes(value),
     riskLevel: 'high',
   },
+  'ui.bubble.thinking': {
+    envKey: 'UI_BUBBLE_THINKING_DEFAULT',
+    snapshotPath: ['ui', 'bubbleDefaults', 'thinking'],
+    validate: (value) => ['expanded', 'collapsed'].includes(value),
+    riskLevel: 'standard',
+  },
+  'ui.bubble.cliOutput': {
+    envKey: 'UI_BUBBLE_CLI_OUTPUT_DEFAULT',
+    snapshotPath: ['ui', 'bubbleDefaults', 'cliOutput'],
+    validate: (value) => ['expanded', 'collapsed'].includes(value),
+    riskLevel: 'standard',
+  },
 };
 
 class ConfigStoreImpl {
@@ -68,8 +81,8 @@ class ConfigStoreImpl {
     return CONFIG_KEY_DEFINITIONS[key];
   }
 
-  /** Set a hot-updatable config key. Throws if key is not updatable. */
-  set(key: string, value: string | number | boolean): void {
+  /** Validate and normalize a hot-updatable value without mutating runtime state. */
+  normalize(key: string, value: string | number | boolean): string {
     const definition = this.definitionFor(key);
     if (!definition) {
       throw new Error(
@@ -80,9 +93,27 @@ class ConfigStoreImpl {
     if (!definition.validate(normalized)) {
       throw new Error(`invalid value for key '${key}': ${normalized}`);
     }
+    return normalized;
+  }
+
+  /** Set a hot-updatable config key. Throws if key is not updatable. */
+  set(key: string, value: string | number | boolean): void {
+    const normalized = this.normalize(key, value);
+    const definition = this.definitionFor(key);
+    if (!definition) throw new Error(`Key '${key}' is not hot-updatable`);
+    const oldValue = this.overlay.get(key) ?? process.env[definition.envKey];
     this.overlay.set(key, normalized);
     process.env[definition.envKey] = normalized;
     clearBudgetCache();
+    if (normalized !== oldValue) {
+      configEventBus.emitChange({
+        source: 'config-store',
+        scope: 'key',
+        changedKeys: [definition.envKey],
+        changeSetId: createChangeSetId(),
+        timestamp: Date.now(),
+      });
+    }
   }
 
   /** Get a config key value (overlay first, then env). */

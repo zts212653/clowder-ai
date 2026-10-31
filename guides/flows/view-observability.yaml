@@ -1,0 +1,44 @@
+# F153 Guide Flow: 查看可观测性
+# 引导用户打开 Hub 可观测性面板，并定位 Traces / Health 子页。
+# Schema: OrchestrationFlow v2 (tag-based engine)
+
+schemaVersion: 1
+id: view-observability
+name: 查看可观测性
+description: 引导你打开运行时可观测面板，查看 traces、metrics 和健康状态
+
+steps:
+  - id: open-hub
+    target: hub.trigger
+    tips: 点击这里打开 Hub 控制台
+    advance: click
+
+  - id: expand-monitor
+    target: monitor.group
+    tips: 展开监控与治理分组
+    advance: click
+
+  - id: go-to-observability
+    target: monitor.observability
+    tips: 进入可观测性页面
+    advance: click
+
+  - id: open-traces
+    target: observability.traces
+    tips: 切到 Traces，查看最近调用链；搜索框可输入 traceId 或 catId
+    advance: click
+
+  - id: inspect-traces
+    target: observability.trace-browser
+    tips: 这里展示最近的 trace 树。没有数据时，先确认是否刚重启、是否有新的 invocation，以及健康页是否显示 trace store 可用
+    advance: next
+
+  - id: open-health
+    target: observability.health
+    tips: 切到健康页，确认 OTel、Trace Store、Snapshot Store 和依赖探针是否正常
+    advance: click
+
+  - id: done
+    target: observability.health-panel
+    tips: 健康页是排查入口；Trace Store 有 span 后，回到 Traces 就能查看调用链
+    advance: next

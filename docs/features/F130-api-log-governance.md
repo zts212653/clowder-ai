@@ -3,24 +3,29 @@ feature_ids: [F130]
 related_features: [F013, F045]
 topics: [observability, infrastructure, logging]
 doc_kind: spec
+tips_exempt: "2026-09-09 sync audit: the September 7 change only records the existing log owner and its independent persistence/redaction boundary; it adds no logging capability or user action."
 created: 2026-03-20
 ---
 
 # F130: API 日志治理 — 四层分离 × 结构化落盘
 
+Architecture cell: observability
+Map delta: none for this feature（2026-09-07 observability cell 登记 F130 的归属关系；F130 的 `infrastructure/logger.ts` 是 Pino dual-write（stdout + rolling `api.log`）并自带 `REDACT_PATHS`，`telemetry/otel-logger.ts` 明写 OTel emission 不替代 Pino——它是独立持久化路径，不是 F153 的派生投影，store / retention / redaction 不转移）。
+Why: 归属写明是为了让日志与 traces / metrics 只按已有关联键 join、不互相吞并，也不再各自长出第二套观测入口。
+
 > **Status**: done | **Completed**: 2026-03-20 | **Owner**: 金渐层 | **Reviewer**: Maine Coon | **Priority**: P1
 >
-> **Phase A merged**: PR [#600](https://github.com/zts212653/cat-cafe/pull/600) — `22e148ad` (2026-03-20)
-> Reviewed by Maine Coon (gpt52) — 8 rounds. Closes [#594](https://github.com/zts212653/cat-cafe/issues/594).
-> **Phase B+C merged**: PR [#601](https://github.com/zts212653/cat-cafe/pull/601) — `8e89df73` (2026-03-20)
+> **Phase A merged**: PR [#600](https://github.com/zts212653/clowder-ai/pull/600) — `22e148ad` (2026-03-20)
+> Reviewed by Maine Coon (gpt52) — 8 rounds. Closes [#594](https://github.com/zts212653/clowder-ai/issues/594).
+> **Phase B+C merged**: PR [#601](https://github.com/zts212653/clowder-ai/pull/601) — `8e89df73` (2026-03-20)
 > Reviewed by Maine Coon (gpt52) — 2 rounds. console.* 全量迁移 + logs:health 脚本。
 >
 
 ## Why
 
-team lead在排查飞书语音上传问题时发现（2026-03-20）：Fastify logger 只配了 stdout，没有 file transport。所有运行日志只在终端输出，terminal 关了就没了。一个多月裸奔。
+operator在排查飞书语音上传问题时发现（2026-03-20）：Fastify logger 只配了 stdout，没有 file transport。所有运行日志只在终端输出，terminal 关了就没了。一个多月裸奔。
 
-Issue: [#594](https://github.com/zts212653/cat-cafe/issues/594)
+Issue: [#594](https://github.com/zts212653/clowder-ai/issues/594)
 
 实际病灶比 issue 描述更大：
 - **Fastify logger**（pino）只有 stdout，无文件落盘（`index.ts` L182-186）

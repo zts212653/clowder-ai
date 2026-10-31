@@ -1,0 +1,188 @@
+/**
+ * F128: Thread proposal types.
+ *
+ * Cats propose a new thread via `cat_cafe_propose_thread`; the user
+ * sees a card, edits if needed, and approves or rejects. Only on
+ * approve does the backend actually create a thread.
+ */
+
+import type { ApprovalPublication } from './approval-hub.js';
+import type { DevelopmentScopeV1 } from './growing-development.js';
+import type { CatId } from './ids.js';
+import type { ApprovedTaskContractV1, TaskContractContinuationV1 } from './proposal-task-contract.js';
+
+/**
+ * Status lifecycle:
+ *   pending → approving → approved   (claim then finalize, atomic against reject)
+ *   pending → rejected               (one-shot)
+ *   pending → withdrawn              (requester-only, one-shot)
+ *   approving → pending              (rollback on thread-creation failure)
+ */
+export type ProposalStatus = 'pending' | 'approving' | 'approved' | 'rejected' | 'withdrawn';
+
+/**
+ * F128 reporting modes — the contract for whether (and how) a sub-thread
+ * reports back to its source thread. Phase AA default is `final-only`; Phase AC
+ * lets the user override the proposed mode on the approval card before creation.
+ *
+ * - `none` (UI: autonomous): source thread holds no receipt responsibility;
+ *   critical events still escalate per house rules (C-Y2).
+ * - `final-only`: one summary on completion.
+ * - `state-transitions`: report at each phase boundary.
+ * - `blocking-ack`: downstream waits for source-thread ack at each blocker (C-Y3).
+ */
+export type ReportingMode = 'none' | 'final-only' | 'state-transitions' | 'blocking-ack';
+
+/**
+ * F277: the declared placement role of a thread at birth.
+ * `unknown` is deliberately absent: it is a read-model fallback for legacy facts,
+ * never a value a cat or user may declare.
+ */
+export type DeclaredWorkMode = 'subtask' | 'parallel' | 'investigation' | 'standalone';
+
+/** F277/F128: zero-config reporting suggestion; an explicit reportingMode always wins. */
+export function suggestedReportingModeForWorkMode(mode: DeclaredWorkMode | undefined): ReportingMode {
+  return mode === 'parallel' || mode === 'standalone' ? 'none' : 'final-only';
+}
+/**
+ * A thread proposal created by a cat, awaiting user decision.
+ */
+export interface ThreadProposal {
+  proposalId: string;
+  status: ProposalStatus;
+
+  // Source / lineage
+  sourceThreadId: string;
+  sourceInvocationId: string;
+  sourceCatId: CatId;
+  /** Exact trigger message persisted at create time; absent only on legacy proposals. */
+  sourceMessageId?: string;
+
+  // Prefilled fields (user may override at approve time)
+  title: string;
+  reason: string;
+  parentThreadId: string; // defaults to sourceThreadId at create time
+  preferredCats: CatId[]; // empty array if none
+  initialMessage?: string;
+  /**
+   * F128: how this sub-thread reports back to its source thread.
+   * Optional for backward-compat with pre-Phase-Y proposals; readers treat
+   * `undefined` as the default `final-only`. Editable only before creation via
+   * ProposalApproveOverrides; still immutable after approve creates the thread.
+   */
+  reportingMode?: ReportingMode;
+  /** F277: user-editable placement role, immutable after approval creates the Thread. */
+  declaredWorkMode?: DeclaredWorkMode;
+  projectPath: string;
+  /** A suggestion only. Membership is written exclusively by owner approval. */
+  suggestedGroupId?: string;
+  suggestedPinned?: boolean;
+  groupSuggestionReason?: 'source-thread' | 'feature-title' | 'explicit' | 'none';
+  /** Owner's final approval-time choice, checkpointed for crash recovery. */
+  attentionGroupId?: string | null;
+  /** Exact owner message that asks the proposer to issue a replacement. */
+  revisionRequest?: {
+    messageId: string;
+    instruction: string;
+    requestedBy: string;
+    requestedAt: number;
+    queuedAt?: number;
+    choices?: { suggestedGroupId?: string | null; projectPath?: string; pinned?: boolean };
+  };
+  supersedesProposalId?: string;
+  supersededByProposalId?: string;
+
+  // Audit — creation
+  createdBy: string;
+  createdAt: number;
+
+  /** Phase-I publication state; absent only on pre-Phase-I records. */
+  publication?: ApprovalPublication;
+
+  /**
+   * Message id of the rich proposal card that was successfully appended to the source thread.
+   * Acts as the visibility commit marker: until this is set, the proposal is in-flight and
+   * MUST NOT be returned via the dedup fast path. Concurrent retries between create() and
+   * card append would otherwise hand callers a phantom proposalId that gets cleaned up.
+   */
+  cardMessageId?: string;
+
+  /**
+   * F167 × F322: When this proposal delegates work for a specific task,
+   * this records the exact task ID. Without this, the delegate binding
+   * provider cannot prove task-level delegation and will fail closed.
+   *
+   * Set at propose time when the proposing cat is working on a known task.
+   * Absent on legacy proposals or proposals not tied to a specific task.
+   */
+  subjectTaskId?: string;
+  /**
+   * F167 R4: Immutable snapshot of the task's title at proposal creation time.
+   * Displayed on the operator approval card so the user can see which task's execution
+   * authority they are granting. Also serves as an audit trail — if the task title
+   * changes after approval, this records what was originally authorized.
+   */
+  subjectTaskTitle?: string;
+  /**
+   * F167 R5: Immutable snapshot of the task's `entrustedWork.developmentScope` at
+   * proposal creation time. At claim time, the provider compares this against the
+   * task's current scope — if workUnitRef, acceptedSourceRef, or acceptedRevision
+   * changed, the delegation is invalidated (scope drift). Generic Tasks require
+   * a server-derived full-contract continuation; two absent scopes never grant authority.
+   */
+  approvedDevelopmentScope?: DevelopmentScopeV1;
+  /** Full generic contract frozen at approval; old approvals remain unchanged. */
+  approvedTaskContract?: ApprovedTaskContractV1;
+  /** One permanent, owner-requested continuation of this exact approved contract. */
+  taskContractContinuation?: TaskContractContinuationV1;
+  /** Read-side corruption marker. Invalid scope/contract data must never become generic authority. */
+  approvalContractInvalid?: true;
+
+  // Audit — approval outcome
+  approvedBy?: string;
+  approvedAt?: number;
+  createdThreadId?: string;
+  /**
+   * Unix ms when claimForApproval transitioned status pending → approving.
+   * If the process crashes between claim and finalize, this lets approve/reject
+   * detect a stale claim (now - claimedAt > STALE_APPROVING_MS) and forcibly
+   * release it so the proposal isn't stuck forever.
+   */
+  claimedAt?: number;
+
+  // Audit — rejection outcome
+  rejectedBy?: string;
+  rejectedAt?: number;
+  rejectionReason?: string;
+
+  // Audit — requester withdrawal outcome
+  withdrawnBy?: CatId;
+  withdrawnAt?: number;
+}
+
+/**
+ * Fields the user may override at approve time.
+ * `null` means "clear the field" for preferredCats/initialMessage;
+ * `undefined` means "keep the proposal's prefilled value".
+ */
+export interface ProposalApproveOverrides {
+  attentionGroupId?: string | null;
+  title?: string;
+  parentThreadId?: string;
+  preferredCats?: CatId[];
+  initialMessage?: string | null;
+  /**
+   * F128: project ownership for the child thread, overridable at approve time. The route
+   * validates it (validateProjectPath → canonical real path) BEFORE claim; an invalid value
+   * is rejected with 400, never silently dropped. Omitted → keep the proposal's projectPath
+   * (which itself defaults to the source thread's at propose time).
+   */
+  projectPath?: string;
+  /**
+   * F128 Phase AC: final reporting contract chosen on the approval card. The child thread's
+   * injected protocol must use this final value, not necessarily the cat's proposal default.
+   */
+  reportingMode?: ReportingMode;
+  /** F277: final placement role chosen on the approval card. */
+  declaredWorkMode?: DeclaredWorkMode;
+}

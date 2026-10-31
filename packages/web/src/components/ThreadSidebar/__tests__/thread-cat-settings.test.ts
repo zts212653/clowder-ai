@@ -5,7 +5,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ThreadCatSettings } from '../ThreadCatSettings';
+import { ThreadCatSettingsContent } from '../ThreadCatSettings';
 
 // ── Mock apiFetch (used by useCatData inside CatSelector) ──
 vi.mock('@/utils/api-client', () => ({
@@ -13,7 +13,51 @@ vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://localhost:3003',
 }));
 
-describe('ThreadCatSettings', () => {
+const TEST_CATS = [
+  {
+    id: 'opus',
+    displayName: '布偶猫',
+    nickname: '宪宪',
+    breedId: 'ragdoll',
+    breedDisplayName: '布偶猫',
+    color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
+    mentionPatterns: ['@opus'],
+    clientId: 'anthropic',
+    defaultModel: 'claude-opus-4-6',
+    avatar: '',
+    roleDescription: '',
+    personality: '',
+  },
+  {
+    id: 'codex',
+    displayName: '缅因猫',
+    nickname: '砚砚',
+    breedId: 'maine-coon',
+    breedDisplayName: '缅因猫',
+    color: { primary: '#5B8C5A', secondary: '#D5E8D4' },
+    mentionPatterns: ['@codex'],
+    clientId: 'openai',
+    defaultModel: 'gpt-5.5',
+    avatar: '',
+    roleDescription: '',
+    personality: '',
+  },
+];
+
+vi.mock('@/hooks/useCatData', () => ({
+  formatCatName: (cat: { displayName: string; variantLabel?: string }) =>
+    cat.variantLabel ? `${cat.displayName}（${cat.variantLabel}）` : cat.displayName,
+  useCatData: () => ({
+    cats: TEST_CATS,
+    isLoading: false,
+    hasFetched: true,
+    getCatById: (id: string) => TEST_CATS.find((cat) => cat.id === id),
+    getCatsByBreed: () => new Map(TEST_CATS.map((cat) => [cat.breedId, [cat]])),
+    refresh: async () => TEST_CATS,
+  }),
+}));
+
+describe('ThreadCatSettingsContent', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -45,7 +89,7 @@ describe('ThreadCatSettings', () => {
     });
   }
 
-  function render(props: Partial<React.ComponentProps<typeof ThreadCatSettings>> = {}) {
+  function render(props: Partial<React.ComponentProps<typeof ThreadCatSettingsContent>> = {}) {
     const defaults = {
       threadId: 'thread-123',
       currentCats: [] as string[],
@@ -53,23 +97,15 @@ describe('ThreadCatSettings', () => {
       ...props,
     };
     act(() => {
-      root.render(React.createElement(ThreadCatSettings, defaults));
+      root.render(React.createElement(ThreadCatSettingsContent, defaults));
     });
     return defaults;
   }
 
-  it('opens popover, selects a cat, and calls onSave with selected cats', async () => {
+  it('selects a cat and calls onSave with selected cats', async () => {
     const fns = render();
     await flush();
 
-    // Click the settings button to open popover
-    const settingsBtn = container.querySelector('button[title="设置默认猫猫"]');
-    expect(settingsBtn).toBeTruthy();
-    act(() => {
-      (settingsBtn as HTMLElement).click();
-    });
-
-    // Popover should now be open — CatSelector renders cat chips from fallback CAT_CONFIGS
     // Find and click the 布偶猫 chip
     const catChip = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('布偶猫'));
     expect(catChip).toBeTruthy();
@@ -95,27 +131,15 @@ describe('ThreadCatSettings', () => {
     render({ currentCats: ['opus'] });
     await flush();
 
-    // Open popover
-    const settingsBtn = container.querySelector('button[title="设置默认猫猫"]');
-    act(() => {
-      (settingsBtn as HTMLElement).click();
-    });
-
     // opus is already selected, so no change → save should be disabled
     const saveBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '保存');
     expect(saveBtn).toBeTruthy();
     expect(saveBtn?.hasAttribute('disabled')).toBe(true);
   });
 
-  it('cancel reverts selection and closes popover', async () => {
+  it('cancel reverts the unsaved selection', async () => {
     const fns = render();
     await flush();
-
-    // Open popover
-    const settingsBtn = container.querySelector('button[title="设置默认猫猫"]');
-    act(() => {
-      (settingsBtn as HTMLElement).click();
-    });
 
     // Select a cat
     const catChip = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('布偶猫'));
@@ -129,23 +153,18 @@ describe('ThreadCatSettings', () => {
       cancelBtn?.click();
     });
 
-    // Popover should be closed (no "保存" button visible)
+    // The embedded editor stays visible but returns to the saved state.
     const saveBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '保存');
-    expect(saveBtn).toBeFalsy();
+    expect(saveBtn).toBeTruthy();
+    expect(saveBtn?.hasAttribute('disabled')).toBe(true);
 
     // onSave should not have been called
     expect(fns.onSave).not.toHaveBeenCalled();
   });
 
-  it('shows error and keeps popover open when onSave rejects', async () => {
+  it('shows error and keeps the editor usable when onSave rejects', async () => {
     render({ onSave: vi.fn().mockRejectedValue(new Error('网络错误')) });
     await flush();
-
-    // Open popover
-    const settingsBtn = container.querySelector('button[title="设置默认猫猫"]');
-    act(() => {
-      (settingsBtn as HTMLElement).click();
-    });
 
     // Select a cat
     const catChip = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('布偶猫'));
@@ -159,7 +178,7 @@ describe('ThreadCatSettings', () => {
       saveBtn?.click();
     });
 
-    // Popover should still be open (save button still visible)
+    // Editor remains visible (save button still visible)
     const saveBtnAfter = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '保存');
     expect(saveBtnAfter).toBeTruthy();
 
@@ -173,12 +192,6 @@ describe('ThreadCatSettings', () => {
   it('clear button resets selection to empty', async () => {
     const fns = render({ currentCats: ['opus', 'codex'] });
     await flush();
-
-    // Open popover
-    const settingsBtn = container.querySelector('button[title="设置默认猫猫"]');
-    act(() => {
-      (settingsBtn as HTMLElement).click();
-    });
 
     // Click "清除" to clear all selections
     const clearBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '清除');

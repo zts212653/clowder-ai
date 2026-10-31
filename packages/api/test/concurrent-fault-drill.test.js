@@ -14,7 +14,12 @@ import { DeliveryCursorStore } from '../dist/domains/cats/services/stores/ports/
 import { InvocationRecordStore } from '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
-import { assertRedisIsolationOrThrow, cleanupPrefixedRedisKeys } from './helpers/redis-test-helpers.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
+import {
+  assertRedisIsolationOrThrow,
+  cleanupPrefixedRedisKeys,
+  redisIsolationSkipReason,
+} from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
 
@@ -25,6 +30,7 @@ function invocationCreateInput(idempotencyKey, threadId = 'thread-race') {
     targetCats: ['opus'],
     intent: 'execute',
     idempotencyKey,
+    actionLeaseCarrier: { kind: 'none' },
   };
 }
 
@@ -73,25 +79,29 @@ describe('Concurrent fault drills - in-memory stores', () => {
     const threadId = 'thread-race-cursor';
     const baseTs = Date.now();
 
-    const base = messageStore.append({
-      userId,
-      catId: null,
-      content: 'base',
-      mentions: [],
-      timestamp: baseTs,
-      threadId,
-    });
+    const base = messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: null,
+        content: 'base',
+        mentions: [],
+        timestamp: baseTs,
+        threadId,
+      }),
+    );
 
     const appendPromise = Promise.resolve().then(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
-      return messageStore.append({
-        userId,
-        catId: null,
-        content: 'new-after-ack',
-        mentions: [],
-        timestamp: baseTs + 1,
-        threadId,
-      });
+      return messageStore.append(
+        canonicalTestMessageInput({
+          userId,
+          catId: null,
+          content: 'new-after-ack',
+          mentions: [],
+          timestamp: baseTs + 1,
+          threadId,
+        }),
+      );
     });
     const ackPromise = Promise.resolve().then(() => deliveryCursorStore.ackCursor(userId, catId, threadId, base.id));
 
@@ -134,7 +144,7 @@ describe('Concurrent fault drills - in-memory stores', () => {
   });
 });
 
-describe('Concurrent fault drills - Redis stores', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }, () => {
+describe('Concurrent fault drills - Redis stores', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let createRedisClient;
   let SessionStore;
   let RedisInvocationRecordStore;
@@ -243,25 +253,29 @@ describe('Concurrent fault drills - Redis stores', { skip: !REDIS_URL ? 'REDIS_U
     const threadId = 'thread-race-cursor';
     const baseTs = Date.now();
 
-    const base = await messageStore.append({
-      userId,
-      catId: null,
-      content: 'base',
-      mentions: [],
-      timestamp: baseTs,
-      threadId,
-    });
+    const base = await messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: null,
+        content: 'base',
+        mentions: [],
+        timestamp: baseTs,
+        threadId,
+      }),
+    );
 
     const appendPromise = Promise.resolve().then(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
-      return messageStore.append({
-        userId,
-        catId: null,
-        content: 'new-after-ack',
-        mentions: [],
-        timestamp: baseTs + 1,
-        threadId,
-      });
+      return messageStore.append(
+        canonicalTestMessageInput({
+          userId,
+          catId: null,
+          content: 'new-after-ack',
+          mentions: [],
+          timestamp: baseTs + 1,
+          threadId,
+        }),
+      );
     });
     const ackPromise = Promise.resolve().then(() => deliveryCursorStore.ackCursor(userId, catId, threadId, base.id));
 

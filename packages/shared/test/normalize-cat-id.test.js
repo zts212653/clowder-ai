@@ -1,0 +1,246 @@
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+import { catRegistry } from '../dist/registry/CatRegistry.js';
+import { normalizeCatId } from '../dist/registry/normalize-cat-id.js';
+import { createCatId } from '../dist/types/ids.js';
+
+/** Minimal cat config fixture for testing */
+const TEST_CAT_FIXTURES = {
+  opus: {
+    id: createCatId('opus'),
+    name: '布偶猫',
+    displayName: '布偶猫',
+    nickname: '宪宪',
+    avatar: '/avatars/opus.png',
+    color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
+    mentionPatterns: ['@opus', '@布偶猫', '@宪宪'],
+    clientId: 'anthropic',
+    defaultModel: 'claude-sonnet-4-20250514',
+    mcpSupport: true,
+    roleDescription: 'Lead architect',
+    personality: 'thoughtful',
+  },
+  codex: {
+    id: createCatId('codex'),
+    name: '缅因猫',
+    displayName: '缅因猫',
+    nickname: '砚砚',
+    avatar: '/avatars/codex.png',
+    color: { primary: '#5B8C5A', secondary: '#D0E8CF' },
+    mentionPatterns: ['@codex', '@缅因猫', '@砚砚'],
+    clientId: 'openai',
+    defaultModel: 'o3-mini',
+    mcpSupport: true,
+    roleDescription: 'Code reviewer',
+    personality: 'meticulous',
+  },
+  gemini25: {
+    id: createCatId('gemini25'),
+    name: '暹罗猫',
+    displayName: '暹罗猫',
+    nickname: '烁烁',
+    avatar: '/avatars/gemini25.png',
+    color: { primary: '#42A5F5', secondary: '#BBDEFB' },
+    mentionPatterns: ['@gemini25', '@gemini-25', '@暹罗gemini25'],
+    clientId: 'google',
+    defaultModel: 'gemini-3.5-flash',
+    mcpSupport: true,
+    roleDescription: 'Creative visual designer',
+    personality: 'energetic',
+  },
+  gemini35: {
+    id: createCatId('gemini35'),
+    name: '暹罗猫',
+    displayName: '暹罗猫 Gemini 3.6',
+    nickname: '烁烁',
+    avatar: '/avatars/gemini35.png',
+    color: { primary: '#42A5F5', secondary: '#BBDEFB' },
+    mentionPatterns: [
+      '@gemini35',
+      '@gemini-35',
+      '@gemini3.5',
+      '@gemini36',
+      '@gemini-36',
+      '@gemini3.6',
+      '@flash',
+      '@暹罗flash',
+      '@暹罗gemini35',
+      '@暹罗gemini36',
+    ],
+    clientId: 'google',
+    defaultModel: 'Gemini 3.6 Flash (High)',
+    mcpSupport: true,
+    roleDescription: 'Creative visual designer',
+    personality: 'energetic',
+  },
+};
+
+/** Build a CatConfig from test fixtures + overrides */
+function makeCatConfig(base, overrides = {}) {
+  return { ...TEST_CAT_FIXTURES[base], ...overrides };
+}
+
+describe('normalizeCatId (F154 AC-A3, AC-A7)', () => {
+  before(() => {
+    catRegistry.reset();
+    catRegistry.register('opus', makeCatConfig('opus'));
+    catRegistry.register(
+      'opus-45',
+      makeCatConfig('opus', {
+        id: createCatId('opus-45'),
+        name: '布偶猫 Opus 4.5',
+        displayName: '布偶猫 Opus 4.5',
+        nickname: undefined,
+        mentionPatterns: ['@opus-45'],
+      }),
+    );
+    catRegistry.register('codex', makeCatConfig('codex'));
+    catRegistry.register('gemini25', makeCatConfig('gemini25'));
+    catRegistry.register('gemini35', makeCatConfig('gemini35'));
+  });
+  after(() => catRegistry.reset());
+
+  // --- Exact catId match ---
+  it('exact catId → ok', () => {
+    const r = normalizeCatId('opus');
+    assert.equal(r.ok, true);
+    assert.equal(r.catId, 'opus');
+  });
+
+  // --- Exact alias match (strip @) ---
+  it('alias with @ prefix → ok', () => {
+    const r = normalizeCatId('@宪宪');
+    assert.equal(r.ok, true);
+    assert.equal(r.catId, 'opus');
+  });
+
+  it('alias without @ → ok', () => {
+    const r = normalizeCatId('宪宪');
+    assert.equal(r.ok, true);
+    assert.equal(r.catId, 'opus');
+  });
+
+  // --- Case insensitive ---
+  it('case insensitive alias → ok', () => {
+    const r = normalizeCatId('Opus');
+    assert.equal(r.ok, true);
+    assert.equal(r.catId, 'opus');
+  });
+
+  it('case insensitive @ alias → ok', () => {
+    const r = normalizeCatId('@Codex');
+    assert.equal(r.ok, true);
+    assert.equal(r.catId, 'codex');
+  });
+
+  // --- Gemini Flash alias tests ---
+  it('gemini35 alias resolves to standalone gemini35 breed (not gemini25)', () => {
+    const r1 = normalizeCatId('@gemini35');
+    assert.equal(r1.ok, true);
+    assert.equal(r1.catId, 'gemini35');
+
+    const r2 = normalizeCatId('gemini-35');
+    assert.equal(r2.ok, true);
+    assert.equal(r2.catId, 'gemini35');
+
+    // Legacy alias preserved: @暹罗gemini35 was on gemini25, now belongs to gemini35
+    const r3 = normalizeCatId('@暹罗gemini35');
+    assert.equal(r3.ok, true);
+    assert.equal(r3.catId, 'gemini35');
+
+    const r4 = normalizeCatId('@暹罗gemini36');
+    assert.equal(r4.ok, true);
+    assert.equal(r4.catId, 'gemini35');
+
+    const r5 = normalizeCatId('@gemini25');
+    assert.equal(r5.ok, true);
+    assert.equal(r5.catId, 'gemini25');
+  });
+
+  it('gemini36 alias resolves to standalone gemini35 breed', () => {
+    const r1 = normalizeCatId('@gemini36');
+    assert.equal(r1.ok, true);
+    assert.equal(r1.catId, 'gemini35');
+
+    const r2 = normalizeCatId('gemini-36');
+    assert.equal(r2.ok, true);
+    assert.equal(r2.catId, 'gemini35');
+
+    const r3 = normalizeCatId('@gemini3.6');
+    assert.equal(r3.ok, true);
+    assert.equal(r3.catId, 'gemini35');
+
+    const r4 = normalizeCatId('@gemini25');
+    assert.equal(r4.ok, true);
+    assert.equal(r4.catId, 'gemini25');
+  });
+
+  // --- Not found ---
+  it('unknown name → not-found', () => {
+    const r = normalizeCatId('unknown');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'not-found');
+  });
+
+  // --- Ambiguous partial match (AC-A7: reject + candidate list) ---
+  it('ambiguous partial displayName → candidates list', () => {
+    // "猫" matches opus ("布偶猫"), opus-45 ("布偶猫 Opus 4.5"), codex ("缅因猫")
+    // and is NOT an exact alias for any cat → triggers partial match ambiguity
+    const r = normalizeCatId('猫');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'ambiguous');
+    assert.ok(r.candidates.length >= 2);
+    assert.ok(r.candidates.includes('opus'));
+    assert.ok(r.candidates.includes('codex'));
+  });
+
+  // --- Exact alias wins over partial displayName (AC-A7) ---
+  it('exact alias "opus" wins over partial displayName match', () => {
+    // "opus" is an exact catId AND partial match for "布偶猫 Opus 4.5"
+    // exact catId should win
+    const r = normalizeCatId('opus');
+    assert.equal(r.ok, true);
+    assert.equal(r.catId, 'opus');
+  });
+
+  // --- Nickname partial match (single) ---
+  it('unique nickname partial → ok', () => {
+    const r = normalizeCatId('砚砚');
+    assert.equal(r.ok, true);
+    assert.equal(r.catId, 'codex');
+  });
+
+  // --- Empty input ---
+  it('empty string → not-found', () => {
+    const r = normalizeCatId('');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'not-found');
+  });
+});
+
+describe('normalizeCatId partial registry hardening', () => {
+  before(() => {
+    catRegistry.reset();
+    catRegistry.register('opus', makeCatConfig('opus'));
+    catRegistry.register('codex', makeCatConfig('codex'));
+    catRegistry.register('legacy-partial', {
+      id: createCatId('legacy-partial'),
+      name: 'Legacy Partial Cat',
+      clientId: 'test-client',
+    });
+  });
+  after(() => catRegistry.reset());
+
+  it('unknown input ignores partial configs without mentionPatterns', () => {
+    const r = normalizeCatId('nonexistent');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'not-found');
+  });
+
+  it('ambiguous input ignores partial configs without displayName', () => {
+    const r = normalizeCatId('猫');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'ambiguous');
+    assert.deepEqual(r.candidates.sort(), ['codex', 'opus']);
+  });
+});

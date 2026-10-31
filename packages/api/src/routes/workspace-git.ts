@@ -58,7 +58,11 @@ function classifyStatusLine(
 export function parseGitStatus(stdout: string): GitStatusResult {
   const result: GitStatusResult = { staged: [], unstaged: [], untracked: [] };
   if (!stdout.trim()) return result;
-  for (const line of stdout.trim().split('\n')) {
+  // Do NOT trim the whole blob: the X/Y status columns are leading spaces, and
+  // trimming eats the first line's X column (' M …' → 'M …'), misclassifying
+  // the entry as staged and shifting its path. Lines without 4+ chars (e.g. the
+  // trailing newline's empty tail) are ignored by classifyStatusLine.
+  for (const line of stdout.split('\n')) {
     for (const entry of classifyStatusLine(line)) {
       result[entry.category].push({ status: entry.status, path: entry.path });
     }
@@ -87,6 +91,11 @@ export interface StaleBranch {
 }
 
 const PROTECTED_BRANCHES = new Set(['main', 'master', 'develop']);
+
+// ref-filter (git branch --format) uses %00 for NUL — git-log's %x00 is not
+// ref-filter syntax and comes back as literal text, fusing name/date/author
+// into one bogus branch name (even main landed in the stale list).
+export const STALE_BRANCH_FORMAT = '%(refname:short)%00%(committerdate:iso-strict)%00%(authorname)';
 
 export function parseStaleBranches(stdout: string): StaleBranch[] {
   if (!stdout.trim()) return [];
@@ -317,7 +326,7 @@ export const workspaceGitRoutes: FastifyPluginAsync = async (app) => {
       // 1. Stale branches: merged into main but not deleted
       const { stdout: mergedOut } = await execFileAsync(
         'git',
-        ['branch', '--merged', 'main', '--format=%(refname:short)%x00%(committerdate:iso-strict)%x00%(authorname)'],
+        ['branch', '--merged', 'main', `--format=${STALE_BRANCH_FORMAT}`],
         { cwd: root, timeout: 5000 },
       );
       const staleBranches = parseStaleBranches(mergedOut);

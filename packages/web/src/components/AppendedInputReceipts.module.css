@@ -1,0 +1,43 @@
+.root {
+  container-type: inline-size;
+}
+
+.list {
+  --receipt-row-height: 28px;
+}
+
+.row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+}
+
+.row[data-expanded="true"] {
+  align-items: flex-start;
+  padding-block: 4px;
+}
+
+@container (max-width: 420px) {
+  .list {
+    --receipt-row-height: 52px;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 0;
+    min-height: 52px;
+    padding-block: 4px;
+  }
+
+  .row [data-append-delivery-state] {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .row [data-append-read-status] {
+    width: auto;
+  }
+}

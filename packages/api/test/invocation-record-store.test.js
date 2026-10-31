@@ -7,6 +7,25 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 describe('InvocationRecordStore', () => {
+  test('create() rejects an unclassified action-lease carrier', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+
+    const store = new InvocationRecordStore();
+    assert.throws(
+      () =>
+        store.create({
+          threadId: 'thread-unclassified',
+          userId: 'user-1',
+          targetCats: ['opus'],
+          intent: 'execute',
+          idempotencyKey: 'missing-carrier',
+        }),
+      /explicit action lease carrier classification/,
+    );
+  });
+
   test('create() returns created outcome with invocationId', async () => {
     const { InvocationRecordStore } = await import(
       '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
@@ -19,6 +38,7 @@ describe('InvocationRecordStore', () => {
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'key-1',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     assert.equal(result.outcome, 'created');
@@ -38,6 +58,7 @@ describe('InvocationRecordStore', () => {
       targetCats: ['opus', 'codex'],
       intent: 'ideate',
       idempotencyKey: 'key-2',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     const record = store.get(invocationId);
@@ -53,6 +74,94 @@ describe('InvocationRecordStore', () => {
     assert.equal(record.createdAt, record.updatedAt);
   });
 
+  test('create() classifies ordinary and action-successor invocation carriers', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+
+    const store = new InvocationRecordStore();
+    const { invocationId: ordinaryInvocationId } = store.create({
+      threadId: 'thread-review',
+      userId: 'user-review',
+      targetCats: ['codex-sol'],
+      intent: 'execute',
+      idempotencyKey: 'review-no-action-lease',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    const { invocationId } = store.create({
+      threadId: 'thread-review',
+      userId: 'user-review',
+      targetCats: ['codex-sol'],
+      intent: 'execute',
+      idempotencyKey: 'review-action-lease',
+      actionLeaseCarrier: {
+        kind: 'action_successor',
+        leaseId: 'lease-review-1',
+        generation: 2,
+      },
+    });
+
+    assert.deepEqual(store.get(ordinaryInvocationId).actionLeaseCarrier, { kind: 'none' });
+    assert.deepEqual(store.get(invocationId).actionLeaseCarrier, {
+      kind: 'action_successor',
+      leaseId: 'lease-review-1',
+      generation: 2,
+    });
+  });
+
+  test('create() persists an exact wait continuation carrier without promoting its owner fence', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+
+    const store = new InvocationRecordStore();
+    const waitContinuationCarrier = {
+      v: 1,
+      waitId: 'task-pr-7',
+      outcomeId: 'wait:pr:owner/repo#7:g4:matched',
+      ownerFence: { kind: 'action_successor', leaseId: 'lease-wait-4', generation: 4 },
+    };
+    const { invocationId } = store.create({
+      threadId: 'thread-wait',
+      userId: 'user-wait',
+      targetCats: ['codex-sol'],
+      intent: 'execute',
+      idempotencyKey: 'wait-carrier',
+      actionLeaseCarrier: { kind: 'none' },
+      waitContinuationCarrier,
+    });
+
+    assert.deepEqual(store.get(invocationId).waitContinuationCarrier, waitContinuationCarrier);
+    assert.deepEqual(store.get(invocationId).actionLeaseCarrier, { kind: 'none' });
+  });
+
+  test('create() rejects a malformed wait continuation carrier before recording it', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+
+    const store = new InvocationRecordStore();
+    assert.throws(
+      () =>
+        store.create({
+          threadId: 'thread-wait-invalid',
+          userId: 'user-wait',
+          targetCats: ['codex-sol'],
+          intent: 'execute',
+          idempotencyKey: 'wait-carrier-invalid',
+          actionLeaseCarrier: { kind: 'none' },
+          waitContinuationCarrier: {
+            v: 1,
+            waitId: 'task-pr-7',
+            outcomeId: 'wait:pr:owner/repo#7:g0:matched',
+            ownerFence: { kind: 'containing_task', generation: 0 },
+          },
+        }),
+      /invalid wait continuation carrier/,
+    );
+    assert.equal(store.size, 0);
+  });
+
   test('idempotency dedup returns duplicate on same key', async () => {
     const { InvocationRecordStore } = await import(
       '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
@@ -65,6 +174,7 @@ describe('InvocationRecordStore', () => {
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'dup-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
     assert.equal(first.outcome, 'created');
 
@@ -74,6 +184,7 @@ describe('InvocationRecordStore', () => {
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'dup-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
     assert.equal(second.outcome, 'duplicate');
     assert.equal(second.invocationId, first.invocationId);
@@ -92,6 +203,7 @@ describe('InvocationRecordStore', () => {
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'same-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
     const second = store.create({
       threadId: 'thread-2',
@@ -99,6 +211,7 @@ describe('InvocationRecordStore', () => {
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'same-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     assert.equal(first.outcome, 'created');
@@ -128,6 +241,7 @@ describe('InvocationRecordStore', () => {
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'upd-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     const before = store.get(invocationId);
@@ -153,12 +267,67 @@ describe('InvocationRecordStore', () => {
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'backfill-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     assert.equal(store.get(invocationId).userMessageId, null);
 
     store.update(invocationId, { userMessageId: 'msg-123' });
     assert.equal(store.get(invocationId).userMessageId, 'msg-123');
+  });
+
+  test('persists a durable connector execution-start receipt while running', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+    const store = new InvocationRecordStore();
+    const { invocationId } = store.create({
+      threadId: 'thread-connector-start',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'connector-start-receipt',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    store.update(invocationId, { status: 'running', expectedStatus: 'queued' });
+
+    const updated = store.update(invocationId, {
+      executionStartedAt: 1_700_000_000_000,
+      expectedStatus: 'running',
+    });
+
+    assert.equal(updated.executionStartedAt, 1_700_000_000_000);
+    assert.equal(store.get(invocationId).executionStartedAt, 1_700_000_000_000);
+  });
+
+  test('clears the previous execution-start receipt when a failed record starts a new attempt', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+    const store = new InvocationRecordStore();
+    const { invocationId } = store.create({
+      threadId: 'thread-connector-retry',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'connector-retry-receipt',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    store.update(invocationId, { status: 'running', expectedStatus: 'queued' });
+    store.update(invocationId, {
+      executionStartedAt: 1_700_000_000_000,
+      expectedStatus: 'running',
+    });
+    store.update(invocationId, { status: 'failed', error: 'process_restart', expectedStatus: 'running' });
+
+    const retried = store.update(invocationId, {
+      status: 'running',
+      error: '',
+      expectedStatus: 'failed',
+    });
+
+    assert.equal(retried.executionStartedAt, undefined);
+    assert.equal(store.get(invocationId).executionStartedAt, undefined);
   });
 
   test('update() sets error on failed status', async () => {
@@ -173,6 +342,7 @@ describe('InvocationRecordStore', () => {
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'err-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     store.update(invocationId, { status: 'running' });
@@ -194,6 +364,7 @@ describe('InvocationRecordStore', () => {
       targetCats: ['opus', 'codex'],
       intent: 'ideate',
       idempotencyKey: 'usage-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     const usageByCat = {
@@ -233,6 +404,7 @@ describe('InvocationRecordStore', () => {
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'lookup-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     const found = store.getByIdempotencyKey('thread-1', 'user-1', 'lookup-key');
@@ -252,6 +424,7 @@ describe('InvocationRecordStore', () => {
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'scoped-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     assert.equal(store.getByIdempotencyKey('thread-2', 'user-1', 'scoped-key'), null);
@@ -272,6 +445,7 @@ describe('InvocationRecordStore', () => {
         targetCats: ['opus'],
         intent: 'execute',
         idempotencyKey: `cap-key-${i}`,
+        actionLeaseCarrier: { kind: 'none' },
       });
       ids.push(result.invocationId);
     }
@@ -284,5 +458,144 @@ describe('InvocationRecordStore', () => {
     assert.ok(store.get(ids[2]));
     assert.ok(store.get(ids[3]));
     assert.ok(store.get(ids[4]));
+  });
+
+  test('F194 Phase B — listRunningByThread returns only running + matching thread/user', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+    const store = new InvocationRecordStore();
+
+    // Setup: 5 records across thread/user/status combinations
+    const r1 = store.create({
+      threadId: 'thread-A',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'k1',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    const r2 = store.create({
+      threadId: 'thread-A',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'k2',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    const r3 = store.create({
+      threadId: 'thread-A',
+      userId: 'user-2', // different user
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'k3',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    const r4 = store.create({
+      threadId: 'thread-B', // different thread
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'k4',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    store.create({
+      threadId: 'thread-A',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'k5',
+      actionLeaseCarrier: { kind: 'none' },
+    }); // r5 stays 'queued' — verifies non-running records are excluded
+
+    // Transition statuses
+    store.update(r1.invocationId, { status: 'running' }); // ✅ matches
+    store.update(r2.invocationId, { status: 'running' }); // ✅ matches
+    store.update(r2.invocationId, { status: 'succeeded' }); // ❌ no longer running
+    store.update(r3.invocationId, { status: 'running' }); // ❌ different user
+    store.update(r4.invocationId, { status: 'running' }); // ❌ different thread
+    // r5 stays 'queued' — ❌ not running
+
+    const running = store.listRunningByThread('thread-A', 'user-1');
+    const ids = running.map((r) => r.id).sort();
+    assert.deepEqual(ids, [r1.invocationId].sort(), 'only r1 (running + thread-A + user-1) returned');
+
+    // Sanity: empty thread returns empty
+    assert.deepEqual(store.listRunningByThread('thread-nonexistent', 'user-1'), []);
+    // Sanity: empty user returns empty
+    assert.deepEqual(store.listRunningByThread('thread-A', 'user-nonexistent'), []);
+  });
+
+  test('F194 Phase B — listRunningByThread reflects status transitions in real time', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+    const store = new InvocationRecordStore();
+
+    const r = store.create({
+      threadId: 'thread-X',
+      userId: 'user-Y',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'transition-key',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+
+    // queued → not in list
+    assert.equal(store.listRunningByThread('thread-X', 'user-Y').length, 0);
+
+    // queued → running
+    store.update(r.invocationId, { status: 'running' });
+    assert.equal(store.listRunningByThread('thread-X', 'user-Y').length, 1);
+
+    // running → succeeded → no longer in list
+    store.update(r.invocationId, { status: 'succeeded' });
+    assert.equal(store.listRunningByThread('thread-X', 'user-Y').length, 0);
+  });
+
+  test('F254 persists the exact successful targets of a shared invocation', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+    const store = new InvocationRecordStore();
+    const { invocationId } = store.create({
+      threadId: 'thread-f254-shared',
+      userId: 'user-f254',
+      targetCats: ['opus', 'codex'],
+      intent: 'execute',
+      idempotencyKey: 'f254-shared-success',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+
+    store.update(invocationId, { status: 'running' });
+    assert.throws(
+      () =>
+        store.update(invocationId, {
+          status: 'succeeded',
+          successfulCatIds: ['gemini'],
+        }),
+      /successfulCatIds.*targetCats/i,
+      'invalid input must be distinguishable from a CAS rejection',
+    );
+    assert.equal(store.get(invocationId).status, 'running');
+    assert.throws(
+      () => store.update(invocationId, { status: 'succeeded', successfulCatIds: [] }),
+      /successfulCatIds.*non-empty/i,
+      'a non-empty target invocation cannot succeed without an exact target witness',
+    );
+    const succeeded = store.update(invocationId, {
+      status: 'succeeded',
+      successfulCatIds: ['opus'],
+    });
+
+    assert.deepEqual(succeeded.successfulCatIds, ['opus']);
+    assert.deepEqual(store.get(invocationId).successfulCatIds, ['opus']);
+    assert.throws(() => succeeded.successfulCatIds.push('codex'), TypeError);
+
+    assert.throws(
+      () => store.update(invocationId, { successfulCatIds: ['codex'] }),
+      /successfulCatIds.*succeeded/i,
+      'the terminal witness is immutable outside the succeeded transition',
+    );
   });
 });

@@ -1,0 +1,202 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+
+import Fastify from 'fastify';
+import { projectSetupRoute } from '../../dist/routes/projects-setup.js';
+
+const HEADERS = { 'x-cat-cafe-user': 'test-user', 'content-type': 'application/json' };
+
+function buildApp(catCafeRoot) {
+  const app = Fastify();
+  app.register(projectSetupRoute, { catCafeRoot });
+  return app;
+}
+
+describe('POST /api/projects/setup', () => {
+  let app;
+  let testRoot;
+  /** Isolated catCafeRoot so tests don't pollute the real governance registry (#926) */
+  let fakeCatCafeRoot;
+
+  beforeEach(async () => {
+    fakeCatCafeRoot = join(tmpdir(), `catcafe-root-${randomUUID()}`);
+    await mkdir(fakeCatCafeRoot, { recursive: true });
+    app = buildApp(fakeCatCafeRoot);
+    testRoot = join(tmpdir(), `setup-test-${randomUUID()}`);
+    await mkdir(testRoot, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await app.close();
+    await rm(testRoot, { recursive: true, force: true });
+    await rm(fakeCatCafeRoot, { recursive: true, force: true });
+  });
+
+  it('mode=skip is a zero-write acknowledgement', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/projects/setup',
+      headers: HEADERS,
+      payload: { projectPath: testRoot, mode: 'skip' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.payload);
+    assert.equal(body.ok, true);
+    assert.equal('governanceReport' in body, false);
+    assert.deepStrictEqual(await readdir(testRoot, { recursive: true }), []);
+  });
+
+  it('mode=init runs git init without governance writes', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/projects/setup',
+      headers: HEADERS,
+      payload: { projectPath: testRoot, mode: 'init' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.payload);
+    assert.equal(body.ok, true);
+    // .git directory should exist
+    const gitStat = await stat(join(testRoot, '.git'));
+    assert.ok(gitStat.isDirectory());
+  });
+
+  it('mode=clone rejects missing gitCloneUrl', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/projects/setup',
+      headers: HEADERS,
+      payload: { projectPath: testRoot, mode: 'clone' },
+    });
+    assert.equal(res.statusCode, 400);
+    const body = JSON.parse(res.payload);
+    assert.ok(body.error.includes('gitCloneUrl'));
+  });
+
+  it('mode=clone rejects non-https/git@ URLs', async () => {
+    for (const badUrl of ['file:///etc/passwd', 'ftp://example.com/repo', '/local/path']) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/projects/setup',
+        headers: HEADERS,
+        payload: { projectPath: testRoot, mode: 'clone', gitCloneUrl: badUrl },
+      });
+      assert.equal(res.statusCode, 400, `should reject URL: ${badUrl}`);
+    }
+  });
+
+  it('mode=clone rejects non-empty directory', async () => {
+    await writeFile(join(testRoot, 'file.txt'), 'not empty');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/projects/setup',
+      headers: HEADERS,
+      payload: { projectPath: testRoot, mode: 'clone', gitCloneUrl: 'https://github.com/example/repo.git' },
+    });
+    assert.equal(res.statusCode, 409);
+    const body = JSON.parse(res.payload);
+    assert.equal(body.errorKind, 'not_empty');
+  });
+
+  it('mode=clone returns network_error on unreachable HTTPS remote', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/projects/setup',
+      headers: HEADERS,
+      payload: {
+        projectPath: testRoot,
+        mode: 'clone',
+        gitCloneUrl: 'https://127.0.0.1:1/nonexistent.git',
+      },
+    });
+    assert.equal(res.statusCode, 502);
+    const body = JSON.parse(res.payload);
+    assert.equal(body.errorKind, 'network_error');
+  });
+
+  it('rejects invalid mode', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/projects/setup',
+      headers: HEADERS,
+      payload: { projectPath: testRoot, mode: 'invalid' },
+    });
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('rejects missing projectPath', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/projects/setup',
+      headers: HEADERS,
+      payload: { mode: 'skip' },
+    });
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('default setup does not write a governance registry in runtime or persistent workspace', async () => {
+    const previousCwd = process.cwd();
+    const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    const runtimeRoot = join(tmpdir(), `catcafe-runtime-${randomUUID()}`);
+    const workspaceRoot = join(tmpdir(), `catcafe-workspace-${randomUUID()}`);
+    await Promise.all([mkdir(runtimeRoot, { recursive: true }), mkdir(workspaceRoot, { recursive: true })]);
+    await writeFile(join(runtimeRoot, 'pnpm-workspace.yaml'), 'packages: []\n');
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    process.chdir(runtimeRoot);
+    const defaultApp = buildApp(undefined);
+
+    try {
+      const res = await defaultApp.inject({
+        method: 'POST',
+        url: '/api/projects/setup',
+        headers: HEADERS,
+        payload: { projectPath: testRoot, mode: 'skip' },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      await assert.rejects(() => stat(join(runtimeRoot, '.cat-cafe', 'governance-registry.json')), /ENOENT/);
+      await assert.rejects(() => stat(join(workspaceRoot, '.cat-cafe', 'governance-registry.json')), /ENOENT/);
+    } finally {
+      await defaultApp.close();
+      process.chdir(previousCwd);
+      if (previousRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
+      if (previousWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = previousWorkspaceRoot;
+      await rm(runtimeRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects Clowder AI descendants as external governance targets', async () => {
+    const internalPackage = join(fakeCatCafeRoot, 'packages', 'api');
+    await mkdir(internalPackage, { recursive: true });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/projects/setup',
+      headers: HEADERS,
+      payload: { projectPath: internalPackage, mode: 'skip' },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.match(JSON.parse(res.payload).error, /external project/i);
+    assert.deepEqual(await readdir(internalPackage), [], 'rejected self-bootstrap must leave the directory untouched');
+  });
+
+  it('rejects requests without identity header', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/projects/setup',
+      headers: { 'content-type': 'application/json' },
+      payload: { projectPath: testRoot, mode: 'skip' },
+    });
+    assert.equal(res.statusCode, 401);
+  });
+});

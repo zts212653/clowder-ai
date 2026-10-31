@@ -1,0 +1,107 @@
+.shared-artifact-management {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--console-border-soft);
+  background: var(--console-panel-bg);
+  font-size: 13px;
+}
+.shared-artifact-surface {
+  position: relative;
+}
+.shared-artifact-information {
+  position: absolute;
+  inset: 72px 12px auto auto;
+  z-index: 3;
+  width: min(460px, calc(100% - 24px));
+  max-height: calc(100% - 84px);
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 12px;
+  color: var(--cafe-text);
+  background: var(--console-card-bg);
+  box-shadow: 0 12px 32px #0002;
+  overflow-wrap: anywhere;
+}
+.shared-artifact-information > header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--console-border-soft);
+  background: var(--console-card-bg);
+  z-index: 1;
+}
+.shared-artifact-information > header h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.shared-artifact-information > header button {
+  min-width: 32px;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 20px;
+}
+@container (max-width: 760px) {
+  .shared-artifact-information {
+    inset: auto 0 0;
+    width: auto;
+    max-height: 72%;
+    border-radius: 14px 14px 0 0;
+  }
+}
+.shared-artifact-management h2 {
+  font-size: 15px;
+}
+.shared-artifact-management h3 {
+  margin: 14px 0 8px;
+  font-size: 13px;
+}
+.shared-artifact-management p {
+  color: var(--cafe-text-muted);
+}
+.shared-artifact-management button,
+.shared-artifact-management select {
+  max-width: 100%;
+  margin: 4px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 6px;
+  color: var(--cafe-text);
+  background: var(--console-card-bg);
+  font: inherit;
+}
+.shared-artifact-management button {
+  cursor: pointer;
+}
+.shared-artifact-management button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.shared-artifact-management button:focus-visible,
+.shared-artifact-management select:focus-visible {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 2px;
+}
+.shared-artifact-management output {
+  display: block;
+  margin: 8px 0;
+}
+.shared-artifact-member-permission {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.shared-artifact-member-permission label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}

@@ -1,5 +1,5 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type {
   BacklogDependencies,
   BacklogPriority,
@@ -9,6 +9,7 @@ import type {
   FeatureDocPhase,
   FeatureDocRisk,
 } from '@cat-cafe/shared';
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { gitListFeatureDocs, readBacklogContent, readFeatureDocContent } from './git-doc-reader.js';
 
 export interface BacklogFeatureRow {
@@ -35,7 +36,10 @@ function extractLink(linkCell: string): string | undefined {
   return match?.[1]?.trim() || undefined;
 }
 
-export function parseActiveFeaturesFromBacklog(markdown: string): BacklogFeatureRow[] {
+export function parseActiveFeaturesFromBacklog(
+  markdown: string,
+  documentPath = deploymentDefaults.roadmapPath,
+): BacklogFeatureRow[] {
   const lines = markdown.split(/\r?\n/);
   const requiredColumns = ['id', '名称', 'status', 'owner'];
   const headerIndex = lines.findIndex((line) => {
@@ -46,7 +50,7 @@ export function parseActiveFeaturesFromBacklog(markdown: string): BacklogFeature
   });
   if (headerIndex < 0) {
     throw new Error(
-      `BACKLOG.md missing required columns: ${requiredColumns.join(', ')}. ` +
+      `${basename(documentPath)} missing required columns: ${requiredColumns.join(', ')}. ` +
         'Refusing to proceed — an empty parse result would cause sync to mark all features as done.',
     );
   }
@@ -106,7 +110,7 @@ function statusToPriority(status: string): BacklogPriority {
   }
 }
 
-/** Map BACKLOG.md feature status to BacklogItem workflow status. */
+/** Map roadmap feature status to BacklogItem workflow status. */
 export function featureStatusToBacklogStatus(featureStatus: string): BacklogStatus {
   const normalized = normalizeStatus(featureStatus);
   if (normalized === 'done') return 'done';
@@ -127,7 +131,7 @@ export function buildBacklogInputFromFeature(
 ): CreateBacklogItemInput {
   const title = truncate(`[${row.id}] ${row.name}`, 200);
   const summarySegments = [
-    '来源 docs/ROADMAP.md',
+    `来源 ${deploymentDefaults.roadmapPath}`,
     `状态：${row.status}`,
     `Owner：${row.owner}`,
     row.link ? `Link：${row.link}` : null,
@@ -339,7 +343,7 @@ export async function readFeatureDocDependencies(featuresDir?: string): Promise<
 export async function readActiveFeaturesFromBacklog(backlogDocPath?: string): Promise<BacklogFeatureRow[]> {
   if (backlogDocPath) {
     const markdown = await readFile(backlogDocPath, 'utf-8');
-    return parseActiveFeaturesFromBacklog(markdown);
+    return parseActiveFeaturesFromBacklog(markdown, backlogDocPath);
   }
   const markdown = await readBacklogContent();
   return parseActiveFeaturesFromBacklog(markdown);
@@ -347,7 +351,7 @@ export async function readActiveFeaturesFromBacklog(backlogDocPath?: string): Pr
 
 /**
  * Read docs/features/*.md and return BacklogFeatureRow[] for features
- * whose status is "done" (historical features not in BACKLOG.md).
+ * whose status is "done" (historical features absent from the active roadmap).
  * Excludes features already present in `excludeIds`.
  */
 export async function readDoneFeatureDocsAsRows(

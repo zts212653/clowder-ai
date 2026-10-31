@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-08-24",
+  "provenance": {
+    "kind": "public-production-dom-shape",
+    "ownerCaptureStatus": "captured_via_bounded_adapter_diagnostic",
+    "ownerFailureSourceMessageIds": [
+      "0001787499697480-000060-f2dfc2e8",
+      "0001787502196918-000097-fdc8b5c7",
+      "0001787502897026-000106-6092ac45",
+      "0001787536240611-000013-ce90ed21",
+      "0001787537739512-000048-376dc653",
+      "0001787559631890-000038-ad2fd178"
+    ],
+    "externalCapture": "https://github.com/jcubic/chat-gpt/blob/22fcb0055a2dc4b3b353e8cc31ee6f4177e0cda0/2025-06-25/chat-gpt-time-series.html",
+    "externalCorroboration": [
+      "https://github.com/Dworrall21/chatgpt-bridge/blob/ed2e92cd71319ad458786623809b90ff46f45dd1/dom-selectors.md",
+      "https://github.com/openweb-org/openweb/blob/b56af0dec6cbe299e32bbc7f373c2860b1364592/src/sites/chatgpt/DOC.md"
+    ],
+    "transactionCorroboration": "https://github.com/srbhptl39/MCP-SuperAssistant/issues/195",
+    "privacy": "text-free"
+  },
+  "composer": {
+    "tag": "DIV",
+    "contentEditable": true,
+    "proseMirror": true,
+    "virtualKeyboard": true,
+    "children": [
+      {
+        "tag": "P",
+        "placeholder": true,
+        "children": []
+      }
+    ]
+  },
+  "insertedComposer": {
+    "tag": "DIV",
+    "contentEditable": true,
+    "proseMirror": true,
+    "virtualKeyboard": true,
+    "children": [
+      {
+        "tag": "P",
+        "children": [{ "kind": "text", "lineIndex": 0 }, { "tag": "BR", "trailingBreak": true, "children": [] }]
+      },
+      { "tag": "P", "children": [{ "kind": "text", "lineIndex": 1 }] },
+      { "tag": "P", "children": [{ "kind": "text", "lineIndex": 2 }] },
+      { "tag": "P", "children": [{ "tag": "BR", "children": [] }] },
+      { "tag": "P", "children": [{ "kind": "text", "lineIndex": 4 }] }
+    ]
+  }
+}

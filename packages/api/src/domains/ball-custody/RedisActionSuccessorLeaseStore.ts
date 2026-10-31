@@ -1,0 +1,759 @@
+import type { RedisClient } from '@cat-cafe/shared/utils';
+import { createModuleLogger } from '../../infrastructure/logger.js';
+import { hydrateTask } from '../cats/services/stores/redis/RedisTaskCodec.js';
+import { TaskKeys } from '../cats/services/stores/redis-keys/task-keys.js';
+import type {
+  ActionSubjectTerminalTruth,
+  ActionSuccessorClaimStoreResult,
+  ActionSuccessorCommitOutcomeResult,
+  ActionSuccessorLeaseStore,
+  ActionSuccessorOutputPreflightResult,
+} from './ActionSuccessorLeaseStore.js';
+import { ActionSuccessorKeys } from './action-successor-keys.js';
+import { preflightActionSuccessorOutputInRedis } from './action-successor-output-preflight.js';
+import { parseActionSubjectTerminal, parseActionSuccessorLease } from './action-successor-redis-codecs.js';
+import {
+  CAS_ACTION_SUCCESSOR_LUA,
+  CLAIM_ACTION_SUCCESSOR_LUA,
+  CLEAR_ACTION_SUBJECT_TERMINAL_LUA,
+  COMMIT_ACTION_SUCCESSOR_CAS_LUA,
+  CONTINUE_ACTION_SUCCESSOR_FRESH_REVISION_LUA,
+  MARK_ACTION_SUBJECT_TERMINAL_LUA,
+  PREFLIGHT_ACTION_SUCCESSOR_LUA,
+} from './action-successor-redis-scripts.js';
+import { ActionSuccessorStandingError } from './action-successor-standing.js';
+import {
+  type ActionSuccessorIdentityInput,
+  type ActionSuccessorLease,
+  type ActionSuccessorPreflightResult,
+  type ClaimActionSuccessorInput,
+  canonicalizeActionSubjectRef,
+  claimActionSuccessor,
+  commitActionCompletionVerdict,
+  continueActionSuccessorFreshRevision,
+  isRecoverableActionSuccessorReturn,
+  type MarkActionSuccessorReturnDeliveredResult,
+  markActionSuccessorReturnDelivered,
+  recordActionCompletionCandidate,
+  recordActionSuccessorOutcome,
+  recordActionSuccessorReturnDeliveryAttempt,
+  refreshHandledActionSuccessor,
+  replaceActionSuccessor,
+  retirePendingDispatchForFreshnessMismatch,
+  returnActionSuccessorToPredecessor,
+} from './action-successor-state-machine.js';
+import { runTaskContinuationFencedCommand } from './approved-task-continuation-fence.js';
+import { isRetiredTaskAction } from './retired-task-action.js';
+
+const MAX_CAS_ATTEMPTS = 20;
+const MAX_MALFORMED_CENSUS_SAMPLES = 5;
+const MALFORMED_CENSUS_REPORT_DEDUP_MS = 10_000;
+const log = createModuleLogger('ball-custody/action-successor-lease-store');
+
+interface MalformedCensusSample {
+  detailKey: string;
+  reason: string;
+}
+
+function parseCensusBatch(
+  keys: readonly string[],
+  raws: readonly (string | null)[],
+  predicate: (lease: ActionSuccessorLease | null) => lease is ActionSuccessorLease,
+): { matches: ActionSuccessorLease[]; malformedCount: number; malformedSamples: MalformedCensusSample[] } {
+  const matches: ActionSuccessorLease[] = [];
+  const malformedSamples: MalformedCensusSample[] = [];
+  let malformedCount = 0;
+  for (const [index, raw] of raws.entries()) {
+    const detailKey = keys[index];
+    if (!detailKey) throw new Error('ActionSuccessor recovery census received an unkeyed Redis value');
+    try {
+      const lease = parseActionSuccessorLease(raw);
+      if (predicate(lease)) matches.push(lease);
+    } catch (error) {
+      malformedCount += 1;
+      if (malformedSamples.length < MAX_MALFORMED_CENSUS_SAMPLES) {
+        malformedSamples.push({
+          detailKey,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+  return { matches, malformedCount, malformedSamples };
+}
+
+function isPendingReturn(lease: ActionSuccessorLease | null): lease is ActionSuccessorLease {
+  return Boolean(
+    lease &&
+      isRecoverableActionSuccessorReturn(lease) &&
+      (lease.returnDeliveryState === 'pending' || lease.returnDeliveryState === 'overdue'),
+  );
+}
+
+function isPendingDispatch(lease: ActionSuccessorLease | null): lease is ActionSuccessorLease {
+  return lease?.dispatchDeliveryState === 'pending';
+}
+
+function isActiveTaskLease(lease: ActionSuccessorLease | null): lease is ActionSuccessorLease {
+  return (
+    lease?.status === 'active' &&
+    lease.actionFamily === 'implement' &&
+    lease.successorSlot === 'implementer' &&
+    lease.subjectRef.startsWith('subject:task:') &&
+    lease.terminalPredicate?.kind === 'task_done'
+  );
+}
+
+function validateFreshRevisionReplay(lease: ActionSuccessorLease, expected: ActionSuccessorLease, now: number): void {
+  const terminalPredicate = expected.terminalPredicate;
+  if (!terminalPredicate) throw new Error('fresh action successor lease requires a terminal predicate');
+  const replay = claimActionSuccessor(lease, {
+    leaseId: expected.leaseId,
+    tenantScope: expected.tenantScope,
+    subjectRef: expected.subjectRef,
+    actionFamily: expected.actionFamily,
+    successorSlot: expected.successorSlot,
+    mode: expected.mode,
+    holderCatIds: expected.holderCatIds,
+    ...(expected.parallelIntent ? { parallelIntent: expected.parallelIntent } : {}),
+    dispatchId: expected.dispatchId,
+    claimOrigin: expected.claimOrigin,
+    holderThreadId: expected.holderThreadId,
+    ...(expected.predecessorCatId ? { predecessorCatId: expected.predecessorCatId } : {}),
+    ...(expected.predecessorThreadId ? { predecessorThreadId: expected.predecessorThreadId } : {}),
+    issuerStandingEvidenceRef: expected.issuerStandingEvidenceRef,
+    evidenceRefs: expected.evidenceRefs,
+    terminalPredicate,
+    now,
+  });
+  if (replay.outcome !== 'replayed') {
+    throw new Error(`action successor fresh-revision replay mismatch: ${expected.dispatchId}`);
+  }
+}
+
+export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore {
+  private lastMalformedCensusReport?: { signature: string; at: number };
+
+  constructor(private readonly redis: RedisClient) {}
+
+  async get(leaseId: string): Promise<ActionSuccessorLease | null> {
+    return parseActionSuccessorLease(await this.redis.get(ActionSuccessorKeys.detail(leaseId)));
+  }
+
+  async getByIdentity(input: ActionSuccessorIdentityInput): Promise<ActionSuccessorLease | null> {
+    const indexedDetailKey = await this.redis.get(ActionSuccessorKeys.identity(input));
+    if (!indexedDetailKey) return null;
+    const keyPrefix = this.redis.options.keyPrefix ?? '';
+    const detailKey =
+      keyPrefix && indexedDetailKey.startsWith(keyPrefix) ? indexedDetailKey.slice(keyPrefix.length) : indexedDetailKey;
+    return parseActionSuccessorLease(await this.redis.get(detailKey));
+  }
+
+  async listPendingReturns(limit = 100): Promise<ActionSuccessorLease[]> {
+    return this.listMatching(limit, 'pending return', isPendingReturn);
+  }
+
+  async listActiveTaskLeases(limit = 100): Promise<ActionSuccessorLease[]> {
+    return this.listMatching(limit, 'active task lease', isActiveTaskLease);
+  }
+
+  async listPendingDispatches(limit = 100): Promise<ActionSuccessorLease[]> {
+    return this.listMatching(limit, 'pending dispatch', isPendingDispatch);
+  }
+
+  private async listMatching(
+    limit: number,
+    label: string,
+    predicate: (lease: ActionSuccessorLease | null) => lease is ActionSuccessorLease,
+  ): Promise<ActionSuccessorLease[]> {
+    if (!Number.isInteger(limit) || limit <= 0) throw new Error(`${label} limit must be a positive integer`);
+    const keyPrefix = this.redis.options.keyPrefix ?? '';
+    const keys = (await this.redis.smembers(ActionSuccessorKeys.ALL))
+      .map((key) => (keyPrefix && key.startsWith(keyPrefix) ? key.slice(keyPrefix.length) : key))
+      .sort();
+    const matches: ActionSuccessorLease[] = [];
+    const malformedSamples: MalformedCensusSample[] = [];
+    let malformedCount = 0;
+    const batchSize = 100;
+    for (let offset = 0; offset < keys.length && matches.length < limit; offset += batchSize) {
+      const batch = keys.slice(offset, offset + batchSize);
+      const raws = await this.redis.mget(...batch);
+      const parsed = parseCensusBatch(batch, raws, predicate);
+      for (const lease of parsed.matches) {
+        const retired = await isRetiredTaskAction(
+          {
+            get: async (id) => {
+              const raw = await this.redis.hgetall(TaskKeys.detail(id));
+              return raw.id ? hydrateTask(raw) : null;
+            },
+          },
+          lease,
+        );
+        if (!retired) matches.push(lease);
+      }
+      malformedCount += parsed.malformedCount;
+      malformedSamples.push(
+        ...parsed.malformedSamples.slice(0, MAX_MALFORMED_CENSUS_SAMPLES - malformedSamples.length),
+      );
+    }
+    if (malformedCount > 0) {
+      this.reportMalformedCensus(label, malformedCount, malformedSamples);
+    }
+    return matches.slice(0, limit);
+  }
+
+  private reportMalformedCensus(
+    label: string,
+    malformedCount: number,
+    malformedSamples: MalformedCensusSample[],
+  ): void {
+    const signature = JSON.stringify({ malformedCount, malformedSamples });
+    const now = Date.now();
+    if (
+      this.lastMalformedCensusReport?.signature === signature &&
+      now - this.lastMalformedCensusReport.at < MALFORMED_CENSUS_REPORT_DEDUP_MS
+    ) {
+      return;
+    }
+    this.lastMalformedCensusReport = { signature, at: now };
+    log.warn(
+      { label, malformedCount, malformedSamples },
+      'ActionSuccessor recovery census skipped malformed persisted leases',
+    );
+  }
+
+  async claim(input: ClaimActionSuccessorInput): Promise<ActionSuccessorClaimStoreResult> {
+    const candidate = claimActionSuccessor(null, input).lease;
+    const fenced = await runTaskContinuationFencedCommand(this.redis, candidate, {
+      script: CLAIM_ACTION_SUCCESSOR_LUA,
+      keys: [
+        ActionSuccessorKeys.detail(candidate.leaseId),
+        ActionSuccessorKeys.identity(candidate),
+        ActionSuccessorKeys.subjectTerminal(candidate.subjectRef),
+        ActionSuccessorKeys.ALL,
+      ],
+      args: [candidate.dispatchId, JSON.stringify(candidate)],
+    });
+    if (!fenced.ok)
+      throw new ActionSuccessorStandingError('mismatch', 'approved Task contract changed before lease admission');
+    const raw = fenced.result as [string, string];
+    const [outcome, payload] = raw;
+    if (outcome === 'subject_terminal') {
+      const terminal = parseActionSubjectTerminal(payload);
+      if (!terminal) throw new Error('missing action subject terminal payload');
+      return { outcome, terminal };
+    }
+    const lease = parseActionSuccessorLease(payload);
+    if (!lease) throw new Error('missing action successor lease payload');
+    if (outcome !== 'claimed' && outcome !== 'replayed' && outcome !== 'safe_wait') {
+      throw new Error(`unexpected action successor claim outcome: ${outcome}`);
+    }
+    if (outcome === 'replayed') return claimActionSuccessor(lease, input);
+    return { outcome, lease };
+  }
+
+  async commitOutcome(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['commitOutcome']>[1],
+  ): Promise<ActionSuccessorCommitOutcomeResult> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.get(leaseId);
+      if (!current) return { outcome: 'lease_missing', lease: null };
+      if (input.generation !== current.generation) return { outcome: 'stale_generation', lease: current };
+      if (current.status !== 'active') return { outcome: 'lease_not_active', lease: current };
+      if (!current.holderCatIds.includes(input.catId)) {
+        throw new Error(`cat is not an action successor holder: ${input.catId}`);
+      }
+      if (current.holderOutcomes[input.catId]) return { outcome: 'holder_outcome_exists', lease: current };
+
+      const next = recordActionSuccessorOutcome(current, input);
+      const committed = await this.compareAndSetUnlessSubjectTerminal(current, next, 'record');
+      if (committed === 'written') return { outcome: 'recorded', lease: next };
+      if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
+    }
+    throw new Error(`action successor commit CAS exhausted: ${leaseId}`);
+  }
+
+  async recordCompletionCandidate(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['recordCompletionCandidate']>[1],
+  ): Promise<ActionSuccessorCommitOutcomeResult> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.get(leaseId);
+      if (!current) return { outcome: 'lease_missing', lease: null };
+      if (input.generation !== current.generation) return { outcome: 'stale_generation', lease: current };
+      if (current.status !== 'active') return { outcome: 'lease_not_active', lease: current };
+      if (!current.holderCatIds.includes(input.catId)) {
+        throw new Error(`cat is not an action successor holder: ${input.catId}`);
+      }
+      if (current.holderOutcomes[input.catId]) return { outcome: 'holder_outcome_exists', lease: current };
+      const next = recordActionCompletionCandidate(current, input);
+      if (next === current) return { outcome: 'recorded', lease: next };
+      const committed = await this.compareAndSetUnlessSubjectTerminal(current, next, 'record');
+      if (committed === 'written') return { outcome: 'recorded', lease: next };
+      if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
+    }
+    throw new Error(`action successor completion-candidate CAS exhausted: ${leaseId}`);
+  }
+
+  async commitCompletionVerdict(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['commitCompletionVerdict']>[1],
+  ): ReturnType<ActionSuccessorLeaseStore['commitCompletionVerdict']> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.get(leaseId);
+      if (!current) return { outcome: 'lease_missing', lease: null };
+      if (input.generation !== current.generation) return { outcome: 'stale_generation', lease: current };
+      if (current.status !== 'active') return { outcome: 'lease_not_active', lease: current };
+      if (current.holderOutcomes[input.catId]) return { outcome: 'holder_outcome_exists', lease: current };
+      const candidate = current.completionCandidates[input.catId];
+      if (
+        input.verdict.status === 'verified' &&
+        candidate &&
+        (input.verdict.candidateRevision !== candidate.candidateRevision ||
+          input.verdict.evidenceDigest !== candidate.evidenceDigest)
+      ) {
+        return { outcome: 'candidate_changed', lease: current };
+      }
+      const next = commitActionCompletionVerdict(current, input);
+      const committed = await this.compareAndSetUnlessSubjectTerminal(current, next, 'record');
+      if (committed === 'written') return { outcome: 'committed', lease: next };
+      if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
+    }
+    throw new Error(`action successor completion-verdict CAS exhausted: ${leaseId}`);
+  }
+
+  async continueFreshRevision(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['continueFreshRevision']>[1],
+  ): ReturnType<ActionSuccessorLeaseStore['continueFreshRevision']> {
+    const current = await this.require(leaseId);
+    const result = continueActionSuccessorFreshRevision(current, input);
+    if (result.outcome !== 'continued') return result;
+    const fenced = await runTaskContinuationFencedCommand(this.redis, result.lease, {
+      script: CONTINUE_ACTION_SUCCESSOR_FRESH_REVISION_LUA,
+      keys: [
+        ActionSuccessorKeys.detail(current.leaseId),
+        ActionSuccessorKeys.detail(result.lease.leaseId),
+        ActionSuccessorKeys.identity(current),
+        ActionSuccessorKeys.subjectTerminal(current.subjectRef),
+        ActionSuccessorKeys.ALL,
+      ],
+      args: [String(current.revision), result.lease.dispatchId, JSON.stringify(result.lease)],
+    });
+    if (!fenced.ok)
+      throw new ActionSuccessorStandingError('mismatch', 'approved Task contract changed before lease admission');
+    const raw = fenced.result as [string, string];
+    const [outcome, payload] = raw;
+    if (outcome === 'subject_terminal') return { outcome, lease: current };
+    if (outcome === 'continued') {
+      const lease = parseActionSuccessorLease(payload);
+      if (!lease) throw new Error('missing fresh action successor lease payload');
+      validateFreshRevisionReplay(lease, result.lease, input.now);
+      return { outcome, lease };
+    }
+    if (outcome === 'lease_missing') throw new Error(`action successor lease not found: ${leaseId}`);
+    if (outcome === 'stale_revision' || outcome === 'identity_advanced') {
+      return { outcome: 'stale_generation', lease: current };
+    }
+    if (outcome === 'successor_exists') {
+      throw new Error(`action successor fresh lease id already exists: ${result.lease.leaseId}`);
+    }
+    throw new Error(`unexpected action successor fresh-revision outcome: ${outcome}`);
+  }
+
+  async replace(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['replace']>[1],
+  ): ReturnType<ActionSuccessorLeaseStore['replace']> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.require(leaseId);
+      const result = replaceActionSuccessor(current, input);
+      if (result.outcome !== 'replaced' && result.outcome !== 'reattached') return result;
+      const committed = await this.compareAndSetUnlessSubjectTerminal(current, result.lease, 'admission');
+      if (committed === 'written') return result;
+      if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
+    }
+    throw new Error(`action successor CAS exhausted: ${leaseId}`);
+  }
+
+  async refreshHandledCarrier(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['refreshHandledCarrier']>[1],
+  ): ReturnType<ActionSuccessorLeaseStore['refreshHandledCarrier']> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.require(leaseId);
+      const result = refreshHandledActionSuccessor(current, input);
+      if (result.outcome !== 'refreshed') return result;
+      const committed = await this.compareAndSetUnlessSubjectTerminal(current, result.lease, 'admission');
+      if (committed === 'written') return result;
+      if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
+    }
+    throw new Error(`action successor refresh CAS exhausted: ${leaseId}`);
+  }
+
+  async returnToPredecessor(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['returnToPredecessor']>[1],
+  ): ReturnType<ActionSuccessorLeaseStore['returnToPredecessor']> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.require(leaseId);
+      const result = returnActionSuccessorToPredecessor(current, input);
+      if (result.lease.revision === current.revision) return result;
+      const committed = await this.compareAndSetUnlessSubjectTerminal(current, result.lease, 'record');
+      if (committed === 'written') return result;
+      if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
+    }
+    throw new Error(`action successor return CAS exhausted: ${leaseId}`);
+  }
+
+  async markReturnDelivered(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['markReturnDelivered']>[1],
+  ): Promise<MarkActionSuccessorReturnDeliveredResult> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.require(leaseId);
+      const result = markActionSuccessorReturnDelivered(current, input);
+      if (result.outcome !== 'delivered') return result;
+      if (await this.compareAndSet(current, result.lease)) return result;
+    }
+    throw new Error(`action successor return-delivery CAS exhausted: ${leaseId}`);
+  }
+
+  async recordReturnDeliveryAttempt(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['recordReturnDeliveryAttempt']>[1],
+  ): ReturnType<ActionSuccessorLeaseStore['recordReturnDeliveryAttempt']> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.require(leaseId);
+      const result = recordActionSuccessorReturnDeliveryAttempt(current, input);
+      if (result.outcome !== 'recorded') return result;
+      if (await this.compareAndSet(current, result.lease)) return result;
+    }
+    throw new Error(`action successor return-attempt CAS exhausted: ${leaseId}`);
+  }
+
+  async recordDispatchDeliveryAttempt(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['recordDispatchDeliveryAttempt']>[1],
+  ): ReturnType<ActionSuccessorLeaseStore['recordDispatchDeliveryAttempt']> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.require(leaseId);
+      if (input.expectedGeneration !== current.generation) {
+        return { outcome: 'stale_generation', lease: current };
+      }
+      if (current.terminalPredicate?.digest !== input.expectedPredicateDigest) {
+        return { outcome: 'predicate_mismatch', lease: current };
+      }
+      if (current.revision !== input.expectedRevision) return { outcome: 'stale_revision', lease: current };
+      if (current.dispatchDeliveryState !== 'pending') {
+        return { outcome: 'dispatch_not_pending', lease: current };
+      }
+      if (current.dispatchDeliveryReservation) return { outcome: 'dispatch_not_pending', lease: current };
+      if (current.status !== 'active') return { outcome: 'lease_not_active', lease: current };
+      if (Object.keys(current.holderOutcomes).length > 0) return { outcome: 'holder_terminal', lease: current };
+      const freshnessEvidenceRef = input.freshnessEvidenceRef.trim();
+      if (!freshnessEvidenceRef) throw new Error('dispatch freshness proof requires an evidence identity');
+      const next: ActionSuccessorLease = {
+        ...current,
+        dispatchDeliveryAttemptCount: (current.dispatchDeliveryAttemptCount ?? 0) + 1,
+        dispatchDeliveryLastAttemptAt: input.now,
+        evidenceRefs: [...new Set([...current.evidenceRefs, freshnessEvidenceRef])],
+        revision: current.revision + 1,
+        updatedAt: input.now,
+      };
+      const committed = await this.compareAndSetUnlessSubjectTerminal(current, next, 'admission');
+      if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
+      if (committed === 'written') return { outcome: 'recorded', lease: next };
+    }
+    throw new Error(`action successor dispatch-attempt CAS exhausted: ${leaseId}`);
+  }
+
+  async reserveDispatchDelivery(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['reserveDispatchDelivery']>[1],
+  ): ReturnType<ActionSuccessorLeaseStore['reserveDispatchDelivery']> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.require(leaseId);
+      if (input.expectedGeneration !== current.generation) {
+        return { outcome: 'stale_generation', lease: current };
+      }
+      if (current.terminalPredicate?.digest !== input.expectedPredicateDigest) {
+        return { outcome: 'predicate_mismatch', lease: current };
+      }
+      if (current.revision !== input.expectedRevision) return { outcome: 'stale_revision', lease: current };
+      if (current.dispatchDeliveryState !== 'pending') {
+        return { outcome: 'dispatch_not_pending', lease: current };
+      }
+      if (current.dispatchDeliveryReservation) return { outcome: 'dispatch_reserved', lease: current };
+      if (current.status !== 'active') return { outcome: 'lease_not_active', lease: current };
+      if (Object.keys(current.holderOutcomes).length > 0) return { outcome: 'holder_terminal', lease: current };
+      const freshnessEvidenceRef = input.freshnessEvidenceRef.trim();
+      if (!freshnessEvidenceRef) throw new Error('dispatch reservation requires a freshness evidence identity');
+      if (
+        !current.dispatchDeliveryAttemptCount ||
+        current.dispatchDeliveryLastAttemptAt === undefined ||
+        !current.evidenceRefs.includes(freshnessEvidenceRef)
+      ) {
+        return { outcome: 'attempt_missing', lease: current };
+      }
+      const next: ActionSuccessorLease = {
+        ...current,
+        dispatchDeliveryReservation: {
+          predicateDigest: input.expectedPredicateDigest,
+          freshnessEvidenceRef,
+          reservedAt: input.now,
+        },
+        evidenceRefs: [...new Set([...current.evidenceRefs, freshnessEvidenceRef])],
+        revision: current.revision + 1,
+        updatedAt: input.now,
+      };
+      const committed = await this.compareAndSetUnlessSubjectTerminal(current, next, 'admission');
+      if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
+      if (committed === 'written') return { outcome: 'reserved', lease: next };
+    }
+    throw new Error(`action successor dispatch-reservation CAS exhausted: ${leaseId}`);
+  }
+
+  async retirePendingDispatchForFreshnessMismatch(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['retirePendingDispatchForFreshnessMismatch']>[1],
+  ): ReturnType<ActionSuccessorLeaseStore['retirePendingDispatchForFreshnessMismatch']> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.require(leaseId);
+      const result = retirePendingDispatchForFreshnessMismatch(current, {
+        generation: input.expectedGeneration,
+        expectedRevision: input.expectedRevision,
+        expectedPredicateDigest: input.expectedPredicateDigest,
+        evidenceRef: input.evidenceRef,
+        now: input.now,
+      });
+      if (result.outcome !== 'retired') return result;
+      const committed = await this.compareAndSetUnlessSubjectTerminal(current, result.lease, 'record');
+      if (committed === 'written') return result;
+      if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
+    }
+    throw new Error(`action successor freshness-mismatch retirement CAS exhausted: ${leaseId}`);
+  }
+
+  async markDispatchDelivered(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['markDispatchDelivered']>[1],
+  ): ReturnType<ActionSuccessorLeaseStore['markDispatchDelivered']> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.require(leaseId);
+      if (input.expectedGeneration !== current.generation) {
+        return { outcome: 'stale_generation', lease: current };
+      }
+      if (current.revision !== input.expectedRevision) return { outcome: 'stale_revision', lease: current };
+      if (current.terminalPredicate?.digest !== input.expectedPredicateDigest) {
+        return { outcome: 'predicate_mismatch', lease: current };
+      }
+      if (current.dispatchDeliveryState !== 'pending') {
+        return { outcome: 'dispatch_not_pending', lease: current };
+      }
+      const reservation = current.dispatchDeliveryReservation;
+      if (
+        !reservation ||
+        reservation.predicateDigest !== input.expectedPredicateDigest ||
+        reservation.freshnessEvidenceRef !== input.freshnessEvidenceRef
+      ) {
+        return { outcome: 'reservation_mismatch', lease: current };
+      }
+      const deliveredMessageId = input.deliveredMessageId.trim();
+      const evidenceRef = input.evidenceRef.trim();
+      if (!deliveredMessageId || !evidenceRef) {
+        throw new Error('dispatch delivery requires message and evidence identities');
+      }
+      const { dispatchDeliveryReservation: _reservation, ...currentWithoutReservation } = current;
+      const next: ActionSuccessorLease = {
+        ...currentWithoutReservation,
+        dispatchDeliveryState: 'delivered',
+        dispatchDeliveredMessageId: deliveredMessageId,
+        evidenceRefs: [...new Set([...current.evidenceRefs, evidenceRef])],
+        revision: current.revision + 1,
+        updatedAt: input.now,
+      };
+      if (await this.compareAndSet(current, next)) return { outcome: 'delivered', lease: next };
+    }
+    throw new Error(`action successor dispatch-delivery CAS exhausted: ${leaseId}`);
+  }
+
+  async markDispatchFailed(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['markDispatchFailed']>[1],
+  ): ReturnType<ActionSuccessorLeaseStore['markDispatchFailed']> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.require(leaseId);
+      if (input.expectedGeneration !== current.generation) {
+        return { outcome: 'stale_generation', lease: current };
+      }
+      if (current.revision !== input.expectedRevision) return { outcome: 'stale_revision', lease: current };
+      if (current.terminalPredicate?.digest !== input.expectedPredicateDigest) {
+        return { outcome: 'predicate_mismatch', lease: current };
+      }
+      if (current.dispatchDeliveryState !== 'pending') {
+        return { outcome: 'dispatch_not_pending', lease: current };
+      }
+      const evidenceRef = input.evidenceRef.trim();
+      if (!evidenceRef) throw new Error('dispatch failure requires an evidence identity');
+      const { dispatchDeliveryReservation: _reservation, ...currentWithoutReservation } = current;
+      const next: ActionSuccessorLease = {
+        ...currentWithoutReservation,
+        dispatchDeliveryState: 'failed',
+        dispatchFailureReason: input.reason,
+        dispatchFailureEvidenceRef: evidenceRef,
+        evidenceRefs: [...new Set([...current.evidenceRefs, evidenceRef])],
+        revision: current.revision + 1,
+        updatedAt: input.now,
+      };
+      if (await this.compareAndSet(current, next)) return { outcome: 'failed', lease: next };
+    }
+    throw new Error(`action successor dispatch-failure CAS exhausted: ${leaseId}`);
+  }
+
+  async markSubjectTerminal(input: {
+    subjectRef: string;
+    state: ActionSubjectTerminalTruth['state'];
+    evidenceRef: string;
+    now: number;
+  }): Promise<ActionSubjectTerminalTruth> {
+    const terminal: ActionSubjectTerminalTruth = {
+      subjectRef: canonicalizeActionSubjectRef(input.subjectRef),
+      state: input.state,
+      evidenceRef: input.evidenceRef,
+      observedAt: input.now,
+    };
+    const raw = String(
+      await this.redis.eval(
+        MARK_ACTION_SUBJECT_TERMINAL_LUA,
+        2,
+        ActionSuccessorKeys.subjectTerminal(terminal.subjectRef),
+        ActionSuccessorKeys.subjectTerminalHistory(terminal.subjectRef),
+        JSON.stringify(terminal),
+      ),
+    );
+    const persisted = parseActionSubjectTerminal(raw);
+    if (!persisted) throw new Error('failed to persist action subject terminal truth');
+    return persisted;
+  }
+
+  async getSubjectTerminal(subjectRef: string): Promise<ActionSubjectTerminalTruth | null> {
+    return parseActionSubjectTerminal(await this.redis.get(ActionSuccessorKeys.subjectTerminal(subjectRef)));
+  }
+
+  async clearSubjectTerminal(subjectRef: string, input: { evidenceRef: string; now: number }): Promise<boolean> {
+    const canonical = canonicalizeActionSubjectRef(subjectRef);
+    const activeEvidence = JSON.stringify({
+      subjectRef: canonical,
+      state: 'active',
+      evidenceRef: input.evidenceRef,
+      observedAt: input.now,
+    });
+    const cleared = Number(
+      await this.redis.eval(
+        CLEAR_ACTION_SUBJECT_TERMINAL_LUA,
+        2,
+        ActionSuccessorKeys.subjectTerminal(canonical),
+        ActionSuccessorKeys.subjectTerminalHistory(canonical),
+        String(input.now),
+        activeEvidence,
+      ),
+    );
+    return cleared === 1;
+  }
+
+  async preflight(
+    leaseId: string,
+    generation: number,
+    terminalPredicateDigest?: string,
+  ): Promise<ActionSuccessorPreflightResult | { ok: false; reason: 'lease_missing' }> {
+    const current = await this.get(leaseId);
+    if (!current) return { ok: false, reason: 'lease_missing' };
+    const fenced = await runTaskContinuationFencedCommand(this.redis, current, {
+      script: PREFLIGHT_ACTION_SUCCESSOR_LUA,
+      keys: [ActionSuccessorKeys.detail(leaseId), ActionSuccessorKeys.subjectTerminal(current.subjectRef)],
+      args: [String(generation), terminalPredicateDigest ?? ''],
+    });
+    if (!fenced.ok) return { ok: false, reason: 'predicate_mismatch' };
+    const reason = String(fenced.result);
+    if (reason === 'active') return { ok: true, reason };
+    if (
+      reason === 'subject_terminal' ||
+      reason === 'stale_generation' ||
+      reason === 'lease_not_active' ||
+      reason === 'predicate_mismatch' ||
+      reason === 'lease_missing'
+    ) {
+      return { ok: false, reason };
+    }
+    throw new Error(`unexpected action successor preflight result: ${reason}`);
+  }
+
+  async preflightOutput(
+    leaseId: string,
+    generation: number,
+    catId: string,
+    terminalPredicateDigest?: string,
+  ): Promise<ActionSuccessorOutputPreflightResult | { ok: false; reason: 'lease_missing' }> {
+    const current = await this.get(leaseId);
+    if (!current) return { ok: false, reason: 'lease_missing' };
+    return preflightActionSuccessorOutputInRedis(this.redis, current, generation, catId, terminalPredicateDigest);
+  }
+
+  private async require(leaseId: string): Promise<ActionSuccessorLease> {
+    const current = await this.get(leaseId);
+    if (!current) throw new Error(`action successor lease not found: ${leaseId}`);
+    return current;
+  }
+
+  private async compareAndSet(current: ActionSuccessorLease, next: ActionSuccessorLease): Promise<boolean> {
+    const result = Number(
+      await this.redis.eval(
+        CAS_ACTION_SUCCESSOR_LUA,
+        2,
+        ActionSuccessorKeys.detail(current.leaseId),
+        ActionSuccessorKeys.identity(current),
+        String(current.revision),
+        JSON.stringify(next),
+      ),
+    );
+    if (result === 1) return true;
+    if (result === -1) return false;
+    if (result === 0) throw new Error(`action successor lease not found: ${current.leaseId}`);
+    throw new Error(`action successor identity index mismatch: ${current.leaseId}`);
+  }
+
+  private async compareAndSetUnlessSubjectTerminal(
+    current: ActionSuccessorLease,
+    next: ActionSuccessorLease,
+    purpose: 'admission' | 'record',
+  ): Promise<'written' | 'retry' | 'subject_terminal'> {
+    const command = {
+      script: COMMIT_ACTION_SUCCESSOR_CAS_LUA,
+      keys: [
+        ActionSuccessorKeys.detail(current.leaseId),
+        ActionSuccessorKeys.identity(current),
+        ActionSuccessorKeys.subjectTerminal(current.subjectRef),
+      ],
+      args: [String(current.revision), JSON.stringify(next)],
+    };
+    // Advancing/recovering work must revalidate the destination's authority at the write boundary.
+    // Recording outcomes or returning custody remains possible after the delegate contract is revoked.
+    const fenced =
+      purpose === 'admission'
+        ? await runTaskContinuationFencedCommand(this.redis, next, command)
+        : {
+            ok: true as const,
+            result: await this.redis.eval(command.script, command.keys.length, ...command.keys, ...command.args),
+          };
+    if (!fenced.ok)
+      throw new ActionSuccessorStandingError('mismatch', 'approved Task contract changed before lease admission');
+    const result = Number(fenced.result);
+    if (result === 1) return 'written';
+    if (result === -1) return 'retry';
+    if (result === -3) return 'subject_terminal';
+    if (result === 0) throw new Error(`action successor lease not found: ${current.leaseId}`);
+    throw new Error(`action successor identity index mismatch: ${current.leaseId}`);
+  }
+}

@@ -8,17 +8,80 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(() => Promise.resolve(new Response('{}', { status: 200 }))),
 }));
 
+const mockConfirm = vi.fn(() => Promise.resolve(true));
+vi.mock('@/components/useConfirm', () => ({
+  useConfirm: () => mockConfirm,
+}));
+
 import { HubCatEditor } from '@/components/HubCatEditor';
+import type { ProfileItem } from '@/components/hub-accounts.types';
 import {
+  buildCatPatchPayload,
   buildCatPayload,
+  buildStrategyPayload,
+  builtinAccountIdForClient,
+  carrierOptionsForClient,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   filterProfiles,
+  getAcpWarning,
+  getCliEffortOptionsForClient,
   type HubCatEditorFormState,
+  initialState,
   splitCommandArgs,
   validateModelFormatForClient,
 } from '@/components/hub-cat-editor.model';
+import { AccountSection } from '@/components/hub-cat-editor.sections';
+import { AdvancedRuntimeSection } from '@/components/hub-cat-editor-advanced';
 
 const mockApiFetch = vi.mocked(apiFetch);
+
+const emptyVoiceFields = {
+  voiceVoice: '',
+  voiceLangCode: '',
+  voiceSpeed: '',
+  voiceRefAudio: '',
+  voiceRefText: '',
+  voiceInstruct: '',
+  voiceTemperature: '',
+};
+
+const emptyAcpFields = {
+  acpTransport: 'stdio' as const,
+  acpCommand: '',
+  acpStartupArgs: '',
+  acpMaxLiveProcesses: '',
+  acpIdleTtlMinutes: '',
+  mcpSupport: true,
+};
+
+const actionableContextProjection: NonNullable<CatData['resolvedContext']> = {
+  windowTokens: 100_000,
+  inputCeilingTokens: 84_000,
+  source: 'manual',
+  provenance: 'test member window',
+  actionable: true,
+  authoritativeUsage: true,
+  usageTelemetry: 'available',
+  nativeWindowControl: true,
+  nativeCompressionControl: true,
+  observesCompression: false,
+};
+
+it('rejects fractional hybrid compression limits instead of silently truncating them', () => {
+  expect(() =>
+    buildStrategyPayload({
+      strategy: 'hybrid',
+      statusStrategy: 'hybrid',
+      warnThreshold: '0.75',
+      actionThreshold: '0.85',
+      maxCompressions: '1.5',
+      source: 'runtime_override',
+      revision: 'test',
+      changedAt: 0,
+      executionStatus: { status: 'active', missingCapabilities: [] },
+    }),
+  ).toThrow(/正整数/);
+});
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -27,10 +90,25 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function profileItem(
+  input: Omit<ProfileItem, 'kind' | 'builtin'> & Partial<Pick<ProfileItem, 'kind' | 'builtin'>>,
+): ProfileItem {
+  const builtin = input.builtin ?? input.authType === 'oauth';
+  return { ...input, builtin, kind: input.kind ?? (builtin ? 'builtin' : 'api_key') };
+}
+
 async function flushEffects() {
   await act(async () => {
     await Promise.resolve();
   });
+}
+
+// Shared member forms read the household account selection, including from the Chat host.
+function accountSelectionRead(path: string, init?: RequestInit): Promise<Response> {
+  if (path === '/api/accounts/codex/members' && !init?.method) {
+    return Promise.resolve(jsonResponse({ selection: { state: 'empty', members: [] } }));
+  }
+  throw new Error(`Unexpected apiFetch path: ${path}`);
 }
 
 async function changeField(
@@ -45,8 +123,9 @@ async function changeField(
   });
 }
 
-function queryField<T extends HTMLElement>(container: HTMLElement, selector: string): T {
-  const element = container.querySelector(selector);
+function queryField<T extends HTMLElement>(_container: HTMLElement, selector: string): T {
+  // HubCatEditor uses createPortal(... , document.body), so query the body
+  const element = document.body.querySelector(selector);
   if (!element) {
     throw new Error(`Missing element: ${selector}`);
   }
@@ -72,6 +151,7 @@ describe('HubCatEditor', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     mockApiFetch.mockReset();
+    mockConfirm.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -80,11 +160,412 @@ describe('HubCatEditor', () => {
     vi.clearAllMocks();
   });
 
+  async function renderAdvancedRuntimeSection(
+    clientId: HubCatEditorFormState['clientId'],
+    defaultModel = 'test-model',
+    patch: Partial<HubCatEditorFormState> = {},
+    speed: { visible?: boolean; fastSupported?: boolean } = {},
+    runtime: {
+      cat?: CatData | null;
+      strategyForm?: Parameters<typeof AdvancedRuntimeSection>[0]['strategyForm'];
+    } = {},
+  ) {
+    const form: HubCatEditorFormState = {
+      catId: `runtime-${clientId}`,
+      name: `runtime-${clientId}`,
+      displayName: `Runtime ${clientId}`,
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/default.png',
+      colorPrimary: '#16a34a',
+      colorSecondary: '#bbf7d0',
+      mentionPatterns: `@runtime-${clientId}`,
+      roleDescription: 'runtime config',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId,
+      accountRef: '',
+      defaultModel,
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      codexSpeed: '',
+      carrier: 'cli',
+      provider: '',
+      sessionChain: 'true',
+      contextWindow: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
+      ...patch,
+    };
+
+    const onChange = vi.fn();
+    await act(async () => {
+      root.render(
+        React.createElement(AdvancedRuntimeSection, {
+          cat: runtime.cat ?? null,
+          form,
+          strategyForm: runtime.strategyForm ?? null,
+          loadingStrategy: false,
+          strategyError: null,
+          codexSettings: null,
+          loadingCodexSettings: false,
+          codexSettingsError: null,
+          codexSettingsEditable: false,
+          showCodexSettings: false,
+          codexSpeedVisible: speed.visible ?? false,
+          codexFastSupported: speed.fastSupported ?? false,
+          onChange,
+          onStrategyChange: vi.fn(),
+          onCodexChange: vi.fn(),
+        }),
+      );
+    });
+    return onChange;
+  }
+
+  it('keeps Context Window focused on the Auto or Manual choice', async () => {
+    await renderAdvancedRuntimeSection(
+      'openai',
+      'gpt-5.6-sol',
+      {},
+      {},
+      {
+        cat: {
+          id: 'runtime-openai',
+          displayName: 'Runtime openai',
+          clientId: 'openai',
+          carrier: 'cli',
+          defaultModel: 'gpt-5.6-sol',
+          color: { primary: '#16a34a', secondary: '#bbf7d0' },
+          mentionPatterns: ['@runtime-openai'],
+          avatar: '/avatars/default.png',
+          roleDescription: 'runtime config',
+          personality: 'test',
+          resolvedContext: {
+            ...actionableContextProjection,
+            source: 'reported',
+            provenance: 'internal carrier provenance',
+          },
+        },
+      },
+    );
+
+    const input = queryField<HTMLInputElement>(container, 'input[aria-label="Context Window"]');
+    expect(input.placeholder).toBe('留空或 0 = Auto；正整数 = Manual');
+    expect(document.body.textContent).toContain(
+      '填写正整数 = Manual 模式，作为该成员的上下文窗口大小。留空或填 0 = Auto，由运行时自动探测。',
+    );
+    expect(document.body.textContent).not.toContain('解析值');
+    expect(document.body.textContent).not.toContain('模型目录');
+    expect(document.body.textContent).not.toContain('internal carrier provenance');
+  });
+
+  it('shows a concise action only when the selected client cannot resolve or apply Context Window', async () => {
+    const baseCat: CatData = {
+      id: 'runtime-antigravity',
+      displayName: 'Runtime antigravity',
+      clientId: 'antigravity',
+      carrier: 'cli',
+      defaultModel: 'test-model',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      mentionPatterns: ['@runtime-antigravity'],
+      avatar: '/avatars/default.png',
+      roleDescription: 'runtime config',
+      personality: 'test',
+    };
+
+    await renderAdvancedRuntimeSection(
+      'antigravity',
+      'test-model',
+      {},
+      {},
+      {
+        cat: {
+          ...baseCat,
+          resolvedContext: {
+            reportsRuntimeWindow: false,
+            nativeWindowControl: false,
+            authoritativeUsage: false,
+            usageTelemetry: 'unavailable',
+            nativeCompressionControl: false,
+            observesCompression: false,
+            capabilityReason: 'Concrete carrier capability unavailable',
+          },
+        },
+      },
+    );
+
+    const contextWindowInput = queryField<HTMLInputElement>(container, 'input[aria-label="Context Window"]');
+    const compatibilityNotice = document.body.querySelector<HTMLOutputElement>('output#context-window-compat-notice');
+    expect(compatibilityNotice?.textContent).toBe('当前 Client 无法自动探测上下文窗口；请填写正整数使用 Manual 模式。');
+    expect(contextWindowInput.getAttribute('aria-describedby')).toBe(compatibilityNotice?.id);
+    expect(compatibilityNotice?.className).toContain('border-conn-amber-ring');
+    expect(compatibilityNotice?.className).toContain('bg-conn-amber-bg');
+    expect(compatibilityNotice?.className).toContain('text-conn-amber-text');
+    expect(document.body.textContent).not.toContain('Concrete carrier capability unavailable');
+    expect(document.body.textContent).not.toContain('未能解析 Context Window');
+
+    await renderAdvancedRuntimeSection(
+      'antigravity',
+      'test-model',
+      { contextWindow: '128000' },
+      {},
+      {
+        cat: {
+          ...baseCat,
+          resolvedContext: {
+            reportsRuntimeWindow: false,
+            nativeWindowControl: false,
+            authoritativeUsage: false,
+            usageTelemetry: 'unavailable',
+            nativeCompressionControl: false,
+            observesCompression: false,
+          },
+        },
+      },
+    );
+
+    expect(document.body.textContent).toContain(
+      '当前 Client 无法校验或调整自身的上下文窗口；请确认 Manual 值不高于 Client 的实际上限。',
+    );
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+
+    await renderAdvancedRuntimeSection(
+      'antigravity',
+      'test-model',
+      {},
+      {},
+      {
+        cat: {
+          ...baseCat,
+          resolvedContext: {
+            reportsRuntimeWindow: true,
+            nativeWindowControl: false,
+            authoritativeUsage: false,
+            usageTelemetry: 'conditional',
+            nativeCompressionControl: false,
+            observesCompression: false,
+          },
+        },
+      },
+    );
+
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+    expect(document.body.textContent).not.toContain('未能解析 Context Window');
+
+    await renderAdvancedRuntimeSection(
+      'antigravity',
+      'test-model',
+      {},
+      {},
+      {
+        cat: {
+          ...baseCat,
+          resolvedContext: {
+            source: 'catalog',
+            windowTokens: 128_000,
+            reportsRuntimeWindow: false,
+            nativeWindowControl: false,
+            authoritativeUsage: false,
+            usageTelemetry: 'unavailable',
+            nativeCompressionControl: false,
+            observesCompression: false,
+          },
+        },
+      },
+    );
+
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+  });
+
+  it('derives Context Window compatibility from the edited client instead of the saved member', async () => {
+    const savedAntigravity = {
+      id: 'runtime-antigravity',
+      displayName: 'Runtime antigravity',
+      clientId: 'antigravity',
+      carrier: 'cli',
+      defaultModel: 'test-model',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      mentionPatterns: ['@runtime-antigravity'],
+      avatar: '/avatars/default.png',
+      roleDescription: 'runtime config',
+      personality: 'test',
+      resolvedContext: {
+        reportsRuntimeWindow: false,
+        nativeWindowControl: false,
+        authoritativeUsage: false,
+        usageTelemetry: 'unavailable' as const,
+        nativeCompressionControl: false,
+        observesCompression: false,
+      },
+    } satisfies CatData;
+
+    await renderAdvancedRuntimeSection('antigravity');
+    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口');
+
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', {}, {}, { cat: savedAntigravity });
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+
+    await renderAdvancedRuntimeSection(
+      'antigravity',
+      'test-model',
+      {},
+      {},
+      {
+        cat: {
+          ...savedAntigravity,
+          clientId: 'openai',
+          resolvedContext: {
+            ...actionableContextProjection,
+            reportsRuntimeWindow: true,
+            nativeWindowControl: true,
+          },
+        },
+      },
+    );
+    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口');
+
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { carrier: 'app_server' });
+    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口');
+
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { carrier: 'cli' });
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+  });
+
+  it('suppresses the Context Window warning for Google drafts when the model has a catalog entry', async () => {
+    // gemini-2.5-pro is in the shared catalog → Auto mode resolves via catalog
+    await renderAdvancedRuntimeSection('google', 'gemini-2.5-pro');
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+
+    // Catalog resolution is Auto-only; Manual still needs the carrier warning.
+    await renderAdvancedRuntimeSection('google', 'gemini-2.5-pro', { contextWindow: '128000' });
+    expect(document.body.textContent).toContain(
+      '当前 Client 无法校验或调整自身的上下文窗口；请确认 Manual 值不高于 Client 的实际上限。',
+    );
+
+    // Unknown model with no catalog entry → warning fires
+    await renderAdvancedRuntimeSection('google', 'gemini-unknown-custom');
+    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口；请填写正整数使用 Manual 模式。');
+
+    // ACP bypasses the carrier entirely — no warning regardless of model
+    await renderAdvancedRuntimeSection('google', 'gemini-unknown-custom', { carrier: 'acp' });
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+  });
+
+  it('does not reuse a saved Manual source after the editor switches Context Window to Auto', async () => {
+    await renderAdvancedRuntimeSection(
+      'antigravity',
+      'test-model',
+      {},
+      {},
+      {
+        cat: {
+          id: 'runtime-antigravity',
+          displayName: 'Runtime antigravity',
+          clientId: 'antigravity',
+          carrier: 'cli',
+          defaultModel: 'test-model',
+          contextWindow: 128_000,
+          color: { primary: '#16a34a', secondary: '#bbf7d0' },
+          mentionPatterns: ['@runtime-antigravity'],
+          avatar: '/avatars/default.png',
+          roleDescription: 'runtime config',
+          personality: 'test',
+          resolvedContext: {
+            source: 'manual',
+            windowTokens: 128_000,
+            reportsRuntimeWindow: false,
+            nativeWindowControl: false,
+            authoritativeUsage: false,
+            usageTelemetry: 'unavailable',
+            nativeCompressionControl: false,
+            observesCompression: false,
+          },
+        },
+      },
+    );
+
+    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口；请填写正整数使用 Manual 模式。');
+  });
+
+  it.each([
+    'handoff',
+    'compress',
+    'hybrid',
+  ] as const)('renders Session State / Chain as a heading directly above the %s strategy controls', async (strategy) => {
+    await renderAdvancedRuntimeSection(
+      'openai',
+      'gpt-5.6-sol',
+      {},
+      {},
+      {
+        cat: {
+          id: 'runtime-openai',
+          displayName: 'Runtime openai',
+          clientId: 'openai',
+          carrier: 'cli',
+          defaultModel: 'gpt-5.6-sol',
+          color: { primary: '#16a34a', secondary: '#bbf7d0' },
+          mentionPatterns: ['@runtime-openai'],
+          avatar: '/avatars/default.png',
+          roleDescription: 'runtime config',
+          personality: 'test',
+          resolvedContext: actionableContextProjection,
+        },
+        strategyForm: {
+          strategy,
+          statusStrategy: strategy,
+          warnThreshold: '0.75',
+          actionThreshold: '0.85',
+          maxCompressions: '2',
+          source: 'runtime_override',
+          revision: 'test',
+          changedAt: 0,
+          executionStatus: { status: 'unavailable', missingCapabilities: ['authoritative_usage'] },
+        },
+      },
+    );
+
+    const heading = document.body.querySelector('h5');
+    const strategySelect = queryField<HTMLSelectElement>(container, 'select[aria-label="Session Strategy"]');
+    expect(heading?.textContent).toBe('Session State / Chain');
+    expect(heading?.nextElementSibling?.contains(strategySelect)).toBe(true);
+    expect(strategySelect.value).toBe(strategy);
+    expect(Array.from(strategySelect.options, (option) => option.value)).toEqual(['handoff', 'compress', 'hybrid']);
+    expect(document.body.textContent).not.toContain('能力预检');
+    expect(document.body.textContent).not.toContain('来源：');
+    expect(document.body.textContent).not.toContain('缺少权威 usage');
+  });
+
+  it('shows extra CLI args editor for CLI clients and hides it for API-only clients', async () => {
+    for (const clientId of ['anthropic', 'openai', 'google', 'kimi', 'opencode'] as const) {
+      await renderAdvancedRuntimeSection(clientId);
+      expect(document.body.textContent, clientId).toContain('额外 CLI 参数');
+    }
+
+    for (const clientId of ['antigravity', 'catagent'] as const) {
+      await renderAdvancedRuntimeSection(clientId);
+      expect(document.body.textContent, clientId).not.toContain('额外 CLI 参数');
+    }
+  });
+
+  it('explains that structured reserved settings cannot be overridden by raw CLI args', async () => {
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', {}, { visible: true, fastSupported: true });
+
+    expect(document.body.textContent).toContain('结构化保留项始终以上方字段为准');
+    expect(document.body.textContent).toContain('对应 raw 参数会被忽略');
+    expect(document.body.textContent).not.toContain('与系统参数重复时以用户参数为准');
+  });
+
   it('buildCatPayload keeps name in PATCH payload when editing an existing cat', () => {
     const form: HubCatEditorFormState = {
       catId: 'runtime-codex',
       name: '运行时缅因猫',
       displayName: '运行时缅因猫',
+      variantLabel: 'GPT-5.5',
       nickname: '',
       avatar: '/avatars/codex.png',
       colorPrimary: '#16a34a',
@@ -95,21 +576,24 @@ describe('HubCatEditor', () => {
       teamStrengths: '',
       caution: '',
       strengths: '',
-      client: 'openai',
-      providerProfileId: '',
+      clientId: 'openai',
+      accountRef: '',
       defaultModel: 'gpt-5.4',
       commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      carrier: 'cli',
+      provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
     };
     const existingCat = {
       id: 'runtime-codex',
       name: 'runtime-codex',
       displayName: '运行时缅因猫',
-      provider: 'openai',
+      clientId: 'openai',
       defaultModel: 'gpt-5.4',
       color: { primary: '#16a34a', secondary: '#bbf7d0' },
       mentionPatterns: ['@runtime-codex'],
@@ -119,6 +603,7 @@ describe('HubCatEditor', () => {
 
     const payload = buildCatPayload(form, existingCat) as Record<string, unknown>;
     expect(payload.name).toBe('运行时缅因猫');
+    expect(payload.variantLabel).toBe('GPT-5.5');
   });
 
   it('buildCatPayload recomputes mcpSupport when client changes on existing cat', () => {
@@ -126,6 +611,7 @@ describe('HubCatEditor', () => {
       catId: 'runtime-codex',
       name: '运行时缅因猫',
       displayName: '运行时缅因猫',
+      variantLabel: '',
       nickname: '',
       avatar: '/avatars/codex.png',
       colorPrimary: '#16a34a',
@@ -136,21 +622,24 @@ describe('HubCatEditor', () => {
       teamStrengths: '',
       caution: '',
       strengths: '',
-      client: 'openai',
-      providerProfileId: '',
+      clientId: 'openai',
+      accountRef: '',
       defaultModel: 'gpt-5.4',
       commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      carrier: 'cli',
+      provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
     };
     const existingCat = {
       id: 'runtime-codex',
       name: 'runtime-codex',
       displayName: '运行时缅因猫',
-      provider: 'antigravity',
+      clientId: 'antigravity',
       defaultModel: 'gemini-bridge',
       color: { primary: '#16a34a', secondary: '#bbf7d0' },
       mentionPatterns: ['@runtime-codex'],
@@ -160,6 +649,20 @@ describe('HubCatEditor', () => {
 
     const payload = buildCatPayload(baseForm, existingCat) as Record<string, unknown>;
     expect(payload.mcpSupport).toBe(true);
+
+    const acpPayload = buildCatPayload(
+      {
+        ...baseForm,
+        clientId: 'acp',
+        accountRef: 'claude',
+        defaultModel: 'acp-model',
+        carrier: 'acp',
+        acpCommand: 'custom-acp-agent',
+        acpStartupArgs: '--acp',
+      },
+      { ...existingCat, clientId: 'openai' },
+    ) as Record<string, unknown>;
+    expect(acpPayload.mcpSupport).toBe(true);
   });
 
   it('buildCatPayload seeds default Antigravity command args when the field is still blank', () => {
@@ -167,6 +670,7 @@ describe('HubCatEditor', () => {
       catId: 'runtime-bridge',
       name: '桥接猫',
       displayName: '桥接猫',
+      variantLabel: '',
       nickname: '',
       avatar: '/avatars/bridge.png',
       colorPrimary: '#16a34a',
@@ -177,19 +681,456 @@ describe('HubCatEditor', () => {
       teamStrengths: '',
       caution: '',
       strengths: '',
-      client: 'antigravity',
-      providerProfileId: '',
+      clientId: 'antigravity',
+      accountRef: '',
       defaultModel: 'gemini-bridge',
       commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      carrier: 'cli',
+      provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
     };
 
     const payload = buildCatPayload(form, null) as Record<string, unknown>;
     expect(payload.commandArgs).toEqual(splitCommandArgs(DEFAULT_ANTIGRAVITY_COMMAND_ARGS));
+  });
+
+  it('exposes model-aware effort options for Claude and Codex only', () => {
+    expect(getCliEffortOptionsForClient('anthropic', 'claude-opus-4-6')).toEqual(['low', 'medium', 'high', 'max']);
+    expect(getCliEffortOptionsForClient('openai', 'gpt-5.4')).toEqual(['low', 'medium', 'high', 'xhigh']);
+    expect(getCliEffortOptionsForClient('openai', 'gpt-5.6-sol')).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+      'ultra',
+    ]);
+    expect(getCliEffortOptionsForClient('opencode', 'gpt-5.6-sol')).toBeNull();
+  });
+
+  it('hydrates a provider-native effort outside the maintained presets', () => {
+    const form = initialState({
+      id: 'runtime-codex-native',
+      displayName: 'Runtime Codex',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      mentionPatterns: ['@runtime-codex-native'],
+      clientId: 'openai',
+      defaultModel: 'gpt-5.4',
+      avatar: '/avatars/codex.png',
+      roleDescription: '审查',
+      personality: '严谨',
+      cli: { effort: 'turbo-native' },
+    } as CatData);
+
+    expect(form.cliEffort).toBe('turbo-native');
+  });
+
+  it('renders editable native effort with model-aware presets and provider validation disclosure', async () => {
+    const onChange = await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol');
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="CLI Effort"]');
+
+    expect(input).not.toBeNull();
+    expect(input?.list?.options ? Array.from(input.list.options).map((option) => option.value) : []).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+      'ultra',
+    ]);
+    expect(container.textContent).toContain('CLI 会返回其自身的校验错误');
+
+    await changeField(input!, 'turbo-native');
+    expect(onChange).toHaveBeenCalledWith({ cliEffort: 'turbo-native' });
+  });
+
+  it('hides CLI-only extensions when the effective transport is ACP', async () => {
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { carrier: 'acp' });
+    expect(container.querySelector('input[aria-label="CLI Effort"]')).toBeNull();
+    expect(container.textContent).not.toContain('额外 CLI 参数');
+  });
+
+  it('shows a separate OAuth Codex speed selector and disables Fast for unsupported models', async () => {
+    const onChange = await renderAdvancedRuntimeSection(
+      'openai',
+      'gpt-4.1',
+      {},
+      { visible: true, fastSupported: false },
+    );
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="速度档位"]');
+    expect(select).not.toBeNull();
+    expect(Array.from(select?.options ?? []).map((option) => option.textContent)).toEqual([
+      '继承 Codex 设置',
+      'Standard',
+      'Fast（当前模型不可用）',
+    ]);
+    expect(Array.from(select?.options ?? []).find((option) => option.value === 'fast')?.disabled).toBe(true);
+    expect(container.textContent).toContain('这是请求档位，不代表上游最终实际服务档位');
+
+    await changeField(select!, 'standard', 'change');
+    expect(onChange).toHaveBeenCalledWith({ codexSpeed: 'standard' });
+
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', {}, { visible: false, fastSupported: true });
+    expect(container.querySelector('select[aria-label="速度档位"]')).toBeNull();
+  });
+
+  it('hydrates, persists, clears, and dormantly preserves the member Codex speed intent', () => {
+    const cat = {
+      id: 'runtime-sol-speed',
+      name: 'Sol',
+      displayName: 'Sol',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.6-sol',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      mentionPatterns: ['@runtime-sol-speed'],
+      avatar: '/avatars/codex.png',
+      roleDescription: '审查',
+      cli: { command: 'codex', outputFormat: 'json', serviceTier: 'fast' },
+    } as CatData;
+    const form = initialState(cat);
+    expect(form.codexSpeed).toBe('fast');
+
+    const changed = buildCatPatchPayload({ ...form, codexSpeed: 'standard' }, cat, {
+      accountAuthType: 'oauth',
+    }) as Record<string, unknown>;
+    expect(changed.cli).toEqual({ serviceTier: 'standard' });
+
+    const cleared = buildCatPatchPayload({ ...form, codexSpeed: '' }, cat, {
+      accountAuthType: 'oauth',
+    }) as Record<string, unknown>;
+    expect(cleared.cli).toEqual({ serviceTier: null });
+
+    const dormant = buildCatPatchPayload({ ...form, codexSpeed: 'standard' }, cat, {
+      accountAuthType: 'api_key',
+    }) as Record<string, unknown>;
+    expect(dormant.cli).toBeUndefined();
+  });
+
+  it('buildCatPayload keeps structured cli.effort separate from raw cliConfigArgs', () => {
+    const form = {
+      catId: 'runtime-codex',
+      name: '运行时缅因猫',
+      displayName: '运行时缅因猫',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/codex.png',
+      colorPrimary: '#16a34a',
+      colorSecondary: '#bbf7d0',
+      mentionPatterns: '@runtime-codex',
+      roleDescription: '审查',
+      personality: '严谨',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'openai',
+      accountRef: 'codex-sponsor',
+      defaultModel: 'gpt-5.4',
+      commandArgs: '',
+      cliConfigArgs: ['--config model_provider="custom"'],
+      cliEffort: 'xhigh',
+      provider: '',
+      sessionChain: 'true',
+      contextWindow: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
+    } as HubCatEditorFormState & { cliEffort: string };
+
+    const payload = buildCatPayload(form, null) as Record<string, unknown>;
+    expect(payload.cli).toEqual({ effort: 'xhigh' });
+    expect(payload.cliConfigArgs).toEqual(['--config model_provider="custom"']);
+  });
+
+  it('ACP payloads clear persisted CLI-only extensions and ignore stale form values', () => {
+    const cat = {
+      id: 'runtime-codex-acp',
+      name: 'ACP Codex',
+      displayName: 'ACP Codex',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      mentionPatterns: ['@runtime-codex-acp'],
+      avatar: '/avatars/codex.png',
+      roleDescription: 'review',
+      personality: 'rigorous',
+      clientId: 'opencode',
+      carrier: 'cli',
+      defaultModel: 'openai/gpt-5.6-sol',
+      cli: { command: 'opencode', outputFormat: 'json', effort: 'ultra' },
+      cliConfigArgs: ['--config stale=true'],
+    } as CatData;
+    const form = {
+      ...initialState(cat),
+      carrier: 'acp',
+      acpCommand: 'codex-acp',
+      acpStartupArgs: 'acp',
+      cliEffort: 'ultra',
+      cliConfigArgs: ['--config should-not-survive=true'],
+    } as HubCatEditorFormState;
+
+    const payload = buildCatPatchPayload(form, cat) as Record<string, unknown>;
+    expect(payload.cli).toEqual({ effort: null });
+    expect(payload.cliConfigArgs).toEqual([]);
+    expect(payload.carrier).toBe('acp');
+  });
+
+  it('writes the canonical carrier at the top level', () => {
+    const form = {
+      catId: 'runtime-sol',
+      name: 'Sol',
+      displayName: 'Sol',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/sol.png',
+      colorPrimary: '#64843A',
+      colorSecondary: '#64843A',
+      mentionPatterns: '@runtime-sol',
+      roleDescription: '旗舰推理与编码',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.6-sol',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      carrier: 'app_server',
+      provider: '',
+      sessionChain: 'true',
+      contextWindow: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
+    } as HubCatEditorFormState;
+
+    const payload = buildCatPayload(form, null) as Record<string, unknown>;
+    expect(payload.carrier).toBe('app_server');
+    expect(payload.cli).toBeUndefined();
+  });
+
+  it('does not emit the legacy cli.carrier field', () => {
+    const form = {
+      catId: 'runtime-sol',
+      name: 'Sol',
+      displayName: 'Sol',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/sol.png',
+      colorPrimary: '#64843A',
+      colorSecondary: '#64843A',
+      mentionPatterns: '@runtime-sol',
+      roleDescription: '旗舰推理与编码',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.6-sol',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      carrier: 'cli',
+      provider: '',
+      sessionChain: 'true',
+      contextWindow: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
+    } as HubCatEditorFormState;
+    const cat = {
+      id: 'runtime-sol',
+      displayName: 'Sol',
+      color: { primary: '#64843A', secondary: '#64843A' },
+      mentionPatterns: ['@runtime-sol'],
+      clientId: 'openai',
+      defaultModel: 'gpt-5.6-sol',
+      avatar: '/avatars/sol.png',
+      roleDescription: '旗舰推理与编码',
+      personality: '',
+      cli: { command: 'codex', outputFormat: 'json' },
+    } as CatData;
+
+    const payload = buildCatPayload(form, cat) as Record<string, unknown>;
+    expect(payload.carrier).toBe('cli');
+    expect(payload.cli).toBeUndefined();
+  });
+
+  it('shows the canonical carrier selector for openai cats', async () => {
+    const form: HubCatEditorFormState = {
+      catId: 'runtime-codex',
+      name: '运行时缅因猫',
+      displayName: '运行时缅因猫',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/codex.png',
+      colorPrimary: '#16a34a',
+      colorSecondary: '#bbf7d0',
+      mentionPatterns: '@runtime-codex',
+      roleDescription: '审查',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.4',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      carrier: 'cli',
+      provider: '',
+      sessionChain: 'true',
+      contextWindow: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
+    };
+
+    await act(async () => {
+      root.render(
+        React.createElement(AccountSection, {
+          form,
+          modelOptions: [],
+          availableProfiles: [],
+          loadingProfiles: false,
+          onChange: vi.fn(),
+        }),
+      );
+    });
+
+    const selector = document.body.querySelector('[aria-label="接入方式"]') as HTMLSelectElement | null;
+    expect(selector).not.toBeNull();
+    expect(Array.from(selector?.options ?? []).map((option) => option.textContent)).toEqual(['CLI', 'App Server']);
+  });
+
+  it('persists ACP as the canonical carrier', () => {
+    const form = {
+      catId: 'runtime-codex-acp',
+      name: 'ACP 缅因猫',
+      displayName: 'ACP 缅因猫',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/codex.png',
+      colorPrimary: '#16a34a',
+      colorSecondary: '#bbf7d0',
+      mentionPatterns: '@runtime-codex-acp',
+      roleDescription: '审查',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'opencode',
+      accountRef: 'opencode',
+      defaultModel: 'openai/gpt-5.4',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      carrier: 'acp',
+      provider: '',
+      sessionChain: 'true',
+      contextWindow: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
+      acpCommand: 'opencode',
+      acpStartupArgs: 'acp',
+    } as HubCatEditorFormState;
+
+    const payload = buildCatPayload(form, null) as Record<string, unknown>;
+    expect(payload.acp).toBeDefined();
+    expect(payload.carrier).toBe('acp');
+    expect(payload.cli).toBeUndefined();
+  });
+
+  it('keeps the carrier selector visible as the single access-mode truth', async () => {
+    const form: HubCatEditorFormState = {
+      catId: 'runtime-codex',
+      name: '运行时缅因猫',
+      displayName: '运行时缅因猫',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/codex.png',
+      colorPrimary: '#16a34a',
+      colorSecondary: '#bbf7d0',
+      mentionPatterns: '@runtime-codex',
+      roleDescription: '审查',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.4',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      carrier: 'cli',
+      provider: '',
+      sessionChain: 'true',
+      contextWindow: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
+    };
+
+    await act(async () => {
+      root.render(
+        React.createElement(AccountSection, {
+          form,
+          modelOptions: [],
+          availableProfiles: [],
+          loadingProfiles: false,
+          onChange: vi.fn(),
+        }),
+      );
+    });
+    expect(document.body.querySelector('[aria-label="接入方式"]')).not.toBeNull();
+  });
+
+  it('preserves a provider-native effort when patching an older OpenAI model', () => {
+    const form = {
+      catId: 'runtime-sol',
+      name: 'Sol',
+      displayName: 'Sol',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/sol.png',
+      colorPrimary: '#64843A',
+      colorSecondary: '#64843A',
+      mentionPatterns: '@runtime-sol',
+      roleDescription: '旗舰推理与编码',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.4',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: 'ultra',
+      carrier: 'cli',
+      provider: '',
+      sessionChain: 'true',
+      contextWindow: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
+    } as HubCatEditorFormState;
+    const cat = {
+      id: 'runtime-sol',
+      name: 'Sol',
+      displayName: 'Sol',
+      clientId: 'openai',
+      defaultModel: 'gpt-5.6-sol',
+      accountRef: 'codex',
+      mcpSupport: true,
+      cli: { command: 'codex', outputFormat: 'json', effort: 'ultra' },
+    } as CatData;
+
+    const payload = buildCatPatchPayload(form, cat) as Record<string, unknown>;
+    expect(payload.defaultModel).toBe('gpt-5.4');
+    expect(payload.cli).toEqual({ effort: 'ultra' });
   });
 
   it('splitCommandArgs preserves quoted segments', () => {
@@ -202,16 +1143,361 @@ describe('HubCatEditor', () => {
     ]);
   });
 
-  it('validateModelFormatForClient enforces providerId/modelId for opencode only', () => {
+  it('validateModelFormatForClient rejects opencode model without providerId/modelId format', () => {
     expect(validateModelFormatForClient('opencode', 'gpt-5.4')).toMatch(/providerId\/modelId/i);
     expect(validateModelFormatForClient('opencode', 'openai/gpt-5.4')).toBeNull();
     expect(validateModelFormatForClient('openai', 'gpt-5.4')).toBeNull();
   });
 
+  it('buildCatPayload includes ACP transport config when enabled for OpenCode', () => {
+    const form: HubCatEditorFormState = {
+      catId: 'opencode-acp',
+      name: 'OpenCode ACP',
+      displayName: 'OpenCode ACP',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/opencode.png',
+      colorPrimary: '#c8a951',
+      colorSecondary: '#f5edda',
+      mentionPatterns: '@opencode-acp',
+      roleDescription: 'OpenCode over ACP',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'opencode',
+      accountRef: 'claude-key',
+      defaultModel: 'claude-opus-4-6',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      provider: 'anthropic',
+      sessionChain: 'true',
+      contextWindow: '',
+      ...emptyVoiceFields,
+      carrier: 'acp',
+      mcpSupport: true,
+      acpTransport: 'stdio',
+      acpCommand: 'opencode',
+      acpStartupArgs: '--acp --mode agent',
+      acpMaxLiveProcesses: '4',
+      acpIdleTtlMinutes: '30',
+    };
+
+    const payload = buildCatPayload(form, null) as Record<string, unknown>;
+    expect(payload.acp).toEqual({
+      command: 'opencode',
+      startupArgs: ['--acp', '--mode', 'agent'],
+      pool: { maxLiveProcesses: 4, idleTtlMs: 1_800_000 },
+    });
+  });
+
+  it('buildCatPayload preserves existing hidden ACP fields when ACP stays enabled', () => {
+    const form: HubCatEditorFormState = {
+      catId: 'opencode-acp',
+      name: 'OpenCode ACP',
+      displayName: 'OpenCode ACP',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/opencode.png',
+      colorPrimary: '#c8a951',
+      colorSecondary: '#f5edda',
+      mentionPatterns: '@opencode-acp',
+      roleDescription: 'OpenCode over ACP',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'opencode',
+      accountRef: 'claude-key',
+      defaultModel: 'claude-opus-4-6',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      provider: 'anthropic',
+      sessionChain: 'true',
+      contextWindow: '',
+      ...emptyVoiceFields,
+      carrier: 'acp',
+      mcpSupport: true,
+      acpTransport: 'stdio',
+      acpCommand: 'opencode',
+      acpStartupArgs: 'acp',
+      acpMaxLiveProcesses: '',
+      acpIdleTtlMinutes: '',
+    };
+    const cat = {
+      id: 'opencode-acp',
+      name: 'opencode-acp',
+      displayName: 'OpenCode ACP',
+      clientId: 'opencode',
+      acp: {
+        command: 'opencode',
+        startupArgs: ['acp'],
+        mcpWhitelist: ['search_evidence'],
+        supportsMultiplexing: true,
+      },
+    } as CatData;
+
+    const payload = buildCatPayload(form, cat) as Record<string, unknown>;
+
+    expect(payload.acp).toEqual({
+      command: 'opencode',
+      startupArgs: ['acp'],
+      mcpWhitelist: ['search_evidence'],
+      supportsMultiplexing: true,
+    });
+  });
+
+  it('exposes the canonical carrier matrix per client', () => {
+    expect(carrierOptionsForClient('anthropic').map((option) => option.value)).toEqual(['cli', 'sdk']);
+    expect(carrierOptionsForClient('openai').map((option) => option.value)).toEqual(['cli', 'app_server']);
+    expect(carrierOptionsForClient('opencode').map((option) => option.value)).toEqual(['cli', 'acp']);
+    expect(carrierOptionsForClient('acp').map((option) => option.value)).toEqual(['acp']);
+  });
+
+  it('seeds a create draft with the supported default carrier for its client', () => {
+    expect(initialState(null, { clientId: 'acp', defaultModel: '' }).carrier).toBe('acp');
+    expect(initialState(null, { clientId: 'openai', defaultModel: '' }).carrier).toBe('app_server');
+  });
+
+  it('getAcpWarning returns kimi login warning when kimi + ACP', () => {
+    const warning = getAcpWarning('kimi', 'acp');
+    expect(warning).toBeTruthy();
+    expect(warning).toContain('kimi login');
+  });
+
+  it('getAcpWarning returns null for kimi when ACP disabled', () => {
+    expect(getAcpWarning('kimi', 'cli')).toBeNull();
+  });
+
+  it('getAcpWarning returns null for non-kimi clients', () => {
+    expect(getAcpWarning('opencode', 'acp')).toBeNull();
+    expect(getAcpWarning('google', 'acp')).toBeNull();
+    expect(getAcpWarning('anthropic', 'sdk')).toBeNull();
+  });
+
+  it('buildCatPayload forces ACP transport for generic acp client', () => {
+    const form: HubCatEditorFormState = {
+      catId: 'acp-deepseek',
+      name: 'DeepSeek ACP',
+      displayName: 'DeepSeek ACP',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/default.png',
+      colorPrimary: '#0f172a',
+      colorSecondary: '#e2e8f0',
+      mentionPatterns: '@acp-deepseek',
+      roleDescription: 'ACP agent',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'acp',
+      accountRef: 'deepseek-key',
+      defaultModel: 'deepseek-chat',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      provider: '',
+      sessionChain: 'true',
+      contextWindow: '',
+      ...emptyVoiceFields,
+      carrier: 'acp',
+      mcpSupport: true,
+      acpTransport: 'stdio',
+      acpCommand: 'deepseek-cli',
+      acpStartupArgs: '--acp',
+      acpMaxLiveProcesses: '',
+      acpIdleTtlMinutes: '',
+    };
+
+    const payload = buildCatPayload(form, null) as Record<string, unknown>;
+    expect(payload.clientId).toBe('acp');
+    expect(payload.acp).toEqual({
+      command: 'deepseek-cli',
+      startupArgs: ['--acp'],
+    });
+  });
+
+  it('buildCatPatchPayload clears stale provider for generic ACP — provider is opencode-only, not carried by acp', () => {
+    // F161 root-cause fix: clientId='acp' (generic ACP) is NOT a provider carrier.
+    // `provider` selects the env-map template (BUILTIN_ENV_MAPS[provider]) and is an
+    // OpenCode-only concept — there is no UI field for generic ACP, and env customization
+    // flows through account envVars templates instead. A stale provider (e.g. left over from
+    // a clientId='opencode' member or pre-cleanup data) must be cleared (provider:null) on
+    // save; otherwise prepareAcpProcessEnv forwards it to the env-map and injects the new
+    // account's key under the wrong provider's env name. For OpenCode provider management,
+    // use clientId='opencode' (cli or acp transport).
+    const form: HubCatEditorFormState = {
+      catId: 'acp-opencode',
+      name: 'OpenCode ACP',
+      displayName: 'OpenCode ACP',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/default.png',
+      colorPrimary: '#0f172a',
+      colorSecondary: '#e2e8f0',
+      mentionPatterns: '@acp-opencode',
+      roleDescription: 'OpenCode over generic ACP',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'acp',
+      accountRef: 'anthropic-key',
+      defaultModel: 'claude-opus-4-6',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      provider: '',
+      sessionChain: 'true',
+      contextWindow: '',
+      ...emptyVoiceFields,
+      carrier: 'acp',
+      mcpSupport: true,
+      acpTransport: 'stdio',
+      acpCommand: 'opencode',
+      acpStartupArgs: 'acp',
+      acpMaxLiveProcesses: '',
+      acpIdleTtlMinutes: '',
+    };
+    const existingCat = {
+      id: 'acp-opencode',
+      name: 'OpenCode ACP',
+      displayName: 'OpenCode ACP',
+      clientId: 'acp',
+      accountRef: 'anthropic-key',
+      provider: 'anthropic',
+      defaultModel: 'claude-opus-4-6',
+      acp: { command: 'opencode', startupArgs: ['acp'] },
+      color: { primary: '#0f172a', secondary: '#e2e8f0' },
+      mentionPatterns: ['@acp-opencode'],
+      avatar: '/avatars/default.png',
+      roleDescription: 'OpenCode over generic ACP',
+    } as CatData;
+
+    const payload = buildCatPatchPayload(form, existingCat) as Record<string, unknown>;
+    expect(payload.provider).toBeNull();
+  });
+
+  it('buildCatPatchPayload provider handling is independent of command basename — generic ACP never carries provider, kimi or opencode alike', () => {
+    // F161 root-cause fix: provider handling for generic ACP must NOT depend on the command
+    // basename. A clientId='acp' member is never a provider carrier whether the command is
+    // "kimi", "opencode", or anything else — a stale provider is always cleared on save.
+    // (Pre-cleanup, the opencode command basename alone preserved it; the cleanup commit
+    // wrongly widened the carrier to ALL acp — the correct scope is opencode-only.)
+    const form: HubCatEditorFormState = {
+      catId: 'acp-kimi',
+      name: 'Kimi ACP',
+      displayName: 'Kimi ACP',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/default.png',
+      colorPrimary: '#0f172a',
+      colorSecondary: '#e2e8f0',
+      mentionPatterns: '@acp-kimi',
+      roleDescription: 'Kimi over generic ACP',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'acp',
+      accountRef: 'moonshot-key',
+      defaultModel: 'kimi-k2',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      provider: '',
+      sessionChain: 'true',
+      contextWindow: '',
+      ...emptyVoiceFields,
+      carrier: 'acp',
+      mcpSupport: true,
+      acpTransport: 'stdio',
+      acpCommand: 'kimi',
+      acpStartupArgs: 'acp',
+      acpMaxLiveProcesses: '',
+      acpIdleTtlMinutes: '',
+    };
+    const existingCat = {
+      id: 'acp-kimi',
+      name: 'Kimi ACP',
+      displayName: 'Kimi ACP',
+      clientId: 'acp',
+      accountRef: 'moonshot-key',
+      provider: 'moonshot',
+      defaultModel: 'kimi-k2',
+      acp: { command: 'kimi', startupArgs: ['acp'] },
+      color: { primary: '#0f172a', secondary: '#e2e8f0' },
+      mentionPatterns: ['@acp-kimi'],
+      avatar: '/avatars/default.png',
+      roleDescription: 'Kimi over generic ACP',
+    } as CatData;
+
+    const payload = buildCatPatchPayload(form, existingCat) as Record<string, unknown>;
+    expect(payload.provider).toBeNull();
+  });
+
+  it('buildCatPatchPayload does not emit a redundant provider:null when a generic ACP member has no stale provider', () => {
+    // F161 root-cause fix guard: a clean generic ACP member (no existing provider) must NOT
+    // gain a noisy provider:null on every save. Clearing only applies when there is a stale
+    // value to remove.
+    const form: HubCatEditorFormState = {
+      catId: 'acp-clean',
+      name: 'Clean ACP',
+      displayName: 'Clean ACP',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/default.png',
+      colorPrimary: '#0f172a',
+      colorSecondary: '#e2e8f0',
+      mentionPatterns: '@acp-clean',
+      roleDescription: 'Clean generic ACP',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'acp',
+      accountRef: 'some-key',
+      defaultModel: 'some-model',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      provider: '',
+      sessionChain: 'true',
+      contextWindow: '',
+      ...emptyVoiceFields,
+      carrier: 'acp',
+      mcpSupport: true,
+      acpTransport: 'stdio',
+      acpCommand: 'some-acp-agent',
+      acpStartupArgs: 'acp',
+      acpMaxLiveProcesses: '',
+      acpIdleTtlMinutes: '',
+    };
+    const existingCat = {
+      id: 'acp-clean',
+      name: 'Clean ACP',
+      displayName: 'Clean ACP',
+      clientId: 'acp',
+      accountRef: 'some-key',
+      defaultModel: 'some-model',
+      acp: { command: 'some-acp-agent', startupArgs: ['acp'] },
+      color: { primary: '#0f172a', secondary: '#e2e8f0' },
+      mentionPatterns: ['@acp-clean'],
+      avatar: '/avatars/default.png',
+      roleDescription: 'Clean generic ACP',
+    } as CatData;
+
+    const payload = buildCatPatchPayload(form, existingCat) as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('provider');
+  });
+
   it('renders normal member provider/model fields and saves to /api/cats', async () => {
     const onSaved = vi.fn(() => Promise.resolve());
-    mockApiFetch.mockImplementation((path: string) => {
-      if (path === '/api/provider-profiles') {
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -224,7 +1510,6 @@ describe('HubCatEditor', () => {
                 name: 'Claude (OAuth)',
                 authType: 'oauth',
                 protocol: 'anthropic',
-                builtin: true,
                 mode: 'subscription',
                 models: ['claude-opus-4-6'],
                 hasApiKey: false,
@@ -238,7 +1523,6 @@ describe('HubCatEditor', () => {
                 name: 'Codex Sponsor',
                 authType: 'api_key',
                 protocol: 'openai',
-                builtin: false,
                 mode: 'api_key',
                 models: ['gpt-5.4-mini'],
                 hasApiKey: true,
@@ -252,16 +1536,25 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-spark' } }, 201));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
       root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved }));
     });
     await flushEffects();
+    await changeField(
+      queryField<HTMLSelectElement>(container, 'select[aria-label="配置方式"]'),
+      'managed_account',
+      'change',
+    );
+    await flushEffects();
 
-    expect(container.textContent).toContain('Provider');
-    expect(container.textContent).not.toContain('CLI Command');
+    expect(document.body.textContent).toContain('用哪个号');
+    expect(document.body.textContent).not.toContain('CLI Command');
 
     await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
     await changeField(queryField(container, 'input[aria-label="Avatar"]'), '/avatars/spark.png');
@@ -269,10 +1562,12 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-spark, @火花猫');
     await changeField(queryField(container, 'select[aria-label="Client"]'), 'openai', 'change');
     await flushEffects();
-    await changeField(queryField(container, 'select[aria-label="Provider"]'), 'codex-sponsor', 'change');
-    await changeField(queryField(container, 'select[aria-label="Model"]'), 'gpt-5.4-mini', 'change');
+    await changeField(queryField(container, 'select[aria-label="用哪个号"]'), 'codex-sponsor', 'change');
+    await changeField(queryField(container, 'input[aria-label="Model"]'), 'gpt-5.4-mini');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -282,17 +1577,310 @@ describe('HubCatEditor', () => {
     expect(postCall).toBeTruthy();
     expect(postCall?.[1]?.method).toBe('POST');
     const payload = JSON.parse(String(postCall?.[1]?.body));
-    expect(payload.client).toBe('openai');
-    expect(payload.catId).toBe('火花猫');
+    expect(payload.clientId).toBe('openai');
+    expect(payload.catId).toMatch(/^cat-[a-z0-9]+$/);
     expect(payload.accountRef).toBe('codex-sponsor');
     expect(payload.defaultModel).toBe('gpt-5.4-mini');
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
-  it('allows creating opencode member with bare model (soft validation, no block)', async () => {
+  it('AC-C2: defaults API-key member aliases to the selected model name', async () => {
     const onSaved = vi.fn(() => Promise.resolve());
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'codex-sponsor',
+            providers: [
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                protocol: 'openai',
+                mode: 'api_key',
+                models: ['gpt-5.4-mini'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cats') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'runtime-spark' } }, 201));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          draft: { clientId: 'openai', accountRef: 'codex-sponsor', defaultModel: 'gpt-5.4-mini' },
+          onClose: vi.fn(),
+          onSaved,
+        }),
+      );
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
+    await changeField(queryField(container, 'input[aria-label="Description"]'), '快速执行');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const postCall = mockApiFetch.mock.calls.find(([path]) => path === '/api/cats');
+    expect(postCall).toBeTruthy();
+    const payload = JSON.parse(String(postCall?.[1]?.body));
+    expect(payload.accountRef).toBe('codex-sponsor');
+    expect(payload.defaultModel).toBe('gpt-5.4-mini');
+    expect(payload.mentionPatterns).toContain('@gpt-5.4-mini');
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('uploads ref audio and saves the returned /uploads path in voiceConfig', async () => {
+    const onSaved = vi.fn(() => Promise.resolve());
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'codex-sponsor',
+            providers: [
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                protocol: 'openai',
+                mode: 'api_key',
+                models: ['gpt-5.4-mini'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/uploads/ref-audio') {
+        expect(init?.method).toBe('POST');
+        expect(init?.body).toBeInstanceOf(FormData);
+        return Promise.resolve(jsonResponse({ url: '/uploads/ref-audio-test.wav' }));
+      }
+      if (path === '/api/cats') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'runtime-spark' } }, 201));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          draft: { clientId: 'openai', accountRef: 'codex-sponsor', defaultModel: 'gpt-5.4-mini' },
+          onClose: vi.fn(),
+          onSaved,
+        }),
+      );
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
+    await changeField(queryField(container, 'input[aria-label="Description"]'), '快速执行');
+    await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-spark');
+
+    const voiceToggle = Array.from(document.body.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Voice Config'),
+    );
+    await act(async () => {
+      voiceToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'select[aria-label="Voice Lang Code"]'), 'zh', 'change');
+    const audioInput = queryField<HTMLInputElement>(container, 'input[type="file"][accept*="audio"]');
+    const file = new File([new Uint8Array([0x52, 0x49, 0x46, 0x46])], 'voice.wav', { type: 'audio/wav' });
+    Object.defineProperty(audioInput, 'files', {
+      configurable: true,
+      value: [file],
+    });
+    await act(async () => {
+      audioInput.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const postCall = mockApiFetch.mock.calls.find(([path]) => path === '/api/cats');
+    expect(postCall).toBeTruthy();
+    const payload = JSON.parse(String(postCall?.[1]?.body));
+    expect(payload.voiceConfig).toMatchObject({
+      voice: 'zm_yunjian',
+      langCode: 'zh',
+      refAudio: '/uploads/ref-audio-test.wav',
+    });
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('dispatches guide:confirm only after a successful member save', async () => {
+    const onSaved = vi.fn(() => Promise.resolve());
+    const onGuideConfirm = vi.fn();
+    window.addEventListener('guide:confirm', onGuideConfirm as EventListener);
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'codex-sponsor',
+            providers: [
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                protocol: 'openai',
+                mode: 'api_key',
+                models: ['gpt-5.4-mini'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cats') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'runtime-spark' } }, 201));
+      }
+      return Promise.resolve(jsonResponse({ config: {} }));
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          draft: { clientId: 'openai', accountRef: 'codex-sponsor', defaultModel: 'gpt-5.4-mini' },
+          onClose: vi.fn(),
+          onSaved,
+        }),
+      );
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
+    await changeField(queryField(container, 'input[aria-label="Description"]'), '快速执行');
+    await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-spark, @火花猫');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(onGuideConfirm).toHaveBeenCalledTimes(1);
+    expect((onGuideConfirm.mock.calls[0]?.[0] as CustomEvent<{ target: string }>).detail).toEqual({
+      target: 'member-editor.profile',
+    });
+
+    window.removeEventListener('guide:confirm', onGuideConfirm as EventListener);
+  });
+
+  it('does not dispatch guide:confirm when member save fails', async () => {
+    const onSaved = vi.fn(() => Promise.resolve());
+    const onGuideConfirm = vi.fn();
+    window.addEventListener('guide:confirm', onGuideConfirm as EventListener);
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'codex-sponsor',
+            providers: [
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                protocol: 'openai',
+                mode: 'api_key',
+                models: ['gpt-5.4-mini'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cats') {
+        return Promise.resolve(jsonResponse({ error: '保存失败' }, 500));
+      }
+      return Promise.resolve(jsonResponse({ config: {} }));
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          draft: { clientId: 'openai', accountRef: 'codex-sponsor', defaultModel: 'gpt-5.4-mini' },
+          onClose: vi.fn(),
+          onSaved,
+        }),
+      );
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
+    await changeField(queryField(container, 'input[aria-label="Description"]'), '快速执行');
+    await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-spark, @火花猫');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(onGuideConfirm).not.toHaveBeenCalled();
+
+    window.removeEventListener('guide:confirm', onGuideConfirm as EventListener);
+  });
+
+  it('blocks creating opencode+api_key member without ocProviderName', async () => {
+    const onSaved = vi.fn(() => Promise.resolve());
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -305,10 +1893,21 @@ describe('HubCatEditor', () => {
                 name: 'OpenCode (OAuth)',
                 authType: 'oauth',
                 protocol: 'anthropic',
-                builtin: true,
                 mode: 'subscription',
                 models: ['claude-opus-4-6'],
                 hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+              {
+                id: 'oc-apikey',
+                provider: 'oc-apikey',
+                displayName: 'OC API Key',
+                name: 'OC API Key',
+                authType: 'api_key',
+                mode: 'api_key',
+                models: ['glm-5'],
+                hasApiKey: true,
                 createdAt: '2026-03-18T00:00:00.000Z',
                 updatedAt: '2026-03-18T00:00:00.000Z',
               },
@@ -319,7 +1918,10 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats' && init?.method === 'POST') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-opencode' } }, 201));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
@@ -327,9 +1929,9 @@ describe('HubCatEditor', () => {
         React.createElement(HubCatEditor, {
           open: true,
           draft: {
-            client: 'opencode',
-            accountRef: 'opencode',
-            defaultModel: 'gpt-5.4',
+            clientId: 'opencode',
+            accountRef: 'oc-apikey',
+            defaultModel: 'glm-5',
           },
           onClose: vi.fn(),
           onSaved: onSaved,
@@ -340,18 +1942,305 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'input[aria-label="Name"]'), '运行时金渐层');
     await changeField(queryField(container, 'input[aria-label="Description"]'), '审查');
+    await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-jinjianceng');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flushEffects();
 
-    // Save should proceed even with bare model name — validation is soft hint only.
-    const postCall = mockApiFetch.mock.calls.find(
-      ([path, init]: [string, RequestInit | undefined]) => path === '/api/cats' && init?.method === 'POST',
+    // Save should be blocked — opencode+api_key without provider is rejected.
+    const postCall = mockApiFetch.mock.calls.find(([path, init]) => path === '/api/cats' && init?.method === 'POST');
+    expect(postCall).toBeUndefined();
+    expect(document.body.textContent).toContain('Provider 名称');
+  });
+
+  it('lets OpenCode members opt into ACP transport from the auth section', async () => {
+    const onSaved = vi.fn(() => Promise.resolve());
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'claude-key',
+            providers: [
+              {
+                id: 'claude-key',
+                provider: 'claude',
+                displayName: 'Claude Key',
+                name: 'Claude Key',
+                authType: 'api_key',
+                mode: 'api_key',
+                models: ['claude-opus-4-6'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cats' && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'opencode-acp' } }, 201));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          draft: { clientId: 'opencode', accountRef: 'claude-key', defaultModel: 'claude-opus-4-6' },
+          onClose: vi.fn(),
+          onSaved,
+        }),
+      );
+    });
+    await flushEffects();
+
+    expect(document.body.textContent).toContain('接入方式');
+    await changeField(queryField(container, 'select[aria-label="接入方式"]'), 'acp', 'change');
+    expect(document.body.textContent).toContain('ACP Command');
+
+    await changeField(queryField(container, 'input[aria-label="Name"]'), 'OpenCode ACP');
+    await changeField(queryField(container, 'input[aria-label="Description"]'), 'OpenCode over ACP');
+    await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@opencode-acp');
+    await changeField(queryField(container, 'input[aria-label="OC Provider Name"]'), 'anthropic');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
     );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const postCall = mockApiFetch.mock.calls.find(([path, init]) => path === '/api/cats' && init?.method === 'POST');
     expect(postCall).toBeTruthy();
+    const payload = JSON.parse(String(postCall?.[1]?.body));
+    expect(payload.acp).toEqual({ command: 'opencode', startupArgs: ['acp'] });
+    expect(onSaved).toHaveBeenCalled();
+  });
+
+  it('drops stale ACP transport when switching an ACP-enabled member to a CLI-only client', async () => {
+    const existingCat = {
+      id: 'opencode-acp',
+      name: 'opencode-acp',
+      displayName: 'OpenCode ACP',
+      clientId: 'opencode',
+      carrier: 'acp',
+      accountRef: 'claude-key',
+      provider: 'anthropic',
+      defaultModel: 'claude-opus-4-6',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@opencode-acp'],
+      avatar: '/avatars/opencode.png',
+      roleDescription: 'OpenCode over ACP',
+      acp: { command: 'opencode', startupArgs: ['acp'] },
+    } as CatData;
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'claude-key',
+            providers: [
+              {
+                id: 'claude-key',
+                provider: 'claude',
+                displayName: 'Claude Key',
+                name: 'Claude Key',
+                authType: 'api_key',
+                protocol: 'anthropic',
+                mode: 'api_key',
+                clientId: 'anthropic',
+                models: ['claude-opus-4-6'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/cats/opencode-acp' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'opencode-acp' } }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          cat: existingCat,
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Transport"]').value).toBe('acp');
+    await changeField(queryField<HTMLSelectElement>(container, 'select[aria-label="Client"]'), 'anthropic', 'change');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Transport"]').value).toBe('cli');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const patchCall = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/cats/opencode-acp' && init?.method === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    const payload = JSON.parse(String(patchCall?.[1]?.body));
+    expect(payload.clientId).toBe('anthropic');
+    expect(payload.carrier).toBe('cli');
+    expect(payload.acp).toBeUndefined();
+  });
+
+  it('switches Google from retired ACP to Native only with an explicit profile', async () => {
+    const existingCat = {
+      id: 'opencode-acp',
+      name: 'opencode-acp',
+      displayName: 'OpenCode ACP',
+      clientId: 'opencode',
+      carrier: 'acp',
+      accountRef: 'claude-key',
+      provider: 'anthropic',
+      defaultModel: 'claude-opus-4-6',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@opencode-acp'],
+      avatar: '/avatars/opencode.png',
+      roleDescription: 'OpenCode over ACP',
+      acp: { command: 'opencode', startupArgs: ['acp'] },
+    } as CatData;
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'claude-key',
+            providers: [
+              {
+                id: 'claude-key',
+                provider: 'claude',
+                displayName: 'Claude Key',
+                name: 'Claude Key',
+                authType: 'api_key',
+                protocol: 'anthropic',
+                mode: 'api_key',
+                clientId: 'anthropic',
+                models: ['claude-opus-4-6'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+              {
+                id: 'gemini-oauth',
+                provider: 'gemini',
+                displayName: 'Gemini OAuth',
+                name: 'Gemini OAuth',
+                authType: 'oauth',
+                protocol: 'google',
+                mode: 'subscription',
+                clientId: 'google',
+                models: ['gemini-2.5-pro'],
+                hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/cats/opencode-acp' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'opencode-acp' } }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          cat: existingCat,
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Transport"]').value).toBe('acp');
+    await changeField(queryField<HTMLSelectElement>(container, 'select[aria-label="Client"]'), 'google', 'change');
+    await flushEffects();
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Transport"]').value).toBe('agy-native');
+    expect(
+      Array.from(queryField<HTMLSelectElement>(container, 'select[aria-label="Transport"]').options).map(
+        (option) => option.value,
+      ),
+    ).not.toContain('acp');
+    await changeField(
+      queryField<HTMLSelectElement>(container, 'select[aria-label="Account"]'),
+      'gemini-oauth',
+      'change',
+    );
+    await changeField(queryField<HTMLInputElement>(container, 'input[aria-label="Model"]'), 'gemini-3.8-flash-high');
+
+    expect(document.body.querySelector('input[aria-label="ACP Command"]')).toBeNull();
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Transport"]').value).toBe('agy-native');
+    await changeField(
+      queryField<HTMLTextAreaElement>(container, 'textarea[aria-label="批准工作区"]'),
+      '/approved/workspace',
+    );
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const patchCall = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/cats/opencode-acp' && init?.method === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    const payload = JSON.parse(String(patchCall?.[1]?.body));
+    expect(payload.clientId).toBe('google');
+    expect(payload.carrier).toBe('cli'); // Native CLI is selected by the explicit agyProfile below.
+    expect(payload.acp).toBeNull(); // Switching to Native explicitly clears the previous ACP configuration.
+    expect(payload.agyProfile).toMatchObject({
+      carrier: 'native',
+      model: 'gemini-3.8-flash-high',
+      trustedWorkspaces: ['/approved/workspace'],
+      autoApprove: false,
+    });
   });
 
   it('resets defaultModel when switching Provider to prevent stale model carry-over', async () => {
@@ -366,8 +2255,7 @@ describe('HubCatEditor', () => {
             displayName: 'Claude (OAuth)',
             name: 'Claude (OAuth)',
             authType: 'oauth',
-            builtin: true,
-            client: 'anthropic',
+            clientId: 'anthropic',
             models: ['claude-opus-4-6', 'claude-sonnet-4-5'],
             hasApiKey: false,
             createdAt: '',
@@ -379,7 +2267,6 @@ describe('HubCatEditor', () => {
             displayName: 'Codex Sponsor',
             name: 'Codex Sponsor',
             authType: 'api_key',
-            builtin: false,
             models: ['gpt-5.4-mini'],
             hasApiKey: true,
             baseUrl: 'https://proxy.example',
@@ -399,7 +2286,8 @@ describe('HubCatEditor', () => {
             displayName: 'Opus',
             breedDisplayName: 'Ragdoll',
             nickname: '',
-            provider: 'anthropic',
+            clientId: 'anthropic',
+            carrier: 'cli',
             accountRef: 'claude',
             defaultModel: 'claude-opus-4-6',
             color: { primary: '#000', secondary: '#fff' },
@@ -407,7 +2295,6 @@ describe('HubCatEditor', () => {
             avatar: '',
             roleDescription: '',
             personality: '',
-            source: 'seed',
           },
           onClose: vi.fn(),
           onSaved: vi.fn(),
@@ -417,19 +2304,92 @@ describe('HubCatEditor', () => {
     await flushEffects();
 
     // Initially model should be claude-opus-4-6
-    const modelSelect = queryField<HTMLSelectElement>(container, 'select[aria-label="Model"]');
-    expect(modelSelect.value).toBe('claude-opus-4-6');
+    const modelInput = queryField<HTMLInputElement>(container, 'input[aria-label="Model"]');
+    expect(modelInput.value).toBe('claude-opus-4-6');
 
     // Switch Provider to codex-sponsor (API Key)
-    await changeField(queryField(container, 'select[aria-label="Provider"]'), 'codex-sponsor', 'change');
+    await changeField(queryField(container, 'select[aria-label="Account"]'), 'codex-sponsor', 'change');
     await flushEffects();
 
     // defaultModel should have been reset (not still 'claude-opus-4-6')
-    const modelSelectAfter = queryField<HTMLSelectElement>(container, 'select[aria-label="Model"]');
-    expect(modelSelectAfter.value).not.toBe('claude-opus-4-6');
+    const modelInputAfter = queryField<HTMLInputElement>(container, 'input[aria-label="Model"]');
+    expect(modelInputAfter.value).not.toBe('claude-opus-4-6');
   });
 
-  it('switches to Antigravity branch and shows CLI command field', async () => {
+  it('resets provider when switching account to prevent stale provider carry-over', async () => {
+    mockApiFetch.mockResolvedValue(
+      jsonResponse({
+        projectPath: '/tmp/project',
+        activeProfileId: null,
+        providers: [
+          {
+            id: 'maas-key',
+            provider: 'maas-key',
+            displayName: 'MaaS Key',
+            name: 'MaaS Key',
+            authType: 'api_key',
+            models: ['glm-5'],
+            hasApiKey: true,
+            baseUrl: 'https://maas.example',
+            createdAt: '',
+            updatedAt: '',
+          },
+          {
+            id: 'deepseek-key',
+            provider: 'deepseek-key',
+            displayName: 'DeepSeek Key',
+            name: 'DeepSeek Key',
+            authType: 'api_key',
+            models: ['deepseek-r2'],
+            hasApiKey: true,
+            baseUrl: 'https://deepseek.example',
+            createdAt: '',
+            updatedAt: '',
+          },
+        ],
+      }),
+    );
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          cat: {
+            id: 'oc-maas',
+            displayName: 'OC MaaS',
+            breedDisplayName: 'OpenCode',
+            nickname: '',
+            clientId: 'opencode',
+            accountRef: 'maas-key',
+            defaultModel: 'maas/glm-5',
+            provider: 'maas',
+            color: { primary: '#000', secondary: '#fff' },
+            mentionPatterns: ['@oc-maas'],
+            avatar: '',
+            roleDescription: '',
+            personality: '',
+          } as CatData,
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+
+    // Initially provider (model provider name) should be 'maas'
+    const providerInput = queryField<HTMLInputElement>(container, 'input[aria-label="OC Provider Name"]');
+    expect(providerInput.value).toBe('maas');
+
+    // Switch account to deepseek-key
+    await changeField(queryField(container, 'select[aria-label="Account"]'), 'deepseek-key', 'change');
+    await flushEffects();
+
+    // provider should have been cleared (not still 'maas')
+    const providerInputAfter = queryField<HTMLInputElement>(container, 'input[aria-label="OC Provider Name"]');
+    expect(providerInputAfter.value).toBe('');
+  });
+
+  it('does not offer the retired IDE execution entry for new members', async () => {
     mockApiFetch.mockResolvedValue(
       jsonResponse({
         projectPath: '/tmp/project',
@@ -442,15 +2402,24 @@ describe('HubCatEditor', () => {
       root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
     });
     await flushEffects();
+    await changeField(
+      queryField<HTMLSelectElement>(container, 'select[aria-label="配置方式"]'),
+      'managed_account',
+      'change',
+    );
+    await flushEffects();
 
-    await changeField(queryField(container, 'select[aria-label="Client"]'), 'antigravity', 'change');
-    expect(container.textContent).toContain('CLI Command');
-    expect(container.querySelector('select[aria-label="Provider"]')).toBeNull();
+    expect(
+      Array.from(queryField<HTMLSelectElement>(container, 'select[aria-label="Client"]').options).map(
+        (option) => option.value,
+      ),
+    ).not.toContain('antigravity');
+    expect(document.body.textContent).not.toContain('CLI Command');
   });
 
   it('shows the selected client builtin account together with all API key accounts', async () => {
-    mockApiFetch.mockImplementation((path: string) => {
-      if (path === '/api/provider-profiles') {
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -463,7 +2432,6 @@ describe('HubCatEditor', () => {
                 name: 'Codex (OAuth)',
                 authType: 'oauth',
                 protocol: 'openai',
-                builtin: true,
                 mode: 'subscription',
                 models: ['gpt-5.4'],
                 hasApiKey: false,
@@ -477,7 +2445,6 @@ describe('HubCatEditor', () => {
                 name: 'Claude Sponsor',
                 authType: 'api_key',
                 protocol: 'anthropic',
-                builtin: false,
                 mode: 'api_key',
                 models: ['claude-opus-4-6'],
                 hasApiKey: true,
@@ -488,80 +2455,81 @@ describe('HubCatEditor', () => {
           }),
         );
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
       root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
     });
     await flushEffects();
+    await changeField(
+      queryField<HTMLSelectElement>(container, 'select[aria-label="配置方式"]'),
+      'managed_account',
+      'change',
+    );
+    await flushEffects();
 
     await changeField(queryField(container, 'select[aria-label="Client"]'), 'openai', 'change');
     await flushEffects();
-    const providerSelect = queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]');
+    const providerSelect = queryField<HTMLSelectElement>(container, 'select[aria-label="用哪个号"]');
     const optionLabels = Array.from(providerSelect.options).map((option) => option.textContent ?? '');
-    expect(optionLabels).toContain('Codex (OAuth)（内置）');
+    expect(optionLabels).toContain('Codex (OAuth)（OAuth）');
     expect(optionLabels).toContain('Claude Sponsor（API Key）');
   });
 
   it('keeps builtin accounts client-specific while exposing all API key accounts', () => {
-    const profiles = [
-      {
+    const profiles: ProfileItem[] = [
+      profileItem({
         id: 'claude-oauth',
         provider: 'claude-oauth',
         displayName: 'Claude (OAuth)',
         name: 'Claude (OAuth)',
         authType: 'oauth',
-        protocol: 'anthropic',
-        builtin: true,
         mode: 'subscription',
         models: ['claude-opus-4-6'],
         hasApiKey: false,
         createdAt: '2026-03-18T00:00:00.000Z',
         updatedAt: '2026-03-18T00:00:00.000Z',
-      },
-      {
+      }),
+      profileItem({
         id: 'claude-sponsor',
         provider: 'claude-sponsor',
         displayName: 'Claude Sponsor',
         name: 'Claude Sponsor',
         authType: 'api_key',
-        protocol: 'anthropic',
-        builtin: false,
         mode: 'api_key',
         models: ['claude-opus-4-6'],
         hasApiKey: true,
         createdAt: '2026-03-18T00:00:00.000Z',
         updatedAt: '2026-03-18T00:00:00.000Z',
-      },
-      {
+      }),
+      profileItem({
         id: 'codex-oauth',
         provider: 'codex-oauth',
         displayName: 'Codex (OAuth)',
         name: 'Codex (OAuth)',
         authType: 'oauth',
-        protocol: 'openai',
-        builtin: true,
         mode: 'subscription',
         models: ['gpt-5.4'],
         hasApiKey: false,
         createdAt: '2026-03-18T00:00:00.000Z',
         updatedAt: '2026-03-18T00:00:00.000Z',
-      },
-      {
+      }),
+      profileItem({
         id: 'codex-sponsor',
         provider: 'codex-sponsor',
         displayName: 'Codex Sponsor',
         name: 'Codex Sponsor',
         authType: 'api_key',
-        protocol: 'openai',
-        builtin: false,
         mode: 'api_key',
         models: ['gpt-5.4'],
         hasApiKey: true,
         createdAt: '2026-03-18T00:00:00.000Z',
         updatedAt: '2026-03-18T00:00:00.000Z',
-      },
+      }),
     ];
 
     expect(filterProfiles('openai', profiles).map((profile) => profile.id)).toEqual([
@@ -574,11 +2542,172 @@ describe('HubCatEditor', () => {
       'claude-sponsor',
       'codex-sponsor',
     ]);
-    expect(filterProfiles('dare', profiles).map((profile) => profile.id)).toEqual(['claude-sponsor', 'codex-sponsor']);
     expect(filterProfiles('opencode', profiles).map((profile) => profile.id)).toEqual([
       'claude-sponsor',
       'codex-sponsor',
     ]);
+
+    // F159: catagent shares anthropic credential family
+    expect(filterProfiles('catagent', profiles).map((profile) => profile.id)).toEqual(
+      filterProfiles('anthropic', profiles).map((profile) => profile.id),
+    );
+    expect(builtinAccountIdForClient('catagent')).toEqual('claude');
+  });
+
+  it('allows google to use builtin auth plus third-party gateway accounts only', () => {
+    const profiles: ProfileItem[] = [
+      {
+        id: 'gemini',
+        provider: 'gemini',
+        displayName: 'Gemini (OAuth)',
+        name: 'Gemini (OAuth)',
+        authType: 'oauth',
+        kind: 'builtin',
+        builtin: true,
+        mode: 'subscription',
+        clientId: 'google',
+        models: ['gemini-2.5-pro'],
+        hasApiKey: false,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      },
+      {
+        id: 'gemini-proxy',
+        provider: 'gemini-proxy',
+        displayName: 'Gemini Proxy',
+        name: 'Gemini Proxy',
+        authType: 'api_key',
+        kind: 'api_key',
+        builtin: false,
+        mode: 'api_key',
+        baseUrl: 'https://gateway.example/google',
+        models: ['openrouter/google/gemini-3-flash-preview'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      },
+      {
+        id: 'google-official',
+        provider: 'google-official',
+        displayName: 'Google Official API',
+        name: 'Google Official API',
+        authType: 'api_key',
+        kind: 'api_key',
+        builtin: false,
+        mode: 'api_key',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+        models: ['gemini-2.5-pro'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      },
+      {
+        id: 'broken-proxy',
+        provider: 'broken-proxy',
+        displayName: 'Broken Proxy',
+        name: 'Broken Proxy',
+        authType: 'api_key',
+        kind: 'api_key',
+        builtin: false,
+        mode: 'api_key',
+        baseUrl: 'not-a-valid-url',
+        models: ['gemini-2.5-pro'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      },
+    ];
+
+    expect(filterProfiles('google', profiles).map((profile) => profile.id)).toEqual(['gemini', 'gemini-proxy']);
+  });
+
+  it('shows google api_key accounts with baseUrl, hides those without (#470)', async () => {
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: null,
+            providers: [
+              {
+                id: 'gemini',
+                provider: 'gemini',
+                displayName: 'Gemini (OAuth)',
+                name: 'Gemini (OAuth)',
+                authType: 'oauth',
+                kind: 'builtin',
+                builtin: true,
+                clientId: 'google',
+                mode: 'subscription',
+                models: ['gemini-2.5-pro'],
+                hasApiKey: false,
+                createdAt: '',
+                updatedAt: '',
+              },
+              {
+                id: 'gemini-proxy',
+                provider: 'gemini-proxy',
+                displayName: 'Gemini Proxy',
+                name: 'Gemini Proxy',
+                authType: 'api_key',
+                kind: 'api_key',
+                builtin: false,
+                clientId: 'google',
+                mode: 'api_key',
+                baseUrl: 'https://gateway.example/google',
+                models: ['openrouter/google/gemini-3-flash-preview'],
+                hasApiKey: true,
+                createdAt: '',
+                updatedAt: '',
+              },
+              {
+                id: 'google-official',
+                provider: 'google-official',
+                displayName: 'Google Official API',
+                name: 'Google Official API',
+                authType: 'api_key',
+                kind: 'api_key',
+                builtin: false,
+                clientId: 'google',
+                mode: 'api_key',
+                baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+                models: ['gemini-2.5-pro'],
+                hasApiKey: true,
+                createdAt: '',
+                updatedAt: '',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          draft: { clientId: 'google', accountRef: 'gemini', defaultModel: 'gemini-2.5-pro' },
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+
+    const providerSelect = queryField<HTMLSelectElement>(container, 'select[aria-label="用哪个号"]');
+    const optionLabels = Array.from(providerSelect.options).map((option) => option.textContent ?? '');
+    expect(optionLabels).toContain('Gemini (OAuth)（内置）');
+    // #470: api_key profiles WITH baseUrl (third-party proxy) now show;
+    // official Google endpoint (no baseUrl) stays hidden — filterAccounts rejects it.
+    expect(optionLabels).toContain('Gemini Proxy（API Key）');
+    expect(optionLabels).not.toContain('Google Official API（API Key）');
   });
 
   it('preserves existing model when it is not listed in provider defaults', async () => {
@@ -586,18 +2715,17 @@ describe('HubCatEditor', () => {
       id: 'runtime-codex',
       name: 'runtime-codex',
       displayName: '运行时缅因猫',
-      provider: 'openai',
-      providerProfileId: 'codex-oauth',
+      clientId: 'openai',
+      accountRef: 'codex-oauth',
       defaultModel: 'gpt-5.3-codex-spark',
       color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
       mentionPatterns: ['@runtime-codex'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
-      source: 'runtime',
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -610,7 +2738,6 @@ describe('HubCatEditor', () => {
                 name: 'Codex (OAuth)',
                 authType: 'oauth',
                 protocol: 'openai',
-                builtin: true,
                 mode: 'subscription',
                 models: ['gpt-5.4'],
                 hasApiKey: false,
@@ -630,7 +2757,10 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats/runtime-codex' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-codex' } }));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
@@ -640,8 +2770,17 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
+    const modelInput = queryField<HTMLInputElement>(container, 'input[aria-label="Model"]');
+    expect(modelInput.value).toBe('gpt-5.3-codex-spark');
+    const modelList = document.getElementById(modelInput.getAttribute('list') ?? '');
+    const modelSuggestions = Array.from(modelList?.querySelectorAll('option') ?? []).map((option) => option.value);
+    expect(modelSuggestions).toEqual(['gpt-5.3-codex-spark', 'gpt-5.4']);
+    expect(document.body.textContent).toContain('模型未列在这个账号中。保存时会保留你填写的模型。');
+
+    await changeField(queryField(container, 'input[aria-label="Nickname"]'), 'Save baseline regression');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
     );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -653,25 +2792,27 @@ describe('HubCatEditor', () => {
     );
     expect(patchCall).toBeTruthy();
     const payload = JSON.parse(String(patchCall?.[1]?.body));
-    expect(payload.defaultModel).toBe('gpt-5.3-codex-spark');
+    expect(payload.defaultModel).toBeUndefined();
+    expect(payload.clientId).toBeUndefined();
+    expect(payload.accountRef).toBeUndefined();
   });
 
-  it('keeps unbound cats unbound when opening the editor', async () => {
+  it('describes and saves edited custom models that are not listed in provider defaults', async () => {
     const existingCat = {
       id: 'runtime-codex',
       name: 'runtime-codex',
       displayName: '运行时缅因猫',
-      provider: 'openai',
+      clientId: 'openai',
+      accountRef: 'codex-oauth',
       defaultModel: 'gpt-5.4',
       color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
       mentionPatterns: ['@runtime-codex'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
-      source: 'runtime',
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -684,7 +2825,164 @@ describe('HubCatEditor', () => {
                 name: 'Codex (OAuth)',
                 authType: 'oauth',
                 protocol: 'openai',
-                builtin: true,
+                mode: 'subscription',
+                models: ['gpt-5.4'],
+                hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/config' && !init?.method) {
+        return Promise.resolve(jsonResponse({ config: { cli: {}, codexExecution: {} } }));
+      }
+      if (path === '/api/cats/runtime-codex' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'runtime-codex' } }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }),
+      );
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'input[aria-label="Model"]'), 'gpt-5.4-custom');
+
+    expect(document.body.textContent).toContain('保存时会保留你填写的模型。');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const patchCall = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/cats/runtime-codex' && init?.method === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    const payload = JSON.parse(String(patchCall?.[1]?.body));
+    expect(payload.defaultModel).toBe('gpt-5.4-custom');
+  });
+
+  it('does not rewrite unchanged Gemini model when saving alias-only edits', async () => {
+    const existingCat = {
+      id: 'gemini25',
+      name: '遇罗猫',
+      displayName: '遇罗猫',
+      variantLabel: 'Gemini 3.5 Flash',
+      clientId: 'google',
+      accountRef: 'gemini',
+      defaultModel: 'Gemini 3.5 Flash (High)',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@gemini25'],
+      avatar: '/avatars/gemini.png',
+      roleDescription: '审美与创意探索',
+    } as CatData;
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'gemini',
+            providers: [
+              {
+                id: 'gemini',
+                provider: 'gemini',
+                displayName: 'Gemini (OAuth)',
+                name: 'Gemini (OAuth)',
+                authType: 'oauth',
+                protocol: 'google',
+                mode: 'subscription',
+                models: ['gemini-2.5-pro', 'gemini-3.1-pro-preview'],
+                hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/cats/gemini25' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'gemini25' } }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }),
+      );
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@gemini35, @gemini-35');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const patchCall = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/cats/gemini25' && init?.method === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    const payload = JSON.parse(String(patchCall?.[1]?.body));
+    expect(payload.mentionPatterns).toEqual(['@gemini35', '@gemini-35']);
+    expect(payload.defaultModel).toBeUndefined();
+    expect(payload.clientId).toBeUndefined();
+    expect(payload.accountRef).toBeUndefined();
+  });
+
+  it('keeps unbound cats unbound when opening the editor', async () => {
+    const existingCat = {
+      id: 'runtime-codex',
+      name: 'runtime-codex',
+      displayName: '运行时缅因猫',
+      clientId: 'openai',
+      defaultModel: 'gpt-5.4',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@runtime-codex'],
+      avatar: '/avatars/codex.png',
+      roleDescription: 'review',
+    } as CatData;
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'codex-oauth',
+            providers: [
+              {
+                id: 'codex-oauth',
+                provider: 'codex-oauth',
+                displayName: 'Codex (OAuth)',
+                name: 'Codex (OAuth)',
+                authType: 'oauth',
+                protocol: 'openai',
                 mode: 'subscription',
                 models: ['gpt-5.4'],
                 hasApiKey: false,
@@ -698,7 +2996,6 @@ describe('HubCatEditor', () => {
                 name: 'Codex Sponsor',
                 authType: 'api_key',
                 protocol: 'openai',
-                builtin: false,
                 mode: 'api_key',
                 models: ['gpt-5.4'],
                 hasApiKey: true,
@@ -718,7 +3015,10 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats/runtime-codex' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-codex' } }));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
@@ -728,10 +3028,12 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]').value).toBe('');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Account"]').value).toBe('');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
+    await changeField(queryField(container, 'input[aria-label="Nickname"]'), 'Save baseline regression');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
     );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -751,17 +3053,16 @@ describe('HubCatEditor', () => {
       id: 'runtime-opencode',
       name: 'runtime-opencode',
       displayName: '运行时 OpenCode',
-      provider: 'opencode',
+      clientId: 'opencode',
       defaultModel: 'claude-opus-4-6',
       color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
       mentionPatterns: ['@runtime-opencode'],
       avatar: '/avatars/opencode.png',
       roleDescription: 'review',
-      source: 'runtime',
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -774,7 +3075,6 @@ describe('HubCatEditor', () => {
                 name: 'Claude (OAuth)',
                 authType: 'oauth',
                 protocol: 'anthropic',
-                builtin: true,
                 mode: 'subscription',
                 models: ['claude-opus-4-6'],
                 hasApiKey: false,
@@ -788,7 +3088,6 @@ describe('HubCatEditor', () => {
                 name: 'Claude Sponsor',
                 authType: 'api_key',
                 protocol: 'anthropic',
-                builtin: false,
                 mode: 'api_key',
                 models: ['claude-opus-4-6'],
                 hasApiKey: true,
@@ -805,7 +3104,10 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats/runtime-opencode' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-opencode' } }));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
@@ -815,10 +3117,12 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]').value).toBe('');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Account"]').value).toBe('');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
+    await changeField(queryField(container, 'input[aria-label="Nickname"]'), 'Save baseline regression');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
     );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -838,13 +3142,12 @@ describe('HubCatEditor', () => {
       id: 'runtime-opencode',
       name: 'runtime-opencode',
       displayName: '运行时 OpenCode',
-      provider: 'opencode',
+      clientId: 'opencode',
       defaultModel: 'claude-opus-4-6',
       color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
       mentionPatterns: ['@runtime-opencode'],
       avatar: '/avatars/opencode.png',
       roleDescription: 'review',
-      source: 'runtime',
     } as CatData;
 
     let resolveProfiles!: (value: Response) => void;
@@ -853,7 +3156,7 @@ describe('HubCatEditor', () => {
     });
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return profilesPromise;
       }
       if (path === '/api/config/session-strategy') {
@@ -862,7 +3165,10 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats/runtime-opencode' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-opencode' } }));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
@@ -872,8 +3178,10 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
+    await changeField(queryField(container, 'input[aria-label="Nickname"]'), 'Save baseline regression');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
     );
     expect(saveButton).toBeTruthy();
     expect((saveButton as HTMLButtonElement).disabled).toBe(false);
@@ -898,7 +3206,6 @@ describe('HubCatEditor', () => {
             name: 'Claude (OAuth)',
             authType: 'oauth',
             protocol: 'anthropic',
-            builtin: true,
             mode: 'subscription',
             models: ['claude-opus-4-6'],
             hasApiKey: false,
@@ -912,7 +3219,6 @@ describe('HubCatEditor', () => {
             name: 'Claude Sponsor',
             authType: 'api_key',
             protocol: 'anthropic',
-            builtin: false,
             mode: 'api_key',
             models: ['claude-opus-4-6'],
             hasApiKey: true,
@@ -925,7 +3231,7 @@ describe('HubCatEditor', () => {
     await flushEffects();
     await flushEffects();
 
-    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Provider"]').value).toBe('');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Account"]').value).toBe('');
     expect((saveButton as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -934,18 +3240,17 @@ describe('HubCatEditor', () => {
       id: 'runtime-codex',
       name: 'runtime-codex',
       displayName: '运行时缅因猫',
-      provider: 'openai',
-      providerProfileId: 'codex-sponsor',
+      clientId: 'openai',
+      accountRef: 'codex-sponsor',
       defaultModel: 'gpt-5.4',
       color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
       mentionPatterns: ['@runtime-codex'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
-      source: 'runtime',
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -958,7 +3263,6 @@ describe('HubCatEditor', () => {
                 name: 'Codex Sponsor',
                 authType: 'api_key',
                 protocol: 'openai',
-                builtin: false,
                 mode: 'api_key',
                 models: ['gpt-5.4'],
                 hasApiKey: true,
@@ -978,7 +3282,10 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats/runtime-codex' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-codex' } }));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
@@ -988,10 +3295,10 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    await changeField(queryField(container, 'select[aria-label="Provider"]'), '', 'change');
+    await changeField(queryField(container, 'select[aria-label="Account"]'), '', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
     );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -1006,110 +3313,23 @@ describe('HubCatEditor', () => {
     expect(payload.accountRef).toBeNull();
   });
 
-  it('sends accountRef=null when switching a bound member to antigravity', async () => {
+  it('sends contextWindow=null when clearing existing runtime budget', async () => {
     const existingCat = {
       id: 'runtime-codex',
       name: 'runtime-codex',
       displayName: '运行时缅因猫',
-      provider: 'openai',
-      providerProfileId: 'codex-sponsor',
+      clientId: 'openai',
+      accountRef: 'codex-oauth',
       defaultModel: 'gpt-5.4',
       color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
       mentionPatterns: ['@runtime-codex'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
-      source: 'runtime',
+      contextWindow: 96000,
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
-        return Promise.resolve(
-          jsonResponse({
-            projectPath: '/tmp/project',
-            activeProfileId: 'codex-sponsor',
-            providers: [
-              {
-                id: 'codex-sponsor',
-                provider: 'codex-sponsor',
-                displayName: 'Codex Sponsor',
-                name: 'Codex Sponsor',
-                authType: 'api_key',
-                protocol: 'openai',
-                builtin: false,
-                mode: 'api_key',
-                models: ['gpt-5.4'],
-                hasApiKey: true,
-                createdAt: '2026-03-18T00:00:00.000Z',
-                updatedAt: '2026-03-18T00:00:00.000Z',
-              },
-            ],
-          }),
-        );
-      }
-      if (path === '/api/config/session-strategy') {
-        return Promise.resolve(jsonResponse({ cats: [] }));
-      }
-      if (path === '/api/config' && !init?.method) {
-        return Promise.resolve(jsonResponse({ config: { cli: {}, codexExecution: {} } }));
-      }
-      if (path === '/api/cats/runtime-codex' && init?.method === 'PATCH') {
-        return Promise.resolve(jsonResponse({ cat: { id: 'runtime-codex' } }));
-      }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
-    });
-
-    await act(async () => {
-      root.render(
-        React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }),
-      );
-    });
-    await flushEffects();
-
-    await changeField(queryField(container, 'select[aria-label="Client"]'), 'antigravity', 'change');
-    await changeField(queryField(container, 'input[aria-label="Model"]'), 'gemini-bridge');
-    await changeField(queryField(container, 'input[aria-label="CLI Command"]'), 'chat --mode agent');
-
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
-    );
-    await act(async () => {
-      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await flushEffects();
-
-    const patchCall = mockApiFetch.mock.calls.find(
-      ([path, init]) => path === '/api/cats/runtime-codex' && init?.method === 'PATCH',
-    );
-    expect(patchCall).toBeTruthy();
-    const payload = JSON.parse(String(patchCall?.[1]?.body));
-    expect(payload.client).toBe('antigravity');
-    expect(payload.accountRef).toBeNull();
-    expect(payload.mcpSupport).toBe(false);
-  });
-
-  it('sends contextBudget=null when clearing existing runtime budget', async () => {
-    const existingCat = {
-      id: 'runtime-codex',
-      name: 'runtime-codex',
-      displayName: '运行时缅因猫',
-      provider: 'openai',
-      providerProfileId: 'codex-oauth',
-      defaultModel: 'gpt-5.4',
-      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
-      mentionPatterns: ['@runtime-codex'],
-      avatar: '/avatars/codex.png',
-      roleDescription: 'review',
-      source: 'runtime',
-      contextBudget: {
-        maxPromptTokens: 32000,
-        maxContextTokens: 24000,
-        maxMessages: 40,
-        maxContentLengthPerMsg: 8000,
-      },
-    } as CatData;
-
-    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -1122,7 +3342,6 @@ describe('HubCatEditor', () => {
                 name: 'Codex (OAuth)',
                 authType: 'oauth',
                 protocol: 'openai',
-                builtin: true,
                 mode: 'subscription',
                 models: ['gpt-5.4'],
                 hasApiKey: false,
@@ -1142,7 +3361,10 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats/runtime-codex' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-codex' } }));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
@@ -1152,13 +3374,10 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    await changeField(queryField(container, 'input[aria-label="Max Prompt Tokens"]'), '');
-    await changeField(queryField(container, 'input[aria-label="Max Context Tokens"]'), '');
-    await changeField(queryField(container, 'input[aria-label="Max Messages"]'), '');
-    await changeField(queryField(container, 'input[aria-label="Max Content Length Per Msg"]'), '');
+    await changeField(queryField(container, 'input[aria-label="Context Window"]'), '');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
     );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -1170,12 +3389,12 @@ describe('HubCatEditor', () => {
     );
     expect(patchCall).toBeTruthy();
     const payload = JSON.parse(String(patchCall?.[1]?.body));
-    expect(payload.contextBudget).toBeNull();
+    expect(payload.contextWindow).toBeNull();
   });
 
-  it('requires all runtime budget fields when any budget value is provided', async () => {
-    mockApiFetch.mockImplementation((path: string) => {
-      if (path === '/api/provider-profiles') {
+  it('rejects non-positive contextWindow and allows empty', async () => {
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -1188,7 +3407,6 @@ describe('HubCatEditor', () => {
                 name: 'Codex Sponsor',
                 authType: 'api_key',
                 protocol: 'openai',
-                builtin: false,
                 mode: 'api_key',
                 models: ['gpt-5.4-mini'],
                 hasApiKey: true,
@@ -1202,15 +3420,22 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats') {
         return Promise.resolve(jsonResponse({ cat: { id: 'runtime-spark' } }, 201));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
       root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
     });
     await flushEffects();
-
-    expect(container.textContent).toContain('4 项要么全部留空，要么全部填写');
+    await changeField(
+      queryField<HTMLSelectElement>(container, 'select[aria-label="配置方式"]'),
+      'managed_account',
+      'change',
+    );
+    await flushEffects();
 
     await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
     await changeField(queryField(container, 'input[aria-label="Avatar"]'), '/avatars/spark.png');
@@ -1218,26 +3443,28 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-spark, @火花猫');
     await changeField(queryField(container, 'select[aria-label="Client"]'), 'openai', 'change');
     await flushEffects();
-    await changeField(queryField(container, 'select[aria-label="Provider"]'), 'codex-sponsor', 'change');
-    await changeField(queryField(container, 'select[aria-label="Model"]'), 'gpt-5.4-mini', 'change');
-    await changeField(queryField(container, 'input[aria-label="Max Prompt Tokens"]'), '48000');
+    await changeField(queryField(container, 'select[aria-label="用哪个号"]'), 'codex-sponsor', 'change');
+    await changeField(queryField(container, 'input[aria-label="Model"]'), 'gpt-5.4-mini');
+    await changeField(queryField(container, 'input[aria-label="Context Window"]'), '-1');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('上下文预算要么全部留空，要么 4 项都填写');
     expect(mockApiFetch).not.toHaveBeenCalledWith('/api/cats', expect.objectContaining({ method: 'POST' }));
   });
 
-  it('deletes an existing member only after confirmation', async () => {
+  it('does not show delete action inside editor (delete lives on member list)', async () => {
     const existingCat: CatData = {
       id: 'runtime-antigravity',
       name: '运行时桥接猫',
       displayName: '运行时桥接猫',
-      provider: 'antigravity',
+      clientId: 'antigravity',
+      carrier: 'cli',
       defaultModel: 'gemini-bridge',
       commandArgs: ['chat', '--mode', 'agent'],
       color: { primary: '#0f766e', secondary: '#99f6e4' },
@@ -1245,54 +3472,29 @@ describe('HubCatEditor', () => {
       avatar: '/avatars/antigravity.png',
       roleDescription: '桥接通道',
       personality: '稳定',
-      source: 'runtime',
     };
-    const onSaved = vi.fn(() => Promise.resolve());
-    mockApiFetch.mockImplementation((path: string) => {
-      if (path === '/api/provider-profiles') {
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
         return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
       }
       if (path === '/api/config/session-strategy') {
         return Promise.resolve(jsonResponse({ cats: [] }));
       }
-      if (path === '/api/cats/runtime-antigravity') {
-        return Promise.resolve(jsonResponse({ deleted: true }));
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
-      root.render(React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved }));
+      root.render(
+        React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }),
+      );
     });
     await flushEffects();
 
-    const deleteButton = queryField<HTMLButtonElement>(container, 'button[aria-label="删除成员"]');
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
-
-    await act(async () => {
-      deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await flushEffects();
-
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(mockApiFetch).not.toHaveBeenCalledWith(
-      '/api/cats/runtime-antigravity',
-      expect.objectContaining({ method: 'DELETE' }),
-    );
-    expect(onSaved).toHaveBeenCalledTimes(0);
-
-    confirmSpy.mockReturnValue(true);
-    await act(async () => {
-      deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await flushEffects();
-
-    expect(mockApiFetch).toHaveBeenCalledWith(
-      '/api/cats/runtime-antigravity',
-      expect.objectContaining({ method: 'DELETE' }),
-    );
-    expect(onSaved).toHaveBeenCalledTimes(1);
-    confirmSpy.mockRestore();
+    expect(document.body.querySelector('button[aria-label="删除成员"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('删除成员');
   });
 
   it('prompts before closing when there are unsaved edits', async () => {
@@ -1305,7 +3507,7 @@ describe('HubCatEditor', () => {
       }),
     );
 
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    mockConfirm.mockResolvedValue(false);
     await act(async () => {
       root.render(React.createElement(HubCatEditor, { open: true, onClose, onSaved: vi.fn() }));
     });
@@ -1313,44 +3515,42 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'input[aria-label="Name"]'), '临时名字');
 
-    const cancelButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '取消',
-    );
+    const closeButton = document.body.querySelector('button[aria-label="关闭"]') as HTMLElement;
     await act(async () => {
-      cancelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      closeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flushEffects();
 
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(mockConfirm).toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
 
-    confirmSpy.mockReturnValue(true);
+    mockConfirm.mockResolvedValue(true);
     await act(async () => {
-      cancelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      closeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flushEffects();
 
     expect(onClose).toHaveBeenCalledTimes(1);
-    confirmSpy.mockRestore();
+    mockConfirm.mockResolvedValue(true);
   });
 
-  it('hides delete action for seed members', async () => {
+  it('does not show delete action inside editor for any member type', async () => {
     const existingCat: CatData = {
       id: 'codex',
       name: '缅因猫',
       displayName: '缅因猫',
-      provider: 'openai',
+      clientId: 'openai',
+      carrier: 'cli',
       defaultModel: 'gpt-5.4',
       color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
       mentionPatterns: ['@codex'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
       personality: 'rigorous',
-      source: 'seed',
     };
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
       }
       if (path === '/api/config/session-strategy') {
@@ -1359,7 +3559,10 @@ describe('HubCatEditor', () => {
       if (path === '/api/config' && !init?.method) {
         return Promise.resolve(jsonResponse({ config: { cli: {}, codexExecution: {} } }));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
@@ -1369,7 +3572,7 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(container.querySelector('button[aria-label="删除成员"]')).toBeNull();
+    expect(document.body.querySelector('button[aria-label="删除成员"]')).toBeNull();
   });
 
   it('loads runtime controls for an existing member and saves strategy separately', async () => {
@@ -1378,8 +3581,8 @@ describe('HubCatEditor', () => {
       name: 'codex',
       displayName: '缅因猫',
       nickname: '砚砚',
-      provider: 'openai',
-      providerProfileId: 'codex-sponsor',
+      clientId: 'openai',
+      accountRef: 'codex-sponsor',
       defaultModel: 'gpt-5.4',
       color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
       mentionPatterns: ['@codex', '@缅因猫'],
@@ -1390,24 +3593,13 @@ describe('HubCatEditor', () => {
       caution: null,
       strengths: ['security', 'testing'],
       sessionChain: true,
-      contextBudget: {
-        maxPromptTokens: 32000,
-        maxContextTokens: 24000,
-        maxMessages: 40,
-        maxContentLengthPerMsg: 8000,
-      },
-    } as CatData & {
-      contextBudget: {
-        maxPromptTokens: number;
-        maxContextTokens: number;
-        maxMessages: number;
-        maxContentLengthPerMsg: number;
-      };
-    };
+      contextWindow: 96000,
+      resolvedContext: actionableContextProjection,
+    } as CatData;
 
     const onSaved = vi.fn(() => Promise.resolve());
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -1420,7 +3612,6 @@ describe('HubCatEditor', () => {
                 name: 'Codex Sponsor',
                 authType: 'api_key',
                 protocol: 'openai',
-                builtin: false,
                 mode: 'api_key',
                 models: ['gpt-5.4'],
                 hasApiKey: true,
@@ -1444,13 +3635,14 @@ describe('HubCatEditor', () => {
                   thresholds: { warn: 0.6, action: 0.8 },
                 },
                 source: 'runtime_override',
+                revision: 'runtime:test',
+                changedAt: 0,
+                executionStatus: { status: 'active', missingCapabilities: [] },
                 hasOverride: true,
                 override: {
                   strategy: 'compress',
                   thresholds: { warn: 0.6, action: 0.8 },
                 },
-                hybridCapable: false,
-                sessionChainEnabled: true,
               },
             ],
           }),
@@ -1466,7 +3658,7 @@ describe('HubCatEditor', () => {
                 mentionPatterns: ['@co-worker', '@owner'],
               },
               cats: {},
-              perCatBudgets: {},
+              perCatCapacities: {},
               a2a: { enabled: true, maxDepth: 2 },
               memory: { enabled: true, maxKeysPerThread: 50 },
               hindsight: {
@@ -1506,7 +3698,10 @@ describe('HubCatEditor', () => {
           }),
         );
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
@@ -1514,43 +3709,48 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('昵称');
-    expect(container.textContent).toContain('擅长领域');
-    expect(container.textContent).toContain('注意事项');
-    expect(container.textContent).toContain('Strengths');
-    expect(container.textContent).toContain('▸ Voice Config (点击展开)');
-    expect(container.textContent).toContain('别名与 @ 路由');
-    expect(container.textContent).toContain('认证与模型');
-    expect(container.textContent).toContain('Session Chain');
-    expect(container.textContent).toContain('── Codex 专属 (仅 Client=Codex 时显示) ──');
-    expect(container.textContent).toContain('Codex Sandbox 🏷️');
-    expect(container.textContent).toContain('Codex Approval 🏷️');
-    expect(container.textContent).toContain('Codex Auth Mode 🏷️');
-    expect(container.textContent).not.toContain('这 3 项是全局运行参数（非成员级）');
+    expect(document.body.textContent).toContain('昵称');
+    expect(document.body.textContent).toContain('显示后缀');
+    expect(document.body.textContent).toContain('擅长领域');
+    expect(document.body.textContent).toContain('注意事项');
+    expect(document.body.textContent).toContain('擅长标签');
+    expect(document.body.textContent).toContain('语音设置');
+    expect(document.body.textContent).toContain('@ 名字');
+    expect(document.body.textContent).toContain('模型与接入');
+    expect(Array.from(document.body.querySelectorAll('h4')).some((heading) => heading.textContent === '上下文')).toBe(
+      true,
+    );
+    expect(document.body.textContent).not.toContain('── Codex 专属 (仅 Client=Codex 时显示) ──');
+    expect(document.body.textContent).toContain('沙箱');
+    expect(document.body.textContent).toContain('审批方式');
+    expect(document.body.textContent).toContain('凭据类型');
+    expect(document.body.textContent).not.toContain('这 3 项是全局运行参数（非成员级）');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Sandbox"]').disabled).toBe(false);
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Approval"]').disabled).toBe(false);
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Auth Mode"]').disabled).toBe(false);
-    expect(container.textContent).toContain('💾 运行时持久化');
-    expect(container.textContent).toContain('保存修改');
-    expect(container.textContent).not.toContain('删除成员');
-    expect(container.textContent).not.toContain('账号与运行方式');
-    expect(container.textContent).not.toContain('Primary');
-    expect(container.textContent).not.toContain('Secondary');
-    expect(container.textContent).not.toContain('Display Name');
+    expect(document.body.textContent).toContain('没有改动');
+    expect(document.body.textContent).toContain('保存');
+    expect(document.body.textContent).not.toContain('删除成员');
+    expect(document.body.textContent).not.toContain('账号与运行方式');
+    expect(document.body.textContent).not.toContain('Primary');
+    expect(document.body.textContent).not.toContain('Secondary');
+    expect(document.body.textContent).not.toContain('Display Name');
 
-    await changeField(queryField(container, 'input[aria-label="Max Prompt Tokens"]'), '48000');
+    await changeField(queryField(container, 'input[aria-label="Context Window"]'), '128000');
+    await changeField(queryField(container, 'input[aria-label="Variant Label"]'), 'GPT-5.5');
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '砚砚升级版');
     await changeField(queryField(container, 'input[aria-label="Team Strengths"]'), '代码审查、找 bug、深度思考');
     await changeField(queryField(container, 'input[aria-label="Strengths"]'), 'security, testing, debugging');
-    await changeField(queryField(container, 'select[aria-label="Session Chain"]'), 'false', 'change');
-    await changeField(queryField(container, 'select[aria-label="Session Strategy"]'), 'handoff', 'change');
-    await changeField(queryField(container, 'input[aria-label="Session Warn Threshold"]'), '0.55', 'change');
+    await changeField(queryField(container, 'select[aria-label="上下文满了以后"]'), 'handoff', 'change');
+    expect(document.body.textContent).not.toContain('能力预检');
+    expect(document.body.textContent).not.toContain('保存后会重新预检 handoff');
+    await changeField(queryField(container, 'input[aria-label="提醒线"]'), '0.55', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Approval"]'), 'never', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Auth Mode"]'), 'api_key', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
     );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -1562,11 +3762,12 @@ describe('HubCatEditor', () => {
     );
     expect(catPatch).toBeTruthy();
     const catPayload = JSON.parse(String(catPatch?.[1]?.body));
-    expect(catPayload.contextBudget.maxPromptTokens).toBe(48000);
+    expect(catPayload.contextWindow).toBe(128000);
+    expect(catPayload.variantLabel).toBe('GPT-5.5');
     expect(catPayload.nickname).toBe('砚砚升级版');
     expect(catPayload.teamStrengths).toBe('代码审查、找 bug、深度思考');
     expect(catPayload.strengths).toEqual(['security', 'testing', 'debugging']);
-    expect(catPayload.sessionChain).toBe(false);
+    expect(catPayload).not.toHaveProperty('sessionChain');
 
     const strategyPatch = mockApiFetch.mock.calls.find(
       ([path, init]) => path === '/api/config/session-strategy/codex' && init?.method === 'PATCH',
@@ -1593,24 +3794,20 @@ describe('HubCatEditor', () => {
       id: 'codex',
       name: 'codex',
       displayName: '缅因猫',
-      provider: 'openai',
-      providerProfileId: 'codex-sponsor',
+      clientId: 'openai',
+      accountRef: 'codex-sponsor',
       defaultModel: 'gpt-5.4',
       color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
       mentionPatterns: ['@codex', '@缅因猫'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
+      resolvedContext: actionableContextProjection,
       sessionChain: true,
-      contextBudget: {
-        maxPromptTokens: 32000,
-        maxContextTokens: 24000,
-        maxMessages: 40,
-        maxContentLengthPerMsg: 8000,
-      },
+      contextWindow: 96000,
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -1623,7 +3820,6 @@ describe('HubCatEditor', () => {
                 name: 'Codex Sponsor',
                 authType: 'api_key',
                 protocol: 'openai',
-                builtin: false,
                 mode: 'api_key',
                 models: ['gpt-5.4'],
                 hasApiKey: true,
@@ -1646,10 +3842,14 @@ describe('HubCatEditor', () => {
                   strategy: 'compress',
                   thresholds: { warn: 0.6, action: 0.8 },
                 },
-                source: 'breed',
+                source: 'provider_default',
+                revision: 'provider_default:test-codex',
+                changedAt: 0,
                 hasOverride: false,
-                hybridCapable: false,
-                sessionChainEnabled: true,
+                executionStatus: {
+                  status: 'unavailable',
+                  missingCapabilities: ['authoritative_usage'],
+                },
               },
             ],
           }),
@@ -1674,7 +3874,10 @@ describe('HubCatEditor', () => {
       if (path === '/api/config/session-strategy/codex' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ ok: true }));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
@@ -1686,8 +3889,8 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '砚砚');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
     );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -1704,10 +3907,102 @@ describe('HubCatEditor', () => {
     expect(strategyPatch).toBeFalsy();
   });
 
+  it('keeps strategy controls visible for a legacy sessionChain=false member without rewriting the legacy byte', async () => {
+    const existingCat = {
+      id: 'opencode',
+      name: 'opencode',
+      displayName: '金渐层',
+      clientId: 'opencode',
+      accountRef: 'opencode',
+      defaultModel: 'anthropic/claude-opus-4-6',
+      color: { primary: '#C8A951', secondary: '#F5EDDA' },
+      mentionPatterns: ['@opencode'],
+      avatar: '/avatars/opencode.png',
+      roleDescription: 'coding',
+      sessionChain: false,
+    } as CatData;
+    const onSaved = vi.fn(() => Promise.resolve());
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'opencode',
+            providers: [],
+          }),
+        );
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(
+          jsonResponse({
+            cats: [
+              {
+                catId: 'opencode',
+                displayName: '金渐层',
+                provider: 'opencode',
+                effective: {
+                  strategy: 'compress',
+                  thresholds: { warn: 0.75, action: 0.85 },
+                },
+                source: 'legacy_session_chain_false',
+                revision: 'legacy:test',
+                changedAt: 0,
+                executionStatus: { status: 'active', missingCapabilities: [] },
+                hasOverride: false,
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config' && !init?.method) {
+        return Promise.resolve(jsonResponse({ config: {} }));
+      }
+      if (path === '/api/cats/opencode' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'opencode' } }));
+      }
+      return accountSelectionRead(path, init);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved }));
+    });
+    await flushEffects();
+
+    expect(Array.from(document.body.querySelectorAll('h4')).some((heading) => heading.textContent === '上下文')).toBe(
+      true,
+    );
+    expect(document.body.textContent).not.toContain('Session Chain 未开启');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="上下文满了以后"]').value).toBe('compress');
+    expect(document.body.querySelector('input[aria-label="提醒线"]')).toBeTruthy();
+    expect(document.body.querySelector('input[aria-label="记录线"]')).toBeTruthy();
+
+    await changeField(queryField(container, 'input[aria-label="Nickname"]'), 'Changed legacy member');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const catPatch = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/cats/opencode' && init?.method === 'PATCH',
+    );
+    expect(catPatch).toBeTruthy();
+    expect(JSON.parse(String(catPatch?.[1]?.body))).not.toHaveProperty('sessionChain');
+    const strategyPatch = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/config/session-strategy/opencode' && init?.method === 'PATCH',
+    );
+    expect(strategyPatch).toBeFalsy();
+    expect(onSaved).toHaveBeenCalled();
+  });
+
   it('shows Codex-only runtime controls for any Client=Codex and lets alias chips be removed', async () => {
     const onSaved = vi.fn(() => Promise.resolve());
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -1720,7 +4015,6 @@ describe('HubCatEditor', () => {
                 name: 'Codex Sponsor',
                 authType: 'api_key',
                 protocol: 'openai',
-                builtin: false,
                 mode: 'api_key',
                 models: ['gpt-5.4'],
                 hasApiKey: true,
@@ -1752,12 +4046,21 @@ describe('HubCatEditor', () => {
       if (path === '/api/config' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ config: {} }));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
       root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved }));
     });
+    await flushEffects();
+    await changeField(
+      queryField<HTMLSelectElement>(container, 'select[aria-label="配置方式"]'),
+      'managed_account',
+      'change',
+    );
     await flushEffects();
 
     await changeField(queryField(container, 'input[aria-label="Name"]'), '运行时审查猫');
@@ -1766,7 +4069,7 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'select[aria-label="Client"]'), 'openai', 'change');
     await flushEffects();
 
-    expect(container.textContent).toContain('Codex Sandbox 🏷️');
+    expect(document.body.textContent).toContain('Codex Sandbox (Codex)');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Sandbox"]').value).toBe(
       'danger-full-access',
     );
@@ -1781,13 +4084,15 @@ describe('HubCatEditor', () => {
       removeAliasButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    await changeField(queryField(container, 'select[aria-label="Provider"]'), 'codex-sponsor', 'change');
-    await changeField(queryField(container, 'select[aria-label="Model"]'), 'gpt-5.4', 'change');
+    await changeField(queryField(container, 'select[aria-label="用哪个号"]'), 'codex-sponsor', 'change');
+    await changeField(queryField(container, 'input[aria-label="Model"]'), 'gpt-5.4');
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'workspace-write', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Approval"]'), 'on-request', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Auth Mode"]'), 'oauth', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1812,18 +4117,18 @@ describe('HubCatEditor', () => {
       id: 'codex',
       name: 'codex',
       displayName: '缅因猫',
-      provider: 'openai',
-      providerProfileId: 'codex-sponsor',
+      clientId: 'openai',
+      accountRef: 'codex-sponsor',
       defaultModel: 'gpt-5.4',
       color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
       mentionPatterns: ['@codex'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
-      source: 'runtime',
+      resolvedContext: actionableContextProjection,
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -1836,7 +4141,6 @@ describe('HubCatEditor', () => {
                 name: 'Codex Sponsor',
                 authType: 'api_key',
                 protocol: 'openai',
-                builtin: false,
                 mode: 'api_key',
                 models: ['gpt-5.4'],
                 hasApiKey: true,
@@ -1871,7 +4175,10 @@ describe('HubCatEditor', () => {
       if (path === '/api/config' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ error: 'Codex PATCH failed' }, 500));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
@@ -1881,15 +4188,15 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
     );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('Codex PATCH failed');
+    expect(document.body.textContent).toContain('Codex PATCH failed');
     expect(onSaved).not.toHaveBeenCalled();
   });
 
@@ -1900,18 +4207,17 @@ describe('HubCatEditor', () => {
       name: 'codex',
       displayName: '缅因猫',
       nickname: '旧昵称',
-      provider: 'openai',
-      providerProfileId: 'codex-sponsor',
+      clientId: 'openai',
+      accountRef: 'codex-sponsor',
       defaultModel: 'gpt-5.4',
       color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
       mentionPatterns: ['@codex'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
-      source: 'runtime',
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -1924,7 +4230,6 @@ describe('HubCatEditor', () => {
                 name: 'Codex Sponsor',
                 authType: 'api_key',
                 protocol: 'openai',
-                builtin: false,
                 mode: 'api_key',
                 models: ['gpt-5.4'],
                 hasApiKey: true,
@@ -1947,7 +4252,10 @@ describe('HubCatEditor', () => {
       if (path === '/api/config' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ config: {} }));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
@@ -1955,16 +4263,16 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('Codex 运行参数加载失败 (503)');
-    expect(container.textContent).toContain('Codex 配置基线未加载成功');
+    expect(document.body.textContent).toContain('Codex 运行参数加载失败 (503)');
+    expect(document.body.textContent).toContain('全局设置读取失败，以下选项暂不能修改。请重开本页重试。');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Sandbox"]').disabled).toBe(true);
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Approval"]').disabled).toBe(true);
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Auth Mode"]').disabled).toBe(true);
 
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '新昵称');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
     );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -1990,18 +4298,17 @@ describe('HubCatEditor', () => {
       name: 'codex',
       displayName: '缅因猫',
       nickname: '旧昵称',
-      provider: 'openai',
-      providerProfileId: 'codex-sponsor',
+      clientId: 'openai',
+      accountRef: 'codex-sponsor',
       defaultModel: 'gpt-5.4',
       color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
       mentionPatterns: ['@codex'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
-      source: 'runtime',
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -2014,7 +4321,6 @@ describe('HubCatEditor', () => {
                 name: 'Codex Sponsor',
                 authType: 'api_key',
                 protocol: 'openai',
-                builtin: false,
                 mode: 'api_key',
                 models: ['gpt-5.4'],
                 hasApiKey: true,
@@ -2049,7 +4355,10 @@ describe('HubCatEditor', () => {
       if (path === '/api/config' && init?.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ error: 'Codex PATCH failed' }, 500));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
@@ -2058,10 +4367,11 @@ describe('HubCatEditor', () => {
     await flushEffects();
 
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '新昵称');
+    await changeField(queryField(container, 'input[aria-label="Model"]'), 'another-model');
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
     );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -2079,31 +4389,33 @@ describe('HubCatEditor', () => {
     const rollbackPayload = JSON.parse(String(catPatches[1]?.[1]?.body));
     expect(rollbackPayload.nickname).toBe('旧昵称');
     expect(rollbackPayload.defaultModel).toBe('gpt-5.4');
-    expect(rollbackPayload.accountRef).toBe('codex-sponsor');
-    expect(container.textContent).toContain('Codex PATCH failed');
+    expect(rollbackPayload).not.toHaveProperty('accountRef');
+    expect(document.body.textContent).toContain('Codex PATCH failed');
     expect(onSaved).not.toHaveBeenCalled();
   });
 
-  it('rolls back prior strategy and config mutations when a later Codex config PATCH fails', async () => {
-    const onSaved = vi.fn(() => Promise.resolve());
+  it.each(['patch', 'readback'] as const)('rolls back all member/config changes after %s failure', async (failure) => {
+    const onSaved = vi.fn(() =>
+      failure === 'readback' ? Promise.reject(new Error('Readback failed')) : Promise.resolve(),
+    );
     const existingCat = {
       id: 'codex',
       name: 'codex',
       displayName: '缅因猫',
       nickname: '旧昵称',
-      provider: 'openai',
-      providerProfileId: 'codex-sponsor',
+      clientId: 'openai',
+      accountRef: 'codex-sponsor',
       defaultModel: 'gpt-5.4',
       color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
       mentionPatterns: ['@codex'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
-      source: 'runtime',
+      resolvedContext: actionableContextProjection,
     } as CatData;
 
     let configPatchCount = 0;
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -2116,7 +4428,6 @@ describe('HubCatEditor', () => {
                 name: 'Codex Sponsor',
                 authType: 'api_key',
                 protocol: 'openai',
-                builtin: false,
                 mode: 'api_key',
                 models: ['gpt-5.4'],
                 hasApiKey: true,
@@ -2140,13 +4451,17 @@ describe('HubCatEditor', () => {
                   thresholds: { warn: 0.6, action: 0.8 },
                 },
                 source: 'runtime_override',
+                revision: 'runtime_override:test-codex',
+                changedAt: 1,
                 hasOverride: true,
                 override: {
                   strategy: 'compress',
                   thresholds: { warn: 0.6, action: 0.8 },
                 },
-                hybridCapable: false,
-                sessionChainEnabled: true,
+                executionStatus: {
+                  status: 'unavailable',
+                  missingCapabilities: ['authoritative_usage'],
+                },
               },
             ],
           }),
@@ -2175,12 +4490,15 @@ describe('HubCatEditor', () => {
       }
       if (path === '/api/config' && init?.method === 'PATCH') {
         configPatchCount += 1;
-        if (configPatchCount === 2) {
+        if (failure === 'patch' && configPatchCount === 2) {
           return Promise.resolve(jsonResponse({ error: 'Second Codex PATCH failed' }, 500));
         }
         return Promise.resolve(jsonResponse({ config: {} }));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
@@ -2189,13 +4507,13 @@ describe('HubCatEditor', () => {
     await flushEffects();
 
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '新昵称');
-    await changeField(queryField(container, 'select[aria-label="Session Strategy"]'), 'handoff', 'change');
-    await changeField(queryField(container, 'input[aria-label="Session Warn Threshold"]'), '0.55');
+    await changeField(queryField(container, 'select[aria-label="上下文满了以后"]'), 'handoff', 'change');
+    await changeField(queryField(container, 'input[aria-label="提醒线"]'), '0.55');
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Approval"]'), 'never', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
     );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -2228,8 +4546,17 @@ describe('HubCatEditor', () => {
     expect(catPatches).toHaveLength(2);
     const rollbackPayload = JSON.parse(String(catPatches[1]?.[1]?.body));
     expect(rollbackPayload.nickname).toBe('旧昵称');
-    expect(container.textContent).toContain('Second Codex PATCH failed');
-    expect(onSaved).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain(failure === 'patch' ? 'Second Codex PATCH failed' : 'Readback failed');
+    expect(onSaved).toHaveBeenCalledTimes(failure === 'readback' ? 1 : 0);
+    if (failure === 'readback') {
+      expect(configPatches).toHaveLength(4);
+      expect(configPatches.map(([, init]) => JSON.parse(String(init?.body)).value)).toEqual([
+        'danger-full-access',
+        'never',
+        'on-request',
+        'workspace-write',
+      ]);
+    }
   });
 
   it('rolls back already-applied strategy mutations when later save requests throw', async () => {
@@ -2239,18 +4566,18 @@ describe('HubCatEditor', () => {
       name: 'codex',
       displayName: '缅因猫',
       nickname: '旧昵称',
-      provider: 'openai',
-      providerProfileId: 'codex-sponsor',
+      clientId: 'openai',
+      accountRef: 'codex-sponsor',
       defaultModel: 'gpt-5.4',
       color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
       mentionPatterns: ['@codex'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
-      source: 'runtime',
+      resolvedContext: actionableContextProjection,
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === '/api/provider-profiles') {
+      if (path === '/api/accounts') {
         return Promise.resolve(
           jsonResponse({
             projectPath: '/tmp/project',
@@ -2263,7 +4590,6 @@ describe('HubCatEditor', () => {
                 name: 'Codex Sponsor',
                 authType: 'api_key',
                 protocol: 'openai',
-                builtin: false,
                 mode: 'api_key',
                 models: ['gpt-5.4'],
                 hasApiKey: true,
@@ -2287,13 +4613,17 @@ describe('HubCatEditor', () => {
                   thresholds: { warn: 0.6, action: 0.8 },
                 },
                 source: 'runtime_override',
+                revision: 'runtime_override:test-codex',
+                changedAt: 1,
                 hasOverride: true,
                 override: {
                   strategy: 'compress',
                   thresholds: { warn: 0.6, action: 0.8 },
                 },
-                hybridCapable: false,
-                sessionChainEnabled: true,
+                executionStatus: {
+                  status: 'unavailable',
+                  missingCapabilities: ['authoritative_usage'],
+                },
               },
             ],
           }),
@@ -2320,7 +4650,10 @@ describe('HubCatEditor', () => {
       if (path === '/api/cats/codex' && init?.method === 'PATCH') {
         return Promise.reject(new Error('network dropped during cat save'));
       }
-      throw new Error(`Unexpected apiFetch path: ${path}`);
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
     });
 
     await act(async () => {
@@ -2328,11 +4661,11 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    await changeField(queryField(container, 'select[aria-label="Session Strategy"]'), 'handoff', 'change');
-    await changeField(queryField(container, 'input[aria-label="Session Warn Threshold"]'), '0.55');
+    await changeField(queryField(container, 'select[aria-label="上下文满了以后"]'), 'handoff', 'change');
+    await changeField(queryField(container, 'input[aria-label="提醒线"]'), '0.55');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '保存修改',
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
     );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -2345,7 +4678,334 @@ describe('HubCatEditor', () => {
     expect(strategyPatches).toHaveLength(2);
     expect(JSON.parse(String(strategyPatches[0]?.[1]?.body)).strategy).toBe('handoff');
     expect(JSON.parse(String(strategyPatches[1]?.[1]?.body)).strategy).toBe('compress');
-    expect(container.textContent).toContain('network dropped during cat save');
+    expect(document.body.textContent).toContain('network dropped during cat save');
     expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it('shows dossier notice badge only when hasDossier is true (OQ-9 per-field regression)', async () => {
+    const catWithDossier: CatData = {
+      id: 'opus',
+      name: 'opus',
+      displayName: '布偶猫',
+      clientId: 'claude-code',
+      carrier: 'cli',
+      defaultModel: 'claude-opus-4-6',
+      commandArgs: [],
+      color: { primary: '#7c3aed', secondary: '#ddd6fe' },
+      mentionPatterns: ['@opus'],
+      avatar: '/avatars/opus.png',
+      roleDescription: '主架构师',
+      personality: '温柔但有主见',
+    };
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      return accountSelectionRead(path, init);
+    });
+
+    // Render WITH hasDossier=true — badge should appear
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          cat: catWithDossier,
+          hasDossier: true,
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+    expect(document.body.textContent).toContain('擅长领域由画像驱动');
+
+    // Re-render WITHOUT hasDossier — badge must NOT appear
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          cat: catWithDossier,
+          hasDossier: false,
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+    expect(document.body.textContent).not.toContain('擅长领域由画像驱动');
+  });
+
+  it('protects the built-in gpt-pro transport identity while keeping profile fields editable', async () => {
+    const protectedCat = {
+      id: 'gpt-pro',
+      name: '缅因猫Pro (云端)',
+      displayName: '缅因猫Pro',
+      nickname: '砚砚Pro',
+      carrier: 'cli',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-pro',
+      provider: 'openai-chatgpt-pro',
+      mcpSupport: true,
+      color: { primary: '#2196F3', secondary: '#90CAF9' },
+      mentionPatterns: ['@gpt-pro', '@yanyan-pro'],
+      avatar: '/avatars/gpt-pro.png',
+      roleDescription: '云端 ChatGPT Pro 砚砚',
+      personality: '温柔、较真',
+      identityProtection: {
+        kind: 'builtin-cloud' as const,
+        state: 'healthy' as const,
+        lockedFields: [
+          'breedId',
+          'clientId',
+          'defaultModel',
+          'provider',
+          'mcpSupport',
+          'accountRef',
+          'cli',
+          'commandArgs',
+          'cliConfigArgs',
+          'acp',
+        ],
+        driftedFields: [],
+      },
+    } satisfies CatData & { identityProtection: Record<string, unknown> };
+    const onSaved = vi.fn(() => Promise.resolve());
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'codex',
+            providers: [
+              profileItem({
+                id: 'codex',
+                name: 'Codex',
+                displayName: 'Codex',
+                clientId: 'openai',
+                authType: 'oauth',
+                mode: 'subscription',
+                hasApiKey: false,
+                createdAt: '2026-09-25T00:00:00.000Z',
+                updatedAt: '2026-09-25T00:00:00.000Z',
+                models: ['gpt-pro'],
+              }),
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config/session-strategy') return Promise.resolve(jsonResponse({ cats: [] }));
+      if (path === '/api/cats/gpt-pro' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: protectedCat }));
+      }
+      return accountSelectionRead(path, init);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          cat: protectedCat,
+          onClose: vi.fn(),
+          onSaved,
+        }),
+      );
+    });
+    await flushEffects();
+
+    expect(document.body.textContent).toContain('云端身份配置已锁定');
+    expect(document.body.textContent).toContain('通过 Remote MCP 与猫咖通信');
+    expect(document.body.textContent).toContain('需要本地 Codex，请添加另一位成员');
+    expect(document.body.textContent).toContain('主 @ 名字 @gpt-pro 固定');
+    expect(document.body.querySelector('button[aria-label="移除 @gpt-pro"]')).toBeNull();
+    expect(document.body.querySelector('button[aria-label="移除 @yanyan-pro"]')).not.toBeNull();
+    expect(document.body.querySelector('select[aria-label="Client"]')).toBeNull();
+    expect(document.body.querySelector('input[aria-label="Model"]')).toBeNull();
+    expect(document.body.querySelector('select[aria-label="MCP Support"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('高级运行时参数');
+
+    await changeField(queryField(container, 'input[aria-label="Name"]'), '缅因猫Pro · 云端');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const patchCall = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/cats/gpt-pro' && init?.method === 'PATCH',
+    );
+    expect(patchCall).toBeDefined();
+    const payload = JSON.parse(String(patchCall?.[1]?.body)) as Record<string, unknown>;
+    expect(payload.name).toBe('缅因猫Pro · 云端');
+    expect(payload).not.toHaveProperty('mentionPatterns');
+    for (const field of protectedCat.identityProtection.lockedFields) {
+      expect(payload).not.toHaveProperty(field);
+    }
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('rolls back a protected gpt-pro profile save without replaying locked identity fields', async () => {
+    const protectedCat = {
+      id: 'gpt-pro',
+      name: '缅因猫Pro (云端)',
+      displayName: '缅因猫Pro',
+      nickname: '旧昵称',
+      carrier: 'cli',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-pro',
+      provider: 'openai-chatgpt-pro',
+      mcpSupport: true,
+      color: { primary: '#2196F3', secondary: '#90CAF9' },
+      mentionPatterns: ['@gpt-pro', '@yanyan-pro'],
+      avatar: '/avatars/gpt-pro.png',
+      roleDescription: '云端 ChatGPT Pro 砚砚',
+      personality: '温柔、较真',
+      identityProtection: {
+        kind: 'builtin-cloud' as const,
+        state: 'healthy' as const,
+        lockedFields: [
+          'breedId',
+          'clientId',
+          'defaultModel',
+          'provider',
+          'mcpSupport',
+          'accountRef',
+          'cli',
+          'commandArgs',
+          'cliConfigArgs',
+          'acp',
+        ],
+        driftedFields: [],
+      },
+    } satisfies CatData & { identityProtection: Record<string, unknown> };
+    const onSaved = vi.fn(() => Promise.reject(new Error('refresh failed after save')));
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
+      }
+      if (path === '/api/config/session-strategy') return Promise.resolve(jsonResponse({ cats: [] }));
+      if (path === '/api/cats/gpt-pro' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: protectedCat }));
+      }
+      return accountSelectionRead(path, init);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          cat: protectedCat,
+          onClose: vi.fn(),
+          onSaved,
+        }),
+      );
+    });
+    await flushEffects();
+    await changeField(queryField(container, 'input[aria-label="Nickname"]'), '新昵称');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const catPatches = mockApiFetch.mock.calls.filter(
+      ([path, init]) => path === '/api/cats/gpt-pro' && init?.method === 'PATCH',
+    );
+    expect(catPatches).toHaveLength(2);
+    const rollbackPayload = JSON.parse(String(catPatches[1]?.[1]?.body)) as Record<string, unknown>;
+    expect(rollbackPayload.nickname).toBe('旧昵称');
+    expect(rollbackPayload).not.toHaveProperty('mentionPatterns');
+    for (const field of protectedCat.identityProtection.lockedFields) {
+      expect(rollbackPayload).not.toHaveProperty(field);
+    }
+    expect(document.body.textContent).toContain('refresh failed after save');
+  });
+
+  it('offers one explicit recovery action when the built-in gpt-pro identity has drifted', async () => {
+    const driftedCat = {
+      id: 'gpt-pro',
+      name: '缅因猫Pro (云端)',
+      displayName: '缅因猫Pro',
+      carrier: 'cli',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.6-sol',
+      provider: undefined,
+      mcpSupport: false,
+      cli: { command: 'codex', outputFormat: 'json' },
+      color: { primary: '#2196F3', secondary: '#90CAF9' },
+      mentionPatterns: ['@gpt-pro'],
+      avatar: '/avatars/gpt-pro.png',
+      roleDescription: '云端 ChatGPT Pro 砚砚',
+      personality: '温柔、较真',
+      identityProtection: {
+        kind: 'builtin-cloud' as const,
+        state: 'drifted' as const,
+        lockedFields: [
+          'breedId',
+          'clientId',
+          'defaultModel',
+          'provider',
+          'mcpSupport',
+          'accountRef',
+          'cli',
+          'commandArgs',
+          'cliConfigArgs',
+          'acp',
+        ],
+        driftedFields: ['defaultModel', 'provider', 'mcpSupport', 'cli'],
+      },
+    } satisfies CatData & { identityProtection: Record<string, unknown> };
+    const onSaved = vi.fn(() => Promise.resolve());
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
+      }
+      if (path === '/api/config/session-strategy') return Promise.resolve(jsonResponse({ cats: [] }));
+      if (path === '/api/cats/gpt-pro' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: driftedCat }));
+      }
+      return accountSelectionRead(path, init);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          cat: driftedCat,
+          onClose: vi.fn(),
+          onSaved,
+        }),
+      );
+    });
+    await flushEffects();
+
+    expect(document.body.textContent).toContain('检测到云端身份配置异常');
+    const restoreButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '恢复云端身份配置',
+    );
+    expect(restoreButton).toBeDefined();
+    await act(async () => {
+      restoreButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const restoreCall = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/cats/gpt-pro' && init?.method === 'PATCH',
+    );
+    expect(JSON.parse(String(restoreCall?.[1]?.body))).toEqual({ restoreBuiltinCloudIdentity: true });
+    expect(onSaved).toHaveBeenCalledTimes(1);
   });
 });

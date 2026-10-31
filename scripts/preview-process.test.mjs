@@ -1,0 +1,352 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import net from 'node:net';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { after, before, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const SCRIPT_PATH = join(SCRIPT_DIR, 'preview-process.mjs');
+const LEASE_RUNNER_PATH = join(SCRIPT_DIR, 'preview-process-lease-runner.mjs');
+
+// Positive fixtures model a cooperating launcher. Arbitrary no-report commands
+// are covered separately and cannot certify requested cleanup from their exit.
+const OWNER_REPORT_SOURCE = `
+const fs = require('node:fs');
+const resultPath = process.env.CAT_CAFE_PREVIEW_CLEANUP_RESULT;
+function report(exitCode) {
+  fs.writeFileSync(resultPath, JSON.stringify({pid:process.pid,processGroupId:process.pid,exitCode}));
+}
+report(null);
+process.on('SIGTERM', () => { report(0); process.exit(0); });
+`;
+
+function reservePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close();
+        reject(new Error('failed to reserve test port'));
+        return;
+      }
+      const { port } = address;
+      server.close((error) => (error ? reject(error) : resolve(port)));
+    });
+  });
+}
+
+describe('preview-process managed lifecycle', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cat-cafe-preview-process-'));
+  const stateDir = join(root, 'state');
+  let port;
+  const env = {
+    ...process.env,
+    CAT_CAFE_PREVIEW_PROCESS_DIR: stateDir,
+    CAT_CAFE_CALLBACK_TOKEN: ['must', 'not', 'leak', 'to', 'managed', 'preview'].join('-'),
+  };
+
+  before(async () => {
+    port = await reservePort();
+  });
+
+  after(() => {
+    if (port) {
+      spawnSync(process.execPath, [SCRIPT_PATH, 'stop', '--port', String(port), '--cwd', root], {
+        env,
+        encoding: 'utf8',
+      });
+    }
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rejects duplicate recognized options before resolving a lifecycle target', () => {
+    const runtimeFixture = join(root, ['cat-cafe', 'runtime'].join('-'));
+    const aliasParent = join(root, 'duplicate-option-aliases');
+    const mainAlias = join(aliasParent, 'cat-cafe');
+    mkdirSync(runtimeFixture, { recursive: true });
+    mkdirSync(aliasParent, { recursive: true });
+    symlinkSync(runtimeFixture, mainAlias, 'dir');
+
+    for (const args of [
+      ['status', '--port', '3511', '--port', '3512', '--cwd', root],
+      ['status', '--port', '3511', '--cwd', mainAlias, '--cwd', mainAlias],
+      ['status', '--port', '3511', '--cwd', root, '--lifetime-seconds', '1', '--lifetime-seconds', '2'],
+      ['status', '--port', '3511', '--cwd', root, '--json', '--json'],
+    ]) {
+      const result = spawnSync(process.execPath, [SCRIPT_PATH, ...args], { env, encoding: 'utf8', timeout: 2_000 });
+      assert.equal(result.status, 1, result.stderr);
+      assert.match(result.stderr, /duplicate argument:/);
+    }
+  });
+
+  it('status without registration reports an unregistered observation without writing a record', () => {
+    const result = spawnSync(
+      process.execPath,
+      [SCRIPT_PATH, 'status', '--port', String(port), '--cwd', root, '--json'],
+      {
+        env,
+        encoding: 'utf8',
+        timeout: 5000,
+      },
+    );
+    assert.equal(result.status, 1, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 'stopped');
+    assert.equal(payload.registered, false);
+    assert.equal(payload.pid, undefined);
+    assert.equal(existsSync(stateDir), false);
+  });
+
+  it('keeps a reporting preview server alive after start exits and reports exact status until stop', () => {
+    const fixture = [
+      OWNER_REPORT_SOURCE,
+      "const http = require('node:http');",
+      `http.createServer((_req, res) => res.end('managed-preview-ok:' + (process.env.CAT_CAFE_CALLBACK_TOKEN ? 'leaked' : 'clean'))).listen(${port}, '127.0.0.1');`,
+    ].join('');
+    const start = spawnSync(
+      process.execPath,
+      [SCRIPT_PATH, 'start', '--port', String(port), '--cwd', root, '--', process.execPath, '-e', fixture],
+      { env, encoding: 'utf8', timeout: 15_000 },
+    );
+    assert.equal(start.status, 0, start.stderr || start.stdout);
+    if (process.platform === 'darwin') assert.match(start.stdout, /origin: launchd/);
+
+    const status = spawnSync(
+      process.execPath,
+      [SCRIPT_PATH, 'status', '--port', String(port), '--cwd', root, '--json'],
+      { env, encoding: 'utf8', timeout: 5_000 },
+    );
+    assert.equal(status.status, 0, status.stderr || status.stdout);
+    const runningStatus = JSON.parse(status.stdout);
+    assert.equal(runningStatus.status, 'running');
+    assert.equal(runningStatus.registered, true);
+    assert.match(runningStatus.expiresAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.ok(Date.parse(runningStatus.expiresAt) > Date.now(), 'managed previews must have a future expiry');
+
+    if (process.platform === 'darwin') {
+      const id = createHash('sha256').update(`${root}\0${port}`).digest('hex').slice(0, 16);
+      const record = JSON.parse(readFileSync(join(stateDir, `${id}.json`), 'utf8'));
+      assert.equal(
+        record.origin,
+        'launchd',
+        'a preview handed to the user must be launched outside the invocation process domain',
+      );
+      assert.match(record.launchdLabel, /^com\.catcafe\.preview\.[a-f0-9]{16}$/);
+
+      const launchd = spawnSync('launchctl', ['print', `gui/${process.getuid()}/${record.launchdLabel}`], {
+        encoding: 'utf8',
+        timeout: 5_000,
+      });
+      assert.equal(launchd.status, 0, launchd.stderr || launchd.stdout);
+      assert.match(launchd.stdout, new RegExp(`\\bpid = ${record.pid}\\b`));
+      assert.match(launchd.stdout, /\bruns = 1\b/);
+      assert.match(
+        launchd.stdout,
+        /spawn type = Interactive\b/i,
+        'an explicitly requested preview must not inherit daemon CPU/IO throttling that times out its identity probes',
+      );
+      assert.doesNotMatch(
+        launchd.stdout,
+        /properties = keepalive/,
+        'a one-shot preview launcher must not spin by relaunching an already-running child',
+      );
+      assert.doesNotMatch(launchd.stdout, /\.codex\/tmp/);
+      const plist = readFileSync(record.plistPath, 'utf8');
+      assert.doesNotMatch(plist, /<key>CAT_CAFE_(?:CALLBACK_TOKEN|INVOCATION_ID|AGENT_KEY_FILES)<\/key>/);
+      assert.doesNotMatch(plist, /\.codex\/tmp/);
+
+      const ppid = spawnSync('ps', ['-p', String(record.pid), '-o', 'ppid='], {
+        encoding: 'utf8',
+        timeout: 5_000,
+      });
+      assert.equal(ppid.status, 0, ppid.stderr || ppid.stdout);
+      assert.equal(Number(ppid.stdout.trim()), 1);
+    }
+
+    const response = spawnSync(
+      process.execPath,
+      ['-e', `fetch('http://127.0.0.1:${port}').then(r => r.text()).then(console.log)`],
+      { encoding: 'utf8', timeout: 5_000 },
+    );
+    assert.equal(response.status, 0, response.stderr);
+    assert.equal(response.stdout.trim(), 'managed-preview-ok:clean');
+
+    const stop = spawnSync(process.execPath, [SCRIPT_PATH, 'stop', '--port', String(port), '--cwd', root], {
+      env,
+      encoding: 'utf8',
+      timeout: 5_000,
+    });
+    assert.equal(stop.status, process.platform === 'win32' ? 1 : 0, stop.stderr || stop.stdout);
+    if (process.platform === 'win32') assert.match(stop.stderr, /cleanup incomplete or failed; state retained/);
+
+    const stopped = spawnSync(
+      process.execPath,
+      [SCRIPT_PATH, 'status', '--port', String(port), '--cwd', root, '--json'],
+      { env, encoding: 'utf8', timeout: 5_000 },
+    );
+    assert.equal(stopped.status, 1);
+    assert.equal(JSON.parse(stopped.stdout).status, 'stopped');
+    if (process.platform === 'win32') assert.equal(JSON.parse(stopped.stdout).registered, true);
+  });
+
+  it('expires the owned preview process group without relying on a later doctor or reboot', () => {
+    const startedAt = Date.now();
+    const result = spawnSync(
+      process.execPath,
+      [
+        LEASE_RUNNER_PATH,
+        '--expires-at',
+        new Date(startedAt + 500).toISOString(),
+        '--',
+        process.execPath,
+        '-e',
+        'setInterval(() => {}, 1000)',
+      ],
+      { encoding: 'utf8', timeout: 5_000 },
+    );
+
+    assert.equal(result.error, undefined, result.error?.message);
+    assert.equal(result.status, process.platform === 'win32' ? 1 : 0, result.stderr);
+    assert.ok(Date.now() - startedAt < 5_000, 'lease expiry must terminate without an external cleanup pass');
+    assert.match(result.stderr, /lease expired.*terminating managed preview/);
+  });
+
+  it('fails promptly when the managed preview command cannot be spawned', () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        LEASE_RUNNER_PATH,
+        '--expires-at',
+        new Date(Date.now() + 60_000).toISOString(),
+        '--',
+        join(root, 'missing-preview-command'),
+      ],
+      { encoding: 'utf8', timeout: 2_000 },
+    );
+
+    assert.equal(result.error, undefined, result.error?.message);
+    assert.equal(result.status, 1, result.error?.message ?? result.stderr);
+    assert.match(result.stderr, /preview command failed to start/);
+  });
+
+  it('can resolve status after the owning worktree has already been removed', async () => {
+    const removedCwd = join(root, 'removed-worktree');
+    const removedPort = await reservePort();
+    const result = spawnSync(
+      process.execPath,
+      [SCRIPT_PATH, 'status', '--port', String(removedPort), '--cwd', removedCwd, '--json'],
+      { env, encoding: 'utf8', timeout: 2_000 },
+    );
+
+    assert.equal(result.error, undefined, result.error?.message);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(JSON.parse(result.stdout).status, 'stopped');
+  });
+
+  it('refuses to replace an unmanaged listener on the requested port', async () => {
+    const occupiedPort = await reservePort();
+    const server = net.createServer();
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(occupiedPort, '127.0.0.1', resolve);
+    });
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [
+          SCRIPT_PATH,
+          'start',
+          '--port',
+          String(occupiedPort),
+          '--cwd',
+          root,
+          '--',
+          process.execPath,
+          '-e',
+          'setInterval(() => {}, 1000)',
+        ],
+        { env, encoding: 'utf8', timeout: 5_000 },
+      );
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /refusing to replace unmanaged target/);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('cleans an exited one-shot LaunchAgent without claiming ownership of another process', async () => {
+    if (process.platform !== 'darwin') return;
+    const oneShotPort = await reservePort();
+    const fixture = [
+      OWNER_REPORT_SOURCE,
+      "const http = require('node:http');",
+      `const server = http.createServer((_req, res) => res.end('one-shot')).listen(${oneShotPort}, '127.0.0.1');`,
+      'setTimeout(() => server.close(() => { report(0); process.exit(0); }), 750);',
+    ].join('');
+    const start = spawnSync(
+      process.execPath,
+      [SCRIPT_PATH, 'start', '--port', String(oneShotPort), '--cwd', root, '--', process.execPath, '-e', fixture],
+      { env, encoding: 'utf8', timeout: 5_000 },
+    );
+    assert.equal(start.status, 0, start.stderr || start.stdout);
+
+    const deadline = Date.now() + 3_000;
+    let status;
+    do {
+      status = spawnSync(
+        process.execPath,
+        [SCRIPT_PATH, 'status', '--port', String(oneShotPort), '--cwd', root, '--json'],
+        { env, encoding: 'utf8', timeout: 5_000 },
+      );
+      if (JSON.parse(status.stdout).status === 'stopped') break;
+    } while (Date.now() < deadline);
+    assert.equal(JSON.parse(status.stdout).status, 'stopped');
+
+    const stop = spawnSync(
+      process.execPath,
+      [SCRIPT_PATH, 'stop', '--port', String(oneShotPort), '--cwd', root, '--json'],
+      { env, encoding: 'utf8', timeout: 5_000 },
+    );
+    assert.equal(stop.status, 0, stop.stderr || stop.stdout);
+
+    const id = createHash('sha256').update(`${root}\0${oneShotPort}`).digest('hex').slice(0, 16);
+    const launchd = spawnSync('launchctl', ['print', `gui/${process.getuid()}/com.catcafe.preview.${id}`], {
+      encoding: 'utf8',
+      timeout: 5_000,
+    });
+    assert.notEqual(launchd.status, 0, 'stopping an exited one-shot preview must boot out its loaded job');
+  });
+
+  it('continues a bounded readiness probe when a managed cold start crosses ten seconds', async () => {
+    const latePort = await reservePort();
+    const fixture = [
+      OWNER_REPORT_SOURCE,
+      "const http = require('node:http');",
+      `setTimeout(() => http.createServer((_req, res) => res.end('late-ready')).listen(${latePort}, '127.0.0.1'), 10_500);`,
+      'setInterval(() => {}, 1000);',
+    ].join('');
+
+    const start = spawnSync(
+      process.execPath,
+      [SCRIPT_PATH, 'start', '--port', String(latePort), '--cwd', root, '--', process.execPath, '-e', fixture],
+      { env, encoding: 'utf8', timeout: 20_000 },
+    );
+
+    try {
+      assert.equal(start.status, 0, start.stderr || start.stdout);
+      assert.match(start.stdout, /\[preview-process\] running/);
+    } finally {
+      spawnSync(process.execPath, [SCRIPT_PATH, 'stop', '--port', String(latePort), '--cwd', root], {
+        env,
+        encoding: 'utf8',
+        timeout: 5_000,
+      });
+    }
+  });
+});

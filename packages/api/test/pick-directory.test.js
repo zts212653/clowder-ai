@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 
@@ -79,9 +81,9 @@ describe('getProjectBrowseParent()', () => {
 });
 
 describe('POST /api/projects/pick-directory', () => {
-  it('returns 401 when only a spoofed userId query param is provided', async () => {
+  it('returns 401 without trusted identity header', async () => {
     const app = await buildApp();
-    const res = await app.inject({ method: 'POST', url: '/api/projects/pick-directory?userId=spoofed' });
+    const res = await app.inject({ method: 'POST', url: '/api/projects/pick-directory' });
     assert.equal(res.statusCode, 401);
     const body = JSON.parse(res.body);
     assert.ok(body.error.includes('Identity required'));
@@ -131,15 +133,18 @@ describe('POST /api/projects/pick-directory', () => {
 });
 
 describe('GET /api/projects/browse (F113 cross-platform)', () => {
-  it('returns 401 when only a spoofed userId query param is provided', async () => {
+  it('returns 401 without trusted identity header', async () => {
     const app = await buildApp();
-    const res = await app.inject({ method: 'GET', url: '/api/projects/browse?userId=spoofed' });
+    const res = await app.inject({ method: 'GET', url: '/api/projects/browse' });
     assert.equal(res.statusCode, 401);
     const body = JSON.parse(res.body);
     assert.ok(body.error.includes('Identity required'));
   });
 
   it('returns home directory listing by default', async () => {
+    const sampleDirName = 'pick-directory-home-fixture';
+    mkdirSync(join(homedir(), sampleDirName), { recursive: true });
+
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/api/projects/browse', headers: AUTH_HEADERS });
     assert.equal(res.statusCode, 200);
@@ -147,8 +152,7 @@ describe('GET /api/projects/browse (F113 cross-platform)', () => {
     assert.equal(body.current, homedir());
     assert.equal(typeof body.name, 'string');
     assert.ok(Array.isArray(body.entries));
-    // Home directory should have subdirectories
-    assert.ok(body.entries.length > 0);
+    assert.ok(body.entries.some((entry) => entry.name === sampleDirName));
     // All entries should be directories
     for (const entry of body.entries) {
       assert.equal(entry.isDirectory, true);
@@ -195,5 +199,130 @@ describe('GET /api/projects/browse (F113 cross-platform)', () => {
       assert.ok(!entry.name.startsWith('.'), `should hide: ${entry.name}`);
       assert.notEqual(entry.name, 'node_modules');
     }
+  });
+});
+
+describe('listAvailableDrives()', () => {
+  it('returns [] on non-Windows platforms', async () => {
+    assert.deepEqual(await mod.listAvailableDrives('darwin'), []);
+    assert.deepEqual(await mod.listAvailableDrives('linux'), []);
+  });
+
+  it('returns an array of DriveInfo with letter/path/label shape on win32', async () => {
+    // On a non-Windows test host, realpath('C:\\') rejects, so every probe
+    // fails and the result is []. That still validates the function does not
+    // throw and returns the correct type. On a real Windows host this would
+    // return populated entries for mounted drives.
+    const result = await mod.listAvailableDrives('win32');
+    assert.ok(Array.isArray(result));
+    for (const d of result) {
+      assert.ok(typeof d.letter === 'string' && d.letter.length === 1);
+      assert.ok(typeof d.path === 'string');
+      assert.ok(typeof d.label === 'string');
+    }
+  });
+
+  it('skips A: and B: (floppy legacy) — only probes C through Z', async () => {
+    // Indirect assertion: listAvailableDrives never returns A or B regardless
+    // of platform, since the probe loop starts at 'C'.
+    for (const plat of ['win32', 'darwin', 'linux']) {
+      for (const d of await mod.listAvailableDrives(plat)) {
+        assert.notEqual(d.letter, 'A');
+        assert.notEqual(d.letter, 'B');
+      }
+    }
+  });
+
+  it('returns mounted drives and skips inaccessible ones (deterministic probe)', async () => {
+    const probe = (root) => {
+      if (root === 'C:\\') return 'C:\\';
+      if (root === 'D:\\') return 'D:\\';
+      throw new Error('ENOENT');
+    };
+    const result = await mod.listAvailableDrives('win32', probe);
+    assert.equal(result.length, 2);
+    assert.equal(result[0].letter, 'C');
+    assert.equal(result[0].path, 'C:\\');
+    assert.equal(result[0].label, '本地磁盘 (C:)');
+    assert.equal(result[1].letter, 'D');
+    assert.equal(result[1].path, 'D:\\');
+  });
+
+  it('awaits asynchronous drive probes and skips rejected roots', async () => {
+    const started = [];
+    const probe = async (root) => {
+      started.push(root);
+      await Promise.resolve();
+      if (root === 'C:\\' || root === 'D:\\') return root;
+      throw new Error('ENOENT');
+    };
+
+    const result = await mod.listAvailableDrives('win32', probe);
+
+    assert.equal(started.length, 24);
+    assert.deepEqual(
+      result.map(({ letter, path }) => ({ letter, path })),
+      [
+        { letter: 'C', path: 'C:\\' },
+        { letter: 'D', path: 'D:\\' },
+      ],
+    );
+  });
+
+  it('returns [] when no drives are accessible (deterministic probe)', async () => {
+    const probe = () => {
+      throw new Error('ENOENT');
+    };
+    const result = await mod.listAvailableDrives('win32', probe);
+    assert.deepEqual(result, []);
+  });
+
+  it('returns the real path resolved by the probe, not the probed root', async () => {
+    // realpath may resolve junctions; returned path must be the resolved one.
+    const probe = (root) => {
+      if (root === 'C:\\') return 'C:\\';
+      throw new Error('ENOENT');
+    };
+    const result = await mod.listAvailableDrives('win32', probe);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].path, 'C:\\');
+  });
+});
+
+describe('GET /api/projects/drives', () => {
+  it('returns 401 without trusted identity header', async () => {
+    const app = await buildApp();
+    const res = await app.inject({ method: 'GET', url: '/api/projects/drives' });
+    assert.equal(res.statusCode, 401);
+    const body = JSON.parse(res.body);
+    assert.ok(body.error.includes('Identity required'));
+  });
+
+  it('returns a drives array (empty on non-Windows host)', async () => {
+    const app = await buildApp();
+    const res = await app.inject({ method: 'GET', url: '/api/projects/drives', headers: AUTH_HEADERS });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.ok(Array.isArray(body.drives));
+    // On the macOS/Linux CI host, no Windows drives are mounted → [].
+    // On a Windows host, this would contain C: at minimum.
+    for (const d of body.drives) {
+      assert.ok(typeof d.letter === 'string');
+      assert.ok(typeof d.path === 'string');
+      assert.ok(typeof d.label === 'string');
+    }
+    // Server-owned capability contract (R4): isWindows reflects the server's
+    // platform, not the client's. On this host it matches process.platform.
+    assert.equal(typeof body.isWindows, 'boolean');
+    assert.equal(body.isWindows, process.platform === 'win32');
+  });
+
+  it('browse endpoint returns isWindows capability', async () => {
+    const app = await buildApp();
+    const res = await app.inject({ method: 'GET', url: '/api/projects/browse', headers: AUTH_HEADERS });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(typeof body.isWindows, 'boolean');
+    assert.equal(body.isWindows, process.platform === 'win32');
   });
 });

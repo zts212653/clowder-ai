@@ -1,21 +1,30 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { after, afterEach, beforeEach, describe, it } from 'node:test';
-import { CAT_CONFIGS, catRegistry, createCatId } from '@cat-cafe/shared';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+import { catRegistry, createCatId } from '@cat-cafe/shared';
+import './helpers/setup-cat-registry.js';
+import { isolateAccountAuthEnvironment } from './helpers/account-auth-environment.js';
+import { selectFakeCodexHome } from './helpers/fake-codex-home.js';
 
 const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
 const { _clearRuntimeOverrides, getRuntimeOverride, setRuntimeOverride } = await import(
   '../dist/config/session-strategy-overrides.js'
 );
+const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
 
 const tempDirs = [];
 let savedTemplatePath;
 
 function resetRegistryToBuiltins() {
   catRegistry.reset();
-  for (const [id, config] of Object.entries(CAT_CONFIGS)) {
+  const allConfigs = toAllCatConfigs(loadCatConfig());
+  for (const [id, config] of Object.entries(allConfigs)) {
     catRegistry.register(id, config);
   }
 }
@@ -37,7 +46,7 @@ function makeTemplate() {
         variants: [
           {
             id: 'opus-default',
-            provider: 'anthropic',
+            clientId: 'anthropic',
             defaultModel: 'claude-sonnet-4-5-20250929',
             mcpSupport: true,
             cli: { command: 'claude', outputFormat: 'stream-json' },
@@ -68,10 +77,41 @@ function makeTemplate() {
   };
 }
 
+/**
+ * F171: bootstrapCatCatalog() now creates empty catalogs (first-run quest).
+ * Pre-write a catalog with breeds from the template so tests that operate on
+ * template cats still find them. Stamps default accountRef.
+ */
+const BUILTIN_ACCOUNT_IDS = {
+  anthropic: 'claude',
+  openai: 'codex',
+  google: 'gemini',
+  kimi: 'kimi',
+  opencode: 'opencode',
+};
+
+function seedCatalogFromTemplate(projectRoot, templatePath) {
+  const tpl = templatePath || join(projectRoot, 'cat-template.json');
+  const template = JSON.parse(readFileSync(tpl, 'utf-8'));
+  for (const breed of template.breeds || []) {
+    for (const variant of breed.variants || []) {
+      if (!variant.accountRef && variant.clientId && BUILTIN_ACCOUNT_IDS[variant.clientId]) {
+        variant.accountRef = BUILTIN_ACCOUNT_IDS[variant.clientId];
+      }
+    }
+  }
+  const catCafeDir = join(projectRoot, '.cat-cafe');
+  mkdirSync(catCafeDir, { recursive: true });
+  writeFileSync(join(catCafeDir, 'cat-catalog.json'), `${JSON.stringify(template, null, 2)}\n`, 'utf-8');
+}
+
 function createProjectRoot() {
   const projectRoot = mkdtempSync(join(tmpdir(), 'cats-route-crud-'));
   tempDirs.push(projectRoot);
+  process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
   writeFileSync(join(projectRoot, 'cat-template.json'), JSON.stringify(makeTemplate(), null, 2));
+  seedCatalogFromTemplate(projectRoot);
+  selectFakeCodexHome(projectRoot);
   return projectRoot;
 }
 
@@ -84,19 +124,53 @@ function createMonorepoProjectRoot() {
 function createProjectRootFromRepoTemplate() {
   const projectRoot = mkdtempSync(join(tmpdir(), 'cats-route-crud-seed-'));
   tempDirs.push(projectRoot);
-  const repoTemplate = JSON.parse(readFileSync(join(process.cwd(), '..', '..', 'cat-template.json'), 'utf-8'));
-  writeFileSync(join(projectRoot, 'cat-template.json'), JSON.stringify(repoTemplate, null, 2));
+  process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
+  const templateDest = join(projectRoot, 'cat-template.json');
+  const repoTemplate = JSON.parse(readFileSync(join(__dirname, '..', '..', '..', 'cat-template.json'), 'utf-8'));
+  writeFileSync(templateDest, JSON.stringify(repoTemplate, null, 2));
+  seedCatalogFromTemplate(projectRoot, templateDest);
+  selectFakeCodexHome(projectRoot);
+  process.env.CAT_TEMPLATE_PATH = templateDest;
   return projectRoot;
 }
 
+function removeAgyOpusFromRuntimeCatalog(projectRoot) {
+  const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+  const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+  delete catalog.roster['agy-opus'];
+  const bengal = catalog.breeds.find((breed) => breed.id === 'bengal');
+  bengal.variants = bengal.variants.filter((variant) => variant.id !== 'agy-opus');
+  writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`, 'utf-8');
+}
+
 describe('cats routes runtime CRUD', { concurrency: false }, () => {
+  /** @type {string | undefined} */ let savedGlobalRoot;
+  /** @type {string | undefined} */ let savedConfigRoot;
+  /** @type {string | undefined} */ let savedCodexHome;
+  /** @type {string | undefined} */ let savedCodexSqliteHome;
+
+  let restoreAuthEnvironment;
   beforeEach(() => {
+    restoreAuthEnvironment = isolateAccountAuthEnvironment();
     savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    savedGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    savedConfigRoot = process.env.CAT_CAFE_CONFIG_ROOT;
+    savedCodexHome = process.env.CODEX_HOME;
+    savedCodexSqliteHome = process.env.CODEX_SQLITE_HOME;
     resetRegistryToBuiltins();
     _clearRuntimeOverrides();
   });
 
   afterEach(() => {
+    restoreAuthEnvironment();
+    if (savedCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = savedCodexHome;
+    if (savedCodexSqliteHome === undefined) delete process.env.CODEX_SQLITE_HOME;
+    else process.env.CODEX_SQLITE_HOME = savedCodexSqliteHome;
+    if (savedGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = savedGlobalRoot;
+    if (savedConfigRoot === undefined) delete process.env.CAT_CAFE_CONFIG_ROOT;
+    else process.env.CAT_CAFE_CONFIG_ROOT = savedConfigRoot;
     if (savedTemplatePath === undefined) {
       delete process.env.CAT_TEMPLATE_PATH;
     } else {
@@ -107,12 +181,372 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
   });
 
   after(() => {
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
+    console.log('Retained isolated catalog fixtures:', JSON.stringify(tempDirs));
+  });
+
+  it('persists a member banner through POST, GET and PATCH removal without changing its avatar', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    const app = (await import('fastify')).default();
+    await app.register((await import('../dist/routes/cats.js')).catsRoutes);
+    const headers = { 'x-cat-cafe-user': 'default-user' };
+    try {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        payload: {
+          catId: 'banner-http',
+          name: 'Banner member',
+          displayName: 'Banner member',
+          avatar: '/avatars/default.png',
+          banner: '/uploads/banner-sunset.jpg',
+          color: { primary: '#765843', secondary: '#eadccc' },
+          mentionPatterns: ['@banner-http'],
+          roleDescription: 'Preview',
+          clientId: 'openai',
+          accountRef: 'codex',
+          defaultModel: 'gpt-5.4',
+          mcpSupport: true,
+        },
+      });
+      assert.equal(created.statusCode, 201, created.payload);
+      const read = async () =>
+        (await app.inject({ method: 'GET', url: '/api/cats', headers }))
+          .json()
+          .cats.find((cat) => cat.id === 'banner-http');
+      assert.equal((await read()).banner, '/uploads/banner-sunset.jpg');
+      const rejected = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/banner-http',
+        headers,
+        payload: { banner: 'https://tracker.example/banner.jpg' },
+      });
+      assert.equal(rejected.statusCode, 400, rejected.payload);
+      const cleared = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/banner-http',
+        headers,
+        payload: { banner: null },
+      });
+      assert.equal(cleared.statusCode, 200, cleared.payload);
+      const cat = await read();
+      assert.equal(cat.banner, undefined);
+      assert.equal(cat.avatar, '/avatars/default.png');
+    } finally {
+      await app.close();
     }
   });
 
+  it('POST and PATCH accept an existing breedId and preserve member identity', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const headers = { 'content-type': 'application/json', 'x-cat-cafe-user': 'default-user' };
+    const createBody = (catId, breedId) => ({
+      catId,
+      ...(breedId ? { breedId } : {}),
+      name: `Member ${catId}`,
+      displayName: `Display ${catId}`,
+      nickname: `Nick ${catId}`,
+      avatar: `/avatars/${catId}.png`,
+      color: { primary: '#123456', secondary: '#abcdef' },
+      mentionPatterns: [`@${catId}`],
+      roleDescription: 'Independent role',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.4',
+      mcpSupport: true,
+    });
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify(createBody('family-new', 'ragdoll')),
+    });
+    assert.equal(created.statusCode, 201, created.body);
+    assert.equal(JSON.parse(created.body).cat.breedId, 'ragdoll');
+    assert.equal(JSON.parse(created.body).cat.relationshipKey, 'family-new');
+    assert.equal(JSON.parse(created.body).cat.roster.family, 'ragdoll');
+
+    const invalidCreate = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify(createBody('family-unknown', 'missing-breed')),
+    });
+    assert.equal(invalidCreate.statusCode, 400, invalidCreate.body);
+    assert.match(JSON.parse(invalidCreate.body).error, /Unknown breedId "missing-breed"/);
+
+    const standalone = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify(createBody('family-move')),
+    });
+    assert.equal(standalone.statusCode, 201, standalone.body);
+    const before = JSON.parse(standalone.body).cat;
+    const moved = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/family-move',
+      headers,
+      body: JSON.stringify({ breedId: 'ragdoll' }),
+    });
+    assert.equal(moved.statusCode, 200, moved.body);
+    const after = JSON.parse(moved.body).cat;
+    assert.equal(after.breedId, 'ragdoll');
+    assert.equal(after.relationshipKey, before.relationshipKey);
+    assert.equal(after.roster.family, 'ragdoll');
+    for (const key of [
+      'id',
+      'name',
+      'displayName',
+      'nickname',
+      'avatar',
+      'color',
+      'mentionPatterns',
+      'clientId',
+      'defaultModel',
+      'accountRef',
+    ]) {
+      assert.deepEqual(after[key], before[key], `${key} must survive the API move`);
+    }
+
+    const listAfterMove = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.ok(
+      JSON.parse(listAfterMove.body).cats.some((cat) => cat.id === 'family-move'),
+      `moved member must remain in resolved catalog: ${listAfterMove.body}`,
+    );
+
+    const invalid = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/family-move',
+      headers,
+      body: JSON.stringify({ breedId: 'missing-breed' }),
+    });
+    assert.equal(invalid.statusCode, 400, invalid.body);
+    assert.match(JSON.parse(invalid.body).error, /Unknown breedId "missing-breed"/);
+    const list = await app.inject({ method: 'GET', url: '/api/cats' });
+    const cats = JSON.parse(list.body).cats;
+    assert.equal(cats.find((cat) => cat.id === 'family-move').breedId, 'ragdoll');
+    assert.equal(cats.find((cat) => cat.id === 'opus').breedId, 'ragdoll');
+    await app.close();
+  });
+
   it('POST /api/cats creates a normal runtime member and PATCH updates aliases immediately', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createPayload = {
+      catId: 'runtime-spark',
+      name: '火花猫',
+      displayName: '火花猫',
+      nickname: '小火花',
+      avatar: '/avatars/spark.png',
+      color: { primary: '#f97316', secondary: '#fed7aa' },
+      mentionPatterns: ['@runtime-spark', '@火花猫'],
+      roleDescription: '快速执行',
+      personality: '利落',
+      teamStrengths: '精确点改',
+      caution: '不会自动跑测试',
+      strengths: ['precision', 'speed'],
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.4',
+      contextWindow: 48_000,
+      mcpSupport: false,
+      cli: { command: 'codex', outputFormat: 'json' },
+    };
+    const rejectedLegacyCreate = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ ...createPayload, sessionChain: true }),
+    });
+    assert.equal(rejectedLegacyCreate.statusCode, 400);
+    assert.match(JSON.parse(rejectedLegacyCreate.body).error, /legacy sessionChain/i);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify(createPayload),
+    });
+    assert.equal(createRes.statusCode, 201);
+    const createdBody = JSON.parse(createRes.body);
+    assert.equal(createdBody.cat.id, 'runtime-spark');
+    assert.equal(createdBody.cat.clientId, 'openai');
+    assert.equal(createdBody.cat.avatar, '/avatars/spark.png', 'create response must preserve the identity avatar');
+
+    // Simulate a member created by an older version. New routes must preserve
+    // this rollback byte during unrelated writes while refusing to edit it.
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const legacyCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const legacyBreed = legacyCatalog.breeds.find((breed) => breed.catId === 'runtime-spark');
+    const legacyVariant = legacyBreed?.variants.find(
+      (variant) => (variant.catId ?? legacyBreed.catId) === 'runtime-spark',
+    );
+    assert.ok(legacyVariant);
+    legacyVariant.sessionChain = false;
+    writeFileSync(catalogPath, `${JSON.stringify(legacyCatalog, null, 2)}\n`, 'utf-8');
+
+    const rejectedLegacyPatch = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-spark',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ sessionChain: false }),
+    });
+    assert.equal(rejectedLegacyPatch.statusCode, 400);
+    assert.match(JSON.parse(rejectedLegacyPatch.body).error, /legacy sessionChain/i);
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-spark',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        displayName: '运行时火花猫',
+        nickname: '火花',
+        mentionPatterns: ['@runtime-spark', '@运行时火花'],
+        teamStrengths: '精确点改 + 快速修复',
+        caution: '',
+        strengths: ['precision', 'speed', 'surgical-edits'],
+        contextWindow: 72_000,
+      }),
+    });
+    assert.equal(patchRes.statusCode, 200);
+
+    const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.equal(listRes.statusCode, 200);
+    const listBody = JSON.parse(listRes.body);
+    const runtimeCat = listBody.cats.find((cat) => cat.id === 'runtime-spark');
+    assert.ok(runtimeCat, 'runtime-spark should appear in /api/cats');
+    assert.equal(runtimeCat.displayName, '运行时火花猫');
+    assert.equal(runtimeCat.nickname, '火花');
+    assert.equal(runtimeCat.avatar, '/avatars/spark.png', 'list response must preserve the identity avatar');
+    assert.deepEqual(runtimeCat.mentionPatterns, ['@runtime-spark', '@运行时火花']);
+    assert.equal(runtimeCat.teamStrengths, '精确点改 + 快速修复');
+    assert.equal(runtimeCat.caution, null);
+    assert.deepEqual(runtimeCat.strengths, ['precision', 'speed', 'surgical-edits']);
+    assert.equal(runtimeCat.contextWindow, 72_000);
+    const patchedCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const patchedBreed = patchedCatalog.breeds.find((breed) => breed.catId === 'runtime-spark');
+    const patchedVariant = patchedBreed?.variants.find(
+      (variant) => (variant.catId ?? patchedBreed.catId) === 'runtime-spark',
+    );
+    assert.equal(patchedVariant.sessionChain, false, 'unrelated writes must preserve the legacy rollback byte');
+
+    const bindProviderRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-spark',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        accountRef: 'codex',
+      }),
+    });
+    assert.equal(bindProviderRes.statusCode, 200);
+
+    const clearProviderRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-spark',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        accountRef: null,
+      }),
+    });
+    assert.equal(clearProviderRes.statusCode, 400);
+    assert.match(JSON.parse(clearProviderRes.body).error, /requires a provider binding/i);
+
+    const clearBudgetRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-spark',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        contextWindow: null,
+      }),
+    });
+    assert.equal(clearBudgetRes.statusCode, 200);
+
+    const listAfterClearRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.equal(listAfterClearRes.statusCode, 200);
+    const listAfterClearBody = JSON.parse(listAfterClearRes.body);
+    const runtimeCatAfterClear = listAfterClearBody.cats.find((cat) => cat.id === 'runtime-spark');
+    assert.ok(runtimeCatAfterClear, 'runtime-spark should still exist');
+    assert.equal(runtimeCatAfterClear.contextWindow, undefined);
+    assert.equal(runtimeCatAfterClear.accountRef, 'codex');
+
+    const mentions = parseA2AMentions('@运行时火花 请跟进这个分支', createCatId('opus'));
+    assert.ok(mentions.includes('runtime-spark'), 'new alias should route immediately');
+  });
+
+  it('PATCH /api/cats/:id can update AGY Opus after bootstrap persists a stale catalog injection', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    removeAgyOpusFromRuntimeCatalog(projectRoot);
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    try {
+      await app.register(catsRoutes);
+
+      const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
+      assert.equal(listRes.statusCode, 200);
+      const listBody = JSON.parse(listRes.body);
+      assert.ok(
+        listBody.cats.some((cat) => cat.id === 'agy-opus'),
+        'AGY Opus should be visible after bootstrap',
+      );
+
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/agy-opus',
+        headers: {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        },
+        body: JSON.stringify({ available: false }),
+      });
+
+      assert.equal(patchRes.statusCode, 200);
+      const persisted = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+      assert.equal(persisted.roster['agy-opus']?.available, false);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST/PATCH /api/cats preserves provider-native effort across model switches', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -130,131 +564,1185 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        catId: 'runtime-spark',
-        name: '火花猫',
-        displayName: '火花猫',
-        nickname: '小火花',
-        avatar: '/avatars/spark.png',
-        color: { primary: '#f97316', secondary: '#fed7aa' },
-        mentionPatterns: ['@runtime-spark', '@火花猫'],
-        roleDescription: '快速执行',
-        personality: '利落',
-        teamStrengths: '精确点改',
-        caution: '不会自动跑测试',
-        strengths: ['precision', 'speed'],
-        sessionChain: true,
-        client: 'openai',
+        catId: 'runtime-codex-effort',
+        name: '运行时缅因猫',
+        displayName: '运行时缅因猫',
+        avatar: '/avatars/codex.png',
+        color: { primary: '#16a34a', secondary: '#bbf7d0' },
+        mentionPatterns: ['@runtime-codex-effort'],
+        roleDescription: '审查',
+        clientId: 'openai',
         accountRef: 'codex',
-        defaultModel: 'gpt-5.4',
-        contextBudget: {
-          maxPromptTokens: 24000,
-          maxContextTokens: 16000,
-          maxMessages: 24,
-          maxContentLengthPerMsg: 6000,
+        defaultModel: 'gpt-5.6-sol',
+        contextWindow: 372000,
+        cli: {
+          command: 'codex',
+          outputFormat: 'json',
+          effort: 'turbo-native',
+          contextWindow: 128000,
+          autoCompactTokenLimit: 96000,
         },
-        mcpSupport: false,
-        cli: { command: 'codex', outputFormat: 'json' },
       }),
     });
-    assert.equal(createRes.statusCode, 201);
+    assert.equal(createRes.statusCode, 201, createRes.body);
     const createdBody = JSON.parse(createRes.body);
-    assert.equal(createdBody.cat.id, 'runtime-spark');
-    assert.equal(createdBody.cat.provider, 'openai');
-
-    const patchRes = await app.inject({
-      method: 'PATCH',
-      url: '/api/cats/runtime-spark',
-      headers: {
-        'content-type': 'application/json',
-        'x-cat-cafe-user': 'codex',
-      },
-      body: JSON.stringify({
-        displayName: '运行时火花猫',
-        nickname: '火花',
-        mentionPatterns: ['@runtime-spark', '@运行时火花'],
-        teamStrengths: '精确点改 + 快速修复',
-        caution: '',
-        strengths: ['precision', 'speed', 'surgical-edits'],
-        sessionChain: false,
-        contextBudget: {
-          maxPromptTokens: 36000,
-          maxContextTokens: 22000,
-          maxMessages: 36,
-          maxContentLengthPerMsg: 9000,
-        },
-      }),
-    });
-    assert.equal(patchRes.statusCode, 200);
+    assert.equal(createdBody.cat.cli?.effort, 'turbo-native');
+    // #1208 public API: only the top-level field is accepted; nested legacy keys are inert.
+    assert.equal(createdBody.cat.contextWindow, 372000, 'top-level contextWindow is canonical');
+    assert.equal(createdBody.cat.cli?.contextWindow, undefined, 'contextWindow no longer stored in cli');
+    assert.equal(createdBody.cat.cli?.autoCompactTokenLimit, undefined, 'autoCompactTokenLimit derived at runtime');
 
     const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
     assert.equal(listRes.statusCode, 200);
     const listBody = JSON.parse(listRes.body);
-    const runtimeCat = listBody.cats.find((cat) => cat.id === 'runtime-spark');
-    assert.ok(runtimeCat, 'runtime-spark should appear in /api/cats');
-    assert.equal(runtimeCat.displayName, '运行时火花猫');
-    assert.equal(runtimeCat.nickname, '火花');
-    assert.deepEqual(runtimeCat.mentionPatterns, ['@runtime-spark', '@运行时火花']);
-    assert.equal(runtimeCat.teamStrengths, '精确点改 + 快速修复');
-    assert.equal(runtimeCat.caution, null);
-    assert.deepEqual(runtimeCat.strengths, ['precision', 'speed', 'surgical-edits']);
-    assert.equal(runtimeCat.sessionChain, false);
-    assert.deepEqual(runtimeCat.contextBudget, {
-      maxPromptTokens: 36000,
-      maxContextTokens: 22000,
-      maxMessages: 36,
-      maxContentLengthPerMsg: 9000,
-    });
+    const runtimeCat = listBody.cats.find((cat) => cat.id === 'runtime-codex-effort');
+    assert.ok(runtimeCat, 'runtime-codex-effort should appear in /api/cats');
+    assert.equal(runtimeCat.cli?.effort, 'turbo-native');
+    assert.equal(runtimeCat.contextWindow, 372000, 'contextWindow at top level in list');
 
-    const bindProviderRes = await app.inject({
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const persisted = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const variant = persisted.breeds.find((breed) => breed.catId === 'runtime-codex-effort')?.variants?.[0];
+    assert.equal(variant?.cli?.effort, 'turbo-native');
+    assert.equal(variant?.contextWindow, 372000, 'contextWindow persisted at variant top-level');
+    assert.equal(variant?.cli?.contextWindow, undefined, 'cli.contextWindow not persisted');
+
+    // #1208: effort patch preserves top-level contextWindow
+    const effortPatchRes = await app.inject({
       method: 'PATCH',
-      url: '/api/cats/runtime-spark',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ cli: { effort: 'max' } }),
+    });
+    assert.equal(effortPatchRes.statusCode, 200, effortPatchRes.body);
+    const effortPatchedCat = JSON.parse(effortPatchRes.body).cat;
+    assert.equal(effortPatchedCat.cli?.effort, 'max');
+    assert.equal(effortPatchedCat.contextWindow, 372000, 'partial effort patch preserves top-level contextWindow');
+
+    // #1208: changing context window via top-level contextWindow field
+    const contextOnlyPatchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ contextWindow: 100000 }),
+    });
+    assert.equal(contextOnlyPatchRes.statusCode, 200, contextOnlyPatchRes.body);
+    const contextOnlyPatchedCat = JSON.parse(contextOnlyPatchRes.body).cat;
+    assert.equal(contextOnlyPatchedCat.contextWindow, 100000, 'top-level contextWindow updated');
+    assert.equal(contextOnlyPatchedCat.cli?.contextWindow, undefined, 'cli.contextWindow stays absent');
+
+    // #1208: cli.autoCompactTokenLimit in body is silently ignored (derived at runtime)
+    const compactOnlyPatchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ cli: { effort: 'max' } }),
+    });
+    assert.equal(compactOnlyPatchRes.statusCode, 200, compactOnlyPatchRes.body);
+    const compactOnlyPatchedCat = JSON.parse(compactOnlyPatchRes.body).cat;
+    assert.equal(compactOnlyPatchedCat.contextWindow, 100000, 'contextWindow unchanged after unrelated cli patch');
+
+    const modelPatchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ defaultModel: 'gpt-5.4' }),
+    });
+    assert.equal(modelPatchRes.statusCode, 200, modelPatchRes.body);
+    const modelPatchedCat = JSON.parse(modelPatchRes.body).cat;
+    assert.equal(modelPatchedCat.cli?.effort, 'max', 'model switch preserves the provider-native member value');
+    // contextWindow persists at top level across model switch (user chose this limit)
+    assert.equal(modelPatchedCat.contextWindow, 100000, 'top-level contextWindow persists across model switch');
+
+    // #1208: restore model with contextWindow via top-level field
+    const restoreGpt56Res = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-effort',
       headers: {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        providerProfileId: 'codex',
+        defaultModel: 'gpt-5.6-sol',
+        contextWindow: 372000,
+        cli: { effort: 'max' },
       }),
     });
-    assert.equal(bindProviderRes.statusCode, 200);
+    assert.equal(restoreGpt56Res.statusCode, 200, restoreGpt56Res.body);
+    const restoredGpt56Cat = JSON.parse(restoreGpt56Res.body).cat;
+    assert.equal(restoredGpt56Cat.contextWindow, 372000, 'top-level contextWindow restored');
+    assert.equal(restoredGpt56Cat.cli?.effort, 'max');
+    const restoredCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const restoredVariant = restoredCatalog.breeds.find((breed) => breed.catId === 'runtime-codex-effort')
+      ?.variants?.[0];
+    assert.equal(restoredVariant?.contextWindow, 372000, 'contextWindow persisted at variant top-level');
 
-    const clearProviderRes = await app.inject({
+    // #1208: model switch + context window via top-level contextWindow
+    const modelAndContextPatchRes = await app.inject({
       method: 'PATCH',
-      url: '/api/cats/runtime-spark',
+      url: '/api/cats/runtime-codex-effort',
       headers: {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        providerProfileId: null,
+        defaultModel: 'gpt-5.4',
+        contextWindow: 100000,
       }),
     });
-    assert.equal(clearProviderRes.statusCode, 400);
-    assert.match(JSON.parse(clearProviderRes.body).error, /requires a provider binding/i);
+    assert.equal(modelAndContextPatchRes.statusCode, 200, modelAndContextPatchRes.body);
+    const modelAndContextPatchedCat = JSON.parse(modelAndContextPatchRes.body).cat;
+    assert.equal(modelAndContextPatchedCat.cli?.effort, 'max');
+    assert.equal(modelAndContextPatchedCat.contextWindow, 100000, 'top-level contextWindow updated with model switch');
 
-    const clearBudgetRes = await app.inject({
+    const clearEffortRes = await app.inject({
       method: 'PATCH',
-      url: '/api/cats/runtime-spark',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ cli: { effort: null } }),
+    });
+    assert.equal(clearEffortRes.statusCode, 200, clearEffortRes.body);
+    assert.equal(JSON.parse(clearEffortRes.body).cat.cli?.effort, undefined);
+
+    const noEffortModelSwitchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ defaultModel: 'gpt-5.6-sol' }),
+    });
+    assert.equal(noEffortModelSwitchRes.statusCode, 200, noEffortModelSwitchRes.body);
+    const noEffortModelSwitchedCat = JSON.parse(noEffortModelSwitchRes.body).cat;
+    assert.equal(noEffortModelSwitchedCat.cli?.effort, undefined, 'model switch preserves an implicit effort');
+    // #1208: contextWindow persists at top level across model switch
+    assert.equal(noEffortModelSwitchedCat.contextWindow, 100000, 'top-level contextWindow persists');
+  });
+
+  it('#1208 migration: legacy cli.contextWindow stripped on any PATCH save', async () => {
+    // Scenario: legacy cat with only cli.contextWindow (no top-level contextWindow).
+    // Any PATCH save should strip cli.contextWindow and promote to top-level.
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+
+    // Inject a legacy cat with cli.contextWindow directly into the catalog
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    catalog.breeds.push({
+      id: 'test-legacy-ctx-breed',
+      catId: 'legacy-ctx-cat',
+      name: 'Legacy Context',
+      displayName: 'Legacy Context',
+      avatar: '🐱',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: ['@legacy-ctx-cat'],
+      roleDescription: 'test',
+      personality: 'test',
+      order: 99,
+      defaultVariantId: 'legacy-ctx-cat',
+      variants: [
+        {
+          id: 'legacy-ctx-cat',
+          clientId: 'openai',
+          defaultModel: 'gpt-5.3-codex',
+          mcpSupport: false,
+          cli: { command: 'codex', outputFormat: 'stream-json', contextWindow: 128000, autoCompactTokenLimit: 96000 },
+        },
+      ],
+    });
+    writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // PATCH something unrelated (effort) — should still strip legacy cli fields
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/legacy-ctx-cat',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ cli: { effort: 'high' } }),
+    });
+    assert.equal(patchRes.statusCode, 200, patchRes.body);
+    const patched = JSON.parse(patchRes.body).cat;
+    // Legacy cli.contextWindow promoted to top-level
+    assert.equal(patched.contextWindow, 128000, 'legacy cli.contextWindow promoted to top-level');
+    assert.equal(patched.cli?.contextWindow, undefined, 'cli.contextWindow stripped after save');
+
+    // Verify persisted state
+    const savedCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const savedVariant = savedCatalog.breeds.find((b) => b.catId === 'legacy-ctx-cat')?.variants?.[0];
+    assert.equal(savedVariant?.contextWindow, 128000, 'top-level persisted');
+    assert.equal(savedVariant?.cli?.contextWindow, undefined, 'cli.contextWindow not persisted');
+    assert.equal(savedVariant?.cli?.autoCompactTokenLimit, undefined, 'cli.autoCompactTokenLimit not persisted');
+  });
+
+  it('#1208 GET /api/cats resolves Hub capacity from legacy window and effective model', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const makeBreed = (catId, variant) => ({
+      id: `${catId}-breed`,
+      catId,
+      name: catId,
+      displayName: catId,
+      avatar: '🐱',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: [`@${catId}`],
+      roleDescription: 'test',
+      personality: 'test',
+      order: 99,
+      defaultVariantId: catId,
+      variants: [{ id: catId, clientId: 'openai', mcpSupport: false, ...variant }],
+    });
+    catalog.breeds.push(
+      makeBreed('hub-legacy-window', {
+        defaultModel: 'gpt-5.1-codex',
+        cli: { command: 'codex', outputFormat: 'json', contextWindow: 123_000 },
+      }),
+      makeBreed('hub-auto-model', {
+        defaultModel: 'gpt-5.1-codex',
+        cli: { command: 'codex', outputFormat: 'json' },
+      }),
+    );
+    writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
+
+    const envKey = 'CAT_HUB_AUTO_MODEL_MODEL';
+    const savedModel = process.env[envKey];
+    process.env[envKey] = 'gpt-5.3';
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/cats',
+        headers: { 'x-cat-cafe-user': 'codex' },
+      });
+      assert.equal(res.statusCode, 200, res.body);
+      const cats = JSON.parse(res.body).cats;
+      const legacy = cats.find((cat) => cat.id === 'hub-legacy-window');
+      const auto = cats.find((cat) => cat.id === 'hub-auto-model');
+
+      assert.equal(legacy?.contextWindow, 123_000, 'Hub editable field exposes the effective legacy manual setting');
+      assert.equal(legacy?.resolvedContext?.source, 'manual');
+      assert.equal(legacy?.resolvedContext?.windowTokens, 123_000);
+      assert.equal(auto?.contextWindow, undefined, 'Auto remains blank in the editable field');
+      assert.equal(auto?.resolvedContext?.source, 'catalog');
+      assert.equal(auto?.resolvedContext?.windowTokens, 128_000);
+      assert.match(auto?.resolvedContext?.provenance ?? '', /gpt-5\.3/);
+    } finally {
+      await app.close();
+      if (savedModel === undefined) delete process.env[envKey];
+      else process.env[envKey] = savedModel;
+    }
+  });
+
+  it('#1208 GET /api/cats projects a binding-aware Auto ACP capacity snapshot', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    catalog.breeds.push({
+      id: 'hub-auto-acp-breed',
+      catId: 'hub-auto-acp',
+      name: 'Hub Auto ACP',
+      displayName: 'Hub Auto ACP',
+      avatar: '🐱',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: ['@hub-auto-acp'],
+      roleDescription: 'test',
+      personality: 'test',
+      order: 99,
+      defaultVariantId: 'hub-auto-acp',
+      variants: [
+        {
+          id: 'hub-auto-acp',
+          clientId: 'opencode',
+          defaultModel: 'claude-opus-4-6',
+          provider: 'anthropic',
+          mcpSupport: true,
+          acp: {
+            command: 'opencode',
+            startupArgs: ['acp'],
+            supportsMultiplexing: true,
+          },
+        },
+      ],
+    });
+    writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes, {
+      resolveContextCapacitySnapshot: (catId) =>
+        catId === 'hub-auto-acp'
+          ? {
+              capacity: {
+                windowTokens: 1_000_000,
+                inputCeilingTokens: 900_000,
+                source: 'catalog',
+                provenance: 'model catalog: claude-opus-4-6; bound by service_spawn to opencode/acp',
+                actionable: true,
+              },
+              capability: {
+                provider: 'opencode',
+                carrier: 'acp',
+                reportsRuntimeWindow: false,
+                authoritativeUsage: true,
+                usageTelemetry: 'available',
+                nativeWindowControl: true,
+                nativeCompressionControl: false,
+                observesCompression: false,
+                reason: 'OpenCode ACP usage telemetry observed',
+              },
+              binding: {
+                model: 'claude-opus-4-6',
+                windowTokens: 1_000_000,
+                source: 'service_spawn',
+              },
+              memberWindowTokens: null,
+              model: 'claude-opus-4-6',
+            }
+          : undefined,
+    });
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/cats',
+        headers: { 'x-cat-cafe-user': 'codex' },
+      });
+      assert.equal(res.statusCode, 200, res.body);
+      const cat = JSON.parse(res.body).cats.find((candidate) => candidate.id === 'hub-auto-acp');
+
+      assert.equal(cat?.resolvedContext?.source, 'catalog');
+      assert.equal(cat?.resolvedContext?.windowTokens, 1_000_000);
+      assert.equal(cat?.resolvedContext?.actionable, true);
+      assert.equal(cat?.resolvedContext?.usageTelemetry, 'available');
+      assert.match(cat?.resolvedContext?.provenance ?? '', /bound by service_spawn to opencode\/acp/);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('#1208 migration: clear-to-Auto on legacy cat removes both top-level and cli cap', async () => {
+    // Scenario: legacy cat has cli.contextWindow=128000 (no top-level).
+    // User sends PATCH {contextWindow: null} to clear to Auto.
+    // Both top-level and legacy cli.contextWindow must be gone.
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    catalog.breeds.push({
+      id: 'test-legacy-clear-breed',
+      catId: 'legacy-clear-cat',
+      name: 'Legacy Clear',
+      displayName: 'Legacy Clear',
+      avatar: '🐱',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: ['@legacy-clear-cat'],
+      roleDescription: 'test',
+      personality: 'test',
+      order: 99,
+      defaultVariantId: 'legacy-clear-cat',
+      variants: [
+        {
+          id: 'legacy-clear-cat',
+          clientId: 'openai',
+          defaultModel: 'gpt-5.3-codex',
+          mcpSupport: false,
+          cli: { command: 'codex', outputFormat: 'stream-json', contextWindow: 128000 },
+        },
+      ],
+    });
+    writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Step 1: arbitrary save → promotes cli.contextWindow to top-level
+    const promotionRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/legacy-clear-cat',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ personality: 'updated' }),
+    });
+    assert.equal(promotionRes.statusCode, 200, promotionRes.body);
+    const promoted = JSON.parse(promotionRes.body).cat;
+    assert.equal(promoted.contextWindow, 128000, 'promoted to top-level');
+    assert.equal(promoted.cli?.contextWindow, undefined, 'cli.contextWindow stripped');
+
+    // Step 2: clear to Auto via {contextWindow: null}
+    const clearRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/legacy-clear-cat',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ contextWindow: null }),
+    });
+    assert.equal(clearRes.statusCode, 200, clearRes.body);
+    const cleared = JSON.parse(clearRes.body).cat;
+    assert.equal(cleared.contextWindow, undefined, 'top-level contextWindow cleared to Auto');
+    assert.equal(cleared.cli?.contextWindow, undefined, 'cli.contextWindow stays gone');
+
+    // Verify resolver now sees this as Auto (no cap)
+    const { getMemberWindowSetting } = await import('../dist/config/context-capacity.js');
+    assert.equal(getMemberWindowSetting('legacy-clear-cat'), undefined, 'resolver sees Auto (no manual setting)');
+  });
+
+  it('#1208 migration: model switch preserves top-level contextWindow', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    catalog.breeds.push({
+      id: 'test-model-switch-breed',
+      catId: 'model-switch-cat',
+      name: 'Model Switch',
+      displayName: 'Model Switch',
+      avatar: '🐱',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: ['@model-switch-cat'],
+      roleDescription: 'test',
+      personality: 'test',
+      order: 99,
+      defaultVariantId: 'model-switch-cat',
+      variants: [
+        {
+          id: 'model-switch-cat',
+          clientId: 'anthropic',
+          accountRef: 'claude',
+          defaultModel: 'claude-opus-4-6',
+          mcpSupport: false,
+          contextWindow: 200000,
+        },
+      ],
+    });
+    writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Model switch should preserve contextWindow at top level
+    const switchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/model-switch-cat',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'opus' },
+      body: JSON.stringify({ defaultModel: 'claude-sonnet-4-6' }),
+    });
+    assert.equal(switchRes.statusCode, 200, switchRes.body);
+    const switched = JSON.parse(switchRes.body).cat;
+    assert.equal(switched.contextWindow, 200000, 'contextWindow preserved across model switch');
+    assert.equal(switched.defaultModel, 'claude-sonnet-4-6', 'model actually switched');
+  });
+
+  it('POST /api/cats keeps legacy nested CLI window fields outside the public contract', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const baseBody = {
+      name: '上下文缅因猫',
+      displayName: '上下文缅因猫',
+      avatar: '/avatars/codex.png',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      roleDescription: '审查',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.6-sol',
+    };
+    const headers = {
+      'content-type': 'application/json',
+      'x-cat-cafe-user': 'codex',
+    };
+
+    // #1208: nested cli.contextWindow is unknown public input and cannot set member capacity.
+    const createContextOnlyRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify({
+        ...baseBody,
+        catId: 'runtime-context-derived',
+        mentionPatterns: ['@runtime-context-derived'],
+        cli: { command: 'codex', outputFormat: 'json', contextWindow: 100000 },
+      }),
+    });
+    assert.equal(createContextOnlyRes.statusCode, 201, createContextOnlyRes.body);
+    const createdContextCat = JSON.parse(createContextOnlyRes.body).cat;
+    assert.equal(createdContextCat.contextWindow, undefined, 'nested cli.contextWindow must be inert');
+    assert.equal(createdContextCat.cli?.contextWindow, undefined, 'cli.contextWindow no longer stored');
+    assert.equal(createdContextCat.cli?.autoCompactTokenLimit, undefined, 'autoCompactTokenLimit derived at runtime');
+    const persisted = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+    const derivedVariant = persisted.breeds.find((breed) => breed.catId === 'runtime-context-derived')?.variants?.[0];
+    assert.equal(derivedVariant?.contextWindow, undefined, 'nested cli.contextWindow must not be migrated on create');
+
+    // #1208: autoCompactTokenLimit without contextWindow is silently accepted
+    // (autoCompactTokenLimit is ignored — derived at runtime from contextWindow)
+    const createOrphanCompactRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify({
+        ...baseBody,
+        catId: 'runtime-context-orphan',
+        mentionPatterns: ['@runtime-context-orphan'],
+        cli: { command: 'codex', outputFormat: 'json', autoCompactTokenLimit: 90000 },
+      }),
+    });
+    // Now succeeds: autoCompactTokenLimit in body is silently ignored (no validation)
+    assert.equal(createOrphanCompactRes.statusCode, 201, createOrphanCompactRes.body);
+
+    // #1208: explicit top-level contextWindow is the only public member window field.
+    const createBothRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify({
+        ...baseBody,
+        catId: 'runtime-context-both',
+        mentionPatterns: ['@runtime-context-both'],
+        contextWindow: 200000,
+        cli: { command: 'codex', outputFormat: 'json', contextWindow: 100000 },
+      }),
+    });
+    assert.equal(createBothRes.statusCode, 201, createBothRes.body);
+    const createdBothCat = JSON.parse(createBothRes.body).cat;
+    assert.equal(createdBothCat.contextWindow, 200000, 'top-level contextWindow is persisted');
+  });
+
+  it('POST /api/cats rejects blank cli.effort values', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
       headers: {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        contextBudget: null,
+        catId: 'runtime-invalid-effort',
+        name: '非法缅因猫',
+        displayName: '非法缅因猫',
+        avatar: '/avatars/codex.png',
+        color: { primary: '#16a34a', secondary: '#bbf7d0' },
+        mentionPatterns: ['@runtime-invalid-effort'],
+        roleDescription: '审查',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+        cli: { command: 'codex', outputFormat: 'json', effort: '   ' },
       }),
     });
-    assert.equal(clearBudgetRes.statusCode, 200);
 
-    const listAfterClearRes = await app.inject({ method: 'GET', url: '/api/cats' });
-    assert.equal(listAfterClearRes.statusCode, 200);
-    const listAfterClearBody = JSON.parse(listAfterClearRes.body);
-    const runtimeCatAfterClear = listAfterClearBody.cats.find((cat) => cat.id === 'runtime-spark');
-    assert.ok(runtimeCatAfterClear, 'runtime-spark should still exist');
-    assert.equal(runtimeCatAfterClear.contextBudget, undefined);
-    assert.equal(runtimeCatAfterClear.accountRef, 'codex');
+    assert.equal(createRes.statusCode, 400);
+  });
 
-    const mentions = parseA2AMentions('@运行时火花 请跟进这个分支', createCatId('opus'));
-    assert.ok(mentions.includes('runtime-spark'), 'new alias should route immediately');
+  it('POST and PATCH /api/cats reject effort for clients without an effort adapter', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      const headers = {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      };
+      const baseBody = {
+        name: 'Kimi 猫',
+        displayName: 'Kimi 猫',
+        avatar: '/avatars/kimi.png',
+        color: { primary: '#7c3aed', secondary: '#ede9fe' },
+        roleDescription: '中文代码助手',
+        clientId: 'kimi',
+        accountRef: 'kimi',
+        defaultModel: 'kimi-k2.5',
+      };
+
+      const createWithEffortRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          catId: 'runtime-kimi-effort',
+          mentionPatterns: ['@runtime-kimi-effort'],
+          cli: { command: 'kimi', outputFormat: 'stream-json', effort: 'high' },
+        }),
+      });
+      assert.equal(createWithEffortRes.statusCode, 400);
+      assert.match(JSON.parse(createWithEffortRes.body).error, /effort/i);
+
+      const validCreateRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          catId: 'runtime-kimi-no-effort',
+          mentionPatterns: ['@runtime-kimi-no-effort'],
+        }),
+      });
+      assert.equal(validCreateRes.statusCode, 201, validCreateRes.body);
+
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-kimi-no-effort',
+        headers,
+        body: JSON.stringify({ cli: { effort: 'high' } }),
+      });
+      assert.equal(patchRes.statusCode, 400);
+      assert.match(JSON.parse(patchRes.body).error, /effort/i);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST and PATCH /api/cats persist canonical carrier and enforce the client matrix', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      const headers = {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      };
+      const baseBody = {
+        name: '缅因猫',
+        displayName: '缅因猫',
+        avatar: '/avatars/codex.png',
+        color: { primary: '#16a34a', secondary: '#bbf7d0' },
+        roleDescription: '审查',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+      };
+
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          catId: 'runtime-codex-carrier',
+          mentionPatterns: ['@runtime-codex-carrier'],
+          carrier: 'app_server',
+          cli: { command: 'codex', outputFormat: 'json' },
+        }),
+      });
+      assert.equal(createRes.statusCode, 201, createRes.body);
+      assert.equal(JSON.parse(createRes.body).cat.carrier, 'app_server');
+      assert.equal(JSON.parse(createRes.body).cat.cli?.carrier, undefined);
+
+      const invalidEnumRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          catId: 'runtime-codex-carrier-invalid',
+          mentionPatterns: ['@runtime-codex-carrier-invalid'],
+          carrier: 'carrier_pigeon',
+        }),
+      });
+      assert.equal(invalidEnumRes.statusCode, 400);
+
+      const kimiCreateRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          clientId: 'kimi',
+          accountRef: 'kimi',
+          defaultModel: 'kimi-k2.5',
+          catId: 'runtime-kimi-carrier',
+          mentionPatterns: ['@runtime-kimi-carrier'],
+          carrier: 'app_server',
+          cli: { command: 'kimi', outputFormat: 'stream-json' },
+        }),
+      });
+      assert.equal(kimiCreateRes.statusCode, 400);
+      assert.match(JSON.parse(kimiCreateRes.body).error, /carrier/i);
+
+      const openCodeServerCreateRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          clientId: 'opencode',
+          accountRef: 'opencode',
+          defaultModel: 'anthropic/claude-test',
+          catId: 'runtime-opencode-server-carrier',
+          mentionPatterns: ['@runtime-opencode-server-carrier'],
+          carrier: 'server',
+          cli: { command: 'opencode', outputFormat: 'json' },
+        }),
+      });
+      assert.equal(openCodeServerCreateRes.statusCode, 400);
+
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-carrier',
+        headers,
+        body: JSON.stringify({ carrier: 'cli' }),
+      });
+      assert.equal(patchRes.statusCode, 200, patchRes.body);
+      assert.equal(JSON.parse(patchRes.body).cat.carrier, 'cli');
+
+      const clearRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-carrier',
+        headers,
+        body: JSON.stringify({ carrier: 'app_server' }),
+      });
+      assert.equal(clearRes.statusCode, 200, clearRes.body);
+      assert.equal(JSON.parse(clearRes.body).cat.carrier, 'app_server');
+
+      // Carrier is model-independent: a model switch must preserve the override.
+      const modelSwitchRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-carrier',
+        headers,
+        body: JSON.stringify({ carrier: 'app_server' }),
+      });
+      assert.equal(modelSwitchRes.statusCode, 200, modelSwitchRes.body);
+      const modelChangeRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-carrier',
+        headers,
+        body: JSON.stringify({ defaultModel: 'gpt-5.5' }),
+      });
+      assert.equal(modelChangeRes.statusCode, 200, modelChangeRes.body);
+      assert.equal(JSON.parse(modelChangeRes.body).cat.carrier, 'app_server');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST and PATCH /api/cats gate cli.serviceTier to eligible Codex OAuth bindings', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
+    writeCatalogAccount(projectRoot, 'codex-api-key', {
+      authType: 'api_key',
+      baseUrl: 'https://api.openai.example',
+      models: ['gpt-5.6-sol'],
+      displayName: 'Codex API Key',
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      const headers = {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      };
+      const baseBody = {
+        name: '缅因猫',
+        displayName: '缅因猫',
+        avatar: '/avatars/codex.png',
+        color: { primary: '#16a34a', secondary: '#bbf7d0' },
+        roleDescription: '审查',
+        clientId: 'openai',
+        defaultModel: 'gpt-5.6-sol',
+      };
+
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          catId: 'runtime-codex-speed',
+          mentionPatterns: ['@runtime-codex-speed'],
+          accountRef: 'codex',
+          cli: { command: 'codex', outputFormat: 'json', serviceTier: 'fast' },
+        }),
+      });
+      assert.equal(createRes.statusCode, 201, createRes.body);
+      assert.equal(JSON.parse(createRes.body).cat.cli?.serviceTier, 'fast');
+
+      const unsupportedModelRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          catId: 'runtime-codex-speed-unsupported',
+          mentionPatterns: ['@runtime-codex-speed-unsupported'],
+          accountRef: 'codex',
+          defaultModel: 'gpt-4.1',
+          cli: { command: 'codex', outputFormat: 'json', serviceTier: 'fast' },
+        }),
+      });
+      assert.equal(unsupportedModelRes.statusCode, 400);
+      assert.match(JSON.parse(unsupportedModelRes.body).error, /Fast.*model/i);
+
+      const apiKeyCreateRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          catId: 'runtime-codex-speed-api-key',
+          mentionPatterns: ['@runtime-codex-speed-api-key'],
+          accountRef: 'codex-api-key',
+          cli: { command: 'codex', outputFormat: 'json', serviceTier: 'fast' },
+        }),
+      });
+      assert.equal(apiKeyCreateRes.statusCode, 400);
+      assert.match(JSON.parse(apiKeyCreateRes.body).error, /OAuth/i);
+
+      const nonCodexRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          clientId: 'kimi',
+          accountRef: 'kimi',
+          defaultModel: 'kimi-k2.5',
+          catId: 'runtime-kimi-speed',
+          mentionPatterns: ['@runtime-kimi-speed'],
+          cli: { command: 'kimi', outputFormat: 'stream-json', serviceTier: 'standard' },
+        }),
+      });
+      assert.equal(nonCodexRes.statusCode, 400);
+      assert.match(JSON.parse(nonCodexRes.body).error, /Codex OAuth/i);
+
+      const clearRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-speed',
+        headers,
+        body: JSON.stringify({ cli: { serviceTier: null } }),
+      });
+      assert.equal(clearRes.statusCode, 200, clearRes.body);
+      assert.equal(JSON.parse(clearRes.body).cat.cli?.serviceTier, undefined);
+
+      const restoreRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-speed',
+        headers,
+        body: JSON.stringify({ cli: { serviceTier: 'fast' } }),
+      });
+      assert.equal(restoreRes.statusCode, 200, restoreRes.body);
+
+      const switchBindingRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-speed',
+        headers,
+        body: JSON.stringify({ accountRef: 'codex-api-key' }),
+      });
+      assert.equal(switchBindingRes.statusCode, 200, switchBindingRes.body);
+      assert.equal(
+        JSON.parse(switchBindingRes.body).cat.cli?.serviceTier,
+        'fast',
+        'account switches preserve dormant member intent when serviceTier was not explicitly edited',
+      );
+
+      const explicitApiKeyRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-speed',
+        headers,
+        body: JSON.stringify({ cli: { serviceTier: 'standard' } }),
+      });
+      assert.equal(explicitApiKeyRes.statusCode, 400);
+      assert.match(JSON.parse(explicitApiKeyRes.body).error, /OAuth/i);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /api/cats exposes the canonical member carrier and ignores the retired global selector', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    const savedCarrier = process.env.CAT_CAFE_CODEX_CARRIER;
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      delete process.env.CAT_CAFE_CODEX_CARRIER;
+      const headers = {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      };
+
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          catId: 'runtime-carrier-truth',
+          name: '缅因猫',
+          displayName: '缅因猫',
+          avatar: '/avatars/codex.png',
+          color: { primary: '#16a34a', secondary: '#bbf7d0' },
+          mentionPatterns: ['@runtime-carrier-truth'],
+          roleDescription: '审查',
+          clientId: 'openai',
+          accountRef: 'codex',
+          defaultModel: 'gpt-5.4',
+        }),
+      });
+      assert.equal(createRes.statusCode, 201, createRes.body);
+      assert.equal(JSON.parse(createRes.body).cat.carrier, 'cli');
+
+      // The retired global selector must not change per-member routing truth.
+      process.env.CAT_CAFE_CODEX_CARRIER = 'app_server';
+      const envRes = await app.inject({ method: 'GET', url: '/api/cats', headers });
+      assert.equal(envRes.statusCode, 200, envRes.body);
+      const envCat = JSON.parse(envRes.body).cats.find((cat) => cat.id === 'runtime-carrier-truth');
+      assert.equal(envCat.carrier, 'cli');
+
+      // The canonical top-level carrier is the only writable selector.
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-carrier-truth',
+        headers,
+        body: JSON.stringify({ carrier: 'app_server' }),
+      });
+      assert.equal(patchRes.statusCode, 200, patchRes.body);
+      assert.equal(JSON.parse(patchRes.body).cat.carrier, 'app_server');
+
+      // Every member carries one explicit access mode, regardless of provider.
+      const claudeCat = JSON.parse(envRes.body).cats.find((cat) => cat.id === 'opus');
+      assert.equal(claudeCat.clientId, 'anthropic');
+      assert.equal(claudeCat.carrier, 'cli');
+
+      // ACP is its own explicit client/carrier; OpenAI does not silently become ACP.
+      const acpRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          catId: 'runtime-carrier-acp',
+          name: 'ACP 缅因猫',
+          displayName: 'ACP 缅因猫',
+          avatar: '/avatars/codex.png',
+          color: { primary: '#16a34a', secondary: '#bbf7d0' },
+          mentionPatterns: ['@runtime-carrier-acp'],
+          roleDescription: '审查',
+          clientId: 'acp',
+          accountRef: 'codex',
+          defaultModel: 'gpt-5.4',
+          acp: { command: 'codex', startupArgs: ['acp'] },
+        }),
+      });
+      assert.equal(acpRes.statusCode, 201, acpRes.body);
+      const acpCat = JSON.parse(acpRes.body).cat;
+      assert.equal(acpCat.carrier, 'acp');
+      assert.equal(acpCat.cli?.effort, undefined, 'ACP create must not persist CLI effort');
+      assert.equal(acpCat.cli?.carrier, undefined, 'ACP create must not persist a CLI carrier override');
+      assert.deepEqual(acpCat.cliConfigArgs ?? [], [], 'ACP create must not persist extra CLI arguments');
+
+      const switchToAcpRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-carrier-truth',
+        headers,
+        body: JSON.stringify({
+          carrier: 'cli',
+        }),
+      });
+      assert.equal(switchToAcpRes.statusCode, 200, switchToAcpRes.body);
+      const switchedToAcp = JSON.parse(switchToAcpRes.body).cat;
+      assert.equal(switchedToAcp.carrier, 'cli');
+
+      // Cloud-only members still expose their configured access mode even though
+      // the cloud provider bypasses local dispatch.
+      const cloudRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          catId: 'runtime-carrier-cloud',
+          name: '云端缅因猫',
+          displayName: '云端缅因猫',
+          avatar: '/avatars/codex.png',
+          color: { primary: '#16a34a', secondary: '#bbf7d0' },
+          mentionPatterns: ['@runtime-carrier-cloud'],
+          roleDescription: '云端 Remote MCP 猫',
+          clientId: 'openai',
+          accountRef: 'codex',
+          defaultModel: 'gpt-pro',
+          provider: 'openai-chatgpt-pro',
+          mcpSupport: true,
+        }),
+      });
+      assert.equal(cloudRes.statusCode, 201, cloudRes.body);
+      const cloudCat = JSON.parse(cloudRes.body).cat;
+      assert.equal(cloudCat.cli, undefined);
+      assert.equal(cloudCat.carrier, 'cli');
+    } finally {
+      if (savedCarrier === undefined) {
+        delete process.env.CAT_CAFE_CODEX_CARRIER;
+      } else {
+        process.env.CAT_CAFE_CODEX_CARRIER = savedCarrier;
+      }
+      await app.close();
+    }
+  });
+
+  it('POST and PATCH /api/cats accept effort for tier-capable kimi k3 models', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      const headers = {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      };
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          catId: 'runtime-kimi-k3-effort',
+          name: 'Kimi K3 猫',
+          displayName: 'Kimi K3 猫',
+          avatar: '/avatars/kimi.png',
+          color: { primary: '#7c3aed', secondary: '#ede9fe' },
+          mentionPatterns: ['@runtime-kimi-k3-effort'],
+          roleDescription: '中文代码助手',
+          clientId: 'kimi',
+          accountRef: 'kimi',
+          defaultModel: 'kimi-code/k3',
+          cli: { command: 'kimi', outputFormat: 'stream-json', effort: 'max' },
+        }),
+      });
+      assert.equal(createRes.statusCode, 201, createRes.body);
+      assert.equal(JSON.parse(createRes.body).cat.cli?.effort, 'max');
+
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-kimi-k3-effort',
+        headers,
+        body: JSON.stringify({ cli: { effort: 'low' } }),
+      });
+      assert.equal(patchRes.statusCode, 200, patchRes.body);
+      assert.equal(JSON.parse(patchRes.body).cat.cli?.effort, 'low');
+
+      const unsupportedPatchRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-kimi-k3-effort',
+        headers,
+        body: JSON.stringify({ defaultModel: 'kimi-code/kimi-for-coding', cli: { effort: 'low' } }),
+      });
+      assert.equal(unsupportedPatchRes.statusCode, 400, unsupportedPatchRes.body);
+      assert.match(JSON.parse(unsupportedPatchRes.body).error, /effort/i);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST /api/cats accepts kimi client with first-class default CLI commands', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      const kimiRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers: {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        },
+        body: JSON.stringify({
+          catId: 'runtime-kimi',
+          name: 'Kimi 猫',
+          displayName: 'Kimi 猫',
+          avatar: '/avatars/kimi.png',
+          color: { primary: '#7c3aed', secondary: '#ede9fe' },
+          mentionPatterns: ['@runtime-kimi'],
+          roleDescription: '中文代码助手',
+          clientId: 'kimi',
+          accountRef: 'kimi',
+          defaultModel: 'kimi-k2.5',
+        }),
+      });
+      assert.equal(kimiRes.statusCode, 201);
+
+      const catalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+      const breeds = catalog.breeds;
+      const kimiVariant = breeds.find((breed) => breed.catId === 'runtime-kimi')?.variants?.[0];
+
+      assert.equal(kimiVariant.clientId, 'kimi');
+      assert.deepEqual(kimiVariant.cli, { command: 'kimi', outputFormat: 'stream-json' });
+      assert.equal(kimiVariant.accountRef, 'kimi');
+    } finally {
+      await app.close();
+    }
   });
 
   it('POST /api/cats falls back to the readable active project root when CAT_TEMPLATE_PATH is stale', async () => {
@@ -287,7 +1775,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
           color: { primary: '#2563eb', secondary: '#bfdbfe' },
           mentionPatterns: ['@runtime-fallback'],
           roleDescription: '验证 project root fallback',
-          client: 'openai',
+          clientId: 'openai',
           accountRef: 'codex',
           defaultModel: 'gpt-5.4',
         }),
@@ -328,7 +1816,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         mentionPatterns: ['@runtime-antigravity'],
         roleDescription: '桥接通道',
         personality: '稳定',
-        client: 'antigravity',
+        clientId: 'antigravity',
         defaultModel: 'gemini-bridge',
         commandArgs: ['chat', '--mode', 'agent'],
       }),
@@ -336,7 +1824,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(res.statusCode, 201);
     const body = JSON.parse(res.body);
     assert.equal(body.cat.id, 'runtime-antigravity');
-    assert.equal(body.cat.provider, 'antigravity');
+    assert.equal(body.cat.clientId, 'antigravity');
     assert.equal(body.cat.defaultModel, 'gemini-bridge');
 
     const statusRes = await app.inject({ method: 'GET', url: '/api/cats/runtime-antigravity/status' });
@@ -371,7 +1859,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         mentionPatterns: ['@runtime-antigravity-clear'],
         roleDescription: '桥接通道',
         personality: '稳定',
-        client: 'antigravity',
+        clientId: 'antigravity',
         defaultModel: 'gemini-bridge',
         commandArgs: ['chat', '--mode', 'agent'],
       }),
@@ -394,9 +1882,17 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(patchBody.cat.commandArgs, undefined);
   });
 
-  it('POST /api/cats defaults mcpSupport=true for Codex/Gemini clients when omitted', async () => {
+  it('POST /api/cats defaults mcpSupport=true for Codex/Gemini/ACP clients when omitted', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const acpProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Default ACP',
+      authType: 'api_key',
+      protocol: 'openai',
+      apiKey: 'sk-default-acp',
+      models: ['test-model'],
+    });
 
     const Fastify = (await import('fastify')).default;
     const { catsRoutes } = await import('../dist/routes/cats.js');
@@ -405,8 +1901,15 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     await app.register(catsRoutes);
 
     for (const spec of [
-      { catId: 'runtime-openai', client: 'openai', accountRef: 'codex', model: 'gpt-5.4' },
-      { catId: 'runtime-gemini', client: 'google', accountRef: 'gemini', model: 'gemini-2.5-pro' },
+      { catId: 'runtime-openai', clientId: 'openai', accountRef: 'codex', model: 'gpt-5.4' },
+      { catId: 'runtime-gemini', clientId: 'google', accountRef: 'gemini', model: 'gemini-2.5-pro' },
+      {
+        catId: 'runtime-acp',
+        clientId: 'acp',
+        accountRef: acpProfile.id,
+        model: 'test-model',
+        acp: { command: 'test-cli', startupArgs: ['--acp'] },
+      },
     ]) {
       const res = await app.inject({
         method: 'POST',
@@ -423,9 +1926,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
           color: { primary: '#334155', secondary: '#cbd5e1' },
           mentionPatterns: [`@${spec.catId}`],
           roleDescription: 'runtime',
-          client: spec.client,
+          clientId: spec.clientId,
           accountRef: spec.accountRef,
           defaultModel: spec.model,
+          ...(spec.acp ? { acp: spec.acp } : {}),
         }),
       });
 
@@ -433,7 +1937,75 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       const body = JSON.parse(res.body);
       assert.equal(body.cat.id, spec.catId);
       assert.equal(body.cat.mcpSupport, true);
+      if (spec.clientId === 'google') {
+        assert.deepEqual(body.cat.cli, { command: 'agy', outputFormat: 'plainText' });
+      }
     }
+  });
+
+  it('POST /api/cats extends MCP blockedCats when a tool is disabled for all existing members', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    const { readCapabilitiesConfig, writeCapabilitiesConfig } = await import(
+      '../dist/config/capabilities/capability-orchestrator.js'
+    );
+    await writeCapabilitiesConfig(projectRoot, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'project-disabled-tool',
+          type: 'mcp',
+          enabled: true,
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: { command: 'echo', args: [] },
+          blockedCats: ['opus'],
+        },
+        {
+          id: 'enabled-tool',
+          type: 'mcp',
+          enabled: true,
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: { command: 'echo', args: [] },
+          blockedCats: [],
+        },
+      ],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-codex-blocked',
+        name: 'Runtime Codex Blocked',
+        displayName: 'Runtime Codex Blocked',
+        avatar: '/avatars/runtime.png',
+        color: { primary: '#334155', secondary: '#cbd5e1' },
+        mentionPatterns: ['@runtime-codex-blocked'],
+        roleDescription: 'runtime',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+      }),
+    });
+
+    assert.equal(res.statusCode, 201, `create failed: ${res.body}`);
+    const config = await readCapabilitiesConfig(projectRoot);
+    const projectDisabledTool = config?.capabilities.find((cap) => cap.id === 'project-disabled-tool');
+    const enabledTool = config?.capabilities.find((cap) => cap.id === 'enabled-tool');
+    assert.deepEqual(projectDisabledTool?.blockedCats, ['opus', 'runtime-codex-blocked']);
+    assert.deepEqual(enabledTool?.blockedCats, []);
   });
 
   it('PATCH /api/cats/:id rejects provider bindings that do not resolve to an existing account', async () => {
@@ -461,7 +2033,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         color: { primary: '#16a34a', secondary: '#bbf7d0' },
         mentionPatterns: ['@runtime-codex'],
         roleDescription: '审查',
-        client: 'openai',
+        clientId: 'openai',
         accountRef: 'codex',
         defaultModel: 'gpt-5.4',
       }),
@@ -476,7 +2048,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        providerProfileId: 'claude-oauth',
+        accountRef: 'claude-oauth',
       }),
     });
     assert.equal(patchRes.statusCode, 400);
@@ -488,7 +2060,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const crossProtocolProfile = await createProviderProfile(projectRoot, {
       displayName: 'OpenAI Key Profile',
       authType: 'api_key',
@@ -519,27 +2091,75 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         color: { primary: '#0f172a', secondary: '#e2e8f0' },
         mentionPatterns: ['@runtime-opencode-crossproto'],
         roleDescription: '审查',
-        client: 'opencode',
-        providerProfileId: crossProtocolProfile.id,
+        clientId: 'opencode',
+        accountRef: crossProtocolProfile.id,
         defaultModel: 'openai/claude-sonnet-4-6',
+        provider: 'openai',
       }),
     });
 
     assert.equal(createRes.statusCode, 201, 'cross-protocol api_key binding should be allowed');
   });
 
-  it('POST /api/cats rejects opencode model without providerId/ prefix', async () => {
+  it('POST /api/cats allows cross-protocol binding after protocol retirement (#329)', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
-    const openaiProfile = await createProviderProfile(projectRoot, {
-      displayName: 'OpenAI Key Profile',
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const openaiAccount = await createProviderProfile(projectRoot, {
+      displayName: 'MiniMax OpenAI',
       authType: 'api_key',
       protocol: 'openai',
-      baseUrl: 'https://api.bound.example',
-      apiKey: 'sk-bound-openai',
-      models: ['gpt-5.4'],
+      baseUrl: 'https://api.minimaxi.com/v1',
+      apiKey: 'sk-test-minimax',
+      models: ['MiniMax-M2.7'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Protocol validation removed (#329): protocol is provider-determined,
+    // not an account attribute. Cross-protocol binding is now allowed.
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-minimax-cross-protocol',
+        name: '跨协议绑定猫',
+        displayName: '跨协议绑定猫',
+        avatar: '/avatars/test.png',
+        color: { primary: '#ff0000', secondary: '#ffcccc' },
+        mentionPatterns: ['@cross-protocol-test'],
+        roleDescription: '测试用',
+        clientId: 'anthropic',
+        accountRef: openaiAccount.id,
+        defaultModel: 'MiniMax-M2.7',
+      }),
+    });
+
+    assert.equal(createRes.statusCode, 201, 'cross-protocol binding should be allowed after protocol retirement');
+  });
+
+  it('POST /api/cats strips trailing slash from model name', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    await createProviderProfile(projectRoot, {
+      displayName: 'Anthropic Key',
+      clientId: 'anthropic',
+      authType: 'api_key',
+      protocol: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-test-anthropic',
+      models: ['claude-opus-4-6'],
     });
 
     const Fastify = (await import('fastify')).default;
@@ -556,22 +2176,527 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        catId: 'runtime-opencode-bare-model',
-        name: '运行时金渐层',
-        displayName: '运行时金渐层',
-        avatar: '/avatars/opencode.png',
-        color: { primary: '#0f172a', secondary: '#e2e8f0' },
-        mentionPatterns: ['@runtime-opencode-bare-model'],
-        roleDescription: '审查',
-        client: 'opencode',
-        providerProfileId: openaiProfile.id,
-        defaultModel: 'gpt-5.4',
+        catId: 'runtime-trailing-slash',
+        name: '尾斜杠测试猫',
+        displayName: '尾斜杠测试猫',
+        avatar: '/avatars/test.png',
+        color: { primary: '#00ff00', secondary: '#ccffcc' },
+        mentionPatterns: ['@slash-test'],
+        roleDescription: '测试用',
+        clientId: 'anthropic',
+        accountRef: 'anthropic-key',
+        defaultModel: 'claude-opus-4-6/',
       }),
     });
 
-    assert.equal(createRes.statusCode, 400);
-    const createBody = JSON.parse(createRes.body);
-    assert.match(createBody.error, /providerId\/modelId/i);
+    assert.equal(createRes.statusCode, 201, 'should accept model with trailing slash (stripped)');
+    const body = JSON.parse(createRes.body);
+    assert.equal(body.cat.defaultModel, 'claude-opus-4-6', 'trailing slash should be stripped');
+  });
+
+  it('POST /api/cats rejects pure-slash model name', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    await createProviderProfile(projectRoot, {
+      displayName: 'Anthropic Key',
+      authType: 'api_key',
+      protocol: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-test-anthropic',
+      models: ['claude-opus-4-6'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-pure-slash',
+        name: '纯斜杠测试猫',
+        displayName: '纯斜杠测试猫',
+        avatar: '/avatars/test.png',
+        color: { primary: '#ff0000', secondary: '#ffcccc' },
+        mentionPatterns: ['@pure-slash'],
+        roleDescription: '测试用',
+        clientId: 'anthropic',
+        accountRef: 'anthropic-key',
+        defaultModel: '/',
+      }),
+    });
+
+    assert.equal(createRes.statusCode, 400, 'pure slash model should be rejected');
+  });
+
+  it('POST /api/cats opencode+api_key: provider/model is primary, provider is legacy fallback', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const openaiProfile = await createProviderProfile(projectRoot, {
+      displayName: 'OpenAI Key Profile',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.bound.example',
+      apiKey: 'sk-bound-openai',
+      models: ['gpt-5.4'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Case 1a: bare model with recognizable prefix (gpt-*) → 201 (provider inferred)
+    const bareInferred = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'oc-bare-inferred',
+        name: '金渐层A',
+        displayName: '金渐层A',
+        avatar: '/avatars/opencode.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@oc-bare-inferred'],
+        roleDescription: '审查',
+        clientId: 'opencode',
+        accountRef: openaiProfile.id,
+        defaultModel: 'gpt-5.4',
+      }),
+    });
+    assert.equal(bareInferred.statusCode, 201, 'bare gpt-* model → provider inferred as openai → 201');
+
+    // Case 1b: bare model with unrecognizable name → 400 (cannot infer provider)
+    const bareReject = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'oc-bare-unknown',
+        name: '金渐层A2',
+        displayName: '金渐层A2',
+        avatar: '/avatars/opencode.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@oc-bare-unknown'],
+        roleDescription: '审查',
+        clientId: 'opencode',
+        accountRef: openaiProfile.id,
+        defaultModel: 'custom-llm-v3',
+      }),
+    });
+    assert.equal(bareReject.statusCode, 400, 'bare unrecognizable model → 400');
+    assert.match(JSON.parse(bareReject.body).error, /provider/i);
+
+    // Case 2: provider/model format WITHOUT provider → 201 (provider inferred from model)
+    const slashAccept = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'oc-slash-no-provider',
+        name: '金渐层B',
+        displayName: '金渐层B',
+        avatar: '/avatars/opencode.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@oc-slash-no-provider'],
+        roleDescription: '审查',
+        clientId: 'opencode',
+        accountRef: openaiProfile.id,
+        defaultModel: 'openai/gpt-5.4',
+      }),
+    });
+    assert.equal(slashAccept.statusCode, 201, 'provider/model without provider → 201');
+
+    // Case 3: bare model WITH provider → 201 (legacy fallback path)
+    const bareAccept = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'oc-bare-with-provider',
+        name: '金渐层C',
+        displayName: '金渐层C',
+        avatar: '/avatars/opencode.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@oc-bare-with-provider'],
+        roleDescription: '审查',
+        clientId: 'opencode',
+        accountRef: openaiProfile.id,
+        defaultModel: 'gpt-5.4',
+        provider: 'openai',
+      }),
+    });
+    assert.equal(bareAccept.statusCode, 201, 'bare model + provider → 201');
+
+    // Case 4: trailing-slash model (normalized to bare by schema) → 201 if
+    // the bare name is recognizable, 400 if not.
+    // 'minimax/' → 'minimax' → inferred as minimax provider → 201
+    const trailingSlashInferred = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'oc-trailing-slash',
+        name: '金渐层D',
+        displayName: '金渐层D',
+        avatar: '/avatars/opencode.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@oc-trailing-slash'],
+        roleDescription: '审查',
+        clientId: 'opencode',
+        accountRef: openaiProfile.id,
+        defaultModel: 'minimax/',
+      }),
+    });
+    assert.equal(
+      trailingSlashInferred.statusCode,
+      201,
+      'trailing-slash → normalized bare model → provider inferred → 201',
+    );
+
+    // Case 4b: unrecognizable trailing-slash model → still 400
+    const trailingSlashReject = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'oc-trailing-slash-unk',
+        name: '金渐层D2',
+        displayName: '金渐层D2',
+        avatar: '/avatars/opencode.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@oc-trailing-slash-unk'],
+        roleDescription: '审查',
+        clientId: 'opencode',
+        accountRef: openaiProfile.id,
+        defaultModel: 'mystery-llm/',
+      }),
+    });
+    assert.equal(trailingSlashReject.statusCode, 400, 'trailing-slash unrecognizable model → 400');
+
+    // Case 5: namespaced model from account's model list WITHOUT provider → 400
+    // "z-ai/glm-4.7" exists in account models → it's a model namespace, not provider/model
+    const { createProviderProfile: createProfile2 } = await import('./helpers/create-test-account.js');
+    const orProfile = await createProfile2(projectRoot, {
+      displayName: 'OpenRouter Key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://openrouter.ai/api',
+      apiKey: 'sk-or',
+      models: ['z-ai/glm-4.7', 'z-ai/glm-4.6'],
+    });
+    const namespacedReject = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'oc-namespaced-no-provider',
+        name: '金渐层E',
+        displayName: '金渐层E',
+        avatar: '/avatars/opencode.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@oc-namespaced-no-provider'],
+        roleDescription: '审查',
+        clientId: 'opencode',
+        accountRef: orProfile.id,
+        defaultModel: 'z-ai/glm-4.7',
+      }),
+    });
+    assert.equal(namespacedReject.statusCode, 400, 'namespaced model from account model list without provider → 400');
+
+    // Case 6: canonical provider/model that ALSO appears in account models → 201
+    // minimax account stores both bare "MiniMax-M2.7" and canonical "minimax/MiniMax-M2.7"
+    const { createProviderProfile: createProfile3 } = await import('./helpers/create-test-account.js');
+    const mmProfile = await createProfile3(projectRoot, {
+      displayName: 'MiniMax Key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.minimax.io/v1',
+      apiKey: 'sk-mm',
+      models: ['MiniMax-M2.7', 'minimax/MiniMax-M2.7'],
+    });
+    const canonicalAccept = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'oc-canonical-in-list',
+        name: '金渐层F',
+        displayName: '金渐层F',
+        avatar: '/avatars/opencode.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@oc-canonical-in-list'],
+        roleDescription: '审查',
+        clientId: 'opencode',
+        accountRef: mmProfile.id,
+        defaultModel: 'minimax/MiniMax-M2.7',
+      }),
+    });
+    assert.equal(
+      canonicalAccept.statusCode,
+      201,
+      'canonical provider/model in account list (bare form also present) → 201',
+    );
+
+    // Case 7: canonical-only model list (no bare alias) WITHOUT provider → 201
+    // Account stores only "openai/gpt-5.4" (no bare "gpt-5.4") — still canonical, not namespaced.
+    // Distinguished from Case 5 by absence of sibling models sharing the same prefix.
+    const { createProviderProfile: createProfile4 } = await import('./helpers/create-test-account.js');
+    const canonicalOnlyProfile = await createProfile4(projectRoot, {
+      displayName: 'Canonical-Only Key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.canonical.example',
+      apiKey: 'sk-co',
+      models: ['openai/gpt-5.4'],
+    });
+    const canonicalOnlyAccept = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'oc-canonical-only',
+        name: '金渐层G',
+        displayName: '金渐层G',
+        avatar: '/avatars/opencode.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@oc-canonical-only'],
+        roleDescription: '审查',
+        clientId: 'opencode',
+        accountRef: canonicalOnlyProfile.id,
+        defaultModel: 'openai/gpt-5.4',
+      }),
+    });
+    assert.equal(canonicalOnlyAccept.statusCode, 201, 'canonical-only model list (no bare alias, singleton) → 201');
+
+    // Case 8: multi-model canonical provider list WITHOUT provider → 201
+    // Account stores multiple models under the same known provider prefix.
+    // Must NOT be confused with openrouter-style namespace siblings.
+    const { createProviderProfile: createProfile5 } = await import('./helpers/create-test-account.js');
+    const multiCanonicalProfile = await createProfile5(projectRoot, {
+      displayName: 'Multi-Canonical Key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.openai.example',
+      apiKey: 'sk-mc',
+      models: ['openai/gpt-5.4', 'openai/gpt-4.1'],
+    });
+    const multiCanonicalAccept = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'oc-multi-canonical',
+        name: '金渐层H',
+        displayName: '金渐层H',
+        avatar: '/avatars/opencode.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@oc-multi-canonical'],
+        roleDescription: '审查',
+        clientId: 'opencode',
+        accountRef: multiCanonicalProfile.id,
+        defaultModel: 'openai/gpt-5.4',
+      }),
+    });
+    assert.equal(
+      multiCanonicalAccept.statusCode,
+      201,
+      'multi-model canonical provider list (known prefix, siblings) → 201',
+    );
+  });
+
+  it('clowder-ai#223 P1 regression: openrouter + foreign-prefix model preserves full model namespace', async () => {
+    // Regression test for: provider=openrouter + defaultModel=z-ai/glm-4.7
+    // The model's first segment "z-ai" is NOT the provider prefix — it is the
+    // model's namespace within OpenRouter. stripOwnProviderPrefix must keep it.
+    const { deriveOpenCodeApiType, generateOpenCodeRuntimeConfig } = await import(
+      '../dist/domains/cats/services/agents/providers/opencode-config-template.js'
+    );
+
+    // Replicate invoke-single-cat.ts logic: stripOwnProviderPrefix + ensureModelInList
+    const ocProviderName = 'openrouter';
+    const defaultModel = 'z-ai/glm-4.7';
+    const bareModel = defaultModel.startsWith(`${ocProviderName}/`)
+      ? defaultModel.slice(ocProviderName.length + 1)
+      : defaultModel;
+    const assembledModel = `${ocProviderName}/${bareModel}`;
+
+    // bareModel should be the full "z-ai/glm-4.7" (not stripped to "glm-4.7")
+    assert.equal(bareModel, 'z-ai/glm-4.7', 'foreign-prefix model should not be stripped');
+    assert.equal(assembledModel, 'openrouter/z-ai/glm-4.7', 'assembled model preserves full namespace');
+
+    // ensureModelInList: bare model should be in the list
+    const accountModels = ['z-ai/glm-4.7'];
+    const hasModel = accountModels.includes(bareModel) || accountModels.includes(defaultModel);
+    assert.ok(hasModel, 'models list should include the bare model');
+
+    // Generate config and verify model key matches
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: ocProviderName,
+      models: accountModels,
+      defaultModel: assembledModel,
+      apiType: 'openai',
+    });
+    assert.equal(config.model, 'openrouter/z-ai/glm-4.7');
+    assert.ok(config.provider.openrouter.models['z-ai/glm-4.7'], 'config models key matches the model namespace');
+
+    // Also test: same-provider prefix IS stripped (no double-prefix)
+    const sameProviderModel = 'openrouter/google/gemini-3-flash';
+    const sameBare = sameProviderModel.startsWith(`${ocProviderName}/`)
+      ? sameProviderModel.slice(ocProviderName.length + 1)
+      : sameProviderModel;
+    assert.equal(sameBare, 'google/gemini-3-flash', 'same-provider prefix is correctly stripped');
+    assert.equal(`${ocProviderName}/${sameBare}`, 'openrouter/google/gemini-3-flash', 'no double-prefix');
+
+    // P1 regression: ensureModelInList must replace prefixed form with bare, not early-return
+    const prefixedModels = ['openrouter/google/gemini-3-flash', 'other-model'];
+    const ensuredBare = sameBare; // google/gemini-3-flash
+    // Simulate ensureModelInList logic: bare not in list, but prefixed IS → replace
+    const hasBare = prefixedModels.includes(ensuredBare);
+    assert.equal(hasBare, false, 'bare model is NOT in prefixed list');
+    assert.ok(prefixedModels.includes(sameProviderModel), 'prefixed form IS in list');
+    const corrected = prefixedModels.map((m) => (m === sameProviderModel ? ensuredBare : m));
+    assert.deepEqual(corrected, ['google/gemini-3-flash', 'other-model'], 'prefixed form replaced with bare');
+
+    // Verify config uses corrected models
+    const correctedConfig = generateOpenCodeRuntimeConfig({
+      providerName: ocProviderName,
+      models: corrected,
+      defaultModel: `${ocProviderName}/${ensuredBare}`,
+      apiType: 'openai',
+    });
+    assert.ok(correctedConfig.provider.openrouter.models['google/gemini-3-flash'], 'bare key in config');
+    assert.equal(
+      correctedConfig.provider.openrouter.models['openrouter/google/gemini-3-flash'],
+      undefined,
+      'prefixed key NOT in config',
+    );
+  });
+
+  it('clowder-ai#223 P1 regression: apiType derived solely from providerName (protocol retired)', async () => {
+    // deriveOpenCodeApiType now only uses providerName; account-level protocol
+    // is no longer consulted. This test verifies the new single-source behavior.
+    const { deriveOpenCodeApiType } = await import(
+      '../dist/domains/cats/services/agents/providers/opencode-config-template.js'
+    );
+
+    const scenarios = [
+      { ocProviderName: 'maas', expected: 'openai' },
+      { ocProviderName: 'deepseek', expected: 'openai' },
+      { ocProviderName: 'anthropic', expected: 'anthropic' },
+      { ocProviderName: 'google', expected: 'google' },
+      { ocProviderName: 'openrouter', expected: 'openai' },
+      { ocProviderName: 'openai-responses', expected: 'openai-responses' },
+      { ocProviderName: undefined, expected: 'openai' },
+    ];
+
+    for (const { ocProviderName, expected } of scenarios) {
+      const apiType = deriveOpenCodeApiType(ocProviderName);
+      assert.equal(apiType, expected, `ocProviderName=${ocProviderName} → ${expected}`);
+    }
+  });
+
+  it('clowder-ai#223 legacy compat: PATCH allows editing an opencode+api_key member without provider', async () => {
+    // Regression: legacy opencode+api_key configs created before clowder-ai#223 have no
+    // provider. Editing these members (e.g. changing defaultModel) must not
+    // fail validation. The invoke path skips the clowder-ai#223 config block when absent.
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const legacyProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Legacy MaaS Key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.legacy-maas.example',
+      apiKey: 'sk-legacy-maas',
+      models: ['glm-5', 'glm-4-plus'],
+    });
+
+    // Create the cat directly via createRuntimeCat (bypasses POST validation)
+    // to simulate a legacy config without provider.
+    const { createRuntimeCat } = await import('../dist/config/runtime-cat-catalog.js');
+    createRuntimeCat(projectRoot, {
+      catId: 'legacy-oc-member',
+      name: '旧金渐层',
+      displayName: '旧金渐层',
+      avatar: '/avatars/opencode.png',
+      color: { primary: '#0f172a', secondary: '#e2e8f0' },
+      mentionPatterns: ['@legacy-oc'],
+      roleDescription: '测试',
+      clientId: 'opencode',
+      accountRef: legacyProfile.id,
+      defaultModel: 'glm-5',
+      mcpSupport: false,
+      cli: { command: 'opencode', outputFormat: 'text' },
+      // No provider (model provider name) — this is the legacy state
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // PATCH with defaultModel change — triggers providerConfigTouched
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/legacy-oc-member',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ defaultModel: 'glm-4-plus' }),
+    });
+    assert.equal(patchRes.statusCode, 200, 'legacy member model edit should succeed without provider');
+
+    // Editor always sends accountRef even when unchanged — must still succeed
+    const editorPatchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/legacy-oc-member',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ defaultModel: 'glm-4-plus', accountRef: legacyProfile.id }),
+    });
+    assert.equal(editorPatchRes.statusCode, 200, 'unchanged accountRef in PATCH should not defeat legacy compat');
+
+    // But switching accountRef on a legacy member WITHOUT provider must be rejected —
+    // a new binding requires provider.
+    const { createProviderProfile: createProfile2 } = await import('./helpers/create-test-account.js');
+    const newProfile = await createProfile2(projectRoot, {
+      displayName: 'New DeepSeek Key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.deepseek.example',
+      apiKey: 'sk-deepseek',
+      models: ['deepseek-r2'],
+    });
+
+    const switchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/legacy-oc-member',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ accountRef: newProfile.id }),
+    });
+    assert.equal(switchRes.statusCode, 400, 'switching account on legacy member without provider should be rejected');
   });
 
   it('POST /api/cats rejects catId values that are not lowercase-safe identifiers', async () => {
@@ -599,8 +2724,8 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         color: { primary: '#0f172a', secondary: '#e2e8f0' },
         mentionPatterns: ['@danger'],
         roleDescription: '审查',
-        client: 'openai',
-        providerProfileId: 'codex',
+        clientId: 'openai',
+        accountRef: 'codex',
         defaultModel: 'gpt-5.4',
       }),
     });
@@ -619,64 +2744,11 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     );
   });
 
-  it('POST /api/cats rejects builtin bindings from the wrong client family even when protocol matches', async () => {
+  it('POST /api/cats allows third-party gateway bindings for google client', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
-    const Fastify = (await import('fastify')).default;
-    const { catsRoutes } = await import('../dist/routes/cats.js');
-
-    const app = Fastify();
-    await app.register(catsRoutes);
-
-    const cases = [
-      {
-        catId: 'runtime-dare-wrong-builtin',
-        client: 'dare',
-        providerProfileId: 'codex',
-        defaultModel: 'gpt-5.4',
-      },
-      {
-        catId: 'runtime-opencode-wrong-builtin',
-        client: 'opencode',
-        providerProfileId: 'claude',
-        defaultModel: 'claude-sonnet-4-6',
-      },
-    ];
-
-    for (const spec of cases) {
-      const createRes = await app.inject({
-        method: 'POST',
-        url: '/api/cats',
-        headers: {
-          'content-type': 'application/json',
-          'x-cat-cafe-user': 'codex',
-        },
-        body: JSON.stringify({
-          catId: spec.catId,
-          name: spec.catId,
-          displayName: spec.catId,
-          avatar: '/avatars/runtime.png',
-          color: { primary: '#0f172a', secondary: '#e2e8f0' },
-          mentionPatterns: [`@${spec.catId}`],
-          roleDescription: '审查',
-          client: spec.client,
-          providerProfileId: spec.providerProfileId,
-          defaultModel: spec.defaultModel,
-        }),
-      });
-
-      assert.equal(createRes.statusCode, 400);
-      const createBody = JSON.parse(createRes.body);
-      assert.match(createBody.error, new RegExp(`incompatible with client "${spec.client}"`, 'i'));
-    }
-  });
-
-  it('POST /api/cats rejects non-builtin provider bindings for google client', async () => {
-    const projectRoot = createProjectRoot();
-    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
-
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const apiKeyProfile = await createProviderProfile(projectRoot, {
       displayName: 'Gemini Proxy',
       authType: 'api_key',
@@ -707,29 +2779,28 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         color: { primary: '#0f172a', secondary: '#e2e8f0' },
         mentionPatterns: ['@runtime-gemini-non-builtin'],
         roleDescription: '审查',
-        client: 'google',
-        providerProfileId: apiKeyProfile.id,
+        clientId: 'google',
+        accountRef: apiKeyProfile.id,
         defaultModel: 'openrouter/google/gemini-3-flash-preview',
       }),
     });
 
-    assert.equal(createRes.statusCode, 400);
-    const createBody = JSON.parse(createRes.body);
-    assert.match(createBody.error, /only supports builtin Gemini auth/i);
+    assert.equal(createRes.statusCode, 201);
   });
 
-  it('PATCH /api/cats/:id rejects models that are not available on the bound provider profile', async () => {
+  it('POST /api/cats rejects official Google endpoints for google api_key bindings', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
-    const { createProviderProfile } = await import('../dist/config/provider-profiles.js');
-    const boundProfile = await createProviderProfile(projectRoot, {
-      displayName: 'Scoped OpenAI Profile',
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const apiKeyProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Gemini Official API',
+      clientId: 'google',
       authType: 'api_key',
       protocol: 'openai',
-      baseUrl: 'https://api.scoped.example',
-      apiKey: 'sk-scoped-openai',
-      models: ['gpt-5.4-mini'],
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      apiKey: 'sk-google-official',
+      models: ['gemini-2.5-pro'],
     });
 
     const Fastify = (await import('fastify')).default;
@@ -746,35 +2817,68 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        catId: 'runtime-codex-scoped-profile',
-        name: '运行时缅因猫',
-        displayName: '运行时缅因猫',
-        avatar: '/avatars/codex.png',
-        color: { primary: '#16a34a', secondary: '#bbf7d0' },
-        mentionPatterns: ['@runtime-codex-scoped-profile'],
+        catId: 'runtime-gemini-official-api',
+        name: 'runtime-gemini-official-api',
+        displayName: 'runtime-gemini-official-api',
+        avatar: '/avatars/runtime.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@runtime-gemini-official-api'],
         roleDescription: '审查',
-        client: 'openai',
-        providerProfileId: boundProfile.id,
-        defaultModel: 'gpt-5.4-mini',
+        clientId: 'google',
+        accountRef: apiKeyProfile.id,
+        defaultModel: 'gemini-2.5-pro',
       }),
     });
-    assert.equal(createRes.statusCode, 201);
 
-    const patchRes = await app.inject({
-      method: 'PATCH',
-      url: '/api/cats/runtime-codex-scoped-profile',
+    assert.equal(createRes.statusCode, 400);
+    const createBody = JSON.parse(createRes.body);
+    assert.match(createBody.error, /requires builtin OAuth for official Google endpoints/i);
+  });
+
+  it('POST /api/cats rejects malformed third-party gateway baseUrl for google client', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const apiKeyProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Gemini Broken Proxy',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'not-a-valid-url',
+      apiKey: 'sk-broken-proxy',
+      models: ['openrouter/google/gemini-3-flash-preview'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
       headers: {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        defaultModel: 'gpt-5.4',
+        catId: 'runtime-gemini-broken-proxy',
+        name: 'runtime-gemini-broken-proxy',
+        displayName: 'runtime-gemini-broken-proxy',
+        avatar: '/avatars/runtime.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@runtime-gemini-broken-proxy'],
+        roleDescription: '审查',
+        clientId: 'google',
+        accountRef: apiKeyProfile.id,
+        defaultModel: 'openrouter/google/gemini-3-flash-preview',
       }),
     });
 
-    assert.equal(patchRes.statusCode, 400);
-    const patchBody = JSON.parse(patchRes.body);
-    assert.match(patchBody.error, /model "gpt-5\.4" is not available on provider "scoped-openai-profile"/i);
+    assert.equal(createRes.statusCode, 400);
+    const createBody = JSON.parse(createRes.body);
+    assert.match(createBody.error, /absolute HTTP\(S\) URL/i);
   });
 
   it('PATCH /api/cats/:id validates seed model edits against the active bootstrap account', async () => {
@@ -782,17 +2886,17 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
     const { bootstrapCatCatalog } = await import('../dist/config/cat-catalog-store.js');
-    const { activateProviderProfile, createProviderProfile } = await import('../dist/config/provider-profiles.js');
+    const { writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
+    const { writeCredential } = await import('../dist/config/credentials.js');
     bootstrapCatCatalog(projectRoot, process.env.CAT_TEMPLATE_PATH);
-    const sponsorProfile = await createProviderProfile(projectRoot, {
-      displayName: 'Codex Sponsor',
+    // clowder-ai#340: Overwrite the 'codex' well-known account with an api_key sponsor
+    writeCatalogAccount(projectRoot, 'codex', {
       authType: 'api_key',
-      protocol: 'openai',
       baseUrl: 'https://api.codex-sponsor.example',
-      apiKey: 'sk-codex-sponsor',
       models: ['gpt-5.4-mini'],
+      displayName: 'Codex Sponsor',
     });
-    await activateProviderProfile(projectRoot, 'openai', sponsorProfile.id);
+    writeCredential('codex', { apiKey: 'sk-codex-sponsor' });
 
     const Fastify = (await import('fastify')).default;
     const { catsRoutes } = await import('../dist/routes/cats.js');
@@ -815,15 +2919,172 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(patchRes.statusCode, 200);
     const patchBody = JSON.parse(patchRes.body);
     assert.equal(patchBody.cat.defaultModel, 'gpt-5.4-mini');
-    assert.equal(patchBody.cat.accountRef, sponsorProfile.id);
+    assert.equal(patchBody.cat.accountRef, 'codex');
+  });
+
+  it('PATCH /api/cats/:id rebases inherited seed binding when switching client families', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const beforeRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.equal(beforeRes.statusCode, 200);
+    const beforeBody = JSON.parse(beforeRes.body);
+    const opusBefore = beforeBody.cats.find((cat) => cat.id === 'opus');
+    assert.ok(opusBefore, 'seed opus member must exist');
+    assert.equal(opusBefore.clientId, 'anthropic');
+    assert.equal(opusBefore.accountRef, 'claude');
+    assert.equal(opusBefore.mcpSupport, true, 'seed builtin client starts with MCP support enabled');
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/opus',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      // Simulate editor payload carrying the previous visible accountRef while switching client.
+      body: JSON.stringify({
+        clientId: 'openai',
+        defaultModel: 'gpt-5.4',
+        accountRef: opusBefore.accountRef,
+      }),
+    });
+
+    assert.equal(patchRes.statusCode, 200);
+    const patchBody = JSON.parse(patchRes.body);
+    assert.equal(patchBody.cat.clientId, 'openai');
+    assert.equal(patchBody.cat.defaultModel, 'gpt-5.4');
+    assert.equal(patchBody.cat.accountRef, 'codex');
+  });
+
+  it('PATCH /api/cats/:id preserves builtin accountRef when switching to generic ACP', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const beforeRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.equal(beforeRes.statusCode, 200);
+    const beforeBody = JSON.parse(beforeRes.body);
+    const opusBefore = beforeBody.cats.find((cat) => cat.id === 'opus');
+    assert.ok(opusBefore, 'seed opus member must exist');
+    assert.equal(opusBefore.clientId, 'anthropic');
+    assert.equal(opusBefore.accountRef, 'claude');
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/opus',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      // Generic ACP is a transport: switching to it must keep the selected account
+      // instead of rebasing the old builtin accountRef to a nonexistent "acp" account.
+      body: JSON.stringify({
+        clientId: 'acp',
+        defaultModel: 'acp-model',
+        accountRef: opusBefore.accountRef,
+        acp: { command: 'custom-acp-agent', startupArgs: ['--acp'] },
+      }),
+    });
+
+    assert.equal(patchRes.statusCode, 200, `generic ACP switch should keep account binding: ${patchRes.body}`);
+    const patchBody = JSON.parse(patchRes.body);
+    assert.equal(patchBody.cat.clientId, 'acp');
+    assert.equal(patchBody.cat.accountRef, 'claude');
+    assert.equal(patchBody.cat.provider, undefined);
+    assert.equal(
+      patchBody.cat.mcpSupport,
+      true,
+      'generic ACP switch without explicit mcpSupport or whitelist must default MCP support on',
+    );
+
+    const afterRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    const afterBody = JSON.parse(afterRes.body);
+    const opusAfter = afterBody.cats.find((cat) => cat.id === 'opus');
+    assert.equal(opusAfter.mcpSupport, true, 'GET should confirm generic ACP migration is MCP-on by default');
+  });
+
+  it('PATCH /api/cats/:id resets stale CLI config when switching client families', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // First, set a non-default CLI config (including effort) on opus (anthropic)
+    const firstPatchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/opus',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        cli: {
+          command: 'claude',
+          outputFormat: 'stream-json',
+          effort: 'low', // Non-default for anthropic (default is 'max')
+        },
+      }),
+    });
+
+    assert.equal(firstPatchRes.statusCode, 200);
+
+    // Verify the non-default effort was persisted
+    let runtimeCatalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+    let opusBreed = runtimeCatalog.breeds.find((breed) => breed.catId === 'opus');
+    let opusVariant = opusBreed.variants.find((variant) => variant.id === opusBreed.defaultVariantId);
+    assert.equal(opusVariant.cli.effort, 'low', 'non-default effort should be persisted');
+
+    // Now switch to openai provider
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/opus',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        clientId: 'openai',
+        defaultModel: 'gpt-5.4',
+      }),
+    });
+
+    assert.equal(patchRes.statusCode, 200);
+    const patchBody = JSON.parse(patchRes.body);
+    assert.equal(patchBody.cat.clientId, 'openai');
+    assert.equal(patchBody.cat.defaultModel, 'gpt-5.4');
+
+    // Verify CLI was reset to openai defaults (including effort)
+    runtimeCatalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+    opusBreed = runtimeCatalog.breeds.find((breed) => breed.catId === 'opus');
+    opusVariant = opusBreed.variants.find((variant) => variant.id === opusBreed.defaultVariantId);
+    assert.ok(opusVariant, 'runtime opus default variant should exist');
+    assert.deepEqual(
+      opusVariant.cli,
+      {
+        command: 'codex',
+        outputFormat: 'json',
+        effort: 'xhigh', // Reset to openai's default
+      },
+      'CLI should be reset to openai defaults including effort',
+    );
   });
 
   it('PATCH /api/cats/:id allows non-provider edits for unbound opencode seed member', async () => {
-    if (savedTemplatePath === undefined) {
-      delete process.env.CAT_TEMPLATE_PATH;
-    } else {
-      process.env.CAT_TEMPLATE_PATH = savedTemplatePath;
-    }
+    const projectRoot = createProjectRootFromRepoTemplate();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
     const Fastify = (await import('fastify')).default;
     const { catsRoutes } = await import('../dist/routes/cats.js');
@@ -869,7 +3130,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         color: { primary: '#334155', secondary: '#cbd5e1' },
         mentionPatterns: ['@runtime-review-bot'],
         roleDescription: '审查',
-        client: 'openai',
+        clientId: 'openai',
         accountRef: 'codex',
         defaultModel: 'gpt-5.4',
       }),
@@ -892,7 +3153,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.match(patchBody.error, /@opus.*opus/i);
   });
 
-  it('POST /api/cats still requires a concrete provider binding for dare and opencode clients', async () => {
+  it('POST /api/cats still requires a concrete provider binding for opencode clients', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -910,15 +3171,15 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        catId: 'runtime-dare',
-        name: '运行时审计猫',
-        displayName: '运行时审计猫',
-        avatar: '/avatars/dare.png',
+        catId: 'runtime-opencode',
+        name: '运行时编码猫',
+        displayName: '运行时编码猫',
+        avatar: '/avatars/opencode.png',
         color: { primary: '#0f172a', secondary: '#cbd5e1' },
-        mentionPatterns: ['@runtime-dare'],
-        roleDescription: '审计',
-        client: 'dare',
-        defaultModel: 'dare-1',
+        mentionPatterns: ['@runtime-opencode'],
+        roleDescription: '编码',
+        clientId: 'opencode',
+        defaultModel: 'claude-opus-4-6',
       }),
     });
 
@@ -995,7 +3256,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         color: { primary: '#155e75', secondary: '#a5f3fc' },
         mentionPatterns: ['@runtime-strategy-cat'],
         roleDescription: '策略验证',
-        client: 'openai',
+        clientId: 'openai',
         accountRef: 'codex',
         defaultModel: 'gpt-5.4',
       }),
@@ -1043,7 +3304,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         mentionPatterns: ['@runtime-temp'],
         roleDescription: '临时成员',
         personality: '临时',
-        client: 'openai',
+        clientId: 'openai',
         accountRef: 'codex',
         defaultModel: 'gpt-5.4',
         mcpSupport: false,
@@ -1069,7 +3330,104 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     );
   });
 
-  it('DELETE /api/cats/:id blocks deletion for seed members', async () => {
+  it('DELETE /api/cats/:id keeps deleted template variants removed from subsequent reads', async () => {
+    createProjectRootFromRepoTemplate();
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const beforeRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.equal(beforeRes.statusCode, 200);
+    assert.equal(
+      JSON.parse(beforeRes.body).cats.some((cat) => cat.id === 'agy-opus'),
+      true,
+      'seeded repo-template catalog should expose agy-opus before deletion',
+    );
+
+    const deleteRes = await app.inject({
+      method: 'DELETE',
+      url: '/api/cats/agy-opus',
+      headers: {
+        'x-cat-cafe-user': 'codex',
+      },
+    });
+    assert.equal(deleteRes.statusCode, 200);
+    assert.equal(JSON.parse(deleteRes.body).deleted, true);
+
+    const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.equal(listRes.statusCode, 200);
+    assert.equal(
+      JSON.parse(listRes.body).cats.some((cat) => cat.id === 'agy-opus'),
+      false,
+    );
+  });
+
+  it('POST and PATCH /api/cats preserve editable variant labels', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-variant',
+        name: '运行时缅因猫',
+        displayName: '缅因猫',
+        variantLabel: 'GPT-5.5',
+        avatar: '/avatars/codex.png',
+        color: { primary: '#16a34a', secondary: '#bbf7d0' },
+        mentionPatterns: ['@runtime-variant'],
+        roleDescription: '代码审查',
+        personality: '严谨',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.5',
+        mcpSupport: true,
+        cli: { command: 'codex', outputFormat: 'json' },
+      }),
+    });
+    assert.equal(createRes.statusCode, 201);
+    assert.equal(JSON.parse(createRes.body).cat.variantLabel, 'GPT-5.5');
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-variant',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ variantLabel: 'GPT-5.6' }),
+    });
+    assert.equal(patchRes.statusCode, 200);
+    assert.equal(JSON.parse(patchRes.body).cat.variantLabel, 'GPT-5.6');
+
+    const clearRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-variant',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ variantLabel: null }),
+    });
+    assert.equal(clearRes.statusCode, 200);
+    assert.equal(JSON.parse(clearRes.body).cat.variantLabel, undefined);
+  });
+
+  it('DELETE /api/cats/:id allows deletion of any member', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -1086,16 +3444,1205 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
     });
-    assert.equal(deleteRes.statusCode, 409);
+    assert.equal(deleteRes.statusCode, 200);
     const deleteBody = JSON.parse(deleteRes.body);
-    assert.match(deleteBody.error, /cannot delete seed cat/i);
+    assert.equal(deleteBody.deleted, true);
 
     const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
     assert.equal(listRes.statusCode, 200);
     const listBody = JSON.parse(listRes.body);
     assert.equal(
       listBody.cats.some((cat) => cat.id === 'opus'),
-      true,
+      false,
     );
+  });
+
+  // ── F161: Generic ACP client route tests ─────────────────────────────────
+
+  it('POST /api/cats creates generic ACP member with acp config', async () => {
+    const projectRoot = createMonorepoProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const acpProfile = await createProviderProfile(projectRoot, {
+      displayName: 'DeepSeek ACP',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'sk-deepseek-xxx',
+      models: ['deepseek-chat'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const acpConfig = {
+      command: 'deepseek-cli',
+      startupArgs: ['--acp'],
+      mcpWhitelist: ['cat-cafe-memory'],
+      pool: { maxLiveProcesses: 2, idleTtlMs: 1_800_000 },
+    };
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'acp-deepseek',
+        name: 'DeepSeek ACP',
+        displayName: 'DeepSeek ACP',
+        avatar: '/avatars/default.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@acp-deepseek'],
+        roleDescription: 'ACP agent',
+        clientId: 'acp',
+        accountRef: acpProfile.id,
+        defaultModel: 'deepseek-chat',
+        acp: acpConfig,
+      }),
+    });
+
+    assert.equal(createRes.statusCode, 201, `Expected 201 but got ${createRes.statusCode}: ${createRes.body}`);
+    const body = JSON.parse(createRes.body);
+    assert.equal(body.cat.carrier, 'acp', 'generic ACP member should have carrier=acp');
+    assert.equal(
+      body.cat.mcpSupport,
+      true,
+      'generic ACP member should enable MCP support when an explicit MCP whitelist is provided',
+    );
+    assert.deepEqual(body.cat.acp, acpConfig, 'ACP response should include editable non-secret transport config');
+
+    const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.equal(listRes.statusCode, 200, `Expected GET 200 but got ${listRes.statusCode}: ${listRes.body}`);
+    const listBody = JSON.parse(listRes.body);
+    const listed = listBody.cats.find((cat) => cat.id === 'acp-deepseek');
+    assert.equal(listed.mcpSupport, true, 'GET /api/cats should preserve MCP support implied by the ACP whitelist');
+    assert.deepEqual(listed.acp, acpConfig, 'GET /api/cats should include ACP config for Hub editing');
+  });
+
+  it('GET/PATCH /api/cats resolves ACP config from active project root, not CAT_TEMPLATE_PATH', async () => {
+    const projectRoot = createMonorepoProjectRoot();
+    process.env.CAT_CAFE_CONFIG_ROOT = projectRoot;
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const acpProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Active ACP',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.example.test',
+      apiKey: 'sk-active',
+      models: ['active-chat'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const acpConfig = {
+      command: 'active-acp',
+      startupArgs: ['--serve'],
+      mcpWhitelist: ['cat-cafe-memory'],
+    };
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'acp-active-root',
+        name: 'Active ACP',
+        displayName: 'Active ACP',
+        avatar: '/avatars/default.png',
+        color: { primary: '#1f2937', secondary: '#f9fafb' },
+        mentionPatterns: ['@acp-active-root'],
+        roleDescription: 'ACP agent',
+        clientId: 'acp',
+        accountRef: acpProfile.id,
+        defaultModel: 'active-chat',
+        acp: acpConfig,
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `Expected 201 but got ${createRes.statusCode}: ${createRes.body}`);
+
+    const staleRoot = mkdtempSync(join(tmpdir(), 'cats-route-crud-stale-acp-'));
+    tempDirs.push(staleRoot);
+    writeFileSync(join(staleRoot, 'cat-template.json'), JSON.stringify(makeTemplate(), null, 2));
+    process.env.CAT_TEMPLATE_PATH = join(staleRoot, 'cat-template.json');
+
+    const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.equal(listRes.statusCode, 200, `Expected GET 200 but got ${listRes.statusCode}: ${listRes.body}`);
+    const listBody = JSON.parse(listRes.body);
+    const listed = listBody.cats.find((cat) => cat.id === 'acp-active-root');
+    assert.deepEqual(listed.acp, acpConfig, 'GET /api/cats should read ACP config from the active catalog');
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/acp-active-root',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ displayName: 'Renamed ACP' }),
+    });
+    assert.equal(
+      patchRes.statusCode,
+      200,
+      `PATCH without resending acp should use active catalog config: ${patchRes.body}`,
+    );
+    const patchBody = JSON.parse(patchRes.body);
+    assert.equal(patchBody.cat.displayName, 'Renamed ACP');
+    assert.deepEqual(patchBody.cat.acp, acpConfig, 'PATCH response should preserve active catalog ACP config');
+  });
+
+  it('POST /api/cats rejects generic ACP member without acp config', async () => {
+    const projectRoot = createMonorepoProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const acpProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Bare ACP',
+      authType: 'api_key',
+      protocol: 'openai',
+      apiKey: 'sk-bare',
+      models: ['some-model'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'acp-bare',
+        name: 'Bare ACP',
+        displayName: 'Bare ACP',
+        avatar: '/avatars/default.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@acp-bare'],
+        roleDescription: 'ACP agent',
+        clientId: 'acp',
+        accountRef: acpProfile.id,
+        defaultModel: 'some-model',
+        // acp section deliberately omitted
+      }),
+    });
+
+    assert.equal(createRes.statusCode, 400, 'clientId acp without acp config should be rejected');
+  });
+
+  it('POST /api/cats gates httpstream ACP transport behind explicit experimental opt-in', async () => {
+    const projectRoot = createMonorepoProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const acpProfile = await createProviderProfile(projectRoot, {
+      displayName: 'HTTP ACP',
+      authType: 'api_key',
+      protocol: 'openai',
+      apiKey: 'sk-http',
+      models: ['test-model'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const baseBody = {
+      name: 'HTTP ACP',
+      displayName: 'HTTP ACP',
+      avatar: '/avatars/default.png',
+      color: { primary: '#0f172a', secondary: '#e2e8f0' },
+      roleDescription: 'experimental ACP agent',
+      clientId: 'acp',
+      accountRef: acpProfile.id,
+      defaultModel: 'test-model',
+    };
+
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        ...baseBody,
+        catId: 'acp-http-rejected',
+        mentionPatterns: ['@acp-http-rejected'],
+        acp: { command: 'http-acp', startupArgs: ['--serve'], transport: 'httpstream' },
+      }),
+    });
+    assert.equal(rejected.statusCode, 400, 'httpstream without explicit experimental opt-in should be rejected');
+    assert.match(JSON.stringify(JSON.parse(rejected.body).details), /experimental/i);
+
+    const accepted = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        ...baseBody,
+        catId: 'acp-http-accepted',
+        mentionPatterns: ['@acp-http-accepted'],
+        acp: { command: 'http-acp', startupArgs: ['--serve'], transport: 'httpstream', experimental: true },
+      }),
+    });
+    assert.equal(accepted.statusCode, 201, `experimental httpstream should be accepted: ${accepted.body}`);
+    assert.deepEqual(JSON.parse(accepted.body).cat.acp, {
+      command: 'http-acp',
+      startupArgs: ['--serve'],
+      transport: 'httpstream',
+      experimental: true,
+    });
+  });
+
+  it('PATCH /api/cats/:id rejects removing acp config from an ACP member', async () => {
+    const projectRoot = createMonorepoProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const acpProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Patchable ACP',
+      clientId: 'openai',
+      authType: 'api_key',
+      protocol: 'openai',
+      apiKey: 'sk-patch',
+      models: ['test-model'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Step 1: Create ACP member
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'acp-patchable',
+        name: 'Patchable ACP',
+        displayName: 'Patchable ACP',
+        avatar: '/avatars/default.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@acp-patchable'],
+        roleDescription: 'ACP agent',
+        clientId: 'acp',
+        accountRef: acpProfile.id,
+        defaultModel: 'test-model',
+        acp: { command: 'test-cli', startupArgs: ['--acp'] },
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `create failed: ${createRes.body}`);
+
+    // Step 2: Try to remove acp config while clientId stays 'acp' → must 400
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/acp-patchable',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ acp: null }),
+    });
+    assert.equal(patchRes.statusCode, 400, 'removing acp from ACP member should be rejected');
+
+    // Step 3: Switch to non-ACP client + remove acp → must succeed
+    const switchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/acp-patchable',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ clientId: 'openai', accountRef: acpProfile.id, acp: null }),
+    });
+    assert.equal(switchRes.statusCode, 200, `client switch failed: ${switchRes.body}`);
+    const switchBody = JSON.parse(switchRes.body);
+    assert.equal(switchBody.cat.carrier, 'cli', 'after switch should be cli mode');
+  });
+
+  it('PATCH /api/cats/:id gates httpstream ACP transport behind explicit experimental opt-in', async () => {
+    const projectRoot = createMonorepoProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const acpProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Patch HTTP ACP',
+      authType: 'api_key',
+      protocol: 'openai',
+      apiKey: 'sk-patch-http',
+      models: ['test-model'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'acp-patch-http',
+        name: 'Patch HTTP ACP',
+        displayName: 'Patch HTTP ACP',
+        avatar: '/avatars/default.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@acp-patch-http'],
+        roleDescription: 'ACP agent',
+        clientId: 'acp',
+        accountRef: acpProfile.id,
+        defaultModel: 'test-model',
+        acp: { command: 'test-cli', startupArgs: ['--acp'] },
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `create failed: ${createRes.body}`);
+
+    const rejected = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/acp-patch-http',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ acp: { command: 'http-acp', startupArgs: ['--serve'], transport: 'httpstream' } }),
+    });
+    assert.equal(rejected.statusCode, 400, 'PATCH httpstream without opt-in should be rejected');
+    assert.match(JSON.stringify(JSON.parse(rejected.body).details), /experimental/i);
+
+    const accepted = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/acp-patch-http',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        acp: { command: 'http-acp', startupArgs: ['--serve'], transport: 'httpstream', experimental: true },
+      }),
+    });
+    assert.equal(accepted.statusCode, 200, `experimental httpstream patch should be accepted: ${accepted.body}`);
+    assert.equal(JSON.parse(accepted.body).cat.acp.experimental, true);
+  });
+
+  it('PATCH /api/cats/:id clears stale acp config when switching away from ACP without acp:null', async () => {
+    const projectRoot = createMonorepoProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const acpProfile = await createProviderProfile(projectRoot, {
+      displayName: 'ACP Switch',
+      clientId: 'openai',
+      authType: 'api_key',
+      protocol: 'openai',
+      apiKey: 'sk-switch',
+      models: ['test-model'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'acp-switch',
+        name: 'ACP Switch',
+        displayName: 'ACP Switch',
+        avatar: '/avatars/default.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@acp-switch'],
+        roleDescription: 'ACP agent',
+        clientId: 'acp',
+        accountRef: acpProfile.id,
+        defaultModel: 'test-model',
+        acp: { command: 'test-cli', startupArgs: ['--acp'] },
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `create failed: ${createRes.body}`);
+
+    const switchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/acp-switch',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        clientId: 'openai',
+        accountRef: acpProfile.id,
+        defaultModel: 'test-model',
+      }),
+    });
+    assert.equal(switchRes.statusCode, 200, `client switch failed: ${switchRes.body}`);
+    const switchBody = JSON.parse(switchRes.body);
+    assert.equal(switchBody.cat.clientId, 'openai');
+    assert.equal(switchBody.cat.carrier, 'cli', 'after switch should be cli mode');
+    assert.equal(switchBody.cat.acp, undefined, 'response must not expose stale ACP config');
+
+    const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.equal(listRes.statusCode, 200, `Expected GET 200 but got ${listRes.statusCode}: ${listRes.body}`);
+    const listBody = JSON.parse(listRes.body);
+    const listed = listBody.cats.find((cat) => cat.id === 'acp-switch');
+    assert.equal(listed.clientId, 'openai');
+    assert.equal(listed.carrier, 'cli', 'listed cat should be cli mode after switch');
+    assert.equal(listed.acp, undefined, 'catalog must not retain stale ACP config');
+  });
+
+  it('POST /api/cats strips provider for generic ACP (AC-A5/KD-1: acp is transport, not provider identity)', async () => {
+    const projectRoot = createMonorepoProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const acpProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Kimi ACP',
+      authType: 'api_key',
+      protocol: 'openai',
+      apiKey: 'sk-moonshot',
+      models: ['kimi-k2'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'acp-kimi-noprovider',
+        name: 'Kimi ACP',
+        displayName: 'Kimi ACP',
+        avatar: '/avatars/default.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@acp-kimi-noprovider'],
+        roleDescription: 'ACP agent',
+        clientId: 'acp',
+        accountRef: acpProfile.id,
+        defaultModel: 'kimi-k2',
+        provider: 'anthropic', // must be stripped — generic ACP never carries provider
+        acp: { command: 'kimi', startupArgs: ['acp'] },
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `create failed: ${createRes.body}`);
+    const created = JSON.parse(createRes.body);
+    assert.equal(created.cat.provider, undefined, 'generic ACP must not persist provider on create');
+
+    const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    const listed = JSON.parse(listRes.body).cats.find((cat) => cat.id === 'acp-kimi-noprovider');
+    assert.equal(listed.provider, undefined, 'GET should confirm generic ACP has no persisted provider');
+  });
+
+  it('PATCH /api/cats/:id strips provider for generic ACP — stays transport-only', async () => {
+    const projectRoot = createMonorepoProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const acpProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Patch ACP NoProvider',
+      authType: 'api_key',
+      protocol: 'openai',
+      apiKey: 'sk-patch2',
+      models: ['test-model'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'acp-patch-noprovider',
+        name: 'Patch ACP',
+        displayName: 'Patch ACP',
+        avatar: '/avatars/default.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@acp-patch-noprovider'],
+        roleDescription: 'ACP agent',
+        clientId: 'acp',
+        accountRef: acpProfile.id,
+        defaultModel: 'test-model',
+        acp: { command: 'test-cli', startupArgs: ['--acp'] },
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `create failed: ${createRes.body}`);
+
+    // Direct API PATCH tries to set a provider on a generic ACP member — must be stripped.
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/acp-patch-noprovider',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ provider: 'anthropic' }),
+    });
+    assert.equal(patchRes.statusCode, 200, `patch failed: ${patchRes.body}`);
+    const patched = JSON.parse(patchRes.body);
+    assert.equal(patched.cat.provider, undefined, 'generic ACP must not persist provider on update');
+  });
+
+  it('PATCH /api/cats/:id enables MCP support when updating a generic ACP whitelist', async () => {
+    const projectRoot = createMonorepoProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const acpProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Patch ACP Whitelist',
+      authType: 'api_key',
+      protocol: 'openai',
+      apiKey: 'sk-patch-whitelist',
+      models: ['test-model'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'acp-patch-whitelist',
+        name: 'Patch ACP Whitelist',
+        displayName: 'Patch ACP Whitelist',
+        avatar: '/avatars/default.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@acp-patch-whitelist'],
+        roleDescription: 'ACP agent',
+        clientId: 'acp',
+        accountRef: acpProfile.id,
+        defaultModel: 'test-model',
+        acp: { command: 'test-cli', startupArgs: ['--acp'] },
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `create failed: ${createRes.body}`);
+    assert.equal(JSON.parse(createRes.body).cat.mcpSupport, true, 'generic ACP without whitelist defaults MCP-on');
+
+    const acpConfig = {
+      command: 'test-cli',
+      startupArgs: ['--acp'],
+      mcpWhitelist: ['cat-cafe-memory'],
+    };
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/acp-patch-whitelist',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ acp: acpConfig }),
+    });
+    assert.equal(patchRes.statusCode, 200, `patch failed: ${patchRes.body}`);
+    const patched = JSON.parse(patchRes.body);
+    assert.equal(patched.cat.mcpSupport, true, 'ACP whitelist patch should imply MCP support');
+    assert.deepEqual(patched.cat.acp, acpConfig, 'ACP whitelist patch should persist');
+
+    const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    const listed = JSON.parse(listRes.body).cats.find((cat) => cat.id === 'acp-patch-whitelist');
+    assert.equal(listed.mcpSupport, true, 'GET should confirm MCP support implied by patched whitelist');
+  });
+
+  it('PATCH /api/cats/:id preserves generic ACP MCP support on ACP-only edits without a whitelist', async () => {
+    const projectRoot = createMonorepoProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const acpProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Patch ACP Preserve MCP',
+      authType: 'api_key',
+      protocol: 'openai',
+      apiKey: 'sk-patch-preserve-mcp',
+      models: ['test-model'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'acp-preserve-mcp',
+        name: 'Patch ACP Preserve MCP',
+        displayName: 'Patch ACP Preserve MCP',
+        avatar: '/avatars/default.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@acp-preserve-mcp'],
+        roleDescription: 'ACP agent',
+        clientId: 'acp',
+        accountRef: acpProfile.id,
+        defaultModel: 'test-model',
+        mcpSupport: true,
+        acp: { command: 'test-cli', startupArgs: ['--acp'] },
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `create failed: ${createRes.body}`);
+    assert.equal(JSON.parse(createRes.body).cat.mcpSupport, true, 'explicit MCP support should persist on create');
+
+    const commandOnlyAcpConfig = { command: 'test-cli', startupArgs: ['--acp', '--edited'] };
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/acp-preserve-mcp',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ acp: commandOnlyAcpConfig }),
+    });
+    assert.equal(patchRes.statusCode, 200, `patch failed: ${patchRes.body}`);
+    const patched = JSON.parse(patchRes.body);
+    assert.equal(patched.cat.mcpSupport, true, 'ACP-only edit should preserve existing MCP support');
+    assert.deepEqual(patched.cat.acp, commandOnlyAcpConfig, 'command-only ACP edit should persist');
+
+    const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    const listed = JSON.parse(listRes.body).cats.find((cat) => cat.id === 'acp-preserve-mcp');
+    assert.equal(listed.mcpSupport, true, 'GET should confirm ACP-only edit preserved MCP support');
+  });
+
+  it('PATCH /api/cats/:id resets generic ACP MCP support when replacing the whitelist with command-only config', async () => {
+    const projectRoot = createMonorepoProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const acpProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Patch ACP Remove Whitelist',
+      authType: 'api_key',
+      protocol: 'openai',
+      apiKey: ['sk', '-patch-remove-whitelist'].join(''),
+      models: ['test-model'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'acp-remove-whitelist',
+        name: 'Patch ACP Remove Whitelist',
+        displayName: 'Patch ACP Remove Whitelist',
+        avatar: '/avatars/default.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@acp-remove-whitelist'],
+        roleDescription: 'ACP agent',
+        clientId: 'acp',
+        accountRef: acpProfile.id,
+        defaultModel: 'test-model',
+        acp: {
+          command: 'test-cli',
+          startupArgs: ['--acp'],
+          mcpWhitelist: ['cat-cafe-memory'],
+        },
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `create failed: ${createRes.body}`);
+    assert.equal(JSON.parse(createRes.body).cat.mcpSupport, true, 'initial whitelist should imply MCP support');
+
+    const commandOnlyAcpConfig = { command: 'test-cli', startupArgs: ['--acp', '--new-command'] };
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/acp-remove-whitelist',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ acp: commandOnlyAcpConfig }),
+    });
+    assert.equal(patchRes.statusCode, 200, `patch failed: ${patchRes.body}`);
+    const patched = JSON.parse(patchRes.body);
+    assert.equal(patched.cat.mcpSupport, true, 'removing whitelist should preserve generic ACP MCP support');
+    assert.deepEqual(patched.cat.acp, commandOnlyAcpConfig, 'command-only ACP patch should persist');
+
+    const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    const listed = JSON.parse(listRes.body).cats.find((cat) => cat.id === 'acp-remove-whitelist');
+    assert.equal(listed.mcpSupport, true, 'GET should confirm removed whitelist preserves MCP support');
+  });
+
+  it('PATCH /api/cats/:id clears stale provider when migrating opencode → generic ACP (covers the currentCat.provider != null clear branch)', async () => {
+    // F161 R7 P3: the migration/stale path. A clientId=opencode member legitimately carries a
+    // provider; migrating it to generic ACP (clientId=acp) must clear that stale provider
+    // (provider:null) so it cannot leak into the ACP env-map. This is the exact path the
+    // @acp-opencode runtime member takes. Locks cats.ts buildProviderPatch acp clear branch.
+    const projectRoot = createMonorepoProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const profile = await createProviderProfile(projectRoot, {
+      displayName: 'OpenAI Key Profile',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.bound.example',
+      apiKey: 'sk-bound',
+      models: ['openai/claude-sonnet-4-6'],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Step 1: create an opencode member that legitimately carries a provider.
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'migrate-oc-to-acp',
+        name: 'Migrate OC',
+        displayName: 'Migrate OC',
+        avatar: '/avatars/default.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@migrate-oc-to-acp'],
+        roleDescription: 'migration',
+        clientId: 'opencode',
+        accountRef: profile.id,
+        defaultModel: 'openai/claude-sonnet-4-6',
+        provider: 'openai',
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `create failed: ${createRes.body}`);
+    assert.equal(JSON.parse(createRes.body).cat.provider, 'openai', 'opencode should persist provider');
+
+    // Step 2: migrate to generic ACP — the stale provider must be cleared (provider:null).
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/migrate-oc-to-acp',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        clientId: 'acp',
+        accountRef: profile.id,
+        acp: { command: 'opencode', startupArgs: ['acp', '--pure'] },
+      }),
+    });
+    assert.equal(patchRes.statusCode, 200, `migration patch failed: ${patchRes.body}`);
+    const patched = JSON.parse(patchRes.body);
+    assert.equal(patched.cat.clientId, 'acp', 'should be generic ACP after migration');
+    assert.equal(patched.cat.provider, undefined, 'stale provider must be cleared on migration to generic ACP');
+
+    const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    const listed = JSON.parse(listRes.body).cats.find((cat) => cat.id === 'migrate-oc-to-acp');
+    assert.equal(listed.provider, undefined, 'GET should confirm no stale provider remains after migration');
+  });
+
+  it('F247 KD-17: POST with provider=openai-chatgpt-pro skips default cli (cloud-only)', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'cloud-pro-cat',
+        name: '云端 Pro 猫',
+        displayName: '云端 Pro 猫',
+        avatar: '/avatars/cloud.png',
+        color: { primary: '#2196F3', secondary: '#90CAF9' },
+        mentionPatterns: ['@cloud-pro-cat'],
+        roleDescription: '云端 Remote MCP 猫，无本地 CLI',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-pro',
+        provider: 'openai-chatgpt-pro',
+        mcpSupport: true,
+        // F247 KD-17: cli intentionally omitted — cloud-only provider triggers skip default
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `cloud-only POST failed: ${createRes.body}`);
+    const body = JSON.parse(createRes.body);
+    assert.equal(body.cat.id, 'cloud-pro-cat');
+    assert.equal(body.cat.provider, 'openai-chatgpt-pro');
+    // F247 KD-17: cli must not be set on cloud-only cat (no local dispatch).
+    assert.equal(body.cat.cli, undefined, 'cloud-only cat must not have cli config (F247 KD-17)');
+  });
+
+  it('F247 KD-17: PATCH cli:null removes cli (transition local cat to cloud-only)', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // 1. Create a normal local cat with cli
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'transition-cat',
+        name: '过渡猫',
+        displayName: '过渡猫',
+        avatar: '/avatars/x.png',
+        color: { primary: '#000', secondary: '#fff' },
+        mentionPatterns: ['@transition-cat'],
+        roleDescription: '测试 cli 删除',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+        mcpSupport: false,
+        cli: { command: 'codex', outputFormat: 'json' },
+      }),
+    });
+    assert.equal(createRes.statusCode, 201);
+    const created = JSON.parse(createRes.body);
+    assert.deepEqual(created.cat.cli, { command: 'codex', outputFormat: 'json' }, 'sanity: cli present after create');
+
+    // 2. PATCH cli:null to transition to cloud-only mode
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/transition-cat',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ cli: null }),
+    });
+    assert.equal(patchRes.statusCode, 200, `PATCH cli:null failed: ${patchRes.body}`);
+    const patched = JSON.parse(patchRes.body);
+    // F247 KD-17: cli must be removed (undefined / missing) after PATCH cli:null.
+    assert.equal(patched.cat.cli, undefined, 'cli must be removed after PATCH cli:null (F247 KD-17)');
+
+    // 3. GET confirms persisted state matches
+    const getRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    const fetched = JSON.parse(getRes.body).cats.find((cat) => cat.id === 'transition-cat');
+    assert.equal(fetched.cli, undefined, 'GET confirms cli removed after PATCH cli:null');
+  });
+
+  it('plugin agentProvider cannot change either protected cloud identity', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const before = readFileSync(catalogPath, 'utf8');
+    for (const id of ['gpt-pro', 'gpt-dot']) {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/cats/${id}`,
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: { agentProvider: 'plugin:official.acp-clients/dsh' },
+      });
+      assert.equal(response.statusCode, 409, response.body);
+      assert.equal(response.json().code, 'BUILTIN_CLOUD_IDENTITY_PROTECTED');
+      assert.equal(readFileSync(catalogPath, 'utf8'), before);
+    }
+    const unchanged = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers: { 'x-cat-cafe-user': 'codex' },
+      payload: { agentProvider: null },
+    });
+    assert.equal(unchanged.statusCode, 200, unchanged.body);
+    await app.close();
+  });
+
+  it('F247: built-in gpt-pro rejects identity mutation atomically while profile edits remain available', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const headers = { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' };
+
+    const before = readFileSync(catalogPath, 'utf-8');
+    const rejected = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers,
+      body: JSON.stringify({
+        provider: null,
+        mcpSupport: false,
+        cli: { command: 'codex', outputFormat: 'json' },
+      }),
+    });
+
+    assert.equal(rejected.statusCode, 409, rejected.body);
+    const rejection = JSON.parse(rejected.body);
+    assert.equal(rejection.code, 'BUILTIN_CLOUD_IDENTITY_PROTECTED');
+    assert.match(rejection.error, /云端成员 @gpt-pro/);
+    assert.match(rejection.error, /新建另一位成员/);
+    assert.equal(readFileSync(catalogPath, 'utf-8'), before, 'a rejected mutation must not touch the catalog');
+
+    const profileEdit = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers,
+      body: JSON.stringify({ nickname: '砚砚 Pro' }),
+    });
+    assert.equal(profileEdit.statusCode, 200, profileEdit.body);
+    const edited = JSON.parse(profileEdit.body).cat;
+    assert.equal(edited.nickname, '砚砚 Pro');
+    assert.equal(edited.clientId, 'openai');
+    assert.equal(edited.defaultModel, 'gpt-pro');
+    assert.equal(edited.provider, 'openai-chatgpt-pro');
+    assert.equal(edited.mcpSupport, true);
+    assert.equal(edited.cli, undefined);
+    assert.deepEqual(edited.identityProtection, {
+      kind: 'builtin-cloud',
+      state: 'healthy',
+      lockedFields: [
+        'breedId',
+        'clientId',
+        'defaultModel',
+        'provider',
+        'mcpSupport',
+        'accountRef',
+        'cli',
+        'commandArgs',
+        'cliConfigArgs',
+        'acp',
+        'agentProvider',
+      ],
+      driftedFields: [],
+    });
+
+    const deleteResult = await app.inject({
+      method: 'DELETE',
+      url: '/api/cats/gpt-pro',
+      headers,
+    });
+    assert.equal(deleteResult.statusCode, 409, deleteResult.body);
+    assert.equal(JSON.parse(deleteResult.body).code, 'BUILTIN_CLOUD_IDENTITY_PROTECTED');
+    await app.close();
+  });
+
+  it('F247: built-in gpt-pro keeps its breed and canonical handle without rejected-write side effects', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const headers = { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' };
+
+    for (const unsafePatch of [{ breedId: 'maine-coon' }, { mentionPatterns: ['@yanyan-pro'] }]) {
+      const before = readFileSync(catalogPath, 'utf-8');
+      const rejected = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/gpt-pro',
+        headers,
+        body: JSON.stringify(unsafePatch),
+      });
+      assert.equal(rejected.statusCode, 409, rejected.body);
+      assert.equal(JSON.parse(rejected.body).code, 'BUILTIN_CLOUD_IDENTITY_PROTECTED');
+      assert.equal(
+        readFileSync(catalogPath, 'utf-8'),
+        before,
+        'rejected invariant changes must be byte-for-byte inert',
+      );
+
+      const listed = await app.inject({ method: 'GET', url: '/api/cats' });
+      assert.ok(
+        JSON.parse(listed.body).cats.some((cat) => cat.id === 'gpt-pro'),
+        'a rejected family move must not make gpt-pro disappear',
+      );
+    }
+
+    const addAlias = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers,
+      body: JSON.stringify({ mentionPatterns: ['@gpt-pro', '@yanyan-pro'] }),
+    });
+    assert.equal(addAlias.statusCode, 200, addAlias.body);
+    assert.deepEqual(JSON.parse(addAlias.body).cat.mentionPatterns, ['@gpt-pro', '@yanyan-pro']);
+    assert.deepEqual(parseA2AMentions('@gpt-pro 请继续', createCatId('opus')), [createCatId('gpt-pro')]);
+    await app.close();
+  });
+
+  it('F247: reserves the gpt-pro id and canonical handle at the create boundary', async () => {
+    const projectRoot = createProjectRoot();
+    const templatePath = join(projectRoot, 'cat-template.json');
+    process.env.CAT_TEMPLATE_PATH = templatePath;
+    catRegistry.reset();
+    for (const [id, config] of Object.entries(toAllCatConfigs(loadCatConfig(templatePath)))) {
+      catRegistry.register(id, config);
+    }
+
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const headers = { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' };
+    const base = {
+      name: '成员',
+      displayName: '成员',
+      avatar: '/avatars/default.png',
+      color: { primary: '#123456', secondary: '#abcdef' },
+      roleDescription: '测试成员',
+      clientId: 'openai',
+      accountRef: 'codex',
+      mcpSupport: true,
+    };
+
+    for (const unsafeCreate of [
+      {
+        ...base,
+        catId: 'gpt-pro',
+        mentionPatterns: ['@gpt-pro'],
+        defaultModel: 'gpt-5.6-sol',
+      },
+      {
+        ...base,
+        catId: 'local-codex',
+        mentionPatterns: ['@gpt-pro'],
+        defaultModel: 'gpt-5.6-sol',
+      },
+      {
+        ...base,
+        catId: 'bare-handle-local',
+        mentionPatterns: ['gpt-pro'],
+        defaultModel: 'gpt-5.6-sol',
+      },
+    ]) {
+      const before = readFileSync(catalogPath, 'utf-8');
+      const rejected = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify(unsafeCreate),
+      });
+      assert.equal(rejected.statusCode, 409, rejected.body);
+      assert.equal(readFileSync(catalogPath, 'utf-8'), before, 'rejected creates must not touch the catalog');
+    }
+
+    const localCreate = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify({
+        ...base,
+        catId: 'local-codex',
+        mentionPatterns: ['@local-codex'],
+        defaultModel: 'gpt-5.6-sol',
+      }),
+    });
+    assert.equal(localCreate.statusCode, 201, localCreate.body);
+    for (const reservedPattern of ['@gpt-pro', 'gpt-pro']) {
+      const beforeHandleClaim = readFileSync(catalogPath, 'utf-8');
+      const reservedHandlePatch = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/local-codex',
+        headers,
+        body: JSON.stringify({ mentionPatterns: [reservedPattern] }),
+      });
+      assert.equal(reservedHandlePatch.statusCode, 409, reservedHandlePatch.body);
+      assert.equal(JSON.parse(reservedHandlePatch.body).code, 'BUILTIN_CLOUD_HANDLE_RESERVED');
+      assert.equal(readFileSync(catalogPath, 'utf-8'), beforeHandleClaim);
+    }
+
+    const canonicalCreate = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify({
+        ...base,
+        catId: 'gpt-pro',
+        breedId: 'gpt-pro',
+        mentionPatterns: ['@gpt-pro', '@yanyan-pro'],
+        defaultModel: 'gpt-pro',
+        provider: 'openai-chatgpt-pro',
+      }),
+    });
+    assert.equal(canonicalCreate.statusCode, 201, canonicalCreate.body);
+    assert.equal(JSON.parse(canonicalCreate.body).cat.identityProtection.state, 'healthy');
+    await app.close();
+  });
+
+  it('F247: drifted gpt-pro remains visible across startup and recovers only through the explicit repair action', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const breed = catalog.breeds.find((candidate) => candidate.id === 'gpt-pro' || candidate.catId === 'gpt-pro');
+    assert.ok(breed, 'repo template must contain the built-in gpt-pro breed');
+    const variant = breed.variants.find(
+      (candidate) => candidate.catId === 'gpt-pro' || candidate.id === breed.defaultVariantId,
+    );
+    assert.ok(variant, 'repo template must contain the built-in gpt-pro variant');
+    variant.defaultModel = 'gpt-5.6-sol';
+    variant.agentProvider = 'plugin:official.acp-clients/dsh';
+    delete variant.provider;
+    variant.mcpSupport = false;
+    variant.cli = { command: 'codex', outputFormat: 'json' };
+    variant.mentionPatterns = ['@yanyan-pro'];
+    writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`, 'utf-8');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const headers = { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' };
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const beforeRepair = await app.inject({ method: 'GET', url: '/api/cats' });
+    const drifted = JSON.parse(beforeRepair.body).cats.find((cat) => cat.id === 'gpt-pro');
+    assert.equal(drifted.defaultModel, 'gpt-5.6-sol', 'startup must not silently overwrite operator state');
+    assert.equal(drifted.identityProtection.state, 'drifted');
+    assert.deepEqual(
+      [...drifted.identityProtection.driftedFields].sort(),
+      ['cli', 'defaultModel', 'mcpSupport', 'mentionPatterns', 'provider', 'agentProvider'].sort(),
+    );
+
+    const profileOnlyEdit = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers,
+      body: JSON.stringify({ nickname: '漂移中仍可改资料' }),
+    });
+    assert.equal(profileOnlyEdit.statusCode, 200, profileOnlyEdit.body);
+    assert.equal(JSON.parse(profileOnlyEdit.body).cat.nickname, '漂移中仍可改资料');
+    assert.equal(JSON.parse(profileOnlyEdit.body).cat.identityProtection.state, 'drifted');
+
+    const partialRepair = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers,
+      body: JSON.stringify({ provider: 'openai-chatgpt-pro' }),
+    });
+    assert.equal(partialRepair.statusCode, 409, partialRepair.body);
+    assert.equal(JSON.parse(partialRepair.body).code, 'BUILTIN_CLOUD_IDENTITY_REPAIR_REQUIRED');
+
+    const mixedRepair = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers,
+      body: JSON.stringify({ restoreBuiltinCloudIdentity: true, nickname: '不要混写' }),
+    });
+    assert.equal(mixedRepair.statusCode, 400, mixedRepair.body);
+    assert.equal(JSON.parse(mixedRepair.body).code, 'BUILTIN_CLOUD_IDENTITY_RESTORE_MIXED_PATCH');
+
+    const repaired = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers,
+      body: JSON.stringify({ restoreBuiltinCloudIdentity: true }),
+    });
+    assert.equal(repaired.statusCode, 200, repaired.body);
+    const repairedCat = JSON.parse(repaired.body).cat;
+    assert.equal(repairedCat.defaultModel, 'gpt-pro');
+    assert.equal(repairedCat.agentProvider, null);
+    assert.equal(repairedCat.provider, 'openai-chatgpt-pro');
+    assert.equal(repairedCat.mcpSupport, true);
+    assert.equal(repairedCat.cli, undefined);
+    assert.deepEqual(repairedCat.mentionPatterns, ['@gpt-pro', '@yanyan-pro']);
+    assert.equal(repairedCat.identityProtection.state, 'healthy');
+    await app.close();
+
+    const restarted = Fastify();
+    await restarted.register(catsRoutes);
+    const afterRestart = await restarted.inject({ method: 'GET', url: '/api/cats' });
+    const persisted = JSON.parse(afterRestart.body).cats.find((cat) => cat.id === 'gpt-pro');
+    assert.equal(persisted.identityProtection.state, 'healthy');
+    assert.equal(persisted.provider, 'openai-chatgpt-pro');
+    assert.equal(persisted.cli, undefined);
+    await restarted.close();
   });
 });

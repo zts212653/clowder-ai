@@ -3,7 +3,85 @@
  */
 
 export type IntentMode = 'execute' | 'ideate' | null;
-export type CatStatus = 'pending' | 'streaming' | 'done' | 'error' | 'alive_but_silent' | 'suspected_stall';
+export type CatStatus =
+  | 'spawning'
+  | 'pending'
+  | 'streaming'
+  | 'done'
+  | 'error'
+  | 'alive_but_silent'
+  | 'suspected_stall';
+export type ActiveInvocationSlot = { catId: string; mode?: string; startedAt?: number };
+export type TaskProgressSnapshot = {
+  tasks?: unknown[];
+  snapshotStatus?: 'running' | 'interrupted' | 'completed' | string;
+};
+
+/**
+ * Extract cats that still have a non-completed task-progress snapshot.
+ * These snapshots should remain visible even when an invocation temporarily drops.
+ */
+export function collectSnapshotActiveCats(
+  catInvocations: Record<string, { taskProgress?: TaskProgressSnapshot }>,
+): string[] {
+  return Object.entries(catInvocations)
+    .filter(([, inv]) => {
+      const taskProgress = inv.taskProgress;
+      if (!taskProgress || (taskProgress.tasks?.length ?? 0) === 0) return false;
+      return taskProgress.snapshotStatus !== 'completed';
+    })
+    .map(([catId]) => catId);
+}
+
+/**
+ * Derive cats currently considered active in UI components.
+ * Priority:
+ * 1) invocation slots (authoritative runtime truth)
+ * 2) targetCats only while invocation is still active but slots not ready (degraded)
+ * 3) snapshot-only when invocation has ended
+ * Legacy compatibility: when slot data is not provided, keep previous targetCats behavior.
+ *
+ * F194 Phase Z5 AC-Z15: ideate mode 下保留 targetCats UNION（不只看 slots），
+ * 让状态面板全程显示本轮所有 targetCats。slot 移除（猫完成清 slot）不应让成员
+ * 消失——co-creator alpha catch 2026-05-10 04:51："并发 at 47 和 55
+ * 但是观点采样面板只显示 47"。
+ */
+export function deriveActiveCats({
+  targetCats,
+  snapshotCats = [],
+  activeInvocations,
+  hasActiveInvocation,
+  intentMode,
+}: {
+  targetCats: string[];
+  snapshotCats?: string[];
+  activeInvocations?: Record<string, ActiveInvocationSlot>;
+  hasActiveInvocation?: boolean;
+  intentMode?: IntentMode;
+}): string[] {
+  if (activeInvocations == null && hasActiveInvocation == null) {
+    return Array.from(new Set([...targetCats, ...snapshotCats]));
+  }
+
+  const slotCats = Array.from(
+    new Set(
+      Object.values(activeInvocations ?? {})
+        .map((slot) => slot?.catId)
+        .filter((catId): catId is string => typeof catId === 'string' && catId.length > 0),
+    ),
+  );
+
+  // F194 Phase Z5 AC-Z15: ideate mode 下 fallback 到 targetCats UNION，slot 状态用作每只猫
+  // 卡片的状态展示（done/streaming/error）但不剔除卡片本身。仅在 hasActiveInvocation 为 true
+  // 时启用，避免 invocation 完全结束后还残留陈旧卡片。
+  if (intentMode === 'ideate' && hasActiveInvocation && targetCats.length > 0) {
+    return Array.from(new Set([...targetCats, ...slotCats, ...snapshotCats]));
+  }
+
+  if (slotCats.length > 0) return Array.from(new Set([...slotCats, ...snapshotCats]));
+  if (hasActiveInvocation) return Array.from(new Set([...targetCats, ...snapshotCats]));
+  return Array.from(new Set(snapshotCats));
+}
 
 export function modeLabel(mode: IntentMode): string {
   if (mode === 'ideate') return '独立观点采样';
@@ -13,6 +91,8 @@ export function modeLabel(mode: IntentMode): string {
 
 export function statusLabel(status: CatStatus): string {
   switch (status) {
+    case 'spawning':
+      return '启动中';
     case 'pending':
       return '待命';
     case 'streaming':
@@ -32,8 +112,10 @@ export function statusLabel(status: CatStatus): string {
 
 export function statusTone(status: CatStatus): string {
   switch (status) {
+    case 'spawning':
+      return 'text-blue-500';
     case 'pending':
-      return 'text-gray-500';
+      return 'text-cafe-secondary';
     case 'streaming':
       return 'text-green-600';
     case 'done':
@@ -45,7 +127,7 @@ export function statusTone(status: CatStatus): string {
     case 'suspected_stall':
       return 'text-orange-600';
     default:
-      return 'text-gray-500';
+      return 'text-cafe-secondary';
   }
 }
 

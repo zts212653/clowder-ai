@@ -1,0 +1,338 @@
+/**
+ * Rules & Prompts Route
+ * GET /api/rules — shared rules + provider guides for console transparency
+ * GET /api/rules/skill/:name — SKILL.md content preview (allowlisted paths only)
+ * GET /api/prompt-injection/manifest — moved to prompt-injection-manifest.ts (F237 Phase 2)
+ */
+
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { CatCafeConfig } from '@cat-cafe/shared';
+import type { FastifyPluginAsync } from 'fastify';
+import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
+import { getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
+import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
+import { getDefaultRootsForPlatform, isPathUnderRoots } from '../utils/project-path.js';
+import { resolveUserId } from '../utils/request-identity.js';
+
+function findProjectRoot(): string {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  while (dir !== dirname(dir)) {
+    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir;
+    dir = dirname(dir);
+  }
+  return process.cwd();
+}
+
+export type PromptConsumptionKind = 'actual-prompt' | 'harness-injected' | 'reference' | 'skill-on-demand';
+
+export interface PromptConsumptionInfo {
+  kind: PromptConsumptionKind;
+  label: string;
+  detail: string;
+  consumers: string[];
+}
+
+export interface RuleFileResponse {
+  path: string;
+  content: string;
+  exists: boolean;
+  consumption: PromptConsumptionInfo;
+}
+
+const CONSUMPTION = {
+  actualPrompt: (detail: string, consumers: string[]): PromptConsumptionInfo => ({
+    kind: 'actual-prompt',
+    label: '实际进 prompt',
+    detail,
+    consumers,
+  }),
+  reference: (detail: string, consumers: string[] = []): PromptConsumptionInfo => ({
+    kind: 'reference',
+    label: '只是参考',
+    detail,
+    consumers,
+  }),
+  harnessInjected: (detail: string, consumers: string[] = []): PromptConsumptionInfo => ({
+    kind: 'harness-injected',
+    label: 'harness 注入',
+    detail,
+    consumers,
+  }),
+  skillOnDemand: (detail: string, consumers: string[] = []): PromptConsumptionInfo => ({
+    kind: 'skill-on-demand',
+    label: 'skill 按需加载',
+    detail,
+    consumers,
+  }),
+} as const;
+
+async function readRuleFile(
+  root: string,
+  relativePath: string,
+  consumption: PromptConsumptionInfo,
+): Promise<RuleFileResponse> {
+  const fullPath = join(root, relativePath);
+  if (!existsSync(fullPath)) return { path: relativePath, content: '', exists: false, consumption };
+  try {
+    const content = await readFile(fullPath, 'utf-8');
+    return { path: relativePath, content, exists: true, consumption };
+  } catch {
+    return { path: relativePath, content: '', exists: false, consumption };
+  }
+}
+
+/**
+ * F203 Phase F — L0 system prompt visibility (read-only viewer in Console
+ * 「规则与 SOP」). Returns the L0 template + paths users follow to customize.
+ * Read-only by Design Gate (co-creator 2026-05-16 confirm "先做可见";
+ * AC-F5 编辑器 DEFER). Per-cat compiled previews moved to the F237 prompt
+ * injection preview path; /api/rules must not spawn compilers for unused UI.
+ */
+export interface L0CompiledForCat {
+  catId: string;
+  displayName: string;
+  compiled: string;
+  error: string | null;
+  consumption: PromptConsumptionInfo;
+}
+
+export interface L0PromptsBlock {
+  template: RuleFileResponse;
+  compiledByCat: L0CompiledForCat[];
+  customization: { templatePath: string; compileScript: string; verifyCommand: string };
+}
+
+export interface ReadL0PromptsOptions {
+  availableCats?: Array<{ catId: string; displayName: string }>;
+  compileL0?: (opts: { catId: string; cwd: string }) => Promise<string>;
+  includeCompiledByCat?: boolean;
+}
+
+const L0_TEMPLATE_RELPATH = 'assets/system-prompts/system-prompt-l0.md';
+const L0_COMPILE_SCRIPT_RELPATH = 'scripts/compile-system-prompt-l0.mjs';
+const L0_VERIFY_COMMAND = 'pnpm gate + runtime restart (KD-5 git revert 回滚通道)';
+
+export async function readL0Prompts(root: string, opts: ReadL0PromptsOptions = {}): Promise<L0PromptsBlock> {
+  const template = await readRuleFile(
+    root,
+    L0_TEMPLATE_RELPATH,
+    CONSUMPTION.actualPrompt('Template is compiled per cat and injected into the native system role.', [
+      'compile-system-prompt-l0.mjs',
+      'ClaudeBgCarrierService',
+      'CodexAgentService',
+    ]),
+  );
+  let compiledByCat: L0CompiledForCat[] = [];
+  if (opts.includeCompiledByCat) {
+    const compileL0 = opts.compileL0;
+    if (!compileL0) throw new Error('compileL0 is required when includeCompiledByCat=true');
+    const compiledConsumption = CONSUMPTION.actualPrompt('Per-cat compiled L0 actually passed to the model.', [
+      'compile-system-prompt-l0.mjs',
+      'ClaudeBgCarrierService',
+      'CodexAgentService',
+    ]);
+    compiledByCat = await Promise.all(
+      (opts.availableCats ?? []).map(async ({ catId, displayName }) => {
+        try {
+          const compiled = await compileL0({ catId, cwd: root });
+          return { catId, displayName, compiled, error: null, consumption: compiledConsumption };
+        } catch (e) {
+          return {
+            catId,
+            displayName,
+            compiled: '',
+            error: e instanceof Error ? e.message : String(e),
+            consumption: compiledConsumption,
+          };
+        }
+      }),
+    );
+  }
+  return {
+    template,
+    compiledByCat,
+    customization: {
+      templatePath: L0_TEMPLATE_RELPATH,
+      compileScript: L0_COMPILE_SCRIPT_RELPATH,
+      verifyCommand: L0_VERIFY_COMMAND,
+    },
+  };
+}
+
+/**
+ * Resolve enabled cats from the runtime loader's merged template+catalog
+ * source (no-arg `loadCatConfig()` per KD-13 / SystemPromptBuilder pattern).
+ * Hardcoding the catalog file silently returned [] on bootstrap-empty —
+ * cloud P1 R1 on PR #1717. The bare try/catch then swallowed real config
+ * errors (malformed template / schema regression) → silent 0 cats masked
+ * operator-actionable bugs — cloud P2 R2. The no-arg loader handles the
+ * one expected "catalog absent" case internally (template defaults), so
+ * any error from it is a real configuration failure that MUST propagate.
+ * `loaderFn` is injectable for tests.
+ */
+export function loadAvailableCatsForL0(
+  loaderFn: () => CatCafeConfig = loadCatConfig,
+): Array<{ catId: string; displayName: string }> {
+  const config = loaderFn();
+  const allCats = toAllCatConfigs(config);
+  const roster = getRoster(config);
+  return Object.entries(allCats)
+    .filter(([catId]) => roster[catId]?.available !== false)
+    .map(([catId, c]) => ({ catId, displayName: c.displayName ?? catId }));
+}
+
+export interface RulesPayload {
+  sharedRules: RuleFileResponse[];
+  providerGuides: Array<RuleFileResponse & { provider: string }>;
+  l0Prompts: L0PromptsBlock;
+}
+
+export async function readRulesPayload(root: string, opts: ReadL0PromptsOptions = {}): Promise<RulesPayload> {
+  const [sharedRules, providerGuides, l0Prompts] = await Promise.all([
+    Promise.all(SHARED_RULE_FILES.map((f) => readRuleFile(root, f.path, f.consumption))),
+    Promise.all(
+      Object.entries(PROVIDER_GUIDE_FILES).map(async ([provider, file]) => ({
+        provider,
+        ...(await readRuleFile(root, file.path, file.consumption)),
+      })),
+    ),
+    readL0Prompts(root, opts),
+  ]);
+  return { sharedRules, providerGuides, l0Prompts };
+}
+
+const SHARED_RULE_FILES: Array<{ path: string; consumption: PromptConsumptionInfo }> = [
+  {
+    path: 'cat-cafe-skills/refs/shared-rules.md',
+    consumption: CONSUMPTION.actualPrompt('shared-rules.md → governance L0 compiler → native/fallback prompt paths.', [
+      'compile-system-prompt-l0.mjs',
+      'SystemPromptBuilder',
+    ]),
+  },
+  {
+    path: 'docs/SOP.md',
+    consumption: CONSUMPTION.reference('Reference workflow document; not injected into every prompt.'),
+  },
+];
+
+const PROVIDER_GUIDE_FILES: Record<string, { path: string; consumption: PromptConsumptionInfo }> = {
+  claude: {
+    path: 'CLAUDE.md',
+    consumption: CONSUMPTION.harnessInjected(
+      'Claude Code reads project CLAUDE.md into model context; not the native L0 source.',
+      ['Claude Code project-doc loader'],
+    ),
+  },
+  codex: {
+    path: 'AGENTS.md',
+    consumption: CONSUMPTION.harnessInjected(
+      'Codex CLI reads project AGENTS.md into model context; native L0 comes from developer_instructions.',
+      ['Codex CLI project-doc loader'],
+    ),
+  },
+  gemini: {
+    path: 'GEMINI.md',
+    consumption: CONSUMPTION.reference(
+      'Historical Gemini CLI guide. AGY Native receives identity from the compiled L0 native agent file.',
+    ),
+  },
+};
+
+export function isLegacySkillProjectPath(absPath: string, roots: string[] = getDefaultRootsForPlatform()): boolean {
+  return isPathUnderRoots(
+    resolve(absPath),
+    roots.map((root) => resolve(root)),
+  );
+}
+
+async function findSkillPath(root: string, name: string, projectPath?: string): Promise<string | null> {
+  const home = homedir();
+  const validatedProject = projectPath ? await resolvePersistentProjectPath(projectPath) : null;
+  const projectRoot = validatedProject && isLegacySkillProjectPath(validatedProject) ? validatedProject : root;
+  const candidateDirs = [
+    join(root, 'cat-cafe-skills'),
+    join(projectRoot, '.claude', 'skills'),
+    join(home, '.claude', 'skills'),
+    join(projectRoot, '.codex', 'skills'),
+    join(home, '.codex', 'skills'),
+    join(projectRoot, '.gemini', 'skills'),
+    join(home, '.gemini', 'skills'),
+    join(projectRoot, '.kimi-code', 'skills'),
+    join(home, '.kimi-code', 'skills'),
+  ];
+  for (const dir of candidateDirs) {
+    const candidate = join(dir, name, 'SKILL.md');
+    if (existsSync(candidate)) return candidate;
+  }
+  // Fallback: check plugin skill source directories from capabilities config.
+  // Plugin skillsSource is relative to the Clowder AI instance root (where plugin
+  // code lives). For preview, try instance root first, then project root as
+  // fallback (for project-local plugins in non-startup projects).
+  try {
+    const config = await readCapabilitiesConfig(projectRoot);
+    if (config) {
+      for (const cap of config.capabilities) {
+        if (cap.type === 'skill' && cap.pluginId && cap.id === name && cap.skillsSource) {
+          const roots = isAbsolute(cap.skillsSource)
+            ? [cap.skillsSource]
+            : [join(root, cap.skillsSource), join(projectRoot, cap.skillsSource)];
+          for (const resolvedSource of roots) {
+            const pluginCandidate = join(resolvedSource, name, 'SKILL.md');
+            if (existsSync(pluginCandidate)) return pluginCandidate;
+          }
+        }
+      }
+    }
+  } catch {
+    // capabilities read failure is non-critical for preview
+  }
+  return null;
+}
+
+export const rulesRoutes: FastifyPluginAsync = async (app) => {
+  app.get('/api/rules', async (request, reply) => {
+    if (!resolveUserId(request)) {
+      reply.status(401);
+      return { error: 'Authentication required' };
+    }
+    const root = findProjectRoot();
+    return readRulesPayload(root);
+  });
+
+  app.get<{ Params: { name: string }; Querystring: { projectPath?: string } }>(
+    '/api/rules/skill/:name',
+    async (request, reply) => {
+      if (!resolveUserId(request)) {
+        reply.status(401);
+        return { error: 'Authentication required' };
+      }
+      const { name } = request.params;
+      if (!/^[a-z][a-z0-9-]*$/i.test(name)) {
+        reply.status(400);
+        return { error: 'Invalid skill name' };
+      }
+      const root = findProjectRoot();
+      const skillPath = await findSkillPath(root, name, request.query.projectPath);
+      if (!skillPath) {
+        reply.status(404);
+        return { error: `Skill "${name}" not found` };
+      }
+      try {
+        const content = await readFile(skillPath, 'utf-8');
+        return {
+          name,
+          content,
+          path: skillPath,
+          consumption: CONSUMPTION.skillOnDemand('SKILL.md is loaded only when that skill is selected or invoked.'),
+        };
+      } catch {
+        reply.status(500);
+        return { error: 'Failed to read skill content' };
+      }
+    },
+  );
+};

@@ -42,6 +42,27 @@ export function PhaseIcon({ className = 'w-4 h-4' }: IconProps) {
   );
 }
 
+/** Architecture: map / structure grid */
+export function ArchitectureIcon({ className = 'w-4 h-4' }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <rect x="4" y="4" width="6" height="6" rx="1.5" />
+      <rect x="14" y="4" width="6" height="6" rx="1.5" />
+      <rect x="9" y="14" width="6" height="6" rx="1.5" />
+      <path d="M10 7h4" />
+      <path d="M12 10v4" />
+    </svg>
+  );
+}
+
 /** Discussion: chat bubble - more organic shape */
 export function DiscussionIcon({ className = 'w-4 h-4' }: IconProps) {
   return (

@@ -1,49 +1,49 @@
 'use client';
 
+import type { ConnectorSource } from '@cat-cafe/shared';
+import type { PublishedMessageCoordinate } from '@/components/content-review/usePublishedContent';
 import type { RichBlock, RichInteractiveBlock } from '@/stores/chat-types';
-import { AudioBlock } from './AudioBlock';
-import { CardBlock } from './CardBlock';
-import { ChecklistBlock } from './ChecklistBlock';
-import { DiffBlock } from './DiffBlock';
-import { HtmlWidgetBlock } from './HtmlWidgetBlock';
-import { InteractiveBlock } from './InteractiveBlock';
+import type { CardConfirmationEntry } from './CardBlock';
+import { useFrustrationVisibility, visibleFrustrationBlocks } from './frustration-visibility';
 import { InteractiveBlockGroup } from './InteractiveBlockGroup';
-import { MediaGalleryBlock } from './MediaGalleryBlock';
+import { ReadOnlyRichBlockRenderer, RichBlockRenderer } from './RichBlockContent';
+import { RichBlockSelectionFrame } from './RichBlockSelectionFrame';
+import type { RuntimeConversationBinding } from './runtime-conversation-model';
 
-function RichBlockRenderer({ block, catId, messageId }: { block: RichBlock; catId?: string; messageId?: string }) {
-  switch (block.kind) {
-    case 'card':
-      return <CardBlock block={block} messageId={messageId} />;
-    case 'diff':
-      return <DiffBlock block={block} />;
-    case 'checklist':
-      return <ChecklistBlock block={block} />;
-    case 'media_gallery':
-      return <MediaGalleryBlock block={block} />;
-    case 'audio':
-      return <AudioBlock block={block} catId={catId} />;
-    case 'interactive':
-      return <InteractiveBlock block={block} messageId={messageId} />;
-    case 'html_widget':
-      return <HtmlWidgetBlock block={block} />;
-    default:
-      return (
-        <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-xs text-gray-400">
-          未知富块类型: {(block as { kind: string }).kind}
-        </div>
-      );
+type BlockItem = { type: 'block'; block: RichBlock };
+type GroupedItem = { type: 'group'; groupId: string; blocks: RichInteractiveBlock[] };
+type WorkCardsItem = { type: 'works'; blocks: RichBlock[] };
+type ResultItem = BlockItem | GroupedItem;
+
+/** Adjacent work cards share a grid without changing selection coordinates or source order. */
+function groupWorkCards(items: ResultItem[]): (ResultItem | WorkCardsItem)[] {
+  const result: (ResultItem | WorkCardsItem)[] = [];
+  for (const item of items) {
+    const work =
+      item.type === 'block' &&
+      (item.block.kind === 'file' || (item.block.kind === 'card' && item.block.meta?.kind === 'work_reference'));
+    if (!work || item.type !== 'block') {
+      result.push(item);
+      continue;
+    }
+    const last = result.at(-1);
+    if (last?.type === 'works') last.blocks.push(item.block);
+    else result.push({ type: 'works', blocks: [item.block] });
   }
+  return result;
 }
 
-type GroupedItem = { grouped: true; groupId: string; blocks: RichInteractiveBlock[] };
-type ResultItem = RichBlock | GroupedItem;
+/** Render decisions belong to local envelopes, never extra fields on source blocks. */
+function blockItem(block: RichBlock): BlockItem {
+  return { type: 'block', block };
+}
 
 /** Find runs of consecutive ungrouped interactive blocks (no non-interactive gaps) */
 function findConsecutiveRuns(blocks: RichBlock[]): RichInteractiveBlock[][] {
   const runs: RichInteractiveBlock[][] = [];
   let current: RichInteractiveBlock[] = [];
   for (const block of blocks) {
-    if (block.kind === 'interactive' && !block.groupId) {
+    if (block.kind === 'interactive' && !block.groupId && block.autoGroup !== false) {
       current.push(block);
     } else {
       if (current.length > 0) {
@@ -99,31 +99,102 @@ function groupBlocks(blocks: RichBlock[]): ResultItem[] {
     if (block.kind === 'interactive' && block.groupId) {
       const gid = block.groupId;
       if (groupFirstIdx.get(gid) === i) {
-        result.push({ grouped: true, groupId: gid, blocks: groupMap.get(gid)! });
+        result.push({ type: 'group', groupId: gid, blocks: groupMap.get(gid)! });
       }
     } else if (block.kind === 'interactive' && autoGroupIds.has(block.id)) {
       const gid = blockToGroup.get(block.id)!;
       if (!emittedGroups.has(gid)) {
-        result.push({ grouped: true, groupId: gid, blocks: syntheticGroups.get(gid)! });
+        result.push({ type: 'group', groupId: gid, blocks: syntheticGroups.get(gid)! });
         emittedGroups.add(gid);
       }
     } else {
-      result.push(block);
+      result.push(blockItem(block));
     }
   }
   return result;
 }
 
-export function RichBlocks({ blocks, catId, messageId }: { blocks: RichBlock[]; catId?: string; messageId?: string }) {
-  if (blocks.length === 0) return null;
-  const items = groupBlocks(blocks);
+export function RichBlocks({
+  blocks,
+  publication,
+  catId,
+  messageId,
+  sourceThreadId,
+  sourceMessageIds,
+  messageSource,
+  confirmations,
+  sendContext,
+  htmlWidgetDisclosureKeys,
+  runtimeInteractionCard,
+  readOnly = false,
+}: {
+  blocks: RichBlock[];
+  publication?: PublishedMessageCoordinate;
+  catId?: string;
+  messageId?: string;
+  sourceThreadId?: string;
+  sourceMessageIds?: readonly string[];
+  /**
+   * F174 D2b-1 cloud P2 #1397: trusted-provenance gate for sub-renderers.
+   * The callback-auth-failure renderer requires `messageSource.connector ===
+   * 'callback-auth'` so a regular card with spoofed `meta.kind` can't pose
+   * as a system warning + trigger hide-similar. Other renderers ignore this.
+   */
+  messageSource?: ConnectorSource;
+  confirmations?: CardConfirmationEntry[];
+  /** F229 Bug 2 fix: context tag for interactive-send events (e.g. 'concierge').
+   *  Prevents InteractiveBlock events from leaking to the wrong thread's handler. */
+  sendContext?: string;
+  htmlWidgetDisclosureKeys?: Readonly<Record<string, string>>;
+  runtimeInteractionCard?: RuntimeConversationBinding;
+  /** Forwarded blocks are inert evidence: no callbacks, specialised actions, or HTML execution. */
+  readOnly?: boolean;
+}) {
+  const visibility = useFrustrationVisibility(blocks, readOnly ? undefined : messageSource?.connector);
+  const shownBlocks = readOnly ? blocks : visibleFrustrationBlocks(visibility);
+  if (shownBlocks.length === 0) return null;
+  const items =
+    readOnly || runtimeInteractionCard ? shownBlocks.map(blockItem) : groupWorkCards(groupBlocks(shownBlocks));
+  const renderBlock = (block: RichBlock) => (
+    <RichBlockSelectionFrame
+      key={block.id}
+      block={block}
+      index={shownBlocks.indexOf(block)}
+      messageId={messageId}
+      readOnly={readOnly}
+    >
+      {readOnly ? (
+        <ReadOnlyRichBlockRenderer block={block} />
+      ) : (
+        <RichBlockRenderer
+          block={block}
+          publication={publication}
+          catId={catId}
+          messageId={messageId}
+          sourceThreadId={sourceThreadId}
+          sourceMessageIds={sourceMessageIds}
+          messageSource={messageSource}
+          confirmations={confirmations}
+          sendContext={sendContext}
+          runtimeInteractionCard={runtimeInteractionCard}
+          htmlWidgetDisclosureKeys={htmlWidgetDisclosureKeys}
+        />
+      )}
+    </RichBlockSelectionFrame>
+  );
   return (
     <div className="mt-2 space-y-2">
       {items.map((item) =>
-        'grouped' in item ? (
-          <InteractiveBlockGroup key={item.groupId} blocks={item.blocks} messageId={messageId} />
+        item.type === 'group' ? (
+          <div key={item.groupId} data-rich-block-group-id={item.groupId} className="group/rich-block relative">
+            <InteractiveBlockGroup blocks={item.blocks} messageId={messageId} sendContext={sendContext} />
+          </div>
+        ) : item.type === 'works' ? (
+          <div key={`works-${item.blocks[0]?.id}`} className="chat-work-gallery">
+            <div className="chat-work-grid">{item.blocks.map(renderBlock)}</div>
+          </div>
         ) : (
-          <RichBlockRenderer key={item.id} block={item} catId={catId} messageId={messageId} />
+          renderBlock(item.block)
         ),
       )}
     </div>

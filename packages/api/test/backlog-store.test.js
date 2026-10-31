@@ -46,6 +46,27 @@ describe('BacklogStore', () => {
     assert.equal(items[1].id, first.id);
   });
 
+  test('ensureTaskBackedItem is deterministic and preserves explicit task provenance', () => {
+    const input = {
+      userId: 'default-user',
+      taskId: 'task-f287',
+      featureId: 'F287',
+      title: 'F287 durable task',
+      summary: 'Task truth already exists in this thread',
+      createdBy: 'codex-sol',
+    };
+
+    const first = store.ensureTaskBackedItem(input);
+    const second = store.ensureTaskBackedItem(input);
+
+    assert.equal(first.id, 'task:task-f287');
+    assert.equal(second.id, first.id);
+    assert.equal(store.listByUser('default-user').length, 1);
+    assert.deepEqual(first.tags, ['source:task', 'feature:f287']);
+    assert.equal(first.priority, 'p2');
+    assert.equal(first.status, 'open');
+  });
+
   test('refreshMetadata updates docs-derived fields and appends audit entry', () => {
     const created = store.create({
       userId: 'default-user',

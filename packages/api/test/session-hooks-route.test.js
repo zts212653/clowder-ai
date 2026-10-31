@@ -21,9 +21,45 @@ describe('Session Hooks Routes', () => {
   let SessionSealer;
   let sessionHooksRoutes;
 
-  const DEFAULT_HOOK_TOKEN = 'test-hook-token';
+  const DEFAULT_CALLBACK_AUTH = {
+    invocationId: 'test-invocation-id',
+    callbackToken: 'test-callback-token',
+  };
+  const DEFAULT_SCOPE = { userId: 'user-1', catId: 'opus', threadId: 'thread-1' };
 
-  async function setup({ digestMap, hookToken = DEFAULT_HOOK_TOKEN, noToken = false } = {}) {
+  function callbackRegistryFor(scope = DEFAULT_SCOPE, { startupRecoveryPending = false, expectedCarrier } = {}) {
+    return {
+      isStartupRecoveryComplete: () => !startupRecoveryPending,
+      verify: async (invocationId, callbackToken) => {
+        const resolvedScope = typeof scope === 'function' ? scope() : scope;
+        return invocationId === DEFAULT_CALLBACK_AUTH.invocationId &&
+          callbackToken === DEFAULT_CALLBACK_AUTH.callbackToken
+          ? {
+              ok: true,
+              record: {
+                ...DEFAULT_CALLBACK_AUTH,
+                ...resolvedScope,
+                ownerAuthProvenance: 'strict',
+                clientMessageIds: new Set(),
+                toolExecutionPolicy: { mode: 'read_only' },
+                ...(expectedCarrier ? { expectedCompactionCarrier: expectedCarrier } : {}),
+                createdAt: 0,
+                expiresAt: null,
+                state: 'active',
+              },
+            }
+          : { ok: false, reason: 'invalid_token' };
+      },
+    };
+  }
+
+  async function setup({
+    digestMap,
+    callbackScope = DEFAULT_SCOPE,
+    expectedCarrier,
+    startupRecoveryPending = false,
+    followCreatedSession = true,
+  } = {}) {
     const storeMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sealerMod = await import('../dist/domains/cats/services/session/SessionSealer.js');
     const routeMod = await import('../dist/routes/session-hooks.js');
@@ -32,6 +68,14 @@ describe('Session Hooks Routes', () => {
     sessionHooksRoutes = routeMod.sessionHooksRoutes;
 
     const sessionChainStore = new SessionChainStore();
+    const activeScope = { ...callbackScope };
+    const createSession = sessionChainStore.create.bind(sessionChainStore);
+    sessionChainStore.create = (input) => {
+      if (followCreatedSession) {
+        Object.assign(activeScope, { userId: input.userId, catId: input.catId, threadId: input.threadId });
+      }
+      return createSession(input);
+    };
     const sessionSealer = new SessionSealer(sessionChainStore);
     const transcriptReader = mockTranscriptReader(digestMap ?? {});
 
@@ -40,28 +84,49 @@ describe('Session Hooks Routes', () => {
       sessionChainStore,
       sessionSealer,
       transcriptReader,
-      ...(noToken ? {} : { hookToken }),
+      callbackRegistry: callbackRegistryFor(() => activeScope, { startupRecoveryPending, expectedCarrier }),
     });
     await app.ready();
-    return { app, sessionChainStore, sessionSealer, hookToken };
+    return { app, sessionChainStore, sessionSealer };
   }
 
   /** Helper: default auth headers for hook requests */
-  function authHeaders(token = DEFAULT_HOOK_TOKEN) {
-    return { 'x-cat-cafe-hook-token': token };
+  function authHeaders(auth = DEFAULT_CALLBACK_AUTH) {
+    return {
+      'x-invocation-id': auth.invocationId,
+      'x-callback-token': auth.callbackToken,
+    };
   }
+
+  function applyPolicy(sessionChainStore, record, config, execution = { status: 'active', missingCapabilities: [] }) {
+    return sessionChainStore.applyPolicySnapshot(record.id, {
+      config,
+      source: 'runtime_override',
+      revision: `test:${config.strategy}:${config.hybrid?.maxCompressions ?? 'none'}`,
+      changedAt: 0,
+      execution,
+    });
+  }
+
+  const handoffPolicy = {
+    strategy: 'handoff',
+    thresholds: { warn: 0.75, action: 0.85 },
+    turnBudget: 12_000,
+    safetyMargin: 4_000,
+  };
 
   // --- POST /api/sessions/seal ---
 
   describe('POST /api/sessions/seal', () => {
     it('seals active session found by cliSessionId', async () => {
       const { app, sessionChainStore } = await setup();
-      sessionChainStore.create({
+      const record = sessionChainStore.create({
         cliSessionId: 'cli-abc',
         threadId: 'thread-1',
         catId: 'opus',
         userId: 'user-1',
       });
+      applyPolicy(sessionChainStore, record, handoffPolicy);
 
       const res = await app.inject({
         method: 'POST',
@@ -178,7 +243,7 @@ describe('Session Hooks Routes', () => {
         sessionChainStore,
         sessionSealer,
         transcriptReader,
-        hookToken: DEFAULT_HOOK_TOKEN,
+        callbackRegistry: callbackRegistryFor(),
       });
       await app.ready();
 
@@ -192,6 +257,110 @@ describe('Session Hooks Routes', () => {
       const body = JSON.parse(res.payload);
       assert.equal(body.sessionId, record.id);
       assert.deepEqual(body.digest.toolsUsed, ['Read', 'Bash']);
+    });
+
+    it('#1329 selects the latest sealed digest within the runtime session owner', async () => {
+      const storeMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const sealerMod = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const routeMod = await import('../dist/routes/session-hooks.js');
+      const sessionChainStore = new storeMod.SessionChainStore();
+      const ownerA = sessionChainStore.create({
+        cliSessionId: 'cli-owner-a',
+        threadId: 'default',
+        catId: 'opus',
+        userId: 'user-a',
+      });
+      const ownerB = sessionChainStore.create({
+        cliSessionId: 'cli-owner-b',
+        threadId: 'default',
+        catId: 'opus',
+        userId: 'user-b',
+      });
+      sessionChainStore.update(ownerA.id, { status: 'sealed', sealedAt: 100 });
+      sessionChainStore.update(ownerB.id, { status: 'sealed', sealedAt: 200 });
+      const digestA = { toolsUsed: ['OwnerA'], filesTouched: [], errors: [] };
+      const digestB = { toolsUsed: ['OwnerB'], filesTouched: [], errors: [] };
+      const app = Fastify();
+      await app.register(routeMod.sessionHooksRoutes, {
+        sessionChainStore,
+        sessionSealer: new sealerMod.SessionSealer(sessionChainStore),
+        transcriptReader: mockTranscriptReader({ [ownerA.id]: digestA, [ownerB.id]: digestB }),
+        callbackRegistry: callbackRegistryFor({ userId: 'user-a', catId: 'opus', threadId: 'default' }),
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/sessions/latest-digest?cliSessionId=cli-owner-a',
+        headers: authHeaders(),
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.sessionId, ownerA.id);
+      assert.deepEqual(body.digest.toolsUsed, ['OwnerA']);
+      await app.close();
+    });
+
+    it('returns sealed digest continuity diagnostics when digest has capsule', async () => {
+      const storeMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const sealerMod = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const routeMod = await import('../dist/routes/session-hooks.js');
+
+      const sessionChainStore = new storeMod.SessionChainStore();
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-sealed-capsule',
+        threadId: 'thread-sealed-capsule',
+        catId: 'opus',
+        userId: 'user-1',
+      });
+      sessionChainStore.update(record.id, {
+        status: 'sealed',
+        sealedAt: Date.now(),
+      });
+
+      const continuityCapsule = {
+        v: 1,
+        threadId: 'thread-sealed-capsule',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+        ballState: 'in_progress',
+        continuationReason: 'threshold_seal',
+        createdAt: 1234,
+        invocationId: 'inv-sealed',
+        seal: { sessionId: record.id, sessionSeq: 1, reason: 'threshold' },
+      };
+      const digestData = {
+        timeRange: { createdAt: 1000, sealedAt: 2000, durationMs: 1000 },
+        toolsUsed: ['Read'],
+        filesTouched: [],
+        errors: [],
+        continuityCapsule,
+      };
+      const transcriptReader = mockTranscriptReader({ [record.id]: digestData });
+      const sessionSealer = new sealerMod.SessionSealer(sessionChainStore);
+      const app = Fastify();
+      await app.register(routeMod.sessionHooksRoutes, {
+        sessionChainStore,
+        sessionSealer,
+        transcriptReader,
+        callbackRegistry: callbackRegistryFor({ userId: 'user-1', catId: 'opus', threadId: 'thread-sealed-capsule' }),
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/sessions/latest-digest?cliSessionId=cli-sealed-capsule',
+        headers: authHeaders(),
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.deepEqual(body.continuity.capsule, continuityCapsule);
+      assert.equal(body.continuity.diagnostics.source, 'sealed_session_digest');
+      assert.equal(body.continuity.diagnostics.boundary, 'threshold_seal');
+      assert.equal(body.continuity.diagnostics.sessionId, record.id);
     });
 
     it('returns 400 when cliSessionId is missing', async () => {
@@ -238,178 +407,380 @@ describe('Session Hooks Routes', () => {
       const body = JSON.parse(res.payload);
       assert.ok(body.error.includes('No sealed sessions'));
     });
+
+    it('returns compact continuity fallback for active compacted session without sealed digest', async () => {
+      const { app, sessionChainStore } = await setup();
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-active-compact',
+        threadId: 'thread-compact',
+        catId: 'opus',
+        userId: 'user-1',
+      });
+      record.compressionCount = 1;
+      record.continuityCapsule = {
+        v: 1,
+        threadId: 'thread-compact',
+        catId: 'opus',
+        mode: 'serial',
+        chainIndex: 1,
+        chainTotal: 2,
+        directMessageFrom: 'codex',
+        a2aTriggerMessageId: 'msg-a2a',
+        a2aEnabled: true,
+        a2aDepth: 1,
+        maxA2ADepth: 15,
+        ballState: 'in_progress',
+        continuationReason: 'threshold_seal',
+      };
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/sessions/latest-digest?cliSessionId=cli-active-compact',
+        headers: authHeaders(),
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.status, 'active');
+      assert.equal(body.digest, null);
+      assert.equal(body.continuity.diagnostics.source, 'active_session_route_state');
+      assert.equal(body.continuity.capsule.continuationReason, 'compact_boundary');
+      assert.equal(body.continuity.capsule.directMessageFrom, 'codex');
+      assert.equal(body.continuity.capsule.a2aTriggerMessageId, 'msg-a2a');
+    });
+
+    it('prefers current active compact continuity over older sealed digest', async () => {
+      const storeMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const sealerMod = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const routeMod = await import('../dist/routes/session-hooks.js');
+
+      const sessionChainStore = new storeMod.SessionChainStore();
+      const oldRecord = sessionChainStore.create({
+        cliSessionId: 'cli-old-sealed',
+        threadId: 'thread-compact-with-history',
+        catId: 'opus',
+        userId: 'user-1',
+      });
+      sessionChainStore.update(oldRecord.id, {
+        status: 'sealed',
+        sealedAt: Date.now() - 1000,
+      });
+      const activeRecord = sessionChainStore.create({
+        cliSessionId: 'cli-active-compact-with-history',
+        threadId: 'thread-compact-with-history',
+        catId: 'opus',
+        userId: 'user-1',
+      });
+      sessionChainStore.update(activeRecord.id, {
+        compressionCount: 1,
+        continuityCapsule: {
+          v: 1,
+          threadId: 'thread-compact-with-history',
+          catId: 'opus',
+          mode: 'serial',
+          chainIndex: 2,
+          chainTotal: 2,
+          directMessageFrom: 'codex',
+          a2aTriggerMessageId: 'msg-current',
+          a2aEnabled: true,
+          a2aDepth: 1,
+          maxA2ADepth: 15,
+          ballState: 'in_progress',
+          continuationReason: 'threshold_seal',
+        },
+      });
+
+      const oldDigest = {
+        timeRange: { createdAt: 1000, sealedAt: 2000, durationMs: 1000 },
+        toolsUsed: ['OldTool'],
+        filesTouched: [],
+        errors: [],
+        continuityCapsule: {
+          v: 1,
+          threadId: 'thread-compact-with-history',
+          catId: 'opus',
+          mode: 'independent',
+          a2aEnabled: false,
+          ballState: 'completed',
+          continuationReason: 'threshold_seal',
+          createdAt: 1000,
+          seal: { sessionId: oldRecord.id, sessionSeq: 1, reason: 'threshold' },
+        },
+      };
+      const transcriptReader = mockTranscriptReader({ [oldRecord.id]: oldDigest });
+      const sessionSealer = new sealerMod.SessionSealer(sessionChainStore);
+      const app = Fastify();
+      await app.register(routeMod.sessionHooksRoutes, {
+        sessionChainStore,
+        sessionSealer,
+        transcriptReader,
+        callbackRegistry: callbackRegistryFor({
+          userId: 'user-1',
+          catId: 'opus',
+          threadId: 'thread-compact-with-history',
+        }),
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/sessions/latest-digest?cliSessionId=cli-active-compact-with-history',
+        headers: authHeaders(),
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.sessionId, activeRecord.id);
+      assert.equal(body.digest, null);
+      assert.equal(body.continuity.diagnostics.source, 'active_session_route_state');
+      assert.equal(body.continuity.capsule.continuationReason, 'compact_boundary');
+      assert.equal(body.continuity.capsule.a2aTriggerMessageId, 'msg-current');
+    });
   });
 
   // --- F33: Strategy-aware seal behavior ---
 
   describe('F33: Strategy-aware seal (POST /api/sessions/seal)', () => {
-    let _setTestStrategyOverride;
-    let _clearTestStrategyOverrides;
-
-    async function loadStrategyHelpers() {
-      const mod = await import('../dist/config/session-strategy.js');
-      _setTestStrategyOverride = mod._setTestStrategyOverride;
-      _clearTestStrategyOverrides = mod._clearTestStrategyOverrides;
-    }
-
     it('compress strategy: returns compress_allowed and increments compressionCount', async () => {
-      await loadStrategyHelpers();
-      _setTestStrategyOverride('opus', {
+      const strategy = {
         strategy: 'compress',
         thresholds: { warn: 0.75, action: 0.85 },
         turnBudget: 12_000,
         safetyMargin: 4_000,
+      };
+      const { app, sessionChainStore } = await setup();
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-compress',
+        threadId: 'thread-1',
+        catId: 'opus',
+        userId: 'user-1',
+        compressionCount: 0,
+      });
+      applyPolicy(sessionChainStore, record, strategy);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-compress', reason: 'claude-code-compact-auto' },
       });
 
-      try {
-        const { app, sessionChainStore } = await setup();
-        const record = sessionChainStore.create({
-          cliSessionId: 'cli-compress',
-          threadId: 'thread-1',
-          catId: 'opus',
-          userId: 'user-1',
-        });
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.action, 'compress_allowed');
+      assert.equal(body.compressionCount, 1);
+      assert.equal(body.strategy, 'compress');
 
-        const res = await app.inject({
-          method: 'POST',
-          url: '/api/sessions/seal',
-          headers: authHeaders(),
-          payload: { cliSessionId: 'cli-compress', reason: 'claude-code-compact-auto' },
-        });
+      // Verify store was updated
+      const updated = sessionChainStore.get(record.id);
+      assert.equal(updated.compressionCount, 1);
+      assert.equal(updated.status, 'active', 'session should remain active');
+    });
 
-        assert.equal(res.statusCode, 200);
-        const body = JSON.parse(res.payload);
-        assert.equal(body.action, 'compress_allowed');
-        assert.equal(body.compressionCount, 1);
-        assert.equal(body.strategy, 'compress');
+    it('compress strategy returns compact continuity capsule from active route state', async () => {
+      const strategy = {
+        strategy: 'compress',
+        thresholds: { warn: 0.75, action: 0.85 },
+        turnBudget: 12_000,
+        safetyMargin: 4_000,
+      };
+      const { app, sessionChainStore } = await setup();
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-compress-capsule',
+        threadId: 'thread-compact',
+        catId: 'opus',
+        userId: 'user-1',
+        compressionCount: 0,
+      });
+      applyPolicy(sessionChainStore, record, strategy);
+      record.continuityCapsule = {
+        v: 1,
+        threadId: 'thread-compact',
+        catId: 'opus',
+        mode: 'serial',
+        chainIndex: 1,
+        chainTotal: 2,
+        directMessageFrom: 'codex',
+        a2aTriggerMessageId: 'msg-a2a',
+        a2aEnabled: true,
+        a2aDepth: 1,
+        maxA2ADepth: 15,
+        ballState: 'in_progress',
+        continuationReason: 'threshold_seal',
+      };
 
-        // Verify store was updated
-        const updated = sessionChainStore.get(record.id);
-        assert.equal(updated.compressionCount, 1);
-        assert.equal(updated.status, 'active', 'session should remain active');
-      } finally {
-        _clearTestStrategyOverrides();
-      }
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-compress-capsule', reason: 'claude-code-compact-auto' },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.action, 'compress_allowed');
+      assert.equal(body.continuity?.diagnostics?.source, 'active_session_route_state');
+      assert.equal(body.continuity?.capsule?.continuationReason, 'compact_boundary');
+      assert.equal(body.continuity?.capsule?.directMessageFrom, 'codex');
+      assert.equal(body.continuity?.capsule?.a2aTriggerMessageId, 'msg-a2a');
     });
 
     it('hybrid strategy: allows compression when under maxCompressions', async () => {
-      await loadStrategyHelpers();
-      _setTestStrategyOverride('opus', {
+      const strategy = {
         strategy: 'hybrid',
         thresholds: { warn: 0.8, action: 0.9 },
         hybrid: { maxCompressions: 2 },
         turnBudget: 12_000,
         safetyMargin: 4_000,
+      };
+      const { app, sessionChainStore } = await setup();
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-hybrid',
+        threadId: 'thread-1',
+        catId: 'opus',
+        userId: 'user-1',
+        compressionCount: 0,
+      });
+      applyPolicy(sessionChainStore, record, strategy);
+
+      // First compression: should allow
+      const res1 = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-hybrid', reason: 'claude-code-compact-auto' },
       });
 
-      try {
-        const { app, sessionChainStore } = await setup();
-        sessionChainStore.create({
-          cliSessionId: 'cli-hybrid',
-          threadId: 'thread-1',
-          catId: 'opus',
-          userId: 'user-1',
-        });
-
-        // First compression: should allow
-        const res1 = await app.inject({
-          method: 'POST',
-          url: '/api/sessions/seal',
-          headers: authHeaders(),
-          payload: { cliSessionId: 'cli-hybrid', reason: 'claude-code-compact-auto' },
-        });
-
-        assert.equal(res1.statusCode, 200);
-        const body1 = JSON.parse(res1.payload);
-        assert.equal(body1.action, 'compress_allowed');
-        assert.equal(body1.compressionCount, 1);
-        assert.equal(body1.maxCompressions, 2);
-        assert.equal(body1.strategy, 'hybrid');
-      } finally {
-        _clearTestStrategyOverrides();
-      }
+      assert.equal(res1.statusCode, 200);
+      const body1 = JSON.parse(res1.payload);
+      assert.equal(body1.action, 'compress_allowed');
+      assert.equal(body1.compressionCount, 1);
+      assert.equal(body1.hybridProgress.observedCount, 1);
+      assert.equal(body1.maxCompressions, 2);
+      assert.equal(body1.strategy, 'hybrid');
     });
 
-    it('hybrid strategy: seals when compressionCount reaches maxCompressions', async () => {
-      await loadStrategyHelpers();
-      _setTestStrategyOverride('opus', {
+    it('hybrid strategy: allows maxCompressions compactions before sealing the next request', async () => {
+      const strategy = {
         strategy: 'hybrid',
         thresholds: { warn: 0.8, action: 0.9 },
         hybrid: { maxCompressions: 1 },
         turnBudget: 12_000,
         safetyMargin: 4_000,
+      };
+      const { app, sessionChainStore } = await setup();
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-hybrid-seal',
+        threadId: 'thread-1',
+        catId: 'opus',
+        userId: 'user-1',
+        compressionCount: 0,
+      });
+      applyPolicy(sessionChainStore, record, strategy);
+
+      const allowed = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-hybrid-seal', reason: 'claude-code-compact-auto' },
       });
 
-      try {
-        const { app, sessionChainStore } = await setup();
-        const record = sessionChainStore.create({
-          cliSessionId: 'cli-hybrid-seal',
-          threadId: 'thread-1',
-          catId: 'opus',
-          userId: 'user-1',
-        });
-        // Pre-set compressionCount to maxCompressions
-        sessionChainStore.update(record.id, { compressionCount: 1 });
+      assert.equal(allowed.statusCode, 200);
+      assert.equal(JSON.parse(allowed.payload).action, 'compress_allowed');
 
-        const res = await app.inject({
+      const sealed = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-hybrid-seal', reason: 'claude-code-compact-auto' },
+      });
+
+      assert.equal(sealed.statusCode, 200);
+      assert.equal(JSON.parse(sealed.payload).status, 'sealing');
+    });
+
+    it('#1329 accepts exactly one concurrent hybrid seal at the revision threshold', async () => {
+      const strategy = {
+        strategy: 'hybrid',
+        thresholds: { warn: 0.8, action: 0.9 },
+        hybrid: { maxCompressions: 1 },
+        turnBudget: 12_000,
+        safetyMargin: 4_000,
+      };
+      const { app, sessionChainStore } = await setup();
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-hybrid-concurrent-seal',
+        threadId: 'thread-1',
+        catId: 'opus',
+        userId: 'user-1',
+        compressionCount: 0,
+      });
+      applyPolicy(sessionChainStore, record, strategy);
+
+      const request = () =>
+        app.inject({
           method: 'POST',
           url: '/api/sessions/seal',
           headers: authHeaders(),
-          payload: { cliSessionId: 'cli-hybrid-seal', reason: 'claude-code-compact-auto' },
+          payload: { cliSessionId: 'cli-hybrid-concurrent-seal', reason: 'claude-code-compact-auto' },
         });
+      const responses = await Promise.all([request(), request()]);
+      const accepted = responses.filter((response) => {
+        const body = JSON.parse(response.payload);
+        return response.statusCode === 200 && body.status === 'sealing';
+      });
+      const allowed = responses.filter((response) => JSON.parse(response.payload).action === 'compress_allowed');
 
-        assert.equal(res.statusCode, 200);
-        const body = JSON.parse(res.payload);
-        assert.equal(body.status, 'sealing', 'should seal when at max compressions');
-      } finally {
-        _clearTestStrategyOverrides();
-      }
+      assert.equal(accepted.length, 1);
+      assert.equal(allowed.length, 1);
     });
 
     it('hybrid strategy: seal reason is max_compressions (not hook reason)', async () => {
-      await loadStrategyHelpers();
-      _setTestStrategyOverride('opus', {
+      const strategy = {
         strategy: 'hybrid',
         thresholds: { warn: 0.8, action: 0.9 },
         hybrid: { maxCompressions: 1 },
         turnBudget: 12_000,
         safetyMargin: 4_000,
+      };
+      const { app, sessionChainStore } = await setup();
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-hybrid-reason',
+        threadId: 'thread-1',
+        catId: 'opus',
+        userId: 'user-1',
+        compressionCount: 0,
+      });
+      applyPolicy(sessionChainStore, record, strategy);
+
+      await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-hybrid-reason', reason: 'claude-code-compact-auto' },
+      });
+      await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-hybrid-reason', reason: 'claude-code-compact-auto' },
       });
 
-      try {
-        const { app, sessionChainStore } = await setup();
-        const record = sessionChainStore.create({
-          cliSessionId: 'cli-hybrid-reason',
-          threadId: 'thread-1',
-          catId: 'opus',
-          userId: 'user-1',
-        });
-        sessionChainStore.update(record.id, { compressionCount: 1 });
-
-        await app.inject({
-          method: 'POST',
-          url: '/api/sessions/seal',
-          headers: authHeaders(),
-          payload: { cliSessionId: 'cli-hybrid-reason', reason: 'claude-code-compact-auto' },
-        });
-
-        // Check that the session's sealReason is max_compressions, not the hook reason
-        const sealed = sessionChainStore.get(record.id);
-        assert.equal(sealed.sealReason, 'max_compressions');
-      } finally {
-        _clearTestStrategyOverrides();
-      }
+      // Check that the session's sealReason is max_compressions, not the hook reason
+      const sealed = sessionChainStore.get(record.id);
+      assert.equal(sealed.sealReason, 'max_compressions');
     });
 
     it('handoff strategy (default): seals normally', async () => {
       // No override → uses default handoff
       const { app, sessionChainStore } = await setup();
-      sessionChainStore.create({
+      const record = sessionChainStore.create({
         cliSessionId: 'cli-handoff',
         threadId: 'thread-1',
         catId: 'opus',
         userId: 'user-1',
       });
+      applyPolicy(sessionChainStore, record, handoffPolicy);
 
       const res = await app.inject({
         method: 'POST',
@@ -422,42 +793,11 @@ describe('Session Hooks Routes', () => {
       const body = JSON.parse(res.payload);
       assert.equal(body.status, 'sealing');
     });
-  });
 
-  // --- Hook Token Authentication ---
-
-  describe('Hook token authentication', () => {
-    it('returns 401 when hookToken is configured but request has no token', async () => {
-      const { app } = await setup({ hookToken: 'secret-token-123' });
-
-      const res = await app.inject({
-        method: 'POST',
-        url: '/api/sessions/seal',
-        payload: { cliSessionId: 'cli-abc', reason: 'test' },
-      });
-
-      assert.equal(res.statusCode, 401);
-      const body = JSON.parse(res.payload);
-      assert.ok(body.error.includes('hook token'));
-    });
-
-    it('returns 401 when hookToken is configured but request has wrong token', async () => {
-      const { app } = await setup({ hookToken: 'secret-token-123' });
-
-      const res = await app.inject({
-        method: 'POST',
-        url: '/api/sessions/seal',
-        headers: { 'x-cat-cafe-hook-token': 'wrong-token' },
-        payload: { cliSessionId: 'cli-abc', reason: 'test' },
-      });
-
-      assert.equal(res.statusCode, 401);
-    });
-
-    it('allows request when hookToken matches', async () => {
-      const { app, sessionChainStore } = await setup({ hookToken: 'secret-token-123' });
+    it('does not live-read policy when the managed invocation snapshot is missing', async () => {
+      const { app, sessionChainStore } = await setup();
       sessionChainStore.create({
-        cliSessionId: 'cli-auth',
+        cliSessionId: 'cli-no-policy-snapshot',
         threadId: 'thread-1',
         catId: 'opus',
         userId: 'user-1',
@@ -466,7 +806,205 @@ describe('Session Hooks Routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/sessions/seal',
-        headers: { 'x-cat-cafe-hook-token': 'secret-token-123' },
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-no-policy-snapshot', reason: 'test-seal' },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.action, 'no_action');
+      assert.equal(body.executionStatus.status, 'unavailable');
+      assert.deepEqual(body.contextEpoch, {
+        status: 'unsupported',
+        reason: 'managed_invocation_boundary_unavailable',
+      });
+    });
+
+    it('reports a stale policy epoch without inventing a capability failure', async () => {
+      const { app, sessionChainStore } = await setup();
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-stale-policy-epoch',
+        threadId: 'thread-1',
+        catId: 'opus',
+        userId: 'user-1',
+        compressionCount: 0,
+      });
+      applyPolicy(sessionChainStore, record, {
+        strategy: 'hybrid',
+        thresholds: { warn: 0.8, action: 0.9 },
+        hybrid: { maxCompressions: 2 },
+      });
+      const originalRecordCompressionEvent = sessionChainStore.recordCompressionEvent.bind(sessionChainStore);
+      sessionChainStore.recordCompressionEvent = (id, revision, invocationId) => {
+        sessionChainStore.applyPolicySnapshot(id, {
+          config: { strategy: 'compress', thresholds: { warn: 0.8, action: 0.9 } },
+          source: 'runtime_override',
+          revision: 'test:compress:new-invocation',
+          changedAt: 1,
+          execution: { status: 'active', missingCapabilities: [] },
+        });
+        return originalRecordCompressionEvent(id, revision, invocationId);
+      };
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-stale-policy-epoch', reason: 'claude-code-compact-auto' },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.action, 'no_action');
+      assert.equal(body.reason, 'stale_policy_revision');
+      assert.equal('executionStatus' in body, false, 'a policy race is not a missing runtime capability');
+      assert.equal(sessionChainStore.get(record.id).status, 'active');
+    });
+
+    it('does not seal revision R when revision S becomes active after the compact event commits', async () => {
+      const { app, sessionChainStore } = await setup();
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-policy-switch-after-event',
+        threadId: 'thread-1',
+        catId: 'opus',
+        userId: 'user-1',
+        compressionCount: 0,
+      });
+      applyPolicy(sessionChainStore, record, {
+        strategy: 'hybrid',
+        thresholds: { warn: 0.8, action: 0.9 },
+        hybrid: { maxCompressions: 1 },
+      });
+
+      const allowed = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-policy-switch-after-event', reason: 'claude-code-compact-auto' },
+      });
+      assert.equal(allowed.statusCode, 200);
+      assert.equal(JSON.parse(allowed.payload).action, 'compress_allowed');
+
+      const originalRecordCompressionEvent = sessionChainStore.recordCompressionEvent.bind(sessionChainStore);
+      sessionChainStore.recordCompressionEvent = (id, revision, invocationId) => {
+        const observed = originalRecordCompressionEvent(id, revision, invocationId);
+        sessionChainStore.applyPolicySnapshot(id, {
+          config: { strategy: 'compress', thresholds: { warn: 0.8, action: 0.9 } },
+          source: 'runtime_override',
+          revision: 'test:compress:next-invocation',
+          changedAt: 2,
+          execution: { status: 'active', missingCapabilities: [] },
+        });
+        return observed;
+      };
+      const originalTransitionToSealing = sessionChainStore.transitionToSealing.bind(sessionChainStore);
+      let expectedSealRevision;
+      sessionChainStore.transitionToSealing = (id, reason, expectedPolicyRevision) => {
+        expectedSealRevision = expectedPolicyRevision;
+        return originalTransitionToSealing(id, reason, expectedPolicyRevision);
+      };
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-policy-switch-after-event', reason: 'claude-code-compact-auto' },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.action, 'no_action');
+      assert.equal(body.reason, 'stale_policy_revision');
+      assert.equal(
+        expectedSealRevision,
+        'test:hybrid:1',
+        'the second callback must reach the revision-fenced seal CAS',
+      );
+      assert.equal(sessionChainStore.get(record.id).status, 'active');
+      assert.equal(sessionChainStore.get(record.id).appliedPolicy.revision, 'test:compress:next-invocation');
+    });
+
+    it('keeps degraded hybrid in the compression action family', async () => {
+      const strategy = {
+        strategy: 'hybrid',
+        thresholds: { warn: 0.8, action: 0.9 },
+        hybrid: { maxCompressions: 0 },
+        turnBudget: 12_000,
+        safetyMargin: 4_000,
+      };
+      const { app, sessionChainStore } = await setup();
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-hybrid-degraded',
+        threadId: 'thread-1',
+        catId: 'opus',
+        userId: 'user-1',
+        compressionCount: 0,
+      });
+      applyPolicy(sessionChainStore, record, strategy, {
+        status: 'degraded',
+        missingCapabilities: ['session_rotation'],
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-hybrid-degraded', reason: 'test-seal' },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.action, 'no_action');
+      assert.equal(body.strategy, 'hybrid');
+      assert.equal(body.executionStatus.status, 'degraded');
+      assert.equal(sessionChainStore.get(record.id).status, 'active');
+    });
+  });
+
+  // --- Invocation-scoped hook authentication ---
+
+  describe('Invocation-scoped hook authentication', () => {
+    it('returns 401 when request has no invocation credentials', async () => {
+      const { app } = await setup();
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        payload: { cliSessionId: 'cli-abc', reason: 'test' },
+      });
+
+      assert.equal(res.statusCode, 401);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.error, 'callback_auth_failed');
+    });
+
+    it('returns 401 when callback token is wrong', async () => {
+      const { app } = await setup();
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders({ ...DEFAULT_CALLBACK_AUTH, callbackToken: 'wrong-token' }),
+        payload: { cliSessionId: 'cli-abc', reason: 'test' },
+      });
+
+      assert.equal(res.statusCode, 401);
+    });
+
+    it('allows request when invocation credentials and session scope match', async () => {
+      const { app, sessionChainStore } = await setup();
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-auth',
+        threadId: 'thread-1',
+        catId: 'opus',
+        userId: 'user-1',
+      });
+      applyPolicy(sessionChainStore, record, handoffPolicy);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
         payload: { cliSessionId: 'cli-auth', reason: 'test-auth' },
       });
 
@@ -475,22 +1013,45 @@ describe('Session Hooks Routes', () => {
       assert.equal(body.status, 'sealing');
     });
 
-    it('returns 503 when hookToken is not configured (fail-closed)', async () => {
-      const { app } = await setup({ noToken: true }); // explicitly no hookToken
+    it('rejects a valid hook credential when the requested session belongs to another invocation scope', async () => {
+      const { app, sessionChainStore } = await setup({ followCreatedSession: false });
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-other-scope',
+        threadId: 'thread-other',
+        catId: 'codex',
+        userId: 'user-other',
+      });
+      applyPolicy(sessionChainStore, record, handoffPolicy);
 
       const res = await app.inject({
         method: 'POST',
         url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-other-scope', reason: 'cross-scope-attempt' },
+      });
+
+      assert.equal(res.statusCode, 403);
+      assert.deepEqual(JSON.parse(res.payload), { error: 'session_hook_scope_mismatch' });
+      assert.equal(sessionChainStore.get(record.id).status, 'active');
+    });
+
+    it('returns 503 while callback-auth startup recovery is pending', async () => {
+      const { app } = await setup({ startupRecoveryPending: true });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
         payload: { cliSessionId: 'cli-noauth', reason: 'test' },
       });
 
       assert.equal(res.statusCode, 503);
       const body = JSON.parse(res.payload);
-      assert.ok(body.error.includes('CAT_CAFE_HOOK_TOKEN'));
+      assert.equal(body.error, 'callback_auth_startup_recovery_pending');
     });
 
-    it('returns 401 for GET endpoint when token is missing', async () => {
-      const { app } = await setup({ hookToken: 'secret-token-123' });
+    it('returns 401 for GET endpoint when credentials are missing', async () => {
+      const { app } = await setup();
 
       const res = await app.inject({
         method: 'GET',
@@ -504,8 +1065,13 @@ describe('Session Hooks Routes', () => {
   // --- F073 P4: SOP stage bookmark ---
 
   describe('POST /api/sessions/sop-bookmark (F073 P4)', () => {
+    function createBookmarkSession(sessionChainStore, cliSessionId) {
+      return sessionChainStore.create({ cliSessionId, ...DEFAULT_SCOPE });
+    }
+
     it('stores SOP bookmark for cliSessionId', async () => {
-      const { app } = await setup();
+      const { app, sessionChainStore } = await setup();
+      createBookmarkSession(sessionChainStore, 'cli-sop-1');
 
       const res = await app.inject({
         method: 'POST',
@@ -520,7 +1086,8 @@ describe('Session Hooks Routes', () => {
     });
 
     it('GET retrieves stored SOP bookmark', async () => {
-      const { app } = await setup();
+      const { app, sessionChainStore } = await setup();
+      createBookmarkSession(sessionChainStore, 'cli-sop-2');
 
       // Store first
       await app.inject({
@@ -557,7 +1124,8 @@ describe('Session Hooks Routes', () => {
     });
 
     it('POST overwrites previous bookmark for same cliSessionId', async () => {
-      const { app } = await setup();
+      const { app, sessionChainStore } = await setup();
+      createBookmarkSession(sessionChainStore, 'cli-sop-3');
 
       await app.inject({
         method: 'POST',
@@ -585,7 +1153,8 @@ describe('Session Hooks Routes', () => {
     });
 
     it('POST returns 400 for missing required fields', async () => {
-      const { app } = await setup();
+      const { app, sessionChainStore } = await setup();
+      createBookmarkSession(sessionChainStore, 'cli-sop-4');
 
       const res = await app.inject({
         method: 'POST',
@@ -597,8 +1166,8 @@ describe('Session Hooks Routes', () => {
       assert.equal(res.statusCode, 400);
     });
 
-    it('requires hook token authentication', async () => {
-      const { app } = await setup({ hookToken: 'secret-token-123' });
+    it('requires invocation callback authentication', async () => {
+      const { app } = await setup();
 
       const res = await app.inject({
         method: 'POST',
@@ -610,7 +1179,9 @@ describe('Session Hooks Routes', () => {
     });
 
     it('TTL sweep removes entries older than 24h on next write', async () => {
-      const { app } = await setup();
+      const { app, sessionChainStore } = await setup();
+      createBookmarkSession(sessionChainStore, 'cli-old');
+      createBookmarkSession(sessionChainStore, 'cli-new');
 
       // Store an old bookmark
       await app.inject({
@@ -658,6 +1229,156 @@ describe('Session Hooks Routes', () => {
         headers: authHeaders(),
       });
       assert.equal(check3.statusCode, 200, 'new bookmark should survive TTL sweep');
+    });
+  });
+
+  describe('POST /api/sessions/seal carrier identity (#1542)', () => {
+    it('rejects a durable-bound invocation whose hook presents a missing or wrong carrier identity', async () => {
+      const { app, sessionChainStore } = await setup({ expectedCarrier: 'f296-node-v1' });
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-carrier',
+        threadId: 'thread-1',
+        catId: 'opus',
+        userId: 'user-1',
+      });
+      applyPolicy(sessionChainStore, record, handoffPolicy);
+
+      const missing = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-carrier', reason: 'claude-code-compact-auto' },
+      });
+      assert.equal(missing.statusCode, 403);
+      assert.equal(JSON.parse(missing.payload).error, 'compaction_carrier_identity_mismatch');
+
+      const wrong = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: { ...authHeaders(), 'x-clowder-compaction-carrier': 'legacy-shell-v0' },
+        payload: { cliSessionId: 'cli-carrier', reason: 'claude-code-compact-auto' },
+      });
+      assert.equal(wrong.statusCode, 403);
+
+      const after = sessionChainStore.get(record.id);
+      assert.equal(after.compressionCount, null, 'a mismatched carrier must not mint a sequence');
+    });
+
+    it('accepts the durable-bound invocation presenting the exact carrier identity', async () => {
+      const { app, sessionChainStore } = await setup({ expectedCarrier: 'f296-node-v1' });
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-carrier-ok',
+        threadId: 'thread-1',
+        catId: 'opus',
+        userId: 'user-1',
+      });
+      applyPolicy(sessionChainStore, record, handoffPolicy);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: { ...authHeaders(), 'x-clowder-compaction-carrier': 'f296-node-v1' },
+        payload: { cliSessionId: 'cli-carrier-ok', reason: 'claude-code-compact-auto' },
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal(JSON.parse(res.payload).status, 'sealing');
+    });
+
+    it('Node + legacy racing behind one barrier produce exactly one logical observation (#1542 P1-5)', async () => {
+      const { app, sessionChainStore } = await setup({ expectedCarrier: 'f296-node-v1' });
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-parallel',
+        threadId: 'thread-1',
+        catId: 'opus',
+        userId: 'user-1',
+        compressionCount: 0,
+      });
+      applyPolicy(sessionChainStore, record, handoffPolicy);
+      const sealRequest = (headers) =>
+        app.inject({
+          method: 'POST',
+          url: '/api/sessions/seal',
+          headers,
+          payload: { cliSessionId: 'cli-parallel', reason: 'claude-code-compact-auto' },
+        });
+
+      // True race: both callbacks are in flight simultaneously — no arrival
+      // order is imposed by the test.
+      const [nodeRes, legacyRes] = await Promise.all([
+        sealRequest({ ...authHeaders(), 'x-clowder-compaction-carrier': 'f296-node-v1' }),
+        sealRequest(authHeaders()),
+      ]);
+
+      assert.equal(nodeRes.statusCode, 200, 'the canonical Node carrier records its observation');
+      assert.equal(
+        legacyRes.statusCode,
+        403,
+        'legacy is rejected at the identity boundary — never by incidental session state',
+      );
+      assert.equal(JSON.parse(legacyRes.payload).error, 'compaction_carrier_identity_mismatch');
+      const after = sessionChainStore.get(record.id);
+      assert.ok(after.compressionObservation, 'the surviving observation is the authenticated one');
+      assert.equal(
+        after.compressionObservation.sequence,
+        1,
+        'exactly one logical observation — a second record would advance the sequence',
+      );
+      assert.equal(after.compressionObservation.invocationId, DEFAULT_CALLBACK_AUTH.invocationId);
+      assert.equal(after.compressionCount, 1, 'the lifetime counter advances exactly once');
+    });
+
+    it('legacy arriving BEFORE the Node carrier is still fenced at the identity boundary (#1542 P1-5)', async () => {
+      const { app, sessionChainStore } = await setup({ expectedCarrier: 'f296-node-v1' });
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-parallel-legacy-first',
+        threadId: 'thread-1',
+        catId: 'opus',
+        userId: 'user-1',
+        compressionCount: 0,
+      });
+      applyPolicy(sessionChainStore, record, handoffPolicy);
+
+      const legacyFirst = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-parallel-legacy-first', reason: 'claude-code-compact-auto' },
+      });
+      assert.equal(legacyFirst.statusCode, 403);
+      assert.equal(JSON.parse(legacyFirst.payload).error, 'compaction_carrier_identity_mismatch');
+
+      const nodeSecond = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: { ...authHeaders(), 'x-clowder-compaction-carrier': 'f296-node-v1' },
+        payload: { cliSessionId: 'cli-parallel-legacy-first', reason: 'claude-code-compact-auto' },
+      });
+      assert.equal(nodeSecond.statusCode, 200);
+
+      const after = sessionChainStore.get(record.id);
+      assert.equal(after.compressionObservation?.sequence, 1, 'arrival order cannot change the exactly-once outcome');
+      assert.equal(after.compressionCount, 1, 'the lifetime counter advances exactly once');
+    });
+
+    it('a legacy shell callback stays rejected after simulated state loss because the binding is durable on the principal', async () => {
+      // #1542 P1-1 regression: the expectation lives on the verified callback
+      // record, not process-local state — a "restart" cannot drop it.
+      const { app, sessionChainStore } = await setup({ expectedCarrier: 'f296-node-v1' });
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-carrier-restart',
+        threadId: 'thread-1',
+        catId: 'opus',
+        userId: 'user-1',
+      });
+      applyPolicy(sessionChainStore, record, handoffPolicy);
+
+      const legacyStyle = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-carrier-restart', reason: 'claude-code-compact-auto' },
+      });
+      assert.equal(legacyStyle.statusCode, 403, 'missing header must stay rejected — no fail-open window');
     });
   });
 });

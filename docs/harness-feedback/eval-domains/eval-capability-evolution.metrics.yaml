@@ -1,0 +1,18 @@
+connected_owner_surfaces:
+  label: Connected owner surfaces
+  means: 通过 canonical owner refs 与 join keys 验证通过的异质 signal/decision surfaces 数；不包含 payload 副本。
+  goodDirection: higher
+  category: activation
+  component: capability-evolution-observation
+typed_insufficient_blockers:
+  label: Typed insufficient blockers
+  means: owner surface、evidence role、named consumption、optimizer exposure 或独立 holdout 缺失时产生的 typed blocker 数。
+  goodDirection: lower
+  category: context
+  component: capability-evolution-observation
+next_evaluation_at:
+  label: Next evaluation time
+  means: F192 canonical frequency 算出的下一次时间触发点；不是 F311 自建调度时间。
+  goodDirection: neutral
+  category: context
+  component: capability-evolution-observation

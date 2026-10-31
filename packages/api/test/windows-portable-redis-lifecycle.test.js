@@ -26,7 +26,10 @@ test('Windows installer exits immediately when native installs are cancelled by 
   assert.match(installScript, /if \(Test-InstallerCancellation -ErrorRecord \$ErrorRecord\) \{/);
   assert.match(installScript, /Write-Err "\$Context cancelled by user"/);
   assert.match(installScript, /Exit-InstallerIfCancelled -ErrorRecord \$_ -Context "pnpm installation"/);
-  assert.match(installScript, /Exit-InstallerIfCancelled -ErrorRecord \$frozenInstallError -Context "pnpm install"/);
+  assert.match(
+    installScript,
+    /Exit-InstallerIfCancelled -ErrorRecord \$frozenInstallResult\.ErrorRecord -Context "pnpm install"/,
+  );
   assert.match(installScript, /Exit-InstallerIfCancelled -ErrorRecord \$_ -Context "\$\(\$tool.Name\) CLI install"/);
   assert.match(installScript, /exit 1/);
 });
@@ -52,6 +55,10 @@ test('Windows startup resolves portable Redis from the shared helper before glob
   assert.match(startWindowsScript, /Resolve-PortableRedisLayout -ProjectRoot \$ProjectRoot/);
   assert.match(helpersScript, /function Resolve-GlobalRedisBinaries/);
   assert.match(helpersScript, /Get-Command redis-server -ErrorAction SilentlyContinue/);
+  assert.doesNotMatch(helpersScript, /if \(-not \$redisServer -or -not \$redisCli\) \{ return \$null \}/);
+  assert.match(helpersScript, /if \(-not \$redisServer\) \{ return \$null \}/);
+  assert.match(helpersScript, /CliPath = if \(\$redisCli\) \{ \$redisCli\.FullName \} else \{ \$null \}/);
+  assert.match(helpersScript, /CliPath = if \(\$redisCli\) \{ \$redisCli\.Source \} else \{ \$null \}/);
 });
 
 test('Windows startup quotes portable Redis file arguments before Start-Process', () => {
@@ -80,14 +87,13 @@ test('Windows stop script only stops Clowder-owned API and frontend listeners', 
 
 test('Windows startup preserves runtime Redis overrides, validates artifacts, and exits when service jobs stop', () => {
   assert.match(startWindowsScript, /\$configuredRedisUrl = if \(\$env:REDIS_URL\)/);
-  assert.match(helpersScript, /function Test-LocalRedisUrl/);
+  assert.match(helpersScript, /function Test-RedisReachable/);
+  assert.match(helpersScript, /function Format-RedisRespCommand/);
+  assert.match(helpersScript, /function Send-RedisShutdown/);
   assert.match(helpersScript, /function Get-RedactedRedisUrl/);
-  assert.match(
-    startWindowsScript,
-    /\$useExternalRedis = \$useRedis -and \$configuredRedisUrl -and -not \(Test-LocalRedisUrl -RedisUrl \$configuredRedisUrl -RedisPort \$RedisPort\)/,
-  );
   assert.match(startWindowsScript, /\$safeConfiguredRedisUrl = Get-RedactedRedisUrl -RedisUrl \$configuredRedisUrl/);
-  assert.match(startWindowsScript, /Write-Ok "Using external Redis: \$safeConfiguredRedisUrl"/);
+  assert.match(startWindowsScript, /Test-RedisReachable -RedisUrl \$configuredRedisUrl/);
+  assert.match(startWindowsScript, /Write-Ok "Redis reachable at \$safeConfiguredRedisUrl"/);
   assert.match(startWindowsScript, /\$safeEffectiveRedisUrl = Get-RedactedRedisUrl -RedisUrl \$effectiveRedisUrl/);
   assert.match(
     startWindowsScript,
@@ -108,11 +114,9 @@ test('Windows startup preserves runtime Redis overrides, validates artifacts, an
   assert.match(startWindowsScript, /Service job '\$\(\$job.Name\)' stopped \(\$\(\$job.State\)\)/);
 });
 
-test('Windows startup preserves configured REDIS_URL with DB suffix and credentials when local Redis is already running', () => {
-  assert.match(
-    startWindowsScript,
-    /if \(\$configuredRedisUrl\) \{\s+\$env:REDIS_URL = \$configuredRedisUrl\s+\} else \{\s+\$env:REDIS_URL = "redis:\/\/localhost:\$RedisPort"\s+\}/s,
-  );
+test('Windows startup preserves configured REDIS_URL when provided', () => {
+  assert.match(startWindowsScript, /\$env:REDIS_URL = \$configuredRedisUrl/);
+  assert.match(startWindowsScript, /Write-Ok "Redis reachable at \$safeConfiguredRedisUrl"/);
 });
 
 test('Windows startup refuses non-Clowder Redis listeners before reusing port 6399', () => {
@@ -156,11 +160,9 @@ test('Windows installer and startup reuse shared tool resolution instead of raw 
   assert.match(startWindowsScript, /\$pnpmCommand = Resolve-ToolCommand -Name "pnpm"/);
   assert.match(startWindowsScript, /& \$pnpmCommand run build/);
   assert.match(startWindowsScript, /param\(\$root, \$port, \$nextCli\)/);
-  assert.match(startWindowsScript, /& node \$nextCli dev \(Join-Path \$root "packages\/web"\) -p \$port/);
-  assert.match(
-    startWindowsScript,
-    /& node \$nextCli start \(Join-Path \$root "packages\/web"\) -p \$port -H 0\.0\.0\.0/,
-  );
+  assert.match(startWindowsScript, /Set-Location \(Join-Path \$root "packages\/web"\)/);
+  assert.match(startWindowsScript, /& node \$nextCli dev -p \$port/);
+  assert.match(startWindowsScript, /& node \$nextCli start -p \$port -H 0\.0\.0\.0/);
 });
 
 test('Windows CLI installs retry command discovery before warning and auth detection uses the same retry helper', () => {
@@ -189,13 +191,11 @@ test('Windows PATH refresh preserves shell-provided shim entries while appending
   );
 });
 
-test('Windows stop script resolves redis-cli through the shared helper chain before shutdown', () => {
+test('Windows stop script resolves Redis through RESP instead of redis-cli', () => {
   assert.match(stopWindowsScript, /install-windows-helpers\.ps1/);
-  assert.match(stopWindowsScript, /Resolve-PortableRedisBinaries -ProjectRoot \$ProjectRoot/);
   assert.match(stopWindowsScript, /Resolve-PortableRedisLayout -ProjectRoot \$ProjectRoot/);
-  assert.match(stopWindowsScript, /Resolve-GlobalRedisBinaries/);
-  assert.match(stopWindowsScript, /\$redisCli = \$redisCommands\.CliPath/);
-  assert.doesNotMatch(stopWindowsScript, /& redis-cli -p \$RedisPort ping/);
+  assert.match(stopWindowsScript, /Test-RedisReachable -RedisUrl \$shutdownUrl/);
+  assert.match(stopWindowsScript, /Send-RedisShutdown -RedisUrl \$shutdownUrl/);
   assert.match(
     stopWindowsScript,
     /\$redisPidFile = if \(\$redisLayout\) \{ Join-Path \$redisLayout\.Data "redis-\$RedisPort\.pid" \} else \{ \$null \}/,
@@ -210,9 +210,8 @@ test('Windows stop script resolves redis-cli through the shared helper chain bef
     /\$isClowderOwned = \$isManagedPid -or \(Test-ClowderOwnedProcess -ProcessId \$conn\.OwningProcess -ClowderProjectRoot \$ProjectRoot\)/,
   );
   assert.match(stopWindowsScript, /Write-Warn "Skipping non-Clowder Redis listener on port \$RedisPort/);
-  assert.match(stopWindowsScript, /Get-RedisAuthArgs\s+-RedisUrl\s+\$configuredRedisUrl/);
-  assert.match(stopWindowsScript, /@redisAuthArgs\s+ping/);
-  assert.match(stopWindowsScript, /@redisAuthArgs\s+shutdown/);
+  assert.doesNotMatch(stopWindowsScript, /& redis-cli/);
+  assert.doesNotMatch(stopWindowsScript, /@redisAuthArgs/);
 });
 
 test('Windows start.bat delegates to start-windows.ps1', () => {
@@ -230,6 +229,24 @@ test('Windows installer generates .env before building so NEXT_PUBLIC_API_URL is
     `.env generation (Step ${envStepMatch[1]}) must come before build (Step ${buildStepMatch[1]})`,
   );
   assert.match(installScript, /SetEnvironmentVariable\(\$key, \$val, "Process"\)/);
+});
+
+test('Windows installer runs preflight before Node and pnpm bootstrap', () => {
+  const preflightIndex = installScript.indexOf('$preflightScript = Join-Path $ProjectRoot "scripts\\preflight.ps1"');
+  const nodeStepIndex = installScript.indexOf('Write-Step "Step 2/7 - Node.js and pnpm"');
+  const wingetIndex = installScript.indexOf('winget install -e --id OpenJS.NodeJS.LTS --version 24.');
+  const npmIndex = installScript.indexOf('& $npmCommand install -g pnpm');
+  const corepackIndex = installScript.indexOf('& $corepackCommand install -g pnpm@latest');
+
+  assert.notEqual(preflightIndex, -1, 'install.ps1 must contain the preflight block');
+  assert.notEqual(nodeStepIndex, -1, 'install.ps1 must still contain the Node/pnpm step');
+  assert.notEqual(wingetIndex, -1, 'install.ps1 must still contain winget bootstrap');
+  assert.notEqual(npmIndex, -1, 'install.ps1 must still contain npm pnpm bootstrap');
+  assert.notEqual(corepackIndex, -1, 'install.ps1 must still contain corepack pnpm bootstrap');
+  assert.ok(preflightIndex < nodeStepIndex, 'preflight must run before Node/pnpm step begins');
+  assert.ok(preflightIndex < wingetIndex, 'preflight must run before winget Node bootstrap');
+  assert.ok(preflightIndex < npmIndex, 'preflight must run before npm pnpm bootstrap');
+  assert.ok(preflightIndex < corepackIndex, 'preflight must run before corepack pnpm bootstrap');
 });
 
 test('Windows installer strips surrounding quotes when loading .env into the build session', () => {

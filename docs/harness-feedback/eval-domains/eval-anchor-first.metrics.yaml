@@ -1,0 +1,66 @@
+selected_window.duration_hours:
+  label: 本次观察窗口
+  means: 这次评估计划观察多少小时的数据；它是解释其他指标的时间范围，不代表好坏。
+  goodDirection: neutral
+  category: context
+  component: window
+runtime.uptime_hours:
+  label: 运行时实际在线时长
+  means: 运行时在本次评估时已经连续运行了多久；若短于观察窗口，数据为空可能只是还没积累够。
+  goodDirection: neutral
+  category: context
+  component: window
+cat_cafe_anchor_returned_count_total:
+  label: Anchor 摘要返回次数
+  means: 观察窗口里 thread-context 以 anchor 摘要模式返回的次数；用于衡量省 token 路径的实际采用量。
+  goodDirection: neutral
+  category: activation
+  component: thread-context
+cat_cafe_anchor_full_drill_count_total:
+  label: Anchor 后全文钻取次数
+  means: 观察窗口里用户或猫从 anchor 摘要继续钻取完整消息的次数；需结合摘要返回次数解释回读成本。
+  goodDirection: neutral
+  category: context
+  component: get-message
+task_outcome.day31_completed_total:
+  label: 最新任务窗口已完成数
+  means: 最新任务结果对照窗口中已经完成的任务数；用于确认 anchor 观察期内确有足够任务活动。
+  goodDirection: neutral
+  category: activation
+  component: task-outcome
+task_outcome.day31_permission_cancel_total:
+  label: 最新任务窗口权限取消数
+  means: 最新任务结果对照窗口中用户取消工具或权限动作的次数；用于排查上下文节省是否伴随授权摩擦。
+  goodDirection: lower
+  category: friction
+  component: task-outcome
+task_outcome.day31_proposal_reject_total:
+  label: 最新任务窗口提案拒绝数
+  means: 最新任务结果对照窗口中用户拒绝提案的次数；用于排查上下文节省是否伴随理解偏差。
+  goodDirection: lower
+  category: friction
+  component: task-outcome
+task_outcome.day20_cancel_total:
+  label: 用户取消授权次数
+  means: 对照窗口里用户取消工具或权限动作的次数；升高可能表示流程打扰人或动作边界不清。
+  goodDirection: lower
+  category: friction
+  component: task-outcome
+task_outcome.day20_proposal_reject_total:
+  label: 提案被拒次数
+  means: 对照窗口里用户拒绝猫猫提案的次数；用于判断上下文节省是否伴随理解偏差。
+  goodDirection: lower
+  category: friction
+  component: task-outcome
+task_outcome.day20_completed_total:
+  label: 已完成任务数
+  means: 对照窗口里完成的任务数量；用于确认观察期是否真的有足够任务活动。
+  goodDirection: neutral
+  category: activation
+  component: task-outcome
+task_outcome.day20_in_progress_total:
+  label: 进行中任务数
+  means: 对照窗口结束时仍在进行的任务数量；用于理解样本成熟度，不能单独判断质量。
+  goodDirection: neutral
+  category: context
+  component: task-outcome

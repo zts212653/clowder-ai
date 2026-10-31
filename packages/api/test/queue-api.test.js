@@ -6,55 +6,202 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
-const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+const { InvocationQueue, queueEntryOwnerId, queueEntryTargetCats } = await import(
+  '../dist/domains/cats/services/agents/invocation/InvocationQueue.js'
+);
+
+async function terminalizeFixtureCarrier(deps, queueProcessor, carrier, userId, threadId) {
+  if ((await queueProcessor.finalizeRemovedEntry(carrier, 'user_cancel')) === false) return false;
+  for (const messageId of carrier.payload.messageId ? [carrier.payload.messageId] : []) {
+    try {
+      const canceled = await deps.messageStore.markCanceled(messageId);
+      if (canceled?.deliveryTransitioned === true) {
+        deps.socketManager.emitToUser(userId, 'message_deleted', { messageId, threadId, deletedBy: userId });
+      }
+    } catch {
+      return false;
+    }
+  }
+  return Boolean(
+    await deps.invocationQueue.removeProcessedAcrossUsersDurable(
+      threadId,
+      carrier.id,
+      'interrupted',
+      'invocation_cancelled',
+    ),
+  );
+}
 
 /** Build deps with stubs */
 function buildDeps(overrides = {}) {
   const invocationQueue = new InvocationQueue();
-  return {
+  const threadFixture = {
+    id: 't1',
+    title: 'Test Thread',
+    createdBy: 'system',
+    participants: ['opus', 'codex'],
+  };
+  let deps;
+  const queueProcessor = {
+    canReleaseSlotForUser: mock.fn(() => true),
+    hasProcessingSlotReservation: mock.fn((threadId, catId) =>
+      Boolean(invocationQueue.findProcessingByCat(threadId, catId)),
+    ),
+    processNext: mock.fn(async () => ({ started: false })),
+    releaseSlot: mock.fn(() => {}),
+    releaseThread: mock.fn(() => {}),
+    requestDrain: mock.fn(async () => {}),
+    finalizeRemovedEntry: mock.fn(async () => true),
+    registerCallerDispatchSteerChanges: mock.fn(() => {}),
+    registerCallerDispatchQueueWithdrawal: mock.fn(() => {}),
+    appendExactEntry: mock.fn(async () => ({ outcome: 'appended', entry: {}, acceptedTargetIds: ['opus'] })),
+    tryAutoAppendExactEntry: mock.fn(async () => ({ outcome: 'appended', entry: {}, acceptedTargetIds: ['opus'] })),
+  };
+  queueProcessor.processClaimedSteerEntries = mock.fn(async (threadId, userId, entryIds) => ({
+    started: true,
+    entry: invocationQueue.getEntrySnapshot(threadId, userId, entryIds[0]),
+  }));
+  queueProcessor.processExactSteerReservation = mock.fn(async (threadId, userId) =>
+    queueProcessor.processNext(threadId, userId),
+  );
+  const managedCommandWakeRecovery = {
+    retireCarrier: mock.fn(async () => 0),
+    retireThread: mock.fn(async () => ({ retired: 0, messageIds: [] })),
+  };
+  deps = {
     threadStore: {
-      get: mock.fn(async (id) => ({
-        id,
-        title: 'Test Thread',
-        createdBy: 'system', // default: public thread
-      })),
+      get: mock.fn(async (id) => ({ ...threadFixture, id, participants: [...threadFixture.participants] })),
+      addParticipants: mock.fn(async (_threadId, catIds) => {
+        for (const catId of catIds) {
+          if (!threadFixture.participants.includes(catId)) threadFixture.participants.push(catId);
+        }
+      }),
     },
     invocationQueue,
-    queueProcessor: {
-      processNext: mock.fn(async () => ({ started: false })),
-      isPaused: mock.fn(() => false),
-      getPauseReason: mock.fn(() => undefined),
-      clearPause: mock.fn(() => {}),
-      releaseSlot: mock.fn(() => {}),
-      releaseThread: mock.fn(() => {}),
-    },
+    queueProcessor,
     invocationTracker: {
       has: mock.fn(() => false),
       getUserId: mock.fn(() => null),
+      getExecutionId: mock.fn(() => undefined),
       cancel: mock.fn(() => ({ cancelled: false, catIds: [] })),
       getActiveSlots: mock.fn(() => []),
     },
+    resolveCarrierCapability: mock.fn(() => ({
+      provider: 'openai_codex',
+      carrier: 'codex_app_server',
+      activeInvocationGuidance: 'supported',
+      deliverySemantics: 'exact_active_turn',
+    })),
+    isCatAvailable: mock.fn(() => true),
     socketManager: {
       broadcastAgentMessage: mock.fn(),
       broadcastToRoom: mock.fn(),
       emitToUser: mock.fn(),
     },
+    messageStore: {
+      markCanceled: mock.fn(async () => ({ deliveryStatus: 'canceled', deliveryTransitioned: true })),
+      getById: mock.fn(async () => null),
+    },
+    agentSessionMutex: {
+      forceReleaseByScope: mock.fn(() => ({ releasedHolders: 0, rejectedWaiters: 0, catIds: [] })),
+    },
+    managedCommandWakeRecovery,
+    getManagedCommandWakeRecovery: () => managedCommandWakeRecovery,
     ...overrides,
   };
+  queueProcessor.retirePrestartProcessingGroup = mock.fn(async (threadId, _catId, userId) => {
+    const inflight = invocationQueue.findProcessingByCat(threadId, _catId);
+    if (!inflight || queueEntryOwnerId(inflight) !== userId) return 'state_changed';
+    const carriers = invocationQueue.getProcessingGroupAcrossUsers(threadId, inflight.id);
+    if (!carriers) return 'state_changed';
+    for (const carrier of carriers) {
+      if (!(await terminalizeFixtureCarrier(deps, queueProcessor, carrier, userId, threadId))) {
+        return 'terminalization_failed';
+      }
+    }
+    return 'retired';
+  });
+  return deps;
 }
 
-/** Enqueue a test entry */
+let durableSourceSequence = 0;
+
+/** Enqueue one canonical durable ledger row for route tests. */
 function enqueueEntry(queue, overrides = {}) {
-  return queue.enqueue({
+  durableSourceSequence += 1;
+  return queue.enqueueDurableNow(
+    canonicalTestQueueInput({
+      threadId: 't1',
+      userId: 'user-a',
+      kind: 'conversation_input',
+      content: 'hello',
+      source: 'user',
+      ownerAuthProvenance: 'unknown',
+      targetCats: ['opus'],
+      intent: 'execute',
+      sourceId: `queue-api-source-${durableSourceSequence}`,
+      ...overrides,
+    }),
+  );
+}
+
+async function enqueueDurableEntry(queue, overrides = {}) {
+  durableSourceSequence += 1;
+  return queue.enqueueDurable(
+    canonicalTestQueueInput({
+      threadId: 't1',
+      userId: 'user-a',
+      kind: 'conversation_input',
+      content: 'hello',
+      source: 'user',
+      sourceId: `queue-api-source-${durableSourceSequence}`,
+      ownerAuthProvenance: 'unknown',
+      targetCats: ['opus'],
+      intent: 'execute',
+      ...overrides,
+    }),
+  );
+}
+
+function mockSourceMessage(deps, messageId, overrides = {}) {
+  const source = {
+    id: messageId,
     threadId: 't1',
     userId: 'user-a',
     content: 'hello',
-    source: 'user',
-    targetCats: ['opus'],
-    intent: 'execute',
+    from: { kind: 'user', userId: 'user-a' },
+    deliveryStatus: 'queued',
+    timestamp: 1,
     ...overrides,
+  };
+  deps.messageStore.getById.mock.mockImplementation(async (id) => (id === messageId ? source : null));
+  return source;
+}
+
+function asyncGate() {
+  let enter;
+  let release;
+  const entered = new Promise((resolve) => {
+    enter = resolve;
   });
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  return { entered, blocked, enter, release };
+}
+
+async function markHeadProcessing(queue, userId = 'user-a') {
+  const head = queue.peekNextQueued('t1', userId);
+  assert.ok(head);
+  const targetCatId = queueEntryTargetCats(head)[0] ?? 'opus';
+  const claimed = await queue.markProcessingDurable('t1', userId, {
+    entryId: head.id,
+    targetCats: [targetCatId],
+  });
+  assert.ok(claimed);
+  return queue.getEntrySnapshot('t1', userId, head.id);
 }
 
 describe('Queue Management API', () => {
@@ -71,6 +218,148 @@ describe('Queue Management API', () => {
 
   afterEach(async () => {
     if (app) await app.close();
+  });
+
+  it('HTTP queue reconciliation carries presentation from a real persisted plugin message', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const from = { kind: 'plugin', instanceId: 'pi_8e8bfc62-7545-4c31-a764-666d3284d138' };
+    const presentation = {
+      connector: 'custom-plugin',
+      label: 'Room Connector',
+      icon: '/plugin.svg',
+      themeColor: '#07c160',
+    };
+    await deps.invocationQueue.send(
+      store,
+      {
+        from,
+        userId: 'user-a',
+        threadId: 't1',
+        content: 'Plugin input',
+        mentions: ['opus'],
+        timestamp: 1,
+        deliveryStatus: 'queued',
+        extra: {
+          pluginMessage: {
+            instanceId: from.instanceId,
+            revision: 1,
+            provenance: { origin: from, epistemicStatus: 'observation' },
+            elements: [],
+            presentation,
+          },
+        },
+      },
+      {
+        from,
+        userId: 'user-a',
+        threadId: 't1',
+        content: 'Plugin input',
+        targetCats: ['opus'],
+        kind: 'conversation_input',
+        intent: 'execute',
+        ownerAuthProvenance: 'unknown',
+        priority: 'normal',
+      },
+    );
+    deps.messageStore.getById.mock.mockImplementation(async (id) => store.getById(id));
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    const [entry] = res.json().queue;
+    assert.deepEqual(entry.from, from);
+    assert.deepEqual(entry.messagePreview.source, presentation);
+    assert.equal(entry.messagePreview.connector, presentation.connector);
+    assert.equal(store.getById(entry.messageId).source, undefined);
+  });
+
+  async function routingRecoveryFixture() {
+    const result = enqueueEntry(deps.invocationQueue, {
+      from: { kind: 'agent', catId: 'codex' },
+      source: 'agent',
+      kind: 'message_wake',
+      sourceId: 'routing-source',
+      messageId: 'routing-source',
+      targetCats: ['opus'],
+    });
+    const source = {
+      id: 'routing-source',
+      threadId: 't1',
+      userId: 'user-a',
+      from: { kind: 'agent', catId: 'codex' },
+      content: 'Original request',
+      deliveryStatus: 'queued',
+    };
+    const records = new Map([[source.id, source]]);
+    deps.messageStore.getById.mock.mockImplementation(async (id) => records.get(id) ?? null);
+    await deps.invocationQueue.markProcessingByIdDurable('t1', result.entry.id, 'opus');
+    await deps.invocationQueue.holdClaimedRoutingTarget('t1', [result.entry.id], 'opus', deps.messageStore);
+    await deps.invocationQueue.restoreClaimedEntries('t1', [result.entry.id]);
+    deps.queueProcessor.retryRoutingTarget = mock.fn(async () => ({ started: true }));
+    return { result, source, records, url: '/api/threads/t1/messages/routing-source/routing-targets/opus' };
+  }
+
+  it('reads pending F293 recovery and retries only its original target under the authenticated owner', async () => {
+    const { url, result } = await routingRecoveryFixture();
+    const headers = { 'x-cat-cafe-user': 'user-a' };
+    const read = await app.inject({ method: 'GET', url, headers });
+    assert.equal(read.statusCode, 200, read.body);
+    assert.equal(read.json().status, 'failed');
+    const retry = await app.inject({ method: 'POST', url: `${url}/retry`, headers });
+    assert.equal(retry.statusCode, 202, retry.body);
+    assert.deepEqual(deps.queueProcessor.retryRoutingTarget.mock.calls[0].arguments, [
+      't1',
+      'user-a',
+      result.entry.id,
+      'opus',
+    ]);
+  });
+
+  it('does not turn stale or cross-owner routing history into retry authority', async () => {
+    const { url, source } = await routingRecoveryFixture();
+    assert.equal((await app.inject({ method: 'POST', url: `${url}/retry` })).statusCode, 401);
+    assert.equal(
+      (await app.inject({ method: 'POST', url: `${url}/retry`, headers: { 'x-cat-cafe-user': 'user-b' } })).statusCode,
+      404,
+    );
+    source.recall = { exposure: 'none' };
+    assert.equal(
+      (await app.inject({ method: 'POST', url: `${url}/retry`, headers: { 'x-cat-cafe-user': 'user-a' } })).statusCode,
+      404,
+    );
+    assert.equal(deps.queueProcessor.retryRoutingTarget.mock.calls.length, 0);
+  });
+
+  it('never reopens a consumed Queue target from an old routing receipt', async () => {
+    const { url, result } = await routingRecoveryFixture();
+    assert.ok(await deps.invocationQueue.claimQueuedEntryForWithdrawal('t1', 'user-a', result.entry.id));
+    assert.ok(await deps.invocationQueue.commitClaimedWithdrawal('t1', result.entry.id));
+    const response = await app.inject({
+      method: 'POST',
+      url: `${url}/retry`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(response.statusCode, 409, response.body);
+    assert.equal(deps.queueProcessor.retryRoutingTarget.mock.calls.length, 0);
+  });
+
+  it('does not accept browser fallback identity, disabled members or an already-dispatched target', async () => {
+    const { url, source } = await routingRecoveryFixture();
+    const post = (headers = { 'x-cat-cafe-user': 'user-a' }) =>
+      app.inject({ method: 'POST', url: `${url}/retry`, headers });
+    assert.equal((await post({ origin: 'http://127.0.0.1:3011', 'x-cat-cafe-user': 'user-a' })).statusCode, 401);
+    deps.isCatAvailable.mock.mockImplementation(() => false);
+    assert.equal((await post()).statusCode, 409);
+    deps.isCatAvailable.mock.mockImplementation(() => true);
+    source.lifecycle = {
+      kind: 'input',
+      dispatchRefs: [{ targetId: 'opus', phase: 'dispatched', statusMessageId: 'response' }],
+    };
+    assert.equal((await post()).statusCode, 409);
+    assert.equal(deps.queueProcessor.retryRoutingTarget.mock.calls.length, 0);
   });
 
   // ── Auth ──
@@ -144,6 +433,697 @@ describe('Queue Management API', () => {
     assert.equal(bodyB.queue[0].content, 'b msg');
   });
 
+  it('GET /queue projects one pending source row and never manufactures delivery state', async () => {
+    enqueueEntry(deps.invocationQueue, {
+      content: 'two targets',
+      targetCats: ['opus', 'codex'],
+      messageId: 'msg-1',
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(body.queue.length, 1);
+    assert.deepEqual(body.queue[0].targetCats, ['opus', 'codex']);
+    assert.equal('targetStates' in body.queue[0], false);
+    assert.equal('recoveryActions' in body.queue[0], false);
+  });
+
+  it('GET /queue projects the exact provider carrier for each active target', async () => {
+    deps.invocationTracker.getActiveSlots.mock.mockImplementation(() => [{ catId: 'opus', startedAt: 100 }]);
+    deps.invocationTracker.getUserId.mock.mockImplementation(() => 'user-a');
+    deps.invocationTracker.getExecutionId.mock.mockImplementation(() => 'inv-active');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    const body = JSON.parse(res.body);
+
+    assert.deepEqual(body.activeInvocations[0].freshnessCarrierCapability, {
+      provider: 'openai_codex',
+      carrier: 'codex_app_server',
+      activeInvocationGuidance: 'supported',
+      deliverySemantics: 'exact_active_turn',
+    });
+  });
+
+  it('GET /queue projects Append only from the exact supporting Active Run dispatcher', async () => {
+    const queued = enqueueEntry(deps.invocationQueue, { ownerAuthProvenance: 'strict', messageId: 'message-1' });
+    const activeRun = {
+      threadId: 't1',
+      targetId: 'opus',
+      invocationId: 'turn-1',
+      responseMessageId: 'response-1',
+      inputEntryIds: ['entry-old'],
+      inputMessageIds: ['message-old'],
+      privateInputEntryIds: [],
+      startedAt: 100,
+    };
+    deps.invocationTracker.getActiveSlots.mock.mockImplementation(() => [{ catId: 'opus', startedAt: 100, activeRun }]);
+    deps.invocationTracker.getUserId.mock.mockImplementation(() => 'user-a');
+    deps.invocationTracker.getAgentClientActiveRunDispatcher = mock.fn(() => ({
+      invocationId: 'turn-1',
+      capabilities: { append: true, steer: true },
+      handle: { provider: 'openai_codex', carrier: 'codex_app_server', threadId: 'native-1', turnId: 'turn-1' },
+      dispatch: async () => ({ accepted: true, handle: {} }),
+    }));
+
+    const available = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    const body = JSON.parse(available.body);
+    assert.equal(body.queueRevision, deps.invocationQueue.snapshotRevision('t1', 'user-a'));
+    assert.deepEqual(body.queue[0].lifecycleActions.append, {
+      kind: 'append',
+      expectedQueueRevision: body.queueRevision,
+      expectedRuns: [{ targetId: 'opus', invocationId: 'turn-1', responseMessageId: 'response-1' }],
+    });
+
+    deps.messageStore.getById.mock.mockImplementation(async (id) => ({
+      id,
+      userId: 'user-a',
+      threadId: 't1',
+      from: { kind: 'agent', catId: 'codex' },
+      content: 'Task work',
+      timestamp: Date.now(),
+      mentions: ['opus'],
+      extra: { taskHandoffInvalid: true },
+    }));
+    const taskSource = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(taskSource.statusCode, 200, taskSource.body);
+    assert.equal(
+      JSON.parse(taskSource.body).queue[0].lifecycleActions,
+      undefined,
+      'Task work must enter through Task execution binding',
+    );
+    deps.messageStore.getById.mock.mockImplementation(async () => null);
+    deps.invocationTracker.getAgentClientActiveRunDispatcher.mock.mockImplementation(() => undefined);
+    const unsupported = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(JSON.parse(unsupported.body).queue[0].lifecycleActions, undefined);
+    assert.equal(deps.invocationQueue.list('t1', 'user-a')[0].id, queued.entry.id);
+  });
+
+  it('POST /queue/:entryId/append forwards only the echoed server fences', async () => {
+    const queued = enqueueEntry(deps.invocationQueue, { ownerAuthProvenance: 'strict', messageId: 'message-1' });
+    const payload = {
+      expectedQueueRevision: deps.invocationQueue.snapshotRevision('t1', 'user-a'),
+      expectedRuns: [{ targetId: 'opus', invocationId: 'turn-1', responseMessageId: 'response-1' }],
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/append`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload,
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(deps.queueProcessor.appendExactEntry.mock.calls[0].arguments[0], {
+      threadId: 't1',
+      userId: 'user-a',
+      entryId: queued.entry.id,
+      ...payload,
+    });
+  });
+
+  it('POST /queue/:entryId/continue appends to the exact active run without canceling it', async () => {
+    const queued = await enqueueDurableEntry(deps.invocationQueue, { targetCats: [] });
+    deps.invocationTracker.has.mock.mockImplementation((_threadId, catId) => catId === 'opus');
+    deps.invocationTracker.getUserId.mock.mockImplementation(() => 'user-a');
+    deps.invocationTracker.getExecutionId.mock.mockImplementation(() => 'turn-1');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/continue`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: { targetCatId: 'opus' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().outcome, 'appended');
+    assert.deepEqual(deps.queueProcessor.tryAutoAppendExactEntry.mock.calls[0].arguments[0], {
+      threadId: 't1',
+      userId: 'user-a',
+      entryId: queued.entry.id,
+      targetCatId: 'opus',
+    });
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0);
+    const bound = deps.invocationQueue.getEntrySnapshot('t1', 'user-a', queued.entry.id);
+    assert.deepEqual(bound?.targets, ['opus']);
+    assert.equal(bound?.delivery.authorIntentByTarget?.opus?.requested, 'continue_current');
+    assert.equal(bound?.delivery.authorIntentByTarget?.opus?.boundParentInvocationId, 'turn-1');
+  });
+
+  for (const from of [
+    { kind: 'agent', catId: 'codex' },
+    { kind: 'system', service: 'github-wait' },
+    { kind: 'external', connectorId: 'github-wait', sender: { id: 'github-wait' } },
+    { kind: 'plugin', instanceId: 'notification-plugin' },
+  ]) {
+    it(`guides an exact active target for ${from.kind} input without changing source identity`, async () => {
+      const queued = await enqueueDurableEntry(deps.invocationQueue, { from });
+      deps.invocationTracker.has.mock.mockImplementation((_threadId, catId) => catId === 'opus');
+      deps.invocationTracker.getUserId.mock.mockImplementation(() => 'user-a');
+      deps.invocationTracker.getExecutionId.mock.mockImplementation(() => 'turn-1');
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/threads/t1/queue/${queued.entry.id}/continue`,
+        headers: { 'x-cat-cafe-user': 'user-a' },
+        payload: { targetCatId: 'opus' },
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.json().outcome, 'appended');
+      assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0);
+      const bound = deps.invocationQueue.getEntrySnapshot('t1', 'user-a', queued.entry.id);
+      assert.deepEqual(bound.from, from);
+      assert.equal(bound.delivery.authorIntentByTarget.opus.boundParentInvocationId, 'turn-1');
+      assert.equal(deps.queueProcessor.tryAutoAppendExactEntry.mock.calls[0].arguments[0].entryId, queued.entry.id);
+    });
+  }
+
+  it('keeps a Steer intent pending while its exact active parent is preparing', async () => {
+    const queued = await enqueueDurableEntry(deps.invocationQueue, { targetCats: ['opus'] });
+    deps.invocationTracker.has.mock.mockImplementation(() => true);
+    deps.invocationTracker.getUserId.mock.mockImplementation(() => 'user-a');
+    deps.invocationTracker.getExecutionId.mock.mockImplementation(() => 'turn-1');
+    deps.queueProcessor.tryAutoAppendExactEntry.mock.mockImplementation(async () => ({
+      outcome: 'rejected',
+      reason: 'active_run_pending',
+    }));
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/continue`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: { targetCatId: 'opus' },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().effective, 'continue_current');
+    const waiting = deps.invocationQueue.getEntrySnapshot('t1', 'user-a', queued.entry.id);
+    assert.equal(waiting.delivery.authorIntentByTarget.opus.fallbackAt, undefined);
+    assert.equal(waiting.delivery.authorIntentByTarget.opus.boundParentInvocationId, 'turn-1');
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0);
+  });
+
+  it('POST /queue/:entryId/continue falls back to a new invocation when no reply is active', async () => {
+    const queued = await enqueueDurableEntry(deps.invocationQueue, { targetCats: [] });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/continue`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: { targetCatId: 'opus' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json(), {
+      outcome: 'queued',
+      targetCatId: 'opus',
+      effective: 'next_work',
+      reason: 'no_active_parent',
+    });
+    assert.equal(deps.queueProcessor.tryAutoAppendExactEntry.mock.calls.length, 0);
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0);
+    assert.equal(deps.queueProcessor.requestDrain.mock.calls.length, 1);
+    const bound = deps.invocationQueue.getEntrySnapshot('t1', 'user-a', queued.entry.id);
+    assert.deepEqual(bound?.targets, ['opus']);
+    assert.equal(bound?.delivery.authorIntentByTarget?.opus?.requested, 'continue_current');
+    assert.equal(bound?.delivery.authorIntentByTarget?.opus?.fallbackReason, 'no_active_parent');
+  });
+
+  it('POST /queue/:entryId/continue keeps unsupported active carriers as next work without canceling', async () => {
+    const queued = await enqueueDurableEntry(deps.invocationQueue, { targetCats: [] });
+    deps.invocationTracker.has.mock.mockImplementation((_threadId, catId) => catId === 'codex');
+    deps.invocationTracker.getUserId.mock.mockImplementation(() => 'user-a');
+    deps.invocationTracker.getExecutionId.mock.mockImplementation(() => 'turn-kimi');
+    deps.resolveCarrierCapability.mock.mockImplementation(() => ({
+      provider: 'other',
+      carrier: 'other',
+      activeInvocationGuidance: 'unsupported',
+      deliverySemantics: 'unsupported',
+    }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/continue`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: { targetCatId: 'codex' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json(), {
+      outcome: 'queued',
+      targetCatId: 'codex',
+      effective: 'next_work',
+      reason: 'unsupported_carrier',
+    });
+    assert.equal(deps.queueProcessor.tryAutoAppendExactEntry.mock.calls.length, 0);
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0);
+    assert.equal(deps.queueProcessor.requestDrain.mock.calls.length, 1);
+    const bound = deps.invocationQueue.getEntrySnapshot('t1', 'user-a', queued.entry.id);
+    assert.deepEqual(bound?.targets, ['codex']);
+    assert.equal(bound?.delivery.authorIntentByTarget?.codex?.requested, 'continue_current');
+    assert.equal(bound?.delivery.authorIntentByTarget?.codex?.fallbackReason, 'unsupported_carrier');
+  });
+
+  it('one target request executes guide without a browser follow-up or a second intent bind', async () => {
+    const messageId = 'one-guide-request';
+    const queued = await enqueueDurableEntry(deps.invocationQueue, { sourceId: messageId, messageId });
+    mockSourceMessage(deps, messageId);
+    deps.invocationTracker.has = mock.fn(() => true);
+    deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
+    deps.invocationTracker.getExecutionId = mock.fn(() => 'parent-1');
+    deps.invocationQueue.bindContinueCurrentIntentDurable = mock.fn(() => {
+      throw Error('must reuse mapped intent');
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/targets`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: {
+        sourceRecordId: messageId,
+        observedPendingTargetIds: ['opus'],
+        targets: [{ targetCatId: 'opus', strategy: 'guide_reply', membershipAtOpen: 'member' }],
+      },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(deps.queueProcessor.tryAutoAppendExactEntry.mock.calls.length, 1);
+    assert.equal(res.json().targets[0].result.outcome, 'appended');
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0);
+  });
+
+  it('one target request restores a failed interrupt claim and still guides the other target', async () => {
+    const messageId = 'partial-steer-request';
+    const queued = await enqueueDurableEntry(deps.invocationQueue, {
+      sourceId: messageId,
+      messageId,
+      targetCats: ['opus', 'codex'],
+    });
+    mockSourceMessage(deps, messageId);
+    deps.invocationTracker.has = mock.fn(() => true);
+    deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
+    deps.invocationTracker.getExecutionId = mock.fn(() => 'parent-1');
+    deps.invocationTracker.cancel = mock.fn(() => {
+      assert.equal(deps.invocationQueue.getEntrySnapshot('t1', 'user-a', queued.entry.id).status, 'claimed');
+      return { cancelled: false, catIds: [] };
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/targets`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: {
+        sourceRecordId: messageId,
+        observedPendingTargetIds: ['opus', 'codex'],
+        targets: [
+          { targetCatId: 'opus', strategy: 'interrupt_reply', membershipAtOpen: 'member' },
+          { targetCatId: 'codex', strategy: 'guide_reply', membershipAtOpen: 'member' },
+        ],
+      },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    const [interrupt, guide] = res.json().targets;
+    assert.equal(interrupt.status, 409);
+    assert.equal(interrupt.result.code, 'INVOCATION_CANCEL_FAILED');
+    assert.equal(guide.result.outcome, 'appended');
+    assert.equal(deps.invocationQueue.getEntrySnapshot('t1', 'user-a', queued.entry.id).status, 'queued');
+    assert.equal(deps.queueProcessor.processClaimedSteerEntries.mock.calls.length, 0);
+  });
+
+  it('POST /queue/:entryId/targets atomically merges targets into one source row', async () => {
+    const messageId = 'message-steer-targets';
+    const queued = await enqueueDurableEntry(deps.invocationQueue, {
+      sourceId: messageId,
+      messageId,
+      targetCats: ['opus'],
+    });
+    assert.equal(await deps.invocationQueue.setPositionDurable('t1', 'user-a', queued.entry.id, 3), true);
+    mockSourceMessage(deps, messageId);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/targets`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: {
+        sourceRecordId: messageId,
+        observedPendingTargetIds: ['opus'],
+        targets: [
+          { targetCatId: 'opus', strategy: 'guide_reply', membershipAtOpen: 'member' },
+          { targetCatId: 'codex', strategy: 'interrupt_reply', membershipAtOpen: 'member' },
+        ],
+      },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(
+      res.json().targets.map((target) => ({ targetCatId: target.targetCatId, strategy: target.strategy })),
+      [
+        { targetCatId: 'opus', strategy: 'guide_reply' },
+        { targetCatId: 'codex', strategy: 'interrupt_reply' },
+      ],
+    );
+    const rows = deps.invocationQueue.list('t1', 'user-a');
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0].targets, ['opus', 'codex']);
+    assert.equal(rows[0].position, 3, 'target edits preserve source FIFO position');
+    assert.equal(deps.queueProcessor.requestDrain.mock.calls.length, 1);
+    assert.deepEqual(deps.queueProcessor.registerCallerDispatchSteerChanges.mock.calls[0].arguments[1], {
+      addedTargetIds: ['codex'],
+      removedTargetIds: [],
+    });
+  });
+
+  it('POST /queue/:entryId/targets atomically binds a targetless source row', async () => {
+    const messageId = 'message-steer-targetless-fanout';
+    const queued = await enqueueDurableEntry(deps.invocationQueue, {
+      sourceId: messageId,
+      messageId,
+      targetCats: [],
+    });
+    const source = mockSourceMessage(deps, messageId);
+    deps.queueProcessor.processClaimedSteerEntries.mock.mockImplementation(async (threadId, userId, ids, targetId) => {
+      const entry = deps.invocationQueue.getEntrySnapshot(threadId, userId, ids[0]);
+      assert.ok(await deps.invocationQueue.commitClaimedAdoptionDurable(threadId, userId, ids[0], targetId));
+      source.lifecycle = {
+        kind: 'source',
+        sourceId: messageId,
+        dispatchRefs: [{ targetId, phase: 'dispatched', statusMessageId: 'response-codex', dispatchedAt: Date.now() }],
+      };
+      return { started: true, entry };
+    });
+
+    const payload = {
+      sourceRecordId: messageId,
+      observedPendingTargetIds: [],
+      targets: [
+        { targetCatId: 'opus', strategy: 'guide_reply', membershipAtOpen: 'member' },
+        { targetCatId: 'codex', strategy: 'interrupt_reply', membershipAtOpen: 'member' },
+      ],
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/targets`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload,
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(
+      res.json().targets.map((target) => ({
+        entryId: target.entryId,
+        targetCatId: target.targetCatId,
+        strategy: target.strategy,
+      })),
+      [
+        { entryId: queued.entry.id, targetCatId: 'opus', strategy: 'guide_reply' },
+        { entryId: queued.entry.id, targetCatId: 'codex', strategy: 'interrupt_reply' },
+      ],
+    );
+    const rows = deps.invocationQueue.list('t1', 'user-a');
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0].targets, ['opus']);
+
+    const replay = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/targets`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload,
+    });
+    assert.equal(replay.statusCode, 200, replay.body);
+    assert.deepEqual(replay.json().skippedAlreadyDispatched, ['codex']);
+    assert.equal(deps.queueProcessor.processClaimedSteerEntries.mock.callCount(), 1);
+    assert.equal(deps.invocationQueue.list('t1', 'user-a').length, 1);
+  });
+
+  it('POST /queue/:entryId/targets admits a newly selected available member into the thread at confirmation', async () => {
+    const messageId = 'message-steer-new-participant';
+    const queued = await enqueueDurableEntry(deps.invocationQueue, {
+      sourceId: messageId,
+      messageId,
+      targetCats: [],
+    });
+    mockSourceMessage(deps, messageId);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/targets`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: {
+        sourceRecordId: messageId,
+        observedPendingTargetIds: [],
+        targets: [{ targetCatId: 'kimi', strategy: 'interrupt_reply', membershipAtOpen: 'admit' }],
+      },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(
+      res.json().targets.map(({ targetCatId, strategy, entryId }) => ({ targetCatId, strategy, entryId })),
+      [{ entryId: queued.entry.id, targetCatId: 'kimi', strategy: 'interrupt_reply' }],
+    );
+    assert.deepEqual(deps.threadStore.addParticipants.mock.calls[0].arguments, ['t1', ['kimi']]);
+    assert.deepEqual((await deps.threadStore.get('t1')).participants, ['opus', 'codex', 'kimi']);
+    const membershipEvent = deps.socketManager.emitToUser.mock.calls.find(
+      (call) => call.arguments[1] === 'thread_updated',
+    );
+    assert.deepEqual(membershipEvent?.arguments[2], {
+      threadId: 't1',
+      participants: ['opus', 'codex', 'kimi'],
+    });
+  });
+
+  it('POST /queue/:entryId/targets skips a target that became unavailable', async () => {
+    const messageId = 'message-steer-unavailable';
+    const queued = await enqueueDurableEntry(deps.invocationQueue, {
+      sourceId: messageId,
+      messageId,
+      targetCats: ['opus'],
+    });
+    mockSourceMessage(deps, messageId);
+    deps.isCatAvailable.mock.mockImplementation((catId) => catId !== 'codex');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/targets`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: {
+        sourceRecordId: messageId,
+        observedPendingTargetIds: ['opus'],
+        targets: [
+          { targetCatId: 'opus', strategy: 'guide_reply', membershipAtOpen: 'member' },
+          { targetCatId: 'codex', strategy: 'interrupt_reply', membershipAtOpen: 'member' },
+        ],
+      },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(
+      res.json().targets.map(({ targetCatId, strategy, entryId }) => ({ targetCatId, strategy, entryId })),
+      [{ targetCatId: 'opus', strategy: 'guide_reply', entryId: queued.entry.id }],
+    );
+    assert.deepEqual(deps.invocationQueue.list('t1', 'user-a')[0].targets, ['opus']);
+  });
+
+  it('POST /queue/:entryId/targets preserves an unsupported guide request as next-work intent', async () => {
+    const messageId = 'message-steer-unsupported';
+    const queued = await enqueueDurableEntry(deps.invocationQueue, {
+      sourceId: messageId,
+      messageId,
+      targetCats: ['opus'],
+    });
+    mockSourceMessage(deps, messageId);
+    deps.resolveCarrierCapability.mock.mockImplementation(() => ({
+      provider: 'anthropic',
+      carrier: 'claude_print_sdk',
+      activeInvocationGuidance: 'unsupported',
+      deliverySemantics: 'unsupported',
+    }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/targets`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: {
+        sourceRecordId: messageId,
+        observedPendingTargetIds: ['opus'],
+        targets: [{ targetCatId: 'opus', strategy: 'guide_reply', membershipAtOpen: 'member' }],
+      },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(
+      res.json().targets.map(({ targetCatId, strategy, entryId }) => ({ targetCatId, strategy, entryId })),
+      [{ targetCatId: 'opus', strategy: 'guide_reply', entryId: queued.entry.id }],
+    );
+  });
+
+  it('POST /queue/:entryId/targets treats a target delivered while the modal was open as an idempotent no-op', async () => {
+    const messageId = 'message-steer-terminal';
+    const queued = await enqueueDurableEntry(deps.invocationQueue, {
+      sourceId: messageId,
+      messageId,
+      targetCats: ['opus', 'codex'],
+    });
+    const source = mockSourceMessage(deps, messageId, {
+      lifecycle: {
+        kind: 'source',
+        sourceId: messageId,
+        dispatchRefs: [
+          {
+            targetId: 'opus',
+            phase: 'dispatched',
+            statusMessageId: 'response-opus',
+            dispatchedAt: 1234,
+          },
+        ],
+      },
+    });
+    const claimed = await deps.invocationQueue.claimExactSteerEntryDurable('t1', 'user-a', queued.entry.id, 'opus');
+    assert.equal(claimed.outcome, 'claimed');
+    assert.ok(await deps.invocationQueue.commitClaimedAdoptionDurable('t1', 'user-a', queued.entry.id, 'opus'));
+    assert.equal(source.lifecycle.dispatchRefs[0].targetId, 'opus');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/targets`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: {
+        sourceRecordId: messageId,
+        observedPendingTargetIds: ['opus', 'codex'],
+        targets: [
+          { targetCatId: 'opus', strategy: 'interrupt_reply', membershipAtOpen: 'member' },
+          { targetCatId: 'codex', strategy: 'interrupt_reply', membershipAtOpen: 'member' },
+        ],
+      },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(res.json().skippedAlreadyDispatched, ['opus']);
+    assert.deepEqual(
+      res.json().targets.map(({ targetCatId, strategy, entryId }) => ({ targetCatId, strategy, entryId })),
+      [{ targetCatId: 'codex', strategy: 'interrupt_reply', entryId: queued.entry.id }],
+    );
+    assert.deepEqual(deps.invocationQueue.list('t1', 'user-a')[0].targets, ['codex']);
+  });
+
+  it('GET /queue/:entryId/targets joins pending Queue targets with delivered History refs', async () => {
+    const messageId = 'message-steer-target-context';
+    const queued = await enqueueDurableEntry(deps.invocationQueue, {
+      sourceId: messageId,
+      messageId,
+      targetCats: ['opus', 'codex'],
+    });
+    mockSourceMessage(deps, messageId, {
+      lifecycle: {
+        kind: 'source',
+        sourceId: messageId,
+        dispatchRefs: [
+          {
+            targetId: 'opus',
+            phase: 'settled',
+            statusMessageId: 'response-opus',
+            dispatchedAt: 1234,
+          },
+        ],
+      },
+    });
+    const claimed = await deps.invocationQueue.claimExactSteerEntryDurable('t1', 'user-a', queued.entry.id, 'opus');
+    assert.equal(claimed.outcome, 'claimed');
+    assert.ok(await deps.invocationQueue.commitClaimedAdoptionDurable('t1', 'user-a', queued.entry.id, 'opus'));
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/threads/t1/queue/${queued.entry.id}/targets`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(res.json(), {
+      sourceRecordId: messageId,
+      targets: [
+        { targetCatId: 'codex', state: 'pending', actionable: true },
+        {
+          targetCatId: 'opus',
+          state: 'settled',
+          actionable: false,
+          dispatchedAt: 1234,
+          statusMessageId: 'response-opus',
+        },
+      ],
+    });
+  });
+
+  it('POST /queue/:entryId/targets skips a member removed after the modal snapshot', async () => {
+    const messageId = 'message-steer-removed-member';
+    const queued = await enqueueDurableEntry(deps.invocationQueue, {
+      sourceId: messageId,
+      messageId,
+      targetCats: ['opus'],
+    });
+    mockSourceMessage(deps, messageId);
+    deps.threadStore.get.mock.mockImplementation(async (id) => ({
+      id,
+      title: 'Test Thread',
+      createdBy: 'system',
+      participants: ['codex'],
+    }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/targets`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: {
+        sourceRecordId: messageId,
+        observedPendingTargetIds: ['opus'],
+        targets: [{ targetCatId: 'opus', strategy: 'interrupt_reply', membershipAtOpen: 'member' }],
+      },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(
+      res.json().targets.map(({ targetCatId, strategy, entryId }) => ({ targetCatId, strategy, entryId })),
+      [],
+    );
+    assert.equal(deps.invocationQueue.list('t1', 'user-a').length, 0);
+    assert.equal(deps.threadStore.addParticipants.mock.calls.length, 0);
+    assert.deepEqual(deps.queueProcessor.registerCallerDispatchSteerChanges.mock.calls[0].arguments[1], {
+      addedTargetIds: [],
+      removedTargetIds: ['opus'],
+    });
+  });
+
+  it('GET /queue projects one pending row with the complete target set', async () => {
+    const queued = enqueueEntry(deps.invocationQueue, {
+      content: 'three targets',
+      targetCats: ['opus', 'codex', 'gpt52'],
+      messageId: 'msg-1',
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(body.queue.length, 1);
+    assert.deepEqual(body.queue[0].targetCats, ['opus', 'codex', 'gpt52']);
+    assert.equal('targetStates' in body.queue[0], false);
+  });
+
   it('DELETE /queue/:entryId returns 404 for another user entry', async () => {
     const r = enqueueEntry(deps.invocationQueue, { userId: 'user-a' });
     // user-b tries to delete user-a's entry
@@ -172,36 +1152,28 @@ describe('Queue Management API', () => {
     assert.equal(deps.invocationQueue.list('t1', 'user-b').length, 1);
   });
 
-  it('POST /queue/next only processes requesting user queue', async () => {
-    enqueueEntry(deps.invocationQueue, { userId: 'user-a' });
-    enqueueEntry(deps.invocationQueue, { userId: 'user-b', targetCats: ['codex'] });
-
-    deps.queueProcessor.processNext.mock.mockImplementation(async (_threadId, userId) => {
-      // Simulate processing user's queue
-      return { started: true, entry: { userId } };
-    });
-
+  it('does not expose a thread-wide manual Continue endpoint', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/threads/t1/queue/next',
       headers: { 'x-cat-cafe-user': 'user-a' },
     });
-    const body = JSON.parse(res.body);
-    assert.equal(body.started, true);
-
-    // Verify processNext was called with user-a
-    const call = deps.queueProcessor.processNext.mock.calls[0];
-    assert.equal(call.arguments[0], 't1');
-    assert.equal(call.arguments[1], 'user-a');
+    assert.equal(res.statusCode, 404);
   });
 
-  // ── Functional: GET paused state (P1-2 fix) ──
+  it('does not expose a second manual reminder delivery endpoint', async () => {
+    const queued = enqueueEntry(deps.invocationQueue, { targetCats: ['opus'] });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/remind`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: { targetCatId: 'opus' },
+    });
+    assert.equal(res.statusCode, 404);
+  });
 
-  it('GET /queue returns paused=true when queueProcessor reports paused', async () => {
+  it('GET /queue does not project thread-wide pause state', async () => {
     enqueueEntry(deps.invocationQueue);
-    // Stub isPaused to return true
-    deps.queueProcessor.isPaused = mock.fn(() => true);
-    deps.queueProcessor.getPauseReason = mock.fn(() => 'canceled');
 
     const res = await app.inject({
       method: 'GET',
@@ -209,36 +1181,8 @@ describe('Queue Management API', () => {
       headers: { 'x-cat-cafe-user': 'user-a' },
     });
     const body = JSON.parse(res.body);
-    assert.equal(body.paused, true);
-  });
-
-  it('GET /queue returns paused=false when queueProcessor reports not paused', async () => {
-    enqueueEntry(deps.invocationQueue);
-    deps.queueProcessor.isPaused = mock.fn(() => false);
-    deps.queueProcessor.getPauseReason = mock.fn(() => undefined);
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/threads/t1/queue',
-      headers: { 'x-cat-cafe-user': 'user-a' },
-    });
-    const body = JSON.parse(res.body);
-    assert.equal(body.paused, false);
-  });
-
-  it('GET /queue returns pauseReason when paused', async () => {
-    enqueueEntry(deps.invocationQueue);
-    deps.queueProcessor.isPaused = mock.fn(() => true);
-    deps.queueProcessor.getPauseReason = mock.fn(() => 'failed');
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/threads/t1/queue',
-      headers: { 'x-cat-cafe-user': 'user-a' },
-    });
-    const body = JSON.parse(res.body);
-    assert.equal(body.paused, true);
-    assert.equal(body.pauseReason, 'failed');
+    assert.equal(Object.hasOwn(body, 'paused'), false);
+    assert.equal(Object.hasOwn(body, 'pauseReason'), false);
   });
 
   // ── Functional: GET ──
@@ -259,8 +1203,168 @@ describe('Queue Management API', () => {
 
   // ── Functional: DELETE entry ──
 
-  it('DELETE /queue/:entryId removes entry and emits queue_updated', async () => {
-    const r = enqueueEntry(deps.invocationQueue);
+  for (const shape of ['multiple_targets', 'wrong_source']) {
+    it(`scoped DELETE preserves ${shape} instead of withdrawing other work`, async () => {
+      const r = enqueueEntry(deps.invocationQueue, {
+        ownerAuthProvenance: 'strict',
+        messageId: 'request-source',
+        ...(shape === 'multiple_targets' ? { targetCats: ['opus', 'codex'] } : {}),
+      });
+      const source = shape === 'wrong_source' ? 'unrelated-source' : 'request-source';
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/api/threads/t1/queue/${r.entry.id}?expectedSourceMessageId=${source}&expectedTargetCatId=opus`,
+        headers: { 'x-cat-cafe-user': 'user-a' },
+      });
+      assert.equal(response.statusCode, 409, response.body);
+      assert.equal(response.json().code, 'ENTRY_SCOPE_CHANGED');
+      assert.equal(deps.invocationQueue.list('t1', 'user-a').length, 1);
+      assert.equal(deps.messageStore.markCanceled.mock.callCount(), 0);
+      assert.equal(deps.queueProcessor.finalizeRemovedEntry.mock.callCount(), 0);
+    });
+  }
+
+  it('scoped DELETE withdraws only the exact single source and cat, retaining source history', async () => {
+    const r = enqueueEntry(deps.invocationQueue, { ownerAuthProvenance: 'strict', messageId: 'request-source' });
+    mockSourceMessage(deps, 'request-source');
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/api/threads/t1/queue/${r.entry.id}?expectedSourceMessageId=request-source&expectedTargetCatId=opus`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(response.json().removed.id, r.entry.id);
+    assert.deepEqual(deps.messageStore.markCanceled.mock.calls[0].arguments, ['request-source']);
+    assert.equal(deps.queueProcessor.registerCallerDispatchQueueWithdrawal.mock.callCount(), 1);
+  });
+
+  it('incomplete scoped DELETE fails before removing any entry', async () => {
+    const r = enqueueEntry(deps.invocationQueue, { ownerAuthProvenance: 'strict', messageId: 'request-source' });
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/api/threads/t1/queue/${r.entry.id}?expectedSourceMessageId=request-source`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(response.statusCode, 400, response.body);
+    assert.equal(deps.invocationQueue.list('t1', 'user-a').length, 1);
+  });
+
+  it('canonical adjacent sources stay separate and an exact withdrawal cannot absorb the neighbor', async () => {
+    const a = enqueueEntry(deps.invocationQueue, { messageId: 'request-source' });
+    const b = enqueueEntry(deps.invocationQueue, { messageId: 'neighbor-source' });
+    assert.notEqual(a.entry.id, b.entry.id);
+    mockSourceMessage(deps, 'request-source');
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/api/threads/t1/queue/${a.entry.id}?expectedSourceMessageId=request-source&expectedTargetCatId=opus`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(
+      deps.invocationQueue.list('t1', 'user-a').map((row) => row.payload.messageId),
+      ['neighbor-source'],
+    );
+    assert.deepEqual(
+      deps.messageStore.markCanceled.mock.calls.map((call) => call.arguments),
+      [['request-source']],
+    );
+  });
+
+  it('native Queue receipt authorizes the exact source and observes only committed withdrawal', async () => {
+    await app.close();
+    let authorized = false;
+    const port = { authorize: mock.fn(() => authorized), observe: mock.fn() };
+    deps.controlReceipts = () => port;
+    const { queueRoutes } = await import('../dist/routes/queue.js');
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    const r = enqueueEntry(deps.invocationQueue, { messageId: 'request-source' });
+    mockSourceMessage(deps, 'request-source');
+    const withdraw = () =>
+      app.inject({
+        method: 'DELETE',
+        url: `/api/threads/t1/queue/${r.entry.id}?expectedSourceMessageId=request-source&expectedTargetCatId=opus&controlReceiptRef=owned-receipt`,
+        headers: { 'x-cat-cafe-user': 'user-a' },
+      });
+    assert.equal((await withdraw()).statusCode, 409);
+    assert.equal(deps.messageStore.markCanceled.mock.callCount(), 0);
+    authorized = true;
+    const response = await withdraw();
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(port.authorize.mock.calls.at(-1).arguments, [
+      'owned-receipt',
+      'user-a',
+      {
+        kind: 'queue',
+        threadId: 't1',
+        entryId: r.entry.id,
+        messageId: 'request-source',
+        catId: 'opus',
+      },
+    ]);
+    assert.deepEqual(port.observe.mock.calls.at(-1).arguments, ['owned-receipt', 'user-a', 200, true, undefined]);
+  });
+
+  it('scoped DELETE refuses a source with an already-dispatched sibling, restoring the pending claim', async () => {
+    const r = enqueueEntry(deps.invocationQueue, { messageId: 'request-source' });
+    mockSourceMessage(deps, 'request-source', {
+      lifecycle: { kind: 'user', dispatchRefs: [{ targetId: 'codex', phase: 'dispatched' }] },
+    });
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/api/threads/t1/queue/${r.entry.id}?expectedSourceMessageId=request-source&expectedTargetCatId=opus`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(response.statusCode, 409, response.body);
+    assert.equal(response.json().code, 'ENTRY_SCOPE_CHANGED');
+    assert.equal(deps.invocationQueue.list('t1', 'user-a')[0].status, 'queued');
+    assert.equal(deps.messageStore.markCanceled.mock.callCount(), 0);
+  });
+
+  it('scoped DELETE fails closed on missing source History without leaving a held claim', async () => {
+    const r = enqueueEntry(deps.invocationQueue, { messageId: 'request-source' });
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/api/threads/t1/queue/${r.entry.id}?expectedSourceMessageId=request-source&expectedTargetCatId=opus`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(response.statusCode, 503, response.body);
+    assert.equal(deps.invocationQueue.list('t1', 'user-a')[0].status, 'queued');
+    assert.equal(deps.messageStore.markCanceled.mock.callCount(), 0);
+  });
+
+  it('scoped DELETE rechecks targets returned by the atomic claim before any source cancellation', async () => {
+    const r = enqueueEntry(deps.invocationQueue, { messageId: 'request-source' });
+    mockSourceMessage(deps, 'request-source');
+    const claim = deps.invocationQueue.claimQueuedEntryForWithdrawal.bind(deps.invocationQueue);
+    deps.invocationQueue.claimQueuedEntryForWithdrawal = async (...args) => {
+      const changed = await deps.invocationQueue.reconcileQueuedMessageTargetsDurable(
+        't1',
+        'user-a',
+        r.entry.id,
+        ['codex'],
+        [],
+        {},
+      );
+      assert.equal(changed.outcome, 'updated');
+      return claim(...args);
+    };
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/api/threads/t1/queue/${r.entry.id}?expectedSourceMessageId=request-source&expectedTargetCatId=opus`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(response.statusCode, 409, response.body);
+    assert.deepEqual(deps.invocationQueue.list('t1', 'user-a')[0].targets, ['opus', 'codex']);
+    assert.equal(deps.invocationQueue.list('t1', 'user-a')[0].status, 'queued');
+    assert.equal(deps.messageStore.markCanceled.mock.callCount(), 0);
+  });
+
+  it('DELETE /queue/:entryId withdraws the pending row and cancels its hidden source', async () => {
+    const r = enqueueEntry(deps.invocationQueue, {
+      ownerAuthProvenance: 'strict',
+      messageId: 'msg-withdrawn',
+    });
 
     const res = await app.inject({
       method: 'DELETE',
@@ -268,6 +1372,7 @@ describe('Queue Management API', () => {
       headers: { 'x-cat-cafe-user': 'user-a' },
     });
     assert.equal(res.statusCode, 200);
+    assert.equal(Object.hasOwn(JSON.parse(res.body).removed, 'ownerAuthProvenance'), false);
     assert.equal(deps.invocationQueue.list('t1', 'user-a').length, 0);
 
     // Should emit queue_updated
@@ -275,14 +1380,45 @@ describe('Queue Management API', () => {
     const updateCall = emitCalls.find((c) => c.arguments[1] === 'queue_updated');
     assert.ok(updateCall);
     assert.equal(updateCall.arguments[2].action, 'removed');
+    assert.deepEqual(updateCall.arguments[2].queue, []);
+    assert.equal('messageReceipts' in updateCall.arguments[2], false);
+    assert.deepEqual(deps.messageStore.markCanceled.mock.calls[0].arguments, ['msg-withdrawn']);
+    assert.equal(deps.queueProcessor.registerCallerDispatchQueueWithdrawal.mock.calls.length, 1);
+    assert.equal(deps.queueProcessor.registerCallerDispatchQueueWithdrawal.mock.calls[0].arguments[0].id, r.entry.id);
+    const deleted = deps.socketManager.emitToUser.mock.calls.find((call) => call.arguments[1] === 'message_deleted');
+    assert.equal(deleted, undefined);
   });
 
-  it('DELETE /queue/:entryId rejects processing entry (409)', async () => {
+  it('DELETE /queue/:entryId restores the actionable entry when durable withdrawal fails', async () => {
+    const r = enqueueEntry(deps.invocationQueue, { ownerAuthProvenance: 'strict', messageId: 'msg-fail' });
+    deps.messageStore.markCanceled.mock.mockImplementation(async () => {
+      throw new Error('message store unavailable');
+    });
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/threads/t1/queue/${r.entry.id}`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+
+    assert.equal(res.statusCode, 503);
+    assert.equal(JSON.parse(res.body).code, 'QUEUE_WITHDRAWAL_FAILED');
+    const terminalReceiptPublication = deps.socketManager.emitToUser.mock.calls.find(
+      (call) => call.arguments[1] === 'queue_updated' && call.arguments[2].messageReceipts?.length > 0,
+    );
+    assert.equal(terminalReceiptPublication, undefined);
+    assert.deepEqual(
+      deps.invocationQueue.list('t1', 'user-a').map((entry) => entry.id),
+      [r.entry.id],
+    );
+  });
+
+  it('DELETE /queue/:entryId rejects a live reversible claim (409)', async () => {
     enqueueEntry(deps.invocationQueue);
-    deps.invocationQueue.markProcessing('t1', 'user-a');
+    await markHeadProcessing(deps.invocationQueue);
 
     const entries = deps.invocationQueue.list('t1', 'user-a');
-    const processingEntry = entries.find((e) => e.status === 'processing');
+    const processingEntry = entries.find((e) => e.status === 'claimed');
 
     const res = await app.inject({
       method: 'DELETE',
@@ -292,35 +1428,15 @@ describe('Queue Management API', () => {
     assert.equal(res.statusCode, 409);
   });
 
-  // ── Functional: POST next ──
-
-  it('POST /queue/next triggers next entry processing', async () => {
-    deps.queueProcessor.processNext.mock.mockImplementation(async () => ({ started: true, entry: { id: 'e1' } }));
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/threads/t1/queue/next',
-      headers: { 'x-cat-cafe-user': 'user-a' },
-    });
-    const body = JSON.parse(res.body);
-    assert.equal(body.started, true);
-  });
-
-  it('POST /queue/next returns started=false when empty', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/threads/t1/queue/next',
-      headers: { 'x-cat-cafe-user': 'user-a' },
-    });
-    const body = JSON.parse(res.body);
-    assert.equal(body.started, false);
-  });
-
   // ── Functional: DELETE clear ──
 
   it('DELETE /queue clears all entries for user', async () => {
-    enqueueEntry(deps.invocationQueue, { targetCats: ['a'] });
-    enqueueEntry(deps.invocationQueue, { targetCats: ['b'] });
+    enqueueEntry(deps.invocationQueue, {
+      targetCats: ['a'],
+      ownerAuthProvenance: 'strict',
+      messageId: 'msg-clear-a',
+    });
+    enqueueEntry(deps.invocationQueue, { targetCats: ['b'], messageId: 'msg-clear-b' });
 
     const res = await app.inject({
       method: 'DELETE',
@@ -329,6 +1445,10 @@ describe('Queue Management API', () => {
     });
     const body = JSON.parse(res.body);
     assert.equal(body.cleared.length, 2);
+    assert.equal(
+      body.cleared.some((entry) => Object.hasOwn(entry, 'ownerAuthProvenance')),
+      false,
+    );
     assert.equal(deps.invocationQueue.list('t1', 'user-a').length, 0);
 
     // Should emit queue_updated with action='cleared'
@@ -336,6 +1456,77 @@ describe('Queue Management API', () => {
     const updateCall = emitCalls.find((c) => c.arguments[1] === 'queue_updated');
     assert.ok(updateCall);
     assert.equal(updateCall.arguments[2].action, 'cleared');
+    assert.equal('messageReceipts' in updateCall.arguments[2], false);
+    assert.deepEqual(
+      deps.messageStore.markCanceled.mock.calls.map((call) => call.arguments[0]),
+      ['msg-clear-a', 'msg-clear-b'],
+    );
+    assert.deepEqual(
+      deps.queueProcessor.registerCallerDispatchQueueWithdrawal.mock.calls.map(
+        (call) => call.arguments[0].payload.messageId,
+      ),
+      ['msg-clear-a', 'msg-clear-b'],
+    );
+    const deleted = deps.socketManager.emitToUser.mock.calls.find((call) => call.arguments[1] === 'message_deleted');
+    assert.equal(deleted, undefined);
+  });
+
+  it('DELETE /queue retires each exact managed-wake producer after durable carrier withdrawal', async () => {
+    const events = [];
+    deps.managedCommandWakeRecovery.retireCarrier.mock.mockImplementation(async (messageIds, reason) => {
+      events.push(`retire:${messageIds.join(',')}:${reason}`);
+      return 1;
+    });
+    const { entry } = enqueueEntry(deps.invocationQueue, {
+      targetCats: ['codex-sol'],
+      messageId: 'message-managed-wake',
+      source: 'agent',
+      sourceCategory: 'scheduled',
+    });
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(events, ['retire:message-managed-wake:withdrawn']);
+    assert.equal(deps.invocationQueue.list('t1', 'user-a').length, 0);
+  });
+
+  it('DELETE /queue reports partial durable withdrawal and keeps every unsettled entry actionable', async () => {
+    const first = enqueueEntry(deps.invocationQueue, {
+      targetCats: ['a'],
+      ownerAuthProvenance: 'strict',
+      messageId: 'msg-partial-a',
+    });
+    const second = enqueueEntry(deps.invocationQueue, { targetCats: ['b'], messageId: 'msg-partial-b' });
+    const third = enqueueEntry(deps.invocationQueue, { targetCats: ['c'], messageId: 'msg-partial-c' });
+    let calls = 0;
+    deps.messageStore.markCanceled.mock.mockImplementation(async () => {
+      calls += 1;
+      if (calls === 2) throw new Error('message store unavailable');
+      return { deliveryStatus: 'canceled', deliveryTransitioned: true };
+    });
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 503);
+    assert.equal(body.code, 'QUEUE_WITHDRAWAL_PARTIAL');
+    assert.deepEqual(
+      body.cleared.map((entry) => entry.id),
+      [first.entry.id],
+    );
+    assert.deepEqual(
+      deps.invocationQueue.list('t1', 'user-a').map((entry) => entry.id),
+      [second.entry.id, third.entry.id],
+    );
   });
 
   // ── Functional: PATCH move ──
@@ -353,8 +1544,8 @@ describe('Queue Management API', () => {
     assert.equal(res.statusCode, 200);
 
     const queue = deps.invocationQueue.list('t1', 'user-a');
-    assert.equal(queue[0].content, 'second');
-    assert.equal(queue[1].content, 'first');
+    assert.equal(queue[0].payload.content, 'second');
+    assert.equal(queue[1].payload.content, 'first');
 
     // Should emit queue_updated with action='reordered'
     const emitCalls = deps.socketManager.emitToUser.mock.calls;
@@ -376,15 +1567,15 @@ describe('Queue Management API', () => {
     assert.equal(res.statusCode, 200);
 
     const queue = deps.invocationQueue.list('t1', 'user-a');
-    assert.equal(queue[0].content, 'second');
+    assert.equal(queue[0].payload.content, 'second');
   });
 
-  it('PATCH /queue/:entryId/move rejects processing entry (409)', async () => {
+  it('PATCH /queue/:entryId/move rejects a live reversible claim (409)', async () => {
     enqueueEntry(deps.invocationQueue);
-    deps.invocationQueue.markProcessing('t1', 'user-a');
+    await markHeadProcessing(deps.invocationQueue);
 
     const entries = deps.invocationQueue.list('t1', 'user-a');
-    const processingEntry = entries.find((e) => e.status === 'processing');
+    const processingEntry = entries.find((e) => e.status === 'claimed');
 
     const res = await app.inject({
       method: 'PATCH',
@@ -395,48 +1586,312 @@ describe('Queue Management API', () => {
     assert.equal(res.statusCode, 409);
   });
 
+  it('PATCH /queue/:entryId/move rejects system continuation entries (409)', async () => {
+    const continuation = enqueueEntry(deps.invocationQueue, {
+      content: 'continue sealed work',
+      source: 'agent',
+      sourceCategory: 'continuation',
+      continuationKey: 't1:opus:inv-1:sess-1:1',
+      autoExecute: true,
+    });
+    enqueueEntry(deps.invocationQueue, { content: 'user work', targetCats: ['codex'] });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/t1/queue/${continuation.entry.id}/move`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { direction: 'down' },
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(body.code, 'ENTRY_POSITION_LOCKED');
+    assert.equal(deps.invocationQueue.list('t1', 'user-a')[0].id, continuation.entry.id);
+  });
+
   // ── Functional: POST steer ──
 
-  it('POST /queue/:entryId/steer promote moves entry to front of queued entries', async () => {
-    enqueueEntry(deps.invocationQueue, { content: 'first', targetCats: ['opus'] });
-    const r2 = enqueueEntry(deps.invocationQueue, { content: 'second', targetCats: ['codex'] });
+  it('POST /queue/steer does not preempt when the durable claim loses', async () => {
+    const target = (
+      await enqueueDurableEntry(deps.invocationQueue, {
+        content: 'steer me',
+        ownerAuthProvenance: 'strict',
+      })
+    ).entry;
+    deps.invocationTracker.has = mock.fn(() => true);
+    deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
+    deps.invocationTracker.cancel = mock.fn(() => ({ cancelled: true, catIds: ['opus'], executionIds: ['inv-a'] }));
+    deps.invocationQueue.claimExactSteerEntryDurable = mock.fn(async () => ({
+      outcome: 'rejected',
+      reason: 'entry_processing',
+    }));
 
     const res = await app.inject({
       method: 'POST',
-      url: `/api/threads/t1/queue/${r2.entry.id}/steer`,
+      url: `/api/threads/t1/queue/${target.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(res.json().code, 'ENTRY_PROCESSING');
+    assert.equal(
+      deps.invocationTracker.cancel.mock.calls.length,
+      0,
+      'a refused steer must not have cancelled the running turn',
+    );
+  });
+
+  it('POST /queue/:entryId/steer binds a targetless message to the selected current-thread member', async () => {
+    const queued = await enqueueDurableEntry(deps.invocationQueue, {
+      content: 'pick one member',
+      ownerAuthProvenance: 'strict',
+      targetCats: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { targetCatId: 'codex' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(deps.queueProcessor.processClaimedSteerEntries.mock.calls[0].arguments, [
+      't1',
+      'user-a',
+      [queued.entry.id],
+      'codex',
+    ]);
+  });
+
+  it('POST /queue/:entryId/steer rejects a targetless message without a current-thread member selection', async () => {
+    const queued = await enqueueDurableEntry(deps.invocationQueue, { targetCats: [] });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.json().code, 'STEER_TARGET_REQUIRED');
+  });
+
+  it('POST /queue/:entryId/steer rejects a member outside the current thread before reservation', async () => {
+    const queued = await enqueueDurableEntry(deps.invocationQueue, { targetCats: [] });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { targetCatId: 'outsider' },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.json().code, 'INVALID_STEER_TARGET');
+    assert.equal(deps.invocationQueue.getEntrySnapshot('t1', 'user-a', queued.entry.id)?.status, 'queued');
+  });
+
+  it('POST /queue/:entryId/steer does not preempt when the durable claim store fails', async () => {
+    const target = (
+      await enqueueDurableEntry(deps.invocationQueue, {
+        content: 'steer me',
+        ownerAuthProvenance: 'strict',
+      })
+    ).entry;
+    deps.invocationTracker.has = mock.fn(() => true);
+    deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
+    deps.invocationTracker.cancel = mock.fn(() => ({ cancelled: true, catIds: ['opus'], executionIds: ['inv-a'] }));
+    deps.invocationQueue.claimExactSteerEntryDurable = mock.fn(async () => {
+      throw new Error('ledger unavailable');
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${target.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.json().code, 'STEER_CLAIM_FAILED');
+    assert.equal(
+      deps.invocationTracker.cancel.mock.calls.length,
+      0,
+      'an unpersistable reservation must not have cancelled the running turn',
+    );
+    const after = deps.invocationQueue.list('t1', 'user-a').find((entry) => entry.id === target.id);
+    assert.equal(after.status, 'queued');
+  });
+
+  it('POST /queue/:entryId/steer keeps the ledger claim across the preemption await', async () => {
+    const inflight = (
+      await enqueueDurableEntry(deps.invocationQueue, {
+        content: 'inflight',
+        ownerAuthProvenance: 'strict',
+        targetCats: ['opus'],
+      })
+    ).entry;
+    await markHeadProcessing(deps.invocationQueue);
+    const target = (
+      await enqueueDurableEntry(deps.invocationQueue, {
+        content: 'steer after preemption',
+        ownerAuthProvenance: 'strict',
+        targetCats: ['opus'],
+      })
+    ).entry;
+    const preemptionGate = asyncGate();
+    deps.invocationTracker.has = mock.fn(() => false);
+    deps.queueProcessor.finalizeRemovedEntry = mock.fn(async (removed) => {
+      assert.equal(removed.id, inflight.id);
+      preemptionGate.enter();
+      await preemptionGate.blocked;
+      return true;
+    });
+    const responsePromise = app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${target.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {},
+    });
+    await preemptionGate.entered;
+
+    assert.equal(deps.invocationQueue.getEntrySnapshot('t1', 'user-a', target.id)?.status, 'claimed');
+    assert.equal(await deps.invocationQueue.markProcessingByIdDurable('t1', target.id, 'opus'), null);
+    preemptionGate.release();
+
+    const res = await responsePromise;
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(deps.queueProcessor.processClaimedSteerEntries.mock.calls[0].arguments, [
+      't1',
+      'user-a',
+      [target.id],
+      'opus',
+    ]);
+  });
+
+  it('POST /queue/:entryId/steer restores the claimed row when preemption is refused', async () => {
+    const target = (
+      await enqueueDurableEntry(deps.invocationQueue, {
+        content: 'steer me',
+        ownerAuthProvenance: 'strict',
+      })
+    ).entry;
+    deps.invocationTracker.has = mock.fn(() => true);
+    // Another user owns the running turn, so preemption is refused after the
+    // reservation has already been persisted.
+    deps.invocationTracker.getUserId = mock.fn(() => 'someone-else');
+    deps.invocationTracker.cancel = mock.fn(() => ({ cancelled: false, catIds: [] }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${target.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0);
+    const after = deps.invocationQueue.list('t1', 'user-a').find((entry) => entry.id === target.id);
+    assert.equal(after.status, 'queued');
+    assert.equal(after.steerRequestedByCatIds, undefined);
+  });
+
+  it('POST /queue/:entryId/steer rejects promote because Steer has one cancel-and-restart meaning', async () => {
+    const queued = await enqueueDurableEntry(deps.invocationQueue, { content: 'queued correction' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/steer`,
       headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
       payload: { mode: 'promote' },
     });
-    assert.equal(res.statusCode, 200);
 
-    const queue = deps.invocationQueue.list('t1', 'user-a');
-    assert.equal(queue[0].content, 'second');
-    assert.equal(queue[1].content, 'first');
+    assert.equal(res.statusCode, 400);
+    assert.equal(deps.invocationQueue.list('t1', 'user-a')[0].id, queued.entry.id);
+  });
+
+  it('POST /queue/:entryId/steer defaults to immediate cancel-and-restart for the same entry', async () => {
+    const queued = await enqueueDurableEntry(deps.invocationQueue, {
+      content: 'queued correction',
+      ownerAuthProvenance: 'strict',
+    });
+    deps.invocationTracker.has = mock.fn(() => true);
+    deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
+    deps.invocationTracker.cancel = mock.fn(() => ({
+      cancelled: true,
+      catIds: ['opus'],
+      executionIds: ['inv-active'],
+    }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(Object.hasOwn(JSON.parse(res.body).entry, 'ownerAuthProvenance'), false);
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 1);
+    assert.equal(deps.queueProcessor.processClaimedSteerEntries.mock.calls.length, 1);
+  });
+
+  it('POST /queue/:entryId/steer restores the pending target when immediate restart cannot begin', async () => {
+    const queued = await enqueueDurableEntry(deps.invocationQueue, { content: 'queued correction' });
+    deps.invocationTracker.has = mock.fn(() => true);
+    deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
+    deps.invocationTracker.cancel = mock.fn(() => ({
+      cancelled: true,
+      catIds: ['opus'],
+      executionIds: ['inv-active'],
+    }));
+    deps.queueProcessor.processClaimedSteerEntries = mock.fn(async () => ({ started: false }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 503);
+    const updates = deps.socketManager.emitToUser.mock.calls
+      .filter((call) => call.arguments[1] === 'queue_updated')
+      .map((call) => call.arguments[2]);
+    assert.equal(updates.at(-1)?.action, 'steer_failed');
+    assert.deepEqual(updates.at(-1)?.queue[0].targetCats, ['opus']);
+    assert.equal('targetStates' in updates.at(-1)?.queue[0], false);
   });
 
   it('POST /queue/:entryId/steer returns 409 when entry is processing', async () => {
-    enqueueEntry(deps.invocationQueue);
-    deps.invocationQueue.markProcessing('t1', 'user-a');
+    await enqueueDurableEntry(deps.invocationQueue);
+    await markHeadProcessing(deps.invocationQueue);
     const entries = deps.invocationQueue.list('t1', 'user-a');
-    const processingEntry = entries.find((e) => e.status === 'processing');
+    const processingEntry = entries.find((e) => e.status === 'claimed');
 
     const res = await app.inject({
       method: 'POST',
       url: `/api/threads/t1/queue/${processingEntry.id}/steer`,
       headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
-      payload: { mode: 'promote' },
+      payload: {},
     });
     assert.equal(res.statusCode, 409);
   });
 
   it('POST /queue/:entryId/steer immediate cancels active invocation and starts processing', async () => {
-    const r1 = enqueueEntry(deps.invocationQueue, { content: 'first' });
-    enqueueEntry(deps.invocationQueue, { content: 'second' });
+    const r1 = await enqueueDurableEntry(deps.invocationQueue, { content: 'first' });
+    await enqueueDurableEntry(deps.invocationQueue, { content: 'second' });
 
     deps.invocationTracker.has = mock.fn(() => true);
     deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
-    deps.invocationTracker.cancel = mock.fn(() => ({ cancelled: true, catIds: ['codex'] }));
-    deps.queueProcessor.processNext = mock.fn(async () => ({ started: true, entry: { id: r1.entry.id } }));
+    deps.invocationTracker.cancel = mock.fn(() => ({
+      cancelled: true,
+      catIds: ['codex'],
+      executionIds: ['inv-active'],
+    }));
 
     const res = await app.inject({
       method: 'POST',
@@ -444,20 +1899,26 @@ describe('Queue Management API', () => {
       headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
       payload: { mode: 'immediate' },
     });
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 200, res.body);
     assert.equal(deps.invocationTracker.cancel.mock.calls.length, 1);
-    assert.equal(deps.queueProcessor.processNext.mock.calls.length, 1);
-    // Bugfix: steer must broadcast cancel+done so frontend clears old invocation's "正在回复中"
+    assert.equal(deps.queueProcessor.processClaimedSteerEntries.mock.calls.length, 1);
+    assert.deepEqual(deps.agentSessionMutex.forceReleaseByScope.mock.calls[0].arguments, [
+      { threadId: 't1', userId: 'user-a', catId: 'opus' },
+      { preserveHolderExecutionIds: ['inv-active'] },
+    ]);
+    // The durable canceled response owns the visible terminal; transport emits
+    // one done event so the frontend clears the old invocation without a
+    // duplicate centered cancellation notice.
     const broadcastCalls = deps.socketManager.broadcastAgentMessage.mock.calls;
-    assert.ok(broadcastCalls.length >= 2, 'should broadcast system_info + done for canceled invocation');
+    assert.ok(broadcastCalls.length >= 1, 'should broadcast done for canceled invocation');
     const doneCall = broadcastCalls.find((c) => c.arguments[0].type === 'done');
     assert.ok(doneCall, 'should broadcast done event to clear frontend loading state');
     assert.equal(doneCall.arguments[0].isFinal, true);
   });
 
   it('POST /queue/:entryId/steer immediate releases QueueProcessor mutex after cancel (P2 race)', async () => {
-    const r1 = enqueueEntry(deps.invocationQueue, { content: 'first' });
-    enqueueEntry(deps.invocationQueue, { content: 'second' });
+    const r1 = await enqueueDurableEntry(deps.invocationQueue, { content: 'first' });
+    await enqueueDurableEntry(deps.invocationQueue, { content: 'second' });
 
     deps.invocationTracker.has = mock.fn(() => true);
     deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
@@ -467,10 +1928,10 @@ describe('Queue Management API', () => {
     deps.queueProcessor.releaseSlot = mock.fn(() => {
       locked = false;
     });
-    deps.queueProcessor.processNext = mock.fn(async () => {
-      if (locked) return { started: false };
-      return { started: true, entry: { id: r1.entry.id } };
-    });
+    deps.queueProcessor.processClaimedSteerEntries = mock.fn(async () => ({
+      started: !locked,
+      entry: r1.entry,
+    }));
 
     const res = await app.inject({
       method: 'POST',
@@ -478,19 +1939,199 @@ describe('Queue Management API', () => {
       headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
       payload: { mode: 'immediate' },
     });
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 200, res.body);
     assert.equal(deps.queueProcessor.releaseSlot.mock.calls.length, 1);
   });
 
+  it('POST /queue/:entryId/steer immediate TOMBSTONES a pre-start in-flight entry instead of force-releasing (race-safe, 云端 R3 P1)', async () => {
+    // In-flight entry A occupies the opus per-cat slot (processing), e.g. its executeEntry is in the
+    // pre-start create-await window so invocationTracker.has(opus) is false. The user steers a second
+    // opus entry B. Force-releasing A's slot would double-start opus once create returns; instead
+    // steer must TOMBSTONE A (removeProcessed) so executeEntry self-aborts, and NOT force-release.
+    const a = await enqueueDurableEntry(deps.invocationQueue, { content: 'inflight', targetCats: ['opus'] });
+    await markHeadProcessing(deps.invocationQueue); // A → processing (holds opus slot)
+    const b = await enqueueDurableEntry(deps.invocationQueue, { content: 'steered', targetCats: ['opus'] });
+
+    deps.invocationTracker.has = mock.fn(() => false); // pre-start: tracker not yet registered
+    // Precondition: A holds the opus slot (in-flight).
+    assert.equal(deps.invocationQueue.findProcessingByCat('t1', 'opus')?.id, a.entry.id);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${b.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'immediate' },
+    });
+
+    // Durable retirement finishes before B becomes the exact replacement owner.
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.started, true);
+
+    // A was tombstoned (removed) so executeEntry self-aborts at its post-startAll guard.
+    assert.equal(
+      deps.invocationQueue.list('t1', 'user-a').some((entry) => entry.id === a.entry.id),
+      false,
+      'in-flight A must be tombstoned',
+    );
+    assert.equal(deps.invocationQueue.findProcessingByCat('t1', 'opus')?.id, b.entry.id);
+    // Race-safe: NO force slot-release, NO cancel of a non-existent tracker invocation.
+    assert.equal(deps.queueProcessor.releaseSlot.mock.calls.length, 0, 'must NOT force-release a pre-start slot');
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0);
+    // B was promoted to run next.
+    assert.equal(deps.invocationQueue.list('t1', 'user-a')[0].id, b.entry.id);
+  });
+
+  it('POST /queue/:entryId/steer immediate must NOT tombstone ANOTHER user’s pre-start entry (云端 R4 P1-b cross-user)', async () => {
+    // user-b holds the opus slot via an in-flight (pre-start) entry; user-a steers their own opus
+    // entry. The cross-user guard must reject (INVOCATION_ACTIVE) and leave user-b's entry intact —
+    // one user cannot interrupt another's in-flight invocation by steering their own.
+    const other = await enqueueDurableEntry(deps.invocationQueue, {
+      userId: 'user-b',
+      content: 'other-inflight',
+      targetCats: ['opus'],
+    });
+    await markHeadProcessing(deps.invocationQueue, 'user-b'); // user-b's entry → processing (holds opus slot)
+    const mine = await enqueueDurableEntry(deps.invocationQueue, {
+      userId: 'user-a',
+      content: 'mine',
+      targetCats: ['opus'],
+    });
+
+    deps.invocationTracker.has = mock.fn(() => false); // pre-start: tracker not yet registered
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${mine.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'immediate' },
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(res.json().code, 'INVOCATION_ACTIVE');
+    // user-b's in-flight entry must NOT be tombstoned.
+    assert.equal(
+      deps.invocationQueue.findProcessingByCat('t1', 'opus')?.id,
+      other.entry.id,
+      "other user's entry intact",
+    );
+  });
+
+  it('POST /queue/:entryId/steer immediate NEVER force-releases an occupied slot — always tombstones (云端 R6: age unsound)', async () => {
+    // 云端 R3–R6 converged: an occupied slot with has()=false is always "executeEntry pending in
+    // create-await"; steer cannot tell a slow-but-live create from a hung one (create awaits an
+    // unbounded Redis eval), so NO age threshold is sound. Even an "old" processing entry must be
+    // tombstoned (not force-released) — a force-release would double-start if create later resumes.
+    await enqueueDurableEntry(deps.invocationQueue, {
+      userId: 'user-a',
+      content: 'old-inflight',
+      targetCats: ['opus'],
+    });
+    await markHeadProcessing(deps.invocationQueue);
+    const old = deps.invocationQueue.findProcessingByCat('t1', 'opus');
+    old.processingStartedAt = Date.now() - 60 * 60_000; // 1h old — still must NOT force-release
+    const steered = await enqueueDurableEntry(deps.invocationQueue, {
+      userId: 'user-a',
+      content: 'steered',
+      targetCats: ['opus'],
+    });
+
+    deps.invocationTracker.has = mock.fn(() => false);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${steered.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'immediate' },
+    });
+
+    // Sound: durable retire + exact start, regardless of entry age. NO force-release (double-start risk).
+    assert.equal(res.statusCode, 200);
+    assert.equal(deps.queueProcessor.releaseSlot.mock.calls.length, 0, 'must NEVER force-release by age');
+  });
+
+  it('POST /queue/:entryId/steer immediate marks the TOMBSTONED user message canceled (云端 R7 P1 F117)', async () => {
+    // Tombstoning an in-flight user entry must mirror withdraw/clear F117 cleanup: its message would
+    // otherwise stay permanently 'queued' (undelivered + excluded from context) since executeEntry
+    // self-aborts before its markDelivered block.
+    await enqueueDurableEntry(deps.invocationQueue, {
+      userId: 'user-a',
+      content: 'inflight',
+      targetCats: ['opus'],
+      messageId: 'msg-inflight',
+    });
+    await markHeadProcessing(deps.invocationQueue);
+    const inflight = deps.invocationQueue.findProcessingByCat('t1', 'opus');
+    assert.equal(inflight.payload.messageId, 'msg-inflight');
+    const steered = await enqueueDurableEntry(deps.invocationQueue, {
+      userId: 'user-a',
+      content: 'steered',
+      targetCats: ['opus'],
+    });
+
+    deps.invocationTracker.has = mock.fn(() => false);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${steered.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'immediate' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(deps.messageStore.markCanceled.mock.calls.length, 1, 'tombstoned message must be marked canceled');
+    assert.equal(deps.messageStore.markCanceled.mock.calls[0].arguments[0], 'msg-inflight');
+    const del = deps.socketManager.emitToUser.mock.calls.find((c) => c.arguments[1] === 'message_deleted');
+    assert.ok(del, 'message_deleted must be emitted');
+    assert.equal(del.arguments[2].messageId, 'msg-inflight');
+  });
+
+  it('POST /queue/:entryId/steer immediate does NOT emit message_deleted when cancel CAS is a no-op', async () => {
+    // If the message was already canceled/delivered, the receipt reports applied=false.
+    // The transition gate must suppress the message_deleted emit — otherwise the client would
+    // flash-delete a delivered message or duplicate-delete an already-canceled one.
+    await enqueueDurableEntry(deps.invocationQueue, {
+      userId: 'user-a',
+      content: 'inflight',
+      targetCats: ['opus'],
+      messageId: 'msg-already-delivered',
+    });
+    await markHeadProcessing(deps.invocationQueue);
+    const inflight = deps.invocationQueue.findProcessingByCat('t1', 'opus');
+    assert.equal(inflight.payload.messageId, 'msg-already-delivered');
+    const steered = await enqueueDurableEntry(deps.invocationQueue, {
+      userId: 'user-a',
+      content: 'steered',
+      targetCats: ['opus'],
+    });
+
+    deps.invocationTracker.has = mock.fn(() => false);
+    deps.messageStore.markCanceled = mock.fn(async () => ({
+      deliveryStatus: 'delivered',
+      deliveryTransitioned: false,
+    }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${steered.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'immediate' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(deps.messageStore.markCanceled.mock.calls.length, 1, 'markCanceled must be called');
+    const del = deps.socketManager.emitToUser.mock.calls.find((c) => c.arguments[1] === 'message_deleted');
+    assert.equal(del, undefined, 'message_deleted must NOT be emitted when cancel is a no-op');
+  });
+
   it('POST /queue/:entryId/steer immediate scopes cancel broadcast to steered cat only (P1 cloud review)', async () => {
-    const r1 = enqueueEntry(deps.invocationQueue, { content: 'first', targetCats: ['opus'] });
-    enqueueEntry(deps.invocationQueue, { content: 'second' });
+    const r1 = await enqueueDurableEntry(deps.invocationQueue, { content: 'first', targetCats: ['opus'] });
+    await enqueueDurableEntry(deps.invocationQueue, { content: 'second' });
 
     deps.invocationTracker.has = mock.fn(() => true);
     deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
     // cancel returns multi-cat catIds (co-dispatched), but steer targets only opus
     deps.invocationTracker.cancel = mock.fn(() => ({ cancelled: true, catIds: ['opus', 'codex'] }));
-    deps.queueProcessor.processNext = mock.fn(async () => ({ started: true, entry: { id: r1.entry.id } }));
 
     const res = await app.inject({
       method: 'POST',
@@ -498,7 +2139,7 @@ describe('Queue Management API', () => {
       headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
       payload: { mode: 'immediate' },
     });
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 200, res.body);
 
     // done should only be broadcast for opus (the steered cat), NOT codex
     const broadcastCalls = deps.socketManager.broadcastAgentMessage.mock.calls;
@@ -510,36 +2151,13 @@ describe('Queue Management API', () => {
     assert.equal(codexDone, undefined, 'codex should NOT receive cancel done when not steered');
   });
 
-  it('POST /queue/:entryId/steer promote works on agent-sourced entries (F122B)', async () => {
-    // Agent entry under user-a's scope (A2A on behalf of user)
-    const r1 = enqueueEntry(deps.invocationQueue, {
-      content: 'A2A handoff',
-      source: 'agent',
-      autoExecute: true,
-      callerCatId: 'codex',
-    });
-    // User entry after it
-    enqueueEntry(deps.invocationQueue, { content: 'user msg', targetCats: ['codex'] });
-
-    const res = await app.inject({
-      method: 'POST',
-      url: `/api/threads/t1/queue/${r1.entry.id}/steer`,
-      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
-      payload: { mode: 'promote' },
-    });
-    assert.equal(res.statusCode, 200);
-    // Agent entry should be promoted to front
-    const queue = deps.invocationQueue.list('t1', 'user-a');
-    assert.equal(queue[0].source, 'agent', 'agent entry should be first after promote');
-  });
-
   it('POST /queue/:entryId/steer returns 404 for another user entry', async () => {
-    const r = enqueueEntry(deps.invocationQueue, { userId: 'user-a' });
+    const r = await enqueueDurableEntry(deps.invocationQueue, { userId: 'user-a' });
     const res = await app.inject({
       method: 'POST',
       url: `/api/threads/t1/queue/${r.entry.id}/steer`,
       headers: { 'x-cat-cafe-user': 'user-b', 'content-type': 'application/json' },
-      payload: { mode: 'promote' },
+      payload: {},
     });
     assert.equal(res.statusCode, 404);
   });
@@ -548,7 +2166,11 @@ describe('Queue Management API', () => {
 
   it('POST /cancel/:catId cancels active cat and broadcasts done (AC-B9)', async () => {
     deps.invocationTracker.has = mock.fn(() => true);
-    deps.invocationTracker.cancel = mock.fn(() => ({ cancelled: true, catIds: ['opus'] }));
+    deps.invocationTracker.cancel = mock.fn(() => ({
+      cancelled: true,
+      catIds: ['opus'],
+      executionIds: ['inv-active'],
+    }));
 
     const res = await app.inject({
       method: 'POST',
@@ -559,11 +2181,40 @@ describe('Queue Management API', () => {
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
     assert.equal(body.cancelled, true);
+    assert.deepEqual(deps.invocationTracker.cancel.mock.calls[0].arguments, ['t1', 'opus', 'user-a', 'user_cancel']);
+    assert.deepEqual(deps.agentSessionMutex.forceReleaseByScope.mock.calls[0].arguments, [
+      { threadId: 't1', userId: 'user-a', catId: 'opus' },
+      { preserveHolderExecutionIds: ['inv-active'] },
+    ]);
 
     // Should broadcast done for opus
     const doneCalls = deps.socketManager.broadcastAgentMessage.mock.calls.filter((c) => c.arguments[0].type === 'done');
     assert.equal(doneCalls.length, 1);
     assert.equal(doneCalls[0].arguments[0].catId, 'opus');
+  });
+
+  it('POST /cancel/:catId leaves an executing Queue reservation for normal completion to drain', async () => {
+    await enqueueDurableEntry(deps.invocationQueue, { content: 'currently executing' });
+    await markHeadProcessing(deps.invocationQueue);
+    deps.invocationTracker.has = mock.fn(() => true);
+    deps.invocationTracker.cancel = mock.fn(() => ({
+      cancelled: true,
+      catIds: ['opus'],
+      executionIds: ['inv-active'],
+    }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/t1/cancel/opus',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(
+      deps.queueProcessor.releaseSlot.mock.calls.length,
+      0,
+      'the canceled execute promise still owns retirement and the following Queue drain',
+    );
   });
 
   it('POST /cancel/:catId returns 404 when cat is not active (AC-B9)', async () => {
@@ -577,5 +2228,104 @@ describe('Queue Management API', () => {
     assert.equal(res.statusCode, 404);
     const body = JSON.parse(res.body);
     assert.equal(body.code, 'CAT_NOT_ACTIVE');
+  });
+
+  // ── F175 Task 6: PATCH /queue/reorder ──
+
+  it('PATCH /queue/reorder sets positions on multiple entries (F175)', async () => {
+    const r1 = enqueueEntry(deps.invocationQueue, { content: 'a' });
+    const r2 = enqueueEntry(deps.invocationQueue, { content: 'b' });
+    const r3 = enqueueEntry(deps.invocationQueue, { content: 'c' });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/threads/t1/queue/reorder',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {
+        positions: [
+          { entryId: r3.entry.id, position: 0 },
+          { entryId: r1.entry.id, position: 1 },
+          { entryId: r2.entry.id, position: 2 },
+        ],
+      },
+    });
+    assert.equal(res.statusCode, 200);
+
+    const next = deps.invocationQueue.peekOldestAcrossUsers('t1');
+    assert.equal(next.payload.content, 'c', 'entry c should be first after reorder');
+
+    const emitCalls = deps.socketManager.emitToUser.mock.calls;
+    const updateCall = emitCalls.find((c) => c.arguments[1] === 'queue_updated');
+    assert.ok(updateCall);
+    assert.equal(updateCall.arguments[2].action, 'reordered');
+  });
+
+  it('PATCH /queue/reorder rejects position on a live reversible claim (F175)', async () => {
+    enqueueEntry(deps.invocationQueue, { content: 'a' });
+    await markHeadProcessing(deps.invocationQueue);
+    const entries = deps.invocationQueue.list('t1', 'user-a');
+    const processingEntry = entries.find((e) => e.status === 'claimed');
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/threads/t1/queue/reorder',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { positions: [{ entryId: processingEntry.id, position: 0 }] },
+    });
+    assert.equal(res.statusCode, 409);
+  });
+
+  it('PATCH /queue/reorder rejects position on system continuation entry (F175)', async () => {
+    const continuation = enqueueEntry(deps.invocationQueue, {
+      content: 'continue sealed work',
+      source: 'agent',
+      sourceCategory: 'continuation',
+      continuationKey: 't1:opus:inv-1:sess-1:1',
+      autoExecute: true,
+    });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/threads/t1/queue/reorder',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { positions: [{ entryId: continuation.entry.id, position: 99 }] },
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(body.code, 'ENTRY_POSITION_LOCKED');
+    assert.equal(deps.invocationQueue.list('t1', 'user-a')[0].id, continuation.entry.id);
+  });
+
+  it('PATCH /queue/reorder rejects invalid body (F175)', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/threads/t1/queue/reorder',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { positions: 'not-an-array' },
+    });
+    assert.equal(res.statusCode, 400);
+  });
+
+  it('P2-4: PATCH /queue/reorder does not partial-write on failure', async () => {
+    const r1 = enqueueEntry(deps.invocationQueue, { content: 'a' });
+    enqueueEntry(deps.invocationQueue, { content: 'b' });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/threads/t1/queue/reorder',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {
+        positions: [
+          { entryId: r1.entry.id, position: 5 },
+          { entryId: 'nonexistent', position: 0 },
+        ],
+      },
+    });
+    assert.equal(res.statusCode, 400);
+
+    const entries = deps.invocationQueue.list('t1', 'user-a');
+    const first = entries.find((e) => e.id === r1.entry.id);
+    assert.equal(first.position, undefined, 'first entry position should NOT be written when batch fails');
   });
 });

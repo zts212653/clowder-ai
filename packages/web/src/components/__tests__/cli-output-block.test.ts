@@ -78,7 +78,7 @@ describe('CliOutputBlock', () => {
     expect(container.textContent).toContain('Read index.ts');
   });
 
-  it('streaming status → always expanded, summary says streaming', () => {
+  it('streaming status → initially expanded, summary says streaming', () => {
     act(() => {
       root.render(
         React.createElement(CliOutputBlock, {
@@ -90,6 +90,151 @@ describe('CliOutputBlock', () => {
     const text = container.textContent ?? '';
     expect(text).toContain('streaming');
     expect(text).toContain('Bash pnpm test');
+  });
+
+  it('user can manually collapse output during streaming', () => {
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' }],
+          status: 'streaming',
+        }),
+      );
+    });
+    // Initially expanded during streaming
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeTruthy();
+
+    // User manually collapses
+    const btn = container.querySelector('button');
+    act(() => {
+      btn?.click();
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeFalsy();
+
+    // Re-render (simulates new streaming event) — should stay collapsed
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [
+            { id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' },
+            { id: 't2', kind: 'tool_use', timestamp: 1001, label: 'Bash pnpm lint' },
+          ],
+          status: 'streaming',
+        }),
+      );
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeFalsy();
+  });
+
+  it('user can manually collapse tools section during streaming', () => {
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' }],
+          status: 'streaming',
+        }),
+      );
+    });
+    // Tools section initially expanded during streaming
+    const toolsToggle = container.querySelector('[data-testid="tools-section-toggle"]') as HTMLElement | null;
+    expect(toolsToggle).toBeTruthy();
+    expect(container.textContent).not.toContain('(collapsed)');
+
+    // User collapses tools
+    act(() => {
+      toolsToggle?.click();
+    });
+    expect(container.textContent).toContain('(collapsed)');
+
+    // Re-render with new streaming event — tools should stay collapsed
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [
+            { id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' },
+            { id: 't2', kind: 'tool_use', timestamp: 1001, label: 'Bash pnpm lint' },
+          ],
+          status: 'streaming',
+        }),
+      );
+    });
+    expect(container.textContent).toContain('(collapsed)');
+  });
+
+  it('resets output collapse when status restarts to streaming after done', () => {
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' }],
+          status: 'streaming',
+        }),
+      );
+    });
+    // User collapses during streaming
+    const btn = container.querySelector('button');
+    act(() => {
+      btn?.click();
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeFalsy();
+
+    // Streaming ends → done
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' }],
+          status: 'done',
+        }),
+      );
+    });
+
+    // New streaming session starts → should re-expand (reset userInteracted)
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't2', kind: 'tool_use', timestamp: 2000, label: 'Bash pnpm build' }],
+          status: 'streaming',
+        }),
+      );
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeTruthy();
+  });
+
+  it('resets tools collapse when status restarts to streaming after done', () => {
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' }],
+          status: 'streaming',
+        }),
+      );
+    });
+    // User collapses tools during streaming
+    const toolsToggle = container.querySelector('[data-testid="tools-section-toggle"]') as HTMLElement | null;
+    act(() => {
+      toolsToggle?.click();
+    });
+    expect(container.textContent).toContain('(collapsed)');
+
+    // Streaming ends → done
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Bash pnpm test' }],
+          status: 'done',
+        }),
+      );
+    });
+
+    // New streaming session → tools should re-expand
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: [{ id: 't2', kind: 'tool_use', timestamp: 2000, label: 'Bash pnpm build' }],
+          status: 'streaming',
+        }),
+      );
+    });
+    expect(container.textContent).not.toContain('(collapsed)');
   });
 
   it('shows shared visibility chip when thinkingMode=debug', () => {
@@ -156,8 +301,9 @@ describe('CliOutputBlock', () => {
         }),
       );
     });
-    // Initially collapsed — no tool details
-    expect(container.textContent).not.toContain('Looks good.');
+    // Initially collapsed — summary can preview stdout, but the body is not mounted.
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeNull();
+    expect(container.textContent).not.toContain('200 lines');
 
     // Click to expand
     const button = container.querySelector('button');
@@ -165,13 +311,15 @@ describe('CliOutputBlock', () => {
     act(() => {
       button?.click();
     });
-    expect(container.textContent).toContain('Looks good.');
+    const expandedBody = container.querySelector('[data-testid="cli-output-body"]');
+    expect(expandedBody).toBeTruthy();
+    expect(expandedBody?.textContent).toContain('Looks good.');
 
     // Click to collapse
     act(() => {
       button?.click();
     });
-    expect(container.textContent).not.toContain('Looks good.');
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeNull();
   });
 
   it('shows failed status text', () => {
@@ -188,12 +336,14 @@ describe('CliOutputBlock', () => {
 
   // ── P1-1: per-tool collapse (AC-A2) ──
   it('tool rows are individually collapsible — click to show detail', () => {
+    const tail = 'TOOL_RESULT_TAIL_SENTINEL';
+    const fullDetail = `${'complete tool output '.repeat(40)}${tail}`;
     act(() => {
       root.render(
         React.createElement(CliOutputBlock, {
           events: [
             { id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Read index.ts' },
-            { id: 'r1', kind: 'tool_result', timestamp: 1001, label: 'Read index.ts', detail: '200 lines read' },
+            { id: 'r1', kind: 'tool_result', timestamp: 1001, label: 'Read index.ts', detail: fullDetail },
           ],
           status: 'done',
           defaultExpanded: true,
@@ -207,7 +357,7 @@ describe('CliOutputBlock', () => {
     });
     // Tool label visible, but detail hidden by default (collapsed row)
     expect(container.textContent).toContain('Read index.ts');
-    expect(container.textContent).not.toContain('200 lines read');
+    expect(container.textContent).not.toContain(tail);
 
     // Click the tool row to expand it
     const toolRow = container.querySelector('[data-testid="tool-row-t1"]') as HTMLElement | null;
@@ -215,7 +365,7 @@ describe('CliOutputBlock', () => {
     act(() => {
       toolRow?.click();
     });
-    expect(container.textContent).toContain('200 lines read');
+    expect(container.textContent).toContain(tail);
   });
 
   // ── P1-2: auto-collapse on streaming→done (AC-A6) ──
@@ -266,6 +416,60 @@ describe('CliOutputBlock', () => {
         React.createElement(CliOutputBlock, {
           events: doneEvents,
           status: 'done',
+        }),
+      );
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeTruthy();
+  });
+
+  // ── #349 regression: streaming→done should respect defaultExpanded ──
+  it('does NOT auto-collapse on streaming→done when defaultExpanded=true', () => {
+    // Start streaming with defaultExpanded=true → expanded
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: doneEvents,
+          status: 'streaming',
+          defaultExpanded: true,
+        }),
+      );
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeTruthy();
+
+    // Status changes to done → should stay expanded because default is expanded
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: doneEvents,
+          status: 'done',
+          defaultExpanded: true,
+        }),
+      );
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeTruthy();
+  });
+
+  // ── #349 regression: async config load should sync defaultExpanded ──
+  it('syncs expanded state when defaultExpanded prop changes from false to true', () => {
+    // Initial render with defaultExpanded=false (simulates store initial value)
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: doneEvents,
+          status: 'done',
+          defaultExpanded: false,
+        }),
+      );
+    });
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeFalsy();
+
+    // Config loads async → defaultExpanded becomes true
+    act(() => {
+      root.render(
+        React.createElement(CliOutputBlock, {
+          events: doneEvents,
+          status: 'done',
+          defaultExpanded: true,
         }),
       );
     });

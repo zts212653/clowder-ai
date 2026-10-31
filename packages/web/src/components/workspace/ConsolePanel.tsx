@@ -1,5 +1,8 @@
 'use client';
 
+import { useShellPresentation } from '@/components/shell/shell-presentation';
+import { ConsolePanelV2 } from './ConsolePanelV2';
+
 export interface ConsoleEntry {
   level: 'log' | 'warn' | 'error' | 'info';
   args: string[];
@@ -7,17 +10,17 @@ export interface ConsoleEntry {
 }
 
 const LEVEL_STYLES: Record<ConsoleEntry['level'], string> = {
-  log: 'text-gray-600 dark:text-gray-400',
+  log: 'text-cafe-secondary',
   info: 'text-blue-600 dark:text-blue-400',
-  warn: 'text-amber-600 dark:text-amber-400',
-  error: 'text-red-600 dark:text-red-400',
+  warn: 'text-conn-amber-text dark:text-amber-400',
+  error: 'text-conn-red-text dark:text-conn-red-text',
 };
 
 const LEVEL_BG: Record<ConsoleEntry['level'], string> = {
   log: '',
   info: '',
-  warn: 'bg-amber-50/50 dark:bg-amber-900/10',
-  error: 'bg-red-50/50 dark:bg-red-900/10',
+  warn: 'bg-conn-amber-bg/50 dark:bg-amber-900/10',
+  error: 'bg-conn-red-bg/50 dark:bg-red-900/10',
 };
 
 interface ConsolePanelProps {
@@ -25,15 +28,15 @@ interface ConsolePanelProps {
   onClear: () => void;
 }
 
-export function ConsolePanel({ entries, onClear }: ConsolePanelProps) {
+function ConsolePanelClassic({ entries, onClear }: ConsolePanelProps) {
   return (
-    <div className="flex flex-col border-t border-[#FFDDD2] bg-white/80 text-[11px] font-mono">
+    <div className="flex flex-col console-divider-t bg-cafe-surface/80 text-xs font-mono">
       {/* Header bar */}
-      <div className="flex items-center justify-between px-2 py-1 border-b border-[#FFDDD2] bg-[#FDF8F3]">
+      <div className="flex items-center justify-between px-2 py-1 console-divider-b bg-[var(--ws-surface)]">
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-semibold text-[#5a4a42]/70 uppercase tracking-wider">Console</span>
+          <span className="text-micro font-semibold text-[var(--ws-text)]/70 uppercase tracking-wider">Console</span>
           {entries.length > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full bg-[#E29578]/20 text-[#E29578] text-[9px] font-bold">
+            <span className="px-1.5 py-0.5 rounded-full bg-[var(--ws-accent)]/20 text-[var(--ws-accent)] text-micro font-bold">
               {entries.length}
             </span>
           )}
@@ -42,7 +45,7 @@ export function ConsolePanel({ entries, onClear }: ConsolePanelProps) {
           <button
             type="button"
             onClick={onClear}
-            className="text-[10px] text-[#5a4a42]/50 hover:text-[#5a4a42] transition-colors"
+            className="text-micro text-[var(--ws-text)]/50 hover:text-[var(--ws-text)] transition-colors"
           >
             Clear
           </button>
@@ -52,19 +55,24 @@ export function ConsolePanel({ entries, onClear }: ConsolePanelProps) {
       {/* Entries */}
       <div className="overflow-y-auto max-h-[200px]">
         {entries.length === 0 ? (
-          <div className="px-3 py-4 text-center text-[#5a4a42]/30 text-xs">No console output</div>
+          <div className="px-3 py-4 text-center text-[var(--ws-text)]/30 text-xs">No console output</div>
         ) : (
           entries.map((entry, i) => (
             <div
               key={`${entry.timestamp}-${i}`}
-              className={`flex items-start gap-2 px-2 py-0.5 border-b border-[#FFDDD2]/30 ${LEVEL_BG[entry.level]}`}
+              className={`flex items-start gap-2 px-2 py-0.5 console-divider-b ${LEVEL_BG[entry.level]}`}
             >
               <span className={`shrink-0 w-10 ${LEVEL_STYLES[entry.level]}`}>{entry.level}</span>
-              <span className="text-[#5a4a42]/80 break-all">{entry.args.join(' ')}</span>
+              <span className="text-[var(--ws-text)]/80 break-all">{entry.args.join(' ')}</span>
             </div>
           ))
         )}
       </div>
     </div>
   );
+}
+
+export function ConsolePanel(props: ConsolePanelProps) {
+  const presentation = useShellPresentation();
+  return presentation === 'v2' ? <ConsolePanelV2 {...props} /> : <ConsolePanelClassic {...props} />;
 }

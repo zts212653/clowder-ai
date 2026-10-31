@@ -1,0 +1,332 @@
+import { DEFAULT_PLUGIN_CONTRACT_RUNTIME, isManifestContractSupported } from './contract-policy.js';
+import type { PackageAdmissionContractRuntime } from './manifest-verifier.js';
+import { storedManifest } from './stored-manifest.js';
+import type {
+  ActivationState,
+  ConfigReadiness,
+  InstanceLifecycleState,
+  PackageState,
+  PluginInstanceRecord,
+  PluginInventorySnapshot,
+  PluginPackageRecord,
+  PluginRuntimeErrorCode,
+  PluginRuntimeErrorRecord,
+  RuntimeState,
+} from './types.js';
+import { PluginInventoryError } from './types.js';
+
+const PACKAGE_STATES = new Set<PackageState>(['staged', 'verified', 'installed', 'quarantined']);
+const LIFECYCLE_STATES = new Set<InstanceLifecycleState>(['installed', 'retired']);
+const CONFIG_STATES = new Set<ConfigReadiness>(['incomplete', 'ready']);
+const ACTIVATION_STATES = new Set<ActivationState>(['disabled', 'enabling', 'enabled', 'disabling', 'error']);
+const RUNTIME_STATES = new Set<RuntimeState>(['stopped', 'starting', 'handshaking', 'healthy', 'degraded', 'crashed']);
+const RUNTIME_ERROR_CODES = new Set<PluginRuntimeErrorCode>([
+  'AUTH_EXPIRED',
+  'EVENT_BUS_CONFLICT',
+  'NOT_FOUND',
+  'PERMISSION_DENIED',
+  'RATE_LIMITED',
+  'UNAVAILABLE',
+  'UPDATE_RESUME_FAILED',
+  'UPDATE_ROLLBACK_RESUME_FAILED',
+  'CONFIGURATION_RESUME_FAILED',
+  'CATCH_UP_RESUME_FAILED',
+  'UNEXPECTED_RUNTIME_FAILURE',
+]);
+const DESKTOP_FAILURE_REASONS = new Set<NonNullable<PluginRuntimeErrorRecord['desktopReason']>>([
+  'renderer-gone',
+  'unresponsive',
+  'window-closed',
+  'process-exit',
+  'request-timeout',
+  'protocol-violation',
+  'connection-ended',
+  'heartbeat-expired',
+  'poll-failed',
+  'surface-unavailable',
+  'unknown',
+]);
+const MAX_PROCESS_EXIT_CODE = 0xffff_ffff;
+
+function corrupt(message: string): never {
+  throw new PluginInventoryError('CORRUPT_SNAPSHOT', message);
+}
+
+function object(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) corrupt(`${label} must be an object`);
+  return value as Record<string, unknown>;
+}
+
+function string(value: unknown, label: string): string {
+  if (typeof value !== 'string' || value.length === 0) corrupt(`${label} must be a non-empty string`);
+  return value;
+}
+
+function boolean(value: unknown, label: string): boolean {
+  if (typeof value !== 'boolean') corrupt(`${label} must be a boolean`);
+  return value;
+}
+
+function timestamp(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    corrupt(`${label} must be a non-negative safe integer`);
+  }
+  return value;
+}
+
+function positiveInteger(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    corrupt(`${label} must be a positive safe integer`);
+  }
+  return value;
+}
+
+function enumValue<T extends string>(value: unknown, values: ReadonlySet<T>, label: string): T {
+  if (typeof value !== 'string' || !values.has(value as T)) corrupt(`${label} has an unsupported value`);
+  return value as T;
+}
+
+function equalStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function signalSchemaCatalog(value: unknown, label: string): PluginPackageRecord['signalSchemas'] {
+  const raw = object(value, label);
+  return Object.fromEntries(
+    Object.entries(raw).map(([key, schema]) => [key, structuredClone(object(schema, `${label}.${key}`))]),
+  );
+}
+
+function packageProvenance(value: unknown, label: string): PluginPackageRecord['provenance'] {
+  const raw = object(value, label);
+  const kind = enumValue(
+    raw.kind,
+    new Set<'catalog' | 'local-directory' | 'local-archive' | 'git'>([
+      'catalog',
+      'local-directory',
+      'local-archive',
+      'git',
+    ]),
+    `${label}.kind`,
+  );
+  if (kind === 'catalog') {
+    return {
+      kind,
+      catalogId: string(raw.catalogId, `${label}.catalogId`),
+      packageName: string(raw.packageName, `${label}.packageName`),
+      ...(raw.ownerAuthRequired === undefined
+        ? {}
+        : { ownerAuthRequired: boolean(raw.ownerAuthRequired, `${label}.ownerAuthRequired`) }),
+    };
+  }
+  if (kind === 'git') {
+    return {
+      kind,
+      url: string(raw.url, `${label}.url`),
+      ...(raw.packageName === undefined ? {} : { packageName: string(raw.packageName, `${label}.packageName`) }),
+      ...(raw.dependencyClosure === undefined
+        ? {}
+        : {
+            dependencyClosure: enumValue(
+              raw.dependencyClosure,
+              new Set(['shipped', 'materialized'] as const),
+              `${label}.dependencyClosure`,
+            ),
+          }),
+    };
+  }
+  return {
+    kind,
+    ...(raw.packageName === undefined ? {} : { packageName: string(raw.packageName, `${label}.packageName`) }),
+    ...(raw.dependencyClosure === undefined
+      ? {}
+      : {
+          dependencyClosure: enumValue(
+            raw.dependencyClosure,
+            new Set(['shipped', 'materialized'] as const),
+            `${label}.dependencyClosure`,
+          ),
+        }),
+  };
+}
+
+function runtimeError(value: unknown, label: string): PluginRuntimeErrorRecord {
+  const raw = object(value, label);
+  const keys = Object.keys(raw).sort();
+  const expectedKeys = ['code', 'exitCode', 'occurredAt', 'signal'];
+  if (!equalStrings(keys, expectedKeys) && !equalStrings(keys, [...expectedKeys, 'desktopReason'].sort())) {
+    corrupt(`${label} has unsupported fields`);
+  }
+  if (
+    raw.exitCode !== null &&
+    (typeof raw.exitCode !== 'number' ||
+      !Number.isSafeInteger(raw.exitCode) ||
+      raw.exitCode < 0 ||
+      raw.exitCode > MAX_PROCESS_EXIT_CODE)
+  ) {
+    corrupt(`${label}.exitCode must be null or an unsigned 32-bit integer`);
+  }
+  if (raw.signal !== null && (typeof raw.signal !== 'string' || !/^SIG[A-Z0-9]{1,12}$/u.test(raw.signal))) {
+    corrupt(`${label}.signal must be null or a bounded signal name`);
+  }
+  return {
+    code: enumValue(raw.code, RUNTIME_ERROR_CODES, `${label}.code`),
+    exitCode: raw.exitCode,
+    signal: raw.signal as NodeJS.Signals | null,
+    occurredAt: timestamp(raw.occurredAt, `${label}.occurredAt`),
+    ...(raw.desktopReason === undefined
+      ? {}
+      : { desktopReason: enumValue(raw.desktopReason, DESKTOP_FAILURE_REASONS, `${label}.desktopReason`) }),
+  };
+}
+
+export function isCanonicalPackageDigest(value: string): boolean {
+  if (!/^sha512-[A-Za-z0-9+/]{86}==$/.test(value)) return false;
+  const encoded = value.slice('sha512-'.length);
+  const bytes = Buffer.from(encoded, 'base64');
+  return bytes.length === 64 && bytes.toString('base64') === encoded;
+}
+
+function parsePackage(value: unknown, index: number, contract: PackageAdmissionContractRuntime): PluginPackageRecord {
+  const raw = object(value, `packages[${index}]`);
+  const persistedManifest = raw.manifest === null ? raw.incompatibleManifest : raw.manifest;
+  const stored = storedManifest(persistedManifest, `packages[${index}].manifest`);
+  const validation = contract.validateManifest(persistedManifest);
+  const compatible =
+    validation.valid && isManifestContractSupported(stored.contractVersion, contract.manifestContractRange);
+  const record: PluginPackageRecord = {
+    packageDigest: string(raw.packageDigest, `packages[${index}].packageDigest`),
+    pluginId: string(raw.pluginId, `packages[${index}].pluginId`),
+    version: string(raw.version, `packages[${index}].version`),
+    contractVersion: string(raw.contractVersion, `packages[${index}].contractVersion`),
+    manifest:
+      compatible && validation.valid ? (structuredClone(persistedManifest) as PluginPackageRecord['manifest']) : null,
+    ...(!compatible ? { incompatibleManifest: stored } : {}),
+    signalSchemas: signalSchemaCatalog(raw.signalSchemas ?? {}, `packages[${index}].signalSchemas`),
+    ...(raw.provenance === undefined
+      ? {}
+      : { provenance: packageProvenance(raw.provenance, `packages[${index}].provenance`) }),
+    packageState: enumValue(raw.packageState, PACKAGE_STATES, `packages[${index}].packageState`),
+    verifiedAt: timestamp(raw.verifiedAt, `packages[${index}].verifiedAt`),
+    updatedAt: timestamp(raw.updatedAt, `packages[${index}].updatedAt`),
+  };
+  if (!isCanonicalPackageDigest(record.packageDigest)) corrupt(`packages[${index}].packageDigest is not canonical`);
+  if (
+    record.pluginId !== stored.pluginId ||
+    record.version !== stored.version ||
+    record.contractVersion !== stored.contractVersion
+  ) {
+    corrupt(`packages[${index}] identity does not match its manifest`);
+  }
+  for (const declaration of record.manifest?.signals?.provides ?? []) {
+    if (!Object.hasOwn(record.signalSchemas, declaration.schemaRef)) {
+      corrupt(`packages[${index}] is missing declared signal schema ${declaration.schemaRef}`);
+    }
+  }
+  return record;
+}
+
+function parseInstance(value: unknown, index: number): PluginInstanceRecord {
+  const raw = object(value, `instances[${index}]`);
+  const record: PluginInstanceRecord = {
+    pluginInstanceId: string(raw.pluginInstanceId, `instances[${index}].pluginInstanceId`),
+    pluginId: string(raw.pluginId, `instances[${index}].pluginId`),
+    packageDigest: string(raw.packageDigest, `instances[${index}].packageDigest`),
+    lifecycleState: enumValue(raw.lifecycleState, LIFECYCLE_STATES, `instances[${index}].lifecycleState`),
+    configReadiness: enumValue(raw.configReadiness, CONFIG_STATES, `instances[${index}].configReadiness`),
+    activationState: enumValue(raw.activationState, ACTIVATION_STATES, `instances[${index}].activationState`),
+    runtimeState: enumValue(raw.runtimeState, RUNTIME_STATES, `instances[${index}].runtimeState`),
+    // Schema v1 snapshots written before owner activation existed are migrated in memory.
+    lifecycleRevision: positiveInteger(raw.lifecycleRevision ?? 1, `instances[${index}].lifecycleRevision`),
+    installedAt: timestamp(raw.installedAt, `instances[${index}].installedAt`),
+    updatedAt: timestamp(raw.updatedAt, `instances[${index}].updatedAt`),
+    ...(raw.retiredAt === undefined ? {} : { retiredAt: timestamp(raw.retiredAt, `instances[${index}].retiredAt`) }),
+    ...(raw.lastRuntimeError === undefined
+      ? {}
+      : { lastRuntimeError: runtimeError(raw.lastRuntimeError, `instances[${index}].lastRuntimeError`) }),
+  };
+  if (!isCanonicalPackageDigest(record.packageDigest)) corrupt(`instances[${index}].packageDigest is not canonical`);
+  if (record.lifecycleState === 'retired' && record.retiredAt === undefined) {
+    corrupt(`instances[${index}] retired state requires retiredAt`);
+  }
+  return record;
+}
+
+export function emptyPluginInventorySnapshot(): PluginInventorySnapshot {
+  return { schemaVersion: 1, packages: [], instances: [] };
+}
+
+export function clonePluginInventorySnapshot(snapshot: PluginInventorySnapshot): PluginInventorySnapshot {
+  return structuredClone(snapshot);
+}
+
+function requireSupportedCollections(raw: Record<string, unknown>): asserts raw is Record<string, unknown> & {
+  packages: unknown[];
+  instances: unknown[];
+} {
+  if (raw.schemaVersion !== 1) {
+    if (typeof raw.schemaVersion === 'number') {
+      throw new PluginInventoryError('UNSUPPORTED_SCHEMA', `unsupported plugin inventory schema ${raw.schemaVersion}`);
+    }
+    corrupt('inventory.schemaVersion must be 1');
+  }
+  if (!Array.isArray(raw.packages) || !Array.isArray(raw.instances)) {
+    corrupt('inventory collections must be arrays');
+  }
+}
+
+function indexPackages(packages: PluginPackageRecord[]): Map<string, PluginPackageRecord> {
+  const packageByDigest = new Map<string, PluginPackageRecord>();
+  for (const record of packages) {
+    if (packageByDigest.has(record.packageDigest)) corrupt(`duplicate package digest ${record.packageDigest}`);
+    packageByDigest.set(record.packageDigest, record);
+  }
+  return packageByDigest;
+}
+
+function assertInstancePackageEligibility(
+  instance: PluginInstanceRecord,
+  packageRecord: PluginPackageRecord | undefined,
+): asserts packageRecord is PluginPackageRecord {
+  if (!packageRecord || packageRecord.pluginId !== instance.pluginId) {
+    corrupt(`instance ${instance.pluginInstanceId} has no package`);
+  }
+  if (packageRecord.packageState === 'staged' || packageRecord.packageState === 'verified') {
+    corrupt(`instance ${instance.pluginInstanceId} references a package that was never installed`);
+  }
+  if (instance.lifecycleState === 'installed' && packageRecord.packageState !== 'installed') {
+    corrupt(`current instance ${instance.pluginInstanceId} requires an installed package`);
+  }
+}
+
+function indexInstances(
+  instances: PluginInstanceRecord[],
+  packageByDigest: ReadonlyMap<string, PluginPackageRecord>,
+): Map<string, PluginInstanceRecord> {
+  const instanceById = new Map<string, PluginInstanceRecord>();
+  const currentByPlugin = new Set<string>();
+  for (const record of instances) {
+    if (instanceById.has(record.pluginInstanceId)) corrupt(`duplicate instance id ${record.pluginInstanceId}`);
+    const packageRecord = packageByDigest.get(record.packageDigest);
+    assertInstancePackageEligibility(record, packageRecord);
+    if (record.lifecycleState === 'installed') {
+      if (currentByPlugin.has(record.pluginId)) corrupt(`multiple installed instances for ${record.pluginId}`);
+      currentByPlugin.add(record.pluginId);
+    }
+    instanceById.set(record.pluginInstanceId, record);
+  }
+  return instanceById;
+}
+
+export function parsePluginInventorySnapshot(
+  value: unknown,
+  contract: PackageAdmissionContractRuntime = DEFAULT_PLUGIN_CONTRACT_RUNTIME,
+): PluginInventorySnapshot {
+  const raw = object(value, 'inventory');
+  requireSupportedCollections(raw);
+  const packages = raw.packages.map((entry, index) => parsePackage(entry, index, contract));
+  const packageByDigest = indexPackages(packages);
+  const instances = raw.instances.map((entry, index) => parseInstance(entry, index));
+  indexInstances(instances, packageByDigest);
+  return { schemaVersion: 1, packages, instances };
+}

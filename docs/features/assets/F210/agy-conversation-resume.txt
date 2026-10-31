@@ -1,0 +1,28 @@
+Command:
+/tmp/cat-cafe-f210-agy-recon/bin/agy \
+  --log-file /tmp/cat-cafe-f210-agy-headless-spike-resume.log \
+  --print-timeout 30s \
+  --conversation [REDACTED_CONVERSATION_ID] \
+  --print "Reply exactly: AGY_RESUME_OK"
+
+Captured: 2026-05-22
+Exit: 0
+
+stdout:
+CAT_CAFE_AGY_HEADLESS_OK
+AGY_RESUME_OK
+
+stderr:
+(empty)
+
+Selected log lines:
+I... Print mode: starting (promptLength=28, model="", conversationID="[REDACTED_CONVERSATION_ID]")
+I... ChainedAuth: authenticated via keyring (effective: keyring)
+I... Propagating selected model override to backend: label="Gemini 3.5 Flash (High)"
+I... Print mode: silent auth succeeded
+I... Print mode: resuming conversation [REDACTED_CONVERSATION_ID]
+I... Print mode: conversation=[REDACTED_CONVERSATION_ID], sending message
+
+Notes:
+- `--conversation <id>` does resume by stable conversation ID.
+- In this fixture, stdout included the previous assistant final text plus the new final text. A Cat Cafe parser must not assume resumed print-mode stdout is only the response delta.

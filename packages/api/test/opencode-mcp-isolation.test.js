@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, mock, test } from 'node:test';
 import { OpenCodeAgentService } from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
+import { probeOpenCodeAutoApproveSupport } from '../dist/domains/cats/services/agents/providers/opencode-auto-approval.js';
 import { generateOpenCodeConfig } from '../dist/domains/cats/services/agents/providers/opencode-config-template.js';
 import { collect, createMockProcess, emitOpenCodeEvents } from './helpers/opencode-test-helpers.js';
 
@@ -23,10 +27,92 @@ const STEP_FINISH = {
   part: { type: 'step-finish', reason: 'stop', cost: 0.01, tokens: { total: 5000 } },
 };
 
-// Cat Cafe MCP env var names used in assertions below
+function createHelpMaskingUnknownFlagsOpenCodeCli() {
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-help-masking-opencode-cli-'));
+  const file = join(dir, 'opencode');
+  writeFileSync(
+    file,
+    `#!/bin/sh
+if [ "$1" = "run" ] && [ "$2" = "--help" ]; then
+  echo "opencode run [message..]"
+  exit 0
+fi
+if [ "$1" = "run" ] && [ "$3" = "--help" ]; then
+  echo "opencode run [message..]"
+  exit 0
+fi
+echo "unknown option" >&2
+exit 1
+`,
+  );
+  chmodSync(file, 0o755);
+  return file;
+}
+
+function createAdvertisedAutoApprovalOpenCodeCli(...flags) {
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-advertised-opencode-cli-'));
+  const file = join(dir, 'opencode');
+  const advertisedFlags = flags.map((flag) => `  echo "      ${flag}"`).join('\n');
+  writeFileSync(
+    file,
+    `#!/bin/sh
+if [ "$1" = "run" ] && [ "$2" = "--help" ]; then
+  echo "opencode run [message..]"
+${advertisedFlags}
+  exit 0
+fi
+echo "unexpected invocation" >&2
+exit 1
+`,
+  );
+  chmodSync(file, 0o755);
+  return file;
+}
+
+function createExecutionOwnerRejectingOpenCodeCli() {
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-non-owner-opencode-probe-'));
+  const file = join(dir, 'opencode');
+  writeFileSync(
+    file,
+    `#!/bin/sh
+if [ -n "$CAT_CAFE_PROCESS_EXECUTION_OWNER" ] || [ -n "$CAT_CAFE_EXECUTION_ID" ]; then
+  echo "probe inherited execution ownership" >&2
+  exit 42
+fi
+echo "opencode run [message..]"
+echo "      --auto"
+`,
+  );
+  chmodSync(file, 0o755);
+  return file;
+}
+
+async function invokeOpenCode(invokeOptions = {}, serviceOptions = {}) {
+  const proc = createMockProcess();
+  const spawnFn = mock.fn(() => proc);
+  const service = new OpenCodeAgentService({
+    catId: 'opencode',
+    spawnFn,
+    model: 'claude-haiku-4-5',
+    ...serviceOptions,
+  });
+
+  const promise = collect(service.invoke('Test', invokeOptions));
+  emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+  const messages = await promise;
+
+  return { messages, spawnFn };
+}
+
+async function invokeOpenCodeAndCaptureArgs(invokeOptions = {}, serviceOptions = {}) {
+  const { spawnFn } = await invokeOpenCode(invokeOptions, serviceOptions);
+  return spawnFn.mock.calls[0].arguments[1];
+}
+
+// Clowder AI MCP env var names used in assertions below
 
 describe('MCP Tool Namespace Isolation (AC-10)', () => {
-  // ── buildEnv does not pass Cat Cafe MCP env vars ──
+  // ── buildEnv does not pass Clowder AI MCP env vars ──
 
   test('buildEnv does not forward CAT_CAFE_MCP_* env vars to child process', async () => {
     const proc = createMockProcess();
@@ -37,7 +123,7 @@ describe('MCP Tool Namespace Isolation (AC-10)', () => {
       model: 'claude-haiku-4-5',
     });
 
-    // Simulate callbackEnv with Cat Cafe MCP vars mixed in
+    // Simulate callbackEnv with Clowder AI MCP vars mixed in
     const callbackEnv = {
       CAT_CAFE_ANTHROPIC_API_KEY: 'sk-test',
       CAT_CAFE_ANTHROPIC_BASE_URL: 'http://proxy:9877/slug',
@@ -53,12 +139,12 @@ describe('MCP Tool Namespace Isolation (AC-10)', () => {
     const opts = spawnFn.mock.calls[0].arguments[2];
     const childEnv = opts.env;
 
-    // Cat Cafe MCP vars should either be absent or passthrough as-is
+    // Clowder AI MCP vars should either be absent or passthrough as-is
     // (they are harmless because opencode doesn't read them),
     // but they must NOT be mapped to opencode's own MCP config vars.
     // opencode reads MCP config from opencode.json, not env vars.
 
-    // Verify no OPENCODE_MCP_* vars were created from Cat Cafe vars
+    // Verify no OPENCODE_MCP_* vars were created from Clowder AI vars
     const opencodeMcpKeys = Object.keys(childEnv).filter(
       (k) => k.startsWith('OPENCODE_MCP_') || k === 'MCP_SERVER_URL',
     );
@@ -111,11 +197,11 @@ describe('MCP Tool Namespace Isolation (AC-10)', () => {
     assert.ok(!('OPENCODE_BASE_URL' in childEnv), 'OPENCODE_BASE_URL should be deleted from child env');
   });
 
-  // ── Process boundary: opencode reads MCP config from opencode.json, not Cat Cafe ──
+  // ── Process boundary: opencode reads MCP config from opencode.json, not Clowder AI ──
 
   test('opencode MCP config is file-based (opencode.json), not env-based', () => {
     // Verify that generateOpenCodeConfig does NOT produce an mcp section.
-    // opencode reads MCP config from opencode.json; Cat Cafe serves MCP via
+    // opencode reads MCP config from opencode.json; Clowder AI serves MCP via
     // its own mcp-server package. The config template must NOT bridge them.
     const config = generateOpenCodeConfig({
       apiKey: 'sk-test',
@@ -123,20 +209,20 @@ describe('MCP Tool Namespace Isolation (AC-10)', () => {
       model: 'claude-sonnet-4-6',
     });
 
-    // No MCP section means no Cat Cafe tools leak into opencode's namespace
+    // No MCP section means no Clowder AI tools leak into opencode's namespace
     assert.strictEqual(config.mcp, undefined, 'generated config must not have mcp section');
     assert.strictEqual(config.provider.anthropic.options.apiKey, undefined, 'apiKey must stay in env');
 
-    // Verify Cat Cafe MCP tool prefix convention is distinct from opencode's tools
-    // (opencode tools: bash/read/write/..., Cat Cafe MCP: cat_cafe_*)
+    // Verify Clowder AI MCP tool prefix convention is distinct from opencode's tools
+    // (opencode tools: bash/read/write/..., Clowder AI MCP: cat_cafe_*)
     const serialized = JSON.stringify(config);
     assert.ok(!serialized.includes('cat_cafe'), 'no cat_cafe references in opencode config');
     assert.ok(!serialized.includes('cat-cafe'), 'no cat-cafe references in opencode config');
   });
 
-  // ── No Cat Cafe MCP tool names in opencode's internal toolset ──
+  // ── No Clowder AI MCP tool names in opencode's internal toolset ──
 
-  test('opencode internal tools do not collide with Cat Cafe MCP tool names', () => {
+  test('opencode internal tools do not collide with Clowder AI MCP tool names', () => {
     const opencodeTools = [
       'bash',
       'read',
@@ -162,22 +248,168 @@ describe('MCP Tool Namespace Isolation (AC-10)', () => {
       'cat_cafe_list_tasks',
       'cat_cafe_update_task',
       'cat_cafe_create_rich_block',
-      'cat_cafe_request_permission',
       'cat_cafe_search_evidence',
-      'cat_cafe_reflect',
+      // cat_cafe_reflect removed in F193 Phase D AC-D1
       'cat_cafe_multi_mention',
       'cat_cafe_start_vote',
       'cat_cafe_update_workflow',
-      'cat_cafe_register_pr_tracking',
     ];
 
     // Verify zero overlap
     const overlap = opencodeTools.filter((t) => catCafeMcpTools.includes(t));
     assert.strictEqual(overlap.length, 0, `tool name collision detected: ${overlap}`);
 
-    // Also verify by prefix convention: Cat Cafe uses cat_cafe_ prefix
+    // Also verify by prefix convention: Clowder AI uses cat_cafe_ prefix
     for (const tool of opencodeTools) {
-      assert.ok(!tool.startsWith('cat_cafe_'), `opencode tool "${tool}" collides with Cat Cafe MCP namespace`);
+      assert.ok(!tool.startsWith('cat_cafe_'), `opencode tool "${tool}" collides with Clowder AI MCP namespace`);
     }
+  });
+});
+
+describe('OpenCode headless permission mode', () => {
+  test('opencode CLI args auto-approve permissions in headless JSON mode', async () => {
+    const args = await invokeOpenCodeAndCaptureArgs();
+
+    assert.ok(args.includes('--format'), 'must run in JSON event stream mode');
+    assert.ok(args.includes('--auto'), 'must auto-approve permissions for headless runs');
+    assert.equal(args.filter((arg) => arg === '--auto').length, 1, 'must inject auto-approval flag exactly once');
+  });
+
+  test('opencode CLI args do not duplicate user-provided --auto', async () => {
+    const args = await invokeOpenCodeAndCaptureArgs({ cliConfigArgs: ['--auto'] });
+
+    assert.ok(args.includes('--auto'), 'must preserve user-provided public auto-approval flag');
+    assert.equal(args.filter((arg) => arg === '--auto').length, 1, 'must not duplicate auto-approval aliases');
+  });
+
+  test('opencode CLI args let user-provided legacy alias replace default --auto', async () => {
+    const args = await invokeOpenCodeAndCaptureArgs({ cliConfigArgs: ['--dangerously-skip-permissions'] });
+
+    assert.ok(args.includes('--dangerously-skip-permissions'), 'must preserve user-provided legacy alias');
+    assert.equal(
+      args.filter((arg) => arg === '--auto').length,
+      0,
+      'must not inject --auto when user controls approval',
+    );
+  });
+
+  test('opencode auto-approval probe continues without default flag when no known flag is available', async () => {
+    const { messages, spawnFn } = await invokeOpenCode(
+      {},
+      {
+        autoApproveProbeFn: async () => ({}),
+      },
+    );
+
+    assert.equal(spawnFn.mock.calls.length, 1, 'must launch opencode run even when no auto flag is available');
+    assert.ok(
+      messages.some((message) => message.type === 'text'),
+      'must stream the opencode result',
+    );
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args.filter((arg) => arg === '--auto').length, 0, 'must not inject unsupported --auto');
+    assert.equal(
+      args.filter((arg) => arg === '--dangerously-skip-permissions' || arg === '--yolo').length,
+      0,
+      'must not inject a legacy alias unless the probe selected one',
+    );
+  });
+
+  test('opencode auto-approval probe injects selected legacy alias', async () => {
+    const args = await invokeOpenCodeAndCaptureArgs(
+      {},
+      {
+        autoApproveProbeFn: async () => ({
+          approvalFlag: '--dangerously-skip-permissions',
+        }),
+      },
+    );
+
+    assert.ok(args.includes('--dangerously-skip-permissions'), 'must inject the selected legacy alias');
+    assert.equal(args.filter((arg) => arg === '--auto').length, 0, 'must not inject --auto when legacy alias wins');
+  });
+
+  test('opencode auto-approval probe injects --auto when selected', async () => {
+    const args = await invokeOpenCodeAndCaptureArgs(
+      {},
+      {
+        autoApproveProbeFn: async () => ({
+          approvalFlag: '--auto',
+        }),
+      },
+    );
+
+    assert.ok(args.includes('--auto'), 'must inject --auto when the probe selects it');
+    assert.equal(args.filter((arg) => arg === '--auto').length, 1, 'must inject --auto exactly once');
+  });
+
+  test('opencode auto-approval probe prefers an advertised --auto flag', async () => {
+    const command = createAdvertisedAutoApprovalOpenCodeCli('--dangerously-skip-permissions', '--auto');
+
+    const result = await probeOpenCodeAutoApproveSupport(command);
+
+    assert.equal(result.approvalFlag, '--auto');
+  });
+
+  test('opencode auto-approval probe accepts an advertised legacy alias', async () => {
+    const command = createAdvertisedAutoApprovalOpenCodeCli('--dangerously-skip-permissions');
+
+    const result = await probeOpenCodeAutoApproveSupport(command);
+
+    assert.equal(result.approvalFlag, '--dangerously-skip-permissions');
+  });
+
+  test('opencode auto-approval probe never becomes an invocation execution owner', async () => {
+    const command = createExecutionOwnerRejectingOpenCodeCli();
+
+    const result = await probeOpenCodeAutoApproveSupport(command, undefined, {
+      CAT_CAFE_PROCESS_EXECUTION_OWNER: '1',
+      CAT_CAFE_EXECUTION_ID: 'parent-execution-first-probe',
+      CAT_CAFE_INVOCATION_ID: 'turn-first-probe',
+      CAT_CAFE_THREAD_ID: 'thread-first-probe',
+      CAT_CAFE_CAT_ID: 'opencode',
+      CAT_CAFE_USER_ID: 'scheduler',
+    });
+
+    assert.equal(result.approvalFlag, '--auto');
+  });
+
+  test('opencode auto-approval probe does not infer hidden aliases when --help masks unknown flags', async () => {
+    const command = createHelpMaskingUnknownFlagsOpenCodeCli();
+
+    const result = await probeOpenCodeAutoApproveSupport(command);
+
+    assert.equal(result.approvalFlag, undefined, 'help-only success cannot prove an unadvertised flag is supported');
+    assert.match(result.warning ?? '', /did not advertise a supported auto-approval flag/);
+  });
+
+  test('opencode auto-approval probe retries after transient warning result', async () => {
+    const procs = [createMockProcess(), createMockProcess()];
+    let spawnIndex = 0;
+    const spawnFn = mock.fn(() => procs[spawnIndex++]);
+    let probeAttempts = 0;
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'claude-haiku-4-5',
+      autoApproveProbeFn: async () => {
+        probeAttempts++;
+        return probeAttempts === 1 ? { warning: 'transient probe failure' } : { approvalFlag: '--auto' };
+      },
+    });
+
+    const firstInvocation = collect(service.invoke('Test'));
+    emitOpenCodeEvents(procs[0], [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    await firstInvocation;
+
+    const secondInvocation = collect(service.invoke('Test'));
+    emitOpenCodeEvents(procs[1], [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    await secondInvocation;
+
+    const firstArgs = spawnFn.mock.calls[0].arguments[1];
+    const secondArgs = spawnFn.mock.calls[1].arguments[1];
+    assert.equal(firstArgs.filter((arg) => arg === '--auto').length, 0, 'first transient warning omits default flag');
+    assert.equal(probeAttempts, 2, 'transient warning results must not be cached');
+    assert.ok(secondArgs.includes('--auto'), 'second invocation must retry and inject --auto when probe succeeds');
   });
 });

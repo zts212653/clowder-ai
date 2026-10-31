@@ -1,0 +1,10 @@
+id: video-cocreation
+domain: creative
+label: Video Co-Creation SOP Stub
+description: Schema fixture only. Not part of runtime codegen.
+stages:
+  - id: intake
+    label: Intake
+    suggested_skill: video-forge
+    hard_rules: []
+    pitfalls: []

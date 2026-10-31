@@ -1,0 +1,132 @@
+{
+  "asset": {
+    "title": "插件平台契约与分工",
+    "origin": "源自 v0 讨论",
+    "version": "当前版本 · v3",
+    "summary": "You 与吴浪围绕平台边界、记忆归属和事件交付完成了八轮往来。争议已经收敛，最后三处措辞也已回填。",
+    "updatedAt": "2026 年 7 月 15 日 08:36",
+    "sections": [
+      {
+        "title": "平台边界",
+        "body": "第一方负责插件的安装、启停、权限、运行状态与审计；插件负责自己的业务数据和执行逻辑。第一版不提供绕过统一管理入口的接入方式。"
+      },
+      {
+        "title": "记忆归属",
+        "body": "关系记忆、长期偏好和互动历史由 Clowder AI 持有。插件可以在授权范围内读取必要片段。停用插件时，同时清理与该插件有关的互动记录。"
+      },
+      {
+        "title": "事件交付",
+        "body": "事件允许重复送达，接收方必须能够安全地重复处理。第一版只支持主动调用与回传结果两种协作方式，后续能力按真实需求扩展。"
+      }
+    ]
+  },
+  "change": {
+    "title": "把四组清理项写回正式版本",
+    "reason": "You 复查后确认四组实质问题已经解决，只剩三处措辞需要统一。",
+    "recommendation": "接受这次修改，并把 v3 设为当前版本。",
+    "before": "停用插件时，同时清理与该插件有关的互动记录。",
+    "after": "停用插件不删除关系记忆与互动历史；仅停止新的插件调用。"
+  },
+  "discussion": [
+    {
+      "author": "吴浪",
+      "time": "7 月 12 日 15:47",
+      "anchor": "平台边界 · 第 1 段",
+      "text": "建议把平台与插件的分工写成机器可读的约定，后续实现和文档都从同一份定义生成。"
+    },
+    {
+      "author": "You",
+      "time": "7 月 12 日 16:58",
+      "anchor": "记忆归属 · 第 1 段",
+      "text": "这里先部分接受。关系记忆不能跟着插件停用一起消失，这条边界需要保留。"
+    },
+    {
+      "author": "吴浪",
+      "time": "7 月 13 日 14:10",
+      "anchor": "事件交付 · 第 1 段",
+      "text": "已按批注补上重复送达与安全重试，也把第一版范围收回到两种协作方式。"
+    }
+  ],
+  "records": [
+    {
+      "id": "proposal-4951786772",
+      "actor": "吴浪",
+      "time": "7 月 12 日 15:47",
+      "kind": "修改提案",
+      "outcome": "待回应",
+      "title": "提出可执行的分工约定",
+      "detail": "把平台、插件与生成物之间的责任写成一份可执行的约定，减少文档与实现分叉。",
+      "sourceUrl": "https://github.com/zts212653/clowder-ai-plugins/issues/1#issuecomment-4951786772"
+    },
+    {
+      "id": "review-4951812238",
+      "actor": "You",
+      "time": "7 月 12 日 16:58",
+      "kind": "批注",
+      "outcome": "部分接受",
+      "title": "接受主体，保留记忆边界",
+      "detail": "三项建议直接接受；关系记忆不能随插件停用删除，这一项先保留分歧。",
+      "sourceUrl": "https://github.com/zts212653/clowder-ai-plugins/issues/1#issuecomment-4951812238"
+    },
+    {
+      "id": "annotations-4951861519",
+      "actor": "You",
+      "time": "7 月 12 日 18:16",
+      "kind": "批注",
+      "outcome": "继续修改",
+      "title": "完成十二处逐段批注",
+      "detail": "批注覆盖平台边界、生命周期、事件语义和第一版范围，要求逐项回填。",
+      "sourceUrl": "https://github.com/zts212653/clowder-ai-plugins/issues/1#issuecomment-4951861519"
+    },
+    {
+      "id": "adopted-4951875891",
+      "actor": "吴浪",
+      "time": "7 月 12 日 18:44",
+      "kind": "修改提案",
+      "outcome": "接受",
+      "title": "补齐两条关键约定",
+      "detail": "采纳记忆归属和事件重复送达两条批注，并把修改写回约定。",
+      "sourceUrl": "https://github.com/zts212653/clowder-ai-plugins/issues/1#issuecomment-4951875891"
+    },
+    {
+      "id": "differences-4953049036",
+      "actor": "You",
+      "time": "7 月 13 日 09:27",
+      "kind": "复查",
+      "outcome": "保留分歧",
+      "title": "确认四组清理项",
+      "detail": "主体方向已经对齐，但四组边界与措辞仍需修改后才能进入新版本。",
+      "sourceUrl": "https://github.com/zts212653/clowder-ai-plugins/issues/1#issuecomment-4953049036"
+    },
+    {
+      "id": "cleanup-279a9cb",
+      "actor": "吴浪",
+      "time": "7 月 13 日 14:10",
+      "kind": "新版本",
+      "outcome": "新版本",
+      "title": "四组修改逐项落进新版本",
+      "detail": "提交 279a9cb，平台边界、记忆归属、事件交付与第一版范围全部更新。",
+      "sourceUrl": "https://github.com/zts212653/clowder-ai-plugins/issues/1#issuecomment-4953869345"
+    },
+    {
+      "id": "partial-4965951215",
+      "actor": "You",
+      "time": "7 月 15 日 05:17",
+      "kind": "复查",
+      "outcome": "部分接受",
+      "title": "实质问题归零，留下三处措辞",
+      "detail": "四组实质修改均已通过，最后三处措辞作为收尾项继续修改。",
+      "sourceUrl": "https://github.com/zts212653/clowder-ai-plugins/issues/1#issuecomment-4965951215"
+    },
+    {
+      "id": "final-4966794934",
+      "actor": "You",
+      "time": "7 月 15 日 08:36",
+      "kind": "复查",
+      "outcome": "接受",
+      "title": "确认 v3 为当前版本",
+      "detail": "提交 54defbb 完成最后三处修订；You 复查确认全部问题归零。",
+      "sourceUrl": "https://github.com/zts212653/clowder-ai-plugins/issues/1#issuecomment-4966794934"
+    }
+  ]
+}

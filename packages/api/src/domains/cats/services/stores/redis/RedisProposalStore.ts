@@ -1,0 +1,397 @@
+import { reconcileSettledIndexTime } from '../../../../../utils/reconcile-settled-index-time.js';
+import { advanceSettledIndex, SettledIndexPreparingError } from '../../../../../utils/redis-settled-index.js';
+import { readRedisSettledPage } from '../../../../../utils/redis-settled-page.js';
+import type { SettledHistoryPageOptions, SettledHistorySourcePage } from '../../../../../utils/settled-history-page.js';
+/**
+ * Redis-backed F128 Proposal store.
+ *
+ * Data structures:
+ * - Hash proposal:{proposalId} — proposal fields
+ * - SortedSet proposals:user:{userId} — all proposals for user (score=createdAt)
+ * - SortedSet proposals:pending:{userId} — pending-only ids (zrem on approve/reject)
+ * - SortedSet proposals:thread:{threadId} — proposals proposed in a thread
+ * - String dedup:propose:{userId}:{clientRequestId} → proposalId (short TTL)
+ *
+ * IMPORTANT: ioredis keyPrefix auto-prefixes ALL commands.
+ */
+
+import type {
+  ApprovalEnvelope,
+  ApprovalPublication,
+  ProposalApproveOverrides,
+  ProposalStatus,
+  ThreadProposal,
+} from '@cat-cafe/shared';
+import { assertApprovalEnvelopeIdentity, generateProposalId } from '@cat-cafe/shared';
+import type { RedisClient } from '@cat-cafe/shared/utils';
+import type { ApprovedTaskContinuationInput } from '../../../../ball-custody/approved-task-continuation.js';
+import type {
+  ClaimForApprovalInput,
+  CreateProposalInput,
+  FinalizeApprovalInput,
+  IProposalStore,
+  RejectProposalInput,
+  WithdrawProposalInput,
+} from '../ports/ProposalStore.js';
+import { ProposalKeys } from '../redis-keys/proposals/proposal-keys.js';
+import { abortRedisStaged, commitRedisApprovalEnvelope } from './RedisApprovalPublication.js';
+import { finalizeRedisProposalApproval } from './RedisProposalApproval.js';
+import { continueRedisApprovedTask } from './RedisProposalContinuation.js';
+import { recordRedisRevisionRequest, supersedeRedisProposal } from './RedisProposalRevision.js';
+import { createdThreadCheckpointFields } from './RedisProposalStoreFields.js';
+import {
+  CAS_TRANSITION_LUA,
+  hydrateProposal,
+  RECORD_CREATED_THREAD_LUA,
+  RELEASE_DEDUP_LUA,
+  serializeProposal,
+} from './RedisProposalStoreHelpers.js';
+import { withdrawPendingProposal } from './RedisProposalWithdrawal.js';
+
+const DEFAULT_DEDUP_TTL_SECONDS = 10 * 60; // 10 minutes — idempotency key only, not user-visible state
+const DEFAULT_LIST_LIMIT = 100;
+
+export class RedisProposalStore implements IProposalStore {
+  private readonly redis: RedisClient;
+  private readonly ttlSeconds: number | null;
+  private readonly dedupTtlSeconds: number;
+
+  constructor(redis: RedisClient, options?: { ttlSeconds?: number; dedupTtlSeconds?: number }) {
+    this.redis = redis;
+    // LL-048: proposal UI state and audit lineage persist unless the caller opts in to a positive TTL.
+    const ttl = options?.ttlSeconds;
+    if (ttl !== undefined && Number.isFinite(ttl) && ttl > 0) {
+      this.ttlSeconds = Math.floor(ttl);
+    } else {
+      this.ttlSeconds = null;
+    }
+    this.dedupTtlSeconds = options?.dedupTtlSeconds ?? DEFAULT_DEDUP_TTL_SECONDS;
+  }
+
+  continueApprovedTask(input: ApprovedTaskContinuationInput) {
+    return continueRedisApprovedTask(this.redis, input);
+  }
+
+  async create(input: CreateProposalInput): Promise<ThreadProposal> {
+    const now = Date.now();
+    const proposal: ThreadProposal = {
+      proposalId: input.proposalId ?? generateProposalId(),
+      status: 'pending',
+      sourceThreadId: input.sourceThreadId,
+      sourceInvocationId: input.sourceInvocationId,
+      sourceCatId: input.sourceCatId,
+      sourceMessageId: input.sourceMessageId,
+      title: input.title,
+      reason: input.reason,
+      parentThreadId: input.parentThreadId,
+      preferredCats: [...input.preferredCats],
+      projectPath: input.projectPath,
+      suggestedGroupId: input.suggestedGroupId,
+      suggestedPinned: input.suggestedPinned,
+      groupSuggestionReason: input.groupSuggestionReason,
+      supersedesProposalId: input.supersedesProposalId,
+      createdBy: input.createdBy,
+      createdAt: now,
+      publication: { state: 'staged', stagedAt: now },
+      ...(input.initialMessage ? { initialMessage: input.initialMessage } : {}),
+      ...(input.reportingMode ? { reportingMode: input.reportingMode } : {}),
+      ...(input.declaredWorkMode ? { declaredWorkMode: input.declaredWorkMode } : {}),
+      ...(input.subjectTaskId ? { subjectTaskId: input.subjectTaskId } : {}),
+      ...(input.subjectTaskTitle ? { subjectTaskTitle: input.subjectTaskTitle } : {}),
+      ...(input.approvedDevelopmentScope ? { approvedDevelopmentScope: input.approvedDevelopmentScope } : {}),
+    };
+
+    const key = ProposalKeys.detail(proposal.proposalId);
+    const pipeline = this.redis.multi();
+    pipeline.hset(key, ...serializeProposal(proposal));
+    if (this.ttlSeconds) pipeline.expire(key, this.ttlSeconds);
+    pipeline.zadd(ProposalKeys.userList(proposal.createdBy), String(now), proposal.proposalId);
+    pipeline.zadd(ProposalKeys.userPending(proposal.createdBy), String(now), proposal.proposalId);
+    pipeline.zadd(ProposalKeys.threadList(proposal.sourceThreadId), String(now), proposal.proposalId);
+    await pipeline.exec();
+    return proposal;
+  }
+
+  async get(proposalId: string): Promise<ThreadProposal | null> {
+    const data = await this.redis.hgetall(ProposalKeys.detail(proposalId));
+    if (!data || !data.proposalId) return null;
+    return hydrateProposal(data);
+  }
+
+  async recordRevisionRequest(
+    proposalId: string,
+    request: NonNullable<ThreadProposal['revisionRequest']>,
+  ): Promise<ThreadProposal | null> {
+    return (await recordRedisRevisionRequest(this.redis, proposalId, request)) ? this.get(proposalId) : null;
+  }
+
+  async supersedePending(
+    proposalId: string,
+    replacementId: string,
+    requestMessageId: string,
+  ): Promise<ThreadProposal | null> {
+    const proposal = await this.get(proposalId);
+    return proposal && (await supersedeRedisProposal(this.redis, proposal, replacementId, requestMessageId))
+      ? this.get(proposalId)
+      : null;
+  }
+
+  async listByUser(userId: string, limit: number = DEFAULT_LIST_LIMIT): Promise<ThreadProposal[]> {
+    return this.loadFromIndex(ProposalKeys.userList(userId), limit);
+  }
+
+  private async prepareSettledHistory() {
+    const ready = await advanceSettledIndex(this.redis, {
+      progressKey: 'proposals:history-index:v1',
+      prefix: 'proposal:',
+      type: 'hash',
+      entry: (raw, key) => {
+        const p = hydrateProposal(raw as Record<string, string>);
+        if (key !== ProposalKeys.detail(p.proposalId)) throw new Error('proposal history identity mismatch');
+        return ['approved', 'rejected', 'withdrawn'].includes(p.status)
+          ? {
+              indexKey: ProposalKeys.userSettled(p.createdBy),
+              id: p.proposalId,
+              score: p.withdrawnAt ?? p.approvedAt ?? p.rejectedAt ?? p.createdAt,
+            }
+          : null;
+      },
+    });
+    if (!ready) throw new SettledIndexPreparingError();
+  }
+
+  async listSettledPage(
+    owner: string,
+    options: SettledHistoryPageOptions,
+  ): Promise<SettledHistorySourcePage<ThreadProposal>> {
+    await this.prepareSettledHistory();
+    return readRedisSettledPage(this.redis, ProposalKeys.userSettled(owner), options, async (id, at) => {
+      const p = await this.get(id);
+      if (!p) return null;
+      if (p.createdBy !== owner || !['approved', 'rejected', 'withdrawn'].includes(p.status))
+        throw new Error('Settled index canonical owner/status mismatch');
+      if (p.proposalId !== id) throw new Error('Settled index identity mismatch');
+      await reconcileSettledIndexTime(
+        this.redis,
+        ProposalKeys.userSettled(owner),
+        id,
+        at,
+        p.withdrawnAt ?? p.approvedAt ?? p.rejectedAt ?? 0,
+        [
+          {
+            key: ProposalKeys.detail(id),
+            fields: {
+              status: p.status,
+              createdBy: p.createdBy,
+              approvedAt: p.approvedAt,
+              rejectedAt: p.rejectedAt,
+              withdrawnAt: p.withdrawnAt,
+            },
+          },
+        ],
+      );
+      return p;
+    });
+  }
+
+  async listSettledByUser(userId: string, limit = DEFAULT_LIST_LIMIT): Promise<ThreadProposal[]> {
+    await this.prepareSettledHistory();
+    return (await this.loadFromIndex(ProposalKeys.userSettled(userId), limit)).filter(
+      (p) => p.createdBy === userId && ['approved', 'rejected', 'withdrawn'].includes(p.status),
+    );
+  }
+
+  async listPending(userId: string, limit: number = DEFAULT_LIST_LIMIT): Promise<ThreadProposal[]> {
+    return this.loadFromIndex(ProposalKeys.userPending(userId), limit);
+  }
+
+  async listByThread(threadId: string, limit: number = DEFAULT_LIST_LIMIT): Promise<ThreadProposal[]> {
+    return this.loadFromIndex(ProposalKeys.threadList(threadId), limit);
+  }
+
+  async listAllByThread(threadId: string): Promise<ThreadProposal[]> {
+    return this.loadFromIndex(ProposalKeys.threadList(threadId), null);
+  }
+
+  async claimForApproval(input: ClaimForApprovalInput): Promise<ThreadProposal | null> {
+    const proposal = await this.get(input.proposalId);
+    if (!proposal || proposal.status !== 'pending') return null;
+    const claimedAt = Date.now();
+    const ok = await this.casTransition(proposal.proposalId, proposal.createdBy, 'pending', 'zrem', '', [
+      'status',
+      'approving',
+      'approvedBy',
+      input.approvedBy,
+      'claimedAt',
+      String(claimedAt),
+    ]);
+    if (!ok) return null;
+    return { ...proposal, status: 'approving', approvedBy: input.approvedBy, claimedAt };
+  }
+
+  finalizeApproval(input: FinalizeApprovalInput): Promise<ThreadProposal | null> {
+    return finalizeRedisProposalApproval(this.redis, input);
+  }
+
+  async recordCreatedThread(proposalId: string, threadId: string, overrides?: ProposalApproveOverrides): Promise<void> {
+    await this.redis.eval(
+      RECORD_CREATED_THREAD_LUA,
+      1,
+      ProposalKeys.detail(proposalId),
+      ...createdThreadCheckpointFields(threadId, overrides),
+    );
+  }
+
+  async rollbackClaim(proposalId: string): Promise<boolean> {
+    const proposal = await this.get(proposalId);
+    if (!proposal || proposal.status !== 'approving') return false;
+    return this.casTransition(
+      proposal.proposalId,
+      proposal.createdBy,
+      'approving',
+      'zadd',
+      String(proposal.createdAt),
+      ['status', 'pending', 'approvedBy', '', 'claimedAt', '0'],
+    );
+  }
+
+  async markRejected(input: RejectProposalInput): Promise<ThreadProposal | null> {
+    const proposal = await this.get(input.proposalId);
+    if (!proposal || proposal.status !== 'pending') return null;
+    const now = Date.now();
+    const updated: ThreadProposal = {
+      ...proposal,
+      status: 'rejected',
+      rejectedBy: input.rejectedBy,
+      rejectedAt: now,
+      ...(input.rejectionReason ? { rejectionReason: input.rejectionReason } : {}),
+    };
+    const pairs = ['status', 'rejected', 'rejectedBy', input.rejectedBy, 'rejectedAt', String(now)];
+    if (input.rejectionReason) pairs.push('rejectionReason', input.rejectionReason);
+    const ok = await this.casTransition(updated.proposalId, updated.createdBy, 'pending', 'zrem', '', pairs);
+    return ok ? updated : null;
+  }
+
+  async withdrawPending(input: WithdrawProposalInput): Promise<ThreadProposal | null> {
+    return withdrawPendingProposal(this.redis, input);
+  }
+
+  async getDedupProposalId(userId: string, clientRequestId: string): Promise<string | null> {
+    return this.redis.get(ProposalKeys.dedup(userId, clientRequestId));
+  }
+
+  /** Atomic SET NX: returns the value actually stored (newly set or existing). */
+  async reserveDedup(userId: string, clientRequestId: string, proposalId: string): Promise<string> {
+    const key = ProposalKeys.dedup(userId, clientRequestId);
+    const result = await this.redis.set(key, proposalId, 'EX', this.dedupTtlSeconds, 'NX');
+    if (result === 'OK') return proposalId;
+    const existing = await this.redis.get(key);
+    return existing ?? proposalId;
+  }
+
+  /**
+   * Mark the proposal as visible: persist the rich-card messageId. Until this is set,
+   * dedup fast paths return 503 retryable so callers don't act on a phantom proposalId.
+   */
+  async setCardMessageId(proposalId: string, cardMessageId: string): Promise<void> {
+    await this.redis.hset(ProposalKeys.detail(proposalId), 'cardMessageId', cardMessageId);
+  }
+
+  async getPublication(proposalId: string): Promise<ApprovalPublication | null> {
+    return (await this.get(proposalId))?.publication ?? null;
+  }
+
+  async commitEnvelope(proposalId: string, envelope: ApprovalEnvelope): Promise<void> {
+    const proposal = await this.get(proposalId);
+    if (!proposal) throw new Error(`proposal not found: ${proposalId}`);
+    assertApprovalEnvelopeIdentity(envelope, {
+      canonicalProposalId: proposal.proposalId,
+      sourceFeatureId: 'F128',
+      ownerUserId: proposal.createdBy,
+      requesterCatId: proposal.sourceCatId,
+      createdAt: proposal.createdAt,
+    });
+    await commitRedisApprovalEnvelope(this.redis, ProposalKeys.detail(proposalId), envelope);
+  }
+
+  async abortStaged(proposalId: string, _reason: string): Promise<void> {
+    const proposal = await this.get(proposalId);
+    if (!proposal) return;
+    await abortRedisStaged(
+      this.redis,
+      ProposalKeys.detail(proposalId),
+      [
+        ProposalKeys.userList(proposal.createdBy),
+        ProposalKeys.userPending(proposal.createdBy),
+        ProposalKeys.threadList(proposal.sourceThreadId),
+      ],
+      proposalId,
+    );
+  }
+
+  /**
+   * Hard delete: remove proposal hash + all index entries. Idempotent.
+   * Used to clean up after propose's card append fails so retries can re-create a visible card.
+   */
+  async delete(proposalId: string): Promise<void> {
+    const proposal = await this.get(proposalId);
+    const pipeline = this.redis.multi();
+    pipeline.del(ProposalKeys.detail(proposalId));
+    if (proposal) {
+      pipeline.zrem(ProposalKeys.userList(proposal.createdBy), proposalId);
+      pipeline.zrem(ProposalKeys.userPending(proposal.createdBy), proposalId);
+      pipeline.zrem(ProposalKeys.userSettled(proposal.createdBy), proposalId);
+      pipeline.zrem(ProposalKeys.threadList(proposal.sourceThreadId), proposalId);
+    }
+    await pipeline.exec();
+  }
+
+  /**
+   * Release a previously reserved dedup key IF it still points at expectedProposalId.
+   * Uses a small Lua script for atomic compare-and-delete so we never wipe a sibling's
+   * reservation if a different winner has already replaced the key.
+   */
+  async releaseDedup(userId: string, clientRequestId: string, expectedProposalId: string): Promise<void> {
+    await this.redis.eval(RELEASE_DEDUP_LUA, 1, ProposalKeys.dedup(userId, clientRequestId), expectedProposalId);
+  }
+
+  private async casTransition(
+    proposalId: string,
+    userId: string,
+    expectedStatus: ProposalStatus,
+    pendingIndexAction: 'zrem' | 'zadd' | 'noop',
+    zaddScore: string,
+    fieldPairs: string[],
+  ): Promise<boolean> {
+    const result = (await this.redis.eval(
+      CAS_TRANSITION_LUA,
+      3,
+      ProposalKeys.detail(proposalId),
+      ProposalKeys.userPending(userId),
+      ProposalKeys.userSettled(userId),
+      proposalId,
+      expectedStatus,
+      pendingIndexAction,
+      zaddScore,
+      ...fieldPairs,
+    )) as number;
+    return result === 1;
+  }
+
+  private async loadFromIndex(indexKey: string, limit: number | null): Promise<ThreadProposal[]> {
+    const ids = await this.redis.zrevrange(indexKey, 0, limit === null ? -1 : Math.max(0, limit - 1));
+    if (ids.length === 0) return [];
+    const pipeline = this.redis.pipeline();
+    for (const id of ids) pipeline.hgetall(ProposalKeys.detail(id));
+    const results = await pipeline.exec();
+    if (!results) return [];
+    const records: ThreadProposal[] = [];
+    for (const [err, data] of results) {
+      if (err || !data || typeof data !== 'object') continue;
+      const d = data as Record<string, string>;
+      if (!d.proposalId) continue;
+      records.push(hydrateProposal(d));
+    }
+    return records;
+  }
+}

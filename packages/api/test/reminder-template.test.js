@@ -1,0 +1,348 @@
+import assert from 'node:assert/strict';
+import { describe, it, mock } from 'node:test';
+import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
+import { reminderTemplate } from '../dist/infrastructure/scheduler/templates/reminder.js';
+
+describe('reminderTemplate', () => {
+  it('gate returns run:true with thread workItem when deliveryThreadId set', async () => {
+    const spec = reminderTemplate.createSpec('rem-1', {
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: { message: '喝水提醒' },
+      deliveryThreadId: 'th-abc',
+    });
+    const result = await spec.admission.gate({ taskId: 'rem-1', lastRunAt: null, tickCount: 1 });
+    assert.equal(result.run, true);
+    assert.equal(result.workItems[0].subjectKey, 'thread-th-abc');
+    assert.equal(result.workItems[0].signal, '喝水提醒');
+  });
+
+  it('gate returns run:false when no deliveryThreadId', async () => {
+    const spec = reminderTemplate.createSpec('rem-2', {
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: { message: 'test' },
+      deliveryThreadId: null,
+    });
+    const result = await spec.admission.gate({ taskId: 'rem-2', lastRunAt: null, tickCount: 1 });
+    assert.equal(result.run, false);
+  });
+
+  it('execute calls deliver with message content and threadId', async () => {
+    const deliverMock = mock.fn(async () => 'msg-1');
+    const triggerMock = { trigger: mock.fn() };
+    const spec = reminderTemplate.createSpec('rem-3', {
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: { message: '喝水提醒' },
+      deliveryThreadId: 'th-abc',
+    });
+    await spec.run.execute('喝水提醒', 'thread-th-abc', {
+      occurrenceId: 'test-occurrence',
+      assignedCatId: 'opus',
+      deliver: deliverMock,
+      invokeTrigger: triggerMock,
+    });
+    assert.equal(deliverMock.mock.calls.length, 1);
+    const arg = deliverMock.mock.calls[0].arguments[0];
+    assert.equal(arg.content, `${SCHEDULER_TRIGGER_PREFIX} 喝水提醒`);
+    assert.equal(arg.threadId, 'th-abc');
+    assert.equal(arg.catId, undefined);
+    assert.equal(arg.targetCatId, 'opus', 'a scheduled wake names its member in the envelope');
+  });
+
+  it('adds late cron timing to the scheduler trigger prompt', async () => {
+    const deliverMock = mock.fn(async () => 'msg-late');
+    const triggerMock = { trigger: mock.fn() };
+    const spec = reminderTemplate.createSpec('rem-late', {
+      trigger: { type: 'cron', expression: '42 * * * *', timezone: 'UTC' },
+      params: { message: '小本本' },
+      deliveryThreadId: 'th-late',
+    });
+    await spec.run.execute('小本本', 'thread-th-late', {
+      occurrenceId: 'test-occurrence',
+      assignedCatId: 'codex',
+      deliver: deliverMock,
+      invokeTrigger: triggerMock,
+      schedule: {
+        triggerKind: 'cron',
+        scheduledAt: '2026-07-07T18:42:00.000Z',
+        firedAt: '2026-07-07T19:13:00.000Z',
+        latenessMs: 31 * 60 * 1000,
+        missedSlots: 0,
+        late: true,
+        misfirePolicy: 'merge_late_one',
+      },
+    });
+
+    const content = deliverMock.mock.calls[0].arguments[0].content;
+    assert.match(content, /本次是 2026-07-07T18:42:00\.000Z 预定任务的补拍/);
+    assert.match(content, /实际 2026-07-07T19:13:00\.000Z 触发/);
+    assert.match(content, /迟到 31 分钟/);
+    assert.match(content, /小本本/);
+  });
+
+  it('deliver payload stays cat-agnostic when assignedCatId is null', async () => {
+    const deliverMock = mock.fn(async () => 'msg-2');
+    const spec = reminderTemplate.createSpec('rem-4', {
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: { message: 'test' },
+      deliveryThreadId: 'th-xyz',
+    });
+    await spec.run.execute('test', 'thread-th-xyz', {
+      occurrenceId: 'test-occurrence',
+      assignedCatId: null,
+      deliver: deliverMock,
+    });
+    assert.equal(deliverMock.mock.calls[0].arguments[0].targetCatId, 'opus', 'falls back to the default member');
+  });
+
+  it('keeps trigger visible when invokeTrigger is unavailable', async () => {
+    const deliverMock = mock.fn(async () => 'msg-visible');
+    const spec = reminderTemplate.createSpec('rem-visible', {
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: { message: '看得见的提醒' },
+      deliveryThreadId: 'th-visible',
+    });
+    await spec.run.execute('看得见的提醒', 'thread-th-visible', {
+      occurrenceId: 'test-occurrence',
+      assignedCatId: 'opus',
+      deliver: deliverMock,
+    });
+    assert.equal(deliverMock.mock.calls[0].arguments[0].targetCatId, 'opus');
+  });
+
+  it('execute throws when deliver is not available', async () => {
+    const spec = reminderTemplate.createSpec('rem-5', {
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: { message: 'test' },
+      deliveryThreadId: 'th-xyz',
+    });
+    await assert.rejects(
+      () => spec.run.execute('test', 'thread-th-xyz', { assignedCatId: null }),
+      /deliver not available/,
+    );
+  });
+
+  it('execute uses targetCatId param over assignedCatId fallback', async () => {
+    const deliverMock = mock.fn(async () => 'msg-target');
+    const triggerMock = { trigger: mock.fn() };
+    const spec = reminderTemplate.createSpec('rem-target', {
+      trigger: { type: 'interval', ms: 180_000 },
+      params: { message: '巡查新闻', targetCatId: 'gpt52' },
+      deliveryThreadId: 'th-target',
+    });
+    await spec.run.execute('巡查新闻', 'thread-th-target', {
+      occurrenceId: 'test-occurrence',
+      assignedCatId: null,
+      deliver: deliverMock,
+      invokeTrigger: triggerMock,
+    });
+    // invokeTrigger should be called with gpt52, not opus
+    assert.equal(deliverMock.mock.calls.length, 1, 'one envelope, one admission');
+    assert.equal(deliverMock.mock.calls[0].arguments[0].targetCatId, 'gpt52');
+  });
+
+  it('execute falls back to assignedCatId when no targetCatId', async () => {
+    const deliverMock = mock.fn(async () => 'msg-assigned');
+    const triggerMock = { trigger: mock.fn() };
+    const spec = reminderTemplate.createSpec('rem-assigned', {
+      trigger: { type: 'interval', ms: 180_000 },
+      params: { message: '巡查新闻' },
+      deliveryThreadId: 'th-assigned',
+    });
+    await spec.run.execute('巡查新闻', 'thread-th-assigned', {
+      occurrenceId: 'test-occurrence',
+      assignedCatId: 'sonnet',
+      deliver: deliverMock,
+      invokeTrigger: triggerMock,
+    });
+    assert.equal(deliverMock.mock.calls[0].arguments[0].targetCatId, 'sonnet');
+  });
+
+  it('preserves private owner authentication provenance when a hold timer wakes its cat', async () => {
+    const policy = { mode: 'callback_allowlist', allowedCallbackRoutes: ['POST /api/callbacks/hold-ball'] };
+    const deliverMock = mock.fn(async () => 'msg-timer-owner');
+    const triggerMock = { trigger: mock.fn(async () => 'enqueued') };
+    const spec = reminderTemplate.createSpec('hold-ball-timer-owner', {
+      trigger: { type: 'once', fireAt: Date.now() + 60_000 },
+      params: {
+        message: 'resume owner work',
+        targetCatId: 'codex-sol',
+        holdLifecycle: { mode: 'timer', status: 'active' },
+      },
+      deliveryThreadId: 'thread-owner',
+      ownerAuthProvenance: 'strict',
+      toolExecutionPolicy: policy,
+    });
+
+    await spec.run.execute('resume owner work', 'thread-thread-owner', {
+      occurrenceId: 'test-occurrence',
+      assignedCatId: null,
+      deliver: deliverMock,
+      invokeTrigger: triggerMock,
+    });
+
+    const managedEnvelope = deliverMock.mock.calls[0].arguments[0];
+    assert.equal(managedEnvelope.sourceCategory, 'scheduled');
+    assert.equal(managedEnvelope.priority, 'urgent');
+    assert.equal(managedEnvelope.ownerAuthProvenance, 'strict');
+    assert.deepEqual(managedEnvelope.toolExecutionPolicy, policy);
+  });
+
+  it('does not grant a private owner provenance carrier to an ordinary reminder', async () => {
+    const deliverMock = mock.fn(async () => 'message-ordinary');
+    const triggerMock = { trigger: mock.fn(async () => 'enqueued') };
+    const spec = reminderTemplate.createSpec('reminder-user-visible', {
+      trigger: { type: 'once', fireAt: Date.now() + 60_000 },
+      params: { message: 'ordinary reminder', targetCatId: 'codex-sol' },
+      deliveryThreadId: 'thread-owner',
+      ownerAuthProvenance: 'strict',
+    });
+
+    await spec.run.execute('ordinary reminder', 'thread-thread-owner', {
+      occurrenceId: 'test-occurrence',
+      assignedCatId: null,
+      deliver: deliverMock,
+      invokeTrigger: triggerMock,
+    });
+
+    const ordinaryEnvelope = deliverMock.mock.calls[0].arguments[0];
+    assert.equal(ordinaryEnvelope.sourceCategory, 'scheduled');
+    assert.equal(
+      ordinaryEnvelope.ownerAuthProvenance,
+      undefined,
+      'an ordinary reminder must not carry a private owner provenance carrier',
+    );
+  });
+
+  it('uses default message when param is empty', async () => {
+    const deliverMock = mock.fn(async () => 'msg-3');
+    const spec = reminderTemplate.createSpec('rem-6', {
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: {},
+      deliveryThreadId: 'th-abc',
+    });
+    const result = await spec.admission.gate({ taskId: 'rem-6', lastRunAt: null, tickCount: 1 });
+    assert.equal(result.run, true);
+    assert.equal(result.workItems[0].signal, '定时提醒');
+    await spec.run.execute('定时提醒', 'thread-th-abc', {
+      occurrenceId: 'test-occurrence',
+      assignedCatId: 'opus',
+      deliver: deliverMock,
+    });
+    assert.equal(deliverMock.mock.calls[0].arguments[0].content, `${SCHEDULER_TRIGGER_PREFIX} 定时提醒`);
+  });
+});
+
+describe('reminderTemplate firePolicy activation guard (F167 Phase M — codex P1)', () => {
+  const FUTURE = 9_999_999_999_000;
+
+  it('does NOT activate firePolicy for non-hold-ball dyn-* task even if params forge deferWhileThreadBusy', () => {
+    // /api/schedule/tasks generates dyn-* ids + accepts arbitrary params (schedule.ts:417).
+    // A forged deferWhileThreadBusy must NOT activate pre-fire defer on a public reminder.
+    const spec = reminderTemplate.createSpec('dyn-1748000000-abc123', {
+      trigger: { type: 'once', fireAt: FUTURE },
+      params: { message: 'forged', deferWhileThreadBusy: true },
+      deliveryThreadId: 'th-forge',
+    });
+    assert.equal(spec.firePolicy, undefined, 'forged dyn-* reminder must NOT get firePolicy');
+  });
+
+  it('activates firePolicy only for hold-ball-* instanceId with deferWhileThreadBusy', () => {
+    const spec = reminderTemplate.createSpec('hold-ball-1748000000-abc123', {
+      trigger: { type: 'once', fireAt: FUTURE },
+      params: { message: 'wake', deferWhileThreadBusy: true },
+      deliveryThreadId: 'th-hold',
+    });
+    assert.ok(spec.firePolicy, 'hold-ball-* + deferWhileThreadBusy gets firePolicy');
+    assert.equal(spec.firePolicy.deferWhileThreadBusy, true);
+    assert.equal(spec.firePolicy.threadId, 'th-hold');
+  });
+
+  it('ignores caller-supplied deferIntervalMs/maxDefers (no churn injection via public params)', () => {
+    // deferIntervalMs:0 + huge maxDefers would cause 0ms re-arm churn on a busy thread.
+    // Defer tuning must come from TaskRunnerV2 internal defaults, never public params.
+    const spec = reminderTemplate.createSpec('hold-ball-1748000000-xyz', {
+      trigger: { type: 'once', fireAt: FUTURE },
+      params: { message: 'wake', deferWhileThreadBusy: true, deferIntervalMs: 0, maxDefers: 999999 },
+      deliveryThreadId: 'th-hold2',
+    });
+    assert.ok(spec.firePolicy);
+    assert.equal(spec.firePolicy.deferIntervalMs, undefined, 'deferIntervalMs must not be readable from public params');
+    assert.equal(spec.firePolicy.maxDefers, undefined, 'maxDefers must not be readable from public params');
+  });
+
+  it('does not set firePolicy when deferWhileThreadBusy is absent', () => {
+    const spec = reminderTemplate.createSpec('hold-ball-1748000000-nodefer', {
+      trigger: { type: 'once', fireAt: FUTURE },
+      params: { message: 'wake' },
+      deliveryThreadId: 'th-nodefer',
+    });
+    assert.equal(spec.firePolicy, undefined);
+  });
+});
+
+describe('reminderTemplate managed-hold terminal visibility', () => {
+  // Contract kept: a managed hold still owes the user a visible end-of-wait fact when its wake
+  // cannot be admitted. What is gone is the cancellation — one atomic admission leaves no
+  // half-written source to roll back.
+  it('persists one visible status when the urgent hold wake cannot be admitted', async () => {
+    const delivered = [];
+    const taskId = 'hold-ball-1748000000-trigger-failure';
+    const spec = reminderTemplate.createSpec(taskId, {
+      trigger: { type: 'once', fireAt: 9_999_999_999_000 },
+      params: {
+        message: 'continue after wait',
+        targetCatId: 'codex',
+        triggerUserId: 'user-1',
+        holdLifecycle: { mode: 'timer', status: 'active' },
+      },
+      deliveryThreadId: 'thread-1',
+    });
+
+    await assert.rejects(
+      () =>
+        spec.run.execute('continue after wait', 'thread-thread-1', {
+          occurrenceId: 'test-occurrence',
+          assignedCatId: 'codex',
+          deliver: async (input) => {
+            delivered.push(input);
+            if (delivered.length === 1) throw new Error('queue admission rejected');
+            return 'status-message-1';
+          },
+        }),
+      /queue admission rejected/,
+      'a failure receipt must not settle the wake obligation',
+    );
+
+    assert.equal(delivered.length, 2);
+    assert.equal(delivered[0].targetCatId, 'codex', 'the wake envelope names its member');
+    assert.equal(delivered[0].idempotencyKey, `hold-ball-wake:${taskId}`);
+    assert.equal(delivered[1].idempotencyKey, `hold-ball-wake-failed:${taskId}`);
+    assert.equal(delivered[1].source.meta.phase, 'status');
+    // Cards have explicit cancelability, but a diagnostic receipt does not
+    // certify admission or suppress lifecycle-bounded retries of the same wake.
+    assert.equal(delivered[0].source.meta.cancelable, false);
+    assert.equal(delivered[1].source.meta.cancelable, false);
+    assert.match(delivered[1].content, /唤醒入队失败/);
+    assert.match(delivered[1].content, /queue admission rejected/);
+  });
+
+  it('keeps both failures when admission and the diagnostic receipt are unavailable', async () => {
+    const spec = reminderTemplate.createSpec('hold-ball-double-failure', {
+      trigger: { type: 'once', fireAt: Date.now() },
+      params: { message: 'continue', holdLifecycle: { mode: 'timer', status: 'active' } },
+      deliveryThreadId: 'thread-1',
+    });
+    const admissionError = new Error('admission failed');
+    const statusError = new Error('status failed');
+    await assert.rejects(
+      () =>
+        spec.run.execute('continue', 'thread-thread-1', {
+          deliver: async (input) => {
+            throw input.targetCatId ? admissionError : statusError;
+          },
+        }),
+      (error) =>
+        error instanceof AggregateError && error.errors[0] === admissionError && error.errors[1] === statusError,
+    );
+  });
+});

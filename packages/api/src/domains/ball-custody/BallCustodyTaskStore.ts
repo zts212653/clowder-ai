@@ -1,0 +1,306 @@
+import type {
+  AutomationState,
+  CreateTaskInput,
+  DevelopmentScopeV1,
+  ManagedWorkBinding,
+  TaskItem,
+  TaskKind,
+  UpdateTaskInput,
+} from '@cat-cafe/shared';
+import type {
+  DevelopmentSourceQuery,
+  DevelopmentWorkTransition,
+} from '../cats/services/stores/ports/DevelopmentWorkTransition.js';
+import type { AttachEntrustedWorkArtifactInput } from '../cats/services/stores/ports/EntrustedWorkArtifactEvidence.js';
+import type { OrdinaryTaskMutation } from '../cats/services/stores/ports/OrdinaryTaskMutation.js';
+import type { EntrustedTaskDataControllerTransition } from '../cats/services/stores/ports/TaskDataControllerTransition.js';
+import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
+import type {
+  AdmitEntrustedWorkStoreInput,
+  AdmitEntrustedWorkStoreResult,
+  CloseEntrustedWorkStoreInput,
+  CloseEntrustedWorkStoreResult,
+  ReplaceAutomationStateIfGenerationInput,
+  ReplaceDeploymentWaitIfGenerationInput,
+  ReplacePluginWaitInput,
+  TaskMutationWriteFence,
+  TaskSubjectUpsertCondition,
+  UpdateEntrustedWorkStoreInput,
+  UpdateEntrustedWorkStoreResult,
+} from '../cats/services/stores/ports/TaskStoreContract.js';
+import type { IBallCustodyIngest } from './BallCustodyIngest.js';
+import { buildTaskBlockedEvent, buildTaskDoneEvent, buildTaskUnblockedEvent } from './ball-custody-events.js';
+import type { TaskActionSuccessorLifecycle } from './TaskActionSuccessorLifecycle.js';
+
+type MaybePromise<T> = T | Promise<T>;
+type WarnLogger = { warn: (obj: unknown, msg?: string) => void };
+
+function isPromiseLike<T>(value: MaybePromise<T>): value is Promise<T> {
+  return typeof (value as { then?: unknown })?.then === 'function';
+}
+
+export function withBallCustodyTaskEvents(
+  inner: ITaskStore,
+  ballCustody: IBallCustodyIngest,
+  logger?: WarnLogger,
+  actionLifecycle?: TaskActionSuccessorLifecycle,
+): ITaskStore {
+  return new BallCustodyTaskStore(inner, ballCustody, logger, actionLifecycle);
+}
+
+class BallCustodyTaskStore implements ITaskStore {
+  async mutateOrdinaryTask(command: OrdinaryTaskMutation, writeFence?: TaskMutationWriteFence) {
+    const before = await this.inner.get(command.taskId);
+    const result = await this.inner.mutateOrdinaryTask(command, writeFence);
+    if (before && result.kind === 'updated') this.recordStatusTransition(before, result.task);
+    return result;
+  }
+  readonly listByThreadPage?: NonNullable<ITaskStore['listByThreadPage']>;
+
+  findDevelopmentWork(userId: string, scope: DevelopmentScopeV1) {
+    return this.inner.findDevelopmentWork(userId, scope);
+  }
+  transitionDevelopmentWork(input: DevelopmentWorkTransition) {
+    return this.inner.transitionDevelopmentWork(input);
+  }
+  hasDevelopmentSource(query: DevelopmentSourceQuery) {
+    return this.inner.hasDevelopmentSource(query);
+  }
+  transitionEntrustedTaskDataController(
+    input: EntrustedTaskDataControllerTransition,
+    writeFence?: TaskMutationWriteFence,
+  ) {
+    return this.inner.transitionEntrustedTaskDataController(input, writeFence);
+  }
+  constructor(
+    private readonly inner: ITaskStore,
+    private readonly ballCustody: IBallCustodyIngest,
+    private readonly logger?: WarnLogger,
+    private readonly actionLifecycle?: TaskActionSuccessorLifecycle,
+  ) {
+    if (inner.listByThreadPage) this.listByThreadPage = inner.listByThreadPage.bind(inner);
+  }
+
+  create(input: CreateTaskInput): MaybePromise<TaskItem> {
+    return this.inner.create(input);
+  }
+
+  get(taskId: string): MaybePromise<TaskItem | null> {
+    return this.inner.get(taskId);
+  }
+
+  async replacePluginWait(taskId: string, input: ReplacePluginWaitInput): Promise<TaskItem | null> {
+    const before = await this.inner.get(taskId);
+    if (!before) return null;
+    const tracking = before.kind === 'pr_tracking' || before.kind === 'issue_tracking';
+    const status = tracking
+      ? input.state.await
+        ? 'doing'
+        : input.state.waitOutcome
+          ? 'done'
+          : before.status
+      : before.status;
+    await this.actionLifecycle?.assertUpdateAllowed(before, { status });
+    const updated = await this.inner.replacePluginWait(taskId, input);
+    if (updated) {
+      this.recordStatusTransition({ ...updated, status: input.expectedStatus }, updated);
+      await this.actionLifecycle?.completeStatusTransition(before, updated);
+    }
+    return updated;
+  }
+
+  getWaitRegistration(taskId: string): ReturnType<ITaskStore['getWaitRegistration']> {
+    return this.inner.getWaitRegistration(taskId);
+  }
+
+  update(taskId: string, input: UpdateTaskInput): MaybePromise<TaskItem | null> {
+    const beforeResult = this.inner.get(taskId);
+    const updateAfterBefore = (before: TaskItem | null): MaybePromise<TaskItem | null> => {
+      const performUpdate = (): MaybePromise<TaskItem | null> => {
+        const updatedResult = this.inner.update(taskId, input);
+        const finish = (updated: TaskItem | null): MaybePromise<TaskItem | null> => {
+          if (!before || !updated) return updated;
+          this.recordStatusTransition(before, updated);
+          const completion = this.actionLifecycle?.completeStatusTransition(before, updated);
+          return completion ? completion.then(() => updated) : updated;
+        };
+        return isPromiseLike(updatedResult) ? updatedResult.then(finish) : finish(updatedResult);
+      };
+      const gate = before ? this.actionLifecycle?.assertUpdateAllowed(before, input) : undefined;
+      return gate ? gate.then(performUpdate) : performUpdate();
+    };
+
+    return isPromiseLike(beforeResult) ? beforeResult.then(updateAfterBefore) : updateAfterBefore(beforeResult);
+  }
+
+  updateIfThreadId(taskId: string, expectedThreadId: string, input: UpdateTaskInput): MaybePromise<TaskItem | null> {
+    const beforeResult = this.inner.get(taskId);
+    const updateAfterBefore = (before: TaskItem | null): MaybePromise<TaskItem | null> => {
+      const performUpdate = (): MaybePromise<TaskItem | null> => {
+        const updatedResult = this.inner.updateIfThreadId(taskId, expectedThreadId, input);
+        const finish = (updated: TaskItem | null): MaybePromise<TaskItem | null> => {
+          if (!before || !updated) return updated;
+          this.recordStatusTransition(before, updated);
+          const completion = this.actionLifecycle?.completeStatusTransition(before, updated);
+          return completion ? completion.then(() => updated) : updated;
+        };
+        return isPromiseLike(updatedResult) ? updatedResult.then(finish) : finish(updatedResult);
+      };
+      const gate = before ? this.actionLifecycle?.assertUpdateAllowed(before, input) : undefined;
+      return gate ? gate.then(performUpdate) : performUpdate();
+    };
+
+    return isPromiseLike(beforeResult) ? beforeResult.then(updateAfterBefore) : updateAfterBefore(beforeResult);
+  }
+
+  listByThread(threadId: string): MaybePromise<TaskItem[]> {
+    return this.inner.listByThread(threadId);
+  }
+
+  delete(taskId: string): MaybePromise<boolean> {
+    const actionLifecycle = this.actionLifecycle;
+    if (!actionLifecycle) return this.inner.delete(taskId);
+    return Promise.resolve(this.inner.get(taskId)).then(async (task) => {
+      if (task) await actionLifecycle.assertDeleteAllowed(task);
+      return this.inner.delete(taskId);
+    });
+  }
+
+  deleteByThread(threadId: string): MaybePromise<number> {
+    const actionLifecycle = this.actionLifecycle;
+    if (!actionLifecycle) return this.inner.deleteByThread(threadId);
+    return Promise.resolve(this.inner.listByThread(threadId)).then(async (tasks) => {
+      await Promise.all(tasks.map((task) => actionLifecycle.assertDeleteAllowed(task)));
+      return this.inner.deleteByThread(threadId);
+    });
+  }
+
+  getBySubject(subjectKey: string): MaybePromise<TaskItem | null> {
+    return this.inner.getBySubject(subjectKey);
+  }
+
+  upsertBySubject(input: CreateTaskInput, condition?: TaskSubjectUpsertCondition): MaybePromise<TaskItem> {
+    return this.inner.upsertBySubject(input, condition);
+  }
+
+  upsertBySubjectWithManagedWorkBinding(input: CreateTaskInput, binding: ManagedWorkBinding): MaybePromise<TaskItem> {
+    return this.inner.upsertBySubjectWithManagedWorkBinding(input, binding);
+  }
+
+  listDeploymentWaitProjectionCandidates(): MaybePromise<TaskItem[]> {
+    return this.inner.listDeploymentWaitProjectionCandidates?.() ?? this.inner.listByKind('work');
+  }
+
+  listByKind(kind: TaskKind): MaybePromise<TaskItem[]> {
+    return this.inner.listByKind(kind);
+  }
+
+  patchAutomationState(taskId: string, patch: Partial<AutomationState>): MaybePromise<TaskItem | null> {
+    return this.inner.patchAutomationState(taskId, patch);
+  }
+
+  bindManagedWorkBinding(taskId: string, binding: ManagedWorkBinding): MaybePromise<ManagedWorkBinding | null> {
+    return this.inner.bindManagedWorkBinding(taskId, binding);
+  }
+
+  getManagedWorkBinding(taskId: string): MaybePromise<ManagedWorkBinding | null> {
+    return this.inner.getManagedWorkBinding(taskId);
+  }
+
+  admitEntrustedWork(input: AdmitEntrustedWorkStoreInput): MaybePromise<AdmitEntrustedWorkStoreResult> {
+    return this.inner.admitEntrustedWork(input);
+  }
+
+  closeEntrustedWork(
+    taskId: string,
+    input: CloseEntrustedWorkStoreInput,
+    writeFence?: TaskMutationWriteFence,
+  ): MaybePromise<CloseEntrustedWorkStoreResult> {
+    const beforeResult = this.inner.get(taskId);
+    const closeAfterBefore = (before: TaskItem | null): MaybePromise<CloseEntrustedWorkStoreResult> => {
+      const closedResult = this.inner.closeEntrustedWork(taskId, input, writeFence);
+      const finish = (result: CloseEntrustedWorkStoreResult): MaybePromise<CloseEntrustedWorkStoreResult> => {
+        if (!before || result.kind !== 'closed') return result;
+        this.recordStatusTransition(before, result.task);
+        const completion = this.actionLifecycle?.completeStatusTransition(before, result.task);
+        return completion ? completion.then(() => result) : result;
+      };
+      return isPromiseLike(closedResult) ? closedResult.then(finish) : finish(closedResult);
+    };
+    return isPromiseLike(beforeResult) ? beforeResult.then(closeAfterBefore) : closeAfterBefore(beforeResult);
+  }
+
+  // Evidence append changes no status/custody and must not complete an action lifecycle.
+  attachEntrustedWorkArtifactEvidence(taskId: string, input: AttachEntrustedWorkArtifactInput) {
+    return this.inner.attachEntrustedWorkArtifactEvidence(taskId, input);
+  }
+
+  updateEntrustedWork(
+    taskId: string,
+    input: UpdateEntrustedWorkStoreInput,
+    writeFence?: TaskMutationWriteFence,
+  ): MaybePromise<UpdateEntrustedWorkStoreResult> {
+    const beforeResult = this.inner.get(taskId);
+    const updateAfterBefore = (before: TaskItem | null): MaybePromise<UpdateEntrustedWorkStoreResult> => {
+      const updatedResult = this.inner.updateEntrustedWork(taskId, input, writeFence);
+      const finish = (result: UpdateEntrustedWorkStoreResult): UpdateEntrustedWorkStoreResult => {
+        if (before && result.kind === 'updated') this.recordStatusTransition(before, result.task);
+        return result;
+      };
+      return isPromiseLike(updatedResult) ? updatedResult.then(finish) : finish(updatedResult);
+    };
+    return isPromiseLike(beforeResult) ? beforeResult.then(updateAfterBefore) : updateAfterBefore(beforeResult);
+  }
+
+  replaceAutomationStateIfGeneration(
+    taskId: string,
+    input: ReplaceAutomationStateIfGenerationInput,
+  ): MaybePromise<TaskItem | null> {
+    return this.inner.replaceAutomationStateIfGeneration(taskId, input);
+  }
+
+  replaceDeploymentWaitIfGeneration(
+    taskId: string,
+    input: ReplaceDeploymentWaitIfGenerationInput,
+  ): MaybePromise<TaskItem | null> {
+    const beforeResult = this.inner.get(taskId);
+    const replaceAfterBefore = (before: TaskItem | null): MaybePromise<TaskItem | null> => {
+      const replaced = this.inner.replaceDeploymentWaitIfGeneration(taskId, input);
+      const finish = (updated: TaskItem | null): TaskItem | null => {
+        if (before && updated) this.recordStatusTransition(before, updated);
+        return updated;
+      };
+      return isPromiseLike(replaced) ? replaced.then(finish) : finish(replaced);
+    };
+    return isPromiseLike(beforeResult) ? beforeResult.then(replaceAfterBefore) : replaceAfterBefore(beforeResult);
+  }
+
+  private recordStatusTransition(before: TaskItem, updated: TaskItem): void {
+    if (before.status === updated.status) return;
+
+    const event =
+      updated.status === 'blocked'
+        ? buildTaskBlockedEvent({
+            taskId: updated.id,
+            threadId: updated.threadId,
+            ownerCatId: updated.ownerCatId,
+            blockedSinceAt: updated.updatedAt,
+            entrustedWorkRevision: updated.entrustedWork?.revision,
+            resolveMode: updated.resolveMode,
+          })
+        : updated.status === 'done'
+          ? buildTaskDoneEvent({ taskId: updated.id, at: updated.updatedAt })
+          : before.status === 'blocked'
+            ? buildTaskUnblockedEvent({
+                taskId: updated.id,
+                at: updated.updatedAt,
+                entrustedWorkRevision: updated.entrustedWork?.revision,
+              })
+            : null;
+
+    if (!event) return;
+    this.ballCustody.record(event).catch((err) => {
+      this.logger?.warn({ err, taskId: updated.id, eventKind: event.kind }, 'F233 PR3: failed to record task event');
+    });
+  }
+}

@@ -290,8 +290,16 @@ describe('parseFeatureDocName', () => {
 });
 
 describe('gitShowFile', () => {
-  test('reads a file from origin/main', async () => {
-    const { gitShowFile } = await import('../dist/routes/git-doc-reader.js');
+  test('reads a file from origin/main', async (t) => {
+    // Skip when origin/main is unavailable (e.g., shallow CI checkout of a fork)
+    try {
+      execFileSync('git', ['rev-parse', '--verify', 'origin/main^{commit}'], { timeout: 5_000 });
+    } catch {
+      t.skip('origin/main ref not available in this environment');
+      return;
+    }
+    const { gitShowFile, _resetFetchTimer } = await import('../dist/routes/git-doc-reader.js');
+    _resetFetchTimer();
     const content = await gitShowFile('docs/ROADMAP.md');
     assert.ok(content, 'should return content');
     assert.ok(content.includes('| ID |') || content.includes('backlog'), 'should contain expected content');

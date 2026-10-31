@@ -1,6 +1,12 @@
 // F102: Memory component interfaces — 6 pluggable adapters
 // See docs/features/F102-memory-adapter-refactor.md for architecture
 
+import type { EntityConflictContext, EntityConflictResolutionRequest } from '@cat-cafe/shared';
+import type { CollectionSensitivity, ReviewStatus, SearchDimension } from './collection-types.js';
+import type { F163Activation, F163Authority } from './f163-types.js';
+
+export * from './collection-types.js';
+
 // ── Runtime guard symbols (TypeScript interfaces erase at runtime) ────
 
 export const IEvidenceStoreSymbol = Symbol.for('IEvidenceStore');
@@ -34,13 +40,54 @@ export const EVIDENCE_KINDS = [
   'thread',
   'discussion',
   'research',
+  'architecture',
+  'diary',
+  'pack-knowledge',
 ] as const;
 
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 
-export type EvidenceStatus = 'active' | 'done' | 'archived';
+export type EvidenceStatus =
+  | 'active'
+  | 'done'
+  | 'archived'
+  | 'review'
+  | 'invalidated'
+  | 'superseded'
+  | 'drifted'
+  | 'stale'
+  | 'historical'
+  | 'retired';
+
+// ── F152 Phase A: Provenance + Scanner types ────────────────────────
+
+export type ProvenanceTier = 'authoritative' | 'derived' | 'soft_clue';
+
+export interface Provenance {
+  tier: ProvenanceTier;
+  source: string;
+}
+
+export interface ScannedEvidence {
+  item: Omit<EvidenceItem, 'sourceHash'>;
+  provenance: Provenance;
+  rawContent: string;
+  passages: string[];
+}
+
+export interface RepoScanner {
+  discover(projectRoot: string, options?: Record<string, unknown>): ScannedEvidence[];
+}
+
+export const IRepoScannerSymbol = Symbol.for('IRepoScanner');
 
 // ── Data types ───────────────────────────────────────────────────────
+
+export interface EvidenceDrillDown {
+  tool: string;
+  params: Record<string, string>;
+  hint: string;
+}
 
 export interface EvidenceItem {
   anchor: string;
@@ -54,12 +101,156 @@ export interface EvidenceItem {
   supersededBy?: string;
   materializedFrom?: string;
   updatedAt: string;
+  /** F129: Pack scope — when set, this evidence belongs to a specific pack */
+  packId?: string;
+  /** G-4: drill-down hint — tells the cat what tool to use to see full details */
+  drillDown?: EvidenceDrillDown;
+  /** F163 Phase A: knowledge authority level */
+  authority?: F163Authority;
+  /** F163 Phase A: knowledge activation mode */
+  activation?: F163Activation;
+  /** F163 Phase A: last verification date (ISO8601) */
+  verifiedAt?: string;
+  /** F152 Phase A: provenance tracking for scanner-produced evidence */
+  provenance?: Provenance;
+  /** F152 Phase C: null = unmarked, false = project-private, true = candidate for global reflow */
+  generalizable?: boolean;
+  /** F163 Phase B: JSON array of source anchors this summary covers */
+  sourceIds?: string[];
+  /** F163 Phase B: summary group ID — non-null means this doc IS a canonical summary */
+  summaryOfAnchor?: string;
+  /** F163 Phase B: why these sources were merged */
+  compressionRationale?: string;
+  /** F163 Phase C: JSON array of anchor IDs this item contradicts */
+  contradicts?: string[];
+  /** F163 Phase C: when contradiction/invalidity was detected (ISO8601) */
+  invalidAt?: string;
+  /** F163 Phase C: days between review cycles */
+  reviewCycleDays?: number;
+  /** F093 Phase A (KD-16): world scope — derived canon evidence */
+  worldId?: string;
+  /** F093 Phase A (KD-16): scene scope — derived canon evidence */
+  sceneId?: string;
+  /** F200 Phase C: first indexed timestamp (epoch ms) for 14d grace period */
+  firstIndexedAt?: number;
+  /** F186: collection-level review status */
+  reviewStatus?: ReviewStatus;
+  /** F200 v1.1 DF-3: explains why this result matched (anchor/title/summary/keyword/content) */
+  matchReason?: string;
+  /** F200 v1.1 DF-3: ranking factor breakdown when explain=true */
+  rankingFactors?: { bm25Score?: number; consumptionPrior?: number; mmrPenalty?: number };
+  /** F263 AC-A2: calibrated retrieval score [0,1], independent from rank and authority */
+  retrievalScore?: number;
+  /** F209 Phase B: entity alias / mention explanations for retrieval-anchor hits */
+  entityMatches?: EntityMatch[];
+  /** AC-I9: passage-level detail when depth=raw */
+  passages?: Array<{
+    docAnchor?: string;
+    passageId: string;
+    content: string;
+    speaker?: string;
+    createdAt?: string;
+    threadId?: string;
+    messageId?: string;
+    /** AC-I8: surrounding passages when contextWindow is set */
+    context?: Array<{
+      docAnchor?: string;
+      passageId: string;
+      content: string;
+      speaker?: string;
+      createdAt?: string;
+      threadId?: string;
+      messageId?: string;
+    }>;
+  }>;
 }
+
+export type EntityType = 'person' | 'cat' | 'feature' | 'concept' | 'external';
+
+export interface EntityProvenance {
+  source: string;
+  anchor?: string;
+  sourcePath?: string;
+  threadId?: string;
+  messageId?: string;
+  messageIds?: string[];
+  sessionId?: string;
+  eventNo?: number;
+  invocationId?: string;
+  note?: string;
+  date?: string;
+}
+
+export interface EntityRecord {
+  entityId: string;
+  type: EntityType;
+  canonicalName: string;
+  aliases: string[];
+  provenance: EntityProvenance[];
+  /** F260: entity stance from proposal approval (default 'unknown'). */
+  stance?: string;
+  /** F260: visibility scope from proposal approval (default 'workspace'). KD-7: private entities must carry through. */
+  visibilityScope?: string;
+  /** F260: entity lifecycle status (default 'active'). */
+  status?: string;
+  createdAt?: string;
+  updatedAt: string;
+}
+
+export type EntityMutationSource = 'proposal-approval' | 'seed-sync' | 'system' | 'owner-action';
+
+export interface EntityMutationContext {
+  source: EntityMutationSource;
+  actorId?: string;
+  proposalId?: string;
+  reason?: string;
+  conflictPolicy?: 'allow-update' | 'reject-conflict' | 'owner-correction';
+}
+
+export interface QueryEntityMatch {
+  entityId: string;
+  type: EntityType;
+  canonicalName: string;
+  matchedAlias: string;
+  provenance: EntityProvenance[];
+  /** Exact hash of the current Entity projection; changes on correction or retirement. */
+  sourceRevision: string;
+}
+
+export interface EntityMatch {
+  entityId: string;
+  type: EntityType;
+  canonicalName: string;
+  matchedAlias: string;
+  surface: string;
+  source: 'doc' | 'passage';
+  docAnchor: string;
+  passageId?: string;
+  provenance: EntityProvenance[];
+  why: string;
+}
+
+export type EdgeRelation =
+  | 'evolved_from'
+  | 'blocked_by'
+  | 'related'
+  | 'related_to'
+  | 'supersedes'
+  | 'invalidates'
+  | 'promoted_from'
+  | 'wikilink'
+  | 'doc_link'
+  | 'feature_ref';
 
 export interface Edge {
   fromAnchor: string;
   toAnchor: string;
-  relation: 'evolved_from' | 'blocked_by' | 'related' | 'supersedes' | 'invalidates';
+  relation: EdgeRelation;
+  fromCollectionId?: string;
+  toCollectionId?: string;
+  edgeSensitivity?: CollectionSensitivity;
+  provenance?: 'frontmatter' | 'wikilink' | 'promote' | 'manual' | 'content';
+  createdAt?: string;
 }
 
 export interface Marker {
@@ -69,6 +260,11 @@ export interface Marker {
   status: MarkerStatus;
   targetKind?: EvidenceKind;
   createdAt: string;
+  sourceCollectionId?: string;
+  sourceSensitivity?: CollectionSensitivity;
+  targetCollectionId?: string;
+  promoteReviewStatus?: ReviewStatus;
+  secretScanFingerprint?: string;
 }
 
 export interface SearchOptions {
@@ -82,6 +278,55 @@ export interface SearchOptions {
   mode?: 'lexical' | 'semantic' | 'hybrid';
   /** Phase D: result depth — summary (default) or raw detail */
   depth?: 'summary' | 'raw';
+  /** Phase I (AC-I4): ISO8601 date filter, inclusive lower bound */
+  dateFrom?: string;
+  /** Phase I (AC-I4): ISO8601 date filter, inclusive upper bound */
+  dateTo?: string;
+  /** Phase I (AC-I8): number of surrounding passages to include per match */
+  contextWindow?: number;
+  /** F148 Phase B (AC-B1): filter evidence to a specific thread's digest */
+  threadId?: string;
+  /** F102 Batch 3: knowledge dimension — project, global, or all (default); F186: library | collection */
+  dimension?: SearchDimension;
+  /** F186: filter to specific collection IDs when dimension=collection */
+  collections?: string[];
+  /** F263: server-derived private collection grants; never copied from caller query params. */
+  authorizedCollections?: string[];
+  /** F152 Phase A (AC-A6): filter by provenance tier */
+  provenanceTier?: ProvenanceTier;
+  /** F163 Phase B (AC-B3): include backstop docs in results (for drill-down) */
+  includeBackstop?: boolean;
+  /** F271: include candidates that are deliberately visible only to pull surfaces. Default false. */
+  includePullOnly?: boolean;
+  /** F093 Phase A (KD-16): filter to a specific world's derived knowledge */
+  worldId?: string;
+  /** F093 Phase A (KD-16): filter to a specific scene within a world */
+  sceneId?: string;
+  /** F200 v1.1 DF-3: include explainability fields in results */
+  explain?: boolean;
+  /** F200 HW-1: search intent — topk (default) or coverage (exhaustive multi-scope) */
+  intent?: 'topk' | 'coverage';
+  /** Internal cooperative cancellation for latency-bounded orchestrators. */
+  signal?: AbortSignal;
+  /** Internal absolute wall-clock deadline paired with signal. */
+  deadlineAt?: number;
+}
+
+export type SearchDegradeReason =
+  | 'passage_embedding_unavailable'
+  | 'passage_vector_search_error'
+  | 'evidence_store_error'
+  | 'raw_lexical_only';
+
+export interface SearchExecutionMeta {
+  degraded: boolean;
+  degradeReason?: SearchDegradeReason;
+  effectiveMode?: 'lexical' | 'semantic' | 'hybrid';
+}
+
+export interface EvidenceSearchExecution {
+  items: EvidenceItem[];
+  meta: SearchExecutionMeta;
 }
 
 export interface MarkerFilter {
@@ -109,12 +354,26 @@ export interface MaterializeResult {
   markerId: string;
   outputPath: string;
   anchor: string;
+  committed: boolean;
+  reindexed: boolean;
+}
+
+export interface CollectionGroup {
+  collectionId: string;
+  sensitivity: CollectionSensitivity;
+  status: 'ok' | 'timeout' | 'skipped' | 'error';
+  whyIncluded?: string;
+  durationMs: number;
+  items: EvidenceItem[];
 }
 
 export interface KnowledgeResult {
   results: EvidenceItem[];
   sources: Array<'project' | 'global'>;
   query: string;
+  meta?: SearchExecutionMeta;
+  collectionGroups?: CollectionGroup[];
+  deprecationWarnings?: string[];
 }
 
 export interface ReflectionContext {
@@ -126,29 +385,94 @@ export interface ReflectionContext {
 // ── Interfaces ───────────────────────────────────────────────────────
 
 export interface IEvidenceStore {
+  readMessagePassageState?(
+    candidate: import('./message-passage-search-types.js').MessagePassageCandidate,
+  ): import('./message-passage-search-types.js').MessagePassageIndexState;
+  searchMessagePassages?(
+    query: string,
+    options: import('./message-passage-search-types.js').MessagePassageSearchOptions,
+  ): Promise<import('./message-passage-search-types.js').MessagePassageSearchExecution>;
   search(query: string, options?: SearchOptions): Promise<EvidenceItem[]>;
+  searchWithMeta?(query: string, options?: SearchOptions): Promise<EvidenceSearchExecution>;
   upsert(items: EvidenceItem[]): Promise<void>;
+  upsertEntities?(entities: EntityRecord[], context?: EntityMutationContext): Promise<void>;
+  inspectEntityConflict?(incoming: EntityRecord, viewerUserId?: string): Promise<EntityConflictContext | null>;
+  resolveEntityConflict?(
+    incoming: EntityRecord,
+    resolution: EntityConflictResolutionRequest,
+    context: EntityMutationContext,
+  ): Promise<void>;
+  getEntity?(entityId: string): Promise<EntityRecord | null>;
+  /** Exact append-only writer revision; proposal status and user-supplied provenance are not proof. */
+  getEntityProposalEffectProof?(entityId: string, proposalId: string, ownerUserId: string): Promise<string | null>;
+  resolveEntityAliases?(query: string): Promise<QueryEntityMatch[]>;
+  refreshEntityMentions?(docAnchors?: string[]): Promise<void>;
   deleteByAnchor(anchor: string): Promise<void>;
   getByAnchor(anchor: string): Promise<EvidenceItem | null>;
+  /** Read-only source/vector revision projection from the original index, never a freshness timestamp. */
+  getIndexedSourceRevision?(anchor: string): Promise<{ sourceHash: string; vectorSourceHash: string | null } | null>;
   health(): Promise<boolean>;
   initialize(): Promise<void>;
 }
 
+export type RebuildProgressCallback = (phase: string, percent: number) => void;
+
+export interface MessageRecallSuppressionLease {
+  threadId: string;
+  messageId: string;
+  leaseId: string;
+}
+
+export interface ThreadIndexRefreshOptions {
+  force?: boolean;
+  signal?: AbortSignal;
+  onProgress?: RebuildProgressCallback;
+}
+
 export interface IIndexBuilder {
-  rebuild(options?: { force?: boolean }): Promise<RebuildResult>;
+  rebuild(options?: {
+    force?: boolean;
+    deferThreadIndexing?: boolean;
+    /** API startup fills vectors through its existing post-listen catch-up. */
+    deferDocumentEmbedding?: boolean;
+    onProgress?: RebuildProgressCallback;
+  }): Promise<RebuildResult>;
+  refreshThreadIndex(options?: ThreadIndexRefreshOptions): Promise<RebuildResult>;
+  startPassageEmbeddingWarmup(): void;
+  /** True while background passage-vector backfill is running. */
+  isPassageWarmupActive(): boolean;
   incrementalUpdate(changedPaths: string[]): Promise<void>;
+  /** Fail-closed pre-CAS guard: hide one authored body from every index rebuild path. */
+  suppressMessagePassage(threadId: string, messageId: string): Promise<MessageRecallSuppressionLease>;
+  /** Release this lease; true only when the final prepared lease restored the snapshot. */
+  releaseMessagePassageSuppression(lease: MessageRecallSuppressionLease): Promise<boolean>;
+  /** Commit every concurrent lease for the recalled source after canonical CAS. */
+  finalizeMessagePassageSuppression(lease: MessageRecallSuppressionLease): Promise<void>;
   checkConsistency(): Promise<ConsistencyReport>;
 }
 
 export interface IMarkerQueue {
   submit(marker: Omit<Marker, 'id' | 'createdAt'>): Promise<Marker>;
   list(filter?: MarkerFilter): Promise<Marker[]>;
-  transition(id: string, to: MarkerStatus): Promise<void>;
+  transition(id: string, to: MarkerStatus, patch?: Partial<Marker>): Promise<void>;
+}
+
+export interface MaterializeOptions {
+  targetRoot?: string;
+  indexBuilder?: Pick<IIndexBuilder, 'incrementalUpdate'> | null;
+  /**
+   * Opt-in: git-commit the materialized .md (default off). Auto-committing onto
+   * the current branch (e.g. runtime/main-sync) silently diverges it and breaks
+   * the next ff-only sync — callers that want git persistence must opt in explicitly.
+   */
+  commit?: boolean;
 }
 
 export interface IMaterializationService {
-  materialize(markerId: string): Promise<MaterializeResult>;
+  materialize(markerId: string, options?: MaterializeOptions): Promise<MaterializeResult>;
   canMaterialize(markerId: string): Promise<boolean>;
+  /** Parent-root targets retain this service's canonical indexer. Legacy embedders may omit this query. */
+  isDefaultTargetRoot?(targetRoot: string): boolean;
 }
 
 export interface IReflectionService {
@@ -163,7 +487,7 @@ export interface IKnowledgeResolver {
 
 export interface EmbedConfig {
   embedMode: 'off' | 'shadow' | 'on';
-  embedModel: 'qwen3-embedding-0.6b' | 'multilingual-e5-small';
+  embedModel: string;
   embedDim: number;
   maxModelMemMb: number;
   embedTimeoutMs: number;
@@ -176,24 +500,26 @@ export interface EmbedModelInfo {
 }
 
 export interface IEmbeddingService {
-  load(): Promise<void>;
-  embed(texts: string[]): Promise<Float32Array[]>;
+  load(signal?: AbortSignal): Promise<void>;
+  embed(texts: string[], signal?: AbortSignal): Promise<Float32Array[]>;
   isReady(): boolean;
+  reprobeIfNeeded(signal?: AbortSignal): Promise<void>;
   getModelInfo(): EmbedModelInfo;
   dispose(): void;
 }
 
 const VALID_EMBED_MODES = new Set(['off', 'shadow', 'on']);
-const VALID_EMBED_MODELS = new Set(['qwen3-embedding-0.6b', 'multilingual-e5-small']);
 
 export function resolveEmbedConfig(partial?: Partial<EmbedConfig>): EmbedConfig {
   const mode = partial?.embedMode ?? 'off';
   if (!VALID_EMBED_MODES.has(mode)) throw new Error(`Invalid embedMode: ${mode}`);
-  const model = partial?.embedModel ?? 'qwen3-embedding-0.6b';
-  if (!VALID_EMBED_MODELS.has(model)) throw new Error(`Invalid embedModel: ${model}`);
+  // The scripted sidecar is the runtime authority for the concrete model
+  // after /health responds. Until then this sentinel keeps local config free
+  // of stale TypeScript-side model whitelists.
+  const model = partial?.embedModel ?? 'unknown';
   return {
     embedMode: mode as EmbedConfig['embedMode'],
-    embedModel: model as EmbedConfig['embedModel'],
+    embedModel: model,
     embedDim: partial?.embedDim ?? 768, // LL-034: 768 is sweet spot for CJK bilingual; 256 too low
     maxModelMemMb: partial?.maxModelMemMb ?? 800,
     embedTimeoutMs: partial?.embedTimeoutMs ?? 3000,

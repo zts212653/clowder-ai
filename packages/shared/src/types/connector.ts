@@ -1,16 +1,68 @@
 /**
- * Connector Types — 外部信息源抽象
+ * Connector Types — 外部信息源 / notice transport 抽象
  *
- * Connector 是从外部系统（GitHub、iMessage、Slack 等）
- * 进入 Cat Cafe 的消息来源。每个 connector 有固定的视觉标识
- * （icon、颜色），在前端以独立气泡样式展示。
+ * Connector transport covers both:
+ * 1) true external systems（GitHub、iMessage、Slack 等）, and
+ * 2) thread-visible system notices that reuse the same persistence/socket path.
+ *
+ * Visual presentation is not implied by storage transport:
+ * - default connector messages render as ConnectorBubble
+ * - messages with `source.meta.presentation = 'system_notice'` render as in-thread notice bars
  *
  * BACKLOG #97
  */
 
+import { CONNECTOR_DEFINITIONS } from './connector-definitions.js';
+import type { MessageFrom } from './message-lifecycle.js';
+
 // ── Connector Source (附加到 StoredMessage) ──
 
-/** Source metadata attached to messages from external connectors. */
+/** Shared prefix for scheduler trigger messages that act as reply anchors. */
+export const SCHEDULER_TRIGGER_PREFIX = '[定时任务]';
+
+export type SchedulerLifecycleEvent =
+  | 'registered'
+  | 'paused'
+  | 'resumed'
+  | 'deleted'
+  | 'succeeded'
+  | 'failed'
+  | 'missed_window';
+
+export interface SchedulerToastPayload {
+  type: 'success' | 'error' | 'info';
+  title: string;
+  message: string;
+  duration: number;
+  lifecycleEvent: SchedulerLifecycleEvent;
+}
+
+export interface SchedulerMessageExtra {
+  scheduler?: {
+    hiddenTrigger?: boolean;
+    toast?: SchedulerToastPayload;
+  };
+  /** F276: server-written, content-free carrier for one deferred write-opportunity re-entry. */
+  writeOpportunityReentry?: import('./memory-write-opportunity.js').WriteOpportunityReentryCarrierV1;
+  /** F276: one unified clerk invocation may carry up to eight independent re-entries. */
+  writeOpportunityReentries?: readonly import('./memory-write-opportunity.js').WriteOpportunityReentryCarrierV1[];
+  /** F292/F296: server-written, refs-only retry for one unchanged write-opportunity generation. */
+  writeOpportunityPresentationRetry?: import('./memory-write-opportunity.js').WriteOpportunityPresentationRetryCarrierV1;
+}
+
+export type ReplyPreviewKind = 'scheduler_trigger';
+
+export interface ReplyPreview {
+  /** Canonical identity of the referenced message, not inferred from a null cat ID. */
+  from?: MessageFrom;
+  source?: ConnectorSource;
+  senderCatId: string | null;
+  content: string;
+  deleted?: true;
+  kind?: ReplyPreviewKind;
+}
+
+/** Source metadata attached to connector-transport messages. */
 export interface ConnectorSource {
   /** Stable connector identifier (used for routing + styling) */
   readonly connector: string;
@@ -18,36 +70,60 @@ export interface ConnectorSource {
   readonly label: string;
   /** Emoji or icon URL for avatar position */
   readonly icon: string;
-  /** Link to original source (e.g., PR URL) */
-  readonly url?: string;
-  /** Connector-specific metadata (not rendered, for debugging/routing) */
+  /** Optional theme color from the plugin's declared presentation identity. */
+  readonly themeColor?: string;
+  /** Connector-specific metadata (e.g. presentation='system_notice', debugging, routing) */
   readonly meta?: Readonly<Record<string, unknown>>;
+  /** F134: Original sender info for group chat messages (message-level binding, not thread-level) */
+  readonly sender?: { readonly id: string; readonly name?: string };
+}
+
+/** Exact identity shared by the visible waiting fact and the queued wake source. */
+export function isManagedHoldConnectorSource(
+  source: Pick<ConnectorSource, 'connector' | 'meta'> | null | undefined,
+): boolean {
+  const meta = source?.meta;
+  return Boolean(
+    source?.connector === 'hold-ball' &&
+      meta?.managedHold === true &&
+      typeof meta.taskId === 'string' &&
+      meta.taskId.trim().length > 0 &&
+      typeof meta.threadId === 'string' &&
+      meta.threadId.trim().length > 0 &&
+      typeof meta.catId === 'string' &&
+      meta.catId.trim().length > 0,
+  );
+}
+
+/** Only the delivered wake/result is a quotable dispatch source; waiting status is context only. */
+export function isSelectableManagedHoldConnectorSource(
+  source: Pick<ConnectorSource, 'connector' | 'meta'> | null | undefined,
+): boolean {
+  return isManagedHoldConnectorSource(source) && source?.meta?.phase === 'wake';
 }
 
 // ── Connector Definition (registry entry) ──
 
-/** Tailwind CSS class strings for connector bubble styling. */
-export interface ConnectorTailwindTheme {
-  readonly avatar: string;
-  readonly label: string;
-  readonly labelLink: string;
-  readonly bubble: string;
-}
+/** How a connector's avatar icon is rendered.
+ *  - `svg`: maps to a React SVG component by `iconId` or renders a bundled SVG file from `src`
+ *  - `png`: renders an image from `src` path */
+export type ConnectorIconSpec =
+  | { readonly type: 'svg'; readonly iconId: string; readonly src?: string }
+  | { readonly type: 'png'; readonly src: string };
 
-/** Static definition of a connector type for frontend rendering. */
+/** Static definition of a connector type for frontend rendering.
+ *  Every connector shares the same metadata shape: name + themeColor + icon.
+ *  The OKLCH pipeline derives bubble/surface/ring colors from `themeColor`. */
 export interface ConnectorDefinition {
   readonly id: string;
+  /** Display name shown next to the message bubble. */
   readonly displayName: string;
-  readonly icon: string;
-  readonly color: {
-    /** Primary accent color (border, label) */
-    readonly primary: string;
-    /** Secondary background color (bubble fill) */
-    readonly secondary: string;
-  };
+  /** Avatar icon spec — single source of truth for icon rendering. */
+  readonly icon: ConnectorIconSpec;
+  /** Theme color hex — single source for OKLCH hue/chroma derivation + avatar ring.
+   *  Avatar bg is computed via `tintedLight(themeColor, 0.5)`. */
+  readonly themeColor: string;
   readonly description: string;
-  /** Tailwind theme for ConnectorBubble rendering. If omitted, default theme is used. */
-  readonly tailwindTheme?: ConnectorTailwindTheme;
 }
 
 // ── Thread Binding (external platform ↔ Clowder AI thread) ──
@@ -72,89 +148,48 @@ export interface OutboundDeliveryTarget {
 
 // ── Connector Registry ──
 
-const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
-  {
-    id: 'github-review',
-    displayName: 'GitHub Review',
-    icon: 'github',
-    color: { primary: '#2563EB', secondary: '#EFF6FF' },
-    description: 'GitHub PR review 邮件通知',
-    tailwindTheme: {
-      avatar: 'bg-slate-100 ring-2 ring-slate-200',
-      label: 'text-slate-700',
-      labelLink: 'text-slate-700 hover:text-slate-900',
-      bubble: 'border border-slate-200 bg-slate-50',
-    },
-  },
-  {
-    id: 'vote-result',
-    displayName: '投票结果',
-    icon: 'ballot',
-    color: { primary: '#7C3AED', secondary: '#F5F3FF' },
-    description: '投票系统自动汇总结果',
-    tailwindTheme: {
-      avatar: 'bg-purple-100 ring-2 ring-purple-200',
-      label: 'text-purple-700',
-      labelLink: 'text-purple-700 hover:text-purple-900',
-      bubble: 'border border-purple-200 bg-purple-50',
-    },
-  },
-  {
-    id: 'multi-mention-result',
-    displayName: 'Multi-Mention 结果',
-    icon: 'users',
-    color: { primary: '#059669', secondary: '#ECFDF5' },
-    description: '多猫 @mention 聚合结果',
-    tailwindTheme: {
-      avatar: 'bg-emerald-100 ring-2 ring-emerald-200',
-      label: 'text-emerald-700',
-      labelLink: 'text-emerald-700 hover:text-emerald-900',
-      bubble: 'border border-emerald-200 bg-emerald-50',
-    },
-  },
-  {
-    id: 'feishu',
-    displayName: '飞书',
-    icon: '/images/connectors/feishu.png',
-    color: { primary: '#3370FF', secondary: '#E8F0FE' },
-    description: '飞书机器人',
-    tailwindTheme: {
-      avatar: 'bg-blue-100 ring-2 ring-blue-200',
-      label: 'text-blue-700',
-      labelLink: 'text-blue-700 hover:text-blue-900',
-      bubble: 'border border-blue-200 bg-blue-50',
-    },
-  },
-  {
-    id: 'telegram',
-    displayName: 'Telegram',
-    icon: '/images/connectors/telegram.png',
-    color: { primary: '#0088CC', secondary: '#E3F2FD' },
-    description: 'Telegram Bot',
-    tailwindTheme: {
-      avatar: 'bg-sky-100 ring-2 ring-sky-200',
-      label: 'text-sky-700',
-      labelLink: 'text-sky-700 hover:text-sky-900',
-      bubble: 'border border-sky-200 bg-sky-50',
-    },
-  },
-  {
-    id: 'system-command',
-    displayName: 'Clowder AI',
-    icon: 'settings',
-    color: { primary: '#6B7280', secondary: '#F9FAFB' },
-    description: '系统命令响应',
-  },
-] as const;
-
 const connectorMap = new Map<string, ConnectorDefinition>(CONNECTOR_DEFINITIONS.map((d) => [d.id, d]));
+
+/** Static IDs from compile-time definitions — immune to runtime registration. */
+const staticConnectorIds = new Set(CONNECTOR_DEFINITIONS.map((d) => d.id));
+
+/**
+ * Check whether an ID belongs to a static (compile-time) connector definition.
+ * Unlike `getConnectorDefinition()`, this is NOT affected by runtime
+ * `registerConnectorDefinition()` calls — safe for hot-reload ID conflict checks.
+ */
+export function isStaticConnectorId(id: string): boolean {
+  return staticConnectorIds.has(id);
+}
+
+/**
+ * Register a connector definition at runtime (F240 dynamic plugins).
+ * External IM connector plugins call this to make their definition
+ * available to frontend rendering (icon, color, displayName).
+ * Built-in definitions cannot be overridden.
+ */
+export function registerConnectorDefinition(def: ConnectorDefinition): void {
+  if (staticConnectorIds.has(def.id)) return;
+  connectorMap.set(def.id, def);
+}
+
+/**
+ * Unregister a runtime-added connector definition (F240 plugin uninstall).
+ * Static (compile-time) definitions are immune — only dynamically registered
+ * entries can be removed.
+ */
+export function unregisterConnectorDefinition(id: string): void {
+  if (!staticConnectorIds.has(id)) {
+    connectorMap.delete(id);
+  }
+}
 
 /** Look up a connector definition by ID. */
 export function getConnectorDefinition(connectorId: string): ConnectorDefinition | undefined {
   return connectorMap.get(connectorId);
 }
 
-/** Get all registered connector definitions. */
+/** Get all registered connector definitions (built-in + dynamically registered). */
 export function getAllConnectorDefinitions(): readonly ConnectorDefinition[] {
-  return CONNECTOR_DEFINITIONS;
+  return Array.from(connectorMap.values());
 }

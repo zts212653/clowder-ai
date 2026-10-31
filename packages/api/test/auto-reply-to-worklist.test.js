@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function createMockSocketManager() {
   const messages = [];
@@ -60,24 +61,28 @@ describe('auto-replyTo: worklist path (a2aTriggerMessageId)', () => {
 
   test('auto-fills replyTo from a2aTriggerMessageId (not user message)', async () => {
     // 1. User's original message (what InvocationRecordStore.userMessageId points to)
-    const userMsg = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: '请三只猫讨论',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    const userMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: '请三只猫讨论',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
 
     // 2. Cat A's message that @mentions Cat B (the actual A2A trigger)
-    const catAMsg = messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: '砚砚帮我看看\n@codex',
-      mentions: ['codex'],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    const catAMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: '砚砚帮我看看\n@codex',
+        mentions: ['codex'],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
 
     // 3. InvocationRecordStore has the USER message (top-level invocation)
     const createResult = invocationRecordStore.create({
@@ -86,13 +91,14 @@ describe('auto-replyTo: worklist path (a2aTriggerMessageId)', () => {
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: `top:${userMsg.id}`,
+      actionLeaseCarrier: { kind: 'none' },
     });
     invocationRecordStore.update(createResult.invocationId, {
       userMessageId: userMsg.id,
     });
 
     // 4. InvocationRegistry with BOTH parentInvocationId AND a2aTriggerMessageId
-    const { invocationId, callbackToken } = registry.create(
+    const { invocationId, callbackToken } = await registry.create(
       'user-1',
       'codex',
       'thread-1',
@@ -105,9 +111,8 @@ describe('auto-replyTo: worklist path (a2aTriggerMessageId)', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '收到，opus！我来看',
       },
     });
@@ -124,33 +129,42 @@ describe('auto-replyTo: worklist path (a2aTriggerMessageId)', () => {
   });
 
   test('re-mentioned pending cat gets latest triggerMessageId', async () => {
-    const catAMsg = messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: '帮我看看\n@sonnet',
-      mentions: ['sonnet'],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    const catAMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: '帮我看看\n@sonnet',
+        mentions: ['sonnet'],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
 
-    const catBMsg = messageStore.append({
-      userId: 'user-1',
-      catId: 'codex',
-      content: 'sonnet 你也看看\n@sonnet',
-      mentions: ['sonnet'],
-      timestamp: Date.now() + 100,
-      threadId: 'thread-1',
-    });
+    const catBMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: 'sonnet 你也看看\n@sonnet',
+        mentions: ['sonnet'],
+        timestamp: Date.now() + 100,
+        threadId: 'thread-1',
+      }),
+    );
 
-    const { invocationId, callbackToken } = registry.create('user-1', 'sonnet', 'thread-1', 'parent-inv-1', catBMsg.id);
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'sonnet',
+      'thread-1',
+      'parent-inv-1',
+      catBMsg.id,
+    );
 
     const app = await createApp();
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '收到两位！',
       },
     });

@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback } from 'react';
-import { useVoiceStream } from '@/hooks/useVoiceStream';
 import { type PlaybackState, useVoiceSessionStore } from '@/stores/voiceSessionStore';
 
 /**
@@ -27,7 +26,7 @@ import { type PlaybackState, useVoiceSessionStore } from '@/stores/voiceSessionS
  *  permitted by the browser.
  *
  *  Returns true if the play() promise resolved, false otherwise. */
-function unlockAutoplay(): boolean {
+export function unlockAutoplay(): boolean {
   try {
     // Minimal valid WAV: 44-byte header + 1 sample of silence
     // prettier-ignore
@@ -107,15 +106,17 @@ interface VoiceCompanionButtonProps {
 }
 
 function VoicePlaybackControls({ playbackState }: { playbackState: PlaybackState }) {
-  const { pause, resume, skip } = useVoiceStream();
+  const pauseAudio = useVoiceSessionStore((s) => s.pauseAudio);
+  const resumeAudio = useVoiceSessionStore((s) => s.resumeAudio);
+  const skipAudio = useVoiceSessionStore((s) => s.skipAudio);
   const isPaused = playbackState === 'paused';
 
   return (
     <>
       <button
         type="button"
-        onClick={isPaused ? resume : pause}
-        className="p-1 rounded-lg text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
+        onClick={isPaused ? resumeAudio : pauseAudio}
+        className="p-1 rounded-lg text-conn-emerald-text hover:bg-[var(--console-hover-bg)] transition-colors"
         aria-label={isPaused ? '继续播放' : '暂停'}
         title={isPaused ? '继续播放' : '暂停'}
       >
@@ -131,8 +132,8 @@ function VoicePlaybackControls({ playbackState }: { playbackState: PlaybackState
       </button>
       <button
         type="button"
-        onClick={skip}
-        className="p-1 rounded-lg text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
+        onClick={skipAudio}
+        className="p-1 rounded-lg text-conn-emerald-text hover:bg-[var(--console-hover-bg)] transition-colors"
         aria-label="跳过当前"
         title="跳过当前"
       >
@@ -169,19 +170,16 @@ export function VoiceCompanionButton({ threadId, defaultCatId }: VoiceCompanionB
       <button
         type="button"
         onClick={handleClick}
-        className={`
-          p-1 rounded-lg transition-colors
-          ${
-            isActive
-              ? 'text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20'
-              : 'text-gray-500 hover:bg-cocreator-light'
-          }
-        `}
+        className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+          isActive
+            ? 'bg-conn-emerald-bg text-conn-emerald-text hover:opacity-80'
+            : 'bg-transparent text-cafe-secondary hover:text-cafe-accent'
+        }`}
         aria-label={isActive ? '停止语音陪伴' : '语音陪伴'}
         title={isActive ? '停止语音陪伴' : '语音陪伴'}
       >
         <svg
-          className={`w-5 h-5${isActive ? ' animate-pulse' : ''}`}
+          className={`w-4 h-4${isActive ? ' animate-pulse' : ''}`}
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"

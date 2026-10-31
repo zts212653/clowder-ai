@@ -18,7 +18,8 @@ See `cat-cafe-skills/` for the full skill-based workflow:
 - `merge-gate` — Merge approval process
 
 ## Code Standards
-- File size: 200 lines warning / 350 hard limit
+- File size: review responsibilities at 200 lines; split at 350 by default or explain the structural reason to keep the unit together. Do not add per-file line-count tests.
+- Tests: see CONTRIBUTING.md; protect real behavior, reuse sufficient coverage, and choose risk-matched checks rather than repeating full gates during cleanup.
 - No `any` types
 - Biome: `pnpm check` / `pnpm check:fix`
 - Types: `pnpm lint`

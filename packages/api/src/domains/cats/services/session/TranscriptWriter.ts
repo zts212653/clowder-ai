@@ -4,22 +4,38 @@
  *
  * File structure per session:
  *   <dataDir>/threads/<threadId>/<catId>/sessions/<sessionId>/
- *     events.jsonl           — NDJSON events with envelope
+ *     events.jsonl           — NDJSON events with envelope (canonical, written at seal)
+ *     events.live.jsonl      — incremental crash-recovery copy (active sessions only)
  *     index.json             — sparse byte-offset index for pagination
  *     digest.extractive.json — rule-based extractive digest
  *
  * events.jsonl envelope:
- *   { v:1, t:number, threadId, catId, sessionId, cliSessionId, invocationId?, eventNo, event }
+ *   { v:1, t:number, threadId, catId, sessionId, cliSessionId?, invocationId?, eventNo, event }
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { createHmac, randomBytes } from 'node:crypto';
+import { appendFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createModuleLogger } from '../../../../infrastructure/logger.js';
+import { createTranscriptReadDiagnostics } from '../../../../infrastructure/transcript-read-diagnostics.js';
+import {
+  type CollaborationContinuityCapsuleV1,
+  extractContinuityCapsuleFromSystemInfo,
+} from '../agents/invocation/CollaborationContinuityCapsule.js';
+import { stripLeakedToolCallPayload } from '../agents/routing/route-helpers.js';
+import { normalizeTranscriptEvent, transcriptEventFingerprint } from './TranscriptEventEnvelope.js';
+import { type TranscriptEvent, TranscriptReader } from './TranscriptReader.js';
+import { materializeFilesTouched, recordFilesTouched } from './transcript-file-touches.js';
+import { TranscriptInvocationReader } from './transcript-index/TranscriptInvocationReader.js';
+import { compactTranscriptEvent } from './transcript-index/transcript-invocation-compact-event.js';
+import type { CompactTranscriptEvent } from './transcript-index/transcript-invocation-index-types.js';
 
 export interface TranscriptSessionInfo {
   sessionId: string;
   threadId: string;
   catId: string;
-  cliSessionId: string;
+  /** Provider runtime ID, absent for a logical session that has not been late-bound. */
+  cliSessionId?: string;
   seq: number;
 }
 
@@ -30,6 +46,41 @@ interface BufferedEvent {
   event: Record<string, unknown>;
 }
 
+function bufferedEventFingerprint(event: BufferedEvent): string {
+  return transcriptEventFingerprint({
+    t: event.timestamp,
+    ...(event.invocationId !== undefined ? { invocationId: event.invocationId } : {}),
+    event: event.event,
+  });
+}
+
+/**
+ * Merge crash-recovered disk events with the authoritative in-memory suffix.
+ * Counts matter: identical events can legitimately occur more than once, and
+ * invocation identity is part of the canonical event identity.
+ */
+function mergeLiveAndBufferedEvents(liveEvents: BufferedEvent[], bufferedEvents: BufferedEvent[]): BufferedEvent[] {
+  const bufferedCounts = new Map<string, number>();
+  for (const event of bufferedEvents) {
+    const key = bufferedEventFingerprint(event);
+    bufferedCounts.set(key, (bufferedCounts.get(key) ?? 0) + 1);
+  }
+
+  const diskOnly: BufferedEvent[] = [];
+  for (const event of liveEvents) {
+    const key = bufferedEventFingerprint(event);
+    const remaining = bufferedCounts.get(key) ?? 0;
+    if (remaining > 0) {
+      if (remaining === 1) bufferedCounts.delete(key);
+      else bufferedCounts.set(key, remaining - 1);
+    } else {
+      diskOnly.push(event);
+    }
+  }
+
+  return [...diskOnly, ...bufferedEvents].map((event, eventNo) => ({ ...event, eventNo }));
+}
+
 export interface ExtractiveDigestV1 {
   v: 1;
   sessionId: string;
@@ -37,6 +88,7 @@ export interface ExtractiveDigestV1 {
   catId: string;
   seq: number;
   time: { createdAt: number; sealedAt: number };
+  sealReason?: string;
   invocations: Array<{
     invocationId?: string;
     toolNames?: string[];
@@ -50,6 +102,47 @@ export interface ExtractiveDigestV1 {
     invocationId?: string;
     message: string;
   }>;
+  diagnostics?: {
+    noise?: DigestNoiseSummary[];
+  };
+  /** Last visible assistant text messages, carried verbatim as reference data for continuity. */
+  recentMessages?: Array<{
+    role: 'assistant';
+    invocationId?: string;
+    content: string;
+  }>;
+  /** Latest structured collaboration control-flow state captured at a seal boundary. */
+  continuityCapsule?: CollaborationContinuityCapsuleV1;
+}
+
+export type DigestNoiseKind = 'context_canceled' | 'mcp_refused' | 'canceled_step';
+
+export interface DigestNoiseSummary {
+  kind: DigestNoiseKind;
+  count: number;
+  sample: string;
+  invocationIds: string[];
+  firstAt: number;
+  lastAt: number;
+  outcome: 'recovered' | 'terminal';
+}
+
+interface DigestErrorRecord {
+  order: number;
+  at: number;
+  invocationId?: string;
+  message: string;
+}
+
+interface DigestNoiseGroup {
+  kind: DigestNoiseKind;
+  count: number;
+  sample: string;
+  invocationIds: Set<string>;
+  firstAt: number;
+  lastAt: number;
+  recovered: boolean;
+  errors: DigestErrorRecord[];
 }
 
 export interface TranscriptWriterOptions {
@@ -65,29 +158,115 @@ export interface HandoffDigestMeta {
 }
 
 export class TranscriptWriter {
+  private filesReadDiagnostics?: ReturnType<typeof createTranscriptReadDiagnostics>;
+  private readonly readProjections = new WeakMap<BufferedEvent, CompactTranscriptEvent>();
   private readonly dataDir: string;
   private readonly indexStride: number;
   /** sessionId → buffered events */
   private buffers = new Map<string, BufferedEvent[]>();
+  /** Serialized disk write chains per session for incremental crash-recovery append. */
+  private diskWriteQueue = new Map<string, Promise<void>>();
+  private contentDigestKey?: Promise<Buffer>;
 
   constructor(opts: TranscriptWriterOptions) {
     this.dataDir = opts.dataDir;
     this.indexStride = opts.indexStride ?? 100;
   }
 
-  /** Append a raw event to the in-memory buffer for a session. */
-  appendEvent(session: TranscriptSessionInfo, event: Record<string, unknown>, invocationId?: string): void {
+  private async loadContentDigestKey(): Promise<Buffer> {
+    const keyPath = join(this.dataDir, '.request-envelope-hmac-key');
+    try {
+      const existing = await readFile(keyPath);
+      if (existing.byteLength !== 32) throw new Error('request_envelope_hmac_key_invalid');
+      return existing;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    await mkdir(this.dataDir, { recursive: true });
+    const created = randomBytes(32);
+    try {
+      await writeFile(keyPath, created, { flag: 'wx', mode: 0o600 });
+      return created;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const winner = await readFile(keyPath);
+      if (winner.byteLength !== 32) throw new Error('request_envelope_hmac_key_invalid');
+      return winner;
+    }
+  }
+
+  /** Stable owner-local digest for sensitive transcript content. */
+  async keyedContentDigest(content: string): Promise<string> {
+    this.contentDigestKey ??= this.loadContentDigestKey();
+    const key = await this.contentDigestKey;
+    return `hmac-sha256:${createHmac('sha256', key).update(content).digest('hex')}`;
+  }
+
+  private bufferEvent(
+    session: TranscriptSessionInfo,
+    event: Record<string, unknown>,
+    invocationId?: string,
+  ): BufferedEvent {
     let buf = this.buffers.get(session.sessionId);
     if (!buf) {
       buf = [];
       this.buffers.set(session.sessionId, buf);
     }
-    buf.push({
+    const entry: BufferedEvent = {
       eventNo: buf.length,
       timestamp: Date.now(),
       ...(invocationId !== undefined ? { invocationId } : {}),
       event,
+    };
+    buf.push(entry);
+    return entry;
+  }
+
+  private rollbackBufferedEvent(sessionId: string, entry: BufferedEvent): void {
+    const buf = this.buffers.get(sessionId);
+    if (!buf) return;
+    const index = buf.indexOf(entry);
+    if (index < 0) return;
+    buf.splice(index, 1);
+    for (let cursor = index; cursor < buf.length; cursor += 1) {
+      const buffered = buf[cursor];
+      if (buffered) buffered.eventNo = cursor;
+    }
+    if (buf.length === 0) this.buffers.delete(sessionId);
+  }
+
+  /** Append a raw event to the in-memory buffer for a session. */
+  appendEvent(session: TranscriptSessionInfo, event: Record<string, unknown>, invocationId?: string): void {
+    const entry = this.bufferEvent(session, event, invocationId);
+
+    // Incremental disk append for crash recovery (F232 disk fallback).
+    // Fire-and-forget: buffer is the primary source during normal operation;
+    // disk copy only matters when the process restarts and buffer is lost.
+    void this.enqueueDiskAppend(session, entry).catch(() => {
+      // Best-effort: buffer is the primary source for ordinary transcript events.
     });
+  }
+
+  /**
+   * Append an event only after its active-session JSONL record is durable.
+   *
+   * F299 request generations call this before provider launch. The event is
+   * reserved in the buffer to preserve process-local ordering, but a failed
+   * disk write rolls that reservation back and rejects the caller. Unlike
+   * ordinary transcript output, this path must never degrade to best-effort.
+   */
+  async appendDurableEvent(
+    session: TranscriptSessionInfo,
+    event: Record<string, unknown>,
+    invocationId?: string,
+  ): Promise<void> {
+    const entry = this.bufferEvent(session, event, invocationId);
+    try {
+      await this.enqueueDiskAppend(session, entry);
+    } catch (error) {
+      this.rollbackBufferedEvent(session.sessionId, entry);
+      throw error;
+    }
   }
 
   /** Get buffered events for a session (for testing). */
@@ -100,17 +279,191 @@ export class TranscriptWriter {
     return this.buffers.get(sessionId)?.length ?? 0;
   }
 
+  /** Enqueue a single event append to disk. Writes are serialized per session. */
+  private enqueueDiskAppend(session: TranscriptSessionInfo, entry: BufferedEvent): Promise<void> {
+    const prev = this.diskWriteQueue.get(session.sessionId) ?? Promise.resolve();
+    const attempt = prev.then(async () => {
+      const dir = this.sessionDir(session);
+      const envelope = {
+        v: 1,
+        t: entry.timestamp,
+        threadId: session.threadId,
+        catId: session.catId,
+        sessionId: session.sessionId,
+        ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
+        invocationId: entry.invocationId,
+        eventNo: entry.eventNo,
+        event: entry.event,
+      };
+      this.readProjections.set(entry, compactTranscriptEvent(envelope));
+      await mkdir(dir, { recursive: true });
+      await appendFile(join(dir, 'events.live.jsonl'), `${JSON.stringify(envelope)}\n`, 'utf-8');
+    });
+    // Keep the queue usable after a failed durable append. Individual callers
+    // still receive the original rejection through `attempt`.
+    this.diskWriteQueue.set(
+      session.sessionId,
+      attempt.catch(() => {}),
+    );
+    return attempt;
+  }
+
+  /** Wait for all pending incremental disk writes to complete. Primarily for testing. */
+  async drainPendingWrites(sessionId?: string): Promise<void> {
+    if (sessionId) {
+      await this.diskWriteQueue.get(sessionId);
+    } else {
+      await Promise.all([...this.diskWriteQueue.values()]);
+    }
+  }
+
+  /** Capture references and their already-computed compact metadata, never the full live file. */
+  async readBufferedSnapshot(session: TranscriptSessionInfo): Promise<{
+    events: TranscriptEvent[];
+    compact: CompactTranscriptEvent[];
+  }> {
+    await this.drainPendingWrites(session.sessionId);
+    const events: TranscriptEvent[] = [];
+    const compact: CompactTranscriptEvent[] = [];
+    for (const entry of this.buffers.get(session.sessionId) ?? []) {
+      const envelope: TranscriptEvent = {
+        v: 1,
+        t: entry.timestamp,
+        threadId: session.threadId,
+        catId: session.catId,
+        sessionId: session.sessionId,
+        eventNo: entry.eventNo,
+        event: entry.event,
+        ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
+        ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
+      };
+      events.push(envelope);
+      let projection = this.readProjections.get(entry);
+      if (!projection) {
+        projection = compactTranscriptEvent(envelope);
+        this.readProjections.set(entry, projection);
+      }
+      compact.push(projection);
+    }
+    return { events, compact };
+  }
+
+  /**
+   * Read an active session through the same merge rule used by seal.
+   *
+   * The in-memory buffer remains primary; `events.live.jsonl` contributes only
+   * crash-recovered events which are no longer present in memory. This is a
+   * read projection — it neither clears the buffer nor promotes the live file
+   * into a second canonical transcript.
+   */
+  async readActiveEvents(session: TranscriptSessionInfo): Promise<TranscriptEvent[]> {
+    await this.drainPendingWrites(session.sessionId);
+    const liveEvents = await this.readEventsFromLiveFile(this.sessionDir(session));
+    const bufferedEvents = [...(this.buffers.get(session.sessionId) ?? [])];
+    return mergeLiveAndBufferedEvents(liveEvents, bufferedEvents).map((entry) => ({
+      v: 1,
+      t: entry.timestamp,
+      threadId: session.threadId,
+      catId: session.catId,
+      sessionId: session.sessionId,
+      ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
+      ...(entry.invocationId ? { invocationId: entry.invocationId } : {}),
+      eventNo: entry.eventNo,
+      event: entry.event,
+    }));
+  }
+
+  /**
+   * Get the current session's touched files.
+   * Merges events from both disk (events.live.jsonl — has pre-restart events)
+   * and in-memory buffer (has current events including not-yet-flushed writes).
+   * The merge is idempotent on file paths via Map key deduplication.
+   */
+  async getFilesTouched(
+    sessionId: string,
+    sessionMeta?: { threadId: string; catId: string },
+  ): Promise<ExtractiveDigestV1['filesTouched']> {
+    const filePaths = new Map<string, Set<string>>();
+
+    if (sessionMeta) {
+      this.filesReadDiagnostics ??= createTranscriptReadDiagnostics({
+        operation: 'TranscriptWriter.getFilesTouched',
+        onEvent: (event) => createModuleLogger('transcript-files').info(event, 'Transcript file projection'),
+      });
+      return new TranscriptInvocationReader(new TranscriptReader({ dataDir: this.dataDir }), this).readFiles(
+        { id: sessionId, ...sessionMeta, seq: 0, status: 'active' },
+        undefined,
+        this.filesReadDiagnostics.beginRead(sessionId, 'files'),
+      );
+    }
+
+    // Overlay in-memory buffer: has current events + not-yet-flushed writes
+    const buf = this.buffers.get(sessionId) ?? [];
+    for (const entry of buf) {
+      const evt = entry.event;
+      recordFilesTouched(filePaths, evt, (evt.toolName ?? evt.name) as string | undefined);
+    }
+
+    return materializeFilesTouched(filePaths);
+  }
+
+  /** Read raw events from the incremental live file. Returns [] if file doesn't exist. */
+  private async readEventsFromLiveFile(sessionDir: string): Promise<BufferedEvent[]> {
+    try {
+      const content = await readFile(join(sessionDir, 'events.live.jsonl'), 'utf-8');
+      const events: BufferedEvent[] = [];
+      for (const line of content.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const envelope = normalizeTranscriptEvent(JSON.parse(line));
+          if (!envelope) continue;
+          events.push({
+            eventNo: events.length,
+            timestamp: envelope.t,
+            ...(envelope.invocationId !== undefined ? { invocationId: envelope.invocationId } : {}),
+            event: envelope.event,
+          });
+        } catch {
+          // Skip malformed lines
+        }
+      }
+      return events;
+    } catch {
+      return [];
+    }
+  }
+
   /**
    * Flush buffered events to disk + generate index + extractive digest.
    * Clears the buffer after successful write.
    */
-  async flush(session: TranscriptSessionInfo, sealTimestamps?: { createdAt: number; sealedAt: number }): Promise<void> {
-    const buf = this.buffers.get(session.sessionId);
-    if (!buf || buf.length === 0) {
+  async flush(
+    session: TranscriptSessionInfo,
+    sealTimestamps?: { createdAt: number; sealedAt: number; sealReason?: string },
+  ): Promise<void> {
+    let buf = this.buffers.get(session.sessionId) ?? [];
+
+    // Drain pending incremental writes before reading the live file.
+    await this.drainPendingWrites(session.sessionId);
+
+    const sessionDir = this.sessionDir(session);
+
+    // Recover pre-restart events from live file, merging with the in-memory
+    // buffer instead of replacing. The buffer is authoritative for post-restart
+    // events — it may include events whose disk append silently failed
+    // (enqueueDiskAppend is best-effort, catch swallows errors).
+    // This also covers the zero-post-restart seal case: buffer is empty but
+    // events.live.jsonl has all pre-restart events.
+    const liveEvents = await this.readEventsFromLiveFile(sessionDir);
+    if (liveEvents.length > 0) {
+      buf = mergeLiveAndBufferedEvents(liveEvents, buf);
+      this.buffers.set(session.sessionId, buf);
+    }
+
+    if (buf.length === 0) {
       return;
     }
 
-    const sessionDir = this.sessionDir(session);
     await mkdir(sessionDir, { recursive: true });
 
     // 1. Write events.jsonl
@@ -129,7 +482,7 @@ export class TranscriptWriter {
         threadId: session.threadId,
         catId: session.catId,
         sessionId: session.sessionId,
-        cliSessionId: session.cliSessionId,
+        ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
         invocationId: entry.invocationId,
         eventNo: entry.eventNo,
         event: entry.event,
@@ -157,8 +510,13 @@ export class TranscriptWriter {
       await writeFile(join(sessionDir, 'digest.extractive.json'), JSON.stringify(digest, null, 2), 'utf-8');
     }
 
-    // Clear buffer
+    // Clear buffer + disk write queue
     this.buffers.delete(session.sessionId);
+    this.diskWriteQueue.delete(session.sessionId);
+
+    // Remove the incremental crash-recovery file — the canonical events.jsonl is now the source.
+    // Best-effort: file may not exist if no incremental writes happened.
+    await unlink(join(sessionDir, 'events.live.jsonl')).catch(() => {});
   }
 
   /**
@@ -167,14 +525,18 @@ export class TranscriptWriter {
    */
   generateExtractiveDigest(
     session: TranscriptSessionInfo,
-    sealTimestamps: { createdAt: number; sealedAt: number },
+    sealTimestamps: { createdAt: number; sealedAt: number; sealReason?: string },
   ): ExtractiveDigestV1 {
     const buf = this.buffers.get(session.sessionId) ?? [];
 
     // Extract tool names (deduplicated per invocation group)
     const toolNames = new Set<string>();
     const filePaths = new Map<string, Set<string>>(); // path → ops
-    const errors: ExtractiveDigestV1['errors'] = [];
+    const errors: DigestErrorRecord[] = [];
+    const noiseGroups: DigestNoiseGroup[] = [];
+    const recentMessages: NonNullable<ExtractiveDigestV1['recentMessages']> = [];
+    const recentMessageByStream = new Map<string, NonNullable<ExtractiveDigestV1['recentMessages']>[number]>();
+    let continuityCapsule: CollaborationContinuityCapsuleV1 | undefined;
 
     for (const entry of buf) {
       const evt = entry.event;
@@ -187,18 +549,7 @@ export class TranscriptWriter {
       // Tool use events
       if (evtType === 'tool_use' && typeof evtName === 'string') {
         toolNames.add(evtName);
-
-        // Extract file paths from tool input (AgentMessage: toolInput, raw: input)
-        const input = (evt.toolInput ?? evt.input) as Record<string, unknown> | undefined;
-        if (input) {
-          const filePath = (input.file_path ?? input.path) as string | undefined;
-          if (filePath && typeof filePath === 'string') {
-            const ops = filePaths.get(filePath) ?? new Set();
-            const opName = this.toolNameToOp(evtName);
-            if (opName) ops.add(opName);
-            filePaths.set(filePath, ops);
-          }
-        }
+        recordFilesTouched(filePaths, evt, evtName);
       }
 
       // Error events — AgentMessage uses type='error'+error field;
@@ -206,20 +557,66 @@ export class TranscriptWriter {
       if (evtType === 'tool_result' && evt.is_error) {
         const evtContent = evt.content;
         const message = typeof evtContent === 'string' ? evtContent : JSON.stringify(evtContent);
-        errors.push({
+        recordDigestErrorOrNoise(noiseGroups, errors, {
+          order: entry.eventNo,
           at: entry.timestamp,
           ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
           message: message.slice(0, 500),
         });
       }
       if (evtType === 'error' && typeof evt.error === 'string') {
-        errors.push({
+        recordDigestErrorOrNoise(noiseGroups, errors, {
+          order: entry.eventNo,
           at: entry.timestamp,
           ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
           message: (evt.error as string).slice(0, 500),
         });
       }
+      if (evtType === 'system_info' && typeof evt.content === 'string') {
+        continuityCapsule = extractContinuityCapsuleFromSystemInfo(evt.content) ?? continuityCapsule;
+      }
+
+      const streamKey =
+        evtType === 'text' && entry.invocationId !== undefined
+          ? `${entry.invocationId}:${typeof evt.catId === 'string' ? evt.catId : session.catId}`
+          : null;
+      const visibleText = extractVisibleAssistantText(evt, { trim: streamKey === null });
+      if (visibleText) {
+        markDigestNoiseRecovered(noiseGroups, entry.timestamp, entry.invocationId);
+        if (streamKey) {
+          const existing = recentMessageByStream.get(streamKey);
+          if (existing && recentMessages[recentMessages.length - 1] === existing) {
+            const content = normalizeVisibleText(coalesceVisibleText(existing.content, visibleText, evt.textMode), {
+              trim: false,
+            });
+            if (content) {
+              existing.content = content.slice(0, 1200);
+              moveToEnd(recentMessages, existing);
+            } else {
+              removeItem(recentMessages, existing);
+              recentMessageByStream.delete(streamKey);
+            }
+          } else {
+            const message = {
+              role: 'assistant' as const,
+              ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
+              content: visibleText.slice(0, 1200),
+            };
+            recentMessages.push(message);
+            recentMessageByStream.set(streamKey, message);
+          }
+        } else {
+          recentMessages.push({
+            role: 'assistant',
+            ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
+            content: visibleText.slice(0, 1200),
+          });
+        }
+      }
     }
+
+    const noiseSummaries = finalizeDigestNoise(noiseGroups, errors);
+    const digestErrors: ExtractiveDigestV1['errors'] = errors.map(({ order: _order, ...error }) => error);
 
     return {
       v: 1,
@@ -227,17 +624,18 @@ export class TranscriptWriter {
       threadId: session.threadId,
       catId: session.catId,
       seq: session.seq,
-      time: sealTimestamps,
+      time: { createdAt: sealTimestamps.createdAt, sealedAt: sealTimestamps.sealedAt },
+      ...(sealTimestamps.sealReason ? { sealReason: sealTimestamps.sealReason } : {}),
       invocations: [
         {
           toolNames: [...toolNames],
         },
       ],
-      filesTouched: [...filePaths.entries()].map(([path, ops]) => ({
-        path,
-        ops: [...ops],
-      })),
-      errors,
+      filesTouched: materializeFilesTouched(filePaths),
+      errors: digestErrors,
+      ...(noiseSummaries.length > 0 ? { diagnostics: { noise: noiseSummaries } } : {}),
+      recentMessages: recentMessages.slice(-5),
+      ...(continuityCapsule ? { continuityCapsule } : {}),
     };
   }
 
@@ -252,23 +650,151 @@ export class TranscriptWriter {
 
     await writeFile(join(sessionDir, 'digest.handoff.md'), `${frontmatter}\n\n${body}\n`, 'utf-8');
   }
-
-  /** Map tool name to file operation type. */
-  private toolNameToOp(name: string): string | null {
-    switch (name.toLowerCase()) {
-      case 'write':
-        return 'create';
-      case 'edit':
-        return 'edit';
-      case 'delete':
-        return 'delete';
-      default:
-        return null;
-    }
-  }
-
   /** Compute session directory path. */
   private sessionDir(session: TranscriptSessionInfo): string {
     return join(this.dataDir, 'threads', session.threadId, session.catId, 'sessions', session.sessionId);
   }
+}
+
+function extractVisibleAssistantText(evt: Record<string, unknown>, opts?: { trim?: boolean }): string | null {
+  if (evt.type === 'text' && typeof evt.content === 'string') {
+    return normalizeVisibleText(evt.content, opts);
+  }
+
+  if (evt.type === 'assistant') {
+    const content = evt.content;
+    if (typeof content === 'string') {
+      return normalizeVisibleText(content, opts);
+    }
+    if (Array.isArray(content)) {
+      const text = content
+        .map((part) => {
+          if (!part || typeof part !== 'object') return '';
+          const maybeText = (part as { text?: unknown }).text;
+          return typeof maybeText === 'string' ? maybeText : '';
+        })
+        .filter(Boolean)
+        .join('\n');
+      return normalizeVisibleText(text, opts);
+    }
+  }
+
+  return null;
+}
+
+function normalizeVisibleText(text: string, opts?: { trim?: boolean }): string | null {
+  const sanitized = stripLeakedToolCallPayload(text.replace(/[\x00-\x08\x0b-\x1f]/g, ''));
+  if (sanitized.trim().length === 0) return null;
+  return opts?.trim === false ? sanitized : sanitized.trim();
+}
+
+function coalesceVisibleText(existing: string, next: string, textMode: unknown): string {
+  if (textMode === 'replace') {
+    return next;
+  }
+  return `${existing}${next}`;
+}
+
+function moveToEnd<T>(items: T[], item: T): void {
+  const index = items.indexOf(item);
+  if (index >= 0 && index !== items.length - 1) {
+    items.splice(index, 1);
+    items.push(item);
+  }
+}
+
+function removeItem<T>(items: T[], item: T): void {
+  const index = items.indexOf(item);
+  if (index >= 0) {
+    items.splice(index, 1);
+  }
+}
+
+function recordDigestErrorOrNoise(
+  noiseGroups: DigestNoiseGroup[],
+  errors: DigestErrorRecord[],
+  error: DigestErrorRecord,
+): void {
+  const kind = classifyDigestNoise(error.message);
+  if (!kind) {
+    errors.push(error);
+    return;
+  }
+
+  const latest = noiseGroups.at(-1);
+  const group =
+    latest && latest.kind === kind && !latest.recovered && noiseGroupMatchesInvocation(latest, error.invocationId)
+      ? latest
+      : {
+          kind,
+          count: 0,
+          sample: error.message,
+          invocationIds: new Set<string>(),
+          firstAt: error.at,
+          lastAt: error.at,
+          recovered: false,
+          errors: [],
+        };
+
+  if (group.count === 0) {
+    noiseGroups.push(group);
+  }
+
+  group.count += 1;
+  group.lastAt = error.at;
+  group.errors.push(error);
+  if (error.invocationId) group.invocationIds.add(error.invocationId);
+}
+
+function classifyDigestNoise(message: string): DigestNoiseKind | null {
+  if (/context cancell?ed/i.test(message)) return 'context_canceled';
+  if (/\bmcp\b/i.test(message) && /refus|status:\s*refused/i.test(message)) return 'mcp_refused';
+  if (/cancell?ed step|step .* cancell?ed|user_cancel/i.test(message)) return 'canceled_step';
+  return null;
+}
+
+function noiseGroupMatchesInvocation(group: DigestNoiseGroup, invocationId?: string): boolean {
+  if (!invocationId) return group.invocationIds.size === 0;
+  return group.invocationIds.size === 1 && group.invocationIds.has(invocationId);
+}
+
+function noiseGroupCanRecoverFromInvocation(group: DigestNoiseGroup, invocationId?: string): boolean {
+  if (group.invocationIds.size === 0) return true;
+  return invocationId !== undefined && group.invocationIds.has(invocationId);
+}
+
+function markDigestNoiseRecovered(noiseGroups: DigestNoiseGroup[], recoveredAt: number, invocationId?: string): void {
+  for (const group of noiseGroups) {
+    if (!group.recovered && group.lastAt <= recoveredAt && noiseGroupCanRecoverFromInvocation(group, invocationId)) {
+      group.recovered = true;
+    }
+  }
+}
+
+function finalizeDigestNoise(noiseGroups: DigestNoiseGroup[], errors: DigestErrorRecord[]): DigestNoiseSummary[] {
+  const summaries: DigestNoiseSummary[] = [];
+  for (const group of noiseGroups) {
+    if (group.count < 2) {
+      errors.push(...group.errors);
+      continue;
+    }
+
+    const outcome = group.recovered ? 'recovered' : 'terminal';
+    summaries.push({
+      kind: group.kind,
+      count: group.count,
+      sample: group.sample,
+      invocationIds: [...group.invocationIds],
+      firstAt: group.firstAt,
+      lastAt: group.lastAt,
+      outcome,
+    });
+
+    if (outcome === 'terminal') {
+      const representative = group.errors[0];
+      if (representative) errors.push(representative);
+    }
+  }
+  errors.sort((left, right) => left.order - right.order);
+  return summaries;
 }

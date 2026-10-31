@@ -1,0 +1,99 @@
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { describe, it } from 'node:test';
+
+import {
+  detectMagicWords,
+  MAGIC_WORD_PATTERNS,
+} from '../../dist/infrastructure/harness-eval/task-outcome/magic-word-detector.js';
+
+const SHARED_RULES_URL = new URL('../../../../cat-cafe-skills/refs/shared-rules.md', import.meta.url);
+const STAGING_CONTENT_URL = new URL('../../../../cat-cafe-skills/refs/l0-staging-content.md', import.meta.url);
+
+function readSharedRuleMagicWords() {
+  const rulesText = readFileSync(SHARED_RULES_URL, 'utf8');
+  const magicWordsSection = rulesText.split(/## Magic Words[^\n]*\n/)[1]?.split(/\n## /)[0] ?? '';
+  return [...magicWordsSection.matchAll(/\|\s*「([^」]+)」\s*\|/g)].flatMap((match) => match[1].split('／'));
+}
+
+describe('Magic Word Runtime Detector (F192 Phase G AC-G12)', () => {
+  it('detects 脚手架 in user message', () => {
+    const hits = detectMagicWords('这个方案是脚手架，不是终态');
+    assert.ok(hits.length > 0);
+    assert.equal(hits[0].word, '脚手架');
+  });
+
+  it('detects 星星罐子 (P0 emergency brake)', () => {
+    const hits = detectMagicWords('星星罐子！立刻停止');
+    assert.ok(hits.length > 0);
+    assert.equal(hits[0].word, '星星罐子');
+  });
+
+  it('detects 第一性原理 in user message', () => {
+    const hits = detectMagicWords('第一性原理，你在堆复杂度');
+    assert.ok(hits.length > 0);
+    assert.equal(hits[0].word, '第一性原理');
+  });
+
+  it('detects 数学之美 in user message', () => {
+    const hits = detectMagicWords('数学之美，方案太复杂了');
+    assert.ok(hits.length > 0);
+    assert.equal(hits[0].word, '数学之美');
+  });
+
+  it('detects 补锅匠 in user message', () => {
+    const hits = detectMagicWords('你是补锅匠，逐点修补不审视同类');
+    assert.ok(hits.length > 0);
+    assert.equal(hits[0].word, '补锅匠');
+  });
+
+  it('detects 四象限 as the unknowns-first brake', () => {
+    const hits = detectMagicWords('四象限：我们是不是只在已知范围里收敛？');
+    assert.ok(hits.length > 0);
+    assert.equal(hits[0].word, '四象限');
+  });
+
+  it('detects multiple magic words in one message', () => {
+    const hits = detectMagicWords('脚手架！钛合金裤衩子！回来');
+    assert.equal(hits.length, 2);
+    const words = hits.map((h) => h.word);
+    assert.ok(words.includes('脚手架'));
+    assert.ok(words.includes('钛合金裤衩子'));
+  });
+
+  it('returns empty for normal message', () => {
+    const hits = detectMagicWords('请帮我看看这个 PR');
+    assert.equal(hits.length, 0);
+  });
+
+  it('returns empty for empty message', () => {
+    assert.equal(detectMagicWords('').length, 0);
+  });
+
+  it('recognizes current aliases and ignores retired words for new events', () => {
+    assert.deepEqual(
+      detectMagicWords('unknown-first 钛合金裤衩子 钛合金内裤').map(({ word }) => word),
+      ['unknown-first', '钛合金裤衩子', '钛合金内裤'],
+    );
+    assert.deepEqual(detectMagicWords('绕路了 喵约 下次一定 我能猜出来 碎片够了'), []);
+  });
+  it('keeps runtime patterns in sync with public injected-governance truth', () => {
+    const sourceWords = readSharedRuleMagicWords();
+
+    assert.deepEqual(MAGIC_WORD_PATTERNS.slice(0, sourceWords.length), sourceWords);
+  });
+
+  it(
+    'keeps runtime patterns in sync with private home-governance truth',
+    { skip: !existsSync(STAGING_CONTENT_URL) && 'private L0 staging content is intentionally absent publicly' },
+    () => {
+      const stagingText = readFileSync(STAGING_CONTENT_URL, 'utf8');
+      const sourceWords = [
+        ...readSharedRuleMagicWords(),
+        ...[...stagingText.matchAll(/^-「([^」]+)」=/gm)].map((match) => match[1]),
+      ];
+
+      assert.deepEqual(MAGIC_WORD_PATTERNS, sourceWords);
+    },
+  );
+});

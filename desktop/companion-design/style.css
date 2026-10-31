@@ -1,0 +1,184 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  color: var(--neutral-800);
+  background: var(--cafe-surface-elevated);
+  font:
+    14px / 1.6 -apple-system,
+    BlinkMacSystemFont,
+    "PingFang SC",
+    sans-serif;
+}
+button,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button {
+  min-height: 32px;
+  border: 1px solid var(--neutral-200);
+  border-radius: 8px;
+  padding: 3px 10px;
+  background: transparent;
+  cursor: pointer;
+}
+button:hover {
+  background: var(--cafe-surface);
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+button:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+}
+button.primary {
+  background: var(--accent-500);
+  border-color: var(--accent-500);
+  color: var(--neutral-50);
+}
+button.primary:hover {
+  background: var(--accent-600);
+}
+button.icon-button {
+  border: none;
+  width: 32px;
+  padding: 0;
+  font-size: 20px;
+}
+select {
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 5px;
+  flex: 1;
+  cursor: pointer;
+}
+h1 {
+  font:
+    400 26px / 1.45 "Songti SC",
+    "Noto Serif CJK SC",
+    serif;
+  margin: 10px 0;
+}
+p {
+  margin: 10px 0;
+}
+.truth {
+  padding: 5px 14px;
+  background: var(--cafe-surface);
+  color: var(--neutral-600);
+  font-size: 11px;
+  text-align: center;
+  border-bottom: 1px solid var(--neutral-200);
+}
+#surface {
+  width: 100%;
+  max-width: 440px;
+  margin: 0 auto;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+header {
+  display: flex;
+  align-items: center;
+  height: 86px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--neutral-200);
+  gap: 10px;
+}
+.drag {
+  -webkit-app-region: drag;
+}
+button,
+select,
+input,
+textarea {
+  -webkit-app-region: no-drag;
+}
+.pet {
+  width: 64px;
+  height: 69px;
+  flex-shrink: 0;
+  image-rendering: pixelated;
+  background-image: url("/pet.webp");
+  background-size: 512px 624px;
+}
+.identity {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.identity strong {
+  font-weight: 500;
+  font-size: 16px;
+}
+.identity span,
+.fine {
+  color: var(--neutral-600);
+  font-size: 12px;
+}
+section {
+  padding: 18px 20px;
+  min-height: 0;
+  overflow-y: auto;
+}
+#companion {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+#companion > * {
+  flex-shrink: 0;
+}
+header,
+.truth,
+#director,
+#notice {
+  flex-shrink: 0;
+}
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--neutral-600);
+  margin-bottom: 16px;
+}
+.intro {
+  color: var(--neutral-600);
+}
+.setup-status {
+  margin: 24px 0;
+  padding: 16px 0;
+  border-top: 1px solid var(--neutral-200);
+  border-bottom: 1px solid var(--neutral-200);
+}
+.setup-status div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0;
+}
+.setup-status dt {
+  color: var(--neutral-600);
+}
+.setup-status dd {
+  margin: 0;
+  text-align: right;
+}
+#setup .fine {
+  margin-top: 22px;
+}

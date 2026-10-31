@@ -18,14 +18,18 @@ export interface EffectiveStrategy {
 export interface CatStrategyEntry {
   catId: string;
   displayName: string;
-  provider: string;
+  clientId: string;
   breedId?: string;
   effective: EffectiveStrategy;
   source: string;
+  revision?: string;
+  changedAt?: number;
+  executionStatus?: {
+    status: 'active' | 'degraded' | 'unavailable';
+    missingCapabilities: string[];
+  };
   hasOverride: boolean;
   override: Partial<EffectiveStrategy> | null;
-  hybridCapable: boolean;
-  sessionChainEnabled: boolean;
 }
 
 export type StrategyType = 'handoff' | 'compress' | 'hybrid';
@@ -36,6 +40,7 @@ export const SOURCE_LABELS: Record<string, string> = {
   breed_code: '代码默认',
   provider_default: 'Provider 默认',
   global_default: '全局默认',
+  legacy_session_chain_false: '旧配置迁移',
 };
 
 export const STRATEGY_LABELS: Record<StrategyType, string> = {

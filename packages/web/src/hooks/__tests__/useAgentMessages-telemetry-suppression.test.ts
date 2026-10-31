@@ -92,7 +92,103 @@ describe('useAgentMessages telemetry suppression', () => {
     root = createRoot(container);
     captured = undefined;
     storeState.messages = [];
-    mockAddMessage.mockClear();
+    vi.clearAllMocks();
+  });
+
+  it('projects provider-neutral warnings on the active path without raw provider JSON', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex',
+        threadId: 'thread-1',
+        content: '{"method":"raw/provider/warning"}',
+        semanticEvent: {
+          v: 1,
+          id: 'warning-active-1',
+          kind: 'warning',
+          occurredAt: 1700000000000,
+          category: 'deprecation',
+          severity: 'warning',
+          message: '旧能力即将停用。',
+          provenance: { provider: 'codex', nativeType: 'deprecated/native/type' },
+        },
+      });
+    });
+
+    expect(mockAddMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'semantic:warning-active-1',
+        content: '警告：旧能力即将停用。',
+      }),
+    );
+    expect(mockAddMessage.mock.calls[0]?.[0]?.content).not.toContain('deprecated/native/type');
+    expect(mockAddMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('F319 Phase F: model_reroute warning adds no detached banner (the reply badge carries it)', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex-sol',
+        threadId: 'thread-1',
+        semanticEvent: {
+          v: 1,
+          id: 'served-model:codex:codex-sol:resp_076e',
+          kind: 'warning',
+          occurredAt: 1700000000000,
+          category: 'model_reroute',
+          severity: 'warning',
+          message: '请求 gpt-5.6-sol，上游实际应答 gpt-6-sol（response resp_076e）。',
+          provenance: { provider: 'codex', nativeType: 'response.created' },
+        },
+      });
+    });
+
+    expect(mockAddMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'stream',
+    'callback',
+  ] as const)('keeps plan visible in the active %s timeline until a real Workspace host owns it', (origin) => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'provider_signal',
+        catId: 'codex',
+        threadId: 'thread-1',
+        origin,
+        content: 'raw plan copy must not become a system bubble',
+        semanticEvent: {
+          v: 1,
+          id: `plan-active-${origin}`,
+          kind: 'plan',
+          occurredAt: 1700000000000,
+          stage: 'updated',
+          text: 'Locate the contract, then fix it.',
+        },
+      });
+    });
+
+    expect(mockAddMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: `semantic:plan-active-${origin}`,
+        type: 'system',
+        content: 'Locate the contract, then fix it.',
+      }),
+    );
+    expect(mockAddMessage).toHaveBeenCalledTimes(1);
   });
 
   afterEach(() => {
@@ -116,6 +212,7 @@ describe('useAgentMessages telemetry suppression', () => {
     });
 
     expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
   });
 
   it('suppresses resume_failure_stats — no system bubble', () => {
@@ -132,5 +229,110 @@ describe('useAgentMessages telemetry suppression', () => {
     });
 
     expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
+  });
+
+  // F230 P2 turn_duration: PTY carrier emits turn_duration as system_info terminal event.
+  // It must be silently consumed — never surfaced as a raw JSON bubble.
+  // Real observed bubble: {"type":"turn_duration","catId":"sonnet","durationMs":9488,"messageCount":38}
+  it('suppresses turn_duration — no system bubble (F230 P2)', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'sonnet',
+        content: JSON.stringify({ type: 'turn_duration', catId: 'sonnet', durationMs: 9488, messageCount: 38 }),
+      });
+    });
+
+    expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      type: 'context_presentation_receipt',
+      v: 1,
+      outcome: 'presented',
+      invocationId: 'inv-receipt',
+      generationId: 'sha256:receipt',
+      projectionIds: ['cue-1'],
+    },
+    {
+      type: 'context_continuity',
+      v: 1,
+      invocationId: 'inv-continuity',
+      contextEpoch: 1,
+      contextMode: 'cold',
+      transition: 'scope_first_seen',
+    },
+    {
+      type: 'future_internal_protocol_event',
+      v: 1,
+      internalCoordinate: 'must-not-render-raw',
+    },
+  ])('fails closed for unprojected structured protocol $type', (payload) => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex-sol',
+        content: JSON.stringify(payload),
+      });
+    });
+
+    expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when a recognized internal projector throws', () => {
+    mockSetCatInvocation.mockImplementationOnce(() => {
+      throw new Error('simulated context-health projection failure');
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    try {
+      act(() => {
+        captured?.handleAgentMessage({
+          type: 'system_info',
+          catId: 'codex-sol',
+          content: JSON.stringify({
+            type: 'context_health',
+            health: { usedTokens: 42, windowTokens: 200000 },
+          }),
+        });
+      });
+    } finally {
+      warnSpy.mockRestore();
+    }
+
+    expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
+  });
+
+  it('keeps plain-text system notices visible', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'system',
+        content: '服务连接已恢复',
+      });
+    });
+
+    expect(mockAddMessage).toHaveBeenCalledWith(expect.objectContaining({ content: '服务连接已恢复' }));
   });
 });

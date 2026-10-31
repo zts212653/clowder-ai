@@ -3,20 +3,47 @@
  * Agent 服务的共享类型定义
  */
 
-import type { CatId, MessageContent } from '@cat-cafe/shared';
+import type {
+  A2ARoutingProjection,
+  CatId,
+  CliEffortPreset,
+  CodexSpeedValue,
+  CrossThreadCoordination,
+  FreshnessCarrierCapability,
+  MessageContent,
+  ProviderOutputMessage,
+  ProviderSemanticEvent,
+  ProviderSubexecutionSemanticEvent,
+  QueueTerminalConsumptionWitness,
+  ReplyPreview,
+  RequestGenerationRetryReason,
+  RequestGenerationSourceRef,
+  SanitizedRequestedRuntimeConfigV1,
+} from '@cat-cafe/shared';
+import type { Span } from '@opentelemetry/api';
+import type { RuntimeProviderProfile } from '../../../config/account-resolver.js';
+import type { CodexAccountLaunchDescriptor } from '../../../config/codex-account-launch.js';
+import type { CliDiagnostics } from '../../../utils/cli-diagnostics.js';
 import type { CliSpawnOptions } from '../../../utils/cli-types.js';
+import type { ClaudeCompactionLaunchPlanResult } from './agents/providers/claude-compaction-launch-plan.js';
+import type { CodexSessionReplacementProvenance } from './runtime-session/CodexSessionReplacementProvenance.js';
+import type { AntigravitySessionLifecycle } from './runtime-session/LegacyAntigravityLifecycle.js';
+import type { TurnExecutionMessageProjection } from './stores/ports/TurnExecutionStore.js';
 
 /** F8: Unified token usage type across all three cats.
  *  inputTokens = TOTAL input tokens (new + cached). Normalised at extraction
  *  so that the field has the same semantics regardless of provider.
  *  cacheReadTokens = subset of inputTokens served from cache. */
 export interface TokenUsage {
+  executionAccount?: import('@cat-cafe/shared').ExecutionAccountSnapshot;
   inputTokens?: number; // Total input (normalised across providers) — AGGREGATED across turns
   outputTokens?: number;
   totalTokens?: number; // Gemini fallback (doesn't split in/out)
   cacheReadTokens?: number; // Subset of inputTokens from cache (Claude + Codex)
   cacheCreationTokens?: number; // Subset of inputTokens written to cache (Claude only)
-  costUsd?: number; // Claude only
+  costUsd?: number; // Claude: exact from CLI; Codex: estimated from pricing table
+  /** True when costUsd was calculated from a pricing table rather than reported by the CLI */
+  costEstimated?: boolean;
   durationMs?: number; // Claude: total duration
   durationApiMs?: number; // Claude: pure API duration
   numTurns?: number; // Claude: number of turns
@@ -25,17 +52,38 @@ export interface TokenUsage {
    *  Unlike inputTokens which is aggregated across all turns, this value
    *  represents the single most recent API call's input size. */
   lastTurnInputTokens?: number;
+  /** #679: true when inputTokens/totalTokens are cumulative across all turns
+   *  (e.g. Gemini CLI stats) — not usable for single-turn context fill ratio.
+   *  This does not taint a separately extracted lastTurnInputTokens value. */
+  isCumulativeUsage?: boolean;
   /** Codex session token_count: exact current context usage shown by CLI status. */
   contextUsedTokens?: number;
   /** Codex session token_count: reset timestamp (epoch ms) for display-only hint. */
   contextResetsAtMs?: number;
 }
 
+/** Resolve the only token signals that represent the current context rather than aggregate spend. */
+export function resolveCurrentContextUsage(
+  usage: TokenUsage,
+): { usedTokens: number; usedFrom: 'context' | 'last_turn' } | undefined {
+  if (usage.contextUsedTokens != null && Number.isFinite(usage.contextUsedTokens) && usage.contextUsedTokens > 0) {
+    return { usedTokens: usage.contextUsedTokens, usedFrom: 'context' };
+  }
+  if (
+    usage.lastTurnInputTokens != null &&
+    Number.isFinite(usage.lastTurnInputTokens) &&
+    usage.lastTurnInputTokens > 0
+  ) {
+    return { usedTokens: usage.lastTurnInputTokens, usedFrom: 'last_turn' };
+  }
+  return undefined;
+}
+
 /** F8: Accumulate token usage — adds numeric fields from `incoming` into `existing` */
 export function mergeTokenUsage(existing: TokenUsage | undefined, incoming: TokenUsage): TokenUsage {
   if (!existing) return { ...incoming };
   const result = { ...existing };
-  const numericKeys: (keyof TokenUsage)[] = [
+  const numericKeys = [
     'inputTokens',
     'outputTokens',
     'totalTokens',
@@ -45,25 +93,26 @@ export function mergeTokenUsage(existing: TokenUsage | undefined, incoming: Toke
     'durationMs',
     'durationApiMs',
     'numTurns',
-  ];
+  ] as const;
   for (const key of numericKeys) {
     const val = incoming[key];
     if (val != null) {
-      result[key] = ((result[key] as number) ?? 0) + (val as number);
+      result[key] = ((result[key] ?? 0) as number) + val;
     }
   }
   // Non-aggregating contextual fields should keep the most recent snapshot.
-  const latestKeys: (keyof TokenUsage)[] = [
-    'contextWindowSize',
-    'lastTurnInputTokens',
-    'contextUsedTokens',
-    'contextResetsAtMs',
-  ];
+  const latestKeys = ['contextWindowSize', 'lastTurnInputTokens', 'contextUsedTokens', 'contextResetsAtMs'] as const;
   for (const key of latestKeys) {
     const val = incoming[key];
     if (val != null) {
       result[key] = val;
     }
+  }
+  if (incoming.isCumulativeUsage != null) {
+    result.isCumulativeUsage = incoming.isCumulativeUsage;
+  }
+  if (incoming.costEstimated != null) {
+    result.costEstimated = incoming.costEstimated;
   }
   return result;
 }
@@ -72,12 +121,132 @@ export function mergeTokenUsage(existing: TokenUsage | undefined, incoming: Toke
  * Metadata about the provider/model behind an agent message
  */
 export interface MessageMetadata {
+  executionAccount?: import('@cat-cafe/shared').ExecutionAccountSnapshot;
   provider: string;
   model: string;
   sessionId?: string;
+  /**
+   * F198 Bug #3: bg carrier surfaces the daemon's freshly-forked conversation
+   * UUID after a `--bg --resume` turn (read from state.resumeSessionId). The
+   * consumer persists it as the SessionRecord's latestResumeSessionId — the
+   * next round's `--resume` target. bg-only; absent for other providers.
+   */
+  resumeSessionId?: string;
   usage?: TokenUsage;
+  /** F306: bounded provider-neutral child lifecycle for live/F5 Agent Run parity. */
+  subexecutionEvents?: readonly ProviderSubexecutionSemanticEvent[];
   /** F061: false when provider cannot verify which model actually ran (e.g. CDP bridge) */
   modelVerified?: boolean;
+  /**
+   * F319: model the upstream declared in its response object. Absent = not
+   * observed (honest unknown), never a copy of `model`. Compare with `model`
+   * to detect silent substitution.
+   */
+  servedModel?: string;
+  /** F319: upstream response id the served model was read from (for provider support lookups). */
+  servedResponseId?: string;
+  /** F319: how servedModel was observed (HTTPS SSE trace or builtin websocket frame trace). */
+  servedModelSource?: 'sse_response_object' | 'ws_response_object';
+  /**
+   * F319 Phase B.2: length of the upstream `x-codex-turn-state` sticky-routing
+   * token for this turn (the token itself is never stored). Informational —
+   * measured identical on normal and rerouted turns, so not a reroute signal.
+   */
+  upstreamTurnStateLength?: number;
+  /** F319 Phase B.2: `x-codex-safety-buffering-faster-model` header (account-level, informational). */
+  upstreamSafetyBufferingFasterModel?: string;
+  /** F319 Phase B.2: `response.safety_buffering` flag from the upstream response object. */
+  upstreamSafetyBuffering?: boolean;
+  /** F061: diagnostic context attached when empty_response is triggered */
+  diagnostics?: Record<string, unknown>;
+  /** Carrier-owned pre-turn tool availability failure for recoverable callers. */
+  requiredToolsUnavailable?: {
+    readonly code: 'required_tools_unavailable';
+    readonly missingTools: readonly string[];
+  };
+  /** F061 Phase 3: structured upstream error classification for recovery decisions */
+  upstreamError?: {
+    kind: 'capacity' | 'network' | 'stream_interrupted' | 'invalid_tool_call' | 'unknown';
+    transient: boolean;
+    rawReason: string;
+  };
+  /** F212 Phase A: structured CLI error diagnostics (reasonCode + sanitized excerpt + debugRef).
+   *  Populated by providers when isCliError/isCliTimeout fires, consumed by Phase B folded panel.
+   *  Carries `__cliError.cliDiagnostics` / `__cliTimeout.cliDiagnostics` from cli-spawn. */
+  cliDiagnostics?: CliDiagnostics;
+  /** F118 AC-C3 / F117: what the provider observed when it gave up on a silent CLI. It explains
+   *  the failure of the turn's response, so it persists with that response's terminal state. */
+  timeoutDiagnostics?: TimeoutDiagnostics;
+  /** Local cancellation does not attest termination of a dispatched remote run. */
+  cancellationDiagnostics?: {
+    localWaitCancelled: true;
+    remoteTermination: 'unconfirmed';
+    remoteExecution: RemoteExecutionRef;
+  };
+}
+
+export interface RemoteExecutionRef {
+  kind: 'a2a_task' | 'antigravity_cascade';
+  id: string;
+}
+
+/** F118 AC-C3: the `timeout_diagnostics` system_info payload, reduced to its rendered fields. */
+export interface TimeoutDiagnostics {
+  silenceDurationMs: number;
+  processAlive: boolean;
+  lastEventType?: string;
+  firstEventAt?: number;
+  lastEventAt?: number;
+  cliSessionId?: string;
+  invocationId?: string;
+  rawArchivePath?: string;
+}
+
+/**
+ * Fold provider metadata snapshots into the one record persisted for a turn.
+ *
+ * Later defined fields are authoritative snapshots. In particular, usage is
+ * replaced rather than added because providers may report cumulative totals at
+ * terminal time. Diagnostics are the exception: independent diagnostic kinds
+ * remain useful together, while a later observation of the same kind wins.
+ */
+export function mergeMessageMetadataSnapshots(
+  existing: MessageMetadata | undefined,
+  incoming: MessageMetadata,
+): MessageMetadata {
+  const definedIncoming = Object.fromEntries(
+    Object.entries(incoming).filter(([, value]) => value !== undefined),
+  ) as Partial<MessageMetadata>;
+  const diagnostics =
+    existing?.diagnostics || incoming.diagnostics ? { ...existing?.diagnostics, ...incoming.diagnostics } : undefined;
+  const subexecutionEvents = mergeSubexecutionEvents(existing?.subexecutionEvents, incoming.subexecutionEvents);
+
+  return {
+    ...(existing ?? incoming),
+    ...definedIncoming,
+    ...(diagnostics ? { diagnostics } : {}),
+    ...(subexecutionEvents ? { subexecutionEvents } : {}),
+  } as MessageMetadata;
+}
+
+export const MAX_PERSISTED_SUBEXECUTION_EVENTS = 256;
+
+export function appendProviderSubexecutionEvent(
+  metadata: MessageMetadata,
+  event: ProviderSubexecutionSemanticEvent,
+): void {
+  metadata.subexecutionEvents = mergeSubexecutionEvents(metadata.subexecutionEvents, [event]);
+}
+
+function mergeSubexecutionEvents(
+  existing: readonly ProviderSubexecutionSemanticEvent[] | undefined,
+  incoming: readonly ProviderSubexecutionSemanticEvent[] | undefined,
+): readonly ProviderSubexecutionSemanticEvent[] | undefined {
+  if (!existing && !incoming) return undefined;
+  const byId = new Map<string, ProviderSubexecutionSemanticEvent>();
+  for (const event of existing ?? []) byId.set(event.id, event);
+  for (const event of incoming ?? []) byId.set(event.id, event);
+  return [...byId.values()].slice(-MAX_PERSISTED_SUBEXECUTION_EVENTS);
 }
 
 /**
@@ -85,9 +254,21 @@ export interface MessageMetadata {
  */
 export interface AuditContext {
   invocationId: string;
+  /** Stable active-execution owner used by read-model projections; may be the parent invocation. */
+  executionId?: string;
   threadId: string;
   userId: string;
   catId: CatId;
+}
+
+/**
+ * Exact Clowder AI task identity available to provider-local bounded recovery.
+ * This is correlation truth, not a natural-language task classifier.
+ */
+export interface InvocationRecoveryAnchor {
+  threadId: string;
+  invocationId: string;
+  promptMessageIds: readonly string[];
 }
 
 /**
@@ -101,7 +282,11 @@ export type AgentMessageType =
   | 'error'
   | 'done'
   | 'a2a_handoff'
-  | 'system_info'; // budget warnings, cancel feedback, extraction progress, thinking
+  | 'system_info' // budget warnings, cancel feedback, extraction progress, thinking
+  | 'provider_signal' // F149: upstream capacity/retry signals — skipped by invocation timeout & content flags
+  | 'liveness_signal' // F149: stream idle watchdog — skipped by invocation timeout & content flags
+  | 'status' // F198 Phase C: transient daemon progress detail — updates cat avatar tooltip, not a bubble
+  | 'agent_loop'; // F153 Phase I: telemetry-only marker at LLM call boundary (provider stream parser emits; never user-visible)
 
 /**
  * A message yielded from an agent during invocation
@@ -109,38 +294,188 @@ export type AgentMessageType =
 export interface AgentMessage {
   /** The type of this message */
   type: AgentMessageType;
+  /** F306: provider-neutral user-meaning event; native wire names stop in the adapter. */
+  semanticEvent?: ProviderSemanticEvent;
+  /** F306: provider-neutral goal observation awaiting exact SessionChain fencing and ThreadStore revision. */
+  nativeGoalObservation?: ProviderNativeGoalObservation;
+  /**
+   * F296: provider-authored compaction edge; never inferred from message text.
+   *
+   * Claude derives the event identity from its session record. The Codex
+   * app-server instead carries the identity on the wire, so it supplies the
+   * minted event directly rather than having one reconstructed from a counter.
+   */
+  contextCompaction?:
+    | {
+        readonly eventSource: 'claude_compact_boundary';
+        readonly preTokens?: number;
+      }
+    | {
+        readonly eventSource: 'codex_app_server_context_compaction' | 'agy_native_checkpoint';
+        readonly event: ProviderCompactionObservation;
+      };
   /** Which cat (agent) produced this message */
   catId: CatId;
   /** Text content (for 'text' and 'tool_result' types) */
   content?: string;
+  /** Durable content blocks projected with an explicit callback message. */
+  contentBlocks?: readonly MessageContent[];
+  /** Machine-readable A2A target cat for 'a2a_handoff' events. */
+  targetCatId?: CatId;
+  /**
+   * F086/F216: structured scheduling mode for 'a2a_handoff' events.
+   * Carries serial-vs-parallel explicitly so no consumer has to infer it from the number
+   * of targets or their ordering. Absent only on legacy/replayed events.
+   */
+  routing?: A2ARoutingProjection;
+  /**
+   * How the frontend should apply text content.
+   * Default append preserves streaming semantics; replace is used when the
+   * provider emits a full corrected snapshot instead of a pure suffix delta.
+   */
+  textMode?: 'append' | 'replace';
+  /** Provider-native output boundary; never use the canonical stored-message messageId for this. */
+  outputMessage?: ProviderOutputMessage;
+  /** Closed host-owned presentation contribution, mutually exclusive with native observation. */
+  hostOutput?: import('@cat-cafe/shared').HostSignatureOutput;
   /** Session ID (for 'session_init' type) */
   sessionId?: string;
-  /** Tool name (for 'tool_use' type) */
+  /** Verified native launch identity; the host commits this before advancing the stream. */
+  nativeSessionBinding?: import('@cat-cafe/shared').NativeSessionBinding;
+  /** ACP transport: sessionId is per-invocation, not a persistent CLI session.
+   *  When true, a different sessionId does NOT mean "session replaced" — skip seal. */
+  ephemeralSession?: boolean;
+  /** F211 A2: provider runtime lifecycle facts used by invocation to seal/create SessionRecords. */
+  sessionLifecycle?: AntigravitySessionLifecycle;
+  /** F118/F211: explicit cause and evidence for a Codex native-session replacement. */
+  sessionReplacement?: CodexSessionReplacementProvenance;
+  /** Tool name (for 'tool_use' and 'tool_result' types; required by F153 Phase J AC-J1) */
   toolName?: string;
+  /** Canonical execution carrier. Consumers must display unknown instead of inferring from toolName. */
+  toolSource?: 'host_cli' | 'mcp' | 'plugin_connector' | 'unknown';
+  /** Canonical model-output channel when the provider reports one; otherwise unknown. */
+  toolChannel?: 'analysis' | 'commentary' | 'final' | 'unknown';
   /** Tool input parameters (for 'tool_use' type) */
   toolInput?: Record<string, unknown>;
+  /** Native tool facts retained in transcript events; separate from the bounded display summary. */
+  toolRawPayload?: { rawInput?: unknown; rawOutput?: unknown; content?: unknown };
+  /** Native completed-file result captured at event birth; never inferred from a later session directory. */
+  fileResultEvidence?: import('./agents/providers/native-file-result-evidence.js').NativeFileResultEvidence;
+  /** F153 Phase J AC-J1: native provider tool call id; used to pair tool_use ↔ tool_result for real-duration spans.
+   *  Provider transformers MUST inject this from raw payload when available (Claude tool_use.id,
+   *  CatAgent tool_use_id, Codex item.id, etc). Providers without native id may omit; ToolSpanTracker treats
+   *  missing id as fallback (no span open, no fake duration) per KD-41. */
+  toolUseId?: string;
+  /** API-born event instance ID, distinct from the native tool pair key. */
+  toolEventId?: string;
+  /** Host-bound child execution of that tool instance. */
+  toolExecutionRef?: string;
+  /** F153 Phase J AC-J1: structured tool execution outcome (for 'tool_result' type).
+   *  Provider transformers MUST map from raw payload (is_error / success / exitCode / status) instead of
+   *  letting downstream guess from content string. Use 'unknown' when raw signal is genuinely absent. */
+  toolResultStatus?: 'ok' | 'error' | 'unknown';
+  /** Host-grounded failure provenance for approval-gated tool results. Never infer
+   *  user_rejected when the carrier has no interactive confirmation surface. */
+  toolResultErrorCode?: 'user_rejected' | 'confirmation_unavailable';
+  /** F153 Phase J Slice J-B AC-J7: tool span trace context for hydrate-side real-duration
+   *  span synthesis. Stamped by invoke-single-cat when ToolSpanTracker opens / has-open
+   *  a span for this event (so route-helpers can carry it into StoredToolEvent.tracing).
+   *  Distinct from `tracing` above (which carries the invocation/route span pointer);
+   *  this one points at the tool span itself, and parentSpanId points at the invocation
+   *  span so hydrate can re-parent the synthesized `cat_cafe.tool_use ...` span. */
+  toolTracing?: { traceId: string; spanId: string; parentSpanId?: string };
   /** Error message (for 'error' type) */
   error?: string;
+  /** Whether an error event is a recoverable diagnostic or a terminal disposition.
+   *  Omitted means terminal for backward compatibility; terminal `done.errorCode`
+   *  remains the authoritative aggregate failure signal. */
+  errorDisposition?: 'transient' | 'terminal';
   /** Whether this is the final 'done' in a multi-cat invocation (for 'done' type) */
   isFinal?: boolean;
   /** Provider/model metadata (set by agent services) */
   metadata?: MessageMetadata;
   /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech) */
   origin?: 'stream' | 'callback';
-  /** Backend stored-message ID (set for callback post-message, used for rich_block correlation) */
+  /** Canonical stored-message ID once persistence has completed. */
   messageId?: string;
+  /** F309: the stored message's own timestamp (its publication revision); absent when unknown. */
+  messageTimestamp?: number;
   /** F52: Cross-thread origin metadata (set for cross-thread callback messages) */
-  extra?: { crossPost?: { sourceThreadId: string; sourceInvocationId?: string }; targetCats?: string[] };
+  extra?: {
+    cloudBridgeReturn?: import('@cat-cafe/shared').CloudBridgeReturnV1;
+    startupRecovery?: import('@cat-cafe/shared').CodexStartupRecovery;
+    outputLayout?: import('@cat-cafe/shared').MessageOutputLayoutV1;
+    crossPost?: {
+      sourceThreadId: string;
+      sourceInvocationId?: string;
+      /** #1387: exact source message id so the child can dereference the original trigger message */
+      sourceMessageId?: string;
+      /** F246 Phase B: effect-class label for receiving-side behavior constraints */
+      effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
+    };
+    coordination?: CrossThreadCoordination;
+    targetCats?: string[];
+    causal?: { kind: 'invocation_reply'; triggerMessageId: string };
+    /** Immutable child identity for live/F5 execution-kind parity. */
+    turnExecution?: TurnExecutionMessageProjection;
+    /** Bodyless child executions attached to the visible child they assisted. */
+    auxiliaryTurnExecutions?: TurnExecutionMessageProjection[];
+    /** #814: True when message originated from an explicit post_message callback (not stream duplicate) */
+    isExplicitPost?: boolean;
+    /** F272: durable proactive visit that owns this canonical home message. */
+    proactive?: { visitId: string; intentId: string; source: 'private_time' };
+  };
   /** F121: ID of the message this message is replying to */
   replyTo?: string;
   /** F121: Hydrated preview of the replied-to message */
-  replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
-  /** F061: Whether this message mentions the co-creator (@user/@铲屎官/configured patterns) */
+  replyPreview?: ReplyPreview;
+  /** F061: Whether this message mentions the co-creator (@user/@co-creator/configured patterns) */
   mentionsUser?: boolean;
-  /** F108: Invocation ID — allows frontend to distinguish messages from concurrent invocations */
+  /** F108: Invocation ID — allows frontend to distinguish messages from concurrent invocations.
+   *  F194 Phase Z3 dual id: this is the chain/parent invocation id (legacy SoT for liveness/queue/cancel).
+   *  Per-cat-turn id is `turnInvocationId` below — frontend uses turn for bubble identity stable key. */
   invocationId?: string;
+  /** F194 Phase Z3 (砚砚 R P1-1): per-cat-turn invocation id, frontend uses for bubble identity
+   *  stable key (prevents same-parent multi-turn-same-cat bubble merge). Stamped into
+   *  `extra.stream.turnInvocationId` by useAgentMessages. */
+  turnInvocationId?: string;
+  /** Exact durable child start time carried only by the typed invocation-created
+   *  lifecycle event. Consumers must not recover it by parsing `content`. */
+  turnExecutionStartedAt?: number;
+  /** Durable processing response created before provider startup for this exact child. */
+  lifecycleResponseMessageId?: string;
+  /** Raw message frontier observed before the processing response was published. */
+  lifecyclePriorFrontierMessageId?: string | null;
+  /** Exact server-owned working identity; dynamic clients must fail closed without it. */
+  activeRun?: import('@cat-cafe/shared').LifecycleActiveRun;
+  /** Typed F167 Phase T proof that this exact child consumed a terminal
+   *  coordination wake and correctly produced no reply. */
+  turnCustodyTerminalWitness?: QueueTerminalConsumptionWitness;
+  /** Exact per-source proofs when one child adopted multiple queued custody
+   *  obligations through prompt exposure before provider startup. */
+  turnCustodyTerminalWitnesses?: readonly QueueTerminalConsumptionWitness[];
+  /** F153-F: OTel span context for trace persistence (written to message extra.tracing) */
+  tracing?: { traceId: string; spanId: string; parentSpanId?: string };
   /** F070: Structured error code for recoverable failures (e.g. GOVERNANCE_BOOTSTRAP_REQUIRED) */
   errorCode?: string;
+  /**
+   * F183 Phase C — thread-scoped monotonic sequence number (KD-9).
+   * Set by `SocketManager.broadcastAgentMessage` from `ThreadSequencer.next()`
+   * before WebSocket emit. Caller-supplied seq>0 is preserved as a transport
+   * hint (e.g. test fixtures); production callers leave undefined and let
+   * sequencer assign. Optional — direct emit paths that bypass SocketManager
+   * won't set it; client treats absence as no-op (graceful degradation for
+   * legacy producers).
+   */
+  seq?: number;
+  /**
+   * F183 Phase C (砚砚 R1 P1 fix) — server seq epoch (sequencer instance UUID).
+   * Generated at API boot, stable for sequencer lifetime. Client compares to
+   * `lastSeqEpochByThread[threadId]`; mismatch = server restart → reset lastSeq
+   * + trigger catch-up. Without epoch, restart silently breaks gap detection
+   * until server catches back up to client's high-water lastSeq.
+   */
+  seqEpoch?: string;
   /** When this message was created */
   timestamp: number;
 }
@@ -151,28 +486,661 @@ export interface AgentMessage {
  */
 export type SpawnCliOverride = (options: CliSpawnOptions) => AsyncGenerator<unknown, void, undefined>;
 
+/** F254 D2 duplex JSON carrier used by provider app-server protocols. */
+export interface AgentCarrierSession {
+  /** Host process identity when a direct carrier owns a process. */
+  readonly pid?: number;
+  read(): AsyncIterable<unknown>;
+  write(message: Record<string, unknown>): Promise<void>;
+  /** True only when a resume lease was acquired from its still-healthy affinity host. */
+  reusedSessionHost?: boolean;
+  /** Host-pool fact, independent of whether the same native session was resumed. */
+  hostAcquisitionMode?: 'cold' | 'warm';
+  /** Bind a provider session id to this reusable carrier host after start/resume. */
+  rememberSession?(sessionId: string): void;
+  /**
+   * Force the transport process/pane to stop after a provider-native interrupt
+   * grace window expires.  Cooperative cancellation belongs to the protocol
+   * client; this method is only the bounded OS-level fallback.
+   */
+  terminate?(): Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface AgentCarrierSessionOptions {
+  executionAccount?: import('@cat-cafe/shared').ExecutionAccountSnapshot;
+  command: string;
+  args: readonly string[];
+  cwd?: string;
+  env?: Record<string, string | null>;
+  signal?: AbortSignal;
+  invocationId: string;
+  /** Existing provider session id used for warm-host affinity. */
+  sessionId?: string;
+}
+
+export type AgentCarrierSessionFactory = (options: AgentCarrierSessionOptions) => Promise<AgentCarrierSession>;
+
+/** F254 D2 carrier truth used to bind provider-native freshness telemetry. */
+export type AgentFreshnessCarrierCapability = FreshnessCarrierCapability;
+
+/** #1208: capability truth for the concrete provider/carrier used by an invocation. */
+export interface AgentContextCapability {
+  readonly provider: string;
+  readonly carrier: string;
+  readonly reportsRuntimeWindow: boolean;
+  readonly authoritativeUsage: boolean;
+  /**
+   * Whether authoritative current-context usage has actually been proven for
+   * this concrete carrier. `conditional` is used by generic transports such as
+   * ACP until the active agent emits the standard usage signal at least once.
+   */
+  readonly usageTelemetry: 'available' | 'conditional' | 'unavailable';
+  readonly nativeWindowControl: boolean;
+  readonly nativeCompressionControl: boolean;
+  readonly observesCompression: boolean;
+  readonly reason: string;
+}
+
+/** F296 B0: concrete provider transport identity, independent of route/origin. */
+export type ProviderCarrier =
+  | {
+      readonly provider: 'claude';
+      readonly carrier: 'print_sdk' | 'agent_sdk' | 'bg_daemon' | 'interactive_pty' | 'api_key';
+    }
+  | { readonly provider: 'codex'; readonly carrier: 'exec_json' | 'app_server' }
+  | { readonly provider: 'gemini'; readonly carrier: 'gemini_cli' | 'antigravity_adapter' | 'agy_stream_json' }
+  | { readonly provider: 'antigravity'; readonly carrier: 'cdp_bridge' }
+  | { readonly provider: 'kimi'; readonly carrier: 'stream_json' }
+  | { readonly provider: 'opencode'; readonly carrier: 'run_json' | 'server' }
+  | { readonly provider: 'acp'; readonly carrier: 'acp'; readonly backend: 'opencode' | 'unknown' }
+  | { readonly provider: 'catagent'; readonly carrier: 'direct_api' }
+  | { readonly provider: 'a2a'; readonly carrier: 'remote' }
+  | {
+      readonly provider: 'unknown';
+      readonly carrier: 'unknown';
+      readonly rawProvider?: string;
+      readonly rawCarrier?: string;
+    };
+
+export type InvocationOrigin = 'interactive' | 'headless' | 'scheduled' | 'connector' | 'cloud' | 'unknown';
+export type RouteTopology = 'serial' | 'parallel' | 'independent';
+
+export interface ContextCoordinate {
+  readonly providerCarrier: ProviderCarrier;
+  readonly invocationOrigin: InvocationOrigin;
+  readonly routeTopology: RouteTopology;
+}
+
+export type FreshReason = 'no_prior_session' | 'resume_rejected' | 'resume_failed' | 'carrier_forces_fresh';
+export type UnknownReason = 'carrier_unsupported' | 'signal_unavailable' | 'binding_mismatch';
+
+export type ContinuityDisposition =
+  | {
+      readonly state: 'fresh';
+      readonly reason: FreshReason;
+      readonly evidenceRef: string;
+      readonly runtimeSessionId?: string;
+    }
+  | {
+      readonly state: 'resumed';
+      readonly reason: 'resume_confirmed';
+      readonly evidenceRef: string;
+      readonly runtimeSessionId: string;
+    }
+  | {
+      readonly state: 'replaced';
+      readonly reason: 'runtime_replaced';
+      readonly evidenceRef: string;
+      readonly previousRuntimeSessionId?: string;
+      readonly runtimeSessionId: string;
+    }
+  | {
+      readonly state: 'unknown';
+      readonly reason: UnknownReason;
+      readonly evidenceRef: string;
+    };
+
+export interface ContextContinuityHandshake {
+  readonly coordinate: ContextCoordinate;
+  readonly disposition: ContinuityDisposition;
+}
+
+/**
+ * F296 B4a: the raw continuity fact a provider adapter observed, before any
+ * normalization into a {@link ContinuityDisposition}.
+ *
+ * Only the adapter that issued the underlying provider call may construct this.
+ * Every variant is derived from an actual provider response — never from a
+ * persisted binding, a token drop, a scratchpad, or an equality check between
+ * what we asked for and what we stored. Gate 0 (2026-08-20, codex-cli 0.147.0)
+ * proved each variant is dynamically observable on `codex/app_server`.
+ */
+export type ProviderContinuityEvidence =
+  /** A new provider runtime was created and returned its id. */
+  | { readonly kind: 'started'; readonly runtimeSessionId: string }
+  /** Resume succeeded and the provider echoed back exactly the requested id. */
+  | {
+      readonly kind: 'resumed';
+      readonly requestedRuntimeSessionId: string;
+      readonly runtimeSessionId: string;
+    }
+  /** Resume was rejected by the provider; a fallback start created a new runtime. */
+  | {
+      readonly kind: 'replaced';
+      readonly requestedRuntimeSessionId: string;
+      readonly runtimeSessionId: string;
+    }
+  /**
+   * Resume "succeeded" but the provider returned a different id. This is never
+   * coerced to `resumed`; it normalizes to `unknown/binding_mismatch`.
+   */
+  | {
+      readonly kind: 'mismatched';
+      readonly requestedRuntimeSessionId: string;
+      readonly runtimeSessionId: string;
+    }
+  /** The adapter reached a verdict point but the provider gave no usable signal. */
+  | { readonly kind: 'unavailable'; readonly reason: UnknownReason };
+
+/** The prompt bytes an adapter is allowed to send, plus the generation they belong to. */
+export interface ProviderContinuityPrompt {
+  readonly prompt: string;
+  /** Content hash of {@link prompt}; the ledger generation these bytes were reserved under. */
+  readonly promptGenerationId: string;
+}
+
+/**
+ * F296 B4b: an authoritative compaction the adapter observed on the wire,
+ * reduced to a stable coordinate. Gate 0 proved the coordinate for
+ * `codex/app_server` is `(envelope.threadId, envelope.turnId, item.id)` — the
+ * `contextCompaction` item body itself carries no thread or turn identity.
+ */
+export interface ProviderCompactionObservation {
+  /** Stable, replay-suppressible identity for this compaction. */
+  readonly eventId: string;
+  /** The runtime this compaction actually applies to. Never inferred from a binding. */
+  readonly runtimeSessionId: string;
+  readonly evidenceRef: string;
+}
+
+export type ProviderNativeGoalStatus = 'active' | 'paused' | 'blocked' | 'usageLimited' | 'budgetLimited' | 'complete';
+
+export type ProviderNativeGoalRequest =
+  | {
+      readonly action: 'set';
+      readonly objective: string;
+      readonly status: ProviderNativeGoalStatus;
+      readonly tokenBudget?: number | null;
+    }
+  | { readonly action: 'get' | 'clear' };
+
+/** Provider-neutral native goal observation; app-server wire fields stop in the adapter. */
+export interface ProviderNativeGoal {
+  readonly action: ProviderNativeGoalRequest['action'];
+  readonly runtimeSessionId: string;
+  readonly goal: {
+    readonly objective: string;
+    readonly status: ProviderNativeGoalStatus;
+    readonly tokenBudget: number | null;
+    readonly tokensUsed: number;
+    readonly timeUsedSeconds: number;
+    readonly createdAt: number;
+    readonly updatedAt: number;
+  } | null;
+}
+
+export type ProviderNativeGoalObservation =
+  | {
+      readonly state: 'updated';
+      readonly runtimeSessionId: string;
+      readonly objective: string;
+      readonly status: ProviderNativeGoalStatus;
+      readonly tokenBudget: number | null;
+      readonly providerUpdatedAt: number;
+      readonly source: string;
+    }
+  | {
+      readonly state: 'cleared';
+      readonly runtimeSessionId: string;
+      readonly source: string;
+    };
+
+export type ProviderNativeReviewTarget =
+  | { readonly kind: 'uncommitted_changes' }
+  | { readonly kind: 'base_branch'; readonly branch: string }
+  | { readonly kind: 'commit'; readonly sha: string; readonly title?: string }
+  | { readonly kind: 'custom'; readonly instructions: string };
+
+export interface ProviderNativeReviewRequest {
+  readonly target: ProviderNativeReviewTarget;
+  readonly delivery: 'inline' | 'detached';
+}
+
+export interface ProviderNativeReviewItem {
+  readonly id: string;
+  readonly kind: 'mode_entered' | 'message' | 'mode_exited';
+  readonly text: string;
+  readonly completedAt: number;
+}
+
+/** Provider-neutral review lifecycle; raw app-server turn/item shapes stop in the adapter. */
+export interface ProviderNativeReview {
+  readonly status: 'running' | 'completed' | 'failed';
+  readonly runtimeSessionId: string;
+  readonly reviewThreadId: string;
+  readonly turnId: string;
+  readonly items: readonly ProviderNativeReviewItem[];
+  readonly result?: {
+    readonly status: 'completed' | 'failed';
+    readonly summary?: string;
+    readonly errorCode?: string;
+  };
+}
+
+export type ProviderNativeAvailability<T extends object> =
+  | ({ readonly availability: 'available' } & T)
+  | { readonly availability: 'unavailable'; readonly reason: 'provider_request_failed' | 'invalid_response' };
+
+/** Live provider status. Every group is independently authoritative or unavailable; none is config-derived. */
+export interface ProviderNativeStatus {
+  readonly runtimeSessionId: string;
+  readonly source: 'codex_app_server';
+  readonly observedAt: number;
+  readonly thread: ProviderNativeAvailability<{
+    readonly status: 'notLoaded' | 'idle' | 'systemError' | 'active';
+    readonly canAcceptDirectInput: boolean | null;
+  }>;
+  readonly capabilities: ProviderNativeAvailability<{
+    readonly imageGeneration: boolean;
+    readonly namespaceTools: boolean;
+    readonly webSearch: boolean;
+  }>;
+  readonly permissionProfiles: ProviderNativeAvailability<{
+    readonly activeId: string | null;
+    readonly profiles: readonly { readonly id: string; readonly allowed: boolean }[];
+  }>;
+  readonly account: ProviderNativeAvailability<{
+    readonly authenticated: boolean;
+    readonly kind?: 'apiKey' | 'chatgpt' | 'amazonBedrock';
+    readonly plan?: string;
+  }>;
+  readonly rateLimits: ProviderNativeAvailability<{
+    readonly primary: { readonly usedPercent: number; readonly resetsAt: number | null } | null;
+    readonly secondary?: { readonly usedPercent: number; readonly resetsAt: number | null } | null;
+    readonly reachedType?: string | null;
+  }>;
+  /** Diagnostic evidence only. Provider rows/cursors never cross this port. */
+  readonly nativeThreadList: ProviderNativeAvailability<{
+    readonly count: number;
+    readonly boundThreadPresent: boolean;
+    readonly hasMore: boolean;
+  }>;
+}
+
+/** Request-scoped, secret-free capability inventory observed from one provider process. */
+export interface ProviderNativeCapabilityArtifact {
+  readonly id: string;
+  readonly kind: 'mcp_server' | 'skill' | 'app' | 'plugin' | 'bundle' | 'pack';
+  readonly name: string;
+  readonly description: string;
+  readonly sourceLocator: string;
+  readonly trustLevel: 'official' | 'verified' | 'community';
+  readonly publisher: string;
+  readonly versionRef?: string;
+  readonly lifecycle?: {
+    readonly installed?: boolean;
+    readonly enabled?: boolean;
+    readonly accessible?: boolean;
+    readonly callable?: boolean;
+    readonly maturity?: 'stable' | 'experimental';
+    readonly authPolicy?: string;
+    readonly authStatus?: string;
+    readonly runtimeStatus?: string;
+    readonly toolCount?: number;
+    readonly resourceCount?: number;
+    readonly resourceTemplateCount?: number;
+    readonly pluginId?: string;
+  };
+}
+
+export interface ProviderNativeCapabilitySource {
+  readonly availability: 'live' | 'degraded' | 'unavailable';
+  readonly providerVersion: string;
+  readonly observedAt: string;
+  readonly artifacts: readonly ProviderNativeCapabilityArtifact[];
+  readonly issues: readonly string[];
+}
+
+/** A provider fork is binding evidence, never a Clowder AI Thread representation. */
+export interface ProviderNativeThreadFork {
+  readonly sourceRuntimeSessionId: string;
+  readonly forkedRuntimeSessionId: string;
+  readonly source: 'codex_app_server';
+  readonly observedAt: number;
+}
+
+/** The only product journeys admitted to the experimental Codex realtime seam. */
+export type ProviderNativeRealtimeConsumer = 'watch_video' | 'meeting_companion';
+
+/** F195-owned transcript data forwarded to Codex as explicitly untrusted text. */
+export interface ProviderNativeRealtimeTranscript {
+  readonly text: string;
+  readonly observedAt: number;
+  readonly inputId?: string;
+  readonly inputSource?: string;
+  readonly inputLabel?: string;
+  readonly speakerLabel?: string;
+}
+
+export type ProviderNativeRealtimeEvent =
+  | {
+      readonly kind: 'assistant_transcript';
+      readonly runtimeSessionId: string;
+      readonly realtimeSessionId: string | null;
+      readonly text: string;
+      readonly occurredAt: number;
+    }
+  | {
+      readonly kind: 'error';
+      readonly runtimeSessionId: string;
+      readonly realtimeSessionId: string | null;
+      readonly message: string;
+      readonly occurredAt: number;
+    }
+  | {
+      readonly kind: 'closed';
+      readonly runtimeSessionId: string;
+      readonly realtimeSessionId: string | null;
+      readonly reason?: string;
+      readonly occurredAt: number;
+    };
+
+/** Long-lived provider seam; capture and durable transcript ownership stay in F195. */
+export interface ProviderNativeRealtimeSession {
+  readonly executionAccount?: import('@cat-cafe/shared').ExecutionAccountSnapshot;
+  readonly runtimeSessionId: string;
+  readonly realtimeSessionId: string | null;
+  readonly version: 'v2';
+  readonly closed: Promise<{ readonly reason?: string }>;
+  appendTranscript(transcript: ProviderNativeRealtimeTranscript): Promise<void>;
+  stop(): Promise<void>;
+}
+
+/**
+ * F296 B4a preflight fence. The invocation hands this to a preflight-capable
+ * adapter instead of a frozen prompt string.
+ */
+export interface ProviderContinuityPreflight {
+  /** The runtime the invocation wants resumed, if any. The adapter requests it; it proves nothing on its own. */
+  readonly requestedRuntimeSessionId?: string;
+  /**
+   * Called exactly once, by the adapter, after the continuity verdict is minted
+   * from the actual provider response and after buffered authoritative
+   * compaction events for the bound runtime have been drained — and strictly
+   * before any prompt bytes leave the process.
+   *
+   * Resolving this runs the epoch owner, the context prompt factory, the
+   * presentation mapper and the ledger reservation, in that order, and returns
+   * the only prompt bytes the adapter is permitted to send.
+   */
+  settle(input: {
+    readonly evidence: ProviderContinuityEvidence;
+    /** Compactions observed for the bound runtime before these bytes were built. */
+    readonly compactions?: readonly ProviderCompactionObservation[];
+  }): Promise<ProviderContinuityPrompt>;
+}
+
+/** The invocation-owned capacity snapshot passed to provider-native controls. */
+export interface AgentContextCapacity {
+  readonly windowTokens: number;
+  readonly inputCeilingTokens: number;
+  readonly actionable: boolean;
+}
+
+/**
+ * Concrete proof of the model/window attached to one carrier instance or
+ * per-invocation native configuration. This is a pure runtime projection and
+ * must never be persisted or inferred from capability flags alone.
+ */
+export interface AgentContextBinding {
+  readonly model?: string;
+  readonly windowTokens?: number;
+  readonly source: 'service_spawn' | 'invocation_config';
+}
+
+/** Provider-native identity for one exact, still-open Agent Client run. */
+export interface AgentClientActiveRunHandle {
+  readonly provider: 'openai_codex' | 'anthropic' | 'anthropic_acp' | 'opencode' | 'google' | 'other';
+  readonly carrier: 'codex_app_server' | 'claude_agent_sdk' | 'acp' | 'agy_stream_json' | 'other';
+  readonly threadId: string;
+  readonly turnId: string;
+}
+
+/** Exact input that the lifecycle coordinator has already admitted durably. */
+export interface AgentClientDispatchInput {
+  readonly text: string;
+  readonly imagePaths?: readonly string[];
+  readonly messageIds: readonly string[];
+  /** Correlates the first handoff and read-only reconciliation; not a provider dedup guarantee. */
+  readonly deliveryId?: string;
+  /** Exact adapter evidence; delivery and Stop never wait for this callback. */
+  readonly onInputRead?: () => Promise<void>;
+  /** Queued internal turns retain Queue custody until their own terminal result. */
+  readonly onInputCompleted?: (completed: boolean) => Promise<void>;
+}
+
+export interface AgentClientDispatchOptions {
+  /** Normal dispatch / Append = false; Steer = true. */
+  readonly force: boolean;
+  /** Server-owned lifecycle invocation fence, never a provider session id. */
+  readonly expectedInvocationId: string;
+}
+
+export type AgentClientDispatchResult =
+  | {
+      readonly accepted: true;
+      readonly handle: AgentClientActiveRunHandle;
+    }
+  | {
+      readonly accepted: false;
+      readonly reason:
+        | 'active_run_mismatch'
+        | 'active_run_closed'
+        | 'invalid_input'
+        | 'provider_rejected'
+        | 'exception';
+      /** Absent evidence is unknown. Only an explicit pre-handoff refusal can be automatically retried. */
+      readonly acceptance?: 'not_accepted' | 'unknown';
+    };
+
+/** Live-only adapter. Durable Queue/History state must never be stored here. */
+export interface AgentClientActiveRunDispatcher {
+  readonly invocationId: string;
+  readonly capabilities: {
+    readonly append: boolean;
+    readonly steer: boolean;
+    readonly inputReadReceipt?: boolean;
+    readonly inputCompletionReceipt?: boolean;
+  };
+  readonly handle: AgentClientActiveRunHandle;
+  /** Exact native consumption of this run’s first input; never awaited by delivery or Stop. */
+  readonly initialInputRead?: Promise<number>;
+  dispatch(input: AgentClientDispatchInput, options: AgentClientDispatchOptions): Promise<AgentClientDispatchResult>;
+  inspectInput?(deliveryId: string): Promise<'accepted' | 'not_accepted' | 'unknown'>;
+}
+
+export interface AgentClientActiveRunDispatchRegistration {
+  readonly invocationId: string;
+  /** Return a release hook that removes this exact live handle from its registry. */
+  register(dispatcher: AgentClientActiveRunDispatcher): (() => void) | undefined;
+}
+
+/** ADR-042 automatic supplement execution: provider + callback layers must enforce this, not prompt prose. */
+/** Host-owned native action coordinates; never accepted from package tool input. */
+export interface PluginNativeActionTarget {
+  readonly instanceId: string;
+  readonly contributionId: string;
+}
+
+export type ToolExecutionPolicy =
+  | {
+      readonly mode: 'read_only';
+      readonly replayDeniedToolNames: readonly string[];
+    }
+  | { readonly mode: 'callback_allowlist'; readonly allowedCallbackRoutes: readonly string[] }
+  | {
+      readonly mode: 'plugin_native';
+      readonly pluginInstanceId: string;
+      readonly contributionId: string;
+    };
+
+/**
+ * Route-owned intent projection for provider behavior controls.
+ * `explicit` keeps a user-selected behavior mode distinct from an automatic
+ * routing strategy such as multi-cat independent thinking.
+ */
+export interface AgentRouteIntent {
+  readonly intent: 'execute' | 'ideate';
+  readonly explicit: boolean;
+}
+
 /**
  * Options for invoking an agent
  */
+/**
+ * F117 K2: the Claude compaction hooks the Agent SDK carrier registers in-process. The carrier then
+ * proves its own compaction to F296 (authoritative-compaction), instead of a project hook in the
+ * workspace: the seal observation is written before the provider compacts, by this invocation.
+ */
+export interface ClaudeCompactionHooks {
+  /** Before the provider compacts: record this invocation's compression observation and apply the session policy. */
+  preCompact(input: { readonly cliSessionId: string; readonly trigger: 'manual' | 'auto' }): Promise<void>;
+  /** After the provider compacted: the cold context packet to inject, when the epoch owner projected one. */
+  postCompactContext(input: { readonly cliSessionId: string }): Promise<string | undefined>;
+}
+
+/** Builds one invocation's in-process compaction hooks; the identity names whose observation they record. */
+export type ClaudeCompactionHooksFactory = (identity: {
+  readonly invocationId: string;
+  readonly userId: string;
+  readonly catId: string;
+  readonly threadId: string;
+}) => ClaudeCompactionHooks;
+
+export interface LocalSessionMetadata {
+  sessionId: string;
+  clientId: import('@cat-cafe/shared').LocalSessionClientId;
+  firstPrompt: string;
+  projectPath: string;
+  lastActivityAt: number;
+  turnCount: number | null;
+}
+
+export interface LocalSessionList {
+  sessions: (LocalSessionMetadata & { recentPrompt?: string })[];
+  limited: boolean;
+}
+
+export interface LocalSessionReadInput {
+  invocationId: string;
+  timeoutMs: number;
+  cwd: string;
+  account?: RuntimeProviderProfile;
+  cliConfigArgs?: readonly string[];
+}
+
 export interface AgentServiceOptions {
+  /** Host logical SessionRecord identity; sessionId remains the native resume id. */
+  hostSessionId?: string;
+  /** Binding restored from the canonical SessionRecord, including across API restarts. */
+  nativeSessionBinding?: import('@cat-cafe/shared').NativeSessionBinding;
+  /** Imported histories must never be silently replaced by a fresh native session. */
+  requireExactResume?: boolean;
+  executionAccount?: import('@cat-cafe/shared').ExecutionAccountSnapshot;
+  /** Synchronous pre-send fact: survives abort racing the provider iterator. */
+  onRemoteExecutionDispatched?: (execution: RemoteExecutionRef) => void;
+  /** Provider-neutral interaction port bound to this invocation. */
+  runtimeInteractionPort?: import('../../runtime-interaction/ports/RuntimeInteractionPort.js').RuntimeInteractionPort;
+  /** F310: source-bound Task relation resolved from canonical Task truth for an F306 question. */
+  resolveEntrustedWorkTaskRef?: () => Promise<import('@cat-cafe/shared').EntrustedWorkTaskRefV1 | undefined>;
+  /** Host-only exact descriptor plus public source/invocation currentness. Not a plugin or SDK DTO.
+   * Never a plugin or SDK DTO. */
+  pluginNativeLaunch?: {
+    readonly server: import('../../plugin/declared/native-mcp-types.js').NativeMcpServer;
+    readonly sandbox: { readonly kind: 'public'; readonly workspaceRoot: string };
+    readonly assertCurrent: () => void | Promise<void>;
+  };
+  /** F317 Host-only continuous companion port; no model-supplied configuration. */
+  liveCompanion?: import('./agents/providers/CodexLiveRunPort.js').CodexLiveRunPort;
+  /** Route-owned intent. Providers may project only explicit behavior intent onto native modes. */
+  routeIntent?: AgentRouteIntent;
   /** Session ID to resume (optional) */
   sessionId?: string;
+  /** MCP server-qualified tool IDs (`serverName::toolName`) required before this invocation may start. */
+  requiredTools?: readonly string[];
+  /**
+   * #1542: launch plan for the managed Claude compaction carrier. Built once
+   * per print-SDK attempt by invoke-single-cat; ClaudeAgentService derives the
+   * single final `--settings` injection from it, and the compaction boundary
+   * consumes the same plan as its carrier-readiness evidence.
+   */
+  compactionLaunchPlan?: ClaudeCompactionLaunchPlanResult;
+  /** #1208: same capacity snapshot used by prompt assembly and lifecycle health. */
+  contextCapacity?: AgentContextCapacity;
+  /**
+   * #1381: raw/native provider window owned by member config (manual/catalog),
+   * captured before any session pin or carrier report shrinks the effective
+   * capacity. Providers with nativeWindowControl inject THIS as their native
+   * window (e.g. Codex `model_context_window`), never the effective/pinned
+   * `contextCapacity.windowTokens` — Codex reports back
+   * `native * effective_context_window_percent`, so feeding the effective value
+   * back recursed (258400 → 245480 → 233206 → …).
+   * `null` explicitly means "no config-owned native window; do not inject".
+   * `undefined` is a legacy caller: fall back to `contextCapacity.windowTokens`.
+   */
+  contextNativeWindowTokens?: number | null;
+  /** F262: Raw per-thread member effort. Providers validate against the effective model before applying it. */
+  reasoningEffortOverride?: CliEffortPreset;
+  /** F291: Resolved Codex OAuth requested tier. Undefined means inherit Codex user config. */
+  requestedServiceTier?: CodexSpeedValue;
   /** Working directory for the agent */
   workingDirectory?: string;
   /** Env vars to pass to CLI process for MCP callback auth */
   callbackEnv?: Record<string, string>;
+  /** F171: User-defined env vars from account config.
+   *  Applied LAST to subprocess env — overrides provider-injected values. */
+  accountEnv?: Record<string, string>;
+  /** Selected token must win after alternate auth and user env merging. */
+  claudeTokenAccount?: boolean;
+  /** F320: immutable selected account launch snapshot; independent of displayName/token refresh. */
+  codexAccountLaunch?: CodexAccountLaunchDescriptor;
   /** Rich content blocks (e.g. images) to pass to the CLI agent */
   contentBlocks?: readonly MessageContent[];
   /** Upload directory for resolving image paths */
   uploadDir?: string;
+  /** Host-only verified HMR path resolver; never provided to callback or plugin surfaces. */
+  resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   /** AbortSignal to cancel the invocation */
   signal?: AbortSignal;
   /** Correlation context for audit logging and raw trace linking */
   auditContext?: AuditContext;
+  /** Exact task identity used when a provider can safely resume an interrupted turn. */
+  recoveryAnchor?: InvocationRecoveryAnchor;
   /** Static identity prompt (Claude: --append-system-prompt, others: prepend to prompt) */
   systemPrompt?: string;
+  /** Static identity prompt used only if a resumed carrier creates a fresh fallback session. */
+  resumeFallbackSystemPrompt?: string;
   /** F089: Override spawnCli with tmux-based spawner (set per-invocation) */
   spawnCliOverride?: SpawnCliOverride;
+  /** F254 D2: optional tmux/direct duplex carrier factory for app-server mode. */
+  agentCarrierSessionFactory?: AgentCarrierSessionFactory;
+  /** #1354: expose an exact provider-native active-turn dispatcher after turn acceptance. */
+  activeRunDispatch?: AgentClientActiveRunDispatchRegistration;
+  /** F117 K2: Claude compaction hooks for a carrier that runs them in-process (the Agent SDK carrier). */
+  claudeCompactionHooks?: ClaudeCompactionHooks;
+  /** F210-H1b: Override AGY --log-file path (test seam for the trajectory progress observer). */
+  agyLogPathOverride?: string;
   /** F118: Invocation ID for diagnostic enrichment of __cliTimeout */
   invocationId?: string;
   /** F118: CLI session ID for diagnostic enrichment of __cliTimeout */
@@ -183,15 +1151,92 @@ export interface AgentServiceOptions {
     softWarningMs?: number;
     stallWarningMs?: number;
     boundedExtensionFactor?: number;
+    minCpuGrowthMs?: number;
+    /** #774: Auto-kill on idle-silent suspected_stall instead of waiting for full timeout */
+    stallAutoKill?: boolean;
   };
   /** F127: Extra --config key=value pairs to pass to the CLI. */
   cliConfigArgs?: readonly string[];
+  /** F153 Phase B: Parent OTel span for creating CLI session child span */
+  parentSpan?: Span;
+  /** ADR-042 hard execution boundary for automatic supplement checks. */
+  toolExecutionPolicy?: ToolExecutionPolicy;
+  /**
+   * F299 Phase D: fail-closed recorder invoked by the concrete adapter after
+   * its final message/native channels are immutable and immediately before
+   * those same values cross the provider boundary.
+   */
+  beforeProviderLaunch?: (request: PreparedProviderRequestV1) => Promise<ProviderRequestGenerationCommitV1>;
+  onLiveInputOutcome?: (receipt: LiveProviderInputOutcome) => Promise<void>;
+}
+
+export interface LiveProviderInputOutcome {
+  request: ProviderRequestGenerationCommitV1;
+  outcome: 'accepted' | 'rejected' | 'error' | 'cancelled';
+  nativeTurnId?: string;
+}
+
+export interface PreparedProviderRequestV1 {
+  readonly v: 1;
+  /** Bounded invocation-local reason when this is an adapter-owned follow-up launch. */
+  readonly boundaryReason?: RequestGenerationRetryReason;
+  readonly message:
+    | {
+        readonly accuracy?: 'exact';
+        readonly body: string;
+        readonly sourceRefs?: readonly RequestGenerationSourceRef[];
+        readonly injectionDecision?: string;
+      }
+    | {
+        readonly accuracy: 'unsupported' | 'unknown';
+        readonly sourceRefs?: readonly RequestGenerationSourceRef[];
+        readonly injectionDecision?: string;
+      };
+  readonly nativeInstructions: readonly {
+    readonly body: string;
+    readonly sourceRefs?: readonly RequestGenerationSourceRef[];
+    readonly injectionDecision?: string;
+  }[];
+  readonly runtime: SanitizedRequestedRuntimeConfigV1;
+  /**
+   * Ephemeral tool evidence. Raw schemas and server names are consumed by the
+   * transcript owner to mint keyed set digests and are never persisted.
+   */
+  readonly tools: PreparedProviderToolSurfaceV1;
+  readonly providerNativeVisibility: 'unsupported' | 'unknown';
+}
+
+export interface PreparedProviderToolSurfaceV1 {
+  readonly finalSurface: 'exact' | 'declared_only' | 'unsupported' | 'unknown';
+  /** Secret-free server identifiers actually declared to the carrier. */
+  readonly declaredServerNames?: readonly string[];
+  /** Clowder AI-owned schemas actually placed on the request boundary. */
+  readonly catCafeSchemas?: readonly unknown[];
+  /** Schemas reported back by a provider-owned negotiation surface. */
+  readonly providerObservedSchemas?: readonly unknown[];
+  /** Sanitized launch-time delivery facts; old generations may omit this field. */
+  readonly schemaDelivery?: import('@cat-cafe/shared').RequestGenerationSchemaDeliveryV1;
+}
+
+export function requireExactPreparedProviderMessage(request: PreparedProviderRequestV1): string {
+  if ('body' in request.message) return request.message.body;
+  throw new Error('prepared_provider_request_message_not_exact');
+}
+
+export interface ProviderRequestGenerationCommitV1 {
+  readonly requestGenerationId: string;
+  readonly generationOrdinal: number;
+  readonly sessionId: string;
 }
 
 /**
  * Interface that all agent services must implement
  */
 export interface AgentService {
+  /** Pin one prepared carrier generation before Host policy, L0 and capacity admission. Idempotent on a pinned view. */
+  forInvocation?(): AgentService;
+  /** Release a pinned Host invocation even when policy/preflight exits before a provider iterator starts. Idempotent. */
+  releaseInvocation?(): Promise<void>;
   /**
    * Invoke the agent with a prompt and stream back messages
    * @param prompt The user's prompt/message
@@ -199,4 +1244,163 @@ export interface AgentService {
    * @returns An async iterable of agent messages
    */
   invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage>;
+
+  /**
+   * F296 B4a: invoke a carrier that owns a real pre-prompt continuity seam.
+   *
+   * There is deliberately no `prompt` parameter. The final prompt bytes exist
+   * only as the return value of {@link ProviderContinuityPreflight.settle},
+   * which the adapter can call only after it has minted a continuity verdict
+   * from an actual provider response. This makes "freeze the prompt first, then
+   * notify that we resumed" structurally unrepresentable rather than merely
+   * discouraged.
+   *
+   * Declared only by services whose adapter has been dynamically proven to
+   * expose the seam (F296 B4 Gate 0). Callers must fall back to {@link invoke}
+   * when it is absent.
+   */
+  invokeWithContinuityPreflight?(
+    preflight: ProviderContinuityPreflight,
+    options?: AgentServiceOptions,
+  ): AsyncIterable<AgentMessage>;
+
+  /** Request provider-native compaction on an already bound, idle runtime. */
+  requestNativeCompaction?(input: {
+    readonly nativeSessionBinding?: import('@cat-cafe/shared').NativeSessionBinding;
+    readonly userId?: string;
+    /** Preserve a proven boundary even if the later control transport fails. */
+    readonly onObserved?: (event: ProviderCompactionObservation) => Promise<void>;
+    readonly sessionId: string;
+    readonly invocationId: string;
+    readonly timeoutMs: number;
+  }): Promise<ProviderCompactionObservation>;
+
+  /** F306: read or mutate the native goal for one exactly-bound runtime. */
+  requestNativeGoal?(input: {
+    readonly sessionId: string;
+    readonly invocationId: string;
+    readonly timeoutMs: number;
+    readonly request: ProviderNativeGoalRequest;
+  }): Promise<ProviderNativeGoal>;
+
+  /** F306: run one structured native review against an exactly-bound runtime. */
+  requestNativeReview?(input: {
+    readonly sessionId: string;
+    readonly invocationId: string;
+    readonly timeoutMs: number;
+    readonly request: ProviderNativeReviewRequest;
+    readonly onUpdate?: (review: ProviderNativeReview) => void | Promise<void>;
+  }): Promise<ProviderNativeReview>;
+
+  /** F306: query one exactly-bound native runtime without inferring from local configuration. */
+  requestNativeStatus?(input: {
+    readonly sessionId: string;
+    readonly invocationId: string;
+    readonly timeoutMs: number;
+    readonly cwd?: string;
+  }): Promise<ProviderNativeStatus>;
+
+  inspectLocalSession?(input: LocalSessionReadInput & { sessionId: string }): Promise<LocalSessionMetadata>;
+  listLocalSessions?(input: LocalSessionReadInput & { limit: number }): Promise<LocalSessionList>;
+
+  /** F306 Phase D: read provider inventory without joining or mutating a runtime thread. */
+  requestNativeCapabilitySource?(input: {
+    readonly invocationId: string;
+    readonly timeoutMs: number;
+    readonly cwd: string;
+    readonly account?: RuntimeProviderProfile;
+    readonly cliConfigArgs?: readonly string[];
+  }): Promise<ProviderNativeCapabilitySource>;
+
+  /** F306: fork one exact native binding; the caller remains responsible for Clowder AI target ownership. */
+  requestNativeFork?(input: {
+    readonly sessionId: string;
+    readonly invocationId: string;
+    readonly timeoutMs: number;
+  }): Promise<ProviderNativeThreadFork>;
+
+  /** F306 experimental companion: text-only bridge into one exact native Codex thread. */
+  openNativeRealtimeCompanion?(input: {
+    readonly sessionId: string;
+    readonly invocationId: string;
+    readonly consumer: ProviderNativeRealtimeConsumer;
+    readonly startupTimeoutMs: number;
+    readonly maxDurationMs: number;
+    readonly onEvent?: (event: ProviderNativeRealtimeEvent) => void | Promise<void>;
+  }): Promise<ProviderNativeRealtimeSession>;
+
+  /** True only when this concrete carrier applies the requested policy before model launch. */
+  supportsToolExecutionPolicy?(policy: ToolExecutionPolicy): boolean;
+
+  /** F254 D2: effective carrier capability for this concrete service instance. */
+  freshnessCarrierCapability?(
+    options?: Pick<AgentServiceOptions, 'liveCompanion' | 'requiredTools'>,
+  ): AgentFreshnessCarrierCapability;
+
+  /** #1208: effective context capability for this concrete service/carrier. */
+  contextCapability?(): AgentContextCapability;
+
+  /** #1208: model/window already applied to this concrete service instance. */
+  contextBinding?(): AgentContextBinding | undefined;
+
+  /**
+   * #1208: concrete model/window this service will deterministically apply
+   * from the invocation-owned capacity before model launch. This is a pure
+   * projection of provider-native configuration, not a capability inference.
+   */
+  contextBindingForCapacity?(capacity: AgentContextCapacity): AgentContextBinding | undefined;
+
+  /**
+   * F203 Phase C — whether this provider injects the L0 static identity into
+   * its native system role (e.g. Claude `--system-prompt-file`, Codex
+   * `-c developer_instructions`). When true, the routing layer passes a
+   * pack-only `systemPrompt` (non-pack identity travels the native channel,
+   * compression-immune); when false/undefined the routing layer keeps the
+   * full static identity in `params.systemPrompt` so cats with no native
+   * channel still receive identity/家规 via user-message prepend.
+   *
+   * Optional — defaults to false for back-compat with non-native services.
+   */
+  injectsL0Natively?(): boolean;
+
+  /**
+   * F198 Bug #3 — whether this carrier resumes a conversation that has NO
+   * stable per-conversation sessionId (the bg daemon forks a fresh UUID every
+   * `--bg --resume` round). When true, invoke-single-cat derives a stable
+   * chainKey = `bg:${threadId}:${catId}` and routes sessionId resolution,
+   * the resume mutex key, session_init record reuse, and done bookkeeping
+   * through it — bypassing the cliSessionId-based seal+create path that would
+   * otherwise inflate one conversation into N sealed records.
+   *
+   * Optional — defaults to false. Only ClaudeBgCarrierService returns true;
+   * every other provider (incl. `-p` ClaudeAgentService) keeps the stable
+   * cliSessionId path unchanged.
+   */
+  usesChainKeyResume?(): boolean;
+}
+
+/**
+ * F203 Phase I — L0 compiler function signature.
+ * Same as `compileL0ViaSubprocess` but injectable for testing.
+ */
+export type L0CompilerFn = (options: {
+  catId: string;
+  userId?: string;
+  projection?: 'owner' | 'public';
+  dataDir?: string;
+  outPath?: string;
+}) => Promise<string>;
+
+/**
+ * F203 Phase I — AgentService that carries an injectable L0 compiler seam.
+ * OpenCodeAgentService implements this; Claude/Codex services keep their own
+ * private l0CompilerFn (different lifecycle — they compile L0 internally).
+ */
+export interface L0InjectableAgentService extends AgentService {
+  readonly l0CompilerFn?: L0CompilerFn;
+}
+
+/** Type guard: does this service expose an injectable L0 compiler? */
+export function hasL0CompilerSeam(service: AgentService): service is L0InjectableAgentService {
+  return 'l0CompilerFn' in service && typeof (service as L0InjectableAgentService).l0CompilerFn === 'function';
 }

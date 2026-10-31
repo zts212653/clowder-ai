@@ -1,0 +1,69 @@
+name: Verify Desktop Candidate
+
+# Consumes existing artifacts. Never builds, tags, publishes or uploads release assets.
+on:
+  workflow_dispatch:
+    inputs:
+      producer-run:
+        description: Artifact-only release-desktop run ID with successful Windows producer job
+        required: true
+        type: string
+      producer-head:
+        description: Exact 40-character public source SHA of that run
+        required: true
+        type: string
+      version:
+        description: Exact candidate semver
+        required: true
+        type: string
+      diagnose-private-path:
+        description: Diagnostic only, installer restore with the pinned private-path observer
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  windows:
+    name: Install, launch and restore Windows EXE and ZIP
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      PRODUCER_RUN: ${{ inputs.producer-run }}
+      PRODUCER_HEAD: ${{ inputs.producer-head }}
+      CANDIDATE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/desktop-acceptance
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check candidate verifier contracts
+        run: node --test .github/desktop-acceptance/*.test.mjs
+      - name: Verify producer identity and download exact artifact bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/desktop-acceptance/input.mjs
+      - name: Exercise both actual distributions in isolated instances
+        if: ${{ !inputs.diagnose-private-path }}
+        shell: pwsh
+        run: node .github/desktop-acceptance/distributions.mjs
+      - name: Diagnose the installed private-path restore (not whole-candidate acceptance)
+        if: ${{ inputs.diagnose-private-path }}
+        shell: pwsh
+        run: |
+          $attempt = [guid]::NewGuid().ToString()
+          & .github/desktop-acceptance/windows.ps1 -Distribution installer -AttemptId $attempt -ObservePrivatePath
+      - name: Preserve actual receipts, screenshots and bounded instance logs
+        if: always() && env.CANDIDATE_ROOT != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-acceptance-${{ github.run_id }}
+          path: ${{ env.CANDIDATE_ROOT }}/evidence
+          if-no-files-found: error
+          retention-days: 30

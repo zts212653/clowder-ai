@@ -1,27 +1,30 @@
 ---
 feature_ids: [F086]
-related_features: [F079, F055, F037, F038, F040, F042, F043, F046, F070]
-related_decisions: [012]
+related_features: [F079, F055, F037, F038, F040, F042, F043, F046, F070, F254, F108, F117, F039]
+related_decisions: [012, 040]
 topics: [collaboration, routing, mcp, multi-mention, orchestration, meta-cognition, knowledge-engineering, reflection]
 doc_kind: done
 created: 2026-03-08
 completed: 2026-03-09
+tips_exempt: "Renewed 2026-09-09 for the F117/ADR-043 lifecycle calibration: exact-target replay prevention, Queue/History identity convergence, and MCP Freshness/HELD retirement harden existing multi-mention delivery without adding a new user-invokable action or discovery surface."
 ---
 
 # F086 Cat Orchestration — 猫猫自主协作 + 元认知系统
 
 > **Status**: done | **Owner**: 三猫
 
+> ⚠️ **2026-09-20 delivery calibration**：本文关于 `WorklistRegistry`、独立 multi-mention 状态机、per-target `TargetStatus` 与 read/handled Queue receipt 的段落只保留为演进历史。当前所有文本 `@`、structured multi-mention、用户与 connector 输入都进入 F117 / ADR-043 的单一 durable Queue：一条 source 一条 entry，`targets[]` 只保存 pending recipients，actual dispatch / response terminal 归 History lifecycle。当前真相源见 [F117](F117-message-delivery-lifecycle.md)、[ADR-043](../decisions/043-queue-durable-single-ledger.md) 与 [A2A protocol](../architecture/a2a-protocol.md)。
+
 ## Why
 
-### 核心痛点（team lead采访 2026-03-08 20:25-20:36）
+### 核心痛点（operator采访 2026-03-08 20:25-20:36）
 
-1. **协作链路脆弱**：A2A 经常断线，猫猫间协作不流畅，断了就需要team lead手动重新调度
+1. **协作链路脆弱**：A2A 经常断线，猫猫间协作不流畅，断了就需要operator手动重新调度
 2. **猫猫缺少元思考**：不是能力问题，是意识问题 — 猫猫不会主动想"这个我应该拉其他猫讨论"
 3. **缺少元反思**：做完一个 feat 没有系统性地问"学到了什么？"，反思结果也没有沉淀到能影响未来行为的地方
 4. **知识孤岛**：只有Ragdoll有 MEMORY.md，其他猫没有跨 session 记忆
 
-team experience：
+operator experience：
 > "其实你们经常 a2a 断线，很多时候都是我在强调和要求你们是不是这里能够找其他猫猫讨论。"
 > "你们有的时候缺少这样的元思考。不是说没能力吧？"
 > "我还认为我们缺少元反思逻辑。做完一个 feat 学习到了什么？沉淀呢？元认知提升呢？反思呢？"
@@ -55,6 +58,14 @@ team experience：
 ### M1 编排运行时 — 多重 @ + 回流路由
 
 **目标**：最小闭环的多猫协作工具。
+
+> **2026-09-09 F117/ADR-043 current calibration**：一次 multi-mention 先创建一条真实、公开、可引用的
+> Agent source message；它的正文必须与 Queue payload 完全一致，`replyTo` / causal trigger 指向发起者当前
+> response。该 source message 与一条 `targets[]` 只含 pending recipients 的 Queue entry 原子提交。
+> `sourceRecordId` 永远指向这条真实 History source；不得把发起者 response 的 id 绑给另一段 synthetic
+> `[Multi-Mention ...]` Queue-only 正文。每个 target 的 actual delivery 仍只写 History `dispatchRefs`，已投递
+> target 的重放幂等跳过。MCP `multi_mention` 本身是纯发送原语，不顺便检查发起猫 inbox、不 HELD，也不附加
+> freshness 补救教学。
 
 #### MCP 工具设计
 
@@ -108,7 +119,7 @@ pending → running → partial | done | timeout | failed
 #### 交互流程
 
 ```
-team lead @opus "帮我设计一下这个功能"
+operator @opus "帮我设计一下这个功能"
     ↓
 Ragdoll思考后，需要收集意见
     ↓
@@ -123,7 +134,7 @@ Ragdoll思考后，需要收集意见
   ├── gemini 回答 → 自动路由回 opus
   └── gpt52 回答 → 自动路由回 opus
     ↓
-Ragdoll收到三份回答，综合后给team lead
+Ragdoll收到三份回答，综合后给operator
 ```
 
 #### 安全模型
@@ -134,7 +145,7 @@ Ragdoll收到三份回答，综合后给team lead
 | MCP multi_mention | **≤3 targets**（首版硬限制） |
 | 被 @ 猫 | **禁止** 再 @ 其他猫（防级联广播） |
 | 白名单 | 仅已注册 catId，不接受任意字符串 |
-| 回流 | 自动路由回 callbackTo，不经过team lead |
+| 回流 | 自动路由回 callbackTo，不经过operator |
 
 #### 后端改动
 
@@ -215,7 +226,7 @@ rule_update_target:
 
 #### 知识图谱方向（docs/frontmatter 当图来用）
 
-team experience：
+operator experience：
 > "你们的知识体系完全还是可以使用我们现在的 docs 来建立，但是是否有些东西可以丢到一个轻量专门的向量库？但有个条件就是他得用处得比你们直接搜名字更快更有用。"
 > "我们或许这里要存也是维护文档的 link，构建文档网络。标题、摘要，有点像 Obsidian 建立起来的图谱。甚至你们现在每个文档都有 metadata 的，其实天然就是一张网络了。"
 
@@ -235,14 +246,14 @@ team experience：
 
 #### ⚠️ Hindsight (cat_cafe_reflect) 已废弃
 
-team lead明确表示 (2026-03-08)：hindsight 反思功能**废弃**——大量 token 消耗但效果不好。
+operator明确表示 (2026-03-08)：hindsight 反思功能**废弃**——大量 token 消耗但效果不好。
 当前猫猫实际常用的是搜索类工具（search_evidence, session_search, read_session_events）。
 
 **教训**：元反思不能走"自动生成大段反思摘要"的路（token 黑洞）。
 
 #### 活生生的反面教材（Ragdoll自省 2026-03-08）
 
-team lead指出：Ragdoll在采访时没有先搜索了解知识体系现状就开始提问——这恰好是 F086 要解决的"元思考缺失"的活例子。
+operator指出：Ragdoll在采访时没有先搜索了解知识体系现状就开始提问——这恰好是 F086 要解决的"元思考缺失"的活例子。
 
 > "你自己回顾你刚刚采访的错误，你并没有先搜、先了解、高效的理解我们，然后再问再想。"
 
@@ -264,6 +275,8 @@ team lead指出：Ragdoll在采访时没有先搜索了解知识体系现状就�
 - [x] 超时默认 8m（3~20m 可配），超时立即回流已有结果
 - [x] 审计 envelope：initiator/callbackTo/idempotencyKey/triggerType/searchEvidenceRefs/overrideReason
 - [x] 可观测性：状态机变迁日志 + 审计字段（structured log in route handler）
+- [x] F117 calibration：multi-mention 的 Queue source 是一条正文一致、可引用的真实 Agent History message，且 Message + single-source `targets[]` entry 原子 admission；callback response 只作 parent lineage
+- [x] exact replay：已存在 `sourceRecordId × targetCatId` dispatch 时不重复唤起；MCP 工具不承担 inbox freshness/HELD 副作用
 - [x] 上线验收指标：
   - 回流成功率 ≥ 90%（done/(done+failed) 在首 20 次调用内）
   - 超时率 ≤ 20%（timeout/total）
@@ -299,16 +312,16 @@ team lead指出：Ragdoll在采访时没有先搜索了解知识体系现状就�
 1. **三段拆分不绑定**：M1/M2/M3 独立可验收，不一锅炖（codex + gpt52 共识）
 2. **首版硬限制 targets ≤ 3**：防扩散优先于灵活性（codex 安全建议）
 3. **回流发原文不发摘要**：先保真，再考虑压缩（两方共识）
-4. **元思考是硬触发器不是口号**：可触发、可记录、可验证（gpt52 建议），含侦查阶段（team lead补充）
+4. **元思考是硬触发器不是口号**：可触发、可记录、可验证（gpt52 建议），含侦查阶段（operator补充）
 5. **反思胶囊 6 固定字段**：不自由发挥，强制结构化（gpt52 建议）
-6. **先 BM25 + frontmatter 图谱，不预设向量库**（team lead + 两方共识）
+6. **先 BM25 + frontmatter 图谱，不预设向量库**（operator + 两方共识）
 7. **共享记忆降级**：先"可检索的共享沉淀"，不做"每猫完整 MEMORY"（gpt52 建议）
 8. **F086 ≠ F037**：F086 是确定性编排+回流，F037 是自主 swarm 探索，并列不吞并（codex 判定）
 9. **F079 Gap 4 与 F086 M1 不混做**：cat_cafe_start_vote 是投票扩展，multi_mention 是编排运行时，先跑通 M1 再决定 Gap 4 接入方式（gpt52 R3 建议）
 
 ## M1 Integration Design（侦查结果 2026-03-08）
 
-> team lead指示："写 MCP 时需要考虑现有 MCP 体系，从 feat 顺藤摸瓜。"
+> operator指示："写 MCP 时需要考虑现有 MCP 体系，从 feat 顺藤摸瓜。"
 
 ### MCP 体系集成点
 
@@ -381,9 +394,9 @@ F086 multi_mention（MCP 工具）:
 
 ## Key Decision #3: shared-rules 注入机制（Post-completion Discovery）
 
-> 发现时机：F086 feature close 后，team lead在另一线程指出"猫猫们对 shared-rules 的注入方式很疑惑——只有一个 link，他们根本不知道还有这玩意"
-> 参与者：team lead + gpt52（方案设计）+ opus 4.6（实施简化）
-> 决策方式：team lead拍板 quick fix
+> 发现时机：F086 feature close 后，operator在另一线程指出"猫猫们对 shared-rules 的注入方式很疑惑——只有一个 link，他们根本不知道还有这玩意"
+> 参与者：operator + gpt52（方案设计）+ opus 4.6（实施简化）
+> 决策方式：operator拍板 quick fix
 
 **问题**：`governance-pack.ts:27` 和 `CLAUDE.md` 都只写了文件路径引用 `cat-cafe-skills/refs/shared-rules.md`。猫猫启动时看不到实际内容，除非主动 `Read` 该文件。F086 M2 给 shared-rules 加了第一性原理和触发器，但注入机制没变——内容更丰富了，猫还是看不到。
 
@@ -402,3 +415,21 @@ F086 multi_mention（MCP 工具）:
 1. 全文注入 shared-rules.md — token 浪费，规则噪音
 2. governance-pack 手写摘要 — 破坏 P4 单一真相源
 3. 向量库检索 — 过度工程，规则不适合 embedding
+
+---
+
+## Historical follow-up (superseded): Per-Target Queued Message State (ADR-040)
+
+> Added 2026-07-01 | Superseded 2026-09-02 by ADR-043 / F117 Phase D. The checklist below is not pending work.
+
+F254 实测发现 queued 消息的 read/handled/target consumed 语义混在一起，导致重复唤醒或多目标吞并。ADR-040 统一定义了四层状态分离模型。
+
+**F086 新增职责**（follow-up phase，未排期）：
+
+- [ ] per-target 队列状态机：`TargetStatus` 类型（pending → running → seen → handled → deferred → superseded → cancelled）
+- [ ] 多目标 entry target preservation：一只猫 ack 不吞掉其他 target 的 pending
+- [ ] `targetStatus[catId]` map 替代单一 consume bit
+- [ ] 前端 per-recipient 状态显示（"read by codex" / "pending for opus"）
+
+**参考**：
+- ADR-040: `040-per-target-queued-message-state-model.md`

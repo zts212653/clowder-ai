@@ -1,0 +1,74 @@
+---
+cell_id: thread-navigation
+title: Thread Navigation / Metadata
+summary: Thread labels、pins、favorites、sidebar filters、权威 Sidebar snapshot 与用户面向的 thread 组织语义。
+canonical_features: [F057, F095, F187, F277, F297]
+code_anchors:
+  - packages/api/src/routes/labels.ts
+  - packages/api/src/routes/threads.ts
+  - packages/api/src/domains/cats/services/stores/ports/ThreadStore.ts
+  - packages/api/src/domains/cats/services/stores/redis/RedisLabelStore.ts
+  - packages/api/src/domains/cats/services/stores/redis-keys/label-keys.ts
+  - packages/api/src/domains/cats/services/stores/factories/LabelStoreFactory.ts
+  - packages/web/src/stores/label-store.ts
+  - packages/web/src/components/ThreadSidebar/ThreadSidebar.tsx
+  - packages/web/src/components/ThreadSidebar/LabelFilterBar.tsx
+  - packages/web/src/components/ThreadSidebar/ThreadLabelPicker.tsx
+  - packages/web/src/components/ThreadSidebar/thread-navigation.ts
+  - packages/web/src/components/message-search/useMessageSearchHost.ts
+  - packages/web/src/components/message-search/message-reading-session.ts
+doc_anchors:
+  - docs/features/F057-thread-discoverability.md
+  - docs/features/F095-sidebar-collapse-memory.md
+  - docs/features/F187-thread-labels.md
+  - docs/features/F277-thread-attention-navigation.md
+  - docs/features/F297-sidebar-projection-convergence.md
+static_scan_hints: [ThreadLabel, ILabelStore, LabelStore, labels, pin, favorite, ThreadSidebar, LabelFilterBar]
+cited_by:
+  - {feature: F187, date: 2026-05-07, delta: new cell}
+  - {feature: F191, date: 2026-05-07, delta: trial result}
+  - {feature: F193, date: 2026-06-03, delta: "Phase E extends feat_index with owner catId and feature-thread suggested cross-post actions"}
+  - {feature: F277, date: 2026-07-26, delta: "Thread attention projection + Sidebar/Thread relation-aware navigation"}
+  - {feature: F297, date: 2026-08-17, delta: "Sidebar rows consume one authoritative full snapshot; edge events only invalidate, IndexedDB is bootstrap-only, and optimistic thread commands stay outside the canonical store"}
+  - {feature: F322-C, date: 2026-10-02, delta: "message-result navigation consumes the original route and reading owners; durable session metadata stores immutable coordinates and opaque origin refs without replacing message or scroll authority"}
+---
+
+# Thread Navigation / Metadata
+
+## Canonical Owner
+
+F057 / F095 / F187 own user-facing thread organization: search/sort/navigation affordances, pins/favorites, labels, sidebar filters, and uncategorized views. F297 owns a separate narrow Sidebar projection DTO/store, its refresh/cache authority boundary, and the single canonical apply for those rows. It does not take ownership of the shared Chat runtime `threads/threadStates` stores.
+
+This cell is about how a user finds, groups, and revisits threads. It is not the source of message identity, connector binding, memory evidence, or dispatch priority.
+
+## Use This When
+
+- Adding or changing thread labels, folders, categories, pins, favorites, read/filter state, or sidebar navigation filters.
+- Changing thread metadata fields that exist to organize or retrieve threads for the user.
+- Adding assistant-assisted thread organization flows, such as suggesting labels for uncategorized threads.
+- Changing the sidebar's thread grouping, visibility, filtering, or thread list navigation behavior.
+- Changing the Sidebar snapshot DTO/store, invalidation/refresh policy, IndexedDB bootstrap rule, canonical row writer, or legacy read detachment in the Sidebar render/sort tree.
+
+## Extend By
+
+- Reuse `IThreadStore` thread metadata methods and `ILabelStore` for label CRUD instead of creating parallel label/category stores.
+- Route label changes through `/api/labels` and `/api/threads/:id/labels` so Redis persistence and frontend stores stay aligned.
+- Extend `ThreadSidebar`, `LabelFilterBar`, `ThreadLabelPicker`, and `thread-navigation` helpers for user-facing navigation behavior.
+- Message search navigation uses the same URL route writer and foreground reading port. Result indices advance only on matching owner receipts; an interrupted or unavailable target preserves the return action. Stored session coordinates and opaque reading references have no expiry, carry no message bodies or visibility grants, and never replay navigation automatically after reload. A late old-session write cannot replace a newer explicit active-session choice.
+- Keep new organization semantics explicit: pin = attention, label = category, favorite = durable interest, filter = current view.
+- Compose active execution truth from the F295/F194 `dispatch` service. This cell may join that projection into Sidebar rows, but must not duplicate invocation lifecycle classification or cancel ownership.
+- Keep composer-owned `hasDraft` as a named local decoration adapter. It may decorate a row but must not enter or persist the canonical Sidebar snapshot.
+
+## Do NOT Unify With
+
+- Do not fold thread labels or sidebar filters into `identity-session`. User organization metadata does not decide cat identity, connector ownership, or bubble identity.
+- Do not push thread labels into `bubble-pipeline`. Labels classify the whole thread; bubbles own per-message rendering and identity.
+- Do not treat connector thread binding as a user label. External chat/thread mapping belongs to `transport` / `identity-connector`.
+- Do not use `memory` as the label source of truth. Evidence and summaries can inform classification, but labels are user-facing thread metadata.
+- Do not use labels to steer `dispatch` priority or busy-gate fairness without a separate dispatch design decision.
+- Do not let socket payloads, late IndexedDB reads, or optimistic command rollback replace the canonical Sidebar snapshot. Do not infer `done` merely because an active execution disappeared.
+- Do not globally forbid or rewrite `chatStore.threads`, `threadStates.lastActivity`, or raw liveness actions/selectors: those have non-Sidebar consumers under Chat runtime / `dispatch`. Instead, prevent the Sidebar render/sort tree from reading them as alternate truth.
+
+## Static Scan Hints
+
+Watch for new or renamed `ThreadLabel`, `ILabelStore`, `RedisLabelStore`, `LabelStore`, `labels`, `LabelFilterBar`, `ThreadLabelPicker`, `ThreadSidebar`, `sidebarProjectionStore`, `SidebarSnapshotRow`, `applySidebarSnapshot`, `thread-navigation`, `pin`, `favorite`, `uncategorized`, and `category` code.

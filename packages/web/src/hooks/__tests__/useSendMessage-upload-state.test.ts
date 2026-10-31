@@ -3,21 +3,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockApiFetch = vi.fn();
-const mockAddMessage = vi.fn();
 const mockAddMessageToThread = vi.fn();
-const mockSetLoading = vi.fn();
-const mockSetHasActiveInvocation = vi.fn();
 const mockSetThreadLoading = vi.fn();
 const mockSetThreadHasActiveInvocation = vi.fn();
-const mockResetRefs = vi.fn();
 const mockProcessCommand = vi.fn(async () => false);
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
-}));
-
-vi.mock('@/hooks/useAgentMessages', () => ({
-  useAgentMessages: () => ({ resetRefs: mockResetRefs }),
 }));
 
 vi.mock('@/hooks/useChatCommands', () => ({
@@ -26,15 +18,15 @@ vi.mock('@/hooks/useChatCommands', () => ({
 
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: Object.assign(
-    () => ({
-      addMessage: mockAddMessage,
-      addMessageToThread: mockAddMessageToThread,
-      setLoading: mockSetLoading,
-      setHasActiveInvocation: mockSetHasActiveInvocation,
-      setThreadLoading: mockSetThreadLoading,
-      setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
-      currentThreadId: 'thread-stale',
-    }),
+    (selector?: (state: Record<string, unknown>) => unknown) => {
+      const state = {
+        addMessageToThread: mockAddMessageToThread,
+        setThreadLoading: mockSetThreadLoading,
+        setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
+        currentThreadId: 'thread-stale',
+      };
+      return selector ? selector(state) : state;
+    },
     {
       getState: () => ({ currentThreadId: 'thread-stale' }),
     },
@@ -100,13 +92,9 @@ describe('useSendMessage upload status', () => {
 
   beforeEach(() => {
     mockApiFetch.mockReset();
-    mockAddMessage.mockReset();
     mockAddMessageToThread.mockReset();
-    mockSetLoading.mockReset();
-    mockSetHasActiveInvocation.mockReset();
     mockSetThreadLoading.mockReset();
     mockSetThreadHasActiveInvocation.mockReset();
-    mockResetRefs.mockReset();
     mockProcessCommand.mockReset();
     mockProcessCommand.mockResolvedValue(false);
 
@@ -159,12 +147,31 @@ describe('useSendMessage upload status', () => {
     const last = snapshots[snapshots.length - 1];
     expect(last.status).toBe('failed');
     expect(last.error).toContain('上传超时');
-    expect(mockAddMessage).toHaveBeenCalledWith(
+    expect(mockAddMessageToThread).toHaveBeenCalledWith(
+      'thread-route',
       expect.objectContaining({
         type: 'system',
         variant: 'error',
         content: expect.stringContaining('Failed to send message: 上传超时'),
       }),
     );
+  });
+
+  it('leaves persisted disposition resolution to server admission for multipart sends', async () => {
+    mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ status: 'queued', entryId: 'entry-1' }) });
+
+    await act(async () => {
+      root.render(
+        React.createElement(SendWithImageRunner, {
+          onDone: () => {},
+          onSnapshot: () => {},
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const form = mockApiFetch.mock.calls[0]?.[1]?.body as FormData;
+    expect(form.get('messageDisposition')).toBeNull();
   });
 });

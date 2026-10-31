@@ -1,0 +1,250 @@
+import type { ActiveExecutionListResponse, ActiveExecutionProjection } from '@cat-cafe/shared';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { activeExecutionKey, useActiveExecutionStore } from '../activeExecutionStore';
+import { DEFAULT_THREAD_STATE, useChatStore } from '../chatStore';
+
+function live(
+  executionId: string,
+  startedAt: number,
+  catId = 'kimi',
+  threadId = 'thread-a',
+): ActiveExecutionProjection {
+  return {
+    executionId,
+    threadId,
+    threadTitle: 'Alpha',
+    catId,
+    kind: 'live_invocation',
+    startedAt,
+    cancelability: {
+      state: 'cancelable',
+      target: { kind: 'live_invocation', threadId, catId, executionId },
+    },
+  };
+}
+
+function command(): ActiveExecutionProjection {
+  return {
+    executionId: 'hold-ball-command',
+    threadId: 'thread-b',
+    threadTitle: 'Background',
+    catId: 'kimi',
+    kind: 'managed_command',
+    startedAt: 200,
+    cancelability: {
+      state: 'cancelable',
+      target: { kind: 'managed_command', taskId: 'hold-ball-command' },
+    },
+  };
+}
+
+function response(executions: ActiveExecutionProjection[]): ActiveExecutionListResponse {
+  return { projectPath: '/project/cafe', executions };
+}
+
+describe('F295 activeExecutionStore', () => {
+  beforeEach(() => useActiveExecutionStore.getState().reset());
+
+  it('keeps the current project as an anchor while hydrating work from all projects', () => {
+    const store = useActiveExecutionStore.getState();
+    const execution = { ...live('planet-inv', 100), projectPath: '/project/planet' };
+    store.applySnapshot('thread-a', store.beginHydration('thread-a', '/project/cafe'), {
+      scope: 'all',
+      executions: [execution],
+    });
+    expect(useActiveExecutionStore.getState()).toMatchObject({
+      projectPath: '/project/cafe',
+      scope: 'all',
+      hydration: 'ready',
+      executionsByKey: { [activeExecutionKey(execution)]: execution },
+    });
+    store.beginCancellation(execution);
+    store.beginHydration('planet-thread', '/project/planet');
+    expect(useActiveExecutionStore.getState()).toMatchObject({
+      projectPath: '/project/planet',
+      hydration: 'ready',
+      scope: 'all',
+      executionsByKey: { [activeExecutionKey(execution)]: execution },
+      cancelPendingByKey: { [activeExecutionKey(execution)]: true },
+    });
+  });
+
+  it('does not let an in-flight snapshot resurrect an exact canceled slot or erase its sibling', () => {
+    const store = useActiveExecutionStore.getState();
+    const first = live('same-parent', 100, 'opus');
+    const sibling = live('same-parent', 100, 'astra');
+    store.applySnapshot('thread-a', store.beginHydration('thread-a', '/project/cafe'), response([first, sibling]));
+    const stale = store.beginHydration('thread-a', '/project/cafe');
+    store.settleCancellation(first);
+    store.applySnapshot('thread-a', stale, response([first]));
+    expect(Object.values(useActiveExecutionStore.getState().executionsByKey)).toEqual([sibling]);
+  });
+
+  it('retains the project snapshot and exact cancellation during same-project navigation', () => {
+    const store = useActiveExecutionStore.getState();
+    const execution = live('inv-still-running', 100);
+    store.applySnapshot('thread-a', store.beginHydration('thread-a', '/project/cafe'), response([execution]));
+    store.beginCancellation(execution);
+
+    store.beginHydration('thread-b', '/project/cafe');
+
+    expect(useActiveExecutionStore.getState()).toMatchObject({
+      anchorThreadId: 'thread-b',
+      projectPath: '/project/cafe',
+      hydration: 'ready',
+      executionsByKey: { [activeExecutionKey(execution)]: execution },
+      cancelPendingByKey: { [activeExecutionKey(execution)]: true },
+    });
+    expect(store.beginCancellation(execution)).toBe(false);
+  });
+
+  it('clears a previous project before a new or unresolved scope can consume it', () => {
+    const store = useActiveExecutionStore.getState();
+    store.applySnapshot('thread-a', store.beginHydration('thread-a', '/project/cafe'), response([live('inv-a', 100)]));
+
+    store.beginHydration('thread-a', '/project/other');
+    expect(useActiveExecutionStore.getState()).toMatchObject({
+      projectPath: '/project/other',
+      hydration: 'loading',
+      executionsByKey: {},
+    });
+    store.beginHydration('thread-unknown', null);
+    expect(useActiveExecutionStore.getState()).toMatchObject({ projectPath: null, executionsByKey: {} });
+  });
+
+  it('preserves parallel cats sharing a parent execution and retires only the finished slot', () => {
+    const astra = live('shared-parent', 100, 'codex-astra');
+    const fable = live('shared-parent', 100, 'fable5');
+    const otherThread = live('shared-parent', 100, 'codex-astra', 'thread-b');
+    const store = useActiveExecutionStore.getState();
+    store.applySnapshot(
+      'thread-a',
+      store.beginHydration('thread-a', '/project/cafe'),
+      response([astra, fable, otherThread]),
+    );
+
+    expect(Object.values(useActiveExecutionStore.getState().executionsByKey)).toEqual([astra, fable, otherThread]);
+
+    store.applySnapshot('thread-a', store.beginHydration('thread-a', '/project/cafe'), response([fable, otherThread]));
+    expect(Object.values(useActiveExecutionStore.getState().executionsByKey)).toEqual([fable, otherThread]);
+  });
+
+  it('isolates cancellation pending, settlement, and retry between parallel cats', () => {
+    const astra = live('shared-parent', 100, 'codex-astra');
+    const fable = live('shared-parent', 100, 'fable5');
+    const store = useActiveExecutionStore.getState();
+    store.applySnapshot('thread-a', store.beginHydration('thread-a', '/project/cafe'), response([astra, fable]));
+
+    expect(store.beginCancellation(astra)).toBe(true);
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[activeExecutionKey(fable)]).toBeUndefined();
+    expect(store.beginCancellation(fable)).toBe(true);
+    store.releaseCancellation(astra);
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[activeExecutionKey(fable)]).toBe(true);
+    expect(store.beginCancellation(astra)).toBe(true);
+    store.settleCancellation(astra);
+    expect(Object.values(useActiveExecutionStore.getState().executionsByKey)).toEqual([fable]);
+
+    store.applySnapshot('thread-a', store.beginHydration('thread-a', '/project/cafe'), response([fable]));
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[activeExecutionKey(astra)]).toBeUndefined();
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[activeExecutionKey(fable)]).toBe(true);
+  });
+
+  it('retains managed task lookup identity alongside a live execution with the same id', () => {
+    const managed = command();
+    const invocation = live(managed.executionId, 100);
+    const store = useActiveExecutionStore.getState();
+    store.applySnapshot('thread-a', store.beginHydration('thread-a', '/project/cafe'), response([managed, invocation]));
+
+    expect(Object.values(useActiveExecutionStore.getState().executionsByKey)).toEqual([managed, invocation]);
+    expect(useActiveExecutionStore.getState().executionsByKey[`managed_command:${managed.executionId}`]).toEqual(
+      managed,
+    );
+  });
+
+  it('retires only identities absent from the newest canonical snapshot', () => {
+    const firstRequest = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
+    useActiveExecutionStore
+      .getState()
+      .applySnapshot('thread-a', firstRequest, response([live('inv-old', 100), command()]));
+
+    const secondRequest = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
+    useActiveExecutionStore
+      .getState()
+      .applySnapshot('thread-a', secondRequest, response([live('inv-new', 300), command()]));
+
+    const byKey = useActiveExecutionStore.getState().executionsByKey;
+    expect(byKey[activeExecutionKey(live('inv-old', 100))]).toBeUndefined();
+    expect(byKey[activeExecutionKey(live('inv-new', 300))]?.executionId).toBe('inv-new');
+    expect(byKey[activeExecutionKey(command())]?.kind).toBe('managed_command');
+  });
+
+  it('ignores a late response from an older refresh so it cannot erase a replacement', () => {
+    const oldRequest = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
+    const newRequest = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
+
+    useActiveExecutionStore.getState().applySnapshot('thread-a', newRequest, response([live('inv-new', 300)]));
+    useActiveExecutionStore.getState().applySnapshot('thread-a', oldRequest, response([live('inv-old', 100)]));
+
+    expect(Object.values(useActiveExecutionStore.getState().executionsByKey).map((item) => item.executionId)).toEqual([
+      'inv-new',
+    ]);
+  });
+
+  it('keeps the last verified display state during a same-anchor background refresh', () => {
+    const initial = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
+    useActiveExecutionStore.getState().applySnapshot('thread-a', initial, response([]));
+
+    useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
+
+    expect(useActiveExecutionStore.getState().hydration).toBe('ready');
+    expect(useActiveExecutionStore.getState().executionsByKey).toEqual({});
+  });
+
+  it('keeps a managed command visible after the model invocation reaches terminal', () => {
+    const initial = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
+    useActiveExecutionStore.getState().applySnapshot('thread-a', initial, response([live('inv-a', 100), command()]));
+
+    const terminal = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
+    useActiveExecutionStore.getState().applySnapshot('thread-a', terminal, response([command()]));
+
+    expect(Object.values(useActiveExecutionStore.getState().executionsByKey)).toEqual([command()]);
+  });
+
+  it('does not mutate unread truth while executions hydrate or retire', () => {
+    useChatStore.setState({
+      threadStates: {
+        'thread-b': { ...DEFAULT_THREAD_STATE, unreadCount: 3, hasUserMention: true },
+      },
+    });
+    const request = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
+    useActiveExecutionStore.getState().applySnapshot('thread-a', request, response([command()]));
+    const terminal = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
+    useActiveExecutionStore.getState().applySnapshot('thread-a', terminal, response([]));
+
+    expect(useChatStore.getState().threadStates['thread-b']?.unreadCount).toBe(3);
+    expect(useChatStore.getState().threadStates['thread-b']?.hasUserMention).toBe(true);
+  });
+
+  it('fences one exact cancellation until a canonical snapshot retires it', () => {
+    const execution = live('inv-cancel', 100);
+    const initial = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
+    useActiveExecutionStore.getState().applySnapshot('thread-a', initial, response([execution]));
+
+    expect(useActiveExecutionStore.getState().beginCancellation(execution)).toBe(true);
+    expect(useActiveExecutionStore.getState().beginCancellation(execution)).toBe(false);
+
+    useActiveExecutionStore.getState().settleCancellation(execution);
+    const key = activeExecutionKey(execution);
+    expect(useActiveExecutionStore.getState().executionsByKey[key]).toBeUndefined();
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[key]).toBe(true);
+
+    const terminalizing = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
+    useActiveExecutionStore.getState().applySnapshot('thread-a', terminalizing, response([execution]));
+    expect(useActiveExecutionStore.getState().executionsByKey[key]).toEqual(execution);
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[key]).toBe(true);
+
+    const terminal = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
+    useActiveExecutionStore.getState().applySnapshot('thread-a', terminal, response([]));
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[key]).toBeUndefined();
+  });
+});

@@ -13,6 +13,7 @@ vi.mock('@/components/icons/AttachIcon', () => ({
   AttachIcon: () => React.createElement('span', null, 'attach'),
 }));
 vi.mock('@/components/ImagePreview', () => ({ ImagePreview: () => null }));
+vi.mock('@/components/AttachmentPreview', () => ({ AttachmentPreview: () => null }));
 vi.mock('@/utils/compressImage', () => ({
   compressImage: (f: File) => Promise.resolve(f),
 }));
@@ -49,89 +50,75 @@ function render(props: Partial<React.ComponentProps<typeof ChatInput>> = {}) {
   return defaults;
 }
 
-describe('ChatInput mobile toolbar', () => {
-  it('shows mobile + button (hidden on md+)', () => {
+describe('ChatInput progressive add menu', () => {
+  it('shows one stable + entry at every width', () => {
     render();
-    const plusBtn = container.querySelector('button[aria-label="展开工具栏"]');
+    const plusBtn = container.querySelector('button[aria-label="添加"]');
     expect(plusBtn).toBeTruthy();
-    // Button should have md:hidden class
-    expect(plusBtn?.className).toContain('md:hidden');
+    expect(plusBtn?.className).not.toContain('md:hidden');
+    expect(container.querySelectorAll('button[aria-label="添加"]')).toHaveLength(1);
   });
 
-  it('expands toolbar on + click and shows attach/whisper buttons', () => {
+  it('reveals secondary actions only after + is clicked', () => {
     render();
-    const plusBtn = container.querySelector('button[aria-label="展开工具栏"]') as HTMLButtonElement;
+    expect(document.querySelector('[data-testid="composer-add-menu"]')).toBeNull();
+
+    const plusBtn = container.querySelector('button[aria-label="添加"]') as HTMLButtonElement;
     act(() => {
       plusBtn.click();
     });
-    // MobileInputToolbar should now be visible
-    expect(container.textContent).toContain('附件');
-    expect(container.textContent).toContain('悄悄话');
+
+    const menu = document.querySelector('[data-testid="composer-add-menu"]');
+    expect(menu?.textContent).toContain('引用 Thread 或文件');
+    expect(menu?.textContent).toContain('上传附件');
+    expect(menu?.textContent).toContain('悄悄话');
+    expect(menu?.textContent).not.toContain('游戏');
   });
 
-  it('collapses toolbar when + is clicked again (rotate-45 toggle)', () => {
+  it('collapses the secondary menu when + is clicked again', () => {
     render();
-    const plusBtn = container.querySelector('button[aria-label="展开工具栏"]') as HTMLButtonElement;
+    const plusBtn = container.querySelector('button[aria-label="添加"]') as HTMLButtonElement;
     // Open
     act(() => {
       plusBtn.click();
     });
-    expect(container.textContent).toContain('附件');
+    expect(document.querySelector('[data-testid="composer-add-menu"]')).toBeTruthy();
     // Close
     act(() => {
       plusBtn.click();
     });
-    // MobileInputToolbar should be gone
-    expect(container.textContent).not.toContain('附件');
+    expect(document.querySelector('[data-testid="composer-add-menu"]')).toBeNull();
   });
 
-  it('+ button has rotate-45 class when toolbar is open', () => {
+  it('collapses on a real pointer click without the outside-click handler reopening it', () => {
     render();
-    const plusBtn = container.querySelector('button[aria-label="展开工具栏"]') as HTMLButtonElement;
-    expect(plusBtn.className).not.toContain('rotate-45');
+    const plusBtn = container.querySelector('button[aria-label="添加"]') as HTMLButtonElement;
+    act(() => plusBtn.click());
+    expect(document.querySelector('[data-testid="composer-add-menu"]')).toBeTruthy();
+
     act(() => {
-      plusBtn.click();
+      plusBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      plusBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      plusBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    expect(plusBtn.className).toContain('rotate-45');
+
+    expect(document.querySelector('[data-testid="composer-add-menu"]')).toBeNull();
   });
 });
 
-describe('ChatInput textarea auto-grow', () => {
-  it('starts with rows=1', () => {
-    render();
-    const ta = container.querySelector('textarea')!;
-    expect(ta.getAttribute('rows')).toBe('1');
-  });
+describe('ChatInput composer layout', () => {
+  it('keeps the active invocation stop affordance visible while preserving hover and keyboard focus styling', () => {
+    render({ hasActiveInvocation: true });
 
-  it('auto-grow uses matchMedia guard (no crash in test env)', () => {
-    // matchMedia may not be defined in jsdom — the guard prevents crash
-    render();
-    const ta = container.querySelector('textarea')!;
-    // Just verify textarea renders without errors
-    expect(ta).toBeTruthy();
-  });
-
-  it('auto-grow respects mobile max height when matchMedia is available', () => {
-    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
-      matches: query.includes('max-width'), // mobile
-      media: query,
-      onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    }));
-    render();
-    const ta = container.querySelector('textarea')!;
-    // Simulate typing to trigger auto-grow effect
-    act(() => {
-      Object.defineProperty(ta, 'scrollHeight', { value: 200, writable: true });
-      ta.value = 'line1\nline2\nline3\nline4\nline5\nline6';
-      ta.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    // On mobile, max height is 120px
-    const height = parseInt(ta.style.height, 10);
-    expect(height).toBeLessThanOrEqual(120);
+    const stopButtons = container.querySelectorAll('button[aria-label="Stop generation"]');
+    expect(stopButtons).toHaveLength(1);
+    const stopButton = stopButtons[0] as HTMLButtonElement;
+    expect(stopButton).toBeTruthy();
+    expect(stopButton?.disabled).toBe(true);
+    expect(stopButton?.className).not.toContain('opacity-0');
+    expect(stopButton?.className).toContain('hover:bg-conn-red-hover');
+    expect(stopButton?.querySelector('svg rect')).not.toBeNull();
+    expect(stopButton?.title).toBe('正在确认可停止的运行状态');
+    expect(stopButton?.className).toContain('focus-visible:ring-2');
   });
 });

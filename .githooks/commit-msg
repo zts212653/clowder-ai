@@ -1,0 +1,3 @@
+#!/bin/bash
+set -euo pipefail
+exec node "$(dirname "${BASH_SOURCE[0]}")/../scripts/secret-git-guard.mjs" message "$1"

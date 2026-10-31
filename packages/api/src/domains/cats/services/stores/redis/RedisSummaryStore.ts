@@ -15,7 +15,7 @@ import { generateSortableId } from '../ports/MessageStore.js';
 import type { ISummaryStore } from '../ports/SummaryStore.js';
 import { SummaryKeys } from '../redis-keys/summary-keys.js';
 
-const DEFAULT_TTL = 30 * 24 * 60 * 60; // 30 days
+const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
 
 export class RedisSummaryStore implements ISummaryStore {
   private readonly redis: RedisClient;
@@ -24,15 +24,11 @@ export class RedisSummaryStore implements ISummaryStore {
 
   constructor(redis: RedisClient, options?: { ttlSeconds?: number }) {
     this.redis = redis;
-    const ttl = options?.ttlSeconds;
-    if (ttl === undefined) {
-      this.ttlSeconds = DEFAULT_TTL;
-    } else if (!Number.isFinite(ttl)) {
-      this.ttlSeconds = DEFAULT_TTL;
-    } else if (ttl <= 0) {
+    const raw = options?.ttlSeconds ?? DEFAULT_TTL;
+    if (!Number.isFinite(raw) || raw <= 0) {
       this.ttlSeconds = null;
     } else {
-      this.ttlSeconds = Math.floor(ttl);
+      this.ttlSeconds = Math.floor(raw);
     }
   }
 

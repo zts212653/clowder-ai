@@ -1,0 +1,226 @@
+/**
+ * check:env-registry — CI gate for env var registration completeness.
+ *
+ * Scans `packages/api/src` and `packages/mcp-server/src` for `process.env.XXX`
+ * references and verifies each is either:
+ *   1. Registered in `env-registry.ts` ENV_VARS array, OR
+ *   2. Listed in the ALLOWLIST below (with a reason).
+ *
+ * Run: `node --test scripts/check-env-registry.test.mjs`
+ * Wire: `pnpm check:env-registry` in root package.json
+ */
+
+import assert from 'node:assert/strict';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, resolve, win32 } from 'node:path';
+import { describe, it } from 'node:test';
+import { parseVars } from './lib/env-registry-parser.mjs';
+import { loadEnvRegistrySource } from './lib/env-registry-source.mjs';
+import './lib/env-registry-source.test.mjs';
+
+const ROOT = resolve(import.meta.dirname, '..');
+
+// ── Allowlist: vars used in code that should NOT be in env-registry ──
+// Each entry MUST have a reason (enforced by test below).
+const ALLOWLIST = new Map([
+  ['HOME', 'OS-provided home directory'],
+  ['SHELL', 'OS-provided shell path'],
+  ['ZDOTDIR', 'Zsh-owned startup configuration root; inherited tool setting, not an app setting'],
+  [
+    'CAT_CAFE_ORIGINAL_ZDOTDIR',
+    'Host-owned shell guard handoff preserving the original Zsh startup root; not user configuration',
+  ],
+  ['PATH', 'OS-provided executable search path'],
+  ['TMPDIR', 'OS-provided temporary directory passed to the isolated AGY CLI; not an app setting'],
+  ['Path', 'Windows OS-provided PATH alias; executable search input, not an app setting'],
+  ['USER', 'OS-provided username'],
+  ['USERNAME', 'Windows OS-provided username'],
+  ['USERPROFILE', 'Windows OS-provided home directory (F212 sanitizer path redaction)'],
+  ['LANG', 'OS-provided locale'],
+  ['LC_ALL', 'OS-provided locale override'],
+  ['APPDATA', 'Windows OS variable (cli-spawn-win.ts)'],
+  ['LOCALAPPDATA', 'Windows OS variable (cli-resolve.ts)'],
+  ['SYSTEMROOT', 'Windows OS variable (project-path.ts)'],
+  [
+    'SystemRoot',
+    'Windows OS-provided SystemRoot spelling used by taskkill and the ACP PowerShell verifier; not an app setting',
+  ],
+  ['PROGRAMFILES', 'Windows OS variable (ImageExporter.ts Chrome detection)'],
+  ['PATHEXT', 'Windows OS variable (capability-orchestrator.ts executable extension lookup)'],
+  ['ProgramData', 'Windows OS-provided machine data root used for the ACP bootstrap fallback; not an app setting'],
+  ['ALLUSERSPROFILE', 'Windows OS-provided alias of ProgramData used when ProgramData is unset'],
+  ['NODE_ENV', 'Node.js standard'],
+  ['GH_HOST', 'Inherited GitHub CLI host used to partition credential quota; not an app setting'],
+  ['GH_CONFIG_DIR', 'GitHub CLI-owned configuration location used to identify its auth store'],
+  ['XDG_CONFIG_HOME', 'XDG configuration root inherited by GitHub CLI; not an app setting'],
+  ['https_proxy', 'Standard proxy convention (lowercase variant of HTTPS_PROXY)'],
+  ['http_proxy', 'Standard proxy convention (lowercase variant of HTTP_PROXY)'],
+  ['all_proxy', 'Standard proxy convention (lowercase variant of ALL_PROXY)'],
+  ['npm_execpath', 'Package-manager metadata injected by npm/pnpm; not user-configurable'],
+  ['npm_config_user_agent', 'Package-manager metadata injected by npm/pnpm; not user-configurable'],
+  ['npm_config_cache', 'Inherited npm cache location used for read-only discovery of an installed DSH entry'],
+  ['INIT_CWD', 'Package-manager metadata injected by npm/pnpm; original invocation directory'],
+  ['COGVIDEO_API_KEY', 'F139 MediaHub CogVideoX provider — mcp-server-local credential'],
+  ['CLAUDE_BIN', 'F254 developer-only live fixture executable override; not a runtime setting'],
+  ['CODEX_BIN', 'F254 developer-only live fixture executable override; not a runtime setting'],
+  ['F254_CLAUDE_MODEL', 'F254 developer-only Claude capability fixture model override; not a runtime setting'],
+  ['F254_CODEX_TRANSPORT', 'F254 developer-only Codex fixture transport selector; not a runtime setting'],
+  ['CAT_OPUS_MODEL', 'Existing provider model env reused only as a developer fixture fallback'],
+  [
+    'CAT_CAFE_GATE_BASE_SHA',
+    'Pre-merge gate internal exact-base handoff to MCP governance; not user or runtime configuration',
+  ],
+]);
+
+// ── Extract registered names from env-registry.ts ──
+function loadRegisteredNames() {
+  const src = loadEnvRegistrySource(join(ROOT, 'packages/api/src/config/env-registry.ts'));
+  return new Set(parseVars(src).map(({ name }) => name));
+}
+
+// ── Recursively collect .ts files ──
+function collectTsFiles(dir) {
+  const results = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory() && entry.name !== 'node_modules') {
+      results.push(...collectTsFiles(full));
+    } else if (entry.isFile() && entry.name.endsWith('.ts')) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
+// ── Extract process.env references from source files ──
+function extractEnvRefs(dirs) {
+  /** @type {Map<string, string[]>} varName → [file:line, ...] */
+  const refs = new Map();
+
+  for (const dir of dirs) {
+    const absDir = join(ROOT, dir);
+    try {
+      statSync(absDir);
+    } catch {
+      continue;
+    }
+    for (const file of collectTsFiles(absDir)) {
+      const lines = readFileSync(file, 'utf-8').split('\n');
+      let inBlockComment = false;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trimStart();
+        // Track multi-line block comments
+        if (inBlockComment) {
+          if (line.includes('*/')) {
+            inBlockComment = false;
+          }
+          continue;
+        }
+        // Single-line block comment: /** ... */ or /* ... */ on one line
+        if (trimmed.startsWith('/*') && line.includes('*/')) continue;
+        // Start of multi-line block comment (no closing on same line)
+        if (trimmed.startsWith('/*')) {
+          inBlockComment = true;
+          continue;
+        }
+        // Skip pure line comments
+        if (trimmed.startsWith('//')) continue;
+        // Strip inline comments before matching (trailing // and inline /* */)
+        const code = line.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '');
+        // Match process.env.VAR_NAME and process.env['VAR_NAME']
+        const dotMatches = code.matchAll(/process\.env\.([A-Za-z_][A-Za-z0-9_]*)/g);
+        const bracketMatches = code.matchAll(/process\.env\[['"]([A-Za-z_][A-Za-z0-9_]*)['"]\]/g);
+        for (const m of [...dotMatches, ...bracketMatches]) {
+          const name = m[1];
+          if (!refs.has(name)) refs.set(name, []);
+          refs.get(name).push(`${file.replace(ROOT + '/', '')}:${i + 1}`);
+        }
+      }
+    }
+  }
+
+  return refs;
+}
+
+// ── Tests ──
+describe('env-registry completeness', () => {
+  const registeredNames = loadRegisteredNames();
+  const envRefs = extractEnvRefs(['packages/api/src', 'packages/mcp-server/src']);
+  const repoInboxEnvNames = ['GITHUB_WEBHOOK_SECRET', 'GITHUB_REPO_ALLOWLIST', 'GITHUB_REPO_INBOX_CAT_ID'];
+  const githubSelfFilterEnvNames = ['GITHUB_SELF_LOGIN'];
+  const weixinRuntimeFlagNames = [
+    'WEIXIN_VOICE_ITEM_MODE',
+    'WEIXIN_ENABLE_UNSAFE_VOICE_MODES',
+    'WEIXIN_CAPTURE_INBOUND_VOICE_MEDIA',
+  ];
+  const isPluginNetworkConsumer = (location) => /(?:^|[/\\])plugin-network-fetch\.ts:\d+$/.test(location);
+
+  it('every allowlist entry has a non-empty reason', () => {
+    for (const [name, reason] of ALLOWLIST) {
+      assert.ok(reason && reason.length > 0, `ALLOWLIST entry "${name}" has no reason`);
+    }
+  });
+
+  it('does not expose retired GitHub and IM process configuration', () => {
+    for (const name of [
+      ...repoInboxEnvNames,
+      ...githubSelfFilterEnvNames,
+      ...weixinRuntimeFlagNames,
+      'GITHUB_MCP_PAT',
+      'CONNECTOR_GATEWAY_AUTOSTART',
+      'TELEGRAM_BOT_TOKEN',
+      'FEISHU_APP_SECRET',
+      'WECOM_AGENT_SECRET',
+    ]) {
+      assert.equal(registeredNames.has(name), false, `${name} must not remain Host configuration`);
+      assert.equal(ALLOWLIST.has(name), false, `${name} must not bypass the registry`);
+      assert.equal(envRefs.has(name), false, `${name} must not be read by Host code`);
+    }
+  });
+
+  it('every process.env.XXX is registered or allowlisted', () => {
+    const missing = [];
+    for (const [name, locations] of envRefs) {
+      if (!registeredNames.has(name) && !ALLOWLIST.has(name)) {
+        missing.push({ name, locations: locations.slice(0, 3) });
+      }
+    }
+    if (missing.length > 0) {
+      const lines = missing.map((m) => `  ${m.name} (${m.locations.join(', ')})`);
+      assert.fail(
+        `${missing.length} env var(s) used in code but not registered in env-registry.ts:\n` +
+          lines.join('\n') +
+          '\n\nFix: add to ENV_VARS in packages/api/src/config/env-registry.ts, ' +
+          'or add to ALLOWLIST in this script with a reason.',
+      );
+    }
+  });
+
+  it('checks both desktop plugin bridge handoff variables without an allowlist bypass', () => {
+    for (const name of ['CAT_CAFE_PLUGIN_NETWORK_BRIDGE_URL', 'CAT_CAFE_PLUGIN_NETWORK_BRIDGE_TOKEN']) {
+      assert.ok(envRefs.get(name)?.some(isPluginNetworkConsumer), `${name} must be discovered at its API consumer`);
+      assert.ok(registeredNames.has(name), `${name} must be registered`);
+      assert.equal(ALLOWLIST.has(name), false, `${name} must not bypass registration`);
+    }
+  });
+
+  it('recognizes the bridge consumer with Windows and POSIX diagnostic separators', () => {
+    assert.ok(isPluginNetworkConsumer(`${win32.join('packages', 'api', 'plugin-network-fetch.ts')}:5`));
+    assert.ok(isPluginNetworkConsumer('packages/api/plugin-network-fetch.ts:5'));
+    assert.equal(isPluginNetworkConsumer('packages/api/other-plugin-network-fetch.ts:5'), false);
+    assert.equal(isPluginNetworkConsumer('packages/api/plugin-network-fetch.ts:5/other.ts:2'), false);
+  });
+
+  it('no allowlist entry that is actually registered (redundant)', () => {
+    const redundant = [];
+    for (const name of ALLOWLIST.keys()) {
+      if (registeredNames.has(name)) {
+        redundant.push(name);
+      }
+    }
+    if (redundant.length > 0) {
+      assert.fail(`These ALLOWLIST entries are already registered (remove from allowlist): ${redundant.join(', ')}`);
+    }
+  });
+});

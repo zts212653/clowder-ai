@@ -1,51 +1,179 @@
 'use client';
 
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
+import { isCanonicalAvatarUrl, resolveAvatarUrl } from '@/lib/avatar-url';
+import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { hexToRgba } from '@/lib/color-utils';
 import { PawIcon } from './icons/PawIcon';
 
-type CatStatus = 'pending' | 'streaming' | 'done' | 'error' | 'alive_but_silent' | 'suspected_stall';
+type CatStatus = 'spawning' | 'pending' | 'streaming' | 'done' | 'error' | 'alive_but_silent' | 'suspected_stall';
+
+/** F174 D2b-2 — callback-auth health (per cat, derived from /api/debug/callback-auth snapshot). */
+export type CallbackAuthStatus = 'healthy' | 'degraded' | 'broken' | 'unknown';
+
+const CALLBACK_AUTH_STATUS_COLOR: Record<CallbackAuthStatus, string> = {
+  healthy: 'var(--semantic-success)',
+  degraded: 'var(--semantic-warning)',
+  broken: 'var(--semantic-critical)',
+  unknown: 'var(--neutral-400)',
+};
 
 interface CatAvatarProps {
   catId: string;
   size?: number;
   status?: CatStatus;
+  onClick?: () => void;
+  /** F174 D2b-2: corner status dot for callback-auth health surface (明厨亮灶 实体层). */
+  callbackAuthStatus?: CallbackAuthStatus;
+  /** Optional aria-label / hover hint for the status dot (e.g."broken · 12 fails"). */
+  callbackAuthLabel?: string;
+  /**
+   * F174 D2b-2 AC-D7: rich popover rendered on dot hover. When provided
+   * (and onCallbackAuthClick set), the dot becomes a clickable entry
+   * point — e.g. jump to D2b-3 deep-dive panel.
+   */
+  callbackAuthPopover?: ReactNode;
+  /** F174 D2b-2 AC-D7: click handler for the dot (typically opens D2b-3). */
+  onCallbackAuthClick?: () => void;
+  /**
+   * The ring around the face. `cat` (default) is the cat-coloured 2px ring every avatar has always had. `none` is for a
+   * surface that is already the cat's colour (the F322 nameplate), where the ring would mark the same colour twice. A
+   * failed state still shows its ring (an error is not decoration), and a clickable avatar shows the accent ring on hover.
+   */
+  ring?: 'cat' | 'none';
 }
 
-export function CatAvatar({ catId, size = 32, status }: CatAvatarProps) {
-  const [imgError, setImgError] = useState(false);
+export function CatAvatar({
+  catId,
+  size = 32,
+  status,
+  onClick,
+  callbackAuthStatus,
+  callbackAuthLabel,
+  callbackAuthPopover,
+  onCallbackAuthClick,
+  ring = 'cat',
+}: CatAvatarProps) {
+  const [failedAvatarSrc, setFailedAvatarSrc] = useState<string | null>(null);
+  const [popoverOpen, setPopoverOpen] = useState(false);
   const { getCatById } = useCatData();
   const cat = getCatById(catId);
+  const catName = resolveCatDisplayName(catId, getCatById);
+  const avatarSrc = resolveAvatarUrl(cat?.avatar || '/avatars/default.png');
+  const imgError = failedAvatarSrc === avatarSrc;
 
   const isStreaming = status === 'streaming';
   const isError = status === 'error';
-  const ringColor = cat?.color.primary ?? '#9CA3AF'; // gray-400 fallback
+  const showRing = ring !== 'none' || isError;
+  const ringColor = cat?.color.primary ?? 'var(--console-cat-fallback)';
   const glowShadow = isStreaming && cat ? `0 0 10px ${hexToRgba(ringColor, 0.5)}` : undefined;
 
+  // F174 D2b-2: dot is ~28% of avatar size (min 8px), absolute positioned bottom-right.
+  // White ring lifts it off the avatar and survives most cat colors.
+  const dotSize = Math.max(8, Math.round(size * 0.28));
+  const dotBorder = Math.max(1, Math.round(dotSize * 0.18));
+
+  const Wrapper = onClick ? 'button' : 'div';
+
   return (
-    <div
-      className={`rounded-full ring-2 overflow-hidden flex-shrink-0 bg-gray-100 flex items-center justify-center transition-shadow duration-300 ${
-        isStreaming ? 'animate-pulse' : ''
-      }`}
-      style={{
-        width: size,
-        height: size,
-        ['--tw-ring-color' as string]: isError ? '#ef4444' : ringColor,
-        boxShadow: glowShadow,
-      }}
-    >
-      {imgError ? (
-        <PawIcon className="w-4 h-4 text-gray-400" />
-      ) : (
-        <img
-          src={cat?.avatar ?? `/avatars/${catId}.png`}
-          alt={cat?.displayName ?? catId}
-          width={size}
-          height={size}
-          className="object-cover"
-          onError={() => setImgError(true)}
-        />
+    <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
+      <Wrapper
+        {...(onClick ? { type: 'button' as const, onClick, 'aria-label': catName } : {})}
+        className={`rounded-full ${showRing ? 'ring-2' : ''} overflow-hidden bg-cafe-surface-elevated flex items-center justify-center transition-shadow duration-300 ${
+          isStreaming ? 'animate-pulse' : ''
+        } ${onClick ? `cursor-pointer ${showRing ? '' : 'hover:ring-2 '}hover:ring-[var(--cafe-accent)] transition-[box-shadow,--tw-ring-color]` : ''}`}
+        style={{
+          width: size,
+          height: size,
+          ...(showRing ? { ['--tw-ring-color' as string]: isError ? 'var(--semantic-critical)' : ringColor } : {}),
+          /* An inline box-shadow replaces the whole stack, including the one Tailwind's ring utilities build from these
+           * variables. With no ring the hover ring is the only affordance a clickable avatar has, so while streaming the
+           * glow is composed after the ring variables instead of over them. The default avatar keeps the glow alone. */
+          boxShadow:
+            ring === 'none' && glowShadow
+              ? `var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), ${glowShadow}`
+              : glowShadow,
+        }}
+      >
+        {imgError ? (
+          isCanonicalAvatarUrl(avatarSrc) ? (
+            <span role="img" aria-label="这张图打不开了" title="这张图打不开了">
+              —
+            </span>
+          ) : (
+            <PawIcon className="text-base" />
+          )
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={avatarSrc}
+            alt={catName}
+            width={size}
+            height={size}
+            className="object-cover"
+            onError={() => setFailedAvatarSrc(avatarSrc)}
+          />
+        )}
+      </Wrapper>
+      {callbackAuthStatus && (
+        <span
+          className="absolute"
+          style={{ right: -dotBorder, bottom: -dotBorder }}
+          onMouseEnter={() => callbackAuthPopover && setPopoverOpen(true)}
+          onMouseLeave={() => setPopoverOpen(false)}
+        >
+          {onCallbackAuthClick ? (
+            <button
+              type="button"
+              data-testid="callback-auth-dot"
+              data-callback-auth-status={callbackAuthStatus}
+              aria-label={callbackAuthLabel ?? `callback-auth: ${callbackAuthStatus}`}
+              title={callbackAuthLabel ?? `callback-auth: ${callbackAuthStatus}`}
+              onClick={(e) => {
+                // 砚砚 P2 #1403: dot lives inside CatAvatar callsites that are
+                // themselves clickable (e.g. ThreadItem row → onSelect). Without
+                // stopPropagation, opening the D2b-3 panel would also switch
+                // threads — a hidden context jump.
+                e.stopPropagation();
+                onCallbackAuthClick();
+              }}
+              className="block rounded-full p-0 hover:scale-110 transition-transform cursor-pointer"
+              style={{
+                width: dotSize,
+                height: dotSize,
+                backgroundColor: CALLBACK_AUTH_STATUS_COLOR[callbackAuthStatus],
+                border: `${dotBorder}px solid var(--cafe-surface)`,
+              }}
+            />
+          ) : (
+            <span
+              role="status"
+              data-testid="callback-auth-dot"
+              data-callback-auth-status={callbackAuthStatus}
+              aria-label={callbackAuthLabel ?? `callback-auth: ${callbackAuthStatus}`}
+              title={callbackAuthLabel ?? `callback-auth: ${callbackAuthStatus}`}
+              className="block rounded-full"
+              style={{
+                width: dotSize,
+                height: dotSize,
+                backgroundColor: CALLBACK_AUTH_STATUS_COLOR[callbackAuthStatus],
+                border: `${dotBorder}px solid var(--cafe-surface)`,
+              }}
+            />
+          )}
+          {popoverOpen && callbackAuthPopover && (
+            <div
+              data-testid="callback-auth-popover"
+              className="absolute z-50 mt-1 rounded-lg border border-cafe-border bg-cafe-surface-elevated p-3 text-xs shadow-xl"
+              style={{ top: dotSize + dotBorder, right: 0, minWidth: 200, maxWidth: 280 }}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              {callbackAuthPopover}
+            </div>
+          )}
+        </span>
       )}
     </div>
   );

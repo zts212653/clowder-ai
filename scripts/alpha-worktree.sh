@@ -1,0 +1,683 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=scripts/lib/node-runtime-guard.sh
+source "$SCRIPT_DIR/lib/node-runtime-guard.sh"
+# shellcheck source=scripts/lib/quickstart-freshness.sh
+source "$SCRIPT_DIR/lib/quickstart-freshness.sh"
+# shellcheck source=scripts/lib/alpha-redis-identity.sh
+source "$SCRIPT_DIR/lib/alpha-redis-identity.sh"
+DEFAULT_ALPHA_DIR="$(cd "$PROJECT_DIR/.." && pwd)/cat-cafe-alpha"
+DEFAULT_LEGACY_ALPHA_DIR="$(cd "$PROJECT_DIR/.." && pwd)/cat-cafe-main-test"
+DEFAULT_ALPHA_BRANCH="alpha/main-sync"
+DEFAULT_LEGACY_ALPHA_BRANCH="main-test/main-sync"
+
+ALPHA_DIR="${CAT_CAFE_ALPHA_DIR:-${CAT_CAFE_MAIN_TEST_DIR:-$DEFAULT_ALPHA_DIR}}"
+LEGACY_ALPHA_DIR="${CAT_CAFE_MAIN_TEST_DIR:-$DEFAULT_LEGACY_ALPHA_DIR}"
+ALPHA_BRANCH="${CAT_CAFE_ALPHA_BRANCH:-$DEFAULT_ALPHA_BRANCH}"
+LEGACY_ALPHA_BRANCH="${CAT_CAFE_MAIN_TEST_BRANCH:-$DEFAULT_LEGACY_ALPHA_BRANCH}"
+REMOTE_NAME="${CAT_CAFE_ALPHA_REMOTE:-${CAT_CAFE_MAIN_TEST_REMOTE:-origin}}"
+ENV_SOURCE_FILE="${CAT_CAFE_ALPHA_ENV_SOURCE:-${CAT_CAFE_MAIN_TEST_ENV_SOURCE:-$PROJECT_DIR/.env}}"
+ALPHA_FRONTEND_PORT="${CAT_CAFE_ALPHA_FRONTEND_PORT:-${CAT_CAFE_MAIN_TEST_FRONTEND_PORT:-3011}}"
+ALPHA_API_PORT="${CAT_CAFE_ALPHA_API_PORT:-${CAT_CAFE_MAIN_TEST_API_PORT:-3012}}"
+ALPHA_PREVIEW_GATEWAY_PORT="${CAT_CAFE_ALPHA_PREVIEW_GATEWAY_PORT:-${CAT_CAFE_MAIN_TEST_PREVIEW_GATEWAY_PORT:-4111}}"
+ALPHA_REDIS_PORT="${CAT_CAFE_ALPHA_REDIS_PORT:-${CAT_CAFE_MAIN_TEST_REDIS_PORT:-6397}}"
+ALPHA_REDIS_PROFILE="${CAT_CAFE_ALPHA_REDIS_PROFILE:-${CAT_CAFE_MAIN_TEST_REDIS_PROFILE:-worktree}}"
+ALPHA_AUDIO_PORT="${CAT_CAFE_ALPHA_AUDIO_PORT:-9891}"
+FORCE=false
+RUN_INSTALL=true
+SYNC_BEFORE_START=true
+QUICK_START=true
+ALPHA_EMPTY_REDIS_ALLOWED=false
+START_ARGS=()
+SOURCE_ONLY=false
+NAMED_ALPHA_INSTANCE=""
+NAMED_ALPHA_PORTS=""
+NAMED_ALPHA_COORDINATES=""
+NAMED_ALPHA_DISALLOWED_OPTIONS=false
+
+usage() {
+  cat <<'EOF'
+Clowder AI Alpha Worktree Manager
+
+Usage:
+  ./scripts/alpha-worktree.sh init   [--dir PATH] [--branch NAME] [--remote NAME] [--no-install]
+  ./scripts/alpha-worktree.sh sync   [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-install]
+  ./scripts/alpha-worktree.sh start  [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-sync] [--no-install] [--no-quick] [--allow-empty-redis] [--] [start-dev args...]
+  ./scripts/alpha-worktree.sh status [--dir PATH] [--branch NAME] [--remote NAME]
+  ./scripts/alpha-worktree.sh stop   [--dir PATH]
+  ./scripts/alpha-worktree.sh init|start --instance NAME --ports WEB,API,PREVIEW,REDIS [--allow-empty-redis]
+
+Defaults:
+  --dir    ../cat-cafe-alpha
+  --branch alpha/main-sync
+  --remote origin
+
+Ports:
+  frontend: 3011
+  api:      3012
+  preview:  4111
+  redis:    6397 (dedicated Alpha instance and data directory)
+
+Behavior:
+  Named init requires CAT_CAFE_CAT_ID and private worktree config, and declares
+  the new checkout's lifecycle before installing dependencies.
+  start auto-syncs origin/main with ff-only, reuses the root .env for secrets,
+  launches the isolated alpha stack with other sidecars disabled, and auto-migrates
+  an existing ../cat-cafe-main-test worktree into ../cat-cafe-alpha.
+EOF
+}
+
+info() {
+  echo "[alpha-worktree] $*"
+}
+
+die() {
+  echo "[alpha-worktree] ERROR: $*" >&2
+  exit 1
+}
+
+abs_path() {
+  local input="$1"
+  local dir base
+
+  case "$input" in
+    /*)
+      dir="$(dirname "$input")"
+      base="$(basename "$input")"
+      ;;
+    *)
+      dir="${PWD%/}/$(dirname "$input")"
+      base="$(basename "$input")"
+      ;;
+  esac
+
+  if [ -d "$dir" ]; then
+    dir="$(cd "$dir" && pwd -P)"
+  fi
+
+  printf '%s/%s\n' "${dir%/}" "${base%/}"
+}
+
+require_git_repo() {
+  git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+    || die "project dir is not a git repository: $PROJECT_DIR"
+}
+
+worktree_exists() {
+  # Drain the registry: grep -q can SIGPIPE awk/git after a match under pipefail.
+  git -C "$PROJECT_DIR" worktree list --porcelain | awk '/^worktree / {print substr($0, 10)}' | grep -Fx "$ALPHA_DIR" >/dev/null
+}
+
+legacy_worktree_exists() {
+  [ "$LEGACY_ALPHA_DIR" != "$ALPHA_DIR" ] || return 1
+  git -C "$PROJECT_DIR" worktree list --porcelain | awk '/^worktree / {print substr($0, 10)}' | grep -Fx "$LEGACY_ALPHA_DIR" >/dev/null
+}
+
+ensure_remote_exists() {
+  git -C "$PROJECT_DIR" remote get-url "$REMOTE_NAME" >/dev/null 2>&1 \
+    || die "remote '$REMOTE_NAME' not found"
+}
+
+resolve_env_source_file() {
+  if [ -f "$ENV_SOURCE_FILE" ]; then
+    printf '%s\n' "$ENV_SOURCE_FILE"
+    return 0
+  fi
+
+  local sibling_source
+  sibling_source="$(cd "$PROJECT_DIR/.." && pwd -P)/cat-cafe/.env"
+  if [ "$sibling_source" != "$ENV_SOURCE_FILE" ] && [ -f "$sibling_source" ]; then
+    printf '%s\n' "$sibling_source"
+    return 0
+  fi
+
+  return 1
+}
+
+is_api_running() {
+  lsof -nP -iTCP:"$ALPHA_API_PORT" -sTCP:LISTEN -t >/dev/null 2>&1
+}
+
+ensure_alpha_clean() {
+  local dirty
+  dirty=$(git -C "$ALPHA_DIR" status --short -uno 2>/dev/null || true)
+  if [ -n "$dirty" ] && [ "$FORCE" != "true" ]; then
+    die "alpha worktree has local changes. Commit/stash first, or re-run with --force."
+  fi
+}
+
+ensure_alpha_branch() {
+  local branch dirty
+
+  branch=$(git -C "$ALPHA_DIR" rev-parse --abbrev-ref HEAD)
+  if [ "$branch" = "$ALPHA_BRANCH" ]; then
+    return 0
+  fi
+
+  dirty=$(git -C "$ALPHA_DIR" status --short -uno 2>/dev/null || true)
+  if [ -n "$dirty" ] && [ "$FORCE" != "true" ]; then
+    die "alpha worktree is on branch '$branch' with local changes. Commit/stash first, or re-run with --force."
+  fi
+
+  git -C "$ALPHA_DIR" fetch "$REMOTE_NAME" main
+
+  if [ "$branch" = "$LEGACY_ALPHA_BRANCH" ] && ! git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ALPHA_BRANCH"; then
+    info "renaming legacy branch '$LEGACY_ALPHA_BRANCH' to '$ALPHA_BRANCH'"
+    git -C "$ALPHA_DIR" branch -m "$LEGACY_ALPHA_BRANCH" "$ALPHA_BRANCH"
+    git -C "$ALPHA_DIR" branch --set-upstream-to="$REMOTE_NAME/main" "$ALPHA_BRANCH" >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  info "repairing alpha worktree branch from '$branch' to '$ALPHA_BRANCH'"
+  if git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ALPHA_BRANCH"; then
+    git -C "$ALPHA_DIR" checkout "$ALPHA_BRANCH"
+  else
+    git -C "$ALPHA_DIR" checkout -B "$ALPHA_BRANCH" "$REMOTE_NAME/main"
+  fi
+}
+
+print_alpha_env_exports() {
+  local allow_empty=0
+  [ "$ALPHA_EMPTY_REDIS_ALLOWED" = "true" ] && allow_empty=1
+  cat <<EOF
+export REDIS_PORT=$ALPHA_REDIS_PORT
+export REDIS_URL=redis://localhost:$ALPHA_REDIS_PORT
+export REDIS_KEY_PREFIX=cat-cafe:
+export REDIS_DATA_DIR=$ALPHA_DIR/.cat-cafe/redis
+export REDIS_BACKUP_DIR=$ALPHA_DIR/.cat-cafe/redis-backups
+export REDIS_PROFILE=$ALPHA_REDIS_PROFILE
+export CAT_CAFE_RESPECT_DOTENV_PORTS=0
+export CAT_CAFE_ALPHA_ALLOW_EMPTY_REDIS=$allow_empty
+export API_SERVER_PORT=$ALPHA_API_PORT
+export FRONTEND_PORT=$ALPHA_FRONTEND_PORT
+export PREVIEW_GATEWAY_PORT=$ALPHA_PREVIEW_GATEWAY_PORT
+export NEXT_PUBLIC_API_URL=http://localhost:$ALPHA_API_PORT
+export WORKTREE_PORT_OFFSET=0
+export CAT_CAFE_DATA_DIR=$ALPHA_DIR/.cat-cafe
+export ANTHROPIC_PROXY_ENABLED=0
+export ASR_ENABLED=0
+export TTS_ENABLED=0
+export LLM_POSTPROCESS_ENABLED=0
+export EMBED_ENABLED=0
+export EMBED_MODE=off
+export AUDIO_SERVICE_ENABLED=0
+export AUDIO_SERVICE_PORT=$ALPHA_AUDIO_PORT
+export CAT_CAFE_F247_CLOUD_AUTOSTART=0
+EOF
+}
+
+install_alpha_dependencies() {
+  info "installing dependencies in alpha worktree"
+  # Always clear production env flags — Claude Code shell often has NODE_ENV=production,
+  # which causes pnpm to skip devDependencies and break web builds.
+  env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
+    pnpm -C "$ALPHA_DIR" install --frozen-lockfile
+}
+
+ensure_alpha_dependencies() {
+  local missing=()
+
+  [ -d "$ALPHA_DIR/node_modules" ] || missing+=("node_modules")
+  [ -f "$ALPHA_DIR/packages/web/node_modules/next/package.json" ] || missing+=("packages/web:next")
+  [ -f "$ALPHA_DIR/packages/api/node_modules/tsx/package.json" ] || missing+=("packages/api:tsx")
+  [ -f "$ALPHA_DIR/packages/mcp-server/node_modules/typescript/package.json" ] || missing+=("packages/mcp-server:typescript")
+
+  if [ "${#missing[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  local joined_missing
+  joined_missing=$(IFS=', '; echo "${missing[*]}")
+  info "detected missing alpha prerequisites: $joined_missing"
+
+  if [ "$RUN_INSTALL" != "true" ]; then
+    die "alpha prerequisites missing ($joined_missing). Run 'pnpm -C \"$ALPHA_DIR\" install --frozen-lockfile' or omit --no-install."
+  fi
+
+  install_alpha_dependencies
+}
+
+source_env_if_present() {
+  local resolved_env
+  resolved_env="$(resolve_env_source_file || true)"
+
+  if [ -n "$resolved_env" ]; then
+    ENV_SOURCE_FILE="$resolved_env"
+    info "sourcing env from $ENV_SOURCE_FILE"
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_SOURCE_FILE"
+    set +a
+  else
+    info "env source not found, continuing without it: $ENV_SOURCE_FILE"
+  fi
+}
+
+apply_alpha_env() {
+  # Alpha is a complete runtime checkout. Do not inherit binary/workspace paths
+  # from whichever Clowder AI runtime happened to launch this command, otherwise
+  # the API can boot from alpha while routing MCP tools through stale dist files.
+  export CAT_CAFE_RUNTIME_ROOT="$ALPHA_DIR"
+  export CAT_CAFE_WORKSPACE_ROOT="$PROJECT_DIR"
+  export CAT_CAFE_DEPLOYMENT_ID=alpha
+  export CAT_CAFE_MCP_SERVER_PATH="$ALPHA_DIR/packages/mcp-server/dist/index.js"
+  export CAT_CAFE_DATA_DIR="$ALPHA_DIR/.cat-cafe"
+  export REDIS_PORT="$ALPHA_REDIS_PORT"
+  export REDIS_URL="redis://localhost:$ALPHA_REDIS_PORT"
+  export REDIS_KEY_PREFIX=cat-cafe:
+  export REDIS_DATA_DIR="$ALPHA_DIR/.cat-cafe/redis"
+  export REDIS_BACKUP_DIR="$ALPHA_DIR/.cat-cafe/redis-backups"
+  export REDIS_PROFILE="$ALPHA_REDIS_PROFILE"
+  export CAT_CAFE_RESPECT_DOTENV_PORTS=0
+  if [ "$ALPHA_EMPTY_REDIS_ALLOWED" = "true" ]; then
+    export CAT_CAFE_ALPHA_ALLOW_EMPTY_REDIS=1
+  else
+    export CAT_CAFE_ALPHA_ALLOW_EMPTY_REDIS=0
+  fi
+  export API_SERVER_PORT="$ALPHA_API_PORT"
+  export FRONTEND_PORT="$ALPHA_FRONTEND_PORT"
+  export PREVIEW_GATEWAY_PORT="$ALPHA_PREVIEW_GATEWAY_PORT"
+  export NEXT_PUBLIC_API_URL="http://localhost:$ALPHA_API_PORT"
+  export WORKTREE_PORT_OFFSET=0
+  export ANTHROPIC_PROXY_ENABLED=0
+  export ASR_ENABLED=0
+  export TTS_ENABLED=0
+  export LLM_POSTPROCESS_ENABLED=0
+  export EMBED_ENABLED=0
+  export EMBED_MODE=off
+  export AUDIO_SERVICE_ENABLED=0
+  export AUDIO_SERVICE_PORT="$ALPHA_AUDIO_PORT"
+  export CAT_CAFE_F247_CLOUD_AUTOSTART=0
+  # Alpha owns an isolated services.json beneath its checkout-local data root.
+  # Keep the API guard too: persisted config must not re-enable sidecar
+  # lifecycle mutations or auto-start reconciliation during acceptance.
+  export CAT_CAFE_SIDECAR_LIFECYCLE_DISABLED=1
+  if [ -n "$NAMED_ALPHA_COORDINATES" ]; then apply_named_alpha_environment; fi
+
+  # Next.js dev only reads .env files relative to its own cwd (packages/web/),
+  # not monorepo root .env, and does not always pick up exported NEXT_PUBLIC_*
+  # env vars at build time. Write packages/web/.env.local so the alpha frontend
+  # always points at ALPHA_API_PORT instead of falling back to the runtime API port.
+  if [ -d "$ALPHA_DIR/packages/web" ]; then
+    cat > "$ALPHA_DIR/packages/web/.env.local" <<EOF
+# Auto-generated by scripts/alpha-worktree.sh — do not edit by hand.
+NEXT_PUBLIC_API_URL=http://localhost:$ALPHA_API_PORT
+EOF
+  fi
+}
+
+migrate_legacy_alpha_worktree() {
+  legacy_worktree_exists || return 1
+  worktree_exists && return 0
+
+  mkdir -p "$(dirname "$ALPHA_DIR")"
+
+  if [ -e "$ALPHA_DIR" ] && [ -n "$(ls -A "$ALPHA_DIR" 2>/dev/null || true)" ]; then
+    die "target alpha path exists and is not empty: $ALPHA_DIR"
+  fi
+
+  info "migrating legacy main-test worktree from $LEGACY_ALPHA_DIR to $ALPHA_DIR"
+  git -C "$PROJECT_DIR" worktree move "$LEGACY_ALPHA_DIR" "$ALPHA_DIR"
+}
+
+init_alpha_worktree() {
+  if [ -n "$NAMED_ALPHA_COORDINATES" ]; then init_named_alpha_worktree; return; fi
+  require_git_repo
+  ensure_remote_exists
+
+  if worktree_exists; then
+    info "alpha worktree already exists: $ALPHA_DIR"
+    return 0
+  fi
+
+  if legacy_worktree_exists; then
+    migrate_legacy_alpha_worktree
+    ensure_alpha_branch
+    if [ "$RUN_INSTALL" = "true" ]; then
+      install_alpha_dependencies
+    fi
+    info "alpha worktree ready at $ALPHA_DIR"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$ALPHA_DIR")"
+
+  if [ -e "$ALPHA_DIR" ] && [ -n "$(ls -A "$ALPHA_DIR" 2>/dev/null || true)" ]; then
+    die "target path exists and is not an empty alpha worktree: $ALPHA_DIR"
+  fi
+
+  info "fetching $REMOTE_NAME/main"
+  git -C "$PROJECT_DIR" fetch "$REMOTE_NAME" main
+
+  if git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ALPHA_BRANCH"; then
+    info "adding existing branch '$ALPHA_BRANCH' to $ALPHA_DIR"
+    git -C "$PROJECT_DIR" worktree add "$ALPHA_DIR" "$ALPHA_BRANCH"
+  else
+    info "creating branch '$ALPHA_BRANCH' from $REMOTE_NAME/main"
+    git -C "$PROJECT_DIR" worktree add "$ALPHA_DIR" -b "$ALPHA_BRANCH" "$REMOTE_NAME/main"
+  fi
+
+  if [ "$RUN_INSTALL" = "true" ]; then
+    install_alpha_dependencies
+  fi
+
+  info "alpha worktree ready at $ALPHA_DIR"
+}
+
+sync_alpha_worktree() {
+  if [ -n "$NAMED_ALPHA_COORDINATES" ]; then sync_named_alpha_worktree; return; fi
+  require_git_repo
+  ensure_remote_exists
+  worktree_exists || die "alpha worktree not found at $ALPHA_DIR (run init first)"
+
+  ensure_alpha_clean
+  ensure_alpha_branch
+
+  info "syncing alpha worktree with $REMOTE_NAME/main (ff-only)"
+  git -C "$ALPHA_DIR" fetch "$REMOTE_NAME" main
+  git -C "$ALPHA_DIR" merge --ff-only "$REMOTE_NAME/main"
+
+  if [ "$RUN_INSTALL" = "true" ]; then
+    install_alpha_dependencies
+
+    local lock_drift
+    lock_drift=$(git -C "$ALPHA_DIR" diff --name-only 2>/dev/null || true)
+    if [ "$lock_drift" = "pnpm-lock.yaml" ]; then
+      info "lock drift detected — stashing instead of committing"
+      git -C "$ALPHA_DIR" stash push -m "alpha-lock-drift-auto-stash" -- pnpm-lock.yaml
+    fi
+  fi
+
+  info "sync complete"
+}
+
+status_alpha_worktree() {
+  require_git_repo
+  if ! worktree_exists; then
+    echo "alpha worktree: missing"
+    echo "expected path: $ALPHA_DIR"
+    echo "legacy_path: $LEGACY_ALPHA_DIR"
+    echo "branch: $ALPHA_BRANCH"
+    echo "remote: $REMOTE_NAME"
+    return 0
+  fi
+
+  local branch head dirty ahead behind api_running env_source_display resolved_env
+  branch=$(git -C "$ALPHA_DIR" rev-parse --abbrev-ref HEAD)
+  head=$(git -C "$ALPHA_DIR" rev-parse --short HEAD)
+  dirty=$(git -C "$ALPHA_DIR" status --short | wc -l | awk '{print $1}')
+
+  git -C "$ALPHA_DIR" fetch "$REMOTE_NAME" main >/dev/null 2>&1 || true
+  ahead=$(git -C "$ALPHA_DIR" rev-list --count "$REMOTE_NAME/main..HEAD" 2>/dev/null || echo "0")
+  behind=$(git -C "$ALPHA_DIR" rev-list --count "HEAD..$REMOTE_NAME/main" 2>/dev/null || echo "0")
+  api_running="no"
+  if is_api_running; then
+    api_running="yes"
+  fi
+
+  env_source_display="$ENV_SOURCE_FILE"
+  resolved_env="$(resolve_env_source_file || true)"
+  if [ -n "$resolved_env" ]; then
+    env_source_display="$resolved_env"
+  fi
+
+  echo "alpha worktree: $ALPHA_DIR"
+  echo "branch: $branch"
+  echo "head: $head"
+  echo "dirty_files: $dirty"
+  echo "ahead_of_${REMOTE_NAME}/main: $ahead"
+  echo "behind_${REMOTE_NAME}/main: $behind"
+  echo "api_running: $api_running"
+  echo "frontend_port: $ALPHA_FRONTEND_PORT"
+  echo "api_port: $ALPHA_API_PORT"
+  echo "preview_gateway_port: $ALPHA_PREVIEW_GATEWAY_PORT"
+  echo "redis_port: $ALPHA_REDIS_PORT"
+  echo "redis_data_dir: $ALPHA_DIR/.cat-cafe/redis"
+  echo "env_source: $env_source_display"
+}
+
+stop_alpha_daemon() {
+  local root daemon_state_path
+  root="$(abs_path "$ALPHA_DIR")"
+  [ -d "$root" ] || die "alpha root not found: $root"
+  export CAT_CAFE_DEPLOYMENT_ID=alpha
+  daemon_state_path="$(node "$SCRIPT_DIR/daemon-state.mjs" path \
+    --home "$HOME" \
+    --project-root "$root" \
+    --deployment-id alpha)"
+  if [ -f "$daemon_state_path" ]; then
+    node "$SCRIPT_DIR/daemon-state.mjs" stop \
+      --home "$HOME" \
+      --project-root "$root" \
+      --deployment-id alpha
+  fi
+  # Managed Hub previews are the canonical cross-invocation Alpha launcher. Its
+  # ownership record proves the exact process group before anything is stopped.
+  node "$SCRIPT_DIR/preview-process.mjs" stop \
+    --port "$ALPHA_FRONTEND_PORT" --cwd "$PROJECT_DIR" --json
+  if is_api_running; then
+    die "Alpha API remains on $ALPHA_API_PORT without a proven managed owner"
+  fi
+}
+
+# ADR-039-alpha: build-freshness gate for alpha worktree (mirrors runtime-worktree.sh Invariant 3).
+#
+# Why: alpha:start syncs origin/main (ff-only), which moves HEAD and brings in new TypeScript
+# source. Without rebuilding, the old dist/ is served:
+#   - @cat-cafe/shared is resolved via its package.json "main" field → dist/index.js; even
+#     tsx watch loads stale compiled shared when the package is imported.
+#   - packages/mcp-server/dist/index.js is the MCP entry point (always node, not tsx).
+# The freshness gate (HEAD-keyed stamp) rebuilds only when source moved, preserving
+# quick-start for unchanged worktrees.
+build_alpha_stale_packages() {
+  local head_commit
+  head_commit="$(git -C "$ALPHA_DIR" rev-parse HEAD 2>/dev/null || echo "")"
+
+  # Order: shared first (api/mcp-server depend on it), then api, then mcp-server.
+  if needs_rebuild "$ALPHA_DIR/packages/shared/dist/index.js" \
+      "$ALPHA_DIR/packages/shared/dist/.build-commit" "$head_commit"; then
+    info "alpha dist: shared stale/missing; rebuilding"
+    pnpm -C "$ALPHA_DIR/packages/shared" run build
+    record_build_stamp "$ALPHA_DIR/packages/shared/dist/.build-commit" "$head_commit"
+  fi
+
+  if needs_rebuild "$ALPHA_DIR/packages/api/dist/index.js" \
+      "$ALPHA_DIR/packages/api/dist/.build-commit" "$head_commit"; then
+    info "alpha dist: api stale/missing; rebuilding"
+    pnpm -C "$ALPHA_DIR/packages/api" run build
+    record_build_stamp "$ALPHA_DIR/packages/api/dist/.build-commit" "$head_commit"
+  fi
+
+  if needs_rebuild "$ALPHA_DIR/packages/mcp-server/dist/index.js" \
+      "$ALPHA_DIR/packages/mcp-server/dist/.build-commit" "$head_commit"; then
+    info "alpha dist: mcp-server stale/missing; rebuilding"
+    pnpm -C "$ALPHA_DIR/packages/mcp-server" run build
+    record_build_stamp "$ALPHA_DIR/packages/mcp-server/dist/.build-commit" "$head_commit"
+  fi
+}
+
+start_alpha_worktree() {
+  if [ -n "$NAMED_ALPHA_COORDINATES" ]; then start_named_alpha_worktree; return; fi
+  if ! worktree_exists && legacy_worktree_exists; then
+    migrate_legacy_alpha_worktree
+  fi
+
+  if ! worktree_exists; then
+    info "alpha worktree missing; initializing first"
+    init_alpha_worktree
+  fi
+
+  if [ "$SYNC_BEFORE_START" = "true" ]; then
+    sync_alpha_worktree
+  fi
+
+  ensure_alpha_dependencies
+  build_alpha_stale_packages
+
+  # The secrets file may contain stale shell variables. Coordinates selected by
+  # the launcher/options are authoritative for the whole managed Alpha start.
+  local selected_project_dir="$PROJECT_DIR" selected_alpha_dir="$ALPHA_DIR"
+  local selected_frontend_port="$ALPHA_FRONTEND_PORT" selected_api_port="$ALPHA_API_PORT"
+  local selected_preview_port="$ALPHA_PREVIEW_GATEWAY_PORT" selected_redis_port="$ALPHA_REDIS_PORT"
+  local selected_redis_profile="$ALPHA_REDIS_PROFILE" selected_audio_port="$ALPHA_AUDIO_PORT"
+  local selected_allow_empty="$ALPHA_EMPTY_REDIS_ALLOWED"
+  local selected_preview_expiry="${CAT_CAFE_PREVIEW_EXPIRES_AT-}"
+  local selected_cleanup_result="${CAT_CAFE_PREVIEW_CLEANUP_RESULT-}"
+  source_env_if_present
+  PROJECT_DIR="$selected_project_dir"
+  ALPHA_DIR="$selected_alpha_dir"
+  ALPHA_FRONTEND_PORT="$selected_frontend_port"
+  ALPHA_API_PORT="$selected_api_port"
+  ALPHA_PREVIEW_GATEWAY_PORT="$selected_preview_port"
+  ALPHA_REDIS_PORT="$selected_redis_port"
+  ALPHA_REDIS_PROFILE="$selected_redis_profile"
+  ALPHA_AUDIO_PORT="$selected_audio_port"
+  ALPHA_EMPTY_REDIS_ALLOWED="$selected_allow_empty"
+  export CAT_CAFE_PREVIEW_EXPIRES_AT="$selected_preview_expiry"
+  export CAT_CAFE_PREVIEW_CLEANUP_RESULT="$selected_cleanup_result"
+  apply_alpha_env
+  assert_alpha_redis_isolated
+  assert_alpha_redis_seeded
+
+  info "starting isolated alpha stack from worktree: $ALPHA_DIR"
+  info "ports: frontend=$ALPHA_FRONTEND_PORT api=$ALPHA_API_PORT preview=$ALPHA_PREVIEW_GATEWAY_PORT redis=$ALPHA_REDIS_PORT"
+
+  cd "$ALPHA_DIR"
+
+  local cmd=("./scripts/start-dev.sh")
+  if [ "$QUICK_START" = "true" ]; then
+    cmd+=("--quick")
+  fi
+
+  exec "${cmd[@]}" ${START_ARGS[@]+"${START_ARGS[@]}"}
+}
+
+if [[ "${1:-}" == "--source-only" ]]; then
+  SOURCE_ONLY=true
+else
+  ensure_supported_node_runtime "$SCRIPT_DIR/alpha-worktree.sh" "$@"
+  COMMAND="${1:-status}"
+  shift || true
+fi
+MANAGED_ALPHA_ARGS=("$@")
+if [ "$SOURCE_ONLY" != true ] && [ "$COMMAND" = start ] && [ -n "${CAT_CAFE_PREVIEW_EXPIRES_AT:-}" ]; then
+  node "$SCRIPT_DIR/lib/alpha-launch-contract.mjs" ${MANAGED_ALPHA_ARGS[@]+"${MANAGED_ALPHA_ARGS[@]}"} >/dev/null || die "invalid managed Alpha launch contract"
+  # pnpm may forward a separator. The bounded contract has already excluded child overrides.
+  if [ "${1:-}" = -- ]; then shift; fi
+fi
+
+while [ "$SOURCE_ONLY" != "true" ] && [ $# -gt 0 ]; do
+  case "$1" in
+    --instance)
+      [ $# -ge 2 ] && [ -z "$NAMED_ALPHA_INSTANCE" ] || die "--instance requires one unique value"
+      NAMED_ALPHA_INSTANCE="$2"
+      shift 2
+      ;;
+    --ports)
+      [ $# -ge 2 ] && [ -z "$NAMED_ALPHA_PORTS" ] || die "--ports requires one unique tuple"
+      NAMED_ALPHA_PORTS="$2"
+      shift 2
+      ;;
+    --dir)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
+      [ $# -ge 2 ] || die "--dir requires a path"
+      ALPHA_DIR="$(abs_path "$2")"
+      shift 2
+      ;;
+    --branch)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
+      [ $# -ge 2 ] || die "--branch requires a value"
+      ALPHA_BRANCH="$2"
+      shift 2
+      ;;
+    --remote)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
+      [ $# -ge 2 ] || die "--remote requires a value"
+      REMOTE_NAME="$2"
+      shift 2
+      ;;
+    --env-file)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
+      [ $# -ge 2 ] || die "--env-file requires a path"
+      ENV_SOURCE_FILE="$(abs_path "$2")"
+      shift 2
+      ;;
+    --force)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
+      FORCE=true
+      shift
+      ;;
+    --no-install)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
+      RUN_INSTALL=false
+      shift
+      ;;
+    --no-sync)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
+      SYNC_BEFORE_START=false
+      shift
+      ;;
+    --no-quick)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
+      QUICK_START=false
+      shift
+      ;;
+    --allow-empty-redis)
+      ALPHA_EMPTY_REDIS_ALLOWED=true
+      shift
+      ;;
+    --)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
+      shift
+      START_ARGS=("$@")
+      break
+      ;;
+    *)
+      die "unknown argument: $1"
+      ;;
+  esac
+done
+
+if [ "$SOURCE_ONLY" = "true" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
+if [ -n "$NAMED_ALPHA_INSTANCE" ] || [ -n "$NAMED_ALPHA_PORTS" ]; then
+  source "$SCRIPT_DIR/lib/alpha-named-launch.sh"
+  select_named_alpha
+elif [ "$COMMAND" = start ] && [ -n "${CAT_CAFE_PREVIEW_EXPIRES_AT:-}" ]; then
+  managed_alpha_ports="$(node "$SCRIPT_DIR/lib/alpha-launch-contract.mjs" --standard-ports)" || die "cannot resolve managed Alpha ports"
+  IFS=$'\t' read -r ALPHA_FRONTEND_PORT ALPHA_API_PORT ALPHA_PREVIEW_GATEWAY_PORT ALPHA_COLLECTIVE_SERVICE_PORT ALPHA_REDIS_PORT <<< "$managed_alpha_ports"
+  ALPHA_DIR="$DEFAULT_ALPHA_DIR"
+  ALPHA_BRANCH="$DEFAULT_ALPHA_BRANCH"
+  REMOTE_NAME=origin
+  ENV_SOURCE_FILE="$PROJECT_DIR/.env"
+fi
+
+case "$COMMAND" in
+  init)
+    init_alpha_worktree
+    ;;
+  sync)
+    sync_alpha_worktree
+    ;;
+  start)
+    start_alpha_worktree
+    ;;
+  status)
+    status_alpha_worktree
+    ;;
+  stop)
+    stop_alpha_daemon
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    die "unknown command: $COMMAND"
+    ;;
+esac

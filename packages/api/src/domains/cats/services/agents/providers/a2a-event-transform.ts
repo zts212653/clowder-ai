@@ -21,7 +21,7 @@ export function extractTextFromParts(parts: A2APart[]): string {
 }
 
 function msg(type: AgentMessage['type'], catId: CatId, content?: string): AgentMessage {
-  return { type, catId, content, timestamp: Date.now() };
+  return { type, catId, content, ...(type === 'error' ? { error: content } : {}), timestamp: Date.now() };
 }
 
 /** Normalize A2A wire format status (SCREAMING_SNAKE_CASE → lowercase) */

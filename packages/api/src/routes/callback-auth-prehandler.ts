@@ -1,0 +1,341 @@
+/**
+ * Unified callback auth preHandler (#476)
+ *
+ * Extracts X-Invocation-Id + X-Callback-Token from HTTP headers,
+ * verifies via InvocationRegistry, and decorates request.callbackAuth.
+ */
+
+import { type AgentKeyVerifyResult, type CallbackPrincipal, catRegistry } from '@cat-cafe/shared';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { InvocationRecord, VerifyResult } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
+import { toolExecutionPolicyDenial } from '../domains/cats/services/agents/invocation/tool-execution-policy.js';
+import { cloudPrincipalStanding } from '../domains/cats/services/cloud-bridge/cloud-conversation-identity.js';
+import type { PluginNativeActionTarget } from '../domains/cats/services/types.js';
+import type { CallbackAuthSystemMessageNotifier } from './callback-auth-system-message.js';
+import { recordCallbackAuthFailure, recordLegacyFallbackHit } from './callback-auth-telemetry.js';
+import { makeCallbackAuthError } from './callback-errors.js';
+import { derivePrincipal } from './callback-scope-helpers.js';
+
+/**
+ * F174 Phase D1: derive a concise tool name from the request URL for
+ * `cat_cafe.callback_auth.failures{callback.tool}` attribute. Strips
+ * `/api/callbacks/` prefix and any query string; returns `unknown` if
+ * the URL doesn't follow the callback route shape (defensive default).
+ */
+function callbackToolFromUrl(url: string): string {
+  const path = url.split('?')[0];
+  const match = path.match(/^\/api\/callbacks\/([^/]+)/);
+  return match ? match[1] : 'unknown';
+}
+
+function allowToolExecution(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  record: InvocationRecord,
+  options: CallbackAuthHookOptions,
+): boolean {
+  const denial = toolExecutionPolicyDenial(
+    record.toolExecutionPolicy,
+    record.toolExecutionPolicy?.mode === 'callback_allowlist' || record.toolExecutionPolicy?.mode === 'plugin_native'
+      ? `${request.method} ${request.url}`
+      : callbackToolFromUrl(request.routeOptions.url ?? ''),
+    record.toolExecutionPolicy?.mode === 'plugin_native' ? options.pluginNativeActionTarget?.(request) : undefined,
+  );
+  if (!denial) return true;
+  reply.status(403).send({
+    error: 'tool_policy_violation',
+    reason: denial.reason,
+    tool: denial.toolName,
+  });
+  return false;
+}
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    callbackAuth?: InvocationRecord;
+    callbackPrincipal?: CallbackPrincipal;
+  }
+}
+
+export interface CallbackAuthRegistry {
+  verify(invocationId: string, callbackToken: string): Promise<VerifyResult>;
+  isStartupRecoveryComplete?(): boolean;
+  /** Pure record read for associating typed tombstones with notifier metadata. */
+  peekRecord?(invocationId: string): Promise<InvocationRecord | null>;
+}
+
+export interface AgentKeyAuthRegistry {
+  verify(secret: string): Promise<AgentKeyVerifyResult>;
+}
+
+export interface CallbackAuthHookOptions {
+  /** F174 D2b-1: in-context system message notifier for surface-able 401s. */
+  notifier?: Pick<CallbackAuthSystemMessageNotifier, 'notify'>;
+  /** F178 Phase C: agent-key registry for persistent agent auth. */
+  agentKeyRegistry?: AgentKeyAuthRegistry;
+  /** Only the canonical writer with DotReturn admission may accept a dot facade key. */
+  allowDotSourceBoundReturn?: boolean;
+  /** Session hooks reuse invocation auth but own a distinct, scope-bound action policy. */
+  enforceToolExecutionPolicy?: boolean;
+  /** Only the native action route supplies this Host token-registry resolver. */
+  pluginNativeActionTarget?: (request: FastifyRequest) => PluginNativeActionTarget | undefined;
+}
+
+export function rejectCallbackAuthDuringStartupRecovery(registry: CallbackAuthRegistry, reply: FastifyReply): boolean {
+  if (registry.isStartupRecoveryComplete?.() !== false) return false;
+  reply.status(503).send({
+    error: 'callback_auth_startup_recovery_pending',
+    reason: 'startup_recovery_pending',
+    message: 'Callback authentication is temporarily unavailable while durable state is recovered',
+    retryable: true,
+  });
+  return true;
+}
+
+/** Register the callbackAuth decoration + preHandler on a Fastify instance.
+ *
+ *  Behavior:
+ *  1. Try X-Invocation-Id + X-Callback-Token headers (preferred)
+ *  2. Fallback: read from body/query (legacy compat window, logs deprecation)
+ *  3. Neither present → no-op (panel / non-callback request)
+ *  4. Credentials present but invalid → immediate 401 (fail-closed, #474)
+ *  5. If `options.notifier` is provided + registry has peekRecord,
+ *     a 401 with a surface-able terminal/identity reason triggers
+ *     an in-context system message in the affected thread.
+ */
+export function registerCallbackAuthHook(
+  app: FastifyInstance,
+  registry: CallbackAuthRegistry,
+  options: CallbackAuthHookOptions = {},
+): void {
+  if (!app.hasRequestDecorator('callbackAuth')) {
+    app.decorateRequest('callbackAuth', undefined);
+  }
+  if (!app.hasRequestDecorator('callbackPrincipal')) {
+    app.decorateRequest('callbackPrincipal', undefined);
+  }
+  app.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
+    // refresh-token does its own atomic verifyLatest in preValidation and
+    // pre-populates callbackAuth. Preserve that atomic freshness decision.
+    if (request.callbackAuth) {
+      if (
+        options.enforceToolExecutionPolicy !== false ||
+        request.callbackAuth.toolExecutionPolicy?.mode === 'callback_allowlist' ||
+        request.callbackAuth.toolExecutionPolicy?.mode === 'plugin_native'
+      )
+        allowToolExecution(request, reply, request.callbackAuth, options);
+      return;
+    }
+
+    let invocationId = firstHeaderValue(request.headers['x-invocation-id']);
+    let callbackToken = firstHeaderValue(request.headers['x-callback-token']);
+    let legacy = false;
+
+    // Fallback: body/query for legacy MCP clients (#476 compat window)
+    if (!invocationId && !callbackToken) {
+      const fromBody = extractLegacyCredentials(request);
+      if (fromBody) {
+        invocationId = fromBody.invocationId;
+        callbackToken = fromBody.callbackToken;
+        legacy = true;
+      }
+    }
+
+    // F178 Phase C: agent-key secret header (only checked when no invocation creds)
+    const agentKeySecret = firstHeaderValue(request.headers['x-agent-key-secret']);
+
+    if (!invocationId && !callbackToken) {
+      if (agentKeySecret && options.agentKeyRegistry) {
+        const tool = callbackToolFromUrl(request.url);
+        const akResult = await options.agentKeyRegistry.verify(agentKeySecret);
+        if (!akResult.ok) {
+          recordCallbackAuthFailure({ reason: akResult.reason, tool });
+          reply.status(401).send(makeCallbackAuthError(akResult.reason));
+          return;
+        }
+        // Dot's URL credential belongs to its event-bound MCP facade, not to
+        // the general callback surface. The writer must still admit the exact
+        // event/source/grant; every other hook and route rejects this principal.
+        if (
+          akResult.record.catId === 'gpt-dot' &&
+          !(
+            options.allowDotSourceBoundReturn === true &&
+            request.method === 'POST' &&
+            request.routeOptions.url === '/api/callbacks/post-message'
+          )
+        ) {
+          reply.status(403).send({ error: 'dot_facade_required', reason: 'dot_callback_scope_denied' });
+          return;
+        }
+        // F202 h3c-2: a key of the cloud return boundary whose cat is no longer the configured cloud
+        // cat is honoured on no route — it must not fall back to being an ordinary agent key. The
+        // standing found here travels with the principal, so a route never re-derives it on its own.
+        const standing = cloudPrincipalStanding(catRegistry, akResult.record);
+        if (standing === 'refused') {
+          recordCallbackAuthFailure({ reason: 'cloud_principal_not_configured', tool });
+          reply.status(403).send(makeCallbackAuthError('cloud_principal_not_configured'));
+          return;
+        }
+        request.callbackPrincipal = derivePrincipal(akResult.record, { cloudBoundary: standing === 'cloud' });
+        return;
+      }
+      return;
+    }
+    const tool = callbackToolFromUrl(request.url);
+    if (!invocationId || !callbackToken) {
+      recordCallbackAuthFailure({ reason: 'missing_creds', tool });
+      if (request.routeOptions.url === '/api/plugin-runtime/action')
+        request.log.warn(
+          { event: 'plugin_native_auth', stage: 'callback_prehandler', reason: 'missing_creds' },
+          'Native plugin callback authentication rejected',
+        );
+      reply.status(401).send(makeCallbackAuthError('missing_creds'));
+      return;
+    }
+    if (rejectCallbackAuthDuringStartupRecovery(registry, reply)) return;
+    // Capture metadata before verify so notifier delivery never depends on a
+    // concurrent tombstone GC boundary. peekRecord() is non-destructive.
+    const recordSnapshot =
+      options.notifier && registry.peekRecord ? await registry.peekRecord(invocationId).catch(() => null) : null;
+
+    const result = await registry.verify(invocationId, callbackToken);
+    if (!result.ok) {
+      recordCallbackAuthFailure({ reason: result.reason, tool });
+      if (request.routeOptions.url === '/api/plugin-runtime/action')
+        request.log.warn(
+          { event: 'plugin_native_auth', stage: 'callback_prehandler', reason: result.reason },
+          'Native plugin callback authentication rejected',
+        );
+      // Surface in-context using the snapshot captured before verify ran.
+      // Notifier handles the surface decision (skips stale_invocation, etc).
+      if (options.notifier && recordSnapshot) {
+        try {
+          await options.notifier.notify({
+            invocationId,
+            threadId: recordSnapshot.threadId,
+            catId: recordSnapshot.catId,
+            userId: recordSnapshot.userId,
+            reason: result.reason,
+            tool,
+          });
+        } catch (err) {
+          request.log.warn(
+            { err, invocationId, reason: result.reason, tool },
+            '[F174-D2b-1] callback auth notifier failed (non-fatal)',
+          );
+        }
+      }
+      reply.status(401).send(makeCallbackAuthError(result.reason));
+      return;
+    }
+    if (legacy) {
+      // F174 Phase F (AC-F3): track legacy fallback usage so we know when the
+      // compat path is safe to delete (zero hits across a release window).
+      recordLegacyFallbackHit({ tool });
+      request.log.warn(
+        { invocationId, path: request.url },
+        '[#476 DEPRECATED] Callback credentials received via body/query — migrate to X-Invocation-Id / X-Callback-Token headers',
+      );
+    }
+    if (
+      (options.enforceToolExecutionPolicy !== false ||
+        result.record.toolExecutionPolicy?.mode === 'callback_allowlist' ||
+        result.record.toolExecutionPolicy?.mode === 'plugin_native') &&
+      !allowToolExecution(request, reply, result.record, options)
+    )
+      return;
+    request.callbackAuth = result.record;
+    request.callbackPrincipal = derivePrincipal(result.record);
+  });
+}
+
+/**
+ * F174-C — single source of truth for "what callback creds does this request
+ * actually present?" Used by both preHandler and refresh-token preValidation
+ * so the cooldown decision matches the auth decision (gpt52 P1 #3 #1368:
+ * mismatched rules let mixed-source bad-auth burn cooldown slot).
+ *
+ * Rule (mirror of preHandler's auth flow):
+ *   - If both headers present → headers win (returns the header pair)
+ *   - Else if BOTH headers absent and legacy body/query has both → legacy creds
+ *   - Otherwise (partial headers, mixed source, etc.) → null (request will
+ *     be rejected by preHandler as missing_creds)
+ *
+ * Returns canonical creds (both fields present) or null. Caller can detect
+ * "auth attempt happened" separately if it needs to distinguish panel path
+ * from missing_creds.
+ */
+export function extractCallbackCredentials(
+  request: FastifyRequest,
+): { invocationId: string; callbackToken: string } | null {
+  const headerInv = firstHeaderValue(request.headers['x-invocation-id']);
+  const headerTok = firstHeaderValue(request.headers['x-callback-token']);
+
+  if (headerInv && headerTok) {
+    return { invocationId: headerInv, callbackToken: headerTok };
+  }
+  // Legacy fallback ONLY when both headers absent (matches preHandler line 40).
+  // Mixed-source (e.g. header inv + body tok) explicitly returns null so
+  // cooldown is never claimed for a request that preHandler will 401.
+  if (!headerInv && !headerTok) {
+    const legacy = extractLegacyCredentials(request);
+    if (legacy?.invocationId && legacy?.callbackToken) {
+      return { invocationId: legacy.invocationId, callbackToken: legacy.callbackToken };
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract legacy credentials from body (POST) or query (GET).
+ * Returns partial results so the caller's `!id || !token` guard
+ * rejects malformed requests (fail-closed, consistent with headers).
+ *
+ * Exported for F174-C refresh-token cooldown — that hook needs to recognize
+ * legacy creds path so cooldown applies uniformly (cloud Codex P1 #1368).
+ */
+export function extractLegacyCredentials(
+  request: FastifyRequest,
+): { invocationId: string | undefined; callbackToken: string | undefined } | null {
+  const body = request.body as Record<string, unknown> | undefined;
+  if (body) {
+    const id = typeof body.invocationId === 'string' ? body.invocationId : undefined;
+    const tok = typeof body.callbackToken === 'string' ? body.callbackToken : undefined;
+    if (id || tok) return { invocationId: id, callbackToken: tok };
+  }
+  const query = request.query as Record<string, unknown> | undefined;
+  if (query) {
+    const id = typeof query.invocationId === 'string' ? query.invocationId : undefined;
+    const tok = typeof query.callbackToken === 'string' ? query.callbackToken : undefined;
+    if (id || tok) return { invocationId: id, callbackToken: tok };
+  }
+  return null;
+}
+
+/** Require callbackPrincipal on the request — returns principal or sends 401. */
+export function requireCallbackPrincipal(request: FastifyRequest, reply: FastifyReply): CallbackPrincipal | null {
+  if (request.callbackPrincipal) return request.callbackPrincipal;
+  reply.status(401);
+  recordCallbackAuthFailure({ reason: 'unknown_invocation', tool: callbackToolFromUrl(request.url) });
+  reply.send(makeCallbackAuthError('unknown_invocation'));
+  return null;
+}
+
+/** Require callbackAuth on the request — returns record or sends 401. */
+export function requireCallbackAuth(request: FastifyRequest, reply: FastifyReply): InvocationRecord | null {
+  if (request.callbackAuth) return request.callbackAuth;
+  reply.status(401);
+  // unknown_invocation: preHandler didn't decorate the request, which means
+  // either creds were missing entirely (handled above) or the route was hit
+  // without going through the preHandler chain. Surfacing as unknown is safer
+  // than guessing a lifecycle state we cannot observe here.
+  recordCallbackAuthFailure({ reason: 'unknown_invocation', tool: callbackToolFromUrl(request.url) });
+  reply.send(makeCallbackAuthError('unknown_invocation'));
+  return null;
+}
+
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  if (typeof value === 'string') return value || undefined;
+  if (Array.isArray(value)) return value[0] || undefined;
+  return undefined;
+}

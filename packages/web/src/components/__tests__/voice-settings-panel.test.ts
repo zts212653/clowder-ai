@@ -72,10 +72,9 @@ function fireKeyDown(el: HTMLElement, key: string, extra: Partial<KeyboardEventI
 }
 
 function fireKeyDownComposing(el: HTMLElement, key: string) {
-  // Simulate an Enter during IME composition
-  const event = new KeyboardEvent('keydown', { key, bubbles: true });
-  Object.defineProperty(event, 'isComposing', { value: true });
-  el.dispatchEvent(event);
+  // Simulate Enter during IME composition: compositionstart → keydown
+  el.dispatchEvent(new Event('compositionstart', { bubbles: true }));
+  el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
 }
 
 // ─── AddTermRow: IME composition guard ───

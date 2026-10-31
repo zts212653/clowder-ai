@@ -1,0 +1,5 @@
+{
+  "id": "agent",
+  "transport": "acp",
+  "acp": { "command": "node", "startupArgs": ["/HOST_GENERATED/fake-acp-agent.mjs"], "mcpWhitelist": [] }
+}

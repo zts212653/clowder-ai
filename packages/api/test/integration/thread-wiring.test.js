@@ -18,6 +18,7 @@ import { PassThrough } from 'node:stream';
 import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { migrateRouterOpts } from '../helpers/agent-registry-helpers.js';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
 const { AgentRouter } = await import('../../dist/domains/cats/services/agents/routing/AgentRouter.js');
 const { InvocationRegistry } = await import('../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
@@ -41,6 +42,14 @@ function createMockProcess() {
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const emitter = new EventEmitter();
+  const originalEmit = emitter.emit.bind(emitter);
+  emitter.emit = (event, ...args) => {
+    const emitted = originalEmit(event, ...args);
+    if (event === 'exit') {
+      process.nextTick(() => originalEmit('close', ...args));
+    }
+    return emitted;
+  };
   const proc = {
     stdout,
     stderr,
@@ -160,27 +169,32 @@ describe('Thread isolation: messages stay in their thread', () => {
     const threadB = JSON.parse(resB.body);
 
     // Add messages to each thread
-    messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: 'msg in A',
-      mentions: [],
-      timestamp: 1000,
-      threadId: threadA.id,
-    });
-    messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: 'msg in B',
-      mentions: [],
-      timestamp: 2000,
-      threadId: threadB.id,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        content: 'msg in A',
+        mentions: [],
+        timestamp: 1000,
+        threadId: threadA.id,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        content: 'msg in B',
+        mentions: [],
+        timestamp: 2000,
+        threadId: threadB.id,
+      }),
+    );
 
     // Query thread A → only msg from A
     const qA = await app.inject({
       method: 'GET',
-      url: `/api/messages?threadId=${threadA.id}&userId=alice`,
+      url: `/api/messages?threadId=${threadA.id}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const bodyA = JSON.parse(qA.body);
     assert.equal(bodyA.messages.length, 1);
@@ -189,7 +203,8 @@ describe('Thread isolation: messages stay in their thread', () => {
     // Query thread B → only msg from B
     const qB = await app.inject({
       method: 'GET',
-      url: `/api/messages?threadId=${threadB.id}&userId=alice`,
+      url: `/api/messages?threadId=${threadB.id}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const bodyB = JSON.parse(qB.body);
     assert.equal(bodyB.messages.length, 1);
@@ -251,15 +266,17 @@ describe('contentBlocks round-trip: store and retrieve', () => {
       { type: 'image', url: '/uploads/photo.png' },
     ];
 
-    messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: 'look at this',
-      contentBlocks: blocks,
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'img-thread',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        content: 'look at this',
+        contentBlocks: blocks,
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'img-thread',
+      }),
+    );
 
     const msgs = messageStore.getByThread('img-thread');
     assert.equal(msgs.length, 1);
@@ -317,7 +334,8 @@ describe('Project-scoped threads: create and list by project', () => {
     // Get all threads to find the resolved projectPath (macOS /tmp → /private/tmp)
     const resAll0 = await app.inject({
       method: 'GET',
-      url: '/api/threads?userId=alice',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const allThreads0 = JSON.parse(resAll0.body).threads;
     const catCafeThread = allThreads0.find((t) => t.title === 'In cat-cafe');
@@ -327,7 +345,8 @@ describe('Project-scoped threads: create and list by project', () => {
     // Query by resolved project path
     const resCatCafe = await app.inject({
       method: 'GET',
-      url: `/api/threads?userId=alice&projectPath=${encodeURIComponent(resolvedPath)}`,
+      url: `/api/threads?projectPath=${encodeURIComponent(resolvedPath)}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const catCafeThreads = JSON.parse(resCatCafe.body).threads;
     assert.equal(catCafeThreads.length, 1);
@@ -337,7 +356,8 @@ describe('Project-scoped threads: create and list by project', () => {
     // Query all (no projectPath filter)
     const resAll = await app.inject({
       method: 'GET',
-      url: '/api/threads?userId=alice',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const allThreads = JSON.parse(resAll.body).threads;
     // Should include all 3 created + default (auto-created by list())
@@ -406,14 +426,13 @@ describe('MCP callback stores message with threadId', () => {
   });
 
   it('post-message callback stores message with invocation threadId', async () => {
-    const { invocationId, callbackToken } = registry.create('alice', 'opus', 'thread-42');
+    const { invocationId, callbackToken } = await registry.create('alice', 'opus', 'thread-42');
 
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: 'callback msg',
       },
     });
@@ -480,22 +499,26 @@ describe('Default thread isolation: no cross-thread message leak', () => {
     const messageStore = new MessageStore();
 
     // Store messages in different threads
-    messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: 'lobby msg',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: 'default',
-    });
-    messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: 'thread-B msg',
-      mentions: [],
-      timestamp: Date.now() + 1,
-      threadId: 'thread-B',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        content: 'lobby msg',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'default',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        content: 'thread-B msg',
+        mentions: [],
+        timestamp: Date.now() + 1,
+        threadId: 'thread-B',
+      }),
+    );
 
     const app = Fastify();
     const registry = new InvocationRegistry();
@@ -509,7 +532,8 @@ describe('Default thread isolation: no cross-thread message leak', () => {
     // GET without threadId → server defaults to 'default' thread
     const res = await app.inject({
       method: 'GET',
-      url: '/api/messages?userId=alice',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const data = JSON.parse(res.body);
     assert.equal(data.messages.length, 1, 'Should only return default thread messages');

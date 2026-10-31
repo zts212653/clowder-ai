@@ -3,17 +3,122 @@
  * Shared types, interfaces, and helper functions for route-serial and route-parallel.
  */
 
-import type { CatId, MessageContent, RichBlock, RichBlockBase } from '@cat-cafe/shared';
-import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
+import { randomUUID } from 'node:crypto';
+import type {
+  CatId,
+  MessageContent,
+  MessageFrom,
+  RichBlock,
+  RichBlockBase,
+  RoutingPreflightDecisionV1,
+} from '@cat-cafe/shared';
+import { catRegistry, isCrossThreadProvenance } from '@cat-cafe/shared';
+import { resolveUnboundHistoryContextTokenCeiling } from '../../../../../config/context-capacity.js';
+import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
+import { visibilityCursorDeferredBoundaryRejected } from '../../../../../infrastructure/telemetry/instruments.js';
+import { isHomeSession } from '../../session/session-scope.js';
+import {
+  assertCanonicalVisibilityCursor,
+  type CanonicalVisibilityCursor,
+  compareCursors,
+} from '../../stores/cursor.js';
+import { createRoutedOutputTransform } from '../message-output-stream-transform.js';
+import {
+  type AgentRegistrationFailure,
+  AgentServiceUnavailableError,
+} from '../registry/AgentServiceUnavailableError.js';
+
+const log = createModuleLogger('context-transport');
+const PROMPT_MESSAGE_SAFETY_CHAR_LIMIT = 100_000;
+
 import { estimateTokens } from '../../../../../utils/token-counter.js';
-import { formatMessage } from '../../context/ContextAssembler.js';
-import { checkContextBudget, type DegradationResult } from '../../orchestration/DegradationPolicy.js';
+import { matchExplicitApprovedTasteTrigger } from '../../../../memory/cue/ExplicitApprovedTasteTriggerCatalog.js';
+import type { MemoryCueOpportunitySeed } from '../../../../memory/cue/MemoryCueInvocationPromptService.js';
+import type { NudgeProcessResult } from '../../../../memory/EntityNudgeService.js';
+import { formatRoadmapPointer, readNavigationRoadmap } from '../../../../workspace/thread-roadmap-source.js';
+import type { CloudDispatchProvenance } from '../../cloud-bridge/types.js';
+import { buildMessageMap, formatMessage } from '../../context/ContextAssembler.js';
+import { CO_CREATOR_TIME_ZONE, formatPromptTime } from '../../format-time.js';
+import type { DegradationResult } from '../../orchestration/DegradationPolicy.js';
+import { mapToPresentation } from '../../session/context/context-presentation.js';
+import {
+  type ContextModeProjection,
+  type ContextSurfaceProjection,
+  countPresentedTiers,
+  projectContextMode,
+  withSurfaceShape,
+} from '../../session/context/context-surface-projection.js';
+import { cursorFor } from '../../stores/cursor.js';
+import { isDisplayOnlySystemMessage } from '../../stores/host-message-policy.js';
+import { messageFrom } from '../../stores/message-from.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
-import type { IMessageStore, StoredMessage, StoredToolEvent } from '../../stores/ports/MessageStore.js';
-import { canViewMessage } from '../../stores/visibility.js';
-import type { AgentMessage, AgentService } from '../../types.js';
+import type {
+  AppendMessageInput,
+  IMessageStore,
+  StoredMessage,
+  StoredToolEvent,
+} from '../../stores/ports/MessageStore.js';
+import type { Thread } from '../../stores/ports/ThreadStore.js';
+import {
+  canViewMessage,
+  isAgentReadableManagedHoldMessage,
+  isTimelinePublished,
+  resolveVisibleReplyParent,
+} from '../../stores/visibility.js';
+import type { AgentMessage, AgentRouteIntent, AgentService, ToolExecutionPolicy } from '../../types.js';
 import type { InvocationDeps } from '../invocation/invoke-single-cat.js';
+import type { OwnerAuthProvenance } from '../invocation/owner-auth-provenance.js';
+import { extractRecentArtifacts, mergeLedger } from './artifact-tracking.js';
+import { appendContextAttachmentsToPrompt } from './context-attachment-prompt.js';
+import type { CoverageMap, ScoredMessage } from './context-transport.js';
+import {
+  buildCoverageMap,
+  buildTombstone,
+  detectRecentBurst,
+  formatAnchors,
+  formatRecallPointer,
+  formatTombstone,
+  recallEvidenceWithProvenance,
+  scrubToolPayloads,
+  selectAnchors,
+  stripStructuralEnvelope,
+} from './context-transport.js';
+import { legacyBatonHasSucceededReply, recoverableDeliveryBoundary } from './delivery-boundary-recovery.js';
+import type { HumanDispositionInvocationOrigin } from './human-disposition-invocation-origin.js';
+import { extractBatonContext, formatNavigationHeader, summarizeActiveTasks } from './navigation-context.js';
+import { isSameUserWaveSiblingReply } from './same-user-wave-sibling.js';
+import { projectRankedSource, rankArtifactSources, selectDirectiveSources } from './source-ranking.js';
+import { resolveReachableArtifactRefs } from './source-reachability.js';
+
+/**
+ * P1 R7 fix: Shared pure helper for context budget calculation.
+ * Used by both route-serial and route-parallel in incremental + legacy paths.
+ * Formula: min(max(0, inputCeiling - fixed tokens - reserve), history ceiling)
+ *
+ * The 200-token RESERVED accounts for formatting overhead (separators, tags, padding).
+ */
+export const BUDGET_RESERVED_TOKENS = 200;
+
+export function computeContextBudget(params: {
+  inputCeilingTokens: number;
+  historyTokenCeiling: number;
+  systemPartsTokens: number;
+  promptTokens: number;
+  nudgeTokens: number;
+}): number {
+  const remaining = Math.max(
+    0,
+    params.inputCeilingTokens -
+      params.systemPartsTokens -
+      params.promptTokens -
+      params.nudgeTokens -
+      BUDGET_RESERVED_TOKENS,
+  );
+  return Math.min(remaining, params.historyTokenCeiling);
+}
 
 /** Minimal broadcast interface — avoids coupling routing layer to SocketManager concrete class */
 export interface RouteBroadcaster {
@@ -22,14 +127,57 @@ export interface RouteBroadcaster {
 
 /** Dependencies shared across route strategies */
 export interface RouteStrategyDeps {
+  messageSearchAnswerService?: import('../../../../memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
+  routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   services: Record<string, AgentService>;
+  unavailableServices?: ReadonlyMap<string, AgentRegistrationFailure>;
   invocationDeps: InvocationDeps;
+  dotReplyTarget?: (
+    source: import('../../cloud-bridge/dot/dot-reply-authority.js').DotReplyCandidate,
+  ) => Promise<boolean>;
   messageStore: IMessageStore;
   deliveryCursorStore?: DeliveryCursorStore;
   /** #80: Streaming draft persistence store */
   draftStore?: IDraftStore;
   /** F079 Bug 2: Optional broadcaster for real-time vote result delivery */
   socketManager?: RouteBroadcaster;
+  /** F129: Pack store for loading active packs at invocation time */
+  packStore?: import('../../../../packs/PackStore.js').PackStore;
+  /** F148: Evidence store for context recall (optional, fail-open) */
+  evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
+  /** F282 Phase A: lane-neutral proactive memory prompt carrier. */
+  proactiveMemoryNudgeService?: import('../../../../memory/ProactiveMemoryNudgeService.js').ProactiveMemoryNudgeService;
+  /** F281 Phase C: exact-subject correction carrier, gated by independent invocation origin. */
+  humanDispositionFeedbackContextService?: import('../../../../human-disposition/HumanDispositionFeedbackContextService.js').HumanDispositionFeedbackContextService;
+  /** F150: Tool usage counter (fire-and-forget INCR on tool_use events) */
+  toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
+  /** F188 Phase F AC-F10: Tool event log (append-only sequence, fire-and-forget) */
+  toolEventLog?: import('../../tool-usage/ToolEventLog.js').ToolEventLog;
+  /** F188 Phase F AC-F10 (AS-4): Skill load event log (fire-and-forget on Skill tool_use) */
+  skillLoadEventLog?: import('../../tool-usage/SkillLoadEventLog.js').SkillLoadEventLog;
+  /** F148 Phase F: Task store for navigation context (optional, fail-open) */
+  taskStore?: import('../../stores/ports/TaskStore.js').ITaskStore;
+  ownedWaitStatusReader?: import('../../../../ball-custody/OwnedWaitStatus.js').OwnedWaitStatusReader;
+  /** RFC A79: exact lifecycle situation shared with UI and read-only thread context. */
+  threadExecutionSituationSource?: import('../invocation/thread-execution-situation.js').ThreadExecutionSituationSource;
+  /** F222: Frustration auto-issue store (optional, fail-open) */
+  frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
+  /** F093: World context provider for world-building mode (optional, fail-open) */
+  worldContextProvider?: import('../../../../world/WorldContextProvider.js').WorldContextProvider;
+  /** F093: World store for thread→world lookup (optional, fail-open) */
+  worldStore?: import('../../../../world/interfaces.js').IWorldStore;
+  /** F233 Phase B (B2): Ball-custody ingest — fire-and-forget 旁路写球权事件（append + appended-guard apply）。optional, fail-open */
+  ballCustody?: import('../../../../ball-custody/BallCustodyIngest.js').IBallCustodyIngest;
+  /** F167 Phase T: read-only turn-scoped stop-gate projection. */
+  turnCustodyProjectionService?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyProjectionService;
+  /** F237 Phase 2 (AC-P2-8): Injection trace store for pipeline observability. optional, fail-open */
+  injectionTraceStore?: import('../../../../prompt-hooks/InjectionTraceStore.js').InjectionTraceStore;
+  /** F254 Phase D (AC-D4): Freshness event log for stream_stale_detected / stream_fresh audit trail */
+  freshnessEventLog?: import('../../freshness/FreshnessAttentionEventLog.js').FreshnessAttentionEventLog;
+  /** F254 Phase E: single output-commit boundary backed by a persistent catch closure. */
+  freshnessOutputCommitCoordinator?: import('../../freshness/glass-box/FreshnessOutputCommitCoordinator.js').FreshnessOutputCommitCoordinator;
+  /** F276: owner-scoped live proposal state injected before every model invocation. */
+  personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
 }
 
 /** Mutable context for tracking persistence failures across the generator boundary.
@@ -41,46 +189,461 @@ export interface PersistenceContext {
   errors: Array<{ catId: string; error: string }>;
   /** F088-P3: Rich blocks consumed during this invocation, for outbound delivery */
   richBlocks?: import('@cat-cafe/shared').RichBlock[];
+  /**
+   * F254 Phase E: per-cat output-commit verdict. Connector delivery must only
+   * expose answer content after this verdict is committed.
+   */
+  outputCommitDecisions?: Record<string, import('@cat-cafe/shared').OutputCommitDecision>;
+  /** F167 Phase S: a durable successor fence rejected this route's output commit. */
+  actionOutputCommitRejected?: boolean;
+  /** Message ids persisted by this route, so a later fence can cancel the projection fail-closed. */
+  persistedOutputMessageIds?: string[];
+}
+
+/** One persisted Queue body and the blocks that belong to that exact message id. */
+export interface PersistedPromptMessage {
+  messageId: string;
+  content: string;
+  contentBlocks?: readonly MessageContent[] | undefined;
+  /**
+   * Server-owned dynamic projection that must replace/augment the durable body
+   * even when incremental history already projected the same message identity.
+   */
+  forceExplicitProjection?: boolean | undefined;
+}
+
+/**
+ * Resolve one server-owned A2A trigger into the existing hydrated prompt path.
+ * The exact-id lookup is never authority to bypass thread, publication, or
+ * whisper visibility constraints.
+ */
+export async function hydrateVisibleA2ATriggerPromptMessage(
+  deps: RouteStrategyDeps,
+  triggerMessageId: string | undefined,
+  threadId: string,
+  catId: CatId,
+  thinkingMode: 'debug' | 'play',
+): Promise<PersistedPromptMessage | undefined> {
+  if (!triggerMessageId) return undefined;
+  let message: StoredMessage | null;
+  try {
+    message = await deps.messageStore.getById(triggerMessageId);
+  } catch (err) {
+    log.warn({ err, threadId, catId: catId as string }, 'A2A trigger hydration failed');
+    return undefined;
+  }
+  if (!message) return undefined;
+  const from = messageFrom(message);
+  if (
+    message.threadId !== threadId ||
+    message.deletedAt ||
+    message._tombstone ||
+    message.origin === 'briefing' ||
+    from.kind !== 'agent' ||
+    from.catId === catId ||
+    !isTimelinePublished(message)
+  ) {
+    return undefined;
+  }
+  const viewer = thinkingMode === 'play' ? { type: 'cat' as const, catId } : { type: 'user' as const };
+  if (!canViewMessage(message, viewer)) return undefined;
+  return {
+    messageId: message.id,
+    content: message.content,
+    ...(message.contentBlocks ? { contentBlocks: message.contentBlocks } : {}),
+  };
+}
+
+/** Preserve the caller-hydrated queue order and append the exact trigger once. */
+export function mergePersistedPromptMessages(
+  persistedPromptMessages: readonly PersistedPromptMessage[] | undefined,
+  exactTrigger: PersistedPromptMessage | undefined,
+): readonly PersistedPromptMessage[] | undefined {
+  if (!exactTrigger) return persistedPromptMessages;
+  if (persistedPromptMessages?.some((message) => message.messageId === exactTrigger.messageId)) {
+    return persistedPromptMessages;
+  }
+  if (!persistedPromptMessages) return [exactTrigger];
+  return [...persistedPromptMessages, exactTrigger];
 }
 
 /** Common options for both strategies */
 export interface RouteOptions {
+  /** Trusted Queue provenance for comparing B with C; never an execution grant. */
+  routingAdmission?: import('@cat-cafe/shared').RoutingAdmissionProvenanceV1;
+  /** Server-owned ingress only; never copied from an HTTP/MCP request body. */
+  contextSourceIngress?: import('../../../../memory/cue/ContextSourceAdmission.js').ContextSourceIngress;
+  /** Persist the exact policy refusal before publishing its receipt; Queue owns recovery. */
+  onRoutingPreflightRejected?: (target: RoutingPreflightDecisionV1['targets'][number]) => Promise<void>;
+  /** Server-owned one-shot owner click for this exact pending target. */
+  routingOwnerRetryTarget?: string;
+  /** Execution-owned fan-out policy. Queue dequeue uses parallel fan-out for one source
+   *  with multiple targets; ordinary routes retain their intent-derived default. */
+  targetDispatchMode?: 'serial' | 'parallel' | undefined;
+  liveCompanion?: import('../../types.js').AgentServiceOptions['liveCompanion'];
+  /** Route-owned intent plus whether the user explicitly selected it. */
+  routeIntent?: AgentRouteIntent;
+  /** F293: deterministic scope used to resolve sparse routing cognition. */
+  routingContextIntent?: 'review' | 'architecture';
+  /** Authentication-grade owner provenance propagated unchanged to every child invocation. */
+  ownerAuthProvenance?: OwnerAuthProvenance;
+  /** F281 Phase C: explicit first-party ingress provenance; omitted legacy callers fail closed. */
+  humanDispositionInvocationOrigin?: HumanDispositionInvocationOrigin;
+  /** Canonical Queue source class for admission/retry policy. */
+  routingQueueSource?: 'user' | 'connector' | 'agent' | 'system';
+  /** Retained legacy record discriminator. The retired Host executor is rejected; current plugins use public invocation. */
+  executionScope?: 'collective-participation' | 'collective-work';
+  /** F167 Phase T: exact protocol wake carrier for this route, never inferred from response prose. */
+  turnCustodyWake?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyWakeProvenance;
+  /** Per-cat carrier resolver for multi-holder routes. Takes precedence over turnCustodyWake. */
+  turnCustodyWakeForCat?: (
+    catId: CatId,
+  ) => import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyWakeProvenance;
   contentBlocks?: readonly MessageContent[] | undefined;
   uploadDir?: string | undefined;
   signal?: AbortSignal | undefined;
+  /** Per-cat execution signal resolver. When present, route-parallel gives each cat
+   *  ITS OWN slot signal (signalForCat(catId)) instead of the shared `signal`, so
+   *  canceling one concurrent cat does not abort its siblings (并发取消误伤根因修复).
+   *  Absent → fall back to the shared `signal` (route-serial / legacy callers). */
+  signalForCat?: ((catId: CatId) => AbortSignal | undefined) | undefined;
+  /** F117 KD-22 (J4): Queue-owned stop for one member whose output timeout fired. Absent → no timeout. */
+  stopMember?: import('../invocation/member-output-timeout.js').MemberTimeoutStop | undefined;
   promptTags?: readonly string[] | undefined;
+  /** Trusted server-owned Cue seeds supplied by connector/workflow ingress. */
+  memoryCueOpportunitySeeds?: readonly MemoryCueOpportunitySeed[] | undefined;
+  /** F276 trial: source-only ASR scenes from exact persisted Queue messages. */
+  asrPersonMemoryScenes?: readonly import('../../../../memory/people/AsrPersonMemoryOpportunityPromptService.js').BoundAsrPersonMemoryScene[];
   /** Pre-assembled context (deprecated: use history for per-cat budget) */
   contextHistory?: string | undefined;
   /** Raw thread history for per-cat context assembly */
   history?: StoredMessage[] | undefined;
   /** Current user message ID (enables exact incremental context delivery path) */
   currentUserMessageId?: string | undefined;
+  /** Intended persisted Queue members folded into the caller's aggregate input; never receipt evidence. */
+  persistedPromptMessageIds?: readonly string[] | undefined;
+  /** Authoritative successfully hydrated Queue subset; an explicit empty array means no member hydrated. */
+  persistedPromptMessages?: readonly PersistedPromptMessage[] | undefined;
+  /** Explicit A2A trigger message ID for queue-dispatched initial targets. */
+  a2aTriggerMessageId?: string | undefined;
+  /** Server-owned caller identity paired with a2aTriggerMessageId. Never infer from display text. */
+  a2aCallerCatId?: string | undefined;
+  /** Exact per-target cloud source carrier; route layers forward it unchanged. */
+  cloudDispatchProvenance?: CloudDispatchProvenance | undefined;
+  /** Cloud targets must reject reconstructed Queue/direct provenance when the carrier is absent. */
+  requiresExactCloudDispatchProvenance?: boolean | undefined;
   /** Max A2A chain depth for routeSerial (default: MAX_A2A_DEPTH env or 2) */
   maxA2ADepth?: number | undefined;
-  /** Queue fairness hook: when true for current thread, routeSerial must stop extending A2A chain. */
-  queueHasQueuedMessages?: ((threadId: string) => boolean) | undefined;
-  /** A2A dedup hook: skip text-scan @mention if cat already dispatched via callback path. */
-  hasQueuedOrActiveAgentForCat?: ((threadId: string, catId: string) => boolean) | undefined;
+  /** F254 D1.1: Target-aware queued freshness input. */
+  getQueuedFreshnessMessagesForCat?:
+    | ((
+        threadId: string,
+        userId: string,
+        catId: string,
+        parentInvocationId?: string,
+      ) => Array<{
+        entryId?: string;
+        from: MessageFrom;
+        content: string;
+        messageId?: string | null;
+        sourceCategory?: string;
+      }>)
+    | undefined;
+  /** F254 D1.1: Any-source same-cat coverage check for stream freshness fallback. */
+  hasPendingForCat?: ((threadId: string, userId: string, catId: string) => boolean) | undefined;
+  /** Canonical completed-final path: terminalize the existing response and publish one durable message wake. */
+  commitCompletedA2AWake?:
+    | ((input: {
+        responseMessageId: string;
+        invocationId: string;
+        terminal: {
+          status: 'completed';
+          completedAt: number;
+          reason?: string;
+          expectedInputMessageIds?: readonly string[];
+        };
+        message: AppendMessageInput;
+        targetCats: CatId[];
+        userId: string;
+        ownerAuthProvenance: OwnerAuthProvenance;
+        threadId: string;
+        callerCatId: CatId;
+        parentInvocationId?: string;
+        callerTraceContext?: import('../../../../../infrastructure/telemetry/genai-semconv.js').CallerTraceContext;
+      }) => Promise<StoredMessage>)
+    | undefined;
+  /**
+   * Canonical failed-final transaction. Always persists the terminal response;
+   * durable receipts select eligible callers and suppress failure-report bounces.
+   * Calling this hook does not itself imply a caller wake was admitted.
+   */
+  commitFailedA2AReport?:
+    | ((input: {
+        responseMessageId: string;
+        invocationId: string;
+        terminal: { status: 'failed'; completedAt: number; reason?: string };
+        message: AppendMessageInput;
+        userId: string;
+        ownerAuthProvenance: OwnerAuthProvenance;
+        threadId: string;
+        reporterCatId: CatId;
+        predecessorCatId?: CatId;
+        parentInvocationId?: string;
+        callerTraceContext?: import('../../../../../infrastructure/telemetry/genai-semconv.js').CallerTraceContext;
+      }) => Promise<StoredMessage>)
+    | undefined;
+  /** Failure-control carriers never recursively wake the caller that reported them. */
+  a2aFailureReport?: boolean | undefined;
   /** ADR-008 S3: When provided, cursor boundaries are collected here instead of acking immediately.
    *  Caller acks after invocation succeeds. If absent, legacy immediate ack behavior. */
   cursorBoundaries?: Map<string, string>;
   /** P1-2: When provided, persistence failures are recorded here instead of silently swallowed.
    *  Caller checks after generator exhausts to determine invocation status. */
   persistenceContext?: PersistenceContext;
+  /** F167 Phase S: durable outcome CAS run after model completion and before every route-side side effect. */
+  beforeOutputCommit?: ((catId: CatId) => Promise<boolean>) | undefined;
   /** F11: Mode-specific system prompt section (appended after identity prompt) */
   modeSystemPrompt?: string | undefined;
   /** F11: Per-cat mode prompt override (takes precedence over modeSystemPrompt) */
   modeSystemPromptByCat?: Record<string, string> | undefined;
-  /** Thinking visibility: play = cats don't see each other's thinking, debug = cats share thinking. Default: play */
+  /** Collaboration visibility: play keeps whisper/in-flight isolation; debug exposes full context. */
   thinkingMode?: 'debug' | 'play' | undefined;
   /** F108: Unique invocation ID for WorklistRegistry isolation in concurrent execution.
    *  When provided, worklist is keyed by this ID instead of threadId. */
   parentInvocationId?: string | undefined;
+  /** A recovery proof cannot acknowledge an older wake that still awaits this target. */
+  resolvePendingWakeMessageIds?: (catId: string, messageIds: readonly string[]) => Promise<readonly string[]>;
+  /** Exact, non-trigger message bodies exposed by incremental context to this invocation. */
+  onPromptMessagesExposed?:
+    | ((input: {
+        threadId: string;
+        userId: string;
+        catId: string;
+        invocationId: string;
+        messageIds: readonly string[];
+        seenAt: number;
+      }) => Promise<void>)
+    | undefined;
+  /** Create the exact child's durable processing response before provider startup. */
+  onLifecycleInvocationStarted?:
+    | ((input: {
+        threadId: string;
+        userId: string;
+        catId: CatId;
+        invocationId: string;
+        parentInvocationId: string;
+        startedAt: number;
+      }) => Promise<{
+        responseMessageId: string;
+        priorFrontierMessageId: string | null;
+        activeRun: import('@cat-cafe/shared').LifecycleActiveRun;
+      }>)
+    | undefined;
+  /** Bind a provider-native exact-turn dispatcher after the client accepts the run. */
+  onAgentClientActiveRunReady?:
+    | ((input: {
+        catId: CatId;
+        dispatcher: import('../../types.js').AgentClientActiveRunDispatcher;
+      }) => (() => void) | undefined)
+    | undefined;
+  /** F254 Phase E stable sibling-exclusion identity for one parallel fan-out. */
+  parallelBatchId?: string | undefined;
+  toolExecutionPolicy?: ToolExecutionPolicy | undefined;
+  /** F153 Phase E: Root route span — invocation spans become children of this. */
+  routeSpan?: import('@opentelemetry/api').Span | undefined;
+  /** F222 P1: Whether this route is eligible for frustration auto-issue detection.
+   *  true/undefined = user-origin (eligible, default for backward compat).
+   *  false = agent/connector-origin (A2A handoff, connector trigger) — suppress
+   *  frustration detection to avoid surfacing system-internal errors as user-facing issues. */
+  frustrationAutoIssueEligible?: boolean | undefined;
+  /** #949 P2: Whether the verdict-without-pass warning should fire at route end.
+   *  true/undefined = warn (default). false = suppress — ONLY for connector-sourced
+   *  flows (MR review, CI notification) where ball-pass is not expected.
+   *  Separate from frustrationAutoIssueEligible because A2A/multi-mention callbacks
+   *  suppress frustration issues but still need verdict-pass handoff guards. */
+  verdictPassWarningEnabled?: boolean | undefined;
+}
+
+/**
+ * Public execution boundary owned jointly by QueueProcessor and AgentRouter.
+ * Keep this derived from RouteOptions so adding a strategy option cannot be
+ * silently dropped by an intermediate hand-written parameter list.
+ */
+export type RouteExecutionOptions = Omit<
+  RouteOptions,
+  'promptTags' | 'currentUserMessageId' | 'thinkingMode' | 'routeSpan' | 'humanDispositionInvocationOrigin'
+> & {
+  ownerAuthProvenance: NonNullable<RouteOptions['ownerAuthProvenance']>;
+  onPromptMessagesExposed: NonNullable<RouteOptions['onPromptMessagesExposed']>;
+  humanDispositionInvocationOrigin: HumanDispositionInvocationOrigin;
+  callerTraceContext?: CallerTraceContext;
+};
+
+const TASTE_JUDGMENT_STAGES = new Set(['quality_gate', 'review']);
+const TASTE_JUDGMENT_SKILLS = new Set(['writing-plans', 'co-creation-docs', 'fresh-context-review', 'request-review']);
+
+export function subjectSeenCueSeeds(input: {
+  result: NudgeProcessResult;
+  sourceMessageId: string | undefined;
+  occurredAt: number;
+}): Array<Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }>> {
+  const sourceMessageId = input.sourceMessageId;
+  if (!sourceMessageId) return [];
+  return input.result.nudges.flatMap((nudge) =>
+    nudge.entityId?.startsWith('person:') && nudge.sourceRevision
+      ? [
+          {
+            kind: 'subject_seen' as const,
+            producer: 'entity_nudge' as const,
+            occurredAt: input.occurredAt,
+            payload: {
+              entityId: nudge.entityId,
+              matchedAlias: nudge.matchedAlias,
+              sourceMessageId,
+              sourceRevision: nudge.sourceRevision,
+            },
+          },
+        ]
+      : [],
+  );
+}
+
+export function judgmentSurfaceCueSeeds(input: {
+  sopStageHint?: { stage: string; suggestedSkill: string; suggestedSkillSource: string; featureId: string };
+  promptTags?: readonly string[];
+  occurredAt: number;
+}): MemoryCueOpportunitySeed[] {
+  const hint = input.sopStageHint;
+  if (!hint || !TASTE_JUDGMENT_STAGES.has(hint.stage) || !/^F\d{3,}$/.test(hint.featureId)) {
+    return [];
+  }
+  const explicitSkill = input.promptTags
+    ?.map((tag) => tag.match(/^skill:(.+)$/)?.[1])
+    .find((skill): skill is string => typeof skill === 'string' && TASTE_JUDGMENT_SKILLS.has(skill));
+  const selectedSkill = explicitSkill ?? hint.suggestedSkill;
+  const selectionSource = explicitSkill
+    ? ('explicit_prompt_tag' as const)
+    : hint.suggestedSkillSource === 'override'
+      ? ('override' as const)
+      : null;
+  if (!selectionSource || !TASTE_JUDGMENT_SKILLS.has(selectedSkill)) return [];
+  return [
+    {
+      kind: 'judgment_surface_entered',
+      producer: 'workflow_sop',
+      occurredAt: input.occurredAt,
+      payload: {
+        stage: hint.stage as 'quality_gate' | 'review',
+        selectedSkill: selectedSkill as
+          | 'writing-plans'
+          | 'co-creation-docs'
+          | 'fresh-context-review'
+          | 'request-review',
+        selectionSource,
+        featureId: hint.featureId,
+      },
+    },
+  ];
+}
+
+export function explicitApprovedTasteCueSeeds(input: {
+  message: string;
+  sourceMessageId: string | undefined;
+  ownerOriginEligible: boolean;
+  occurredAt: number;
+}): Array<Extract<MemoryCueOpportunitySeed, { kind: 'approved_taste_invoked' }>> {
+  if (!input.ownerOriginEligible || !input.sourceMessageId) return [];
+  const trigger = matchExplicitApprovedTasteTrigger(stripStructuralEnvelope(input.message));
+  if (!trigger) return [];
+  return [
+    {
+      kind: 'approved_taste_invoked',
+      producer: 'owner_message',
+      occurredAt: input.occurredAt,
+      payload: {
+        triggerKey: trigger.triggerKey,
+        sourceMessageId: input.sourceMessageId,
+      },
+    },
+  ];
+}
+
+function oneExactRef(message: string, pattern: RegExp): string | null {
+  const refs = [...new Set([...message.matchAll(pattern)].map((match) => match[0].toUpperCase()))];
+  return refs.length === 1 ? refs[0] : null;
+}
+
+/**
+ * F312 Phase D: lane-owned, bounded task predicates for operational knowledge.
+ * The producer carries only one exact canonical coordinate; source resolution and
+ * authority checks remain in the Decision and Project Knowledge lanes.
+ */
+export function operationalKnowledgeCueSeeds(input: {
+  message: string;
+  sourceMessageId: string | undefined;
+  ownerOriginEligible: boolean;
+  sopStageHint?: { stage: string; suggestedSkill: string; suggestedSkillSource: string; featureId: string };
+  occurredAt: number;
+}): MemoryCueOpportunitySeed[] {
+  if (!input.sourceMessageId) return [];
+  const currentMessage = stripStructuralEnvelope(input.message);
+  const seeds: MemoryCueOpportunitySeed[] = [];
+  if (input.ownerOriginEligible) {
+    const decisionAnchor = oneExactRef(currentMessage, /\bADR-\d{3}\b/giu);
+    if (decisionAnchor) {
+      seeds.push({
+        kind: 'accepted_decision_required',
+        producer: 'owner_message',
+        occurredAt: input.occurredAt,
+        payload: { decisionAnchor, sourceMessageId: input.sourceMessageId },
+      });
+    }
+  }
+
+  const workflowFeature = input.sopStageHint?.featureId;
+  const explicitFeature = input.ownerOriginEligible ? oneExactRef(currentMessage, /\bF\d{3,}\b/giu) : null;
+  const featureId = workflowFeature && /^F\d{3,}$/.test(workflowFeature) ? workflowFeature : explicitFeature;
+  if (featureId) {
+    seeds.push({
+      kind: 'project_source_required',
+      producer: 'task_context',
+      occurredAt: input.occurredAt,
+      payload: {
+        featureId,
+        selectionSource: workflowFeature === featureId ? 'workflow_feature' : 'explicit_owner_reference',
+        sourceMessageId: input.sourceMessageId,
+      },
+    });
+  }
+  return seeds;
+}
+
+function canonicalDeferredBoundary(
+  candidate: string | undefined,
+  source: string,
+): CanonicalVisibilityCursor | undefined {
+  if (!candidate) return undefined;
+  try {
+    assertCanonicalVisibilityCursor(candidate, `incremental-context:${source}`);
+    return candidate;
+  } catch (err) {
+    // Fail at the producer boundary without aborting the route. No canonical
+    // evidence means this invocation must not mutate the deferred durable slot.
+    visibilityCursorDeferredBoundaryRejected.add(1);
+    log.error({ err, source }, 'Omitting non-canonical deferred delivery boundary');
+    return undefined;
+  }
 }
 
 export interface IncrementalContextResult {
   contextText: string;
-  boundaryId?: string;
+  /** F296 B3b-4: one typed projection shared by prompt, bootstrap, briefing, and receipt surfaces. */
+  surfaceProjection?: ContextSurfaceProjection;
+  boundaryId?: CanonicalVisibilityCursor;
+  /** Message ids with a retained per-message safe projection in the final prompt. */
+  projectedMessageIds: string[];
+  /** Message bodies present in full after all visibility, count, token, and per-message trims. */
+  exposedMessageIds: string[];
   includesCurrentUserMessage: boolean;
   /** True when the current user message exists in unseen but was filtered out
    *  (e.g. whisper not intended for this cat). Callers must NOT inject the raw
@@ -88,6 +651,219 @@ export interface IncrementalContextResult {
   currentMessageFilteredOut: boolean;
   /** GAP-1: User-facing message when incremental batch was truncated by budget cap */
   degradation?: string;
+  /** Phase E: Coverage map for context briefing surface (only present when smart window triggered) */
+  coverageMap?: CoverageMap;
+  /** Phase E: Briefing context data for AC-E4 expanded view */
+  briefingContext?: {
+    threadMemorySummary?: string;
+    anchorSummaries?: string[];
+    baton?: import('./navigation-context.js').BatonContext;
+    activeTasks?: import('./navigation-context.js').TaskSummary[];
+    recentArtifacts?: import('./artifact-tracking.js').RecentArtifact[];
+    rankedSources?: import('./source-ranking.js').RankedSource[];
+  };
+  /** F148 Phase F: Navigation context header (injected on ALL paths — KD-7) */
+  navigationHeader?: string;
+  /** F263: only cold-context evidence lines that survived final token trimming. */
+  pushRecallPresentations?: import('../../../../memory/f200-types.js').PushRecallPresentation[];
+  /** F153/F296: bounded refs-only explanation of the final message window. */
+  projectionAudit?: IncrementalProjectionAudit;
+}
+
+export type IncrementalProjectionReason =
+  | 'projected'
+  | 'system_display_only'
+  | 'briefing'
+  | 'same_route_output_isolation'
+  | 'same_user_wave_sibling_deferred'
+  | 'visibility'
+  | 'self_output'
+  | 'smart_window_omitted'
+  | 'token_budget';
+
+export interface IncrementalProjectionAudit {
+  candidateCount: number;
+  sampledCount: number;
+  truncatedCount: number;
+  messageRefs: Array<{ messageRef: string; reason: IncrementalProjectionReason }>;
+}
+
+/**
+ * A continuity verdict may force a cold packet even for a small unread delta.
+ * The persisted briefing is a volume-shaping surface, not a per-cold-turn
+ * receipt, so epoch-aware callers keep the original large-delta admission.
+ * Legacy smart-window callers have no typed mode/size and remain admitted.
+ */
+export function shouldPersistContextBriefing(
+  result: IncrementalContextResult,
+): result is IncrementalContextResult & { coverageMap: CoverageMap } {
+  if (!result.coverageMap) return false;
+  return (
+    result.surfaceProjection === undefined ||
+    (result.surfaceProjection.contextMode === 'cold' && result.surfaceProjection.deltaSize === 'large')
+  );
+}
+
+/**
+ * Provider replacement can rebuild a projection after an earlier generation
+ * has already emitted its pre-provider notices. Reset replaces notifications
+ * that are still pending; emitted keys are never yielded twice.
+ */
+export function createIdempotentPendingProjectionQueue<T>(): {
+  readonly length: number;
+  reset(): void;
+  enqueue(key: string, value: T): void;
+  shift(): T | undefined;
+} {
+  const pending: Array<{ key: string; value: T }> = [];
+  const emittedKeys = new Set<string>();
+  return {
+    get length() {
+      return pending.length;
+    },
+    reset() {
+      pending.length = 0;
+    },
+    enqueue(key, value) {
+      if (!emittedKeys.has(key)) pending.push({ key, value });
+    },
+    shift() {
+      const entry = pending.shift();
+      if (!entry) return undefined;
+      emittedKeys.add(entry.key);
+      return entry.value;
+    },
+  };
+}
+
+/**
+ * Internal retry/replacement events never escape invokeSingleCat. The first
+ * substantive output (or the final done) is therefore the earliest route seam
+ * that can safely persist a final-generation briefing.
+ */
+export function isFinalGenerationBriefingBoundary(message: Pick<AgentMessage, 'type' | 'content'>): boolean {
+  return (
+    message.type === 'done' ||
+    message.type === 'tool_use' ||
+    message.type === 'tool_result' ||
+    (message.type === 'text' && Boolean(message.content))
+  );
+}
+
+/**
+ * Decide whether the routing layer should append the raw current user message
+ * outside the incremental context envelope.
+ *
+ * The normal path is:
+ * - append when the current message is genuinely absent from unseen history
+ * - do NOT append when the message was filtered out for privacy
+ *
+ * Delivery is derived only from structural ownership. `contextText` also carries
+ * attachment provenance and other metadata, so an arbitrary id substring cannot
+ * prove that a message body was exposed.
+ */
+export function shouldAppendExplicitCurrentMessage(
+  inc: Pick<
+    IncrementalContextResult,
+    'projectedMessageIds' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut'
+  >,
+  currentUserMessageId: string | undefined,
+): boolean {
+  if (inc.includesCurrentUserMessage || inc.currentMessageFilteredOut) return false;
+  return !currentUserMessageId || !inc.projectedMessageIds.includes(currentUserMessageId);
+}
+
+export interface ExplicitIncrementalPromptProjection {
+  text?: string;
+  /** Persisted ids represented by this explicit safe projection. */
+  projectedMessageIds: string[];
+  /** Strict subset whose complete model-facing body survived unchanged. */
+  exposedMessageIds: string[];
+}
+
+function emptyExplicitPromptProjection(): ExplicitIncrementalPromptProjection {
+  return { projectedMessageIds: [], exposedMessageIds: [] };
+}
+
+function projectLegacyIncrementalFallback(
+  inc: Pick<
+    IncrementalContextResult,
+    'projectedMessageIds' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut'
+  >,
+  fallbackMessage: string,
+  currentUserMessageId: string | undefined,
+): ExplicitIncrementalPromptProjection {
+  if (!shouldAppendExplicitCurrentMessage(inc, currentUserMessageId)) return emptyExplicitPromptProjection();
+  const safeBody = sanitizeInjectedContent(fallbackMessage);
+  if (!safeBody) return emptyExplicitPromptProjection();
+  const projectedMessageIds = currentUserMessageId ? [currentUserMessageId] : [];
+  return {
+    text: safeBody,
+    projectedMessageIds,
+    exposedMessageIds: safeBody === fallbackMessage ? projectedMessageIds : [],
+  };
+}
+
+function projectHydratedPromptMessages(
+  alreadyProjectedMessageIds: readonly string[],
+  persistedPromptMessages: readonly PersistedPromptMessage[],
+): ExplicitIncrementalPromptProjection {
+  const safelyProjectedIds = new Set(alreadyProjectedMessageIds);
+  const pieces: string[] = [];
+  const projectedMessageIds: string[] = [];
+  const exposedMessageIds: string[] = [];
+  for (const { messageId, content, contentBlocks, forceExplicitProjection } of persistedPromptMessages) {
+    if (safelyProjectedIds.has(messageId) && !forceExplicitProjection) continue;
+    const persistedBody = appendContextAttachmentsToPrompt(content, contentBlocks);
+    const safeBody = sanitizeInjectedContent(persistedBody);
+    if (!safeBody) continue;
+    pieces.push(safeBody);
+    projectedMessageIds.push(messageId);
+    if (safeBody === persistedBody) exposedMessageIds.push(messageId);
+  }
+  return {
+    ...(pieces.length > 0 ? { text: pieces.join('\n') } : {}),
+    projectedMessageIds,
+    exposedMessageIds,
+  };
+}
+
+/**
+ * Project only persisted Queue bodies that incremental history did not already
+ * safely project. Exact exposure is deliberately separate from safe projection:
+ * altered content prevents durable receipt but must also prevent a later raw
+ * fallback from bypassing the sanitizer.
+ */
+export function explicitPromptForIncrementalContext(
+  inc: Pick<
+    IncrementalContextResult,
+    'projectedMessageIds' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut'
+  >,
+  fallbackMessage: string,
+  currentUserMessageId: string | undefined,
+  persistedPromptMessages: readonly PersistedPromptMessage[] | undefined,
+): ExplicitIncrementalPromptProjection {
+  if (inc.currentMessageFilteredOut) return emptyExplicitPromptProjection();
+  if (persistedPromptMessages === undefined) {
+    return projectLegacyIncrementalFallback(inc, fallbackMessage, currentUserMessageId);
+  }
+  return projectHydratedPromptMessages(inc.projectedMessageIds, persistedPromptMessages);
+}
+
+/**
+ * One stable, exact set of persisted message bodies present in a child prompt.
+ * Both ledger creation and freshness relevance must consume this same set;
+ * otherwise a caller-folded Queue body can be read by the model yet look like
+ * unrelated late work when a sibling reply arrives.
+ */
+export function collectExactPromptMessageIds(...groups: ReadonlyArray<ReadonlyArray<string | undefined>>): string[] {
+  const collected = new Set<string>();
+  for (const group of groups) {
+    for (const messageId of group) {
+      if (messageId) collected.add(messageId);
+    }
+  }
+  return [...collected];
 }
 
 /**
@@ -96,39 +872,84 @@ export interface IncrementalContextResult {
  * observe fewer relevant messages and produce an older boundary; this helper
  * prevents regressing the deferred ack boundary.
  *
- * Assumes message IDs are lexicographically monotonic (timestamp+seq prefix).
+ * #1200/#3444 A3: this is a canonical visibility slot. Reject raw IDs before
+ * comparison so compareCursors' cross-format `0` cannot silently freeze a
+ * deferred ACK boundary.
  */
 export function upsertMaxBoundary(cursorBoundaries: Map<string, string>, catId: string, boundaryId: string): void {
+  assertCanonicalVisibilityCursor(boundaryId, 'deferred-delivery-boundary');
   const current = cursorBoundaries.get(catId);
-  if (!current || boundaryId > current) {
+  if (current) {
+    assertCanonicalVisibilityCursor(current, 'deferred-delivery-boundary:existing');
+  }
+  if (!current || compareCursors(boundaryId, current) > 0) {
     cursorBoundaries.set(catId, boundaryId);
   }
 }
 
 /** Get the agent service for a given cat ID */
-export function getService(services: Record<string, AgentService>, catId: CatId): AgentService {
-  const service = services[catId];
-  if (!service) throw new Error(`Unknown cat ID: ${catId as string}`);
-  return service;
+export function getService(
+  services: Record<string, AgentService>,
+  catId: CatId,
+  unavailableServices?: ReadonlyMap<string, AgentRegistrationFailure>,
+): AgentService {
+  const service = Object.hasOwn(services, catId) ? services[catId] : undefined;
+  if (service) return service;
+  const reason = unavailableServices?.get(catId);
+  if (reason) throw new AgentServiceUnavailableError(catId, reason);
+  if (catRegistry.has(catId)) {
+    throw new AgentServiceUnavailableError(catId, {
+      code: 'not-registered',
+      message: 'This member is configured but its service is not registered; check runtime registration diagnostics.',
+    });
+  }
+  throw new Error(`Unknown cat ID: ${catId as string}`);
 }
 
-export function detectContextDegradation(
-  historyCount: number,
-  includedCount: number,
-  budget: ReturnType<typeof getCatContextBudget>,
-): DegradationResult | null {
-  // Existing count-based degradation logic
-  const byCount = checkContextBudget(historyCount, budget);
-  if (byCount.degraded) return byCount;
+export function getThreadBootcampMemberCount(thread: Thread | null | undefined): number | undefined {
+  if (!thread?.bootcampState) return undefined;
+  const members = new Set<string>(thread.participants);
+  if (thread.bootcampState.leadCat) {
+    members.add(thread.bootcampState.leadCat);
+  }
+  return members.size;
+}
 
-  // Additional char-budget degradation: history count is within budget, but content still got truncated.
-  const maxCountCandidate = Math.min(historyCount, budget.maxMessages);
-  if (includedCount < maxCountCandidate) {
+export function shouldHandleCompletedGuide(
+  guideCompletionOwner: string | undefined,
+  targetCatIds: ReadonlySet<string>,
+  fallbackCatId: string | undefined,
+  catId: string,
+): boolean {
+  if (!guideCompletionOwner) return true;
+  if (guideCompletionOwner === catId) return true;
+  if (!targetCatIds.has(guideCompletionOwner)) return fallbackCatId === catId;
+  return false;
+}
+
+export function shouldHandleOfferedGuide(
+  guideOfferOwner: string | undefined,
+  targetCatIds: ReadonlySet<string>,
+  fallbackCatId: string | undefined,
+  catId: string,
+  hasUserSelection: boolean,
+  allowOwnerMissingFallback = false,
+): boolean {
+  if (!guideOfferOwner) return true;
+  if (guideOfferOwner === catId) return true;
+  if ((hasUserSelection || allowOwnerMissingFallback) && !targetCatIds.has(guideOfferOwner)) {
+    return fallbackCatId === catId;
+  }
+  return false;
+}
+
+export function detectContextDegradation(historyCount: number, includedCount: number): DegradationResult | null {
+  if (includedCount < historyCount) {
     return {
       degraded: true,
       strategy: 'truncated',
-      reason: `Token 预算限制，历史从 ${maxCountCandidate} 条截断到 ${includedCount} 条`,
-      adjustedMaxMessages: includedCount,
+      reason: `Token 预算限制，历史从 ${historyCount} 条截断到 ${includedCount} 条`,
+      includedMessages: includedCount,
     };
   }
 
@@ -141,38 +962,264 @@ export function truncateDetail(text: string, maxLength: number): string {
   return `${text.slice(0, maxLength)}…`;
 }
 
-/** Build a StoredToolEvent from a streaming AgentMessage */
-export function toStoredToolEvent(msg: AgentMessage): StoredToolEvent | null {
+/** Build a StoredToolEvent from a streaming AgentMessage.
+ *
+ * F153 Phase J Slice J-B AC-J7: extends the event with the four-piece telemetry set
+ * (`toolUseId`, `status`, `tracing`, `startTimeMs`/`endTimeMs`) so cold-start hydrate
+ * (AC-J8) can synthesize a real-duration `cat_cafe.tool_use ...` child span instead
+ * of degrading to a flat `cat_cafe.invocation.restored` marker.
+ *
+ * All new fields are optional: messages without Phase J wiring (legacy, or providers
+ * deferred per KD-41) still produce a valid StoredToolEvent that the hydrate path
+ * skips for span synthesis but still surfaces in the Hub history view.
+ */
+export function toStoredToolEvent(
+  msg: AgentMessage,
+  executionRef = msg.turnInvocationId ?? msg.invocationId,
+): StoredToolEvent | null {
+  if (msg.type !== 'tool_use' && msg.type !== 'tool_result') return null;
+  // Event IDs are born once in the API and then carried unchanged through every consumer.
+  const prefix = msg.type === 'tool_use' ? 'tool-' : 'toolr-';
+  if (!msg.toolEventId?.startsWith(prefix)) msg.toolEventId = `${prefix}${randomUUID()}`;
+  if (executionRef) msg.toolExecutionRef = executionRef;
+  const instance = { id: msg.toolEventId, ...(msg.toolExecutionRef ? { executionRef: msg.toolExecutionRef } : {}) };
+  let inputDetail: string | undefined;
+  if (msg.toolInput !== undefined) {
+    try {
+      inputDetail = truncateDetail(JSON.stringify(msg.toolInput), 200);
+    } catch {
+      inputDetail = '[unserializable]';
+    }
+  }
   if (msg.type === 'tool_use') {
     const toolName = msg.toolName ?? 'unknown';
-    let detail: string | undefined;
-    if (msg.toolInput) {
-      try {
-        detail = truncateDetail(JSON.stringify(msg.toolInput), 200);
-      } catch {
-        detail = '[unserializable]';
-      }
-    }
     return {
-      id: `tool-${msg.timestamp}-${Math.random().toString(36).slice(2, 6)}`,
+      ...instance,
       type: 'tool_use',
       label: `${msg.catId as string} → ${toolName}`,
-      ...(detail ? { detail } : {}),
+      // R6 maintainer: persist native tool name as data field (decoupled from display label).
+      // Hydrate prefers this for span naming; label parse becomes legacy fallback only.
+      toolName,
+      ...(inputDetail !== undefined ? { detail: inputDetail } : {}),
       timestamp: msg.timestamp,
+      ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
+      ...(msg.toolTracing ? { tracing: msg.toolTracing } : {}),
+      // For tool_use events, msg.timestamp marks when the span opened.
+      startTimeMs: msg.timestamp,
     };
   }
   if (msg.type === 'tool_result') {
     const raw = (msg.content ?? '').trimEnd();
-    const detail = raw.length > 0 ? truncateDetail(raw, 220) : '(no output)';
+    const detail = raw.length > 0 ? truncateDetail(raw, 1500) : '(no output)';
     return {
-      id: `toolr-${msg.timestamp}-${Math.random().toString(36).slice(2, 6)}`,
+      ...instance,
       type: 'tool_result',
       label: `${msg.catId as string} ← result`,
       detail,
+      ...(inputDetail !== undefined ? { inputDetail } : {}),
       timestamp: msg.timestamp,
+      ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
+      ...(msg.toolResultStatus ? { status: msg.toolResultStatus } : {}),
+      ...(msg.toolTracing ? { tracing: msg.toolTracing } : {}),
+      // For tool_result events, msg.timestamp marks when the span closed.
+      endTimeMs: msg.timestamp,
     };
   }
   return null;
+}
+
+const USER_FACING_SYSTEM_INFO_TYPES = new Set([
+  'a2a_followup_available',
+  // F086/F216: "your N line-start @ were scheduled SERIALLY" — the whole point is that the cat
+  // and the reader both see it, so it must survive refresh like any other user-facing notice.
+  'a2a_multi_target_serialized',
+  'cloud_bridge_status',
+  'governance_blocked',
+  'invocation_preempted',
+  // F215 BLOCKING 1 fix: relay signal produces a user-visible text card before this signal,
+  // so marking it user-facing prevents route-serial from appending a misleading silent_completion.
+  'malformed_toolcall_relay_46',
+  'mode_switch_proposal',
+  'session_rollover_lifecycle',
+  'session_seal_requested',
+  'silent_completion',
+]);
+
+/**
+ * Return true when a system_info payload already produces a user-visible notice in the UI.
+ * Route strategies use this to avoid appending a misleading silent_completion after an
+ * actionable blocker/warning has already been surfaced.
+ */
+export function isUserFacingSystemInfoContent(content: string): boolean {
+  try {
+    const parsed = JSON.parse(content) as { type?: unknown; presentation?: unknown };
+    if (parsed.type === 'warning') return parsed.presentation === 'user_action_required';
+    return typeof parsed.type === 'string' && USER_FACING_SYSTEM_INFO_TYPES.has(parsed.type);
+  } catch {
+    return true;
+  }
+}
+
+function isInternalToolRecipientName(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    (value.startsWith('functions.') || value.startsWith('mcp__') || value.startsWith('multi_tool_use.'))
+  );
+}
+
+function looksLikeLeakedToolCallPayload(candidate: string): boolean {
+  const trimmed = candidate.trim();
+  if (!trimmed.startsWith('{')) return false;
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      tool_uses?: Array<{ recipient_name?: unknown }>;
+      recipient_name?: unknown;
+    };
+    if (Array.isArray(parsed.tool_uses)) {
+      return parsed.tool_uses.some((item) => isInternalToolRecipientName(item?.recipient_name));
+    }
+    return isInternalToolRecipientName(parsed.recipient_name);
+  } catch {
+    return false;
+  }
+}
+
+const LEAKED_TOOL_CALL_SIGNATURES = [
+  '{"tool_uses":[{"recipient_name":"functions.',
+  '{"tool_uses":[{"recipient_name":"mcp__',
+  '{"tool_uses":[{"recipient_name":"multi_tool_use.',
+  '{"recipient_name":"functions.',
+  '{"recipient_name":"mcp__',
+  '{"recipient_name":"multi_tool_use.',
+];
+
+const INTENTIONAL_JSON_EXAMPLE_LINE_RE =
+  /^(?:(?:(?:文档|JSON)\s*)?示例|for\s+example|example|json\s+example|例如|比如)\s*(?:[:：]\s*)?$/i;
+
+function looksLikePotentialLeakedToolCallPayloadPrefix(candidate: string): boolean {
+  const trimmed = candidate.trim();
+  if (!trimmed.startsWith('{')) return false;
+
+  const compact = trimmed.replace(/\s+/g, '');
+  return LEAKED_TOOL_CALL_SIGNATURES.some(
+    (signature) => signature.startsWith(compact) || compact.startsWith(signature),
+  );
+}
+
+function findLineStartPayloadIndex(
+  content: string,
+  predicate: (candidate: string) => boolean,
+): { index: number; candidate: string } | null {
+  const lines = content.split('\n');
+  let offset = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    const trimmed = line.trimStart();
+    if (!trimmed.startsWith('{')) {
+      offset += line.length + 1;
+      continue;
+    }
+
+    const leadingWhitespace = line.length - trimmed.length;
+    const candidate = lines.slice(i).join('\n');
+    if (predicate(candidate)) {
+      return { index: offset + leadingWhitespace, candidate };
+    }
+    offset += line.length + 1;
+  }
+
+  return null;
+}
+
+function isIntentionalJsonExamplePrefix(prefix: string): boolean {
+  const trimmed = prefix.trimEnd();
+  if (!trimmed) return false;
+
+  const lines = trimmed.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = (lines[i] ?? '').trim();
+    if (!line) continue;
+    if (/^```(?:json)?$/i.test(line)) return true;
+    return INTENTIONAL_JSON_EXAMPLE_LINE_RE.test(line);
+  }
+
+  return false;
+}
+
+export function stripLeakedToolCallPayload(content: string): string {
+  if (!content) return content;
+
+  const match = findLineStartPayloadIndex(content, looksLikeLeakedToolCallPayload);
+  if (match) {
+    const prefix = content.slice(0, match.index);
+    if (isIntentionalJsonExamplePrefix(prefix)) {
+      return content;
+    }
+    return prefix.replace(/\s+$/, '');
+  }
+
+  return content;
+}
+
+export type RoutedMessageTransform = import('../message-output-stream-transform.js').RoutedOutputTransform;
+
+export interface LeakedToolCallStreamStripper {
+  push(content: string): string;
+  flush(): string;
+  hasPendingContent(): boolean;
+  wasRewritten(): boolean;
+}
+
+export function createLeakedToolCallStreamStripper(): LeakedToolCallStreamStripper {
+  let pending = '';
+  let pendingEmittedLength = 0;
+  let rewritten = false;
+
+  return {
+    hasPendingContent: () => pending.length > 0,
+    wasRewritten: () => rewritten,
+    push(content: string): string {
+      if (!content) return content;
+
+      const combined = pending + content;
+      const alreadyEmittedLength = pendingEmittedLength;
+      pending = '';
+      pendingEmittedLength = 0;
+
+      const stripped = stripLeakedToolCallPayload(combined);
+      if (stripped !== combined) {
+        rewritten = true;
+        return stripped.slice(alreadyEmittedLength);
+      }
+
+      const match = findLineStartPayloadIndex(combined, looksLikePotentialLeakedToolCallPayloadPrefix);
+      if (!match) {
+        return combined.slice(alreadyEmittedLength);
+      }
+
+      const emittedPrefix = combined.slice(0, match.index).replace(/\s+$/, '');
+      pending = combined;
+      pendingEmittedLength = emittedPrefix.length;
+      return emittedPrefix.slice(alreadyEmittedLength);
+    },
+    flush(): string {
+      if (!pending) return '';
+
+      const remaining = pending;
+      const alreadyEmittedLength = pendingEmittedLength;
+      pending = '';
+      pendingEmittedLength = 0;
+      const stripped = stripLeakedToolCallPayload(remaining);
+      rewritten ||= stripped !== remaining;
+      return stripped.slice(alreadyEmittedLength);
+    },
+  };
+}
+
+export function createRoutingMessageTransform(explicitCatId?: CatId): RoutedMessageTransform {
+  return createRoutedOutputTransform(createLeakedToolCallStreamStripper, explicitCatId);
 }
 
 export function sanitizeInjectedContent(content: string): string {
@@ -182,7 +1229,10 @@ export function sanitizeInjectedContent(content: string): string {
 
   for (const line of lines) {
     const trimmed = line.trim();
-    const isHistoryHeader = line.startsWith('[对话历史 - 最近 ') || line.startsWith('[对话历史增量 - 未发送过 ');
+    const isHistoryHeader =
+      line.startsWith('[对话历史 - 最近 ') ||
+      line.startsWith('[对话历史增量 - 未发送过 ') ||
+      line.startsWith('[对话历史增量 - 智能窗口');
 
     if (!skippingHistoryEnvelope && isHistoryHeader) {
       // Drop known injected history envelopes only.
@@ -201,7 +1251,37 @@ export function sanitizeInjectedContent(content: string): string {
     kept.push(line);
   }
 
-  return kept.join('\n').trim();
+  return stripLeakedToolCallPayload(kept.join('\n')).trim();
+}
+
+function projectLifecycleResponsePromptContent(message: StoredMessage, content: string): string {
+  if (content.trim() || message.lifecycle?.kind !== 'response') return content;
+  switch (message.lifecycle.status) {
+    case 'completed':
+      return '已完成，没有返回可显示内容。';
+    case 'failed':
+      return '回复失败。';
+    case 'canceled':
+      if (message.lifecycle.reason === 'user_cancel' || message.lifecycle.reason === 'cancel_all') {
+        return '用户已取消该回复。';
+      }
+      return '已停止回复。';
+    case 'interrupted':
+      if (message.lifecycle.reason === 'preempted') return '该回复已被后续消息中断。';
+      return '回复已中断。';
+    case 'processing':
+      return content;
+  }
+}
+
+function isEmptyTerminalLifecycleResponse(message: StoredMessage): boolean {
+  return (
+    message.content.trim().length === 0 &&
+    (message.contentBlocks?.length ?? 0) === 0 &&
+    (message.extra?.rich?.blocks?.length ?? 0) === 0 &&
+    message.lifecycle?.kind === 'response' &&
+    message.lifecycle.status !== 'processing'
+  );
 }
 
 /**
@@ -238,9 +1318,53 @@ function digestRichBlock(b: RichBlock): string {
 }
 
 export function digestRichBlocks(msg: StoredMessage): string {
-  if (!msg.extra?.rich?.blocks?.length) return msg.content;
+  const contextAwareContent = appendContextAttachmentsToPrompt(msg.content, msg.contentBlocks);
+  if (!msg.extra?.rich?.blocks?.length) return contextAwareContent;
   const digests = msg.extra.rich.blocks.map(digestRichBlock);
-  return `${msg.content}\n${digests.join(' ')}`;
+  return `${contextAwareContent}\n${digests.join(' ')}`;
+}
+
+function exactBodyMessageIds(messages: readonly StoredMessage[], truncateLimit: number): string[] {
+  return messages
+    .filter((message) => {
+      const persistedBody = digestRichBlocks(message);
+      const injectedBody = sanitizeInjectedContent(persistedBody);
+      return injectedBody === persistedBody && injectedBody.length <= truncateLimit;
+    })
+    .map((message) => message.id);
+}
+
+function exactBodyMessageIdsAfterToolScrub(
+  originalMessages: readonly StoredMessage[],
+  scrubbedMessages: readonly StoredMessage[],
+  truncateLimit: number,
+): string[] {
+  const originalContentById = new Map(originalMessages.map((message) => [message.id, message.content]));
+  return exactBodyMessageIds(
+    scrubbedMessages.filter((message) => originalContentById.get(message.id) === message.content),
+    truncateLimit,
+  );
+}
+
+/**
+ * Count a smart-window anchor as exact body exposure only when its projected
+ * model-facing body survived sanitization and truncation unchanged.
+ */
+function exactAnchorBodyMessageIds(
+  originalMessages: readonly StoredMessage[],
+  retainedAnchors: readonly ScoredMessage[],
+  truncateLimit: number,
+): string[] {
+  const originalById = new Map(originalMessages.map((message) => [message.id, message]));
+  return retainedAnchors
+    .filter(({ message }) => {
+      const original = originalById.get(message.id);
+      if (!original) return false;
+      const persistedBody = digestRichBlocks(original);
+      const injectedBody = sanitizeInjectedContent(persistedBody);
+      return message.content === injectedBody && injectedBody === persistedBody && injectedBody.length <= truncateLimit;
+    })
+    .map(({ message }) => message.id);
 }
 
 export async function fetchAfterCursor(
@@ -252,6 +1376,329 @@ export async function fetchAfterCursor(
   return messageStore.getByThreadAfter(threadId, afterId, undefined, userId);
 }
 
+/** Options for caller-specified budget overrides */
+export interface IncrementalContextOptions {
+  /** Pending wakes cap recovery only; they remain visible in the actual projection. */
+  resolvePendingWakeMessageIds?: (messageIds: readonly string[]) => Promise<readonly string[]>;
+  /**
+   * Invocation-owned history ceiling for the token-trim pass.
+   * The routing layer should calculate this as:
+   *   invocation input ceiling - fixed prompt tokens - guard
+   * so the assembled context + system parts never exceed the model's input limit.
+   */
+  effectiveMaxContextTokens?: number;
+  recentFilesTouched?: Array<{ path: string; ops: string[] }>;
+  canonicalFeatureId?: string;
+  threadTitle?: string;
+  /** Canonical workspace used to verify local artifact reachability. */
+  projectPath?: string;
+  /** Invocation wall-clock for stale-age rendering in prompt timestamps. */
+  nowMs?: number;
+  /** Route-scoped deferred boundary from an earlier invocation of this same cat. */
+  cursorOverlay?: string;
+  /** Outputs persisted earlier in this same serial route; keep first-pass reasoning independent. */
+  sameRouteOutputMessageIds?: ReadonlySet<string>;
+  /**
+   * User trigger that owns the active parallel wave. A sibling reply rooted in
+   * this trigger may be ignored for same-wave freshness, but that is not read
+   * evidence: defer it and keep the delivery boundary before it so a later
+   * directed turn can receive the body.
+   */
+  sameUserWaveTriggerMessageId?: string;
+  /** A directly addressed same-route A2A trigger remains visible despite that isolation. */
+  exactA2ATriggerMessageId?: string;
+  /**
+   * F296 B3b-1: provider/epoch-owned continuity decision. Production routes
+   * pass this only from InvocationParams.contextPromptFactory, after preflight.
+   */
+  contextProjection?: ContextModeProjection;
+}
+
+/** One mapper for every route surface consuming an epoch-owner decision. */
+export function contextProjectionFromEpochDecision(
+  decision: Parameters<typeof projectContextMode>[0]['decision'],
+  coordinate: Parameters<typeof projectContextMode>[0]['coordinate'],
+): ContextModeProjection {
+  return projectContextMode({ decision, coordinate });
+}
+
+function formatContextProjection(
+  projection: NonNullable<IncrementalContextOptions['contextProjection']>,
+  deltaSize: 'small' | 'large',
+): string {
+  return [
+    '[Context Continuity]',
+    JSON.stringify({
+      contextEpoch: projection.contextEpoch,
+      contextMode: projection.contextMode,
+      transition: projection.transition,
+      reason: projection.reason,
+      deltaSize,
+    }),
+    '[/Context Continuity]',
+  ].join('\n');
+}
+
+function projectSurfaceShape(
+  projection: ContextModeProjection | undefined,
+  deltaSize: 'small' | 'large',
+  presentations: Parameters<typeof countPresentedTiers>[0] = [],
+): Pick<IncrementalContextResult, 'surfaceProjection'> {
+  return projection
+    ? { surfaceProjection: withSurfaceShape(projection, deltaSize, countPresentedTiers(presentations)) }
+    : {};
+}
+
+function projectVisibleMessages(messages: readonly StoredMessage[]) {
+  return messages.map((message) =>
+    mapToPresentation({
+      subjectKey: `message:${message.id}`,
+      asOf: { kind: 'as_of' as const, value: message.timestamp },
+      sourceTier: 'T0' as const,
+      requested: 'state' as const,
+    }),
+  );
+}
+
+type IncrementalBoundaryCap = { active: false } | { active: true; boundary: CanonicalVisibilityCursor | undefined };
+
+interface SameRouteIsolationContext {
+  readonly laterUserTurnBoundary?: CanonicalVisibilityCursor;
+  readonly directedReplyMessageIds: ReadonlySet<string>;
+  readonly sameUserWaveTriggerMessageIds: ReadonlySet<string>;
+}
+
+function isSameRouteOutputWithheld(
+  message: StoredMessage,
+  playMode: boolean,
+  options: IncrementalContextOptions | undefined,
+  isolation: SameRouteIsolationContext,
+): boolean {
+  if (!playMode || !options?.sameRouteOutputMessageIds?.has(message.id)) return false;
+  if (message.id === options.exactA2ATriggerMessageId || isolation.directedReplyMessageIds.has(message.id))
+    return false;
+  if (isolation.laterUserTurnBoundary) {
+    try {
+      if (compareCursors(cursorFor(message), isolation.laterUserTurnBoundary) < 0) return false;
+    } catch {
+      // Unresolved ordering cannot widen visibility; keep the route-local output isolated.
+    }
+  }
+  return true;
+}
+
+function isSameUserWaveSiblingDeferred(
+  message: StoredMessage,
+  catId: CatId,
+  playMode: boolean,
+  options: IncrementalContextOptions | undefined,
+  isolation: SameRouteIsolationContext,
+): boolean {
+  if (!playMode || !options?.sameUserWaveTriggerMessageId || message.catId === null || message.catId === catId) {
+    return false;
+  }
+  return isSameUserWaveSiblingReply(message, {
+    catId,
+    coveredTriggerMessageIds: isolation.sameUserWaveTriggerMessageIds,
+  });
+}
+
+function incrementalDeferralReason(
+  message: StoredMessage,
+  catId: CatId,
+  playMode: boolean,
+  options: IncrementalContextOptions | undefined,
+  isolation: SameRouteIsolationContext,
+): Extract<IncrementalProjectionReason, 'same_route_output_isolation' | 'same_user_wave_sibling_deferred'> | undefined {
+  if (isSameRouteOutputWithheld(message, playMode, options, isolation)) return 'same_route_output_isolation';
+  if (isSameUserWaveSiblingDeferred(message, catId, playMode, options, isolation)) {
+    return 'same_user_wave_sibling_deferred';
+  }
+  return undefined;
+}
+
+function resolveIncrementalBoundaryCap(
+  unseen: StoredMessage[],
+  cursor: string | undefined,
+  catId: CatId,
+  playMode: boolean,
+  options: IncrementalContextOptions | undefined,
+  isolation: SameRouteIsolationContext,
+): IncrementalBoundaryCap {
+  const firstWithheldIndex = unseen.findIndex(
+    (message) => incrementalDeferralReason(message, catId, playMode, options, isolation) !== undefined,
+  );
+  if (firstWithheldIndex < 0) return { active: false };
+
+  const precedingCursor =
+    firstWithheldIndex === 0 ? cursor : cursorFor(unseen[firstWithheldIndex - 1] as StoredMessage);
+  return {
+    active: true,
+    boundary: canonicalDeferredBoundary(precedingCursor, 'incremental-withheld-predecessor'),
+  };
+}
+
+function resolveLaterUserTurnBoundary(
+  unseen: readonly StoredMessage[],
+  currentUserMessageId: string | undefined,
+  viewer: { type: 'cat'; catId: CatId } | { type: 'user' },
+): CanonicalVisibilityCursor | undefined {
+  if (!currentUserMessageId) return undefined;
+  const current = unseen.find((message) => message.id === currentUserMessageId);
+  if (
+    !current ||
+    current.catId !== null ||
+    current.userId === 'system' ||
+    current.origin === 'briefing' ||
+    current.deletedAt ||
+    current._tombstone ||
+    !isTimelinePublished(current) ||
+    !canViewMessage(current, viewer)
+  ) {
+    return undefined;
+  }
+  return canonicalDeferredBoundary(cursorFor(current), 'same-route-later-user-turn');
+}
+
+async function resolveDirectedSameRouteReplies(input: {
+  readonly deps: RouteStrategyDeps;
+  readonly unseen: readonly StoredMessage[];
+  readonly threadId: string;
+  readonly catId: CatId;
+  readonly playMode: boolean;
+  readonly sameRouteOutputMessageIds: ReadonlySet<string> | undefined;
+}): Promise<ReadonlySet<string>> {
+  if (!input.playMode || !input.sameRouteOutputMessageIds?.size) return new Set();
+  const visibleById = new Map(input.unseen.map((message) => [message.id, message]));
+  const directed = new Set<string>();
+  for (const message of input.unseen) {
+    if (!input.sameRouteOutputMessageIds.has(message.id)) continue;
+    const triggerMessageId = exactCausalReplyTrigger(message);
+    if (!triggerMessageId) continue;
+    const trigger = await readDirectedReplyTrigger(input, visibleById, message.id, triggerMessageId);
+    if (isVisibleTargetTrigger(trigger, input.threadId, input.catId)) directed.add(message.id);
+  }
+  return directed;
+}
+
+function exactCausalReplyTrigger(message: StoredMessage): string | undefined {
+  if (message.catId === null) return undefined;
+  const triggerMessageId = message.extra?.causal?.triggerMessageId;
+  return triggerMessageId && message.replyTo === triggerMessageId ? triggerMessageId : undefined;
+}
+
+async function readDirectedReplyTrigger(
+  input: {
+    readonly deps: RouteStrategyDeps;
+    readonly threadId: string;
+    readonly catId: CatId;
+  },
+  visibleById: ReadonlyMap<string, StoredMessage>,
+  messageRef: string,
+  triggerMessageId: string,
+): Promise<StoredMessage | null> {
+  const visible = visibleById.get(triggerMessageId);
+  if (visible) return visible;
+  try {
+    return await input.deps.messageStore.getById(triggerMessageId);
+  } catch (err) {
+    log.warn(
+      { err, threadId: input.threadId, catId: input.catId as string, messageRef, triggerMessageId },
+      '[F296] directed same-route reply source lookup failed; preserving isolation',
+    );
+    return null;
+  }
+}
+
+function isVisibleTargetTrigger(trigger: StoredMessage | null, threadId: string, catId: CatId): boolean {
+  return Boolean(
+    trigger &&
+      trigger.threadId === threadId &&
+      trigger.catId === catId &&
+      !trigger.deletedAt &&
+      !trigger._tombstone &&
+      isTimelinePublished(trigger),
+  );
+}
+
+function clampToIncrementalBoundaryCap(
+  candidate: CanonicalVisibilityCursor | undefined,
+  cap: IncrementalBoundaryCap,
+): CanonicalVisibilityCursor | undefined {
+  if (!cap.active) return candidate;
+  if (!candidate || !cap.boundary) return undefined;
+  return compareCursors(candidate, cap.boundary) > 0 ? cap.boundary : candidate;
+}
+
+async function resolveRecentFilesTouched(
+  deps: RouteStrategyDeps,
+  userId: string,
+  catId: CatId,
+  threadId: string,
+  options?: IncrementalContextOptions,
+): Promise<Array<{ path: string; ops: string[] }>> {
+  if (options?.recentFilesTouched) return options.recentFilesTouched;
+
+  const sessionChainStore = deps.invocationDeps.sessionChainStore;
+  const transcriptWriter = deps.invocationDeps.transcriptWriter;
+  if (!sessionChainStore || !transcriptWriter) return [];
+
+  try {
+    const activeSession = await Promise.resolve(sessionChainStore.getActive(catId, threadId, userId));
+    if (isHomeSession(activeSession) && activeSession.userId === userId) {
+      return await transcriptWriter.getFilesTouched(activeSession.id, { threadId, catId });
+    }
+
+    const threadSessions = await Promise.resolve(sessionChainStore.getChainByThread(threadId));
+    const callerSession = [...threadSessions]
+      .reverse()
+      .find(
+        (session) =>
+          isHomeSession(session) && session.status === 'active' && session.catId === catId && session.userId === userId,
+      );
+    if (!callerSession) return [];
+    return await transcriptWriter.getFilesTouched(callerSession.id, { threadId, catId: callerSession.catId });
+  } catch {
+    log.warn({ threadId, catId }, 'Optional recent file observations unavailable; preserving authoritative context');
+    return [];
+  }
+}
+
+interface ProjectionAuditCandidate {
+  readonly messageRef: string;
+  readonly filteredReason?: Exclude<IncrementalProjectionReason, 'projected' | 'smart_window_omitted' | 'token_budget'>;
+}
+
+interface ProjectionAuditCapture {
+  candidates: ProjectionAuditCandidate[];
+}
+
+const PROJECTION_AUDIT_SAMPLE_LIMIT = 16;
+
+function buildIncrementalProjectionAudit(
+  candidates: readonly ProjectionAuditCandidate[],
+  result: IncrementalContextResult,
+): IncrementalProjectionAudit {
+  const projected = new Set(result.projectedMessageIds);
+  const omittedReason: IncrementalProjectionReason =
+    result.degradation?.includes('token') || result.degradation?.includes('预算')
+      ? 'token_budget'
+      : 'smart_window_omitted';
+  const sampled: IncrementalProjectionAudit['messageRefs'] = candidates
+    .slice(-PROJECTION_AUDIT_SAMPLE_LIMIT)
+    .map((candidate) => ({
+      messageRef: candidate.messageRef,
+      reason: projected.has(candidate.messageRef) ? 'projected' : (candidate.filteredReason ?? omittedReason),
+    }));
+  return {
+    candidateCount: candidates.length,
+    sampledCount: sampled.length,
+    truncatedCount: Math.max(0, candidates.length - sampled.length),
+    messageRefs: sampled,
+  };
+}
+
+/* @segment N2 — 对话历史增量 */
 export async function assembleIncrementalContext(
   deps: RouteStrategyDeps,
   userId: string,
@@ -259,28 +1706,183 @@ export async function assembleIncrementalContext(
   catId: CatId,
   currentUserMessageId?: string,
   thinkingMode?: 'debug' | 'play',
+  options?: IncrementalContextOptions,
+): Promise<IncrementalContextResult> {
+  const auditCapture: ProjectionAuditCapture = { candidates: [] };
+  const result = await assembleIncrementalContextInternal(
+    deps,
+    userId,
+    threadId,
+    catId,
+    currentUserMessageId,
+    thinkingMode,
+    options,
+    auditCapture,
+  );
+  const projectionAudit = buildIncrementalProjectionAudit(auditCapture.candidates, result);
+  log.info(
+    {
+      f148: 'projection-audit',
+      threadId,
+      catId,
+      candidateCount: projectionAudit.candidateCount,
+      sampledCount: projectionAudit.sampledCount,
+      truncatedCount: projectionAudit.truncatedCount,
+      messageRefs: projectionAudit.messageRefs,
+      boundaryRef: result.boundaryId ?? null,
+    },
+    '[F153] bounded content-free incremental projection audit',
+  );
+  return { ...result, projectionAudit };
+}
+
+async function assembleIncrementalContextInternal(
+  deps: RouteStrategyDeps,
+  userId: string,
+  threadId: string,
+  catId: CatId,
+  currentUserMessageId: string | undefined,
+  thinkingMode: 'debug' | 'play' | undefined,
+  options: IncrementalContextOptions | undefined,
+  auditCapture: ProjectionAuditCapture,
 ): Promise<IncrementalContextResult> {
   if (!deps.deliveryCursorStore) {
-    return { contextText: '', includesCurrentUserMessage: false, currentMessageFilteredOut: false };
+    return {
+      contextText: '',
+      projectedMessageIds: [],
+      exposedMessageIds: [],
+      includesCurrentUserMessage: false,
+      currentMessageFilteredOut: false,
+    };
   }
 
-  const cursor = await deps.deliveryCursorStore.getCursor(userId, catId, threadId);
-  const unseen = await fetchAfterCursor(deps.messageStore, threadId, cursor, userId);
+  const durableCursor = await deps.deliveryCursorStore.getCursor(userId, catId, threadId);
+  const overlayCursor = options?.cursorOverlay;
+  if (overlayCursor) {
+    assertCanonicalVisibilityCursor(overlayCursor, 'incremental-context:cursor-overlay');
+  }
+  let cursor = durableCursor;
+  if (overlayCursor) {
+    if (!durableCursor) {
+      cursor = overlayCursor;
+    } else {
+      try {
+        assertCanonicalVisibilityCursor(durableCursor, 'incremental-context:durable-read');
+        cursor = compareCursors(overlayCursor, durableCursor) > 0 ? overlayCursor : durableCursor;
+      } catch (err) {
+        // The overlay was produced after reading this durable slot earlier in
+        // the same route. If a legacy/raw durable value cannot be compared in
+        // the canonical domain, prefer the proven in-flight boundary; replay
+        // remains at-least-once after a crash because the overlay is ephemeral.
+        log.warn(
+          { err, catId: catId as string, threadId },
+          'Using canonical cursor overlay over unresolved durable read',
+        );
+        cursor = overlayCursor;
+      }
+    }
+  }
+  const fetchedUnseen = await fetchAfterCursor(deps.messageStore, threadId, cursor, userId);
+  // Public speech stays in the unread projection. Queue coverage is committed
+  // for the exact fully projected IDs before the provider sees this prompt.
+  const loadedUnseen = fetchedUnseen;
+  const pendingWakes = new Set(
+    await options?.resolvePendingWakeMessageIds?.(fetchedUnseen.map((message) => message.id)),
+  );
+  const firstPending = fetchedUnseen.findIndex((message) => pendingWakes.has(message.id));
+  const recoveryPrefix = firstPending < 0 ? fetchedUnseen : fetchedUnseen.slice(0, firstPending);
+  const deliveryRecovery = recoverableDeliveryBoundary(recoveryPrefix, { userId, threadId, catId });
+  let unreadCandidates = fetchedUnseen;
+  if (deliveryRecovery.cursor && (!cursor || compareCursors(deliveryRecovery.cursor, cursor) > 0)) {
+    try {
+      await deps.deliveryCursorStore.ackCursor(userId, catId, threadId, deliveryRecovery.cursor);
+      // ackCursor owns concurrent monotonicity; this proven prefix is safe even
+      // when another reader has already advanced the durable slot further.
+      cursor = deliveryRecovery.cursor;
+      const recoveredCursor = cursor;
+      unreadCandidates = fetchedUnseen.filter(
+        (message) => message.visibilitySeq === undefined || compareCursors(cursorFor(message), recoveredCursor) > 0,
+      );
+    } catch (err) {
+      log.warn({ err, catId, threadId }, 'Delivery boundary recovery failed; retaining unread context');
+    }
+  }
+  const unseen = unreadCandidates;
 
   // Debug mode: cats see all whispers (full transparency). Play mode: cats only see their own whispers.
-  const viewer = (thinkingMode ?? 'play') === 'play' ? { type: 'cat' as const, catId } : { type: 'user' as const };
+  const playMode = thinkingMode !== 'debug';
+  const viewer = playMode ? { type: 'cat' as const, catId } : { type: 'user' as const };
+  const sameRouteIsolation: SameRouteIsolationContext = {
+    laterUserTurnBoundary: resolveLaterUserTurnBoundary(unseen, currentUserMessageId, viewer),
+    sameUserWaveTriggerMessageIds: options?.sameUserWaveTriggerMessageId
+      ? new Set([options.sameUserWaveTriggerMessageId])
+      : new Set(),
+    directedReplyMessageIds: await resolveDirectedSameRouteReplies({
+      deps,
+      unseen,
+      threadId,
+      catId,
+      playMode,
+      sameRouteOutputMessageIds: options?.sameRouteOutputMessageIds,
+    }),
+  };
+  const incrementalBoundaryCap = resolveIncrementalBoundaryCap(
+    unreadCandidates,
+    cursor,
+    catId,
+    playMode,
+    options,
+    sameRouteIsolation,
+  );
+  const filteredReasons = new Map<string, ProjectionAuditCandidate['filteredReason']>();
   const relevant = unseen.filter((m) => {
+    // Only typed Host business receipts extend canonical system-message eligibility.
+    if (messageFrom(m).kind === 'system' && isDisplayOnlySystemMessage(m) && !isAgentReadableManagedHoldMessage(m)) {
+      filteredReasons.set(m.id, 'system_display_only');
+      return false;
+    }
+    // F148 Phase E: briefing messages are non-routing — never enter incremental context (AC-E2)
+    if (m.origin === 'briefing') {
+      filteredReasons.set(m.id, 'briefing');
+      return false;
+    }
+    const deferralReason = incrementalDeferralReason(m, catId, playMode, options, sameRouteIsolation);
+    if (deferralReason) {
+      filteredReasons.set(m.id, deferralReason);
+      return false;
+    }
     // F35: Exclude whispers not intended for this cat (play mode only)
-    if (!canViewMessage(m, viewer)) return false;
-    // Exclude own messages (only include user messages and other cats' messages)
-    // F052 fix: exempt cross-posted messages — same catId from another thread must be visible
-    if (!m.extra?.crossPost && m.catId !== null && m.catId === catId) return false;
-    // In play mode, hide other cats' stream (thinking) messages.
-    // Legacy messages (no origin) are visible for backward compatibility —
-    // all new writes are tagged, so untagged = legacy callback data.
-    if ((thinkingMode ?? 'play') === 'play' && m.catId !== null && m.origin === 'stream') return false;
+    if (!canViewMessage(m, viewer)) {
+      filteredReasons.set(m.id, 'visibility');
+      return false;
+    }
+    // Exclude own messages (only include user messages and other cats' messages).
+    // F052: only distinct source/target provenance earns the same-cat cross-post exemption.
+    const isActualCrossPost = isCrossThreadProvenance(m.extra?.crossPost?.sourceThreadId, m.threadId);
+    const from = messageFrom(m);
+    const authorCatId = from.kind === 'agent' ? from.catId : null;
+    // Native provider memory cannot be trusted to retain a turn that ended
+    // before producing content. Preserve only the durable empty terminal
+    // marker so the next invocation can distinguish interrupted/failed/stopped
+    // work; ordinary own output remains excluded to avoid replaying it.
+    if (!isActualCrossPost && authorCatId !== null && authorCatId === catId && !isEmptyTerminalLifecycleResponse(m)) {
+      filteredReasons.set(m.id, 'self_output');
+      return false;
+    }
+    // `origin` describes the transport that persisted a message, not whether its
+    // visible body is private thinking. Persisted unread speech therefore follows
+    // the same visibility contract for user and cat authors.
     return true;
   });
+  auditCapture.candidates = unseen.map((message) => ({
+    messageRef: message.id,
+    ...(filteredReasons.get(message.id) ? { filteredReason: filteredReasons.get(message.id) } : {}),
+  }));
+
+  // An explicit zero means fixed prompt parts exhausted the invocation budget.
+  // An absent override identifies an unbound direct consumer and uses the
+  // conservative unresolved history guard without fabricating model capacity.
+  const effectiveTokenBudget = options?.effectiveMaxContextTokens ?? resolveUnboundHistoryContextTokenCeiling();
 
   // F35 fix: detect when the current message was present but filtered out by visibility
   // (e.g. whisper not intended for this cat). Must NOT fallback-inject in that case.
@@ -291,54 +1893,323 @@ export async function assembleIncrementalContext(
       unseen.some((m) => m.id === currentUserMessageId),
   );
 
-  // GAP-1: Unconditional budget cap — protects both first-time cats (cursor=undefined)
-  // and stale cursor scenarios where large unseen batches accumulate.
-  const budget = getCatContextBudget(catId as string);
-  const wasCapped = relevant.length > budget.maxMessages;
-  const capped = wasCapped ? relevant.slice(-budget.maxMessages) : relevant;
+  // F148 Phase F (KD-7): Navigation context — injected on ALL paths (cold + warm)
+  // P1 fix: extract baton from unseen (pre-stream-filter) so cat→cat @ mentions via stream are visible
+  const unseenIds = new Set(unseen.map((message) => message.id));
+  const batonCandidates = loadedUnseen.filter(
+    (m) =>
+      (m.id === currentUserMessageId || (unseenIds.has(m.id) && !deliveryRecovery.answeredSourceIds.has(m.id))) &&
+      messageFrom(m).kind !== 'system' &&
+      m.origin !== 'briefing' &&
+      canViewMessage(m, viewer),
+  );
+  let baton = extractBatonContext(batonCandidates, catId);
+  if (
+    baton &&
+    (await legacyBatonHasSucceededReply({
+      messages: loadedUnseen,
+      sourceMessageId: baton.fromMessageId,
+      explicitSourceMessageId: currentUserMessageId,
+      target: { userId, threadId, catId },
+      turnExecutionStore: deps.invocationDeps.turnExecutionStore,
+    }))
+  ) {
+    baton = null;
+  }
+  // The current direct request is already rendered verbatim in the delta. It
+  // is not a prior handoff and repeating it as co-creator→cat navigation adds
+  // duplicate instructions. Keep genuine cat handoffs and older provenance.
+  if (baton?.fromSpeaker === 'user' && baton.fromMessageId === currentUserMessageId) baton = null;
+  let activeTasks: import('./navigation-context.js').TaskSummary[] = [];
+  let allThreadTasks: import('./artifact-tracking.js').ArtifactExtractionInput['prTasks'] = [];
+  if (deps.taskStore) {
+    try {
+      const tasks = await Promise.resolve(deps.taskStore.listByThread(threadId));
+      activeTasks = summarizeActiveTasks(tasks);
+      allThreadTasks = tasks;
+      if (deps.ownedWaitStatusReader) {
+        try {
+          const hasActiveWait = await deps.ownedWaitStatusReader({ userId, threadId, catId }, tasks);
+          if (hasActiveWait !== undefined) {
+            const ownedIds = new Set(
+              tasks
+                .filter(
+                  (task) =>
+                    task.kind === 'work' &&
+                    task.userId === userId &&
+                    task.threadId === threadId &&
+                    task.ownerCatId === catId,
+                )
+                .map((task) => task.id),
+            );
+            activeTasks = activeTasks.map((task) => (ownedIds.has(task.id) ? { ...task, hasActiveWait } : task));
+          }
+        } catch {
+          // Unknown wait state must not erase the existing Task/navigation context.
+        }
+      }
+    } catch {
+      // fail-open: tasks stay empty
+    }
+  }
+
+  const recentFilesTouched = await resolveRecentFilesTouched(deps, userId, catId, threadId, options);
+
+  const recentArtifacts = extractRecentArtifacts({
+    filesTouched: recentFilesTouched,
+    prTasks: allThreadTasks,
+    catId,
+  });
+
+  // G1→G2 bridge: read stored ledger from threadMemory to merge with current-invocation artifacts
+  let storedLedgerArtifacts: import('./artifact-tracking.js').RecentArtifact[] = [];
+  const threadStore = deps.invocationDeps.threadStore;
+  if (threadStore && !options?.contextProjection) {
+    try {
+      const mem = await Promise.resolve(threadStore.getThreadMemory(threadId));
+      if (mem && Array.isArray(mem.recentArtifacts) && mem.recentArtifacts.length > 0) {
+        storedLedgerArtifacts = mem.recentArtifacts as import('./artifact-tracking.js').RecentArtifact[];
+      }
+    } catch {
+      // fail-open: ranking degrades to current-invocation only
+    }
+  }
+  const mergedLedger = mergeLedger(storedLedgerArtifacts, recentArtifacts);
+  const reachableArtifactRefs = await resolveReachableArtifactRefs(options?.projectPath, mergedLedger);
+
+  const rankedSources = rankArtifactSources(
+    mergedLedger,
+    allThreadTasks.map((t) => ({ kind: t.kind, subjectKey: t.subjectKey ?? null, title: t.title, status: t.status })),
+    {
+      canonicalFeatureId: options?.canonicalFeatureId,
+      threadTitle: options?.threadTitle,
+      reachableArtifactRefs,
+    },
+  );
+  const topSource = selectDirectiveSources(rankedSources)[0] ?? null;
+  const bestNextSource = topSource ? `先看 ${topSource.label}: ${topSource.ref}` : undefined;
+  let executionSituation: import('../invocation/thread-execution-situation.js').ThreadExecutionSituation | undefined;
+  if (deps.threadExecutionSituationSource) {
+    try {
+      executionSituation = await deps.threadExecutionSituationSource.resolve(threadId);
+    } catch {
+      executionSituation = {
+        kind: 'thread_execution_situation.v1',
+        complete: false,
+        activeRuns: [],
+      };
+    }
+  }
+  const roadmap =
+    threadStore && options?.contextProjection?.contextMode !== 'hot'
+      ? await readNavigationRoadmap(threadStore, userId, threadId)
+      : undefined;
+  const navigationHeader = formatNavigationHeader({
+    threadId,
+    currentCatId: catId,
+    recentWorkDirectory: Boolean(threadStore) && options?.contextProjection?.contextMode !== 'hot',
+    ...(roadmap ? { roadmapPointer: formatRoadmapPointer(roadmap) } : {}),
+    baton,
+    tasks: activeTasks,
+    ...(executionSituation ? { executionSituation } : {}),
+    // Epoch-owned packets admit only a validated truth source. A recency-only
+    // artifact list is not canonical state and must wait for the B3b mapper.
+    artifacts: options?.contextProjection ? [] : recentArtifacts,
+    truthSource: topSource ? { label: topSource.label, ref: topSource.ref, provenance: topSource.provenance } : null,
+    bestNextSource,
+  });
+
+  log.info({
+    f148: 'navigation-header',
+    threadId,
+    catId,
+    hasBaton: baton !== null,
+    batonFrom: baton?.fromSpeakerDisplay ?? null,
+    taskCount: activeTasks.length,
+    artifactCount: recentArtifacts.length,
+    headerLength: navigationHeader.length,
+    unseenCount: unseen.length,
+    batonCandidateCount: batonCandidates.length,
+  });
+
+  // F296: unread volume owns only delta shaping. It cannot prove whether the
+  // provider still holds working memory.
+  // P1-review: short-circuit on count first — avoid O(n) tokenize when count already triggers
+  const hcConfig = DEFAULT_HIERARCHICAL_CONTEXT;
+  const countTrigger = relevant.length > hcConfig.coldMentionThreshold;
+  // Gap-1: only estimate tokens when count doesn't trigger (the "few but fat" path)
+  const tokenTrigger =
+    !countTrigger &&
+    relevant.reduce((sum, m) => sum + estimateTokens(m.content), 0) > hcConfig.coldMentionTokenThreshold;
+  const deltaSize: 'small' | 'large' = countTrigger || tokenTrigger ? 'large' : 'small';
+  const contextMode = options?.contextProjection?.contextMode;
+  const projectionOutput = projectSurfaceShape(options?.contextProjection, deltaSize);
+
+  // F148 OQ-3 telemetry: warm/cold path decision
+  log.info({
+    f148: 'path-decision',
+    threadId,
+    catId,
+    messageCount: relevant.length,
+    contextMode: contextMode ?? 'legacy',
+    deltaSize,
+    trigger: countTrigger ? 'count' : tokenTrigger ? 'token' : 'none',
+    thresholds: { count: hcConfig.coldMentionThreshold, token: hcConfig.coldMentionTokenThreshold },
+  });
+
+  if (contextMode === 'cold' || deltaSize === 'large') {
+    const shaped = await assembleSmartWindowContext(
+      deps,
+      relevant,
+      catId,
+      threadId,
+      currentUserMessageId,
+      currentMessageFilteredOut,
+      hcConfig,
+      cursor,
+      options,
+      effectiveTokenBudget,
+      navigationHeader,
+      baton,
+      activeTasks,
+      recentArtifacts,
+      rankedSources,
+      storedLedgerArtifacts,
+      viewer,
+      incrementalBoundaryCap,
+      contextMode ?? 'cold',
+      deltaSize,
+    );
+    return shaped;
+  }
+
+  // --- Warm path: existing behavior unchanged ---
+
+  // Smart Window owns message selection; invocation capacity owns token trimming.
+  const capped = relevant;
 
   // Metadata must be based on the FINAL capped set, not pre-cap `relevant`
   const includesCurrentUserMessage = Boolean(currentUserMessageId && capped.some((m) => m.id === currentUserMessageId));
 
   if (capped.length === 0) {
     return cursor
-      ? { contextText: '', boundaryId: cursor, includesCurrentUserMessage, currentMessageFilteredOut }
-      : { contextText: '', includesCurrentUserMessage, currentMessageFilteredOut };
+      ? {
+          ...projectionOutput,
+          contextText: options?.contextProjection
+            ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+            : navigationHeader,
+          boundaryId: clampToIncrementalBoundaryCap(
+            canonicalDeferredBoundary(cursor, 'warm-empty-cursor'),
+            incrementalBoundaryCap,
+          ),
+          projectedMessageIds: [],
+          exposedMessageIds: [],
+          includesCurrentUserMessage,
+          currentMessageFilteredOut,
+          navigationHeader,
+        }
+      : {
+          ...projectionOutput,
+          contextText: options?.contextProjection
+            ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+            : navigationHeader,
+          projectedMessageIds: [],
+          exposedMessageIds: [],
+          includesCurrentUserMessage,
+          currentMessageFilteredOut,
+          navigationHeader,
+        };
   }
 
-  const truncateLimit = budget.maxContentLengthPerMsg;
+  const truncateLimit = PROMPT_MESSAGE_SAFETY_CHAR_LIMIT;
+  // #699: Build map from full relevant set for inline reply-to preview.
+  // Cursor gap fix: messages replying to older content (before cursor) need
+  // a targeted fetch so the inline preview can resolve the parent.
+  // Uses resolveVisibleReplyParent — atomic fetch + visibility gate.
+  const replyParentOpts = {
+    threadId,
+    viewer,
+  };
+  const baseMap = new Map(buildMessageMap(relevant));
+  const missingReplyIds = [
+    ...new Set(capped.filter((m) => m.replyTo && !baseMap.has(m.replyTo)).map((m) => m.replyTo!)),
+  ];
+  if (missingReplyIds.length > 0) {
+    const resolved = await Promise.all(
+      missingReplyIds.map((id) => resolveVisibleReplyParent(deps.messageStore, id, replyParentOpts)),
+    );
+    for (const msg of resolved) {
+      if (msg) baseMap.set(msg.id, msg);
+    }
+  }
+  const messageMap: ReadonlyMap<string, StoredMessage> = baseMap;
+  // Stale-age formatTime callback: appends "Xh Ym ago" for cross-date or ≥6h-stale messages.
+  // Compare dates in co-creator timezone to avoid false cross-date triggers around midnight UTC.
+  const staleFormatTime = options?.nowMs
+    ? (epochMs: number) =>
+        formatPromptTime(epochMs, {
+          nowMs: options.nowMs,
+          includeAge: 'stale',
+          staleComparisonTimeZone: CO_CREATOR_TIME_ZONE,
+        })
+    : undefined;
   const lines = capped.map((m) => {
     // F22: Digest rich blocks into compact summaries for context
-    const contentWithDigest = digestRichBlocks(m);
+    const contentWithDigest = projectLifecycleResponsePromptContent(m, digestRichBlocks(m));
     const cleanContent = sanitizeInjectedContent(contentWithDigest);
     const normalized: StoredMessage = cleanContent === m.content ? m : { ...m, content: cleanContent };
-    const rendered = formatMessage(normalized, { truncate: truncateLimit });
+    const rendered = formatMessage(normalized, {
+      truncate: truncateLimit,
+      messageMap,
+      sanitizeContent: sanitizeInjectedContent,
+      ...(staleFormatTime ? { formatTime: staleFormatTime } : {}),
+    });
     return `[${m.id}] ${rendered}`;
   });
 
-  // 第二刀: Aggregate token budget — trim oldest lines until within maxContextTokens
+  // 第二刀: Aggregate token budget — trim oldest lines until within effective token limit.
+  // The routing layer passes the history share of the invocation-owned input ceiling.
+  // to prevent the assembled context + system prompt from exceeding the model's input limit.
+  if (effectiveTokenBudget <= 0) {
+    const zeroBudgetDegradation = `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算，${capped.length} 条未读消息全部丢弃`;
+    // #1200/#3444: only canonical evidence may enter the deferred ACK slot.
+    const zeroLastMsg = capped[capped.length - 1];
+    const zeroBoundaryId = clampToIncrementalBoundaryCap(
+      canonicalDeferredBoundary(zeroLastMsg ? cursorFor(zeroLastMsg) : undefined, 'warm-zero-budget-tail'),
+      incrementalBoundaryCap,
+    );
+    return {
+      ...projectionOutput,
+      contextText: options?.contextProjection
+        ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+        : navigationHeader,
+      boundaryId: zeroBoundaryId,
+      projectedMessageIds: [],
+      exposedMessageIds: [],
+      includesCurrentUserMessage: false,
+      currentMessageFilteredOut,
+      degradation: zeroBudgetDegradation,
+      navigationHeader,
+    };
+  }
+
   let tokenTrimmed = false;
   let tokenTrimStart = 0;
-  if (budget.maxContextTokens > 0) {
+  if (effectiveTokenBudget > 0) {
     const perLineTokens = lines.map((l) => estimateTokens(l));
     const totalTokens = perLineTokens.reduce((a, b) => a + b, 0);
-    if (totalTokens > budget.maxContextTokens) {
+    if (totalTokens > effectiveTokenBudget) {
       tokenTrimmed = true;
       // Scan from oldest: accumulate tokens to drop until remainder fits budget
       let dropTokens = 0;
       for (let i = 0; i < perLineTokens.length - 1; i++) {
         dropTokens += perLineTokens[i];
-        if (totalTokens - dropTokens <= budget.maxContextTokens) {
+        if (totalTokens - dropTokens <= effectiveTokenBudget) {
           tokenTrimStart = i + 1;
           break;
         }
       }
-      if (totalTokens - dropTokens > budget.maxContextTokens) {
-        // Even after dropping all but one message, the last message alone may exceed
-        // maxContextTokens (e.g. a single huge message). We still keep it because
-        // returning empty context is worse — the cat gets no context at all. The
-        // degradation notice below will flag this situation so the cat knows the
-        // context was force-trimmed.
+      if (totalTokens - dropTokens > effectiveTokenBudget) {
         tokenTrimStart = perLineTokens.length - 1;
       }
     }
@@ -354,25 +2225,549 @@ export async function assembleIncrementalContext(
 
   if (finalCapped.length === 0) {
     return cursor
-      ? { contextText: '', boundaryId: cursor, includesCurrentUserMessage: false, currentMessageFilteredOut }
-      : { contextText: '', includesCurrentUserMessage: false, currentMessageFilteredOut };
+      ? {
+          ...projectionOutput,
+          contextText: options?.contextProjection
+            ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+            : navigationHeader,
+          boundaryId: clampToIncrementalBoundaryCap(
+            canonicalDeferredBoundary(cursor, 'warm-trimmed-empty-cursor'),
+            incrementalBoundaryCap,
+          ),
+          projectedMessageIds: [],
+          exposedMessageIds: [],
+          includesCurrentUserMessage: false,
+          currentMessageFilteredOut,
+          navigationHeader,
+        }
+      : {
+          ...projectionOutput,
+          contextText: options?.contextProjection
+            ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+            : navigationHeader,
+          projectedMessageIds: [],
+          exposedMessageIds: [],
+          includesCurrentUserMessage: false,
+          currentMessageFilteredOut,
+          navigationHeader,
+        };
   }
 
   let degradation: string | undefined;
-  if (wasCapped && tokenTrimmed) {
-    degradation = `⚠️ 增量上下文已截断: 未读消息 ${relevant.length} 条经 maxMessages(${budget.maxMessages}) 和 token 预算(${budget.maxContextTokens}) 双重截断，已保留最近 ${finalCapped.length} 条`;
-  } else if (wasCapped) {
-    degradation = `⚠️ 增量上下文已截断: 未读消息 ${relevant.length} 条超出预算 ${budget.maxMessages}，已保留最近 ${finalCapped.length} 条`;
-  } else if (tokenTrimmed) {
-    degradation = `⚠️ 增量上下文 token 预算截断: ${capped.length} 条消息超出 token 预算(${budget.maxContextTokens})，已保留最近 ${finalCapped.length} 条`;
+  if (tokenTrimmed) {
+    degradation = `⚠️ 增量上下文 token 预算截断: ${capped.length} 条消息超出 token 预算(${effectiveTokenBudget})，已保留最近 ${finalCapped.length} 条`;
   }
 
-  const boundaryId = finalCapped[finalCapped.length - 1]?.id;
+  // #1200/#3444: cursorFor remains graded for general consumers; this producer
+  // admits only the canonical branch into deferred delivery state.
+  const lastCappedMsg = finalCapped[finalCapped.length - 1];
+  const boundaryId = clampToIncrementalBoundaryCap(
+    canonicalDeferredBoundary(lastCappedMsg ? cursorFor(lastCappedMsg) : undefined, 'warm-visible-tail'),
+    incrementalBoundaryCap,
+  );
   return {
-    contextText: `[对话历史增量 - 未发送过 ${finalCapped.length} 条]\n${finalLines.join('\n')}\n[/对话历史]`,
+    ...projectionOutput,
+    ...projectSurfaceShape(options?.contextProjection, deltaSize, projectVisibleMessages(finalCapped)),
+    contextText: [
+      ...(options?.contextProjection ? [formatContextProjection(options.contextProjection, deltaSize)] : []),
+      navigationHeader,
+      `[对话历史增量 - 未发送过 ${finalCapped.length} 条]\n${finalLines.join('\n')}\n[/对话历史]`,
+    ].join('\n'),
     boundaryId,
+    projectedMessageIds: finalCapped.map((message) => message.id),
+    exposedMessageIds: exactBodyMessageIds(finalCapped, truncateLimit),
     includesCurrentUserMessage: finalIncludesCurrentUserMessage,
     currentMessageFilteredOut,
     degradation,
+    navigationHeader,
   };
+}
+
+/**
+ * F148: Smart window path for cold-mention context assembly.
+ * Burst detection → tombstone → evidence recall → tool scrub → compact context.
+ */
+async function assembleSmartWindowContext(
+  deps: RouteStrategyDeps,
+  relevant: StoredMessage[],
+  catId: CatId,
+  threadId: string,
+  currentUserMessageId: string | undefined,
+  currentMessageFilteredOut: boolean,
+  hcConfig: import('../../../../../config/hierarchical-context-config.js').HierarchicalContextConfig,
+  _cursor: string | undefined,
+  options: IncrementalContextOptions | undefined,
+  effectiveTokenBudget: number,
+  navigationHeader: string,
+  baton: import('./navigation-context.js').BatonContext | null,
+  activeTasks: import('./navigation-context.js').TaskSummary[],
+  recentArtifacts: import('./artifact-tracking.js').RecentArtifact[],
+  rankedSources: import('./source-ranking.js').RankedSource[],
+  preReadStoredArtifacts: import('./artifact-tracking.js').RecentArtifact[],
+  viewer: { type: 'cat'; catId: CatId } | { type: 'user' },
+  incrementalBoundaryCap: IncrementalBoundaryCap,
+  contextMode: 'cold' | 'hot',
+  deltaSize: 'small' | 'large',
+): Promise<IncrementalContextResult> {
+  const truncateLimit = PROMPT_MESSAGE_SAFETY_CHAR_LIMIT;
+  const hasEpochProjection = options?.contextProjection !== undefined;
+  const isCanonicalCold = hasEpochProjection && contextMode === 'cold';
+  const usesLegacyRecall = !hasEpochProjection;
+
+  // 1. Burst detection
+  const { burst, omitted } = detectRecentBurst(relevant, hcConfig);
+
+  // F148 OQ-1 telemetry: burst detection stats
+  const actualGapMs =
+    burst.length > 0 && omitted.length > 0 ? burst[0].timestamp - omitted[omitted.length - 1].timestamp : null;
+  log.info({
+    f148: 'burst-stats',
+    threadId,
+    catId,
+    totalMessages: relevant.length,
+    burstCount: burst.length,
+    omittedCount: omitted.length,
+    actualGapMs,
+    configuredGapMs: hcConfig.burstSilenceGapMs,
+  });
+
+  // 2. Thread title for tombstone + evidence (fail-open like recallEvidence)
+  const threadStore = deps.invocationDeps.threadStore;
+  let threadTitle = '';
+  if ((isCanonicalCold || usesLegacyRecall) && threadStore) {
+    try {
+      threadTitle = (await Promise.resolve(threadStore.get(threadId)))?.title ?? '';
+    } catch {
+      // fail-open: threadTitle stays empty, tombstone/evidence degrade gracefully
+    }
+  }
+
+  // 3. Sanitize omitted content once (before tombstone keyword extraction + anchor formatting)
+  const sanitizedOmitted = omitted.map((m) => ({
+    ...m,
+    content: sanitizeInjectedContent(m.content),
+  }));
+
+  // 3.1 Tombstone (uses sanitized content for keyword extraction)
+  const tombstone = buildTombstone(sanitizedOmitted, threadTitle, hcConfig, threadId);
+  const tombstoneText = tombstone ? formatTombstone(tombstone) : '';
+
+  // 3.5 Phase C: Anchor extraction from omitted messages
+  // F263: strip structural envelope before slicing to ensure semantic content is captured
+  const currentMsgText = currentUserMessageId
+    ? stripStructuralEnvelope(burst.find((m) => m.id === currentUserMessageId)?.content ?? '').slice(0, 200)
+    : '';
+  const compositeQueryTerms = [threadTitle, currentMsgText]
+    .concat(
+      burst
+        .filter((m) => messageFrom(m).kind === 'user')
+        .slice(-2)
+        .map((m) => stripStructuralEnvelope(m.content).slice(0, 200)),
+    )
+    .join(' ')
+    .toLowerCase()
+    .split(/[^a-zA-Z0-9\u4e00-\u9fff]+/)
+    .filter((w) => w.length >= 3);
+  const anchors = selectAnchors(sanitizedOmitted, compositeQueryTerms, hcConfig.maxAnchors);
+  const omittedById = new Map(omitted.map((message) => [message.id, message]));
+  const eligibleAnchors = isCanonicalCold ? [] : anchors;
+  const promptAnchors = eligibleAnchors.map((anchor) => {
+    const original = omittedById.get(anchor.message.id);
+    if (!original) return anchor;
+    return {
+      ...anchor,
+      message: {
+        ...anchor.message,
+        content: sanitizeInjectedContent(digestRichBlocks(original)),
+      },
+    };
+  });
+  const anchorLines = formatAnchors(promptAnchors, truncateLimit);
+
+  // 3.7 Phase D: Fetch thread memory (fail-open)
+  let threadMemorySummary = '';
+  const storedFileArtifacts = preReadStoredArtifacts;
+  let threadMemoryMeta: {
+    available: boolean;
+    sessionsIncorporated: number;
+    decisions?: string[];
+    decisionRefs?: import('../../stores/ports/ThreadStore.js').ThreadMemorySourceRef[];
+  } | null = null;
+  if (usesLegacyRecall && threadStore) {
+    try {
+      const mem = await Promise.resolve(threadStore.getThreadMemory(threadId));
+      if (mem) {
+        let summary = sanitizeInjectedContent(mem.summary);
+        // Trim to maxThreadMemoryTokens by dropping oldest lines
+        const lines = summary.split('\n');
+        while (lines.length > 1 && estimateTokens(lines.join('\n')) > hcConfig.maxThreadMemoryTokens) {
+          lines.shift();
+        }
+        summary = lines.join('\n');
+        // Hard-cap: if remaining text still exceeds budget, binary-search truncate by tokens
+        if (estimateTokens(summary) > hcConfig.maxThreadMemoryTokens) {
+          let lo = 0;
+          let hi = summary.length;
+          while (lo < hi) {
+            const mid = (lo + hi + 1) >>> 1;
+            if (estimateTokens(summary.slice(0, mid)) <= hcConfig.maxThreadMemoryTokens) lo = mid;
+            else hi = mid - 1;
+          }
+          summary = `${summary.slice(0, lo)}…`;
+        }
+        threadMemorySummary = summary;
+        // storedFileArtifacts already pre-read via preReadStoredArtifacts (G1→G2 bridge)
+        threadMemoryMeta = {
+          available: true,
+          sessionsIncorporated: mem.sessionsIncorporated,
+          ...(Array.isArray(mem.decisions) && mem.decisions.length ? { decisions: mem.decisions } : {}),
+          ...(Array.isArray(mem.decisionRefs) && mem.decisionRefs.length ? { decisionRefs: mem.decisionRefs } : {}),
+          // F296 AC-A2: mem.openQuestions stays in the store but never enters the
+          // model-facing projection — it has no lifecycle state and no invalidator.
+        };
+      }
+    } catch {
+      // fail-open: threadMemory stays empty
+    }
+  }
+
+  // 3.8 Evidence recall (fail-open) — must run before coverage map so hints are populated
+  const currentMsg = currentUserMessageId ? burst.find((m) => m.id === currentUserMessageId) : undefined;
+  const nonSystemRecent = burst.filter((m) => messageFrom(m).kind === 'user').slice(-2);
+  const recalledEvidence = usesLegacyRecall
+    ? await recallEvidenceWithProvenance(
+        deps.evidenceStore,
+        threadTitle,
+        currentMsg?.content ?? '',
+        nonSystemRecent,
+        hcConfig,
+      )
+    : { query: '', candidates: [] };
+  // F296 AC-A1: recall is presented as a content-free pointer, never as
+  // candidate titles/snippets. The candidates themselves stay in the F263 trace.
+  const recallCandidates = recalledEvidence.candidates;
+  const recallPointerText =
+    recallCandidates.length > 0
+      ? formatRecallPointer({ label: 'Related evidence', candidateCount: recallCandidates.length })
+      : '';
+
+  // 3.9 Phase D: Build coverage map (AC-D2)
+  const participants = [...new Set(omitted.map((m) => m.catId ?? m.userId).filter(Boolean))] as string[];
+  const coverageMap = buildCoverageMap({
+    omitted: {
+      count: omitted.length,
+      from: omitted[0]?.timestamp ?? 0,
+      to: omitted[omitted.length - 1]?.timestamp ?? 0,
+      participants,
+    },
+    burst: {
+      count: burst.length,
+      from: burst[0]?.timestamp ?? 0,
+      to: burst[burst.length - 1]?.timestamp ?? 0,
+    },
+    anchorIds: eligibleAnchors.map((a) => a.message.id),
+    threadMemory: usesLegacyRecall ? threadMemoryMeta : null,
+    recallPointer: { candidateCount: recallCandidates.length },
+    searchSuggestions: tombstone?.retrievalHints ?? [],
+    semanticSearchTerms: tombstone?.keywords.length ? [tombstone.keywords.slice(0, 2).join(' ')] : [],
+  });
+  const coverageMapText = `[Context Coverage Map]\n${JSON.stringify(coverageMap)}`;
+  const threadMemoryText = threadMemorySummary
+    ? `[Thread Memory: ${threadMemoryMeta?.sessionsIncorporated ?? 0} sessions]\n${threadMemorySummary}`
+    : '';
+
+  // 5. Tool payload scrub on burst
+  const scrubbedBurst = scrubToolPayloads(burst);
+
+  // 6. Format burst messages
+  // #699: Build map from full relevant set for inline reply-to preview.
+  // Cursor gap fix: burst messages may reply to content from the omitted window —
+  // uses resolveVisibleReplyParent — atomic fetch + visibility gate.
+  const replyParentOptsCold = { threadId, viewer };
+  const baseMap = new Map(buildMessageMap(relevant));
+  const missingReplyIds = [
+    ...new Set(scrubbedBurst.filter((m) => m.replyTo && !baseMap.has(m.replyTo)).map((m) => m.replyTo!)),
+  ];
+  if (missingReplyIds.length > 0) {
+    const resolved = await Promise.all(
+      missingReplyIds.map((id) => resolveVisibleReplyParent(deps.messageStore, id, replyParentOptsCold)),
+    );
+    for (const msg of resolved) {
+      if (msg) baseMap.set(msg.id, msg);
+    }
+  }
+  const messageMap: ReadonlyMap<string, StoredMessage> = baseMap;
+  // Stale-age formatTime callback (same logic as warm path).
+  const coldStaleFormatTime = options?.nowMs
+    ? (epochMs: number) =>
+        formatPromptTime(epochMs, {
+          nowMs: options.nowMs,
+          includeAge: 'stale',
+          staleComparisonTimeZone: CO_CREATOR_TIME_ZONE,
+        })
+    : undefined;
+  const burstLines = scrubbedBurst.map((m) => {
+    const contentWithDigest = projectLifecycleResponsePromptContent(m, digestRichBlocks(m));
+    const cleanContent = sanitizeInjectedContent(contentWithDigest);
+    const normalized: StoredMessage = cleanContent === m.content ? m : { ...m, content: cleanContent };
+    const rendered = formatMessage(normalized, {
+      truncate: truncateLimit,
+      messageMap,
+      sanitizeContent: sanitizeInjectedContent,
+      ...(coldStaleFormatTime ? { formatTime: coldStaleFormatTime } : {}),
+    });
+    return `[${m.id}] ${rendered}`;
+  });
+
+  // 7. Respect effectiveMaxContextTokens (same as warm path)
+  // #1200/#3444: cursorFor remains graded for general consumers; this producer
+  // admits only the canonical branch into deferred delivery state.
+  const lastRelevantMsg = relevant[relevant.length - 1];
+  const boundaryId = clampToIncrementalBoundaryCap(
+    canonicalDeferredBoundary(lastRelevantMsg ? cursorFor(lastRelevantMsg) : undefined, 'cold-visible-tail'),
+    incrementalBoundaryCap,
+  );
+  const directiveSource = selectDirectiveSources(rankedSources)[0];
+  const navigationPresentations = [
+    ...(baton
+      ? [
+          mapToPresentation({
+            subjectKey: `baton:${baton.fromSpeakerDisplay}:${baton.timestamp}`,
+            asOf: { kind: 'as_of' as const, value: baton.timestamp },
+            sourceTier: 'T0' as const,
+            requested: 'directive' as const,
+          }),
+        ]
+      : []),
+    directiveSource
+      ? projectRankedSource(directiveSource)
+      : mapToPresentation({
+          subjectKey: `thread-drill:${threadId}`,
+          asOf: { kind: 'as_of' as const, value: Date.now() },
+          sourceTier: 'T2' as const,
+          requested: 'pointer' as const,
+        }),
+  ];
+
+  if (effectiveTokenBudget <= 0) {
+    return {
+      ...projectSurfaceShape(options?.contextProjection, deltaSize, navigationPresentations),
+      contextText: options?.contextProjection
+        ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+        : '',
+      boundaryId,
+      projectedMessageIds: [],
+      exposedMessageIds: [],
+      includesCurrentUserMessage: false,
+      currentMessageFilteredOut,
+      degradation: `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算`,
+    };
+  }
+
+  // Token trim with graduated degradation:
+  // recall pointer → coverageMap+threadMemory → anchors → tombstone → burst
+  let finalBurstLines = burstLines;
+  let finalBurstMsgs = scrubbedBurst;
+  let finalRecallPointerText = recallPointerText;
+  let finalRecallCandidates = [...recallCandidates];
+  const finalAnchorLines = [...anchorLines];
+  const finalAnchors = [...promptAnchors];
+  const anchorScores = eligibleAnchors.map((a) => a.score);
+  let finalTombstoneText = tombstoneText;
+  let finalCoverageMapText = usesLegacyRecall ? coverageMapText : '';
+  let finalThreadMemoryText = usesLegacyRecall ? threadMemoryText : '';
+  let tokenDegradation: string | undefined;
+
+  const totalTokens = () =>
+    estimateTokens(
+      [
+        finalCoverageMapText,
+        finalThreadMemoryText,
+        finalTombstoneText,
+        ...finalAnchorLines,
+        finalRecallPointerText,
+        ...finalBurstLines,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
+
+  if (totalTokens() > effectiveTokenBudget) {
+    // Stage 1: Drop the recall pointer as one unit (it is content-free and
+    // cheapest to re-acquire via an explicit drill).
+    if (finalRecallPointerText) {
+      finalRecallPointerText = '';
+      finalRecallCandidates = [];
+    }
+
+    // Stage 1.3: Drop coverage map + thread memory together
+    if (totalTokens() > effectiveTokenBudget) {
+      finalCoverageMapText = '';
+      finalThreadMemoryText = '';
+    }
+
+    // Stage 1.5: Drop anchors by lowest score
+    while (finalAnchorLines.length > 0 && totalTokens() > effectiveTokenBudget) {
+      let minIdx = 0;
+      for (let i = 1; i < anchorScores.length; i++) {
+        if (anchorScores[i] < anchorScores[minIdx]) minIdx = i;
+      }
+      finalAnchorLines.splice(minIdx, 1);
+      finalAnchors.splice(minIdx, 1);
+      anchorScores.splice(minIdx, 1);
+    }
+
+    // Stage 2: Drop tombstone
+    if (totalTokens() > effectiveTokenBudget && finalTombstoneText) {
+      finalTombstoneText = '';
+    }
+
+    // Stage 3: Trim burst from oldest
+    let keep = finalBurstLines.length;
+    while (keep > 1 && totalTokens() > effectiveTokenBudget) {
+      finalBurstLines = burstLines.slice(-keep + 1);
+      finalBurstMsgs = scrubbedBurst.slice(-keep + 1);
+      keep--;
+    }
+
+    // Stage 4: Hard cap — if envelope + 1 burst still exceeds budget, return empty
+    if (totalTokens() > effectiveTokenBudget) {
+      return {
+        ...projectSurfaceShape(options?.contextProjection, deltaSize, navigationPresentations),
+        contextText: '',
+        boundaryId,
+        projectedMessageIds: [],
+        exposedMessageIds: [],
+        includesCurrentUserMessage: false,
+        currentMessageFilteredOut,
+        degradation: `⚠️ 增量上下文 token 预算截断: 预算不足以容纳最小上下文 (${effectiveTokenBudget} tokens)`,
+      };
+    }
+
+    tokenDegradation = `⚠️ 增量上下文 token 预算截断: recall pointer ${recallPointerText ? 1 : 0} → ${finalRecallPointerText ? 1 : 0}, anchors ${anchorLines.length} → ${finalAnchorLines.length}, burst ${burstLines.length} → ${finalBurstLines.length}`;
+  }
+
+  // 8. Assemble context packet
+  const sections: string[] = [];
+  if (usesLegacyRecall && finalCoverageMapText) sections.push(finalCoverageMapText);
+  if (usesLegacyRecall && finalThreadMemoryText) sections.push(finalThreadMemoryText);
+  if (finalTombstoneText) sections.push(finalTombstoneText);
+  if (finalAnchorLines.length > 0) sections.push(...finalAnchorLines);
+  if (usesLegacyRecall && finalRecallPointerText) sections.push(finalRecallPointerText);
+  sections.push(...finalBurstLines);
+
+  const includesCurrentUserMessage = Boolean(
+    currentUserMessageId && finalBurstMsgs.some((m) => m.id === currentUserMessageId),
+  );
+
+  const contextText =
+    sections.length > 0
+      ? `${options?.contextProjection ? `${formatContextProjection(options.contextProjection, deltaSize)}\n` : ''}${navigationHeader}\n[对话历史增量 - 智能窗口: ${omitted.length} 条已摘要, ${finalBurstMsgs.length} 条详细]\n${sections.join('\n')}\n[/对话历史]`
+      : options?.contextProjection
+        ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+        : '';
+
+  // Final hard cap: envelope overhead may push total over budget
+  if (contextText && estimateTokens(contextText) > effectiveTokenBudget) {
+    return {
+      ...projectSurfaceShape(options?.contextProjection, deltaSize, navigationPresentations),
+      contextText: options?.contextProjection
+        ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+        : '',
+      boundaryId,
+      projectedMessageIds: [],
+      exposedMessageIds: [],
+      includesCurrentUserMessage: false,
+      currentMessageFilteredOut,
+      degradation: `⚠️ 增量上下文 token 预算截断: 预算不足以容纳最小上下文 (${effectiveTokenBudget} tokens)`,
+    };
+  }
+
+  return {
+    ...projectSurfaceShape(options?.contextProjection, deltaSize, [
+      ...navigationPresentations,
+      ...(finalTombstoneText
+        ? [
+            mapToPresentation({
+              subjectKey: `omitted-range:${threadId}:${omitted[0]?.id ?? 'empty'}:${omitted.at(-1)?.id ?? 'empty'}`,
+              asOf: { kind: 'as_of' as const, value: omitted.at(-1)?.timestamp ?? 0 },
+              sourceTier: 'T0' as const,
+              requested: 'state' as const,
+            }),
+          ]
+        : []),
+      ...projectVisibleMessages(finalAnchors.map(({ message }) => message)),
+      ...projectVisibleMessages(finalBurstMsgs),
+      ...(usesLegacyRecall && finalRecallPointerText
+        ? [
+            mapToPresentation({
+              subjectKey: `evidence-drill:${threadId}`,
+              asOf: { kind: 'as_of' as const, value: Date.now() },
+              sourceTier: 'T2' as const,
+              requested: 'pointer' as const,
+            }),
+          ]
+        : []),
+    ]),
+    contextText,
+    boundaryId,
+    projectedMessageIds: [
+      ...new Set([...finalAnchors.map(({ message }) => message.id), ...finalBurstMsgs.map((message) => message.id)]),
+    ],
+    exposedMessageIds: [
+      ...new Set([
+        ...exactAnchorBodyMessageIds(omitted, finalAnchors, truncateLimit),
+        ...exactBodyMessageIdsAfterToolScrub(burst, finalBurstMsgs, truncateLimit),
+      ]),
+    ],
+    includesCurrentUserMessage,
+    currentMessageFilteredOut,
+    degradation: tokenDegradation,
+    ...(isCanonicalCold || usesLegacyRecall ? { coverageMap } : {}),
+    briefingContext: {
+      ...(usesLegacyRecall && threadMemorySummary ? { threadMemorySummary } : {}),
+      ...(finalAnchorLines.length > 0 ? { anchorSummaries: finalAnchorLines } : {}),
+      ...(baton ? { baton } : {}),
+      ...(activeTasks.length > 0 ? { activeTasks } : {}),
+      ...(() => {
+        if (hasEpochProjection) return {};
+        const merged = mergeLedger(storedFileArtifacts, recentArtifacts);
+        return merged.length > 0 ? { recentArtifacts: merged } : {};
+      })(),
+      ...(rankedSources.length > 0 ? { rankedSources } : {}),
+    },
+    navigationHeader,
+    ...(usesLegacyRecall && finalRecallCandidates.length > 0
+      ? {
+          pushRecallPresentations: [
+            {
+              surface: 'cold_context' as const,
+              presentationKind: 'pointer' as const,
+              query: recalledEvidence.query,
+              scope: 'docs',
+              timestamp: Date.now(),
+              candidates: finalRecallCandidates,
+            },
+          ],
+        }
+      : {}),
+  };
+}
+
+/**
+ * F309: a publication names a message by its stored time, which the live bubble cannot know on its
+ * own clock. Read it back with the stored id; an unreadable time is left unknown, never guessed.
+ */
+export async function storedMessageTimestamp(
+  store: Pick<IMessageStore, 'getById'>,
+  messageId: string | undefined,
+): Promise<{ messageTimestamp: number } | Record<string, never>> {
+  if (!messageId) return {};
+  try {
+    const stored = await store.getById(messageId);
+    return stored?.id === messageId ? { messageTimestamp: stored.timestamp } : {};
+  } catch (err) {
+    log.warn({ err, messageId }, 'stored message time unreadable; done leaves it unknown');
+    return {};
+  }
 }

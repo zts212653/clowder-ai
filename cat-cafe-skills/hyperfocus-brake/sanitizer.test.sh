@@ -128,8 +128,8 @@ test_spaces_replaced() {
 # Test 8: 路径分隔符保留
 test_path_preserved() {
   local result
-  result=$(sanitize "/path/to/project")
-  assert_eq "/path/to/project" "$result" "path separators preserved"
+  result=$(sanitize "/home/user/cat-cafe")
+  assert_eq "/home/user/cat-cafe" "$result" "path separators preserved"
 }
 
 # Test 9: 数字和点号保留

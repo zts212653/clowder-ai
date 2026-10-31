@@ -1,11 +1,12 @@
 import Link from 'next/link';
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 
 export type SignalNavItem = 'chat' | 'signals' | 'sources';
 
 interface SignalNavProps {
   readonly active: SignalNavItem;
+  readonly initialReferrerThread?: string | null;
 }
 
 interface ItemConfig {
@@ -19,51 +20,33 @@ interface ItemConfig {
  * Falls back to store's currentThreadId (last active thread).
  * Same pattern as MissionControlPage referrer-based back button.
  */
-function useReferrerThread(): string | null {
+function useReferrerThread(initialReferrerThread: string | null): string | null {
   const storeThreadId = useChatStore((s) => s.currentThreadId);
+  const [fromParam, setFromParam] = useState<string | null>(initialReferrerThread);
+  useEffect(() => {
+    const nextFromParam = new URLSearchParams(window.location.search).get('from');
+    if (nextFromParam) setFromParam(nextFromParam);
+  }, [initialReferrerThread]);
   return useMemo(() => {
-    if (typeof window !== 'undefined') {
-      const fromParam = new URLSearchParams(window.location.search).get('from');
-      if (fromParam) return fromParam;
-    }
+    if (fromParam) return fromParam;
     return storeThreadId && storeThreadId !== 'default' ? storeThreadId : null;
-  }, [storeThreadId]);
+  }, [fromParam, storeThreadId]);
 }
 
-export function SignalNav({ active }: SignalNavProps) {
-  const referrerThread = useReferrerThread();
+export function SignalNav({ active, initialReferrerThread = null }: SignalNavProps) {
+  const referrerThread = useReferrerThread(initialReferrerThread);
   const fromSuffix = referrerThread ? `?from=${encodeURIComponent(referrerThread)}` : '';
 
   const items: readonly ItemConfig[] = useMemo(
     () => [
-      { id: 'signals' as const, href: `/signals${fromSuffix}`, label: 'Signals' },
-      { id: 'sources' as const, href: `/signals/sources${fromSuffix}`, label: 'Sources' },
+      { id: 'signals' as const, href: `/signals${fromSuffix}`, label: '信号' },
+      { id: 'sources' as const, href: `/signals/sources${fromSuffix}`, label: '信号源' },
     ],
     [fromSuffix],
   );
 
-  const backHref = referrerThread && referrerThread !== 'default' ? `/thread/${referrerThread}` : '/';
-
   return (
-    <nav aria-label="Signal navigation" className="flex items-center gap-2">
-      <Link
-        href={backHref}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-3 py-1.5 text-xs font-medium text-[#8B6F47] transition-colors hover:bg-[#F7EEDB]"
-        data-testid="signal-back-to-chat"
-      >
-        <svg
-          className="h-4 w-4"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <polyline points="15 18 9 12 15 6" />
-        </svg>
-        返回线程
-      </Link>
+    <nav aria-label="Signal navigation" className="flex console-divider-b">
       {items.map((item) => {
         const isActive = item.id === active;
         return (
@@ -71,12 +54,11 @@ export function SignalNav({ active }: SignalNavProps) {
             key={item.id}
             href={item.href}
             aria-current={isActive ? 'page' : undefined}
-            className={[
-              'inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
+            className={`inline-flex items-center px-5 py-2.5 text-sm font-semibold transition-colors ${
               isActive
-                ? 'border-cocreator-primary bg-cocreator-light text-cocreator-dark'
-                : 'border-gray-200 bg-white text-gray-600 hover:border-cocreator-light hover:text-cocreator-dark',
-            ].join(' ')}
+                ? 'border-b-2 border-[var(--console-button-emphasis)] text-[var(--console-button-emphasis)]'
+                : 'text-cafe-muted hover:text-cafe-secondary'
+            }`}
           >
             {item.label}
           </Link>

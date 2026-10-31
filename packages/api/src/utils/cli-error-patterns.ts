@@ -1,0 +1,225 @@
+/**
+ * F212 Phase A — Shared regex pool for CLI error sanitization + classification.
+ *
+ * Two consumers:
+ *  - `sanitize-cli-stderr.ts`: redact secrets/paths/control sequences before exposure
+ *  - `cli-diagnostics.ts`: classify stderr / NDJSON stream error text into reasonCodes
+ *
+ * Aligned with F153 TelemetryRedactor Class A (credential) intent — kept independent to
+ * avoid circular dependency. If both ship, future work can extract this further into
+ * a shared `@cat-cafe/secret-patterns` package (spec OQ-1 accept).
+ */
+
+// =============================================================================
+// Reason codes (F212 Phase B: hoisted to @cat-cafe/shared; re-exported here so existing
+// regex/sanitizer call sites keep their import path stable.)
+// =============================================================================
+
+import type { CliErrorReasonCode } from '@cat-cafe/shared';
+
+export type { CliErrorReasonCode };
+
+// =============================================================================
+// Sanitizer regex pool — applied by sanitize-cli-stderr.ts in a fixed order
+// =============================================================================
+
+// Control sequences (ANSI CSI / OSC). \x1b is ESC. OSC ends at BEL (\x07) or ST (\x1b\\).
+const ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+const OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+
+// JWT: 3 base64url segments separated by '.', first 2 begin with 'eyJ'
+const JWT = /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
+
+// PEM block: -----BEGIN ... PRIVATE KEY----- to matching END
+const PEM = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g;
+
+// URL query — everything after ? until whitespace or closing quote/paren
+const URL_QUERY = /(\?)([^\s'"<>)]+)/g;
+// URL fragment — OAuth implicit/callback flows often place access_token/state after #.
+// Redact only fragments carrying sensitive keys so ordinary issue anchors remain readable.
+const URL_FRAGMENT = /(#)(?=[^\s'"<>)\n]*(?:access_token|id_token|refresh_token|state|code)=)([^\s'"<>)]+)/gi;
+
+// Cookie / set-cookie header value (case-insensitive, until ; or newline)
+const COOKIE_HEADER = /((?:set-)?cookie)\s*:\s*[^;\n\r]+/gi;
+
+// Provider tokens (specific patterns first; order matters in sanitizer)
+const OPENAI_ANTHROPIC = /sk-[A-Za-z0-9_-]{20,}/g;
+const GITHUB_PAT = /github_pat_[A-Za-z0-9_]{82,}/g;
+const GITHUB_CLASSIC = /gh[pousr]_[A-Za-z0-9]{36,}/g;
+const NPM_TOKEN = /npm_[A-Za-z0-9]{36,}/g;
+const GOOGLE_AIZA = /AIza[0-9A-Za-z_-]{35}/g;
+// HTTP auth schemes are case-insensitive (RFC 7235). 云端 codex P1: stderr from proxies
+// often lowercases the scheme (`authorization: bearer ...`) — without /i this leaks tokens.
+const BEARER_TOKEN = /Bearer\s+[A-Za-z0-9_.\-+/=]+/gi;
+
+// Generic key=value pattern catching `"api_key": "xxx"`, `token=xxx`, `password: xxx` etc.
+// Requires the value to be at least 8 chars to avoid matching trivial words.
+const GENERIC_TOKEN_KV =
+  /(token|api[_-]?key|secret|password|callbackToken)(["']?\s*[:=]\s*["']?)([^\s,}"';\n\r]{8,})/gi;
+
+// High-entropy fallback: ≥32 chars in [A-Za-z0-9+/=_-], applied LAST and filtered by entropy.
+const HIGH_ENTROPY = /[A-Za-z0-9+/=_-]{32,}/g;
+
+// Path patterns are dynamic (depend on env). See getPathPatterns().
+const WIN_USER_PATH = /C:\\Users\\[^\\\s'"]+/g;
+const TMP_PATH = /\/tmp\/[^\s'"<>)]+/g;
+
+export const SANITIZER_PATTERNS = {
+  ansiCsi: ANSI_CSI,
+  osc: OSC,
+  jwt: JWT,
+  pem: PEM,
+  urlQuery: URL_QUERY,
+  urlFragment: URL_FRAGMENT,
+  cookieHeader: COOKIE_HEADER,
+  openaiAnthropic: OPENAI_ANTHROPIC,
+  githubPat: GITHUB_PAT,
+  githubClassic: GITHUB_CLASSIC,
+  npmToken: NPM_TOKEN,
+  googleAIza: GOOGLE_AIZA,
+  bearer: BEARER_TOKEN,
+  genericTokenKv: GENERIC_TOKEN_KV,
+  highEntropy: HIGH_ENTROPY,
+  winUserPath: WIN_USER_PATH,
+  tmpPath: TMP_PATH,
+} as const;
+
+/**
+ * Build runtime-dependent path patterns. Re-compute on each sanitize call because
+ * tests / multi-tenant envs may mutate process.env.HOME.
+ */
+export function getPathPatterns(): { homeUnix: RegExp | null; userProfileWin: RegExp | null } {
+  const home = process.env.HOME;
+  const userprofile = process.env.USERPROFILE;
+  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return {
+    homeUnix: home && home.length > 1 ? new RegExp(`${escapeRegex(home)}(?=[/\\s'"]|$)`, 'g') : null,
+    userProfileWin:
+      userprofile && userprofile.length > 1 ? new RegExp(`${escapeRegex(userprofile)}(?=[\\\\/\\s'"]|$)`, 'g') : null,
+  };
+}
+
+// =============================================================================
+// Classifier patterns — used by cli-diagnostics.classifyCliError()
+// =============================================================================
+
+export const CLASSIFIER_PATTERNS: Array<{ code: CliErrorReasonCode; regex: RegExp }> = [
+  // Existing (must regress — predates F212)
+  {
+    code: 'invalid_thinking_signature',
+    regex: /Invalid [`'"]?signature[`'"]? in [`'"]?thinking[`'"]? block/i,
+  },
+  { code: 'missing_rollout', regex: /no rollout found/i },
+  // clowder-ai#1038: opencode resumed a stale --session after its session DB was
+  // recreated/cleared (Redis still holds the old cliSessionId). stderr is the literal
+  // `Error: Session not found`. Distinct from missing_rollout (Codex "no rollout found")
+  // — routes to the session self-heal retry path (Path A) in invoke-single-cat.
+  { code: 'session_not_found', regex: /Session not found/i },
+  // F212 Phase H (AC-H3, Sol runtime forensics 2026-07-09): upstream provider (Codex 0.98+)
+  // policy engine rejects prompt as "cyber-safety risk". Emit `{type:"error",message:"This
+  // content was flagged for possible cybersecurity risk..."}` then `turn.failed` + exit 1.
+  // NOT a Clowder AI bug — upstream policy layer decision. Witnessed exact phrase from archive
+  // 97449e4b-0dec-433e-885a-0e37ab977b1e. LL-059 discipline: allowlist grows from evidence
+  // only, do NOT invent /content policy/i or /moderation/i variants until upstream witness.
+  // Highly-specific phrase so ordering-insensitive, but keep near top for provenance clarity.
+  {
+    code: 'upstream_policy_reject',
+    // AGY 2026-10-18, human3195: response rejected after four upstream output attempts.
+    regex: /flagged for possible cybersecurity risk|Your previous response was blocked by content safety filters/i,
+  },
+  // clowder-ai#1324 (refs #848 "CLI upgrade with format incompatibility"): the CLI's own
+  // argument parser rejected the argv the harness built. Deterministic — the same argv is
+  // rejected identically forever, so this also disables the transient retry (invoke-helpers).
+  //
+  // LL-059 discipline — both regexes are transcribed from logged witnesses only, no invented
+  // parser variants. Runtime log survey 2026-08-06..08-10 (108 unknown-CLI-error events total):
+  //   48x  `error: unknown option '--agent-file'`      — kimi-code predating the flag
+  //   28x  `error: Cannot combine --agent/--agent-file with --session/--continue: ...`
+  //                                                    — kimi-code >=0.30 added the validation
+  // Same disease, two CLI versions. Deliberately NOT generalized to clap/argparse phrasings
+  // (`unexpected argument`, `unrecognized arguments`) — no witness in our logs yet; add them
+  // when one shows up, not before.
+  //
+  // @codex-terra P2 on PR #1325: the first cut matched ANY rejected flag. But F127
+  // cliConfigArgs lets an operator pass their own flags, so a typo like
+  // `--definitely-not-a-real-flag` would have been blamed on the harness — telling the
+  // user "this is not your config" (false) and, once the F222 allowlist entry below
+  // lands, auto-filing an issue against ourselves for someone's typo.
+  //
+  // This reasonCode means specifically: MANAGED argv (flags the harness itself builds)
+  // drifted from the installed CLI version. Only the exact `unknown option '--agent-file'`
+  // witness is admitted, and cli-diagnostics additionally requires `managedArgvFlags`
+  // provenance from the invocation builder. The `Cannot combine` witness is deliberately
+  // excluded because stderr cannot prove that both conflicting flags were harness-owned.
+  // A generic user-flag rejection needs its own neutral reasonCode/hint — deliberately not
+  // invented here without a witness (LL-059).
+  //
+  // Both phrases are highly specific, so ordering is not load-bearing; kept above the broad
+  // AC-A4 keyword block for provenance clarity.
+  {
+    code: 'incompatible_cli_arguments',
+    regex: /unknown option\s+['"`]?--agent-file(?=['"`\s]|$)/i,
+  },
+  // New 7 (AC-A4) — ordered most-specific first to avoid mis-classification
+  {
+    code: 'model_not_found',
+    regex:
+      /(model.*not found|Unknown model|supported API model names|model.*not supported|model[^\r\n]+is not recognized as a known model or custom model in settings|No available channel for model|deployment.*not found|neither PlanModel nor RequestedModel specified|Please use the \/model command|没有可用的账号侧默认模型)/i,
+  },
+  {
+    code: 'auth_failed',
+    regex:
+      /(\b401\b|Unauthorized|invalid api key|authentication failed|forbidden.*api|profile is not authenticated|Authentication required\. Please visit the URL to log in|authentication interrupted|Not logged in\s*[·.:-]?\s*Please run \/login|The provided authorization grant is invalid|provider managed:kimi-code has no credential configured)/i,
+  },
+  // F212 Phase E (cloud codex P1 fix per @co-creator organic 2026-05-29): server-side temporary
+  // throttling is NOT a user quota problem. CC explicitly disambiguates with "(not your usage
+  // limit)" but the quota_exceeded regex below blindly matches "usage limit" / "rate limit",
+  // costing users a futile trip to their quota dashboard. server_overloaded MUST come BEFORE
+  // quota_exceeded in CLASSIFIER_PATTERNS (specific-first ordering) so the disambiguation
+  // signal wins. Lesson: keyword white-list without disambiguation is cognitive scaffolding —
+  // CC says "(not your usage limit)", trust the source's explicit negation.
+  {
+    code: 'server_overloaded',
+    regex:
+      /(temporarily limiting requests|not your usage limit|server is (overloaded|busy)|Selected model is at capacity\.|currently experiencing high demand, which may cause temporary errors\.|\b529\b|\bOverloaded\b)/i,
+  },
+  {
+    code: 'quota_exceeded',
+    regex: /(\b429\b|quota|rate limit|too many requests|usage limit)/i,
+  },
+  // Witness: 2026-10-11 Codex archive 5f771d02..., final request 7ab62694...
+  // A stream wrapper alone says nothing about the cause. Explicit provider wording wins.
+  {
+    code: 'upstream_service_error',
+    regex: /An error occurred while processing your request\./i,
+  },
+  {
+    code: 'network_error',
+    regex:
+      /(ETIMEDOUT|ECONNREFUSED|ENOTFOUND|ECONNRESET|socket hang up|fetch failed|connect ECONN|getaddrinfo|error sending request for url)/i,
+  },
+  {
+    code: 'stream_disconnected',
+    // Exact carrier EOF is also an incomplete stream, not evidence of a local network cause.
+    regex: /stream disconnected before completion|Codex app-server stream ended before turn completion/i,
+  },
+  {
+    code: 'invalid_config',
+    regex: /(Error loading config\.toml|invalid transport|Failed to parse config|config.*(invalid|malformed))/i,
+  },
+  {
+    code: 'spawn_failed',
+    regex: /(spawn.*ENOENT|spawn.*EACCES|ENOENT.*spawn|EACCES.*spawn)/i,
+  },
+  {
+    code: 'context_window_exceeded',
+    regex: /(context length|maximum context|context_length_exceeded|tokens? exceed|prompt too long)/i,
+  },
+  // F212 Phase D: Claude CLI result error — model tool-call parse failure (e.g.
+  // "The model's tool call could not be parsed (retry also failed)"). CC emits this
+  // in the result error event (type==='result' && subtype!=='success'), not stderr.
+  {
+    code: 'tool_call_parse_failed',
+    regex: /tool calls? could not be parsed|could not parse[^.\n]{0,30}tool call/i,
+  },
+];

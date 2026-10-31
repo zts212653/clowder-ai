@@ -1,3 +1,4 @@
+// F206 exempt: file-type brand colors — fixed per language identity, not theme-dependent
 const FILE_ICONS: Record<string, { color: string; label: string }> = {
   ts: { color: '#3178C6', label: 'TS' },
   tsx: { color: '#3178C6', label: 'TX' },
@@ -21,14 +22,14 @@ export function FileIcon({ name }: { name: string }) {
   const icon = FILE_ICONS[ext];
   if (!icon) {
     return (
-      <span className="w-4 h-4 rounded text-[8px] font-bold flex items-center justify-center bg-gray-200 text-gray-500 flex-shrink-0">
+      <span className="w-4 h-4 rounded text-micro font-bold flex items-center justify-center bg-cafe-surface text-cafe-secondary flex-shrink-0">
         F
       </span>
     );
   }
   return (
     <span
-      className="w-4 h-4 rounded text-[8px] font-bold flex items-center justify-center flex-shrink-0 text-white"
+      className="w-4 h-4 rounded text-micro font-bold flex items-center justify-center flex-shrink-0 text-[var(--cafe-surface)]"
       style={{ backgroundColor: icon.color }}
     >
       {icon.label}
@@ -39,7 +40,7 @@ export function FileIcon({ name }: { name: string }) {
 export function DirIcon({ expanded }: { expanded: boolean }) {
   return (
     <span
-      className={`w-4 h-4 flex items-center justify-center flex-shrink-0 transition-transform duration-150 ${expanded ? 'text-cocreator-primary' : 'text-cocreator-dark/60'}`}
+      className={`w-4 h-4 flex items-center justify-center flex-shrink-0 transition-transform duration-150 ${expanded ? 'text-cafe-accent' : 'text-cafe-interactive/60'}`}
     >
       <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
         {expanded ? (

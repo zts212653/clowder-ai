@@ -1,0 +1,134 @@
+/* Only owned structural surfaces and explicit paper/selected/human markers paint the viewport image.
+ * Utility colour classes also belong to menus, status controls and the fixed tuner; they confer no ownership. */
+html[data-shell="v2"][data-chat-background="image"] .console-shell {
+  --chat-background-surface: var(--shell-work);
+  --chat-background-hover-base: var(--shell-work);
+}
+html[data-shell="v2"][data-chat-background="image"]
+  :is(.cafe-world-rail, [data-shell-sidebar="v2"], [data-console-panel="settings-nav"]) {
+  --chat-background-surface: var(--shell-frame);
+  --chat-background-hover-base: var(--shell-frame);
+}
+html[data-shell="v2"][data-chat-background="image"] [data-sidebar-group-segment] > div {
+  --chat-background-surface: var(--shell-group);
+  --chat-background-hover-base: var(--shell-group);
+}
+html[data-shell="v2"][data-chat-background="image"]
+  :is(
+    [data-shell-work-host],
+    [data-shell-header="v2"],
+    .cafe-header,
+    [data-testid="thread-chat-host"],
+    [data-thread-chat-surface],
+    [data-thread-chat-history],
+    [data-thread-chat-footer],
+    div:has(> [data-testid="chat-input-composer-row"]),
+    [data-testid="settings-v2"]
+  ) {
+  --chat-background-surface: var(--shell-work);
+}
+html[data-shell="v2"][data-chat-background="image"]
+  :is(
+    .you-settings-card,
+    .you-profile-field input:not([type="color"]),
+    [data-testid="chat-input-composer-row"],
+    .work-gallery-card,
+    [data-chat-background-surface="paper"]
+  ) {
+  --chat-background-surface: var(--shell-paper);
+  --chat-background-hover-base: var(--shell-paper);
+}
+html[data-shell="v2"][data-chat-background="image"]
+  :is(.work-gallery-visual, [data-chat-background-surface="selected"]) {
+  --chat-background-surface: var(--shell-selected);
+}
+html[data-shell="v2"][data-chat-background="image"] [data-chat-background-surface="human"] {
+  --chat-background-surface: var(--color-cocreator-surface);
+}
+html[data-shell="v2"][data-chat-background="image"]
+  :is(.shell-nav-row:hover, .shell-rail-item:hover, [data-shell-sidebar="v2"] [data-thread-id]:hover) {
+  --chat-background-surface: color-mix(in srgb, var(--shell-selected) 55%, var(--chat-background-hover-base));
+}
+html[data-shell="v2"][data-chat-background="image"]
+  :is(
+    .shell-nav-row[data-selected="true"],
+    .shell-rail-item[data-selected="true"],
+    [data-shell-sidebar="v2"] [data-thread-id][aria-current="page"]
+  ) {
+  --chat-background-surface: var(--shell-selected);
+}
+html[data-shell="v2"][data-chat-background="image"]
+  :is(
+    .console-shell,
+    .console-shell
+      :is(
+        .cafe-world-rail,
+        [data-shell-sidebar="v2"],
+        [data-console-panel="settings-nav"],
+        [data-sidebar-group-segment] > div,
+        [data-shell-work-host],
+        [data-shell-header="v2"],
+        .cafe-header,
+        [data-testid="thread-chat-host"],
+        [data-thread-chat-surface],
+        [data-thread-chat-history],
+        [data-thread-chat-footer],
+        div:has(> [data-testid="chat-input-composer-row"]):not([data-testid="new-conversation-page"] *),
+        [data-testid="settings-v2"],
+        .you-settings-card,
+        .you-profile-field input:not([type="color"]),
+        [data-testid="chat-input-composer-row"],
+        .work-gallery-card,
+        .work-gallery-visual,
+        [data-chat-background-surface="paper"],
+        [data-chat-background-surface="selected"],
+        [data-chat-background-surface="human"],
+        .shell-nav-row:is(:hover, [data-selected="true"]),
+        .shell-rail-item:is(:hover, [data-selected="true"]),
+        [data-shell-sidebar="v2"] [data-thread-id]:is(:hover, [aria-current="page"])
+      )
+  ):not(
+    :is(
+        dialog,
+        [role="dialog"],
+        [role="menu"],
+        [role="listbox"],
+        [data-thread-settings-panel],
+        .work-gallery-menu,
+        .cafe-tooltip,
+        .you-settings-save,
+        .cafe-toggle,
+        [role="switch"],
+        .bg-cafe-accent,
+        [class*="bg-semantic-"],
+        .work-gallery-latest
+      ),
+    :is(
+        dialog,
+        [role="dialog"],
+        [role="menu"],
+        [role="listbox"],
+        [data-thread-settings-panel],
+        .work-gallery-menu,
+        .cafe-tooltip,
+        .you-settings-save,
+        .cafe-toggle,
+        [role="switch"],
+        .bg-cafe-accent,
+        [class*="bg-semantic-"],
+        .work-gallery-latest
+      )
+      *
+  ) {
+  background-color: var(--chat-background-surface) !important;
+  background-image:
+    linear-gradient(
+      color-mix(in srgb, var(--chat-background-surface) calc(var(--chat-background-veil-opacity) * 100%), transparent),
+      color-mix(in srgb, var(--chat-background-surface) calc(var(--chat-background-veil-opacity) * 100%), transparent)
+    ),
+    var(--chat-background-image) !important;
+  background-position: center, center !important;
+  background-size: auto, var(--chat-background-size) !important;
+  background-repeat: no-repeat, var(--chat-background-repeat) !important;
+  background-attachment: scroll, fixed !important;
+}

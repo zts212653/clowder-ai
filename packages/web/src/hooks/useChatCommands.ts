@@ -1,8 +1,13 @@
 'use client';
 
+import { deploymentDefaults } from '@cat-cafe/shared';
+import { useRouter } from 'next/navigation';
 import { useCallback, useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import { useSettingsReadingEntry } from '@/components/shell/useSettingsSourceReturn';
 import { useCatData } from '@/hooks/useCatData';
-import { useChatStore } from '@/stores/chatStore';
+import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
+import type { EvidenceSourceType } from '@/types/evidence';
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 
@@ -17,34 +22,22 @@ export function isCommandInvocation(input: string, command: string): boolean {
 
 /** Format ConfigSnapshot into readable multi-line text for /config display */
 function formatConfigForDisplay(config: ConfigSnapshot): string {
-  const lines: string[] = ['[配置] Clowder AI Config', ''];
+  const lines: string[] = [`[配置] ${deploymentDefaults.brand.displayName} 运行配置`, ''];
 
-  // Per-cat budgets first (the actual limits used)
-  if (config.perCatBudgets) {
-    lines.push('Per-Cat 上下文预算');
-    for (const [catId, budget] of Object.entries(config.perCatBudgets)) {
-      const b = budget as {
-        maxPromptTokens: number;
-        maxContextTokens: number;
-        maxMessages: number;
-        maxContentLengthPerMsg: number;
+  // Per-cat capacity truth (#1208: no independent prompt-policy knobs)
+  if (config.perCatCapacities) {
+    lines.push('Per-Cat Context Capacity');
+    for (const [catId, entry] of Object.entries(config.perCatCapacities)) {
+      const e = entry as {
+        windowTokens: number;
+        inputCeilingTokens: number;
+        source: string;
+        actionable: boolean;
       };
-      lines.push(
-        `  ${catId}: prompt ${(b.maxPromptTokens / 1000).toFixed(0)}k, context ${(b.maxContextTokens / 1000).toFixed(0)}k, ${b.maxMessages} msgs, ${b.maxContentLengthPerMsg}/msg`,
-      );
-    }
-    lines.push('');
-  }
-
-  // Legacy context section (deprecated)
-  if (config.context) {
-    lines.push('上下文默认值 (deprecated, see per-cat)');
-    lines.push(`  历史条数: ${config.context.maxMessages}`);
-    lines.push(`  每条截断: ${config.context.maxContentLength} 字符`);
-    lines.push(`  总上下文: ${config.context.maxTotalChars} 字符`);
-    lines.push(`  总 prompt: ${config.context.maxPromptTokens} 字符`);
-    if (config.context.note) {
-      lines.push(`  注: ${config.context.note}`);
+      const window = (e.windowTokens / 1000).toFixed(0);
+      const ceil = (e.inputCeilingTokens / 1000).toFixed(0);
+      const tag = e.source === 'unresolved' ? ' [unresolved]' : e.actionable ? '' : ` [${e.source}]`;
+      lines.push(`  ${catId}: window ${window}k, input ceiling ${ceil}k${tag}`);
     }
     lines.push('');
   }
@@ -83,8 +76,8 @@ function formatConfigForDisplay(config: ConfigSnapshot): string {
   if (config.cats) {
     lines.push('猫猫配置');
     for (const [id, cat] of Object.entries(config.cats)) {
-      const c = cat as { displayName: string; provider: string; model: string; mcpSupport: boolean };
-      lines.push(`  ${c.displayName} (${id}): ${c.provider}/${c.model} ${c.mcpSupport ? '[MCP]' : ''}`);
+      const c = cat as { displayName: string; clientId: string; model: string; mcpSupport: boolean };
+      lines.push(`  ${c.displayName} (${id}): ${c.clientId}/${c.model} ${c.mcpSupport ? '[MCP]' : ''}`);
     }
     lines.push('');
   }
@@ -124,7 +117,9 @@ function formatConfigForDisplay(config: ConfigSnapshot): string {
  * Returns true if the input was a command that was handled.
  */
 export function useChatCommands() {
-  const { addMessage } = useChatStore();
+  const router = useRouter();
+  const captureSettingsOrigin = useSettingsReadingEntry();
+  const { addMessageToThread } = useChatStore(useShallow((s) => ({ addMessageToThread: s.addMessageToThread })));
   const { cats } = useCatData();
 
   // Build dynamic mention pattern → catId resolver from cat data
@@ -145,17 +140,22 @@ export function useChatCommands() {
     const regex =
       allPatterns.length > 0
         ? new RegExp(`@(${allPatterns.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi')
-        : /@(opus|codex|gemini|dare|dare-agent)/gi; // fallback
+        : /@(opus|codex|gemini)/gi; // fallback
     return { regex, resolve: (name: string) => patternToCatId.get(name.toLowerCase()) };
   }, [cats]);
 
   const processCommand = useCallback(
     async (input: string, overrideThreadId?: string): Promise<boolean> => {
       const trimmed = input.trim();
-      /** Resolve effective threadId — override (from split-pane) or store default */
-      const getThreadId = () => overrideThreadId ?? useChatStore.getState().currentThreadId;
+      // Capture once before any await. Every command-side completion must remain
+      // bound to the thread that initiated the command, even after navigation.
+      const threadId = overrideThreadId ?? useChatStore.getState().currentThreadId;
+      const getThreadId = () => threadId;
+      const addMessageForThread = (message: ChatMessageData) => {
+        addMessageToThread(threadId, message);
+      };
       const addSystemError = (content: string) => {
-        addMessage({
+        addMessageForThread({
           id: `err-${Date.now()}`,
           type: 'system',
           variant: 'error',
@@ -163,23 +163,35 @@ export function useChatCommands() {
           timestamp: Date.now(),
         });
       };
-      // /help — open Hub to commands tab (F12)
+      // /help — show available commands as system message
       if (trimmed === '/help') {
-        useChatStore.getState().openHub('commands');
+        addMessageForThread({
+          id: `help-${Date.now()}`,
+          type: 'system',
+          variant: 'info',
+          content: [
+            '**可用命令**',
+            '`/config set <key> <value>` — 热更新配置',
+            '`/config` — 打开设置页面',
+            '`/help` — 显示此帮助',
+          ].join('\n'),
+          timestamp: Date.now(),
+        });
         return true;
       }
 
-      // /config command — open hub or hot-update
+      // /config command — open settings or hot-update
       if (isCommandInvocation(trimmed, '/config')) {
         const configArgs = trimmed.slice('/config'.length).trim();
 
-        // /config (no args) — open Hub to system tab (F12)
+        // /config (no args) — navigate to Settings page
         if (!configArgs) {
-          useChatStore.getState().openHub('system');
+          captureSettingsOrigin();
+          router.push('/settings?s=system');
           return true;
         }
 
-        addMessage({
+        addMessageForThread({
           id: `user-${Date.now()}`,
           type: 'user',
           content: trimmed,
@@ -204,7 +216,7 @@ export function useChatCommands() {
               throw new Error(body?.error ?? `Server error: ${res.status}`);
             }
             const data = await res.json();
-            addMessage({
+            addMessageForThread({
               id: `config-${Date.now()}`,
               type: 'system',
               variant: 'info',
@@ -218,7 +230,7 @@ export function useChatCommands() {
         }
 
         // Other /config subcommands (unknown) — show usage hint
-        addMessage({
+        addMessageForThread({
           id: `err-${Date.now()}`,
           type: 'system',
           variant: 'error',
@@ -239,7 +251,7 @@ export function useChatCommands() {
         const key = rest.slice(0, spaceIdx);
         const value = rest.slice(spaceIdx + 1);
 
-        addMessage({
+        addMessageForThread({
           id: `user-${Date.now()}`,
           type: 'user',
           content: trimmed,
@@ -254,7 +266,7 @@ export function useChatCommands() {
             body: JSON.stringify({ threadId, key, value, updatedBy: 'user' }),
           });
           if (!res.ok) throw new Error(`Server error: ${res.status}`);
-          addMessage({
+          addMessageForThread({
             id: `mem-${Date.now()}`,
             type: 'system',
             variant: 'info',
@@ -271,7 +283,7 @@ export function useChatCommands() {
       if (isCommandInvocation(trimmed, '/recall')) {
         const rest = trimmed.slice('/recall'.length).trim();
 
-        addMessage({
+        addMessageForThread({
           id: `user-${Date.now()}`,
           type: 'user',
           content: trimmed,
@@ -289,7 +301,7 @@ export function useChatCommands() {
           if (rest) {
             // Single key lookup
             if (res.status === 404) {
-              addMessage({
+              addMessageForThread({
                 id: `mem-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
@@ -300,7 +312,7 @@ export function useChatCommands() {
               throw new Error(`Server error: ${res.status}`);
             } else {
               const entry = await res.json();
-              addMessage({
+              addMessageForThread({
                 id: `mem-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
@@ -314,7 +326,7 @@ export function useChatCommands() {
             const data = await res.json();
             const entries = data.entries as Array<{ key: string; value: string }>;
             if (entries.length === 0) {
-              addMessage({
+              addMessageForThread({
                 id: `mem-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
@@ -323,7 +335,7 @@ export function useChatCommands() {
               });
             } else {
               const lines = entries.map((e) => `  ${e.key}: ${e.value}`).join('\n');
-              addMessage({
+              addMessageForThread({
                 id: `mem-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
@@ -342,7 +354,7 @@ export function useChatCommands() {
       if (isCommandInvocation(trimmed, '/evidence')) {
         const query = trimmed.slice('/evidence'.length).trim();
 
-        addMessage({
+        addMessageForThread({
           id: `user-${Date.now()}`,
           type: 'user',
           content: trimmed,
@@ -350,7 +362,7 @@ export function useChatCommands() {
         });
 
         if (!query) {
-          addMessage({
+          addMessageForThread({
             id: `err-${Date.now()}`,
             type: 'system',
             variant: 'info',
@@ -368,14 +380,17 @@ export function useChatCommands() {
               title: string;
               anchor: string;
               snippet: string;
-              confidence: 'high' | 'mid' | 'low';
-              sourceType: 'decision' | 'phase' | 'discussion' | 'commit';
+              matchRank: 'high' | 'mid' | 'low';
+              retrievalScore?: number;
+              sourceType: EvidenceSourceType;
+              authority?: string;
+              updatedAt?: string;
             }>;
             degraded: boolean;
             degradeReason?: string;
           };
 
-          addMessage({
+          addMessageForThread({
             id: `evidence-${Date.now()}`,
             type: 'system',
             variant: 'evidence',
@@ -393,7 +408,7 @@ export function useChatCommands() {
       if (isCommandInvocation(trimmed, '/approve')) {
         const entryId = trimmed.slice('/approve'.length).trim();
 
-        addMessage({
+        addMessageForThread({
           id: `user-${Date.now()}`,
           type: 'user',
           content: trimmed,
@@ -401,7 +416,7 @@ export function useChatCommands() {
         });
 
         if (!entryId) {
-          addMessage({
+          addMessageForThread({
             id: `err-${Date.now()}`,
             type: 'system',
             variant: 'info',
@@ -421,7 +436,7 @@ export function useChatCommands() {
           if (!res.ok) {
             addSystemError(`审批失败: ${data.error ?? res.status}`);
           } else {
-            addMessage({
+            addMessageForThread({
               id: `publish-${Date.now()}`,
               type: 'system',
               variant: 'info',
@@ -439,7 +454,7 @@ export function useChatCommands() {
       if (isCommandInvocation(trimmed, '/archive')) {
         const entryId = trimmed.slice('/archive'.length).trim();
 
-        addMessage({
+        addMessageForThread({
           id: `user-${Date.now()}`,
           type: 'user',
           content: trimmed,
@@ -447,7 +462,7 @@ export function useChatCommands() {
         });
 
         if (!entryId) {
-          addMessage({
+          addMessageForThread({
             id: `err-${Date.now()}`,
             type: 'system',
             variant: 'info',
@@ -467,7 +482,7 @@ export function useChatCommands() {
           if (!res.ok) {
             addSystemError(`归档失败: ${data.error ?? res.status}`);
           } else {
-            addMessage({
+            addMessageForThread({
               id: `publish-${Date.now()}`,
               type: 'system',
               variant: 'info',
@@ -485,7 +500,7 @@ export function useChatCommands() {
       if (isCommandInvocation(trimmed, '/reflect')) {
         const query = trimmed.slice('/reflect'.length).trim();
 
-        addMessage({
+        addMessageForThread({
           id: `user-${Date.now()}`,
           type: 'user',
           content: trimmed,
@@ -493,7 +508,7 @@ export function useChatCommands() {
         });
 
         if (!query) {
-          addMessage({
+          addMessageForThread({
             id: `err-${Date.now()}`,
             type: 'system',
             variant: 'info',
@@ -517,7 +532,7 @@ export function useChatCommands() {
           };
 
           if (data.degraded) {
-            addMessage({
+            addMessageForThread({
               id: `reflect-${Date.now()}`,
               type: 'system',
               variant: 'info',
@@ -525,7 +540,7 @@ export function useChatCommands() {
               timestamp: Date.now(),
             });
           } else {
-            addMessage({
+            addMessageForThread({
               id: `reflect-${Date.now()}`,
               type: 'system',
               variant: 'info',
@@ -543,7 +558,7 @@ export function useChatCommands() {
       if (isCommandInvocation(trimmed, '/signals')) {
         const signalArgs = trimmed.slice('/signals'.length).trim();
 
-        addMessage({
+        addMessageForThread({
           id: `user-${Date.now()}`,
           type: 'user',
           content: trimmed,
@@ -559,7 +574,7 @@ export function useChatCommands() {
             };
 
             if (data.items.length === 0) {
-              addMessage({
+              addMessageForThread({
                 id: `signals-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
@@ -568,7 +583,7 @@ export function useChatCommands() {
               });
             } else {
               const lines = data.items.map((item) => `- [${item.id}] ${item.title} (${item.source}/T${item.tier})`);
-              addMessage({
+              addMessageForThread({
                 id: `signals-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
@@ -577,7 +592,7 @@ export function useChatCommands() {
               });
             }
           } catch (err) {
-            addMessage({
+            addMessageForThread({
               id: `err-${Date.now()}`,
               type: 'system',
               content: `Signals inbox 请求失败: ${err instanceof Error ? err.message : 'Unknown'}`,
@@ -590,7 +605,7 @@ export function useChatCommands() {
         if (signalArgs.startsWith('search ')) {
           const query = signalArgs.slice('search '.length).trim();
           if (!query) {
-            addMessage({
+            addMessageForThread({
               id: `err-${Date.now()}`,
               type: 'system',
               content: '用法: /signals search <query>',
@@ -608,7 +623,7 @@ export function useChatCommands() {
             };
 
             if (data.items.length === 0) {
-              addMessage({
+              addMessageForThread({
                 id: `signals-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
@@ -617,7 +632,7 @@ export function useChatCommands() {
               });
             } else {
               const lines = data.items.map((item) => `- [${item.id}] ${item.title} (${item.source}/T${item.tier})`);
-              addMessage({
+              addMessageForThread({
                 id: `signals-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
@@ -626,7 +641,7 @@ export function useChatCommands() {
               });
             }
           } catch (err) {
-            addMessage({
+            addMessageForThread({
               id: `err-${Date.now()}`,
               type: 'system',
               content: `Signals search 请求失败: ${err instanceof Error ? err.message : 'Unknown'}`,
@@ -646,7 +661,7 @@ export function useChatCommands() {
               unreadCount: number;
             };
 
-            addMessage({
+            addMessageForThread({
               id: `signals-${Date.now()}`,
               type: 'system',
               variant: 'info',
@@ -654,7 +669,7 @@ export function useChatCommands() {
               timestamp: Date.now(),
             });
           } catch (err) {
-            addMessage({
+            addMessageForThread({
               id: `err-${Date.now()}`,
               type: 'system',
               content: `Signals stats 请求失败: ${err instanceof Error ? err.message : 'Unknown'}`,
@@ -678,7 +693,7 @@ export function useChatCommands() {
                 const state = source.enabled ? 'enabled' : 'disabled';
                 return `- ${source.id} (${state}, T${source.tier}, ${source.fetch.method})`;
               });
-              addMessage({
+              addMessageForThread({
                 id: `signals-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
@@ -686,7 +701,7 @@ export function useChatCommands() {
                 timestamp: Date.now(),
               });
             } catch (err) {
-              addMessage({
+              addMessageForThread({
                 id: `err-${Date.now()}`,
                 type: 'system',
                 content: `Signals sources 请求失败: ${err instanceof Error ? err.message : 'Unknown'}`,
@@ -698,7 +713,7 @@ export function useChatCommands() {
 
           const parts = sourceArgs.split(/\s+/);
           if (parts.length !== 2 || (parts[1] !== 'on' && parts[1] !== 'off')) {
-            addMessage({
+            addMessageForThread({
               id: `err-${Date.now()}`,
               type: 'system',
               content: '用法: /signals sources [sourceId on|off]',
@@ -719,7 +734,7 @@ export function useChatCommands() {
             if (!res.ok) throw new Error(`Server error: ${res.status}`);
             const data = (await res.json()) as { source: { id: string; enabled: boolean } };
 
-            addMessage({
+            addMessageForThread({
               id: `signals-${Date.now()}`,
               type: 'system',
               variant: 'info',
@@ -727,7 +742,7 @@ export function useChatCommands() {
               timestamp: Date.now(),
             });
           } catch (err) {
-            addMessage({
+            addMessageForThread({
               id: `err-${Date.now()}`,
               type: 'system',
               content: `Signals source update 失败: ${err instanceof Error ? err.message : 'Unknown'}`,
@@ -737,7 +752,7 @@ export function useChatCommands() {
           return true;
         }
 
-        addMessage({
+        addMessageForThread({
           id: `err-${Date.now()}`,
           type: 'system',
           content:
@@ -752,14 +767,14 @@ export function useChatCommands() {
         const rest = trimmed.slice('/tasks extract'.length).trim();
         const messageCount = rest ? parseInt(rest, 10) : undefined;
 
-        addMessage({
+        addMessageForThread({
           id: `user-${Date.now()}`,
           type: 'user',
           content: trimmed,
           timestamp: Date.now(),
         });
 
-        addMessage({
+        addMessageForThread({
           id: `sysinfo-extract-${Date.now()}`,
           type: 'system',
           variant: 'info',
@@ -783,7 +798,7 @@ export function useChatCommands() {
           const data = (await res.json()) as { count: number; degraded: boolean; reason?: string };
 
           if (data.count === 0) {
-            addMessage({
+            addMessageForThread({
               id: `extract-result-${Date.now()}`,
               type: 'system',
               variant: 'info',
@@ -792,7 +807,7 @@ export function useChatCommands() {
             });
           } else {
             const degradeNote = data.degraded ? ` (模式匹配: ${data.reason ?? '未知'})` : '';
-            addMessage({
+            addMessageForThread({
               id: `extract-result-${Date.now()}`,
               type: 'system',
               variant: 'info',
@@ -810,7 +825,7 @@ export function useChatCommands() {
       if (isCommandInvocation(trimmed, '/vote')) {
         const voteArgs = trimmed.slice('/vote'.length).trim();
 
-        addMessage({
+        addMessageForThread({
           id: `user-${Date.now()}`,
           type: 'user',
           content: trimmed,
@@ -825,7 +840,7 @@ export function useChatCommands() {
               method: 'DELETE',
             });
             if (res.status === 404) {
-              addMessage({
+              addMessageForThread({
                 id: `vote-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
@@ -844,7 +859,7 @@ export function useChatCommands() {
                     .map(([opt, count]) => `  ${opt}: ${count} 票`)
                     .join('\n')
                 : '  (无投票)';
-              addMessage({
+              addMessageForThread({
                 id: `vote-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
@@ -869,7 +884,7 @@ export function useChatCommands() {
               const v = data.vote;
               // Use voteCount from backend (anonymous) or compute from votes (named)
               const voteCount = v.voteCount ?? Object.keys(v.votes).length;
-              addMessage({
+              addMessageForThread({
                 id: `vote-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
@@ -877,7 +892,7 @@ export function useChatCommands() {
                 timestamp: Date.now(),
               });
             } else {
-              addMessage({
+              addMessageForThread({
                 id: `vote-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
@@ -902,7 +917,7 @@ export function useChatCommands() {
               body: JSON.stringify({ option }),
             });
             if (res.status === 404) {
-              addMessage({
+              addMessageForThread({
                 id: `vote-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
@@ -911,7 +926,7 @@ export function useChatCommands() {
               });
             } else if (res.status === 400) {
               const data = await res.json();
-              addMessage({
+              addMessageForThread({
                 id: `vote-${Date.now()}`,
                 type: 'system',
                 variant: 'error',
@@ -921,7 +936,7 @@ export function useChatCommands() {
             } else if (!res.ok) {
               throw new Error(`Server error: ${res.status}`);
             } else {
-              addMessage({
+              addMessageForThread({
                 id: `vote-${Date.now()}`,
                 type: 'system',
                 variant: 'info',
@@ -942,7 +957,7 @@ export function useChatCommands() {
 
       return false;
     },
-    [addMessage],
+    [addMessageToThread, router, captureSettingsOrigin],
   );
 
   return { processCommand };

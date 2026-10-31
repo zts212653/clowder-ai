@@ -48,7 +48,7 @@ describe('MCP Signal Tools', () => {
     const result = await handleSignalListInbox({
       limit: 5,
       source: 'anthropic-news',
-      tier: 1,
+      tier: '1',
     });
 
     assert.equal(result.isError, undefined);
@@ -128,7 +128,7 @@ describe('MCP Signal Tools', () => {
       query: 'claude',
       status: 'read',
       source: 'anthropic-news',
-      tier: 1,
+      tier: '1',
       limit: 10,
     });
 
@@ -140,6 +140,41 @@ describe('MCP Signal Tools', () => {
     assert.equal(parsed.searchParams.get('source'), 'anthropic-news');
     assert.equal(parsed.searchParams.get('tier'), '1');
     assert.equal(parsed.searchParams.get('limit'), '10');
+  });
+
+  // Bug-C: Gemini rejects numeric enum in tool schema (INVALID_ARGUMENT 400).
+  // tier must be STRING enum for Gemini function declaration compatibility.
+  test('tier schema accepts string values and handler produces correct URL params', async () => {
+    const { handleSignalListInbox, handleSignalSearch } = await import('../dist/tools/signals-tools.js');
+
+    const urls = [];
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      return { ok: true, json: async () => ({ items: [] }) };
+    };
+
+    // String tier "2" must be accepted and produce tier=2 in URL
+    await handleSignalListInbox({ tier: '2' });
+    assert.equal(new URL(urls[0]).searchParams.get('tier'), '2', 'inbox: string tier must produce tier=2');
+
+    await handleSignalSearch({ query: 'test', tier: '3' });
+    assert.equal(new URL(urls[1]).searchParams.get('tier'), '3', 'search: string tier must produce tier=3');
+  });
+
+  test('tier Zod schema rejects invalid values', async () => {
+    const { signalListInboxInputSchema } = await import('../dist/tools/signals-tools.js');
+    const { z } = await import('zod');
+    const schema = z.object(signalListInboxInputSchema);
+
+    // Valid string tiers
+    assert.doesNotThrow(() => schema.parse({ tier: '1' }));
+    assert.doesNotThrow(() => schema.parse({ tier: '4' }));
+    assert.doesNotThrow(() => schema.parse({})); // optional
+
+    // Invalid values
+    assert.throws(() => schema.parse({ tier: '5' }));
+    assert.throws(() => schema.parse({ tier: '0' }));
+    assert.throws(() => schema.parse({ tier: 'high' }));
   });
 
   test('handleSignalSummarize reads article then PATCHes summary', async () => {
@@ -195,5 +230,55 @@ describe('MCP Signal Tools', () => {
     assert.equal(typeof payload.summary, 'string');
     assert.ok(payload.summary.length > 0);
     assert.match(result.content[0].text, /summary updated/i);
+  });
+
+  test('both Signal families use verified concurrent invocation users over host decoys', async () => {
+    process.env.CAT_CAFE_SIGNAL_USER = 'host-user';
+    process.env.CAT_CAFE_USER_ID = 'host-user-id';
+    const { withInvocationCredentials } = await import('../dist/tools/invocation-auth.js');
+    const { handleSignalListInbox } = await import('../dist/tools/signals-tools.js?verified-invocation');
+    const { handleStartStudy } = await import('../dist/tools/signal-study-tools.js?verified-invocation');
+    const calls = [];
+    globalThis.fetch = async (url, init) => {
+      await new Promise((resolve) => setImmediate(resolve));
+      calls.push({ url: String(url), user: new Headers(init?.headers).get('X-Cat-Cafe-User') });
+      return {
+        ok: true,
+        json: async () => ({ items: [], article: { title: 'Article', source: 'test', tier: 1, content: 'Content' } }),
+      };
+    };
+    await Promise.all(
+      ['verified-a', 'verified-b'].map((userId) =>
+        withInvocationCredentials(
+          { invocationId: `inv-${userId}`, callbackToken: 'token', userId, apiUrl: `http://${userId}.invalid` },
+          async () => {
+            const results = await Promise.all([
+              handleSignalListInbox({}),
+              handleStartStudy({ articleId: 'article', threadId: 'thread' }),
+            ]);
+            for (const result of results) assert.equal(result.isError, undefined);
+          },
+        ),
+      ),
+    );
+    assert.equal(calls.length, 6);
+    for (const call of calls) assert.equal(call.user, new URL(call.url).hostname.replace('.invalid', ''));
+
+    // A bound invocation without its verified user must not adopt either host identity.
+    calls.length = 0;
+    const missing = await withInvocationCredentials({ invocationId: 'inv-missing', callbackToken: 'token' }, () =>
+      Promise.all([handleSignalListInbox({}), handleStartStudy({ articleId: 'article' })]),
+    );
+    for (const result of missing) {
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /verified invocation userId/i);
+    }
+    assert.equal(calls.length, 0);
+
+    // The existing stdio/launcher Signal principal is still used outside an invocation scope.
+    await handleSignalListInbox({});
+    await handleStartStudy({ articleId: 'article', threadId: 'thread' });
+    assert.equal(calls.length, 3);
+    for (const call of calls) assert.equal(call.user, 'host-user');
   });
 });

@@ -2,11 +2,14 @@
  * F122B AC-B8: ThreadExecutionBar shows per-cat active status with elapsed time.
  * B8/B9 polish: cat names from cat-config (formatCatName), colors from cat.color.primary.
  */
+import type { ActiveExecutionProjection } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { _resetCatDataCache } from '@/hooks/useCatData';
+import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
+import { apiFetch } from '@/utils/api-client';
 import { ThreadExecutionBar } from '../ThreadExecutionBar';
 
 // Mock /api/cats to return dynamic cat data
@@ -23,7 +26,8 @@ vi.mock('@/utils/api-client', () => ({
                 displayName: '布偶猫',
                 color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
                 mentionPatterns: ['@opus'],
-                provider: 'anthropic',
+                clientId: 'anthropic',
+                carrier: 'cli',
                 defaultModel: 'claude-opus-4-6',
                 avatar: '🐱',
                 roleDescription: 'test',
@@ -34,7 +38,8 @@ vi.mock('@/utils/api-client', () => ({
                 displayName: '缅因猫',
                 color: { primary: '#4CAF50', secondary: '#C8E6C9' },
                 mentionPatterns: ['@codex'],
-                provider: 'openai',
+                clientId: 'openai',
+                carrier: 'cli',
                 defaultModel: 'gpt-5.3-codex',
                 avatar: '🐱',
                 roleDescription: 'test',
@@ -48,19 +53,135 @@ vi.mock('@/utils/api-client', () => ({
   }),
 }));
 
+function liveExecution({
+  executionId,
+  catId,
+  threadId = 'thread-1',
+  startedAt = Date.now(),
+}: {
+  executionId: string;
+  catId: string;
+  threadId?: string;
+  startedAt?: number;
+}): ActiveExecutionProjection {
+  return {
+    executionId,
+    threadId,
+    threadTitle: 'Test thread',
+    catId,
+    kind: 'live_invocation',
+    startedAt,
+    cancelability: {
+      state: 'cancelable',
+      target: { kind: 'live_invocation', threadId, catId, executionId },
+    },
+  };
+}
+
+function managedGateExecution(): ActiveExecutionProjection {
+  return {
+    executionId: 'hold-ball-gate',
+    threadId: 'thread-1',
+    threadTitle: 'Gate thread',
+    catId: 'codex',
+    kind: 'managed_command',
+    activity: 'full_gate',
+    startedAt: Date.now() - 5000,
+    cancelability: {
+      state: 'cancelable',
+      target: { kind: 'managed_command', taskId: 'hold-ball-gate' },
+    },
+  };
+}
+
+function seedExecutions(executions: ActiveExecutionProjection[], anchorThreadId = 'thread-1'): void {
+  useChatStore.setState({
+    currentThreadId: anchorThreadId,
+    catInvocations: Object.fromEntries(
+      executions
+        .filter((execution) => execution.kind === 'live_invocation')
+        .map((execution) => [
+          execution.catId,
+          {
+            invocationId: execution.executionId,
+            activeRun: {
+              threadId: execution.threadId,
+              targetId: execution.catId,
+              invocationId: execution.executionId,
+              responseMessageId: `response-${execution.executionId}`,
+              inputEntryIds: [],
+              inputMessageIds: [],
+              privateInputEntryIds: [],
+              startedAt: execution.startedAt,
+            },
+          },
+        ]),
+    ),
+  });
+  useActiveExecutionStore.setState({
+    anchorThreadId,
+    projectPath: '/project/cafe',
+    executionsByKey: Object.fromEntries(executions.map((execution) => [activeExecutionKey(execution), execution])),
+    hydration: 'ready',
+    hydrationError: null,
+  });
+}
+
 describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
   let container: HTMLDivElement;
   let root: Root;
 
   beforeEach(() => {
+    vi.mocked(apiFetch)
+      .mockReset()
+      .mockImplementation((url: string) => {
+        if (url === '/api/cats') {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                cats: [
+                  {
+                    id: 'opus',
+                    displayName: '布偶猫',
+                    color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
+                    mentionPatterns: ['@opus'],
+                    clientId: 'anthropic',
+                    carrier: 'cli',
+                    defaultModel: 'claude-opus-4-6',
+                    avatar: '🐱',
+                    roleDescription: 'test',
+                    personality: 'test',
+                  },
+                  {
+                    id: 'codex',
+                    displayName: '缅因猫',
+                    color: { primary: '#4CAF50', secondary: '#C8E6C9' },
+                    mentionPatterns: ['@codex'],
+                    clientId: 'openai',
+                    carrier: 'cli',
+                    defaultModel: 'gpt-5.3-codex',
+                    avatar: '🐱',
+                    roleDescription: 'test',
+                    personality: 'test',
+                  },
+                ],
+              }),
+          }) as Promise<Response>;
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) }) as Promise<Response>;
+      });
     _resetCatDataCache();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
     useChatStore.setState({
+      currentThreadId: 'thread-1',
       activeInvocations: {},
       hasActiveInvocation: false,
+      catInvocations: {},
     });
+    useActiveExecutionStore.getState().reset();
   });
 
   afterEach(() => {
@@ -73,13 +194,53 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     expect(container.textContent).toBe('');
   });
 
-  it('renders active cat with display name from cat-config', async () => {
-    useChatStore.setState({
-      activeInvocations: {
-        'inv-1': { catId: 'opus', mode: 'execute', startedAt: Date.now() - 5000 },
+  it('presents a server-verified execution without requiring a second chat cache', () => {
+    useActiveExecutionStore.setState({
+      anchorThreadId: 'thread-1',
+      projectPath: '/project/cafe',
+      executionsByKey: {
+        execution: liveExecution({ executionId: 'admitted-response', catId: 'opus' }),
       },
-      hasActiveInvocation: true,
+      hydration: 'ready',
+      hydrationError: null,
     });
+    act(() => root.render(React.createElement(ThreadExecutionBar)));
+    expect(container.textContent).toContain('执行中');
+  });
+
+  it('keeps no-execution hydration states out of the bottom-chrome layout', () => {
+    const loadingRequest = useActiveExecutionStore.getState().beginHydration('thread-1', '/project/cafe');
+    act(() => root.render(React.createElement(ThreadExecutionBar)));
+    expect(container.childElementCount).toBe(0);
+
+    useActiveExecutionStore.getState().applySnapshot('thread-1', loadingRequest, {
+      projectPath: '/project/cafe',
+      executions: [],
+    });
+    act(() => root.render(React.createElement(ThreadExecutionBar)));
+    expect(container.childElementCount).toBe(0);
+
+    const failedRequest = useActiveExecutionStore.getState().beginHydration('thread-1', '/project/cafe');
+    useActiveExecutionStore.getState().failHydration('thread-1', failedRequest, new Error('offline'));
+    act(() => root.render(React.createElement(ThreadExecutionBar)));
+    expect(container.childElementCount).toBe(0);
+  });
+
+  it('keeps active controls and marks retained execution truth as stale after hydration fails', async () => {
+    seedExecutions([liveExecution({ executionId: 'inv-stale', catId: 'opus' })]);
+    const failedRequest = useActiveExecutionStore.getState().beginHydration('thread-1', '/project/cafe');
+    useActiveExecutionStore.getState().failHydration('thread-1', failedRequest, new Error('offline'));
+
+    await act(async () => root.render(React.createElement(ThreadExecutionBar)));
+
+    expect(container.querySelector('[aria-label="Stop opus live_invocation inv-stale"]')).not.toBeNull();
+    const staleMarker = container.querySelector('[data-testid="execution-hydration-stale"]');
+    expect(staleMarker?.textContent).toBe('状态暂不可核对');
+    expect(staleMarker?.getAttribute('title')).toBe('同步暂时失败，显示最近一次已验证状态。');
+  });
+
+  it('renders active cat with display name from cat-config', async () => {
+    seedExecutions([liveExecution({ executionId: 'inv-1', catId: 'opus', startedAt: Date.now() - 5000 })]);
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));
 
     const text = container.textContent ?? '';
@@ -87,16 +248,14 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     // Should show display name (布偶猫) not raw catId (opus)
     expect(text).toContain('布偶猫');
     expect(text).toMatch(/0:0[0-9]/);
+    expect(container.querySelector('[data-testid="execution-kind"]')?.textContent).toBe('实时回合');
   });
 
   it('renders multiple active cats with their respective display names', async () => {
-    useChatStore.setState({
-      activeInvocations: {
-        'inv-1': { catId: 'opus', mode: 'execute', startedAt: Date.now() - 30000 },
-        'inv-2': { catId: 'codex', mode: 'execute', startedAt: Date.now() - 10000 },
-      },
-      hasActiveInvocation: true,
-    });
+    seedExecutions([
+      liveExecution({ executionId: 'inv-1', catId: 'opus', startedAt: Date.now() - 30_000 }),
+      liveExecution({ executionId: 'inv-2', catId: 'codex', startedAt: Date.now() - 10_000 }),
+    ]);
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));
 
     const text = container.textContent ?? '';
@@ -104,28 +263,55 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     expect(text).toContain('缅因猫');
   });
 
-  it('uses dynamic cat color from cat-config (not hardcoded)', async () => {
-    useChatStore.setState({
-      activeInvocations: {
-        'inv-1': { catId: 'codex', mode: 'execute', startedAt: Date.now() },
+  it('names managed work 托管命令 without exposing its activity or thread detail', async () => {
+    seedExecutions([managedGateExecution()]);
+    await act(async () => root.render(React.createElement(ThreadExecutionBar)));
+
+    expect(container.querySelector('[data-testid="execution-kind"]')?.textContent).toBe('托管命令');
+    expect(container.textContent).not.toContain('全量门禁');
+    expect(container.textContent).not.toContain('Gate thread');
+    expect(container.textContent).not.toContain('pnpm gate');
+  });
+
+  it('does not expose newer managed activity values in the compact bar', async () => {
+    seedExecutions([
+      {
+        ...managedGateExecution(),
+        activity: 'future_activity' as unknown as ActiveExecutionProjection['activity'],
       },
-      hasActiveInvocation: true,
-    });
+    ]);
+    await act(async () => root.render(React.createElement(ThreadExecutionBar)));
+
+    expect(container.querySelector('[data-testid="execution-kind"]')?.textContent).toBe('托管命令');
+    expect(container.textContent).not.toContain('future_activity');
+    expect(container.textContent).not.toContain('Gate thread');
+  });
+
+  it('keeps exact member controls without adding a second whole-thread Stop', async () => {
+    seedExecutions([
+      liveExecution({ executionId: 'inv-1', catId: 'opus' }),
+      liveExecution({ executionId: 'inv-2', catId: 'codex' }),
+    ]);
+    await act(async () => root.render(React.createElement(ThreadExecutionBar)));
+
+    expect(container.querySelectorAll('[aria-label^="Stop "]')).toHaveLength(2);
+    expect(container.textContent).not.toContain('全部停止');
+  });
+
+  it('uses dynamic cat color from cat-config (not hardcoded)', async () => {
+    seedExecutions([liveExecution({ executionId: 'inv-1', catId: 'codex' })]);
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));
 
     const dot = container.querySelector('.animate-pulse') as HTMLElement;
     expect(dot).toBeTruthy();
-    expect(dot.style.backgroundColor).toBe('rgb(76, 175, 80)'); // #4CAF50
+    expect(dot.style.backgroundColor).toBe('var(--color-codex-primary)');
   });
 
-  it('deduplicates same cat from multiple invocations', async () => {
-    useChatStore.setState({
-      activeInvocations: {
-        'inv-1': { catId: 'opus', mode: 'execute', startedAt: Date.now() },
-        'inv-2': { catId: 'opus', mode: 'execute', startedAt: Date.now() },
-      },
-      hasActiveInvocation: true,
-    });
+  it('filters exact executions by thread instead of collapsing them globally by cat', async () => {
+    seedExecutions([
+      liveExecution({ executionId: 'inv-here', catId: 'opus' }),
+      liveExecution({ executionId: 'inv-elsewhere', catId: 'opus', threadId: 'thread-2' }),
+    ]);
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));
 
     const text = container.textContent ?? '';
@@ -134,12 +320,7 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
   });
 
   it('falls back to catId when cat not in config', async () => {
-    useChatStore.setState({
-      activeInvocations: {
-        'inv-1': { catId: 'unknown-cat', mode: 'execute', startedAt: Date.now() },
-      },
-      hasActiveInvocation: true,
-    });
+    seedExecutions([liveExecution({ executionId: 'inv-1', catId: 'unknown-cat' })]);
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));
 
     const text = container.textContent ?? '';
@@ -148,17 +329,65 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
 
   it('background thread invocation has startedAt after thread switch (R1 P1-1)', async () => {
     const fiveSecondsAgo = Date.now() - 5000;
-    useChatStore.setState({
-      currentThreadId: 'thread-bg',
-      activeInvocations: {
-        'inv-bg': { catId: 'codex', mode: 'execute', startedAt: fiveSecondsAgo },
-      },
-      hasActiveInvocation: true,
-    });
+    seedExecutions(
+      [liveExecution({ executionId: 'inv-bg', catId: 'codex', threadId: 'thread-bg', startedAt: fiveSecondsAgo })],
+      'thread-bg',
+    );
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));
 
     const text = container.textContent ?? '';
     expect(text).toContain('缅因猫');
     expect(text).not.toContain('0:00');
+  });
+
+  it('shows canonical app-server stage and last provider activity in-context', async () => {
+    const now = Date.now();
+    seedExecutions([liveExecution({ executionId: 'inv-1', catId: 'codex', startedAt: now - 10_000 })]);
+    useChatStore.setState({
+      catInvocations: {
+        codex: {
+          ...useChatStore.getState().catInvocations.codex,
+          invocationId: 'inv-1',
+          appServerLifecycle: {
+            stage: 'active',
+            lastActivityAt: now - 5_000,
+            recoveryAttempt: 0,
+            turnStartSent: true,
+            turnAccepted: true,
+            itemObserved: true,
+          },
+        },
+      },
+    });
+    await act(async () => root.render(React.createElement(ThreadExecutionBar)));
+
+    expect(container.textContent).not.toContain('运行回合');
+    expect(container.textContent).not.toContain('活动');
+  });
+
+  it('marks a silent active app-server turn as visible warning without auto-canceling it', async () => {
+    const now = Date.now();
+    seedExecutions([liveExecution({ executionId: 'inv-1', catId: 'codex', startedAt: now - 300_000 })]);
+    useChatStore.setState({
+      catInvocations: {
+        codex: {
+          ...useChatStore.getState().catInvocations.codex,
+          invocationId: 'inv-1',
+          appServerLifecycle: {
+            stage: 'active',
+            lastActivityAt: now - 130_000,
+            recoveryAttempt: 0,
+            turnStartSent: true,
+            turnAccepted: true,
+            itemObserved: false,
+          },
+        },
+      },
+    });
+    await act(async () => root.render(React.createElement(ThreadExecutionBar)));
+
+    expect(container.querySelector('[data-app-server-stalled="true"]')).toBeNull();
+    expect(container.textContent).not.toContain('可能在等待模型');
+    expect(container.querySelector('[aria-label="Stop codex live_invocation inv-1"]')).not.toBeNull();
   });
 });

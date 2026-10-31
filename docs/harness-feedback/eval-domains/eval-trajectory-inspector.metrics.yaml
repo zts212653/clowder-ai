@@ -1,0 +1,54 @@
+eligible_episodes:
+  label: Eligible anomaly opportunities
+  means: 窗口内 terminal error/cancelled/timeout 或由 F192 finding 显式指向 invocation 的机会总数；无调查动作的机会也保留在分母。
+  goodDirection: neutral
+  category: context
+  component: trajectory-inspector-utility
+accepted_evidence_episodes:
+  label: Accepted root-cause evidence episodes
+  means: Inspector 调查后，存在独立 accepted-evidence bit 且 canonical invocation/thread/session 一致的 episode 数；打开详情本身不算接受。
+  goodDirection: higher
+  category: activation
+  component: trajectory-inspector-utility
+unresolved_evidence_episodes:
+  label: Unresolved investigation episodes
+  means: 猫已调查但没有独立根因接受证据的 episode 数；成功 tool result 与 Raw/JSONL 查询不能自动把它归零。
+  goodDirection: lower
+  category: friction
+  component: trajectory-inspector-utility
+not_taken_episodes:
+  label: Investigation not taken episodes
+  means: Eligible opportunity 后没有 Inspector drill 或 Raw/JSONL fallback 的 episode 数；必须保留在 evidence-outcome 分布中。
+  goodDirection: lower
+  category: friction
+  component: trajectory-inspector-utility
+wrong_ref_episodes:
+  label: Wrong invocation or thread episodes
+  means: 调查所带 invocation/thread/session hint 与 canonical record 不一致的 episode 数；任何非零值都会停止效用结论。
+  goodDirection: lower
+  category: friction
+  component: trajectory-inspector-utility
+time_to_first_accepted_evidence_ms:
+  label: Time to first accepted evidence
+  means: 从 eligible anomaly opportunity 到独立接受根因证据的毫秒分布；仅包含 accepted episode，不用缺失值伪造零。
+  goodDirection: lower
+  category: activation
+  component: trajectory-inspector-utility
+raw_or_jsonl_fallback_episodes:
+  label: Raw or JSONL fallback episodes
+  means: 调查中需要用 events.jsonl 或等价 Raw/JSONL shell 查询回退的 episode 数；它是摩擦维度，不是成功信号。
+  goodDirection: lower
+  category: friction
+  component: trajectory-inspector-utility
+canonical_coverage:
+  label: Canonical episode coverage
+  means: 能由既有 invocation resolver 解析到 owner-scoped canonical invocation/thread/session 的候选比例；缺 transcript 也使覆盖退化。
+  goodDirection: higher
+  category: context
+  component: trajectory-inspector-utility
+reviewer_disagreement_rate:
+  label: Reviewer disagreement rate
+  means: 有独立 reviewer 判断的 accepted-evidence episode 中 disagreed / reviewed；超过 20% 时只能发布 calibration/observe。
+  goodDirection: lower
+  category: context
+  component: trajectory-inspector-utility

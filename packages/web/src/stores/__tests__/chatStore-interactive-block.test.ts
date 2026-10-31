@@ -35,7 +35,7 @@ describe('F096: chatStore.updateRichBlock', () => {
     store.updateRichBlock('msg-1', 'i1', { disabled: true, selectedIds: ['o1'] });
 
     const msg = useChatStore.getState().messages.find((m) => m.id === 'msg-1');
-    const block = msg?.extra?.rich?.blocks[0] as Record<string, unknown>;
+    const block = msg?.extra?.rich?.blocks[0] as unknown as Record<string, unknown>;
     expect(block?.disabled).toBe(true);
     expect(block?.selectedIds).toEqual(['o1']);
   });
@@ -68,8 +68,8 @@ describe('F096: chatStore.updateRichBlock', () => {
 
     const msg = useChatStore.getState().messages.find((m) => m.id === 'msg-2');
     expect(msg?.extra?.rich?.blocks[0]?.kind).toBe('card');
-    expect((msg?.extra?.rich?.blocks[0] as Record<string, unknown>)?.disabled).toBeUndefined();
-    expect((msg?.extra?.rich?.blocks[1] as Record<string, unknown>)?.disabled).toBe(true);
+    expect((msg?.extra?.rich?.blocks[0] as unknown as Record<string, unknown>)?.disabled).toBeUndefined();
+    expect((msg?.extra?.rich?.blocks[1] as unknown as Record<string, unknown>)?.disabled).toBe(true);
   });
 
   it('no-op when message not found', () => {

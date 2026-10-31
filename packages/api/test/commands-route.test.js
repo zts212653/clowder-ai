@@ -3,12 +3,15 @@
  */
 
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { TaskStore } from '../dist/domains/cats/services/stores/ports/TaskStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
+import { CommandRegistry } from '../dist/infrastructure/commands/CommandRegistry.js';
 import { commandsRoutes } from '../dist/routes/commands.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 // Mock opus service
 const mockOpusService = {
@@ -23,6 +26,8 @@ const mockSocketManager = {
   broadcastToRoom: () => {},
 };
 
+const TEST_MESSAGE_TIMESTAMP = Date.now();
+
 describe('Commands Routes', () => {
   let app;
   let messageStore;
@@ -32,6 +37,8 @@ describe('Commands Routes', () => {
   let otherThreadId;
 
   beforeEach(async () => {
+    catRegistry.reset();
+    catRegistry.register('opus', { id: 'opus', name: 'Opus', client: 'anthropic' });
     app = Fastify();
     messageStore = new MessageStore();
     taskStore = new TaskStore();
@@ -49,13 +56,18 @@ describe('Commands Routes', () => {
     await app.ready();
   });
 
+  afterEach(() => catRegistry.reset());
+
   it('POST /api/commands/extract-tasks creates tasks', async () => {
     // Add some messages first
-    await messageStore.append({
-      content: 'TODO: write tests',
-      userId: 'test-user',
-      threadId: ownThreadId,
-    });
+    await messageStore.append(
+      canonicalTestMessageInput({
+        content: 'TODO: write tests',
+        userId: 'test-user',
+        threadId: ownThreadId,
+        timestamp: TEST_MESSAGE_TIMESTAMP,
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -100,11 +112,14 @@ describe('Commands Routes', () => {
   });
 
   it('uses X-Cat-Cafe-User header over legacy payload userId', async () => {
-    await messageStore.append({
-      content: 'TODO: header identity should win',
-      userId: 'test-user',
-      threadId: ownThreadId,
-    });
+    await messageStore.append(
+      canonicalTestMessageInput({
+        content: 'TODO: header identity should win',
+        userId: 'test-user',
+        threadId: ownThreadId,
+        timestamp: TEST_MESSAGE_TIMESTAMP,
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -134,11 +149,14 @@ describe('Commands Routes', () => {
   });
 
   it('returns 403 when accessing another user thread', async () => {
-    await messageStore.append({
-      content: 'TODO: should not be visible',
-      userId: 'other-user',
-      threadId: otherThreadId,
-    });
+    await messageStore.append(
+      canonicalTestMessageInput({
+        content: 'TODO: should not be visible',
+        userId: 'other-user',
+        threadId: otherThreadId,
+        timestamp: TEST_MESSAGE_TIMESTAMP,
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -150,5 +168,97 @@ describe('Commands Routes', () => {
     });
 
     assert.equal(res.statusCode, 403);
+  });
+});
+
+// --- F142 Phase B: GET /api/commands (command listing) ---
+
+const CORE_CMDS = [
+  { name: '/help', usage: '/help', description: 'Help', category: 'general', surface: 'both', source: 'core' },
+  {
+    name: '/where',
+    usage: '/where',
+    description: 'Where',
+    category: 'connector',
+    surface: 'connector',
+    source: 'core',
+  },
+  { name: '/config', usage: '/config', description: 'Config', category: 'general', surface: 'web', source: 'core' },
+];
+
+function buildListingApp(extraSkill) {
+  const registry = new CommandRegistry(CORE_CMDS);
+  if (extraSkill) {
+    registry.registerSkillCommands(extraSkill.id, extraSkill.commands, { warn: () => {} });
+  }
+  const app = Fastify();
+  app.register(commandsRoutes, {
+    messageStore: new MessageStore(),
+    taskStore: new TaskStore(),
+    socketManager: { broadcastToRoom: () => {} },
+    opusService: {
+      async *invoke() {
+        yield { type: 'done', catId: 'opus' };
+      },
+    },
+    registry,
+  });
+  return app;
+}
+
+describe('GET /api/commands (F142-B)', () => {
+  it('returns all commands without surface filter', async () => {
+    const app = buildListingApp();
+    const res = await app.inject({ method: 'GET', url: '/api/commands' });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.commands.length, 3);
+  });
+
+  it('filters by surface=connector', async () => {
+    const app = buildListingApp();
+    const res = await app.inject({ method: 'GET', url: '/api/commands?surface=connector' });
+    const body = res.json();
+    const names = body.commands.map((c) => c.name).sort();
+    assert.deepEqual(names, ['/help', '/where']);
+  });
+
+  it('filters by surface=web', async () => {
+    const app = buildListingApp();
+    const res = await app.inject({ method: 'GET', url: '/api/commands?surface=web' });
+    const body = res.json();
+    const names = body.commands.map((c) => c.name).sort();
+    assert.deepEqual(names, ['/config', '/help']);
+  });
+
+  it('includes skill commands', async () => {
+    const app = buildListingApp({
+      id: 'debugging',
+      commands: [
+        {
+          name: '/debug',
+          usage: '/debug',
+          description: 'Debug',
+          category: 'general',
+          surface: 'connector',
+          source: 'skill',
+        },
+      ],
+    });
+    const res = await app.inject({ method: 'GET', url: '/api/commands?surface=connector' });
+    const body = res.json();
+    const debug = body.commands.find((c) => c.name === '/debug');
+    assert.ok(debug);
+    assert.equal(debug.source, 'skill');
+    assert.equal(debug.skillId, 'debugging');
+  });
+
+  it('all commands have surface and source fields (AC-B8)', async () => {
+    const app = buildListingApp();
+    const res = await app.inject({ method: 'GET', url: '/api/commands' });
+    for (const cmd of res.json().commands) {
+      assert.ok(cmd.surface, `${cmd.name} missing surface`);
+      assert.ok(cmd.source, `${cmd.name} missing source`);
+    }
   });
 });

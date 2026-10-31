@@ -1,8 +1,10 @@
 'use client';
 
+import { accountQuotaOwnerMatches } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
-import type { BuiltinAccountClient, ProfileItem } from './hub-provider-profiles.types';
-import type { CodexUsageItem, QuotaResponse } from './quota-cards';
+import type { BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
+import type { ConfiguredQuotaPlatforms } from './hub-quota-refresh';
+import { type CodexUsageItem, type QuotaResponse, toUtilization } from './quota-cards';
 
 export interface AccountQuotaPool {
   id: string;
@@ -10,6 +12,7 @@ export interface AccountQuotaPool {
   items: CodexUsageItem[];
   memberTags: string[];
   emptyText?: string;
+  checkedAt?: number;
 }
 
 export interface AccountQuotaPoolGroup {
@@ -24,32 +27,10 @@ const BUILTIN_CLIENT_LABELS: Record<BuiltinAccountClient, string> = {
   anthropic: 'Claude',
   openai: 'Codex',
   google: 'Gemini',
-  dare: 'Dare',
+  kimi: 'Kimi',
   opencode: 'OpenCode',
+  acp: 'ACP',
 };
-
-const BUILTIN_ACCOUNT_IDS: Record<BuiltinAccountClient, string> = {
-  anthropic: 'claude',
-  openai: 'codex',
-  google: 'gemini',
-  dare: 'dare',
-  opencode: 'opencode',
-};
-
-function builtinDisplayName(client: BuiltinAccountClient): string {
-  switch (client) {
-    case 'anthropic':
-      return 'Claude (OAuth)';
-    case 'openai':
-      return 'Codex (OAuth)';
-    case 'google':
-      return 'Gemini (OAuth)';
-    case 'dare':
-      return 'Dare (client-auth)';
-    case 'opencode':
-      return 'OpenCode (client-auth)';
-  }
-}
 
 function uniqueTags(tags: string[]): string[] {
   return [...new Set(tags.filter(Boolean))];
@@ -60,15 +41,15 @@ function memberTag(cat: CatData): string {
 }
 
 function fallbackAccountRef(cat: CatData): string | null {
-  switch (cat.provider) {
+  switch (cat.clientId) {
     case 'anthropic':
       return 'claude';
     case 'openai':
       return 'codex';
     case 'google':
       return 'gemini';
-    case 'dare':
-      return 'dare';
+    case 'kimi':
+      return 'kimi';
     case 'opencode':
       return 'opencode';
     default:
@@ -80,35 +61,37 @@ function memberTagsForAccount(cats: CatData[], accountId: string): string[] {
   return uniqueTags(
     cats
       .filter((cat) => {
-        const boundAccountRef = cat.accountRef?.trim() || cat.providerProfileId?.trim() || fallbackAccountRef(cat);
+        const boundAccountRef = cat.accountRef?.trim() || fallbackAccountRef(cat);
         return boundAccountRef === accountId;
       })
       .map(memberTag),
   );
 }
 
-function builtinQuotaItems(accountId: string, quota: QuotaResponse | null): CodexUsageItem[] {
-  switch (accountId) {
-    case 'claude':
+function builtinQuotaItems(clientId: BuiltinAccountClient | undefined, quota: QuotaResponse | null): CodexUsageItem[] {
+  switch (clientId) {
+    case 'anthropic':
       return quota?.claude.usageItems ?? [];
-    case 'codex':
+    case 'openai':
       return quota?.codex.usageItems ?? [];
-    case 'gemini':
+    case 'google':
       return quota?.gemini?.usageItems ?? [];
+    case 'kimi':
+      return quota?.kimi?.usageItems ?? [];
     default:
       return [];
   }
 }
 
-function builtinEmptyText(accountId: string): string {
-  switch (accountId) {
-    case 'claude':
-    case 'codex':
+function builtinEmptyText(clientId: BuiltinAccountClient | undefined): string {
+  switch (clientId) {
+    case 'anthropic':
+    case 'openai':
       return '暂无数据，点击刷新获取';
-    case 'gemini':
+    case 'google':
       return '暂无数据（需 ClaudeBar 推送）';
-    case 'dare':
-      return 'Dare 不单独上报官方额度，实际额度取决于绑定账号';
+    case 'kimi':
+      return '默认通过 Kimi CLI /usage 获取；如需 API 降级，配置 KIMI_QUOTA_API_FALLBACK_ENABLED=1 与 KIMI_AUTH_TOKEN';
     case 'opencode':
       return 'OpenCode 不单独上报官方额度，实际额度取决于绑定账号';
     default:
@@ -116,32 +99,44 @@ function builtinEmptyText(accountId: string): string {
   }
 }
 
+export function managedQuotaIsCurrent(profile: ProfileItem): boolean {
+  return (
+    profile.codex?.status === 'ready' && accountQuotaOwnerMatches(profile.quota, profile.id, profile.codex.identity)
+  );
+}
+
+function managedQuotaEmptyText(profile: ProfileItem): string {
+  if (profile.codex?.status === 'identity_changed') return '登录身份已变化，请先处理此账号登录';
+  if (profile.codex?.status !== 'ready') return '尚未登录，请先完成此账号的官方登录';
+  if (profile.quota && !managedQuotaIsCurrent(profile)) return '此账号额度身份未确认，请重新查询';
+  return profile.quota?.error ?? '尚未查询此账号额度，不代表额度为零';
+}
+
 export function buildAccountQuotaGroups(
   quota: QuotaResponse | null,
   profiles: ProfileItem[],
   cats: CatData[],
 ): AccountQuotaPoolGroup[] {
-  const builtinProfiles =
-    profiles.filter((profile) => profile.builtin).length > 0
-      ? profiles.filter((profile) => profile.builtin)
-      : (Object.entries(BUILTIN_ACCOUNT_IDS) as Array<[BuiltinAccountClient, string]>).map(([client, id]) => ({
-          id,
-          displayName: builtinDisplayName(client),
-          client,
-          builtin: true,
-          authType: 'oauth' as const,
-        }));
+  const oauthProfiles = profiles.filter((profile) => profile.authType === 'oauth');
 
-  const builtinPools = builtinProfiles.map<AccountQuotaPool>((profile) => ({
+  const builtinPools = oauthProfiles.map<AccountQuotaPool>((profile) => ({
     id: profile.id,
-    title: profile.displayName || BUILTIN_CLIENT_LABELS[profile.client ?? 'anthropic'],
-    items: builtinQuotaItems(profile.id, quota),
+    title: profile.displayName || BUILTIN_CLIENT_LABELS[profile.clientId ?? 'anthropic'],
+    // The aggregate observation belongs to the native default, never another login.
+    items: profile.codex
+      ? managedQuotaIsCurrent(profile) && profile.quota?.status === 'ok'
+        ? [...profile.quota.items]
+        : []
+      : builtinQuotaItems(profile.clientId, quota),
     memberTags: memberTagsForAccount(cats, profile.id),
-    emptyText: builtinEmptyText(profile.id),
+    emptyText: profile.codex ? managedQuotaEmptyText(profile) : builtinEmptyText(profile.clientId),
+    ...(profile.codex && managedQuotaIsCurrent(profile) && profile.quota
+      ? { checkedAt: profile.quota.observedAt }
+      : {}),
   }));
 
   const apiKeyPools = profiles
-    .filter((profile) => profile.authType === 'api_key' && !profile.builtin)
+    .filter((profile) => profile.authType === 'api_key')
     .map<AccountQuotaPool>((profile) => ({
       id: profile.id,
       title: profile.displayName,
@@ -150,7 +145,7 @@ export function buildAccountQuotaGroups(
       emptyText: '按账单周期计费，暂不展示官方用量',
     }));
 
-  const antigravityMemberTags = uniqueTags(cats.filter((cat) => cat.provider === 'antigravity').map(memberTag));
+  const antigravityMemberTags = uniqueTags(cats.filter((cat) => cat.clientId === 'antigravity').map(memberTag));
   const antigravityPools: AccountQuotaPool[] =
     antigravityMemberTags.length > 0 || (quota?.antigravity?.usageItems.length ?? 0) > 0
       ? [
@@ -167,8 +162,8 @@ export function buildAccountQuotaGroups(
   const groups: AccountQuotaPoolGroup[] = [
     {
       id: 'builtin',
-      title: '内置账号额度（按账号配置）',
-      description: '固定内置账号包括 Claude / Codex / Gemini / Dare / OpenCode，每个账号下方反向显示绑定成员。',
+      title: 'OAuth 账号额度（按账号配置）',
+      description: 'OAuth 账号包括 Claude / Codex / Gemini / Kimi / OpenCode，每个账号下方反向显示绑定成员。',
       pools: builtinPools,
     },
     {
@@ -190,4 +185,27 @@ export function buildAccountQuotaGroups(
   }
 
   return groups;
+}
+
+export function resolveAccountQuotaRisk(
+  quota: QuotaResponse | null,
+  refreshError: string | null,
+  configured: ConfiguredQuotaPlatforms,
+  profiles: ProfileItem[],
+  groups: AccountQuotaPoolGroup[],
+): 'ok' | 'warn' | 'high' {
+  if (
+    refreshError ||
+    (configured.codex && quota?.codex?.error) ||
+    (configured.claude && quota?.claude?.error) ||
+    (configured.gemini && quota?.gemini?.error) ||
+    (configured.kimi && quota?.kimi?.error) ||
+    (configured.antigravity && quota?.antigravity?.error) ||
+    profiles.some((profile) => profile.codex && managedQuotaIsCurrent(profile) && profile.quota?.error)
+  )
+    return 'high';
+  const max = Math.max(0, ...groups.flatMap((group) => group.pools.flatMap((pool) => pool.items.map(toUtilization))));
+  if (max >= 95) return 'high';
+  if (max >= 80) return 'warn';
+  return 'ok';
 }

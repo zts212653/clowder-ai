@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "activeProfile": "opensource",
+  "profiles": {
+    "opensource": {
+      "apiPort": 3004,
+      "webPort": 3003,
+      "envRegistryFrontendPort": 3003,
+      "corsOrigins": ["http://localhost:3000", "http://localhost:3003", "https://cafe.clowder-ai.com"],
+      "roadmapPath": "docs/ROADMAP.md",
+      "brand": {
+        "name": "Clowder AI",
+        "displayName": "Clowder AI",
+        "shortName": "Clowder AI",
+        "hubName": "Clowder AI Hub",
+        "tagline": "Your AI team collaboration space"
+      },
+      "repositoryFullName": "zts212653/clowder-ai",
+      "l0Projections": ["owner", "public"],
+      "promptPolicy": {
+        "coCreatorRole": "co-creator",
+        "decisionRole": "operator",
+        "runtimeSafetyRule": "1. **Runtime data safety** — Use isolated development/test data stores; never point local experiments at production user data",
+        "acceptanceRule": "4. **Release acceptance channel** — Validate merged changes in an isolated acceptance environment; test unmerged work in a feature checkout",
+        "modifyDataBoundary": "修改生产数据边界",
+        "capabilityQualifier": ""
+      }
+    }
+  },
+  "startupProfiles": {
+    "dev": {
+      "common": {
+        "ANTHROPIC_PROXY_ENABLED": "1",
+        "ASR_ENABLED": "0",
+        "TTS_ENABLED": "0",
+        "LLM_POSTPROCESS_ENABLED": "0",
+        "MESSAGE_TTL_SECONDS": "0",
+        "THREAD_TTL_SECONDS": "0",
+        "TASK_TTL_SECONDS": "0",
+        "SUMMARY_TTL_SECONDS": "0",
+        "REDIS_PROFILE": "dev"
+      },
+      "posix": {
+        "AUDIO_SERVICE_ENABLED": "0"
+      },
+      "win32": {
+        "ASR_ENABLED": "1",
+        "TTS_ENABLED": "1",
+        "LLM_POSTPROCESS_ENABLED": "1"
+      }
+    },
+    "production": {
+      "common": {
+        "ANTHROPIC_PROXY_ENABLED": "0",
+        "ASR_ENABLED": "0",
+        "TTS_ENABLED": "0",
+        "LLM_POSTPROCESS_ENABLED": "0",
+        "MESSAGE_TTL_SECONDS": "0",
+        "THREAD_TTL_SECONDS": "0",
+        "TASK_TTL_SECONDS": "0",
+        "SUMMARY_TTL_SECONDS": "0",
+        "REDIS_PROFILE": "opensource"
+      },
+      "posix": {
+        "AUDIO_SERVICE_ENABLED": "0"
+      },
+      "win32": {}
+    },
+    "opensource": {
+      "common": {
+        "ANTHROPIC_PROXY_ENABLED": "0",
+        "ASR_ENABLED": "0",
+        "TTS_ENABLED": "0",
+        "LLM_POSTPROCESS_ENABLED": "0",
+        "MESSAGE_TTL_SECONDS": "0",
+        "THREAD_TTL_SECONDS": "0",
+        "TASK_TTL_SECONDS": "0",
+        "SUMMARY_TTL_SECONDS": "0",
+        "REDIS_PROFILE": "opensource"
+      },
+      "posix": {
+        "AUDIO_SERVICE_ENABLED": "0"
+      },
+      "win32": {}
+    },
+    "unprofiled": {
+      "common": {},
+      "posix": {
+        "ANTHROPIC_PROXY_ENABLED": "0",
+        "ASR_ENABLED": "0",
+        "TTS_ENABLED": "0",
+        "LLM_POSTPROCESS_ENABLED": "0",
+        "MESSAGE_TTL_SECONDS": "0",
+        "THREAD_TTL_SECONDS": "0",
+        "TASK_TTL_SECONDS": "0",
+        "SUMMARY_TTL_SECONDS": "0",
+        "REDIS_PROFILE": "dev",
+        "AUDIO_SERVICE_ENABLED": "0"
+      },
+      "win32": {}
+    }
+  }
+}

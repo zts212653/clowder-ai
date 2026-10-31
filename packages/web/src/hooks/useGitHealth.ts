@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useChatStore } from '../stores/chatStore';
 import { apiFetch } from '../utils/api-client';
 
@@ -36,26 +36,51 @@ export interface GitHealthResult {
   runtimeDrift: RuntimeDrift | null;
 }
 
+interface TargetedSnapshot<T> {
+  worktreeId: string;
+  value: T;
+}
+
+/** F322 R3: health reads are pinned to their target worktree, like useGitPanel. */
 export function useGitHealth() {
   const worktreeId = useChatStore((s) => s.workspaceWorktreeId);
-  const [health, setHealth] = useState<GitHealthResult | null>(null);
+  const [healthSnap, setHealthSnap] = useState<TargetedSnapshot<GitHealthResult> | null>(null);
+  const [errorSnap, setErrorSnap] = useState<TargetedSnapshot<string> | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const epoch = useRef(0);
+  const targetRef = useRef(worktreeId);
+
+  useLayoutEffect(() => {
+    targetRef.current = worktreeId;
+  }, [worktreeId]);
 
   const fetchHealth = useCallback(async () => {
-    if (!worktreeId) return;
+    const target = worktreeId;
+    if (!target) return;
+    const request = ++epoch.current;
     setLoading(true);
-    setError(null);
     try {
-      const res = await apiFetch(`/api/workspace/git-health?worktreeId=${encodeURIComponent(worktreeId)}`);
+      const res = await apiFetch(`/api/workspace/git-health?worktreeId=${encodeURIComponent(target)}`);
       if (!res.ok) throw new Error(await res.text());
-      setHealth(await res.json());
+      const json = await res.json();
+      if (request === epoch.current && targetRef.current === target) {
+        setHealthSnap({ worktreeId: target, value: json });
+        setErrorSnap(null);
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to fetch git health');
+      if (request === epoch.current && targetRef.current === target) {
+        setHealthSnap((prev) => (prev && prev.worktreeId === target ? null : prev));
+        setErrorSnap({ worktreeId: target, value: e instanceof Error ? e.message : 'Failed to fetch git health' });
+      }
     } finally {
-      setLoading(false);
+      if (request === epoch.current) setLoading(false);
     }
   }, [worktreeId]);
 
-  return { health, loading, error, fetchHealth };
+  return {
+    health: healthSnap?.worktreeId === worktreeId ? healthSnap.value : null,
+    loading,
+    error: errorSnap?.worktreeId === worktreeId ? errorSnap.value : null,
+    fetchHealth,
+  };
 }

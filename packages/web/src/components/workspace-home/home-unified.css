@@ -1,0 +1,74 @@
+[data-shell="v2"] .home-section-icon {
+  flex: none;
+  align-self: center;
+  width: 16px;
+  height: 16px;
+  color: var(--shell-muted);
+}
+[data-shell="v2"] .home-conversation-scope {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 8px 0 12px;
+  padding-top: 18px;
+  border-top: 1px solid var(--shell-hairline-strong);
+  color: var(--shell-muted);
+}
+[data-shell="v2"] .home-conversation-scope b {
+  flex: none;
+}
+[data-shell="v2"] .home-conversation-scope > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+[data-shell="v2"] .home-wait-row {
+  display: block;
+  padding: 0;
+  border-top: 1px solid var(--shell-hairline);
+}
+[data-shell="v2"] .home-wait-main {
+  display: flex;
+  align-items: flex-start;
+}
+[data-shell="v2"] .home-wait-row .home-live-sub {
+  font-weight: 400;
+}
+[data-shell="v2"] .home-wait-details {
+  margin: 0;
+  padding: 0 0 10px 25px;
+  color: var(--shell-muted);
+}
+[data-shell="v2"] .home-deployment-fold {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  padding: 10px 4px;
+  color: var(--shell-body);
+  text-align: left;
+  white-space: nowrap;
+}
+[data-shell="v2"] .home-deployment-fold .home-project-avatars {
+  margin-left: 0;
+}
+[data-shell="v2"] .home-deployment-count {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+[data-shell="v2"] .home-deployment-longest {
+  flex: none;
+  margin-left: auto;
+  color: var(--shell-muted);
+}
+[data-shell="v2"] .home-project-live-dot[data-tone="wait"] {
+  background: var(--semantic-warning);
+}
+@container home (max-width: 360px) {
+  [data-shell="v2"] .home-deployment-fold {
+    gap: 5px;
+  }
+}

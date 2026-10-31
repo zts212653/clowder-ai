@@ -245,8 +245,21 @@ export const signalStudyRoutes: FastifyPluginAsync<StudyRouteOptions> = async (a
     let affected = 0;
 
     for (const id of ids) {
-      const input = action === 'delete' ? { deletedAt: new Date().toISOString() } : (fields ?? {});
-      const result = await articleQuery.updateArticle(id, input);
+      if (action === 'delete') {
+        const result = await articleQuery.updateArticle(id, { deletedAt: new Date().toISOString() });
+        if (result) affected++;
+        continue;
+      }
+      const updateFields = { ...fields };
+      // Tags in batch = append semantics: merge with existing tags
+      if (updateFields?.tags && updateFields.tags.length > 0) {
+        const existing = await articleQuery.getArticleById(id);
+        if (existing) {
+          const merged = Array.from(new Set([...existing.tags, ...updateFields.tags]));
+          updateFields.tags = merged;
+        }
+      }
+      const result = await articleQuery.updateArticle(id, updateFields ?? {});
       if (result) affected++;
     }
 

@@ -9,20 +9,15 @@
  */
 
 import assert from 'node:assert/strict';
-import { before, beforeEach, describe, test } from 'node:test';
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import { beforeEach, describe, test } from 'node:test';
+import './helpers/setup-cat-registry.js';
 import Fastify from 'fastify';
-
-// Ensure catRegistry is populated for catId validation tests
-before(() => {
-  for (const [id, config] of Object.entries(CAT_CONFIGS)) {
-    if (!catRegistry.has(id)) catRegistry.register(id, config);
-  }
-});
+import { adaptInvocationQueue, canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 function createMockSocketManager() {
   const messages = [];
   const roomEvents = [];
+  const userEvents = [];
   return {
     broadcastAgentMessage(msg) {
       messages.push(msg);
@@ -30,11 +25,19 @@ function createMockSocketManager() {
     broadcastToRoom(room, event, data) {
       roomEvents.push({ room, event, data });
     },
+    // F-coalesce: production SocketManager has emitToUser (enqueueA2ATargets emits queue_updated on
+    // both enqueue AND coalesce). The mock previously omitted it; coalesce path now exercises it.
+    emitToUser(userId, event, data) {
+      userEvents.push({ userId, event, data });
+    },
     getMessages() {
       return messages;
     },
     getRoomEvents() {
       return roomEvents;
+    },
+    getUserEvents() {
+      return userEvents;
     },
   };
 }
@@ -86,18 +89,28 @@ describe('post_message A2A mention invocation', () => {
   let socketManager;
   let invocationRecordStore;
   let mockRouter;
+  let invocationQueue;
+  let queueProcessor;
 
   beforeEach(async () => {
     const { InvocationRegistry } = await import(
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
     );
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 
     registry = new InvocationRegistry();
     messageStore = new MessageStore();
     socketManager = createMockSocketManager();
     invocationRecordStore = createMockInvocationRecordStore();
     mockRouter = createMockRouter();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
+    queueProcessor = {
+      async onInvocationComplete() {},
+      async requestDrain() {},
+      registerEntryCompleteHook() {},
+      unregisterEntryCompleteHook() {},
+    };
   });
 
   async function createApp(opts = {}) {
@@ -109,6 +122,8 @@ describe('post_message A2A mention invocation', () => {
       socketManager,
       router: mockRouter,
       invocationRecordStore,
+      invocationQueue,
+      queueProcessor,
       ...opts,
     });
     return app;
@@ -117,12 +132,13 @@ describe('post_message A2A mention invocation', () => {
   // P1-1 regression: no @ → no invocation
   test('post-message without @ does NOT trigger invocation', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', { threadId: 't1' });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
-      payload: { invocationId, callbackToken, content: 'Just a status update, no mentions' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content: 'Just a status update, no mentions' },
     });
 
     assert.equal(response.statusCode, 200);
@@ -137,14 +153,13 @@ describe('post_message A2A mention invocation', () => {
   // P1-2 regression: inline @ → no invocation
   test('post-message with inline @ (行中) does NOT trigger invocation', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', { threadId: 't1' });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '这个方案里，之前 @缅因猫 提过类似的思路',
       },
     });
@@ -160,14 +175,13 @@ describe('post_message A2A mention invocation', () => {
   // P1-2 regression: @ inside code block → no invocation
   test('post-message with @ in code block does NOT trigger invocation', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', { threadId: 't1' });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '看看这段代码:\n```\n@缅因猫 这里是注释\n```\n完毕',
       },
     });
@@ -180,17 +194,20 @@ describe('post_message A2A mention invocation', () => {
     );
   });
 
-  // Positive case: line-start @ → mentions stored + invocation created
-  test('post-message with line-start @ stores mentions and triggers invocation', async () => {
+  // Positive case: line-start @ → mentions stored + canonical Queue carrier created
+  test('post-message with line-start @ stores mentions and queues A2A', async () => {
+    let observedAppend;
+    messageStore.onAppend = (message) => {
+      observedAppend = structuredClone(message);
+    };
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', { threadId: 't1' });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '修复完成了\n@缅因猫\n请帮忙 review',
       },
     });
@@ -201,24 +218,92 @@ describe('post_message A2A mention invocation', () => {
     const recent = messageStore.getRecent(10);
     assert.equal(recent.length, 1);
     assert.ok(recent[0].mentions.includes('codex'), 'Message should store codex as mention (缅因猫 = codex)');
+    assert.notEqual(recent[0].deliveryStatus, 'queued', 'agent speech must be public before recipient admission');
+    assert.deepEqual(recent[0].from, { kind: 'agent', catId: 'opus' });
+    assert.equal(observedAppend.queueCustodyAdmission, undefined);
+    assert.equal(socketManager.getMessages().length, 1, 'public speech must broadcast immediately');
 
-    // InvocationRecord should be created
-    assert.equal(invocationRecordStore.getRecords().length, 1);
-    assert.deepEqual(invocationRecordStore.getRecords()[0].targetCats, ['codex']);
+    const entries = invocationQueue.list('t1', 'user-1');
+    assert.equal(entries.length, 1);
+    assert.deepEqual(entries[0].targets, ['codex']);
+    assert.equal(invocationRecordStore.getRecords().length, 0);
+    assert.equal(mockRouter.getExecutions().length, 0);
   });
 
-  // Content-before-mention regression: 上面写内容，最后一行 @ (缅因猫习惯)
-  test('post-message with content-before-mention triggers invocation', async () => {
-    const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', { threadId: 't1' });
+  test('post-message preserves separate source identity for an already-queued target', async () => {
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const drainCalls = [];
+    const queueProcessor = {
+      async onInvocationComplete() {},
+      async requestDrain(threadId) {
+        drainCalls.push(threadId);
+      },
+      registerEntryCompleteHook() {},
+      unregisterEntryCompleteHook() {},
+    };
+    const invocationQueue = adaptInvocationQueue(
+      new InvocationQueue(undefined, {
+        onAdmitted: ({ threadId }) => {
+          void queueProcessor.requestDrain(threadId);
+        },
+      }),
+    );
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
+    const existing = invocationQueue.enqueue(
+      canonicalTestQueueInput({
+        threadId: 't1',
+        userId: 'user-1',
+        kind: 'message_wake',
+        ownerAuthProvenance: 'unknown',
+        content: 'earlier queued handoff',
+        messageId: 'earlier-trigger',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        targetCats: ['codex'],
+        intent: 'execute',
+        autoExecute: true,
+        callerCatId: 'opus',
+        a2aTriggerMessageId: 'earlier-trigger',
+      }),
+    ).entry;
+    drainCalls.length = 0;
+    const app = await createApp({ invocationQueue, queueProcessor });
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
-        content: '这是交接文档，DARE 源码目录执行\n是否接受完全禁用 --api-key argv\n@缅因猫',
+        content: '修复完成了\n@缅因猫\n请帮忙 review',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    const entries = invocationQueue.list('t1', 'user-1');
+    assert.equal(entries.length, 2, 'each durable source must own one independent Queue row');
+    assert.equal(entries[0].id, existing.id);
+    assert.match(entries[0].payload.content, /earlier queued handoff/);
+    assert.doesNotMatch(entries[0].payload.content, /修复完成了/);
+    assert.equal(entries[1].payload.messageId, body.messageId);
+    assert.match(entries[1].payload.content, /修复完成了/);
+    assert.deepEqual(body.routed, ['codex']);
+    assert.match(body.message, /消息已路由给 @codex/);
+    assert.deepEqual(drainCalls, ['t1']);
+    assert.equal(invocationRecordStore.getRecords().length, 0, 'InvocationQueue path must not create legacy records');
+  });
+
+  // Content-before-mention regression: 上面写内容，最后一行 @ (缅因猫习惯)
+  test('post-message with content-before-mention queues A2A', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        content: '这是交接文档，源码目录执行\n是否接受完全禁用 --api-key argv\n@缅因猫',
       },
     });
 
@@ -231,9 +316,10 @@ describe('post_message A2A mention invocation', () => {
       'Content-before-mention: codex should be mentioned when @缅因猫 is on last line',
     );
 
-    const records = invocationRecordStore.getRecords();
-    const a2aRecord = records.find((r) => r.targetCats.includes('codex'));
-    assert.ok(a2aRecord, 'Content-before-mention should trigger A2A invocation for codex');
+    const entries = invocationQueue.list('t1', 'user-1');
+    assert.equal(entries.length, 1, 'Content-before-mention should queue A2A for codex');
+    assert.deepEqual(entries[0].targets, ['codex']);
+    assert.equal(mockRouter.getExecutions().length, 0);
   });
 
   test('post-message skips redundant A2A when target already covered by active parent invocation', async () => {
@@ -253,14 +339,13 @@ describe('post_message A2A mention invocation', () => {
       complete() {},
     };
     const app = await createApp({ invocationTracker: mockInvocationTracker });
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', { threadId: 't1' });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '同步一下\n@缅因猫\n这条是冗余提醒',
       },
     });
@@ -271,7 +356,7 @@ describe('post_message A2A mention invocation', () => {
   });
 
   // F108 slot-aware: opus active, @codex in different slot → codex SHOULD be invoked
-  test('post-message wakes codex when opus is active in different slot (slot-aware fallback)', async () => {
+  test('post-message queues codex when opus is active in a different slot', async () => {
     const mockInvocationTracker = {
       has() {
         return true;
@@ -285,30 +370,26 @@ describe('post_message A2A mention invocation', () => {
       complete() {},
     };
     const app = await createApp({ invocationTracker: mockInvocationTracker });
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', { threadId: 't1' });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '修完了，请帮忙 review\n@缅因猫',
       },
     });
 
     assert.equal(response.statusCode, 200);
-    // codex should be invoked even though opus is active
-    assert.equal(invocationRecordStore.getRecords().length, 1, 'Should create InvocationRecord for codex');
-    assert.deepEqual(
-      invocationRecordStore.getRecords()[0].targetCats,
-      ['codex'],
-      'codex should be invoked (different slot from active opus)',
-    );
+    const entries = invocationQueue.list('t1', 'user-1');
+    assert.equal(entries.length, 1, 'Should queue codex in its independent slot');
+    assert.deepEqual(entries[0].targets, ['codex']);
+    assert.equal(invocationRecordStore.getRecords().length, 0);
   });
 
   // F108 slot-aware: opus active, explicit targetCats:["codex"] → codex SHOULD be invoked
-  test('post-message with targetCats wakes codex when opus is active (no worklist)', async () => {
+  test('post-message with targetCats queues codex when opus is active', async () => {
     const mockInvocationTracker = {
       has() {
         return true;
@@ -322,40 +403,36 @@ describe('post_message A2A mention invocation', () => {
       complete() {},
     };
     const app = await createApp({ invocationTracker: mockInvocationTracker });
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', { threadId: 't1' });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
-        content: '铲屎官快看！有事情！',
+        content: 'co-creator快看！有事情！',
         targetCats: ['codex'],
       },
     });
 
     assert.equal(response.statusCode, 200);
-    assert.equal(
-      invocationRecordStore.getRecords().length,
-      1,
-      'Should create InvocationRecord for codex via targetCats',
-    );
-    assert.deepEqual(invocationRecordStore.getRecords()[0].targetCats, ['codex']);
+    const entries = invocationQueue.list('t1', 'user-1');
+    assert.equal(entries.length, 1, 'Should queue codex via targetCats');
+    assert.deepEqual(entries[0].targets, ['codex']);
+    assert.equal(invocationRecordStore.getRecords().length, 0);
   });
 
   // Invalid catId in explicitTargetCats → filtered out, no A2A crash
   test('post-message with invalid catId in targetCats is filtered gracefully', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', { threadId: 't1' });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
-        content: '铲屎官快看！有事情！',
+        content: 'co-creator快看！有事情！',
         targetCats: ['default-user'],
       },
     });
@@ -364,6 +441,10 @@ describe('post_message A2A mention invocation', () => {
     // Message should still be stored
     const recent = messageStore.getRecent(10);
     assert.equal(recent.length, 1, 'Message should still be stored');
+    assert.equal(response.json().isError, true, 'The sending agent must receive the target failure');
+    assert.deepEqual(response.json().routed, [], 'An invalid A2A target must not choose a conversation fallback');
+    assert.equal(response.json().messageId, recent[0].id, 'The failure reply must reference the durable source');
+    assert.equal(invocationQueue.list('t1', 'user-1').length, 0);
     // No A2A invocation should be triggered for invalid catId
     assert.equal(invocationRecordStore.getRecords().length, 0, 'Invalid catId must not trigger A2A');
     assert.equal(mockRouter.getExecutions().length, 0, 'routeExecution should not be called');
@@ -372,37 +453,61 @@ describe('post_message A2A mention invocation', () => {
   // Mixed valid + invalid targetCats → only valid ones enter A2A
   test('post-message with mixed valid/invalid targetCats keeps only valid ones', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', { threadId: 't1' });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '通知一下',
         targetCats: ['codex', 'default-user', 'nonexistent-cat'],
       },
     });
 
     assert.equal(response.statusCode, 200);
-    // A2A should fire for codex only
-    const records = invocationRecordStore.getRecords();
-    assert.equal(records.length, 1, 'Should create InvocationRecord for valid target');
-    assert.deepEqual(records[0].targetCats, ['codex'], 'Only valid catId (codex) should be in targetCats');
+    const entries = invocationQueue.list('t1', 'user-1');
+    assert.equal(entries.length, 1, 'Should queue only the valid target');
+    assert.deepEqual(entries[0].targets, ['codex']);
+    assert.equal(invocationRecordStore.getRecords().length, 0);
+  });
+
+  test('single line-start mention drops polluted explicit targetCats extras (fail-closed)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        content: '请帮忙复核\n@缅因猫',
+        targetCats: ['codex', 'gemini'],
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const entries = invocationQueue.list('t1', 'user-1');
+    assert.equal(entries.length, 1, 'single mention should enqueue exactly one target');
+    assert.deepEqual(entries[0].targets, ['codex'], 'extra explicit target should be dropped');
+    assert.equal(invocationRecordStore.getRecords().length, 0);
+
+    const recent = messageStore.getRecent(10);
+    assert.equal(recent.length, 1);
+    assert.ok(recent[0].mentions.includes('codex'));
+    assert.equal(recent[0].mentions.includes('gemini'), false, 'gemini must not be injected into mentions');
   });
 
   // Self-mention filter: opus @布偶猫 → no invocation (can't invoke self)
   test('post-message self-mention does NOT trigger invocation', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', { threadId: 't1' });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '@布偶猫\n这是自我引用测试',
       },
     });
@@ -420,6 +525,8 @@ describe('F052: cross-thread A2A mention routing', () => {
   let socketManager;
   let invocationRecordStore;
   let mockRouter;
+  let invocationQueue;
+  let queueProcessor;
 
   beforeEach(async () => {
     const { InvocationRegistry } = await import(
@@ -427,6 +534,7 @@ describe('F052: cross-thread A2A mention routing', () => {
     );
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 
     registry = new InvocationRegistry();
     messageStore = new MessageStore();
@@ -434,9 +542,11 @@ describe('F052: cross-thread A2A mention routing', () => {
     socketManager = createMockSocketManager();
     invocationRecordStore = createMockInvocationRecordStore();
     mockRouter = createMockRouter();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
+    queueProcessor = { async requestDrain() {} };
   });
 
-  async function createAppWithThreadStore() {
+  async function createAppWithThreadStore(opts = {}) {
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
     const app = Fastify();
     await app.register(callbacksRoutes, {
@@ -446,6 +556,9 @@ describe('F052: cross-thread A2A mention routing', () => {
       socketManager,
       router: mockRouter,
       invocationRecordStore,
+      invocationQueue,
+      queueProcessor,
+      ...opts,
     });
     return app;
   }
@@ -455,14 +568,13 @@ describe('F052: cross-thread A2A mention routing', () => {
     const sourceThread = await threadStore.create('user-1', 'A2A Source Thread');
     const targetThread = await threadStore.create('user-1', 'A2A Target Thread');
 
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', sourceThread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', sourceThread.id);
 
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '@codex 请处理这个跨线程任务',
         threadId: targetThread.id,
       },
@@ -475,18 +587,84 @@ describe('F052: cross-thread A2A mention routing', () => {
     assert.ok(crossMsg.mentions.includes('codex'), 'cross-thread @codex should be in mentions');
   });
 
+  test('cross-thread same-member source enters durable Queue before advisory availability is read', async () => {
+    const retryAt = Date.now() + 300_000;
+    let availabilityChecks = 0;
+    let targetThreadId;
+    const app = await createAppWithThreadStore({
+      routingDispatchPreflight: {
+        async preflight(input) {
+          availabilityChecks++;
+          const admitted = invocationQueue.list(targetThreadId, 'user-1');
+          assert.equal(admitted.length, 1, 'availability is read only after durable admission');
+          assert.deepEqual(admitted[0].targets, ['codex']);
+          return {
+            v: 1,
+            ownerId: input.ownerId,
+            observedAt: Date.now(),
+            resolverState: 'fresh',
+            targets: input.targetCatIds.map((targetCatId) => ({
+              targetCatId,
+              disposition: 'rejected',
+              automaticRetryAt: retryAt,
+              reasons: [
+                { code: 'provider_timeout', summary: 'another turn timed out', sourceRefs: ['turn:other-thread'] },
+              ],
+              alternatives: [],
+            })),
+          };
+        },
+      },
+    });
+    const source = await threadStore.create('user-1', 'Source');
+    const target = await threadStore.create('user-1', 'Target');
+    targetThreadId = target.id;
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', source.id);
+    const request = {
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        threadId: target.id,
+        targetCats: ['codex'],
+        effectClass: 'coordinate',
+        content: 'Read the existing provider boundary',
+        clientMessageId: 'cross-thread-temporary-refusal',
+      },
+    };
+    const response = await app.inject(request);
+    assert.equal(response.statusCode, 200);
+    const body = response.json();
+    assert.deepEqual(body.routed, ['codex'], 'requested recipient owns the durable wake');
+    assert.equal(availabilityChecks, 1, 'availability annotates the admitted source');
+    assert.equal(body.routing_preflight, undefined);
+    assert.equal(body.routing_admission.stage, 'queue_admitted');
+    assert.equal(body.routing_admission.executionPreflight, 'pending');
+    assert.equal(body.routing_admission.targets[0].availabilityObservation, 'unavailable');
+    const entries = invocationQueue.list(target.id, 'user-1');
+    assert.equal(entries.length, 1);
+    assert.deepEqual(entries[0].targets, ['codex']);
+    assert.equal(entries[0].payload.messageId, body.messageId);
+    const stored = await messageStore.getById(body.messageId);
+    assert.equal(stored.extra.crossPost.sourceThreadId, source.id);
+    assert.equal(stored.from.catId, 'codex');
+    assert.equal(mockRouter.getExecutions().length, 0, 'admission uses the normal Queue drain');
+    await app.inject(request);
+    assert.equal(invocationQueue.list(target.id, 'user-1').length, 1, 'retry does not duplicate the source');
+    await app.close();
+  });
+
   test('same-thread @codex from codex still filtered (self-reference)', async () => {
     const app = await createAppWithThreadStore();
     const thread = await threadStore.create('user-1', 'Self Ref Thread');
 
-    const { invocationId, callbackToken } = registry.create('user-1', 'codex', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', thread.id);
 
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         content: '@codex 请处理',
         threadId: thread.id,
       },

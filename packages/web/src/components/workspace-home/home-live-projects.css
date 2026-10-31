@@ -1,0 +1,104 @@
+[data-shell="v2"] .home-live-project + .home-live-project {
+  border-top: 1px solid var(--shell-hairline);
+  margin-top: 10px;
+}
+[data-shell="v2"] .home-project-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  margin-top: 2px;
+  padding: 0 4px;
+  color: var(--shell-ink);
+  text-align: left;
+  white-space: nowrap;
+}
+[data-shell="v2"] .home-project-chevron,
+[data-shell="v2"] .home-project-folder {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--shell-muted);
+}
+[data-shell="v2"] .home-project-chevron {
+  width: 12px;
+  height: 12px;
+}
+[data-shell="v2"] .home-project-chevron[data-expanded="true"] {
+  transform: rotate(90deg);
+}
+[data-shell="v2"] .home-project-name {
+  overflow: hidden;
+  min-width: 5ch;
+  flex: 0 1 auto;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+[data-shell="v2"] .home-project-current,
+[data-shell="v2"] .home-project-count {
+  color: var(--shell-muted);
+}
+[data-shell="v2"] .home-project-current {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-shell="v2"] .home-project-count {
+  flex: none;
+}
+[data-shell="v2"] .home-project-count {
+  margin-left: auto;
+}
+[data-shell="v2"] .home-project-avatars {
+  display: flex;
+  align-items: center;
+  flex: none;
+  margin-left: auto;
+}
+[data-shell="v2"] .home-project-avatars > :not(:first-child) {
+  margin-left: -4px;
+}
+[data-shell="v2"] .home-project-avatars > :last-child:not([role="img"]) {
+  margin-left: 2px;
+}
+[data-shell="v2"] .home-project-live-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--semantic-success);
+}
+[data-shell="v2"] .home-project-live-dot + .home-project-count {
+  margin-left: 0;
+}
+[data-shell="v2"] .home-project-unavailable {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px;
+  color: var(--shell-body);
+}
+[data-shell="v2"] .home-project-unavailable::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--semantic-warning);
+}
+@container home (max-width: 520px) {
+  [data-shell="v2"] .home-project-head[aria-expanded="false"] .home-project-current {
+    display: none;
+  }
+}
+@container home (max-width: 420px) {
+  [data-shell="v2"] .home-project-avatars {
+    display: none;
+  }
+  [data-shell="v2"] .home-project-live-dot {
+    margin-left: auto;
+  }
+}

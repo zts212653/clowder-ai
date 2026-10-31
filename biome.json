@@ -7,7 +7,31 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!gitnexus"]
+    "includes": [
+      "**",
+      "!.review-worktrees",
+      "!gitnexus",
+      "!.claude/skills",
+      "!assets/avatars",
+      "!assets/concierge",
+      "!assets/design-concepts",
+      "!assets/docs",
+      "!assets/hero-prism.svg",
+      "!assets/icons",
+      "!assets/logos",
+      "!assets/preview-v2.html",
+      "!assets/reference",
+      "!assets/screenshots",
+      "!assets/stickers",
+      "!diagrams",
+      "!docs/designs",
+      "!docs/features/assets",
+      "!docs/harness-feedback/bundles",
+      "!docs/videos",
+      "!site/tailwind.css",
+      "!docs/architecture/memory/memory-architecture-closure.generated.json",
+      "!packages/mcp-server/governance/mcp-surface-baseline.json"
+    ]
   },
   "formatter": {
     "enabled": true,

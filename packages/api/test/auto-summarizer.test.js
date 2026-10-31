@@ -15,6 +15,7 @@ const { SummaryStore } = await import('../dist/domains/cats/services/stores/port
  */
 function createMockMessageStore(messages = []) {
   return {
+    getById: () => null,
     getByThread: () => messages,
   };
 }

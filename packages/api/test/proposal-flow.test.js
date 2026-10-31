@@ -1,0 +1,384 @@
+/**
+ * F128 Proposal Flow — core lifecycle tests (propose / approve / reject).
+ * Concurrency + stale recovery: proposal-concurrency.test.js
+ * Partial-commit + dedup + self-heal: proposal-resilience.test.js
+ *
+ * Covers AC-B7:
+ *  - cat-auth propose happy path
+ *  - stale invocation guard
+ *  - cross-user parent ownership rejection
+ *  - clientRequestId idempotency
+ *  - user-auth approve happy path + double-approve idempotency
+ *  - cross-user approve 403
+ *  - approve-after-reject 409
+ *  - reject happy path + reject-after-approve 409
+ *  - audit metadata + socket payload shape
+ *  - edit-on-approve applied to created thread
+ */
+
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
+import './helpers/setup-cat-registry.js';
+import { createProposalTestContext } from './helpers/proposal-test-harness.js';
+
+describe('F128 propose / approve / reject lifecycle', () => {
+  test('propose creates a pending proposal without creating a thread', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const before = ctx.threadStore.size;
+    const res = await ctx.propose({ userId: 'alice', threadId: source.id });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.status, 'pending');
+    assert.match(body.proposalId, /^proposal_/);
+    assert.equal(ctx.threadStore.size, before, 'no new thread should be created on propose');
+    const stored = await ctx.proposalStore.get(body.proposalId);
+    assert.equal(stored.sourceThreadId, source.id);
+    assert.equal(stored.parentThreadId, source.id);
+  });
+
+  test('declaredWorkMode is explicit, overridable, and persisted with exact birth provenance', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const proposed = await ctx.propose({
+      userId: 'alice',
+      threadId: source.id,
+      body: { declaredWorkMode: 'parallel' },
+    });
+    assert.equal(proposed.statusCode, 200, proposed.body);
+    const { proposalId } = proposed.json();
+    assert.equal((await ctx.proposalStore.get(proposalId)).declaredWorkMode, 'parallel');
+
+    const approved = await ctx.approve('alice', proposalId, { declaredWorkMode: 'investigation' });
+    assert.equal(approved.statusCode, 200, approved.body);
+    const thread = await ctx.threadStore.get(approved.json().threadId);
+    assert.equal(thread.declaredWorkMode, 'investigation');
+    assert.equal(thread.sourceThreadId, source.id);
+    assert.equal(typeof thread.sourceInvocationId, 'string');
+    assert.equal(typeof thread.sourceMessageId, 'string');
+    assert.equal((await ctx.proposalStore.get(proposalId)).declaredWorkMode, 'investigation');
+    const seeds = await ctx.messageStore.getByThread(thread.id, 10, 'alice', { includeQueuedCatMessages: true });
+    assert.equal(seeds.length, 1);
+    assert.match(seeds[0].content, /协作方式/);
+    assert.match(seeds[0].content, /investigation/);
+  });
+
+  test('omitted declaredWorkMode remains absent through approval instead of fabricating birth truth', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const proposed = await ctx.propose({ userId: 'alice', threadId: source.id });
+    assert.equal(proposed.statusCode, 200, proposed.body);
+    const { proposalId } = proposed.json();
+    assert.equal((await ctx.proposalStore.get(proposalId)).declaredWorkMode, undefined);
+
+    const approved = await ctx.approve('alice', proposalId);
+    assert.equal(approved.statusCode, 200, approved.body);
+    const thread = await ctx.threadStore.get(approved.json().threadId);
+    assert.equal(thread.declaredWorkMode, undefined);
+    assert.equal((await ctx.proposalStore.get(proposalId)).declaredWorkMode, undefined);
+  });
+
+  test('unknown is projection-only and rejected as a declaredWorkMode', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const res = await ctx.propose({
+      userId: 'alice',
+      threadId: source.id,
+      body: { declaredWorkMode: 'unknown' },
+    });
+    assert.equal(res.statusCode, 400, res.body);
+  });
+
+  test('direct user invocation publishes against its exact prompt origin without an A2A trigger', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const origin = await ctx.messageStore.append({
+      userId: 'alice',
+      catId: null,
+      content: 'Please propose a child thread directly',
+      mentions: ['opus'],
+      timestamp: Date.now(),
+      threadId: source.id,
+    });
+    const auth = await ctx.registry.create('alice', 'opus', source.id, undefined, undefined, undefined, origin.id);
+
+    const res = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/callbacks/propose-thread',
+      headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
+      payload: { title: 'Direct proposal', reason: 'Exact user-message origin' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const stored = await ctx.proposalStore.get(res.json().proposalId);
+    assert.deepEqual(stored.publication.envelope.originRef, {
+      kind: 'message',
+      threadId: source.id,
+      messageId: origin.id,
+    });
+  });
+
+  test('propose returns typed replaced when a newer invocation supersedes', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const first = await ctx.registry.create('alice', 'opus', source.id);
+    await ctx.registry.create('alice', 'opus', source.id);
+    const res = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/callbacks/propose-thread',
+      headers: { 'x-invocation-id': first.invocationId, 'x-callback-token': first.callbackToken },
+      payload: { title: 't', reason: 'r' },
+    });
+    assert.equal(res.statusCode, 401);
+    assert.deepEqual(JSON.parse(res.body).reason, 'replaced');
+  });
+
+  test('propose rejects parentThreadId owned by another user (403)', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const foreign = await ctx.threadStore.create('bob', 'Foreign');
+    const res = await ctx.propose({ userId: 'alice', threadId: source.id, body: { parentThreadId: foreign.id } });
+    assert.equal(res.statusCode, 403);
+  });
+
+  test('propose is idempotent on clientRequestId', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const first = await ctx.propose({ userId: 'alice', threadId: source.id, body: { clientRequestId: 'req-1' } });
+    const second = await ctx.propose({ userId: 'alice', threadId: source.id, body: { clientRequestId: 'req-1' } });
+    const firstId = JSON.parse(first.body).proposalId;
+    const secondBody = JSON.parse(second.body);
+    assert.equal(secondBody.proposalId, firstId);
+    assert.equal(secondBody.deduped, true);
+  });
+
+  test('dedup retry from a later callback preserves the original proposal origin', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const payload = {
+      title: 'Origin-stable proposal',
+      reason: 'Retry must not re-anchor',
+      clientRequestId: 'origin-key',
+    };
+    const invoke = async (content) => {
+      const origin = await ctx.messageStore.append({
+        userId: 'alice',
+        catId: null,
+        content,
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: source.id,
+      });
+      const auth = await ctx.registry.create('alice', 'opus', source.id, undefined, undefined, undefined, origin.id);
+      const response = await ctx.app.inject({
+        method: 'POST',
+        url: '/api/callbacks/propose-thread',
+        headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
+        payload,
+      });
+      return { origin, response };
+    };
+
+    const first = await invoke('Original approval trigger');
+    assert.equal(first.response.statusCode, 200);
+    const retry = await invoke('Later callback reusing the transport key');
+    assert.equal(retry.response.statusCode, 200);
+    assert.equal(retry.response.json().deduped, true);
+    const stored = await ctx.proposalStore.get(first.response.json().proposalId);
+    assert.deepEqual(stored.publication.envelope.originRef, {
+      kind: 'message',
+      threadId: source.id,
+      messageId: first.origin.id,
+    });
+  });
+
+  test('approve creates a new thread and marks proposal approved', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const { proposalId } = JSON.parse((await ctx.propose({ userId: 'alice', threadId: source.id })).body);
+    const res = await ctx.approve('alice', proposalId);
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.status, 'approved');
+    const newThread = await ctx.threadStore.get(body.threadId);
+    assert.ok(newThread);
+    assert.equal(newThread.title, 'New thread');
+    assert.equal(newThread.parentThreadId, source.id);
+    const proposal = await ctx.proposalStore.get(proposalId);
+    assert.equal(proposal.status, 'approved');
+    assert.equal(proposal.createdThreadId, body.threadId);
+    assert.equal(proposal.approvedBy, 'alice');
+  });
+
+  // Approve-side dispatch behaviours (queue processor wiring, preferredCats
+  // fallback, intent default, fork-and-return header, explicit-mention
+  // precedence) moved to proposal-approve-dispatch.test.js to keep this file
+  // under the AC-X1 350-line cap.
+  test('double approve returns the same thread (idempotent)', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const { proposalId } = JSON.parse((await ctx.propose({ userId: 'alice', threadId: source.id })).body);
+    const first = JSON.parse((await ctx.approve('alice', proposalId)).body);
+    const second = JSON.parse((await ctx.approve('alice', proposalId)).body);
+    assert.equal(second.threadId, first.threadId);
+    assert.equal(second.deduped, true);
+  });
+
+  test('approve by a different user returns 403', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const { proposalId } = JSON.parse((await ctx.propose({ userId: 'alice', threadId: source.id })).body);
+    const res = await ctx.approve('bob', proposalId);
+    assert.equal(res.statusCode, 403);
+  });
+
+  test('approve after reject returns 409', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const { proposalId } = JSON.parse((await ctx.propose({ userId: 'alice', threadId: source.id })).body);
+    await ctx.reject('alice', proposalId);
+    const res = await ctx.approve('alice', proposalId);
+    assert.equal(res.statusCode, 409);
+  });
+
+  test('reject marks proposal rejected without creating a thread', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const { proposalId } = JSON.parse((await ctx.propose({ userId: 'alice', threadId: source.id })).body);
+    const sizeBefore = ctx.threadStore.size;
+    const res = await ctx.reject('alice', proposalId, { rejectionReason: 'not now' });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).status, 'rejected');
+    assert.equal(ctx.threadStore.size, sizeBefore);
+    const proposal = await ctx.proposalStore.get(proposalId);
+    assert.equal(proposal.status, 'rejected');
+    assert.equal(proposal.rejectionReason, 'not now');
+  });
+
+  test('staged publication blocks approve and reject before thread or proposal mutation', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const approveProposal = ctx.proposalStore.create({
+      sourceThreadId: source.id,
+      sourceInvocationId: 'inv-staged-approve',
+      sourceCatId: 'opus',
+      title: 'staged approve',
+      reason: 'race',
+      parentThreadId: source.id,
+      preferredCats: [],
+      projectPath: 'default',
+      createdBy: 'alice',
+    });
+    const rejectProposal = ctx.proposalStore.create({
+      sourceThreadId: source.id,
+      sourceInvocationId: 'inv-staged-reject',
+      sourceCatId: 'opus',
+      title: 'staged reject',
+      reason: 'race',
+      parentThreadId: source.id,
+      preferredCats: [],
+      projectPath: 'default',
+      createdBy: 'alice',
+    });
+    const sizeBefore = ctx.threadStore.size;
+
+    assert.equal((await ctx.approve('alice', approveProposal.proposalId)).statusCode, 409);
+    assert.equal((await ctx.reject('alice', rejectProposal.proposalId)).statusCode, 409);
+    assert.equal(ctx.threadStore.size, sizeBefore);
+    assert.equal((await ctx.proposalStore.get(approveProposal.proposalId)).status, 'pending');
+    assert.equal((await ctx.proposalStore.get(rejectProposal.proposalId)).status, 'pending');
+  });
+
+  test('reject after approve returns 409', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const { proposalId } = JSON.parse((await ctx.propose({ userId: 'alice', threadId: source.id })).body);
+    await ctx.approve('alice', proposalId);
+    const res = await ctx.reject('alice', proposalId);
+    assert.equal(res.statusCode, 409);
+  });
+
+  test('approve writes audit metadata onto the created thread', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const { proposalId } = JSON.parse((await ctx.propose({ userId: 'alice', threadId: source.id })).body);
+    const { threadId } = JSON.parse((await ctx.approve('alice', proposalId)).body);
+    const thread = await ctx.threadStore.get(threadId);
+    assert.equal(thread.createdFromProposalId, proposalId);
+    assert.equal(thread.sourceThreadId, source.id);
+    assert.equal(thread.approvedBy, 'alice');
+    assert.ok(typeof thread.approvedAt === 'number' && thread.approvedAt > 0);
+  });
+
+  test('thread_created socket event emits the Thread itself (no envelope wrapper)', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const { proposalId } = JSON.parse((await ctx.propose({ userId: 'alice', threadId: source.id })).body);
+    ctx.socketEvents.length = 0;
+    await ctx.approve('alice', proposalId);
+    const evt = ctx.socketEvents.find((e) => e.event === 'thread_created');
+    assert.ok(evt);
+    assert.ok(evt.data && typeof evt.data.id === 'string', 'payload must have id at top level');
+    assert.equal(typeof evt.data.thread, 'undefined', 'payload must NOT be wrapped in {thread}');
+  });
+
+  test('approve applies user overrides (title + initialMessage)', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const { proposalId } = JSON.parse(
+      (
+        await ctx.propose({
+          userId: 'alice',
+          threadId: source.id,
+          body: { title: 'orig title', initialMessage: 'orig msg' },
+        })
+      ).body,
+    );
+    const res = await ctx.approve('alice', proposalId, { title: 'edited title', initialMessage: 'edited msg' });
+    assert.equal(res.statusCode, 200);
+    const { threadId } = JSON.parse(res.body);
+    const newThread = await ctx.threadStore.get(threadId);
+    assert.equal(newThread.title, 'edited title');
+    const msgs = await ctx.messageStore.getByThread(threadId);
+    // Phase AA (AC-AA4): seed message catId is now sourceCatId ('opus' from
+    // default test harness), not null. The user who approves is the userId.
+    const userMsg = msgs.find((m) => m.userId === 'alice' && m.content.includes('edited msg'));
+    assert.ok(userMsg, 'seed message must exist with user-edited content');
+    assert.equal(userMsg.catId, 'opus', 'AC-AA4: seed message catId = proposing cat, not null');
+    // Server injects "## 主 Thread" header; edited message is at the start.
+    assert.ok(userMsg.content.startsWith('edited msg'), 'thread first message should start with user-edited content');
+    assert.ok(userMsg.content.includes('## 主 Thread'), 'thread first message should include parent header');
+  });
+
+  test('approve can override reportingMode to autonomous before creating the thread', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const { proposalId } = JSON.parse(
+      (
+        await ctx.propose({
+          userId: 'alice',
+          threadId: source.id,
+          body: {
+            initialMessage: 'handoff to child',
+            preferredCats: ['opus'],
+            reportingMode: 'final-only',
+          },
+        })
+      ).body,
+    );
+
+    const res = await ctx.approve('alice', proposalId, { reportingMode: 'none' });
+    assert.equal(res.statusCode, 200);
+    const { threadId } = JSON.parse(res.body);
+
+    const proposal = await ctx.proposalStore.get(proposalId);
+    assert.equal(proposal.reportingMode, 'none', 'approved proposal audit reflects the user override');
+
+    const msgs = await ctx.messageStore.getByThread(threadId);
+    const seed = msgs.find((m) => m.content.includes('handoff to child'));
+    assert.ok(seed, 'seed message must exist');
+    assert.ok(seed.content.includes('回报模式：autonomous'), 'override should drive the child-thread protocol');
+    assert.ok(!seed.content.includes('回报模式：final-only'), 'final-only proposal value must not leak after override');
+    assert.ok(seed.content.includes('无强制回报；接力完成即可'), 'serial chain tail should not force return');
+  });
+});

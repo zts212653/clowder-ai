@@ -6,7 +6,6 @@ doc_kind: spec
 created: 2026-03-08
 status: done
 completed: 2026-03-11
-reflection: docs/reflections/2026-03-09-f085-hyperfocus-brake-capsule.md
 ---
 
 # F085 Hyperfocus Brake — 猫猫健康小刹车
@@ -15,11 +14,11 @@ reflection: docs/reflections/2026-03-09-f085-hyperfocus-brake-capsule.md
 
 ## Why
 
-team lead有 ADHD + ASD，hyperfocus 特质让他能进入超级深度的心流状态，但**没有自动刹车**。他不会像普通人一样"累了就不想干了"——会一直干到身体物理罢工。
+operator有 ADHD + ASD，hyperfocus 特质让他能进入超级深度的心流状态，但**没有自动刹车**。他不会像普通人一样"累了就不想干了"——会一直干到身体物理罢工。
 
 普通闹钟对 hyperfocus 状态无效（会被冷酷无情按掉）。需要：
 1. **情感羁绊** — 三只猫猫撒娇，不是机械提醒
-2. **上下文感知** — 知道team lead在干嘛，提到具体内容
+2. **上下文感知** — 知道operator在干嘛，提到具体内容
 3. **互动门槛** — 不能一键 dismiss，要强制互动
 
 ## What
@@ -85,12 +84,12 @@ team lead有 ADHD + ASD，hyperfocus 特质让他能进入超级深度的心流�
 - [x] **AC23**: 前端 UI 通知 — 订阅 brake event，弹猫猫提醒卡片（含头像 + 撒娇文案）
 - [x] **AC24**: 前端 check-in 交互 — 三选一（休息/收尾/继续）直接在前端完成
 - ~~AC25~~: 前端 TTS 播放 → 裁出为 TD108（依赖 F066 前端播放基建，非核心体验，不阻塞 F085 close）
-- [x] **AC26**: 三猫全覆盖 — 无论team lead在跟哪只猫聊天，都能触发提醒
+- [x] **AC26**: 三猫全覆盖 — 无论operator在跟哪只猫聊天，都能触发提醒
 - ~~AC27~~: agent hook 退役 → 裁出为 TD109（需验证平台 brake 稳定 1 周+，不阻塞 F085 close）
 
 ### Phase 5 (Brake UX 增强)
 
-**Gap**: Phase 4 把提醒迁到了前端，但 UX 仍是朴素的：没有语音（之前裁出的 TD108）、没有猫猫图片、没有开关。team lead想要：(1) Hub 里能开关 brake，(2) 弹窗时猫猫语音自动播放，(3) 弹窗里有猫猫图片增加情感。
+**Gap**: Phase 4 把提醒迁到了前端，但 UX 仍是朴素的：没有语音（之前裁出的 TD108）、没有猫猫图片、没有开关。operator想要：(1) Hub 里能开关 brake，(2) 弹窗时猫猫语音自动播放，(3) 弹窗里有猫猫图片增加情感。
 
 - [x] **AC28**: Hub 开关 — Hub Settings 新增 Brake 面板，含 enable/disable toggle + 阈值调节（默认 90min）
 - [x] **AC29**: 前端 TTS 自动播放 — brake 弹窗弹出时，用 `useTts.synthesize()` 自动播放当前猫的撒娇语音（回收 TD108）
@@ -109,7 +108,7 @@ team lead有 ADHD + ASD，hyperfocus 特质让他能进入超级深度的心流�
 | 声线顺序 | Ragdoll → Maine Coon → Siamese | 按家族顺序 |
 | Phase 4 平台化 | hook → API + 前端 | Phase 1-3 只覆盖 Claude，Maine CoonSiamese无保护 |
 | Phase 5 TTS | 复用 `useTts` + `AudioBlock` | F066 前端播放基建已就绪，TD108 可直接回收 |
-| Phase 5 图片 | 放大头像 + 新增表情动作图 | team lead明确要求"猫猫发图片" |
+| Phase 5 图片 | 放大头像 + 新增表情动作图 | operator明确要求"猫猫发图片" |
 
 ## Dependencies
 
@@ -154,4 +153,4 @@ Phase 1 需求点追踪：
 | **Opus 4.5** | skill 骨架 + hook 触发逻辑 + renderer 抽象 | 初版完成，Opus 4.6 接力修复 ✅ |
 | **Codex** | hook 安全审查 + emergency bypass 逻辑 + 上下文白名单 | R1-R4 review 完成 ✅ |
 | **Gemini** | 三档文案 + card 草案 + 视觉规范 | 已存入 refs/ ✅ |
-| **Opus 4.6** | R1-R4 修复 + 云端 review + merge | Phase 1 合入 main ✅ |
+| **Opus 4.6** | R1-R4 修复 + remote review + merge | Phase 1 合入 main ✅ |

@@ -1,13 +1,10 @@
-/**
- * opencode Config Template Generator
- * Generates opencode.json configuration for Cat Cafe runtime.
- *
- * opencode reads its config from opencode.json (per-project or ~/.config/opencode/).
- * This generator produces a config with:
- * - Anthropic provider (via proxy)
- * - Optional OMOC plugin (oh-my-opencode)
- * - No Cat Cafe MCP tools (isolation by design)
- */
+import { buildOpenCodeMcpSync } from './opencode-mcp-injection.js';
+
+export {
+  inferOpenCodeProviderFromModelName,
+  parseOpenCodeModel,
+  resolveEffectiveOpenCodeModel,
+} from '../../../../../config/opencode-model.js';
 
 interface OpenCodeConfigOptions {
   /** Anthropic API key — validated but NOT written to config (stays in ANTHROPIC_API_KEY env var) */
@@ -20,34 +17,42 @@ interface OpenCodeConfigOptions {
   enableOmoc?: boolean;
 }
 
+type OpenCodeProviderConfig = {
+  npm?: string;
+  models?: Record<string, { id?: string; name: string }>;
+  options: {
+    apiKey?: string;
+    baseURL?: string;
+  };
+};
+
+type OpenCodePermissionAction = 'allow' | 'ask' | 'deny';
+
 interface OpenCodeConfig {
   $schema: string;
-  model: string;
-  provider: {
-    anthropic: {
-      options: {
-        baseURL: string;
-      };
-    };
-  };
+  model?: string;
+  small_model?: string;
+  provider: Record<string, OpenCodeProviderConfig>;
   plugin?: string[];
   mcp?: Record<string, unknown>;
+  /** Instruction file paths for native L0 injection (compression-immune system role). */
+  instructions?: string[];
+  /** OpenCode permission grants for directories outside the working directory. */
+  permission?: {
+    external_directory?: Record<string, OpenCodePermissionAction>;
+  };
 }
 
 export function generateOpenCodeConfig(options: OpenCodeConfigOptions): OpenCodeConfig {
   const { baseUrl, model, enableOmoc = true } = options;
 
-  // Keep user input as-is (no implicit model/baseUrl rewriting).
-  const modelStr = model;
-  const normalizedBaseUrl = baseUrl;
-
   const config: OpenCodeConfig = {
     $schema: 'https://opencode.ai/config.json',
-    model: modelStr,
+    model,
     provider: {
       anthropic: {
         options: {
-          baseURL: normalizedBaseUrl,
+          baseURL: baseUrl,
         },
       },
     },
@@ -59,3 +64,262 @@ export function generateOpenCodeConfig(options: OpenCodeConfigOptions): OpenCode
 
   return config;
 }
+
+export const OC_API_KEY_ENV = 'CAT_CAFE_OC_API_KEY';
+export const OC_BASE_URL_ENV = 'CAT_CAFE_OC_BASE_URL';
+
+/**
+ * We deliberately emit no `limit` block at all.
+ *
+ * OpenCode requires `limit.output` whenever `limit` is present and resolves
+ * explicit config before its catalog and built-in fallback. Pinning only our
+ * invocation context window here therefore makes the config invalid; guessing
+ * an output would instead overwrite authoritative catalog output limits. This layer has no
+ * carrier-aware output authority, so it supplies neither field. Clowder AI still
+ * retains the invocation window for context health and session handoff.
+ */
+
+/**
+ * OpenCode API type determines which AI SDK npm adapter to use.
+ * - 'openai'           → @ai-sdk/openai-compatible  (chat/completions, default for custom providers)
+ * - 'openai-responses'  → @ai-sdk/openai             (responses API, for official OpenAI endpoints)
+ * - 'anthropic'         → @ai-sdk/anthropic
+ * - 'google'            → @ai-sdk/google
+ */
+export type OpenCodeApiType = 'openai' | 'openai-responses' | 'anthropic' | 'google';
+
+const NPM_ADAPTER_FOR_API_TYPE: Record<string, string> = {
+  openai: '@ai-sdk/openai-compatible',
+  'openai-responses': '@ai-sdk/openai',
+  anthropic: '@ai-sdk/anthropic',
+  google: '@ai-sdk/google',
+};
+
+/**
+ * Derive the OpenCode API type from the member's provider name binding.
+ *
+ * Account-level protocol is no longer used — it was removed from the UI and
+ * should not drive runtime routing. The sole authority is the provider name,
+ * which the user explicitly sets in the member editor "Provider 名称" field.
+ */
+export function deriveOpenCodeApiType(providerName: string | undefined): OpenCodeApiType {
+  const normalized = providerName?.toLowerCase();
+  if (normalized === 'openai-responses') return 'openai-responses';
+  if (normalized === 'anthropic') return 'anthropic';
+  if (normalized === 'google') return 'google';
+  return 'openai';
+}
+
+export interface OpenCodeRuntimeConfigOptions {
+  providerName: string;
+  models: readonly string[];
+  modelAliases?: Readonly<Record<string, string>>;
+  defaultModel?: string;
+  apiType?: OpenCodeApiType;
+  hasBaseUrl?: boolean;
+  /**
+   * Native-auth OpenCode accounts (OAuth/subscription) must not receive
+   * provider auth placeholders that point at unset CAT_CAFE_OC_* env vars.
+   */
+  omitProviderAuth?: boolean;
+  /** Absolute path to Clowder AI MCP server entry (packages/mcp-server/dist/index.js). */
+  mcpServerPath?: string;
+  /** Workspace exposed to Clowder AI MCP servers for this invocation. */
+  allowedWorkspaceDirs?: string;
+  /**
+   * F203 Phase I: Instruction file paths injected into OpenCode's `instructions` config.
+   * Loaded every turn into `role: "system"` messages — compression-immune.
+   */
+  instructions?: readonly string[];
+  /** #935: Directories outside cwd granted `permission.external_directory` access. */
+  externalDirectories?: readonly string[];
+  /** Cat ID for capabilities.json enabled-state filtering. */
+  catId?: string;
+  /** Persistent default capability source, independent of the runtime MCP binary root. */
+  capabilitiesProjectRoot?: string;
+  /** F249: User's project working directory for per-project MCP overrides. */
+  workingDirectory?: string;
+  /**
+   * When true, only generate MCP config — no custom provider entry.
+   * Used for OAuth auth where OpenCode handles credentials natively;
+   * injecting a provider with an empty apiKey placeholder would override
+   * OpenCode's built-in auth and break the session.
+   */
+  mcpOnly?: boolean;
+}
+
+export interface OpenCodeRuntimeConfigDebugSummary {
+  model?: string;
+  smallModel?: string;
+  providerKeys: string[];
+  providerSummary: Record<
+    string,
+    {
+      npm?: string;
+      modelKeys: string[];
+      modelMappings: Record<string, string>;
+      hasBaseUrl: boolean;
+      apiKeySource: string;
+      baseUrlSource?: string;
+    }
+  >;
+}
+
+function stripOwnProviderPrefix(modelName: string, providerName: string): string {
+  const prefix = `${providerName}/`;
+  return modelName.startsWith(prefix) ? modelName.slice(prefix.length) : modelName;
+}
+
+/**
+ * OpenCode treats certain provider names as built-in and forces its own SDK
+ * handling (e.g. 'openai' → Responses API via sdk.responses()), ignoring the
+ * npm adapter field.  Remap these names so the config's npm adapter is used.
+ *
+ * Only 'openai' needs remapping: its builtin forces Responses-style routing
+ * that conflicts with Chat Completions proxies. 'anthropic' and 'google'
+ * builtins already match the intended SDK adapter, so no remap needed.
+ */
+const OPENCODE_BUILTIN_NAMES = new Set(['openai']);
+
+export function safeProviderName(name: string): string {
+  return OPENCODE_BUILTIN_NAMES.has(name) ? `${name}-compat` : name;
+}
+
+export function buildExternalDirectoryPermissions(
+  externalDirectories?: readonly string[],
+): Record<string, OpenCodePermissionAction> | undefined {
+  const rules: Record<string, OpenCodePermissionAction> = {};
+  for (const directory of externalDirectories ?? []) {
+    const normalized = directory.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+    if (normalized) rules[`${normalized}/**`] = 'allow';
+  }
+  return Object.keys(rules).length > 0 ? rules : undefined;
+}
+
+export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOptions): OpenCodeConfig {
+  const {
+    providerName,
+    models,
+    modelAliases,
+    defaultModel,
+    apiType = 'openai',
+    hasBaseUrl = false,
+    omitProviderAuth = false,
+    mcpServerPath,
+    allowedWorkspaceDirs,
+    instructions,
+    externalDirectories,
+    catId,
+    capabilitiesProjectRoot,
+    workingDirectory,
+    mcpOnly,
+  } = options;
+
+  const configName = safeProviderName(providerName);
+
+  const modelsMap: Record<string, { id?: string; name: string }> = {};
+  const modelsToRegister = defaultModel ? [...models, defaultModel] : [...models];
+  for (const rawModel of modelsToRegister) {
+    const modelName = stripOwnProviderPrefix(rawModel, providerName);
+    const configuredAlias =
+      modelAliases && Object.hasOwn(modelAliases, modelName) ? modelAliases[modelName] : undefined;
+    const upstreamId = typeof configuredAlias === 'string' ? configuredAlias.trim() : undefined;
+    modelsMap[modelName] = {
+      ...(upstreamId ? { id: upstreamId } : {}),
+      name: modelName,
+    };
+  }
+
+  let configDefaultModel = defaultModel;
+  if (configName !== providerName && defaultModel?.startsWith(`${providerName}/`)) {
+    configDefaultModel = `${configName}/${defaultModel.slice(providerName.length + 1)}`;
+  }
+
+  const config: OpenCodeConfig = {
+    $schema: 'https://opencode.ai/config.json',
+    ...(configDefaultModel ? { model: configDefaultModel, small_model: configDefaultModel } : {}),
+    provider: {
+      [configName]: {
+        npm: NPM_ADAPTER_FOR_API_TYPE[apiType] ?? NPM_ADAPTER_FOR_API_TYPE.openai,
+        models: modelsMap,
+        options: {
+          ...(!omitProviderAuth && hasBaseUrl ? { baseURL: `{env:${OC_BASE_URL_ENV}}` } : {}),
+          ...(!omitProviderAuth ? { apiKey: `{env:${OC_API_KEY_ENV}}` } : {}),
+        },
+      },
+    },
+  };
+
+  if (mcpServerPath) {
+    const mcp = buildOpenCodeMcpSync(
+      mcpServerPath,
+      catId,
+      capabilitiesProjectRoot,
+      workingDirectory,
+      allowedWorkspaceDirs,
+    );
+    if (Object.keys(mcp).length > 0) config.mcp = mcp;
+  }
+
+  // F203 Phase I: inject compiled L0 + OPENCODE.md paths into instructions.
+  // OpenCode merges instructions across config layers (concat + dedup),
+  // so these are additive to any project-root opencode.json instructions.
+  if (instructions && instructions.length > 0) {
+    config.instructions = [...instructions];
+  }
+
+  // #935: Grant external_directory permission for Clowder AI-approved workspace roots.
+  // Without this, OpenCode on Windows rejects tool calls that touch paths outside
+  // the working directory, forcing users to edit global config manually.
+  const externalDirectoryPermissions = buildExternalDirectoryPermissions(externalDirectories);
+  if (externalDirectoryPermissions) {
+    config.permission = {
+      external_directory: externalDirectoryPermissions,
+    };
+  }
+
+  return config;
+}
+
+function summarizeEnvPlaceholder(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const match = value.match(/^\{env:([^}]+)\}$/);
+  return match ? `env:${match[1]}` : value;
+}
+
+export function summarizeOpenCodeRuntimeConfigForDebug(
+  options: OpenCodeRuntimeConfigOptions,
+): OpenCodeRuntimeConfigDebugSummary {
+  // This projection reports provider routing only. Resolving MCP again here
+  // has neither the writer's member nor its persistent root and can abort an
+  // already prepared native launch merely while constructing a debug message.
+  const config = generateOpenCodeRuntimeConfig({ ...options, mcpServerPath: undefined });
+  const providerEntries = Object.entries(config.provider).sort(([a], [b]) => a.localeCompare(b));
+
+  return {
+    model: config.model,
+    smallModel: config.small_model,
+    providerKeys: providerEntries.map(([providerName]) => providerName),
+    providerSummary: Object.fromEntries(
+      providerEntries.map(([providerName, providerConfig]) => [
+        providerName,
+        {
+          npm: providerConfig.npm,
+          modelKeys: Object.keys(providerConfig.models ?? {}).sort(),
+          modelMappings: Object.fromEntries(
+            Object.entries(providerConfig.models ?? {})
+              .sort(([left], [right]) => left.localeCompare(right))
+              .map(([modelKey, modelConfig]) => [modelKey, modelConfig.id ?? modelKey]),
+          ),
+          hasBaseUrl: Boolean(providerConfig.options.baseURL),
+          apiKeySource: summarizeEnvPlaceholder(providerConfig.options.apiKey) ?? '(unset)',
+          ...(providerConfig.options.baseURL
+            ? { baseUrlSource: summarizeEnvPlaceholder(providerConfig.options.baseURL) }
+            : {}),
+        },
+      ]),
+    ),
+  };
+}
+// Writer functions (writeOpenCodeRuntimeConfig, writeOpenCodeInstructionsOnlyConfig)
+// extracted to opencode-config-writer.ts to stay under 350-line module budget.

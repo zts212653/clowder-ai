@@ -1,0 +1,273 @@
+export type CodexAppServerJsonObject = Record<string, unknown>;
+
+export function asCodexAppServerRecord(value: unknown): CodexAppServerJsonObject | null {
+  return typeof value === 'object' && value !== null ? (value as CodexAppServerJsonObject) : null;
+}
+
+export function codexAppServerErrorMessage(value: unknown): string {
+  const record = asCodexAppServerRecord(value);
+  return typeof record?.message === 'string' ? record.message : 'Codex app-server request failed';
+}
+
+function codexErrorDetails(value: unknown): CodexAppServerJsonObject {
+  const record = asCodexAppServerRecord(value);
+  return {
+    message: codexAppServerErrorMessage(value),
+    ...(typeof record?.additionalDetails === 'string' ? { additionalDetails: record.additionalDetails } : {}),
+  };
+}
+
+function mapItem(itemValue: unknown): CodexAppServerJsonObject | null {
+  const item = asCodexAppServerRecord(itemValue);
+  if (!item || typeof item.type !== 'string') return null;
+  const typeMap: Readonly<Record<string, string>> = {
+    userMessage: 'user_message',
+    agentMessage: 'agent_message',
+    commandExecution: 'command_execution',
+    fileChange: 'file_change',
+    mcpToolCall: 'mcp_tool_call',
+    dynamicToolCall: 'dynamic_tool_call',
+    reasoning: 'reasoning',
+  };
+  const mapped: CodexAppServerJsonObject = { ...item, type: typeMap[item.type] ?? item.type };
+  if (typeof item.aggregatedOutput === 'string') mapped.aggregated_output = item.aggregatedOutput;
+  if (typeof item.exitCode === 'number') mapped.exit_code = item.exitCode;
+  return mapped;
+}
+
+export function mapCodexAppServerTokenUsage(tokenUsageValue: unknown): CodexAppServerJsonObject | null {
+  const tokenUsage = asCodexAppServerRecord(tokenUsageValue);
+  const last = asCodexAppServerRecord(tokenUsage?.last);
+  if (!last) return null;
+  const usage: CodexAppServerJsonObject = {};
+  if (typeof last.inputTokens === 'number') usage.input_tokens = last.inputTokens;
+  if (typeof last.outputTokens === 'number') usage.output_tokens = last.outputTokens;
+  if (typeof last.cachedInputTokens === 'number') usage.cached_input_tokens = last.cachedInputTokens;
+  return Object.keys(usage).length > 0 ? usage : null;
+}
+
+export function isCodexAppServerTokenUsageNotification(envelopeValue: unknown): boolean {
+  return asCodexAppServerRecord(envelopeValue)?.method === 'thread/tokenUsage/updated';
+}
+
+type CodexAppServerNotificationMapper = (
+  method: string,
+  params: CodexAppServerJsonObject | null,
+) => CodexAppServerJsonObject | null;
+
+const mapCodexAppServerItemNotification: CodexAppServerNotificationMapper = (method, params) => {
+  const item = mapItem(params?.item);
+  return item
+    ? {
+        type: method.replace('/', '.'),
+        item,
+        ...(typeof params?.threadId === 'string' ? { thread_id: params.threadId } : {}),
+        ...(typeof params?.turnId === 'string' ? { turn_id: params.turnId } : {}),
+      }
+    : null;
+};
+
+const mapCodexAppServerAgentMessageDelta: CodexAppServerNotificationMapper = (_method, params) => {
+  if (typeof params?.itemId !== 'string' || typeof params.delta !== 'string') return null;
+  return {
+    type: 'item.agent_message.delta',
+    item_id: params.itemId,
+    delta: params.delta,
+    ...(typeof params.threadId === 'string' ? { thread_id: params.threadId } : {}),
+    ...(typeof params.turnId === 'string' ? { turn_id: params.turnId } : {}),
+  };
+};
+
+const CODEX_GOAL_STATUSES = new Set(['active', 'paused', 'blocked', 'usageLimited', 'budgetLimited', 'complete']);
+
+const mapCodexAppServerGoalUpdated: CodexAppServerNotificationMapper = (_method, params) => {
+  const threadId = params?.threadId;
+  const goal = asCodexAppServerRecord(params?.goal);
+  if (
+    typeof threadId !== 'string' ||
+    !threadId ||
+    goal?.threadId !== threadId ||
+    typeof goal.objective !== 'string' ||
+    !goal.objective.trim() ||
+    !CODEX_GOAL_STATUSES.has(String(goal.status)) ||
+    !isFiniteNumber(goal.updatedAt)
+  ) {
+    return null;
+  }
+  return {
+    type: 'thread.goal.updated',
+    thread_id: threadId,
+    goal: {
+      objective: goal.objective,
+      status: goal.status,
+      tokenBudget: isFiniteNumber(goal.tokenBudget) ? goal.tokenBudget : null,
+      updatedAt: goal.updatedAt,
+    },
+  };
+};
+
+const mapCodexAppServerGoalCleared: CodexAppServerNotificationMapper = (_method, params) => {
+  const threadId = params?.threadId;
+  return typeof threadId === 'string' && threadId ? { type: 'thread.goal.cleared', thread_id: threadId } : null;
+};
+
+const CODEX_APP_SERVER_NOTIFICATION_MAPPERS: Readonly<Record<string, CodexAppServerNotificationMapper>> = Object.freeze(
+  Object.assign(Object.create(null) as Record<string, CodexAppServerNotificationMapper>, {
+    'item/started': mapCodexAppServerItemNotification,
+    'item/completed': mapCodexAppServerItemNotification,
+    'item/agentMessage/delta': mapCodexAppServerAgentMessageDelta,
+    'turn/started': (_method, params) => {
+      const turn = asCodexAppServerRecord(params?.turn);
+      return {
+        type: 'turn.started',
+        ...(typeof params?.threadId === 'string' ? { thread_id: params.threadId } : {}),
+        ...(typeof turn?.id === 'string' ? { turn_id: turn.id } : {}),
+      };
+    },
+    'thread/goal/updated': mapCodexAppServerGoalUpdated,
+    'thread/goal/cleared': mapCodexAppServerGoalCleared,
+    'turn/plan/updated': (_method, params) => {
+      const plan = Array.isArray(params?.plan) ? params.plan : [];
+      return {
+        type: 'turn.plan.updated',
+        ...(typeof params?.explanation === 'string' ? { explanation: params.explanation } : {}),
+        plan,
+      };
+    },
+    'turn/completed': (_method, params) => {
+      const turn = asCodexAppServerRecord(params?.turn);
+      const status = turn?.status;
+      if (status === 'failed') {
+        return {
+          type: 'turn.failed',
+          status,
+          error: codexErrorDetails(turn?.error),
+          ...(typeof params?.threadId === 'string' ? { thread_id: params.threadId } : {}),
+          ...(typeof turn?.id === 'string' ? { turn_id: turn.id } : {}),
+        };
+      }
+      return {
+        type: 'turn.completed',
+        ...(typeof status === 'string' ? { status } : {}),
+        ...(typeof params?.threadId === 'string' ? { thread_id: params.threadId } : {}),
+        ...(typeof turn?.id === 'string' ? { turn_id: turn.id } : {}),
+      };
+    },
+    error: (_method, params) => ({
+      type: 'error',
+      ...codexErrorDetails(params?.error ?? params),
+      ...(typeof params?.threadId === 'string' ? { thread_id: params.threadId } : {}),
+      ...(typeof params?.turnId === 'string' ? { turn_id: params.turnId } : {}),
+    }),
+  } satisfies Record<string, CodexAppServerNotificationMapper>),
+);
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+export function mapCodexAppServerNotification(envelopeValue: unknown): CodexAppServerJsonObject | null {
+  const envelope = asCodexAppServerRecord(envelopeValue);
+  const params = asCodexAppServerRecord(envelope?.params);
+  if (!envelope || typeof envelope.method !== 'string') return null;
+  const mapper = CODEX_APP_SERVER_NOTIFICATION_MAPPERS[envelope.method];
+  return mapper ? mapper(envelope.method, params) : null;
+}
+
+export function boundedUnsupportedCodexAppServerNotificationMethod(envelopeValue: unknown): string | null {
+  const envelope = asCodexAppServerRecord(envelopeValue);
+  const method = envelope?.method;
+  if (
+    typeof method !== 'string' ||
+    Object.hasOwn(CODEX_APP_SERVER_NOTIFICATION_MAPPERS, method) ||
+    isCodexAppServerTokenUsageNotification(envelope)
+  ) {
+    return null;
+  }
+  return method.slice(0, 64);
+}
+
+export function respondToCodexAppServerRequest(request: CodexAppServerJsonObject): CodexAppServerJsonObject | null {
+  const id = request.id;
+  if (typeof id !== 'number') return null;
+  if (
+    request.method === 'item/commandExecution/requestApproval' ||
+    request.method === 'item/fileChange/requestApproval'
+  ) {
+    return { id, result: { decision: 'decline' } };
+  }
+  if (request.method === 'execCommandApproval' || request.method === 'applyPatchApproval') {
+    return { id, result: { decision: 'denied' } };
+  }
+  if (request.method === 'item/tool/requestUserInput') {
+    const questionIds = codexMcpApprovalCompatibilityQuestionIds(request);
+    if (questionIds) {
+      // Upstream's request-user-input compatibility path recognizes this token
+      // as a fail-closed decline. The completed tool event is then normalized by
+      // codex-event-transform using the host's unavailable approval surface.
+      return {
+        id,
+        result: {
+          answers: Object.fromEntries(
+            questionIds.map((questionId) => [questionId, { answers: ['__codex_mcp_decline__'] }]),
+          ),
+        },
+      };
+    }
+  }
+  return {
+    id,
+    error: { code: -32601, message: `Unsupported app-server request: ${String(request.method)}` },
+  };
+}
+
+export function isCodexMcpApprovalCompatibilityRequest(request: CodexAppServerJsonObject): boolean {
+  return codexMcpApprovalCompatibilityQuestionIds(request) !== null;
+}
+
+function codexMcpApprovalCompatibilityQuestionIds(request: CodexAppServerJsonObject): string[] | null {
+  if (request.method !== 'item/tool/requestUserInput') return null;
+  const params = asCodexAppServerRecord(request.params);
+  const questions = Array.isArray(params?.questions) ? params.questions : [];
+  const questionIds = questions.map((question) => asCodexAppServerRecord(question)?.id);
+  return questionIds.length > 0 &&
+    questionIds.every(
+      (questionId): questionId is string =>
+        typeof questionId === 'string' && questionId.startsWith('mcp_tool_call_approval_'),
+    )
+    ? questionIds
+    : null;
+}
+
+/**
+ * F296 B4b: map a Codex app-server notification to an authoritative compaction
+ * observation, or null when it is not one.
+ *
+ * Gate 0 (2026-08-20, codex-cli 0.147.0) proved the shape dynamically: the
+ * `contextCompaction` thread item carries only `{ id, type }`, so the binding
+ * coordinates come from the enclosing `item/started` | `item/completed`
+ * envelope. `(threadId, turnId, item.id)` is therefore the stable identity, and
+ * `thread/compacted` / `ContextCompactedNotification` is deprecated upstream
+ * and is deliberately NOT accepted here.
+ *
+ * Fail closed: any missing coordinate yields null rather than a guessed event.
+ */
+export function mapCodexAppServerCompactionObservation(
+  envelope: unknown,
+): { eventId: string; runtimeSessionId: string; evidenceRef: string } | null {
+  const record = asCodexAppServerRecord(envelope);
+  if (record?.method !== 'item/started' && record?.method !== 'item/completed') return null;
+  const params = asCodexAppServerRecord(record.params);
+  const item = asCodexAppServerRecord(params?.item);
+  if (item?.type !== 'contextCompaction') return null;
+  const threadId = params?.threadId;
+  const turnId = params?.turnId;
+  const itemId = item.id;
+  if (typeof threadId !== 'string' || typeof turnId !== 'string' || typeof itemId !== 'string') return null;
+  if (!threadId || !turnId || !itemId) return null;
+  return {
+    eventId: `context-compaction:codex:app_server:${threadId}:${turnId}:${itemId}`,
+    runtimeSessionId: threadId,
+    evidenceRef: `codex_app_server_context_compaction:${threadId}:${turnId}:${itemId}`,
+  };
+}

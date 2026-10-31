@@ -83,6 +83,17 @@ export function formatTaskSnapshot(tasks: readonly TaskItem[]): string {
   const lines: string[] = [];
   lines.push(`[Task Snapshot — ${tasks.length} tasks (${countParts.join(', ')})]`);
 
+  // Blocked reminder (F160 Phase C: AC-C3)
+  if (counts.blocked > 0) {
+    const blockedTasks = sorted.filter((t) => t.status === 'blocked').slice(0, MAX_OPEN);
+    lines.push(`⚠️ 有 ${counts.blocked} 个任务被阻塞，请优先处理或更新状态：`);
+    for (const bt of blockedTasks) {
+      const title = truncate(sanitize(bt.title), MAX_TITLE);
+      lines.push(`  → ${title}`);
+    }
+    lines.push('');
+  }
+
   // Find focus task (first doing, else first blocked)
   const focusId = display.find((t) => t.status === 'doing')?.id ?? display.find((t) => t.status === 'blocked')?.id;
 

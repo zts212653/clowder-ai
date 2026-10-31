@@ -1,0 +1,77 @@
+{
+  "kind": "success_contract",
+  "summary": "对照八项具体对象收准原三条规约，仍区分指令执行、指定脚触球及人的体验价值。PR4492实现/原件已获Terra413有限独立审阅；规约仍为草案，未签Goal或测量证书。模拟器、自建benchmark、真实观看是取证渠道，不能直接当作GT域。",
+  "criteria": [
+    {
+      "criterionId": "command-execution",
+      "label": "猫的指令真实控制指定鸭",
+      "utilityClaim": "猫能改变自己队伍的执行，而物理持续运行。",
+      "observationUnit": "一次真实观察→提交→接受/拒绝→执行/失效",
+      "estimator": "接受数/提交数、观察到接收年龄、覆盖时长，结合50Hz轨迹与目标到达事实；保留全部拒绝。",
+      "counterexample": "只显示猫的解说，或迟到后把revision换成最新值。",
+      "gtDomain": "verifiable",
+      "judge": "verifier",
+      "payer": {
+        "kind": "engineering_maintenance",
+        "detail": "本地仿真与日志维护成本由本项目执行承担。"
+      },
+      "gtSourceKeys": ["physical-record"],
+      "validityBounds": [
+        "仿真状态可见；证明指定鸭执行，不证明战术值得或真机视觉。",
+        "对应有限指令协议、局部控制与记录实现；猫读world state与局部sensor/state信息源分别声明。协议接收/执行证据不等于独立战术方法已形成，或战术净收益成立。"
+      ],
+      "unknowns": ["更稳定的跨指令时效策略待验证。"],
+      "nextAction": "两场指令、事件与轨迹已归档并经有限实现审阅；后续沿同一观察域取证目标持续性，保留全部拒绝和失效，不只换依赖引用。"
+    },
+    {
+      "criterionId": "kick-contact",
+      "label": "指定脚在踢球动作期实际触球",
+      "utilityClaim": "鸭完成有物理接触的踢球，减少对旧球位踢空。",
+      "observationUnit": "一次独立踢球技能实例及一次完整起始场景",
+      "estimator": "200Hz接触力、指定脚geom与动作ID联合判定；同时报无尝试场景、踢腿数、接触数、摔倒和目标方向。",
+      "counterexample": "仅kick调用，动作后其他鸭碰球，或摆球夹具冒充自主接近。",
+      "gtDomain": "verifiable",
+      "judge": "verifier",
+      "payer": {
+        "kind": "engineering_maintenance",
+        "detail": "真实仿真采集与校准。"
+      },
+      "gtSourceKeys": ["physical-record", "placed-ball-calibration"],
+      "validityBounds": [
+        "position actuator与冻结球场内；接触不等于传球成功或胜率改善。",
+        "对应动作权重、身体执行配置、局部控制、接触判定与样本。18点摆球夹具校准接触，不作为自主接近成功的分母；已公开801–808不再是未暴露holdout。"
+      ],
+      "unknowns": ["许多场景没有尝试，尚未稳定踢球。"],
+      "nextAction": "完整公开新seed结果已复算；state仍5/8场无踢腿。继续依据已有失败准备局部反馈候选，实际干预另记录版本及比较条件。"
+    },
+    {
+      "criterionId": "team-value",
+      "label": "真实配合与对人的价值",
+      "utilityClaim": "队友形成可追溯传接链，比赛体验值得继续投入。",
+      "observationUnit": "一次传接机会与完整对局；You观看后的判断",
+      "estimator": "意图→A指定脚接触→B响应/接球→后续动作；与固定对手交换边对照。体验由真实观看者判，不用作者LLM自评分。",
+      "counterexample": "两鸭各追球、巧合连续碰球、只剪出一脚或赢了代理比分。",
+      "gtDomain": "open_value",
+      "judge": "mixed",
+      "payer": {
+        "kind": "mixed",
+        "detail": "本地实验计算与You观看注意力；新增成本需另核。"
+      },
+      "gtSourceKeys": ["physical-record", "viewer-feedback"],
+      "validityBounds": [
+        "当前仅分工/站位已出现；尚无完整传接证据或球队净收益结论。",
+        "open_value标的是“对人值得/有趣”；可追溯传接链中的接触与轨迹只能作为物理先决证据，不会自动给出人的价值判断。当前没有经校准的传接判定器。"
+      ],
+      "unknowns": ["价值阈值与独立裁判尚未冻结。"],
+      "nextAction": "成片已交付；真实观看反馈仍未取得，不能代填满意或验收。保留规约与反例，后续先校准传接机会的物理链，再由真实价值主人判断体验。"
+    }
+  ],
+  "unknowns": [
+    "保留原criteria ID、GT域和judge类型：command-execution/verifiable/verifier，kick-contact/verifiable/verifier，team-value/open_value/mixed；本修订不按渠道硬造semi_verifiable标签。",
+    "正式Goal、测量与经济证书、角色及价值阈值尚未冻结；技术审阅不能代签。",
+    "协作机会/传接判据、足量比赛对照、训练预算与观看者反馈仍未知，未新增实验或采用。",
+    "修订依据原提交猫thread_mtmp3gjq2hntizz4#0001789373591565-000316-1350ca00，以及有限审阅thread_mtmp3gjq2hntizz4#0001789038735370-000413-ae17665a；旧规约作为历史保留。",
+    "原作者720及029收准对象与理由：猫的独立、版本化软战术方法尚未形成；逐次reason/assignments只能证明输出，不能替代方法加载证据。来源message:0001789635982467-000720-8ada8be9、message:0001789709613092-000029-b97dfee1。"
+  ],
+  "nextAction": "沿八项具体对象准备局部执行与有限战术的可比方案；先区分协议执行、局部反馈、方法消费与人的价值。判定域、裁判、反例及未知保持原边界，正式量尺和价值判断由相应有权来源解决。"
+}

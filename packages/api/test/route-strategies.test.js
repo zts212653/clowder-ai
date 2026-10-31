@@ -3,8 +3,49 @@
  * 验证 routeSerial / routeParallel 纯函数的基本行为 + A2A worklist
  */
 
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
+import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
+
+const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/context/ContextEpochOwner.js');
+const { InMemoryContextEpochStore } = await import('../dist/domains/cats/services/stores/ports/ContextEpochStore.js');
+
+const SMALL_CONTEXT_OPUS = 'small-context-opus';
+const SMALL_CONTEXT_CODEX = 'small-context-codex';
+const UNKNOWN_AUTO_CONTEXT_CAT = 'unknown-auto-context-cat';
+
+for (const [id, baseId] of [
+  [SMALL_CONTEXT_OPUS, 'opus'],
+  [SMALL_CONTEXT_CODEX, 'codex'],
+]) {
+  if (!catRegistry.has(id)) {
+    const base = catRegistry.getOrThrow(baseId).config;
+    catRegistry.register(id, {
+      ...base,
+      id,
+      name: id,
+      displayName: id,
+      mentionPatterns: [`@${id}`],
+      contextWindow: 17_000,
+    });
+  }
+}
+
+if (!catRegistry.has(UNKNOWN_AUTO_CONTEXT_CAT)) {
+  const base = catRegistry.getOrThrow('opus').config;
+  catRegistry.register(UNKNOWN_AUTO_CONTEXT_CAT, {
+    ...base,
+    id: UNKNOWN_AUTO_CONTEXT_CAT,
+    name: UNKNOWN_AUTO_CONTEXT_CAT,
+    displayName: UNKNOWN_AUTO_CONTEXT_CAT,
+    mentionPatterns: [`@${UNKNOWN_AUTO_CONTEXT_CAT}`],
+    defaultModel: 'vendor/unknown-auto-model',
+    contextWindow: undefined,
+    cli: base.cli ? { ...base.cli, contextWindow: undefined, autoCompactTokenLimit: undefined } : base.cli,
+  });
+}
 
 // Create a mock agent service that yields text + done
 function createMockService(catId, text = 'hello') {
@@ -27,6 +68,60 @@ function createCapturingService(catId, text = 'hello') {
       yield { type: 'done', catId, timestamp: Date.now() };
     },
   };
+}
+
+function createVerifiedThreadLookupService(catId, targetThreadId, targetMessageId, text) {
+  const toolName = 'mcp:cat-cafe-collab/cat_cafe_get_thread_context';
+  const calls = [];
+  return {
+    calls,
+    async *invoke(prompt) {
+      calls.push(prompt);
+      yield {
+        type: 'tool_use',
+        catId,
+        toolName,
+        toolUseId: 'thread-context-lookup-1',
+        toolInput: {
+          threadId: targetThreadId,
+          messageId: targetMessageId,
+          before: 3,
+          after: 3,
+        },
+        timestamp: Date.now(),
+      };
+      yield {
+        type: 'tool_result',
+        catId,
+        toolName,
+        toolUseId: 'thread-context-lookup-1',
+        toolResultStatus: 'ok',
+        content: `${toolName} (completed)\n${JSON.stringify({
+          threadId: targetThreadId,
+          messages: [{ id: targetMessageId, threadId: targetThreadId, content: 'PR #3017 created' }],
+        })}`,
+        timestamp: Date.now(),
+      };
+      yield { type: 'text', catId, content: text, timestamp: Date.now() };
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+}
+
+function createSmartWindowHistory(overridesBySequence = {}) {
+  return Array.from({ length: 16 }, (_, index) => {
+    const sequence = index + 1;
+    return {
+      id: `00000000000000${String(sequence).padStart(2, '0')}-000001-${String(sequence).padStart(8, '0')}`,
+      threadId: 'thread1',
+      userId: 'user1',
+      catId: null,
+      content: `history-${sequence}`,
+      mentions: [],
+      timestamp: sequence * 1_000,
+      ...(overridesBySequence[sequence] ?? {}),
+    };
+  });
 }
 
 function createOptionsCapturingService(catId, text = 'hello') {
@@ -56,21 +151,119 @@ function createSequentialCapturingService(catId, responses) {
   };
 }
 
-function createMockDeps(services, appendCalls, threadStore = null) {
+function createGuideAckThreadStore(initialGuideState, currentGuideState, projectPath = '/tmp/test') {
+  return {
+    async get() {
+      return {
+        id: 'thread1',
+        title: 'Test',
+        createdBy: 'user1',
+        participants: [],
+        lastActiveAt: Date.now(),
+        createdAt: Date.now(),
+        projectPath,
+      };
+    },
+    async getParticipantsWithActivity() {
+      return [];
+    },
+    /** Create an InMemoryGuideSessionStore pre-seeded with initial state, returning it and a bridge for assertions. */
+    _createSessionStore: null,
+  };
+}
+
+async function createGuideAckFixture(guideState, projectPath = '/tmp/test') {
+  const { InMemoryGuideSessionStore, createGuideStoreBridge } = await import(
+    '../dist/domains/guides/GuideSessionRepository.js'
+  );
+  const sessionStore = new InMemoryGuideSessionStore();
+  const bridge = createGuideStoreBridge(sessionStore);
+  await bridge.set('thread1', guideState);
+  const threadStore = createGuideAckThreadStore(null, null, projectPath);
+  return { threadStore, sessionStore, bridge };
+}
+
+/** Session store that returns initialState on first read, then replacementState afterwards.
+ *  Models concurrent guide replacement between prepare and ack phases. */
+async function createSwitchingGuideAckFixture(initialState, replacementState, projectPath = '/tmp/test') {
+  const { createSessionFromState } = await import('../dist/domains/guides/GuideSession.js');
+  let readCount = 0;
+  const sessionStore = {
+    async getByThread(threadId) {
+      readCount++;
+      const state = readCount <= 1 ? initialState : replacementState;
+      return createSessionFromState(threadId, state);
+    },
+    async save() {},
+    async delete() {},
+  };
+  const threadStore = createGuideAckThreadStore(null, null, projectPath);
+  return { threadStore, sessionStore };
+}
+
+function createSharedDefaultGuideThreadStore() {
+  const updates = [];
+  return {
+    updates,
+    async get() {
+      return {
+        id: 'default',
+        title: 'Default Thread',
+        createdBy: 'system',
+        participants: [],
+        lastActiveAt: Date.now(),
+        createdAt: Date.now(),
+        projectPath: 'default',
+      };
+    },
+    async getParticipantsWithActivity() {
+      return [];
+    },
+    async consumeMentionRoutingFeedback() {
+      return null;
+    },
+    async updateParticipantActivity() {},
+    async updateGuideState(threadId, nextGuideState) {
+      updates.push({ threadId, guideState: nextGuideState });
+    },
+  };
+}
+
+async function createSharedDefaultGuideFixture(guideState) {
+  const { InMemoryGuideSessionStore, createGuideStoreBridge } = await import(
+    '../dist/domains/guides/GuideSessionRepository.js'
+  );
+  const sessionStore = new InMemoryGuideSessionStore();
+  const bridge = createGuideStoreBridge(sessionStore);
+  await bridge.set('default', guideState);
+  const threadStore = createSharedDefaultGuideThreadStore();
+  return { threadStore, sessionStore, bridge };
+}
+
+function createMockDeps(services, appendCalls, threadStore = null, guideSessionStore = null) {
   let counter = 0;
+  const safeThreadStore = threadStore
+    ? {
+        consumeMentionRoutingFeedback: async () => null,
+        ...threadStore,
+      }
+    : null;
   return {
     services,
     invocationDeps: {
       registry: {
         create: () => ({ invocationId: `inv-${++counter}`, callbackToken: `tok-${counter}` }),
-        verify: () => null,
+        verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
       },
       sessionManager: {
+        get: async () => undefined,
         getOrCreate: async () => ({}),
         resolveWorkingDirectory: () => '/tmp/test',
       },
-      threadStore,
+      threadStore: safeThreadStore,
+      guideSessionStore,
       apiUrl: 'http://127.0.0.1:3004',
+      contextEpochOwner: new ContextEpochOwner(new InMemoryContextEpochStore()),
     },
     messageStore: {
       append: async (msg) => {
@@ -103,6 +296,1478 @@ function degradationSystemInfos(messages) {
   });
 }
 
+describe('bootcamp invocation context', () => {
+  it('uses thread-scoped member count instead of global roster size', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const captureService = createCapturingService('opus', 'ack');
+    const deps = createMockDeps({ opus: captureService }, undefined, {
+      async get() {
+        return {
+          id: 'thread1',
+          title: 'Bootcamp Thread',
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          projectPath: resolve(process.cwd(), '../..'),
+          bootcampState: {
+            v: 1,
+            phase: 'phase-2-env-check',
+            leadCat: 'opus',
+            startedAt: Date.now(),
+          },
+        };
+      },
+      async getParticipantsWithActivity() {
+        return [];
+      },
+      async updateParticipantActivity() {},
+    });
+
+    const messages = [];
+    for await (const message of routeParallel(deps, ['opus'], '继续', 'user1', 'thread1')) {
+      messages.push(message);
+    }
+
+    assert.match(
+      captureService.calls[0],
+      /members=1/,
+      `should derive team size from the active thread only; events=${JSON.stringify(messages)}`,
+    );
+  });
+});
+
+describe('routeParallel collaboration continuity', () => {
+  it('does not treat stored prior-invocation usage as current invocation handoff proof', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const base = catRegistry.getOrThrow('opencode').config;
+    const catId = 'route-late-capacity-bootstrap';
+    if (!catRegistry.has(catId)) {
+      catRegistry.register(catId, {
+        ...base,
+        id: catId,
+        name: catId,
+        displayName: catId,
+        mentionPatterns: [`@${catId}`],
+        provider: 'anthropic',
+        clientId: 'opencode',
+        accountRef: undefined,
+        defaultModel: 'anthropic/claude-opus-4-6',
+        contextWindow: undefined,
+      });
+    }
+
+    const prompts = [];
+    const service = {
+      l0CompilerFn: async ({ catId: compiledCatId }) => `# Test L0 for ${compiledCatId}`,
+      contextCapability() {
+        return {
+          provider: 'opencode',
+          carrier: 'run_json',
+          reportsRuntimeWindow: false,
+          authoritativeUsage: true,
+          usageTelemetry: 'available',
+          nativeWindowControl: true,
+          nativeCompressionControl: true,
+          observesCompression: false,
+          reason: 'route late-binding test carrier',
+        };
+      },
+      async *invoke(prompt) {
+        prompts.push(prompt);
+        yield { type: 'done', catId, timestamp: Date.now() };
+      },
+    };
+    const deps = createMockDeps({ [catId]: service });
+    const sessionChainStore = new SessionChainStore();
+    const active = sessionChainStore.create({
+      cliSessionId: 'cli-route-late-capacity',
+      threadId: 'thread-route-late-capacity',
+      catId,
+      userId: 'user1',
+    });
+    sessionChainStore.update(active.id, {
+      contextHealth: {
+        usedTokens: 900_000,
+        windowTokens: 1_000_000,
+        fillRatio: 0.9,
+        source: 'exact',
+        usedFrom: 'last_turn',
+        measuredAt: Date.now(),
+      },
+    });
+    deps.invocationDeps.sessionManager.get = async () => 'cli-route-late-capacity';
+    deps.invocationDeps.sessionManager.delete = async () => {};
+    deps.invocationDeps.sessionChainStore = sessionChainStore;
+    let sealRequests = 0;
+    deps.invocationDeps.sessionSealer = {
+      async requestSeal({ sessionId, reason }) {
+        sealRequests += 1;
+        sessionChainStore.update(sessionId, { status: 'sealing', sealReason: reason });
+        return { accepted: true, status: 'sealing', sessionId };
+      },
+      async finalize({ sessionId }) {
+        sessionChainStore.update(sessionId, { status: 'sealed' });
+      },
+      async reconcileStuck() {
+        return 0;
+      },
+    };
+    deps.invocationDeps.transcriptReader = {
+      async readDigest(sessionId) {
+        if (sessionId !== active.id) return null;
+        return {
+          v: 1,
+          sessionId,
+          threadId: 'thread-route-late-capacity',
+          catId,
+          seq: 0,
+          time: { createdAt: 1, sealedAt: 2 },
+          invocations: [],
+          filesTouched: [],
+          errors: [],
+          recentMessages: [{ role: 'assistant', content: 'prior active-session history' }],
+        };
+      },
+    };
+
+    for await (const _message of routeParallel(
+      deps,
+      [catId],
+      'current invocation delta',
+      'user1',
+      'thread-route-late-capacity',
+    )) {
+      // consume route output
+    }
+
+    assert.equal(prompts.length, 1);
+    assert.equal(sealRequests, 0, 'stored health cannot activate handoff before this invocation reports usage');
+    assert.equal(sessionChainStore.get(active.id).status, 'active');
+    assert.doesNotMatch(prompts[0], /prior active-session history/);
+    assert.match(prompts[0], /current invocation delta/);
+  });
+
+  it('includes continuity capsule in threshold seal payload for parallel invocations', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const activeRecord = sessionChainStore.create({
+      cliSessionId: 'cli-parallel-seal',
+      catId: 'codex',
+      threadId: 'thread-parallel-seal',
+      userId: 'user1',
+    });
+    const service = {
+      contextCapability() {
+        return {
+          provider: 'openai',
+          carrier: 'exec_json',
+          reportsRuntimeWindow: true,
+          authoritativeUsage: true,
+          nativeWindowControl: true,
+          nativeCompressionControl: false,
+          observesCompression: false,
+          reason: 'test carrier mirrors Codex exec-json authority',
+        };
+      },
+      async *invoke() {
+        yield {
+          type: 'done',
+          catId: 'codex',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'openai',
+            model: 'gpt-5.5',
+            usage: {
+              contextUsedTokens: 90_000,
+              lastTurnInputTokens: 90_000,
+              outputTokens: 100,
+              contextWindowSize: 100_000,
+            },
+          },
+        };
+      },
+    };
+    const deps = createMockDeps({ codex: service });
+    deps.invocationDeps.sessionManager.delete = async () => {};
+    deps.invocationDeps.sessionChainStore = sessionChainStore;
+    deps.invocationDeps.sessionSealer = {
+      requestSeal: async () => ({ accepted: true, status: 'sealing' }),
+      finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    };
+    deps.invocationDeps.transcriptReader = {
+      readDigest: async () => null,
+      readEvents: async () => ({ events: [], hasMore: false }),
+      search: async () => [],
+    };
+
+    const events = [];
+    for await (const msg of routeParallel(deps, ['codex'], 'parallel seal', 'user1', 'thread-parallel-seal')) {
+      events.push(msg);
+    }
+
+    const sealEvent = events.find((m) => {
+      if (m.type !== 'system_info') return false;
+      try {
+        return JSON.parse(m.content).type === 'session_seal_requested';
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(sealEvent, 'parallel threshold seal should emit session_seal_requested');
+    const payload = JSON.parse(sealEvent.content);
+    assert.equal(payload.continuityCapsule.threadId, 'thread-parallel-seal');
+    assert.equal(payload.continuityCapsule.catId, 'codex');
+    assert.equal(payload.continuityCapsule.mode, 'parallel');
+    assert.equal(payload.continuityCapsule.seal.sessionId, activeRecord.id);
+  });
+});
+
+describe('incremental current-message fallback helper', () => {
+  it('deduplicates every exact persisted prompt-body group into one shared coverage set', async () => {
+    const { collectExactPromptMessageIds } = await import(
+      '../dist/domains/cats/services/agents/routing/route-helpers.js'
+    );
+
+    assert.deepEqual(
+      collectExactPromptMessageIds(
+        ['msg-merged', 'msg-batched'],
+        ['msg-current', 'msg-merged', undefined],
+        ['msg-incremental'],
+        ['msg-supplement', 'msg-closure'],
+      ),
+      ['msg-merged', 'msg-batched', 'msg-current', 'msg-incremental', 'msg-supplement', 'msg-closure'],
+    );
+  });
+
+  it('does not infer current-message delivery from an arbitrary id substring in context text', async () => {
+    const { shouldAppendExplicitCurrentMessage } = await import(
+      '../dist/domains/cats/services/agents/routing/route-helpers.js'
+    );
+
+    const result = shouldAppendExplicitCurrentMessage(
+      {
+        contextText:
+          '[对话历史增量 - 未发送过 1 条]\n[Thread opener: 0000000000000002-000001-bbbbbbbb] CURRENT USER MESSAGE\n[/对话历史]',
+        projectedMessageIds: [],
+        includesCurrentUserMessage: false,
+        currentMessageFilteredOut: false,
+      },
+      '0000000000000002-000001-bbbbbbbb',
+    );
+
+    assert.equal(result, true, 'unowned metadata must not suppress raw fallback append');
+  });
+
+  it('still appends raw current message when context truly lacks current message id', async () => {
+    const { shouldAppendExplicitCurrentMessage } = await import(
+      '../dist/domains/cats/services/agents/routing/route-helpers.js'
+    );
+
+    const result = shouldAppendExplicitCurrentMessage(
+      {
+        contextText: '[对话历史增量 - 未发送过 1 条]\n[older-id] older user message\n[/对话历史]',
+        projectedMessageIds: [],
+        includesCurrentUserMessage: false,
+        currentMessageFilteredOut: false,
+      },
+      '0000000000000002-000001-bbbbbbbb',
+    );
+
+    assert.equal(result, true, 'missing current message id should keep raw fallback append');
+  });
+
+  it('treats an explicit empty hydration subset as authoritative instead of appending aggregate raw text', async () => {
+    const { explicitPromptForIncrementalContext } = await import(
+      '../dist/domains/cats/services/agents/routing/route-helpers.js'
+    );
+
+    const result = explicitPromptForIncrementalContext(
+      {
+        projectedMessageIds: [],
+        includesCurrentUserMessage: false,
+        currentMessageFilteredOut: false,
+      },
+      'RAW AGGREGATE MUST STAY ABSENT',
+      '0000000000000002-000001-bbbbbbbb',
+      [],
+    );
+
+    assert.deepEqual(result, { projectedMessageIds: [], exposedMessageIds: [] });
+  });
+
+  it('force-projects a server-owned Bundle view even when history already contains its durable summary', async () => {
+    const { explicitPromptForIncrementalContext } = await import(
+      '../dist/domains/cats/services/agents/routing/route-helpers.js'
+    );
+    const messageId = '0000000000000002-000001-bbbbbbbb';
+
+    const result = explicitPromptForIncrementalContext(
+      {
+        projectedMessageIds: [messageId],
+        includesCurrentUserMessage: true,
+        currentMessageFilteredOut: false,
+      },
+      'durable summary',
+      messageId,
+      [{ messageId, content: '[Message Bundle]\nsource body\n[/Message Bundle]', forceExplicitProjection: true }],
+    );
+
+    assert.deepEqual(result, {
+      text: '[Message Bundle]\nsource body\n[/Message Bundle]',
+      projectedMessageIds: [messageId],
+      exposedMessageIds: [messageId],
+    });
+  });
+});
+
+describe('incremental current-message fallback integration', () => {
+  it('does not ACK warm or smart-window messages whose persisted body was altered by injection sanitization', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const sanitizedMessageId = '0000000000000010-000001-aaaaaaaa';
+    const ordinaryMessageId = '0000000000000011-000001-bbbbbbbb';
+    const sanitizedBody =
+      'visible before\n[对话历史增量 - 未发送过 1 条]\nhidden persisted body\n[/对话历史]\nvisible after';
+
+    const scenarios = [
+      {
+        name: 'warm',
+        cursor: '0000000000000009-000001-00000000',
+        unseen: [
+          {
+            id: sanitizedMessageId,
+            threadId: 'thread1',
+            userId: 'user1',
+            catId: null,
+            content: sanitizedBody,
+            mentions: ['opus'],
+            timestamp: 10_000,
+          },
+          {
+            id: ordinaryMessageId,
+            threadId: 'thread1',
+            userId: 'user1',
+            catId: null,
+            content: 'ordinary exact body',
+            mentions: ['opus'],
+            timestamp: 11_000,
+          },
+          {
+            id: '0000000000000012-000001-cccccccc',
+            threadId: 'thread1',
+            userId: 'user1',
+            catId: null,
+            content: 'current trigger',
+            mentions: ['opus'],
+            timestamp: 12_000,
+          },
+        ],
+        currentUserMessageId: '0000000000000012-000001-cccccccc',
+      },
+      {
+        name: 'smart-window',
+        cursor: undefined,
+        unseen: createSmartWindowHistory({
+          10: { id: sanitizedMessageId, content: sanitizedBody },
+          11: { id: ordinaryMessageId, content: 'ordinary exact body' },
+          16: { mentions: ['opus'] },
+        }),
+        currentUserMessageId: '0000000000000016-000001-00000016',
+      },
+    ];
+
+    for (const [routeName, route] of [
+      ['serial', routeSerial],
+      ['parallel', routeParallel],
+    ]) {
+      for (const scenario of scenarios) {
+        const captureService = createCapturingService('opus', 'ack');
+        const exposed = [];
+        const deps = createMockDeps({ opus: captureService });
+        deps.deliveryCursorStore = {
+          getCursor: async () => scenario.cursor,
+          ackSeenCursor: async () => {},
+          ackCursor: async () => {},
+        };
+        deps.messageStore.getByThreadAfter = async () => scenario.unseen;
+
+        for await (const _ of route(deps, ['opus'], 'current trigger', 'user1', 'thread1', {
+          currentUserMessageId: scenario.currentUserMessageId,
+          parentInvocationId: 'inv-parent',
+          persistedPromptMessageIds: [sanitizedMessageId],
+          persistedPromptMessages: [{ messageId: sanitizedMessageId, content: sanitizedBody }],
+          onPromptMessagesExposed: async (input) => {
+            exposed.push(input);
+          },
+        })) {
+        }
+
+        const label = `${routeName}/${scenario.name}`;
+        assert.equal(exposed.length, 1, label);
+        assert.equal(exposed[0].messageIds.includes(ordinaryMessageId), true, `${label}: exact control is exposed`);
+        assert.equal(
+          exposed[0].messageIds.includes(sanitizedMessageId),
+          false,
+          `${label}: sanitized body must not become seen evidence`,
+        );
+        assert.equal(captureService.calls[0].split('visible before').length - 1, 1, `${label}: safe prefix once`);
+        assert.equal(captureService.calls[0].split('visible after').length - 1, 1, `${label}: safe suffix once`);
+        assert.doesNotMatch(
+          captureService.calls[0],
+          /hidden persisted body/,
+          `${label}: stripped envelope stays absent`,
+        );
+      }
+    }
+  });
+
+  it('projects whitespace-normalized Queue smart anchors once without granting exact receipt', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const normalizedMessageId = '0000000000000001-000001-aaaaaaaa';
+    const currentUserMessageId = '0000000000000016-000001-cccccccc';
+    const persistedBody = '  WHITESPACE NORMALIZED QUEUE BODY  ';
+    const unseen = createSmartWindowHistory({
+      1: { id: normalizedMessageId, content: persistedBody },
+      16: { id: currentUserMessageId, content: 'current trigger', mentions: ['opus'] },
+    });
+
+    for (const [routeName, route] of [
+      ['serial', routeSerial],
+      ['parallel', routeParallel],
+    ]) {
+      const captureService = createCapturingService('opus', 'ack');
+      const exposed = [];
+      const deps = createMockDeps({ opus: captureService });
+      deps.deliveryCursorStore = {
+        getCursor: async () => undefined,
+        ackSeenCursor: async () => {},
+        ackCursor: async () => {},
+      };
+      deps.messageStore.getByThreadAfter = async () => unseen;
+
+      for await (const _ of route(deps, ['opus'], 'current trigger', 'user1', 'thread1', {
+        currentUserMessageId,
+        parentInvocationId: 'inv-parent',
+        persistedPromptMessageIds: [normalizedMessageId],
+        persistedPromptMessages: [{ messageId: normalizedMessageId, content: persistedBody }],
+        onPromptMessagesExposed: async (input) => {
+          exposed.push(input);
+        },
+      })) {
+      }
+
+      assert.equal(
+        captureService.calls[0].split('WHITESPACE NORMALIZED QUEUE BODY').length - 1,
+        1,
+        `${routeName}: normalized smart anchor renders once`,
+      );
+      assert.equal(exposed.length, 1, routeName);
+      assert.equal(
+        exposed[0].messageIds.includes(normalizedMessageId),
+        false,
+        `${routeName}: normalization must not become exact receipt`,
+      );
+    }
+  });
+
+  it('does not ACK smart-window messages whose exact body was replaced by tool-payload scrubbing', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const currentUserMessageId = '0000000000000016-000001-cccccccc';
+    const scrubbedMessageId = '0000000000000010-000001-aaaaaaaa';
+    const ordinaryMessageId = '0000000000000011-000001-bbbbbbbb';
+    const unseen = createSmartWindowHistory({
+      10: {
+        id: scrubbedMessageId,
+        content: 'the exact queued body must not be replaced and then ACKed',
+        toolEvents: [
+          {
+            id: 'tool-result-10',
+            type: 'tool_result',
+            label: 'cat_cafe_get_thread_context',
+            timestamp: 10_000,
+          },
+        ],
+      },
+      11: { id: ordinaryMessageId },
+      16: { id: currentUserMessageId, mentions: ['opus'] },
+    });
+
+    for (const [routeName, route] of [
+      ['serial', routeSerial],
+      ['parallel', routeParallel],
+    ]) {
+      const captureService = createCapturingService('opus', 'ack');
+      const exposed = [];
+      const deps = createMockDeps({ opus: captureService });
+      deps.deliveryCursorStore = {
+        getCursor: async () => undefined,
+        ackSeenCursor: async () => {},
+        ackCursor: async () => {},
+      };
+      deps.messageStore.getByThreadAfter = async () => unseen;
+
+      for await (const _ of route(deps, ['opus'], 'history-16', 'user1', 'thread1', {
+        currentUserMessageId,
+        parentInvocationId: 'inv-parent',
+        onPromptMessagesExposed: async (input) => {
+          exposed.push(input);
+        },
+      })) {
+      }
+
+      assert.equal(exposed.length, 1, routeName);
+      assert.equal(exposed[0].messageIds.includes(ordinaryMessageId), true, `${routeName}: control body is exposed`);
+      assert.equal(
+        exposed[0].messageIds.includes(scrubbedMessageId),
+        false,
+        `${routeName}: scrubbed body must not become seen evidence`,
+      );
+      assert.match(captureService.calls[0], /tool_result truncated/);
+      assert.doesNotMatch(captureService.calls[0], /exact queued body must not be replaced/);
+    }
+  });
+
+  it('binds every exact prompt body, including the hidden primary-trigger receipt, to the child invocation', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const currentUserMessageId = '0000000000000003-000001-cccccccc';
+    const unseen = [
+      {
+        id: '0000000000000001-000001-aaaaaaaa',
+        threadId: 'thread1',
+        userId: 'user1',
+        catId: null,
+        content: 'queued while the prior turn was running',
+        mentions: ['opus'],
+        timestamp: 1,
+        deliveryStatus: 'queued',
+      },
+      {
+        id: '0000000000000002-000001-bbbbbbbb',
+        threadId: 'thread1',
+        userId: 'user1',
+        catId: null,
+        content: 'also queued and now included in this prompt',
+        mentions: ['opus'],
+        timestamp: 2,
+        deliveryStatus: 'queued',
+      },
+      {
+        id: currentUserMessageId,
+        threadId: 'thread1',
+        userId: 'user1',
+        catId: null,
+        content: 'this message starts the new turn',
+        mentions: ['opus'],
+        timestamp: 3,
+      },
+    ];
+
+    for (const [routeName, route] of [
+      ['serial', routeSerial],
+      ['parallel', routeParallel],
+    ]) {
+      for (const [contextName, cursor] of [
+        ['cold', undefined],
+        ['warm', '0000000000000000-000001-00000000'],
+      ]) {
+        const captureService = createCapturingService('opus', 'ack');
+        const exposed = [];
+        const deps = createMockDeps({ opus: captureService });
+        deps.deliveryCursorStore = {
+          getCursor: async () => cursor,
+          ackSeenCursor: async () => {},
+          ackCursor: async () => {},
+        };
+        deps.messageStore.getByThreadAfter = async () => unseen;
+
+        for await (const _ of route(deps, ['opus'], 'this message starts the new turn', 'user1', 'thread1', {
+          currentUserMessageId,
+          parentInvocationId: 'inv-parent',
+          onPromptMessagesExposed: async (input) => {
+            exposed.push(input);
+          },
+        })) {
+        }
+
+        assert.equal(exposed.length, 1, `${routeName}/${contextName}`);
+        const [{ seenAt, messageIds, ...identity }] = exposed;
+        assert.deepEqual(
+          identity,
+          {
+            threadId: 'thread1',
+            userId: 'user1',
+            catId: 'opus',
+            invocationId: 'inv-1',
+          },
+          `${routeName}/${contextName}: exact child identity`,
+        );
+        assert.equal(Number.isFinite(seenAt), true, `${routeName}/${contextName}: exact exposure timestamp`);
+        assert.deepEqual(
+          new Set(messageIds),
+          new Set([currentUserMessageId, '0000000000000001-000001-aaaaaaaa', '0000000000000002-000001-bbbbbbbb']),
+          `${routeName}/${contextName}: primary trigger remains internal truth beside incremental bodies`,
+        );
+      }
+    }
+  });
+
+  it('binds caller-folded Queue bodies to the exact child', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const currentUserMessageId = '0000000000000020-000001-current0';
+    const callerFolded = ['0000000000000018-000001-merged00', '0000000000000019-000001-batched0'];
+
+    for (const [routeName, route] of [
+      ['serial', routeSerial],
+      ['parallel', routeParallel],
+    ]) {
+      const exposed = [];
+      const deps = createMockDeps({ opus: createCapturingService('opus', 'ack') });
+
+      for await (const _ of route(deps, ['opus'], 'already folded exact bodies', 'user1', 'thread1', {
+        currentUserMessageId,
+        parentInvocationId: 'inv-parent',
+        persistedPromptMessageIds: callerFolded,
+        onPromptMessagesExposed: async (input) => {
+          exposed.push(input);
+        },
+      })) {
+      }
+
+      assert.equal(exposed.length, 1, routeName);
+      assert.deepEqual(
+        new Set(exposed[0].messageIds),
+        new Set([currentUserMessageId, ...callerFolded]),
+        `${routeName}: every persisted body folded into the prompt must share the exact child identity`,
+      );
+    }
+  });
+
+  it('appends only the uncovered Queue message part when the incremental window contains another batched member', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const primaryMessageId = '0000000000000020-000001-primary0';
+    const batchedMessageId = '0000000000000021-000001-batched0';
+    const primaryAttachment = {
+      v: 1,
+      id: 'ctx-primary',
+      kind: 'thread',
+      threadId: 'thread-primary',
+      title: 'Primary context',
+    };
+    const batchedAttachment = {
+      v: 1,
+      id: 'ctx-batched',
+      kind: 'thread',
+      threadId: 'thread-batched',
+      title: 'Batched context',
+    };
+    const promptParts = [
+      {
+        messageId: primaryMessageId,
+        content: 'primary body',
+        contentBlocks: [{ type: 'context_attachment', attachment: primaryAttachment }],
+      },
+      {
+        messageId: batchedMessageId,
+        content: 'batched body',
+        contentBlocks: [{ type: 'context_attachment', attachment: batchedAttachment }],
+      },
+    ];
+    const foldedPrompt = `primary body\nbatched body\n<context_attachments>${JSON.stringify([
+      primaryAttachment,
+      batchedAttachment,
+    ])}</context_attachments>`;
+    const unseenBatchedMessage = {
+      id: batchedMessageId,
+      threadId: 'thread1',
+      userId: 'user1',
+      catId: null,
+      content: 'batched body',
+      contentBlocks: promptParts[1].contentBlocks,
+      mentions: [],
+      timestamp: Date.now(),
+    };
+
+    for (const [routeName, route] of [
+      ['serial', routeSerial],
+      ['parallel', routeParallel],
+    ]) {
+      const captureService = createCapturingService('opus', 'ack');
+      const deps = createMockDeps({ opus: captureService });
+      deps.deliveryCursorStore = {
+        getCursor: async () => undefined,
+        ackSeenCursor: async () => {},
+        ackCursor: async () => {},
+      };
+      deps.messageStore.getByThreadAfter = async () => [unseenBatchedMessage];
+
+      for await (const _ of route(deps, ['opus'], foldedPrompt, 'user1', 'thread1', {
+        currentUserMessageId: primaryMessageId,
+        parentInvocationId: 'inv-parent',
+        persistedPromptMessageIds: [primaryMessageId, batchedMessageId],
+        persistedPromptMessages: promptParts,
+      })) {
+      }
+
+      const prompt = captureService.calls[0];
+      assert.equal(prompt.split('"id":"ctx-primary"').length - 1, 1, `${routeName}: uncovered primary once`);
+      assert.equal(prompt.split('"id":"ctx-batched"').length - 1, 1, `${routeName}: covered batch attachment once`);
+      assert.equal(prompt.split('primary body').length - 1, 1, `${routeName}: uncovered primary body once`);
+      assert.equal(prompt.split('batched body').length - 1, 1, `${routeName}: covered batch body once`);
+    }
+  });
+
+  it('emits and receipts only the durably hydrated Queue subset in serial and parallel routes', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const hydratedMessageId = '0000000000000025-000001-hydrated';
+    const unavailableMessageId = '0000000000000026-000001-missing00';
+    const hydratedAttachment = {
+      v: 1,
+      id: 'ctx-hydrated-subset',
+      kind: 'thread',
+      threadId: 'thread-hydrated',
+      title: 'Hydrated context',
+    };
+    const unavailableAttachment = {
+      v: 1,
+      id: 'ctx-unavailable-subset',
+      kind: 'thread',
+      threadId: 'thread-unavailable',
+      title: 'Unavailable context',
+    };
+    const aggregateFallback = `HYDRATED QUEUE BODY\nUNAVAILABLE QUEUE BODY\n<context_attachments>${JSON.stringify([
+      hydratedAttachment,
+      unavailableAttachment,
+    ])}</context_attachments>`;
+
+    for (const [routeName, route] of [
+      ['serial', routeSerial],
+      ['parallel', routeParallel],
+    ]) {
+      const captureService = createCapturingService('opus', 'ack');
+      const exposed = [];
+      const deps = createMockDeps({ opus: captureService });
+      deps.deliveryCursorStore = {
+        getCursor: async () => undefined,
+        ackSeenCursor: async () => {},
+        ackCursor: async () => {},
+      };
+      deps.messageStore.getByThreadAfter = async () => [];
+
+      for await (const _ of route(deps, ['opus'], aggregateFallback, 'user1', 'thread1', {
+        currentUserMessageId: hydratedMessageId,
+        parentInvocationId: 'inv-parent',
+        persistedPromptMessageIds: [hydratedMessageId, unavailableMessageId],
+        persistedPromptMessages: [
+          {
+            messageId: hydratedMessageId,
+            content: 'HYDRATED QUEUE BODY',
+            contentBlocks: [{ type: 'context_attachment', attachment: hydratedAttachment }],
+          },
+        ],
+        onPromptMessagesExposed: async (input) => {
+          exposed.push(input);
+        },
+      })) {
+      }
+
+      const prompt = captureService.calls[0];
+      assert.equal(prompt.split('HYDRATED QUEUE BODY').length - 1, 1, `${routeName}: hydrated body once`);
+      assert.equal(prompt.split('"id":"ctx-hydrated-subset"').length - 1, 1, `${routeName}: hydrated block once`);
+      assert.doesNotMatch(prompt, /UNAVAILABLE QUEUE BODY/, `${routeName}: unavailable aggregate body absent`);
+      assert.doesNotMatch(prompt, /ctx-unavailable-subset/, `${routeName}: unavailable block absent`);
+      assert.equal(exposed.length, 1, routeName);
+      assert.equal(exposed[0].messageIds.includes(hydratedMessageId), true, `${routeName}: hydrated id receipted`);
+      assert.equal(
+        exposed[0].messageIds.includes(unavailableMessageId),
+        false,
+        `${routeName}: unavailable id keeps retry custody`,
+      );
+    }
+  });
+
+  it('does not treat Quote provenance ids as Queue body coverage in serial or parallel routes', async (t) => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const primaryMessageId = '0000000000000030-000001-primary0';
+    const batchedMessageId = '0000000000000031-000001-batched0';
+    const primaryAttachment = {
+      v: 1,
+      id: 'ctx-primary-collision',
+      kind: 'thread',
+      threadId: 'thread-primary',
+      title: 'Primary context',
+    };
+    const batchedAttachment = {
+      v: 1,
+      id: 'ctx-batched-quote',
+      kind: 'quote',
+      text: 'quote from the uncovered primary',
+      source: {
+        kind: 'message',
+        threadId: 'thread1',
+        messageId: primaryMessageId,
+      },
+    };
+    const promptParts = [
+      {
+        messageId: primaryMessageId,
+        content: 'PRIMARY FULL BODY',
+        contentBlocks: [{ type: 'context_attachment', attachment: primaryAttachment }],
+      },
+      {
+        messageId: batchedMessageId,
+        content: 'BATCHED FULL BODY',
+        contentBlocks: [{ type: 'context_attachment', attachment: batchedAttachment }],
+      },
+    ];
+    const foldedPrompt = `PRIMARY FULL BODY\nBATCHED FULL BODY\n<context_attachments>${JSON.stringify([
+      primaryAttachment,
+      batchedAttachment,
+    ])}</context_attachments>`;
+    const unseenBatchedMessage = {
+      id: batchedMessageId,
+      threadId: 'thread1',
+      userId: 'user1',
+      catId: null,
+      content: 'BATCHED FULL BODY',
+      contentBlocks: promptParts[1].contentBlocks,
+      mentions: [],
+      timestamp: Date.now(),
+    };
+
+    for (const [routeName, route] of [
+      ['serial', routeSerial],
+      ['parallel', routeParallel],
+    ]) {
+      await t.test(routeName, async () => {
+        const captureService = createCapturingService('opus', 'ack');
+        const deps = createMockDeps({ opus: captureService });
+        deps.deliveryCursorStore = {
+          getCursor: async () => undefined,
+          ackSeenCursor: async () => {},
+          ackCursor: async () => {},
+        };
+        deps.messageStore.getByThreadAfter = async () => [unseenBatchedMessage];
+
+        for await (const _ of route(deps, ['opus'], foldedPrompt, 'user1', 'thread1', {
+          currentUserMessageId: primaryMessageId,
+          parentInvocationId: 'inv-parent',
+          persistedPromptMessageIds: [primaryMessageId, batchedMessageId],
+          persistedPromptMessages: promptParts,
+        })) {
+        }
+
+        const prompt = captureService.calls[0];
+        assert.equal(prompt.split('PRIMARY FULL BODY').length - 1, 1, `${routeName}: uncovered primary body once`);
+        assert.equal(prompt.split('BATCHED FULL BODY').length - 1, 1, `${routeName}: exposed batch body once`);
+        assert.equal(
+          prompt.split('"id":"ctx-primary-collision"').length - 1,
+          1,
+          `${routeName}: uncovered primary attachment once`,
+        );
+        assert.equal(
+          prompt.split('"id":"ctx-batched-quote"').length - 1,
+          1,
+          `${routeName}: exposed batch attachment once`,
+        );
+      });
+    }
+  });
+
+  it('routeSerial avoids duplicating the current message after canonical cold removes anchors', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const captureService = createCapturingService('opus', 'ack');
+    const currentUserMessageId = '0000000000000001-000001-aaaaaaaa';
+    const currentText = 'CURRENT USER MESSAGE';
+    const currentAttachment = {
+      v: 1,
+      id: 'ctx-smart-anchor-serial',
+      kind: 'thread',
+      threadId: 'thread-smart-anchor',
+      title: 'Smart anchor context',
+    };
+    const baseTs = Date.now() - 16 * 60_000;
+
+    const unseen = Array.from({ length: 16 }, (_, i) => {
+      const index = i + 1;
+      return {
+        id: index === 1 ? currentUserMessageId : `000000000000000${index}-000001-${String(index).padStart(8, '0')}`,
+        threadId: 'thread1',
+        userId: 'user1',
+        catId: index === 1 ? null : 'codex',
+        content: index === 1 ? currentText : `history-${index}`,
+        ...(index === 1 ? { contentBlocks: [{ type: 'context_attachment', attachment: currentAttachment }] } : {}),
+        mentions: [],
+        timestamp: baseTs + i * 60_000,
+      };
+    });
+
+    const deps = createMockDeps({ opus: captureService }, undefined, {
+      async get() {
+        return {
+          id: 'thread1',
+          title: 'Test Thread',
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          projectPath: 'default',
+        };
+      },
+      async getParticipantsWithActivity() {
+        return [];
+      },
+      async updateParticipantActivity() {},
+    });
+
+    deps.deliveryCursorStore = {
+      getCursor: async () => undefined,
+      ackCursor: async () => {},
+    };
+    deps.messageStore.getByThreadAfter = async () => unseen;
+
+    for await (const _ of routeSerial(deps, ['opus'], currentText, 'user1', 'thread1', {
+      currentUserMessageId,
+      persistedPromptMessageIds: [currentUserMessageId],
+      persistedPromptMessages: [
+        {
+          messageId: currentUserMessageId,
+          content: currentText,
+          contentBlocks: [{ type: 'context_attachment', attachment: currentAttachment }],
+        },
+      ],
+    })) {
+    }
+
+    const prompt = captureService.calls[0];
+    assert.equal(
+      (prompt.match(/CURRENT USER MESSAGE/g) || []).length,
+      1,
+      'current message should appear once even when anchor already contains it',
+    );
+    assert.equal(
+      prompt.split('"id":"ctx-smart-anchor-serial"').length - 1,
+      1,
+      'current attachment should appear once in its exact smart-window anchor',
+    );
+    assert.doesNotMatch(prompt, /\[Anchor /, 'canonical cold must not restore the message through an unbound anchor');
+  });
+
+  it('concierge routes keep handle context visible to the invocation that resolves its actions', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { formatConciergeHandleBinding } = await import('../dist/domains/concierge/concierge-search-context.js');
+    const { projectConciergeStoredContent } = await import('../dist/domains/concierge/concierge-reply-validator.js');
+    const { CONCIERGE_CONFIG_DEFAULTS } = await import('@cat-cafe/shared');
+    const appendCalls = [];
+    const targetEntry = {
+      label: 'R1',
+      anchor: { threadId: 'thread_target', messageId: 'message-target', title: 'Target Thread', type: 'thread' },
+    };
+    const otherEntry = {
+      label: 'R2',
+      anchor: { threadId: 'thread_other', messageId: 'message-other', title: 'Other Thread', type: 'thread' },
+    };
+    const targetBinding = formatConciergeHandleBinding(targetEntry.label, targetEntry.anchor);
+    const otherBinding = formatConciergeHandleBinding(otherEntry.label, otherEntry.anchor);
+    const wrongOrdinalWithTargetBinding = targetBinding.replace(/^R1/, 'R2');
+    const visibleMarkerWithDanglingHiddenTriage = `[跳过去 ${targetBinding}]
+
+<!-- triage-plan -->
+**意图**: relay
+**目标**: [跳过去 ${otherBinding}]
+**原文**: this hidden block must not be persisted
+@codex`;
+    const hiddenMentionService = createCapturingService('codex', 'hidden route should not run');
+    const captureService = createSequentialCapturingService('opus', [
+      `[跳过去 ${targetBinding}]\n\n@co-creator`,
+      `[跳过去 ${targetBinding}]\n\n@co-creator`,
+      `[跳过去 ${wrongOrdinalWithTargetBinding}]\n\n@co-creator`,
+      `[跳过去 ${targetBinding}] legacy copy [跳过去 R1]\n\n@co-creator`,
+      visibleMarkerWithDanglingHiddenTriage,
+      visibleMarkerWithDanglingHiddenTriage,
+    ]);
+    const currentUserMessageId = '0000000000000001-000001-c011cafe';
+    const currentText = '这个 PR 在哪个 thread 提的？';
+    const timestamp = Date.now();
+    const threads = new Map(
+      [
+        ['thread-concierge', { title: '猫猫球', threadKind: 'concierge' }],
+        ['thread_target', { title: 'Target Thread' }],
+        ['thread_other', { title: 'Other Thread' }],
+      ].map(([id, details]) => [
+        id,
+        {
+          id,
+          ...details,
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: timestamp,
+          createdAt: timestamp,
+          projectPath: 'default',
+        },
+      ]),
+    );
+    const messages = new Map(
+      [
+        { id: currentUserMessageId, threadId: 'thread-concierge', catId: null, content: currentText },
+        {
+          id: 'message-target',
+          threadId: 'thread_target',
+          catId: 'opus',
+          timestamp: timestamp - 2000,
+          // Literal hits keep this routing fixture independent of native inference.
+          content: currentText,
+        },
+        {
+          id: 'message-other',
+          threadId: 'thread_other',
+          catId: 'opus',
+          timestamp: timestamp - 1000,
+          content: currentText,
+        },
+      ].map((message) => [message.id, { timestamp, ...message, userId: 'user1', mentions: [] }]),
+    );
+    const deps = createMockDeps({ opus: captureService, codex: hiddenMentionService }, appendCalls, {
+      async get(id) {
+        return threads.get(id) ?? null;
+      },
+      async list(userId) {
+        return [...threads.values()].filter((thread) => thread.createdBy === userId);
+      },
+      async getParticipantsWithActivity() {
+        return [];
+      },
+      async updateParticipantActivity() {},
+    });
+    deps.invocationDeps.conciergeConfigStore = {
+      async get() {
+        return { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'opus' };
+      },
+    };
+    deps.evidenceStore = {
+      async search() {
+        assert.fail('foreground message mode must not use legacy thread aggregation');
+      },
+      readMessagePassageState() {
+        return { current: true, suppressThreadTitle: false };
+      },
+      async searchMessagePassages(query, options) {
+        assert.equal(query, currentText);
+        assert.deepEqual(options.excludeSource, { threadId: 'thread-concierge', messageId: currentUserMessageId });
+        assert.deepEqual(options.visibleThreadIds, [...threads.keys()]);
+        return {
+          passages: ['message-target', 'message-other'].map((id) => {
+            const message = messages.get(id);
+            return {
+              docAnchor: `thread-${message.threadId}`,
+              passageId: `msg-${id}`,
+              threadId: message.threadId,
+              messageId: id,
+              content: message.content,
+              match: 'lexical',
+            };
+          }),
+          meta: {
+            sort: 'time',
+            candidateLimit: 2000,
+            truncated: false,
+            semanticCandidatesLimited: false,
+            sourceCoverage: 'unknown',
+            freshness: 'unknown',
+            degraded: true,
+            effectiveMode: 'lexical',
+          },
+        };
+      },
+    };
+    deps.messageStore.getById = async (id) => messages.get(id) ?? null;
+    deps.deliveryCursorStore = {
+      getCursor: async () => undefined,
+      ackCursor: async () => {},
+      ackSeenCursor: async () => {},
+    };
+    deps.messageStore.getByThreadAfter = async () => [messages.get(currentUserMessageId)];
+
+    for await (const _ of routeSerial(deps, ['opus'], currentText, 'user1', 'thread-concierge', {
+      currentUserMessageId,
+    })) {
+    }
+
+    const prompt = captureService.calls[0];
+    assert.equal(
+      (prompt.match(/\*\*消息检索候选（复制对应完整标记；/g) || []).length,
+      1,
+      'the final incremental prompt should include the handle table exactly once',
+    );
+    assert.match(prompt, /R1: opus · .*《Target Thread》/);
+    assert.ok(prompt.includes(`[跳过去 ${targetBinding}]`));
+
+    const storedReply = appendCalls.find((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus');
+    const action = storedReply?.extra?.rich?.blocks
+      ?.flatMap((block) => block.actions ?? [])
+      .find((candidate) => candidate.payload?.threadId === 'thread_target');
+    assert.ok(action, 'the persisted reply should contain the action resolved from the injected R1 table');
+    assert.equal(action.action, 'concierge_teleport');
+    assert.equal(action.payload.messageId, 'message-target');
+    assert.equal(action.label, '跳过去：Target Thread');
+
+    captureService.calls.length = 0;
+    appendCalls.length = 0;
+    for await (const _ of routeParallel(deps, ['opus'], currentText, 'user1', 'thread-concierge', {
+      currentUserMessageId,
+    })) {
+    }
+
+    const parallelPrompt = captureService.calls[0];
+    assert.equal(
+      (parallelPrompt.match(/\*\*消息检索候选（复制对应完整标记；/g) || []).length,
+      1,
+      'the final parallel prompt should include the handle table exactly once',
+    );
+    assert.match(parallelPrompt, /R1: opus · .*《Target Thread》/);
+    assert.ok(parallelPrompt.includes(`[跳过去 ${targetBinding}]`));
+    const parallelAction = appendCalls
+      .find((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus')
+      ?.extra?.rich?.blocks?.flatMap((block) => block.actions ?? [])
+      .find((candidate) => candidate.payload?.threadId === 'thread_target');
+    assert.ok(parallelAction, 'parallel action resolution should use the same injected R1 table');
+    assert.equal(parallelAction.payload.messageId, 'message-target');
+
+    captureService.calls.length = 0;
+    appendCalls.length = 0;
+    for await (const _ of routeSerial(deps, ['opus'], currentText, 'user1', 'thread-concierge', {
+      currentUserMessageId,
+    })) {
+    }
+    const mismatchedActions =
+      appendCalls
+        .find((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus')
+        ?.extra?.rich?.blocks?.flatMap((block) => block.actions ?? []) ?? [];
+    assert.deepStrictEqual(
+      mismatchedActions,
+      [],
+      'a valid R2 ordinal bound to the R1 title must persist no teleport action',
+    );
+
+    captureService.calls.length = 0;
+    appendCalls.length = 0;
+    for await (const _ of routeSerial(deps, ['opus'], currentText, 'user1', 'thread-concierge', {
+      currentUserMessageId,
+    })) {
+    }
+    const mixedBareActions =
+      appendCalls
+        .find((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus')
+        ?.extra?.rich?.blocks?.flatMap((block) => block.actions ?? []) ?? [];
+    assert.deepStrictEqual(
+      mixedBareActions,
+      [],
+      'a valid binding must not persist an action that makes a bare marker with the same handle clickable',
+    );
+
+    const assertDanglingTriageStoredAsVisibleText = (storedReply, mode) => {
+      assert.ok(storedReply, `${mode} should persist the concierge reply`);
+      assert.ok(
+        !storedReply.content.includes('triage-plan'),
+        `${mode} stored content must strip dangling hidden triage control blocks`,
+      );
+      assert.ok(
+        !storedReply.content.includes('Other Thread'),
+        `${mode} stored content must not leak hidden target titles`,
+      );
+      const blocks = storedReply.extra?.rich?.blocks;
+      assert.ok(Array.isArray(blocks), `${mode} should persist concierge action blocks`);
+      const actions = blocks.flatMap((block) => (Array.isArray(block.actions) ? block.actions : []));
+      assert.equal(actions.length, 1, `${mode} should keep the visible marker action`);
+      assert.equal(actions[0].payload.threadId, 'thread_target', `${mode} action should come from visible text only`);
+    };
+
+    captureService.calls.length = 0;
+    hiddenMentionService.calls.length = 0;
+    appendCalls.length = 0;
+    const serialProjectedEvents = [];
+    for await (const event of routeSerial(deps, ['opus'], currentText, 'user1', 'thread-concierge', {
+      currentUserMessageId,
+    })) {
+      serialProjectedEvents.push(event);
+    }
+    const serialStoredReply = appendCalls.find((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus');
+    assertDanglingTriageStoredAsVisibleText(serialStoredReply, 'serial');
+    const serialDone = serialProjectedEvents.find((event) => event.type === 'done' && event.catId === 'opus');
+    // F117: the done event carries the canonical projection of the stored body
+    // (route-serial persistedDoneContent = projectConciergeStoredContent), while the
+    // stream append keeps the verbatim reply text (marker syntax included).
+    assert.equal(
+      serialDone?.content,
+      projectConciergeStoredContent(serialStoredReply.content),
+      'serial done must expose the canonical projection of the stored body',
+    );
+    assert.deepStrictEqual(serialStoredReply.mentions, [], 'serial should ignore hidden triage A2A mentions');
+    assert.equal(
+      hiddenMentionService.calls.length,
+      0,
+      'serial should not invoke a cat mentioned only in hidden triage',
+    );
+    assert.ok(
+      !appendCalls.some((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'codex'),
+      'serial should not persist a hidden A2A follow-up',
+    );
+
+    captureService.calls.length = 0;
+    hiddenMentionService.calls.length = 0;
+    appendCalls.length = 0;
+    const parallelProjectedEvents = [];
+    for await (const event of routeParallel(deps, ['opus'], currentText, 'user1', 'thread-concierge', {
+      currentUserMessageId,
+    })) {
+      parallelProjectedEvents.push(event);
+    }
+    assertDanglingTriageStoredAsVisibleText(
+      appendCalls.find((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus'),
+      'parallel',
+    );
+    assert.equal(hiddenMentionService.calls.length, 0, 'parallel should not invoke hidden triage mentions');
+  });
+
+  it('concierge routes turn one verified thread-context lookup into a teleport action', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { CONCIERGE_CONFIG_DEFAULTS } = await import('@cat-cafe/shared');
+    const appendCalls = [];
+    const targetThreadId = 'thread_mrf6uzhogk1y3p30';
+    const targetMessageId = '0001784218043549-000203-0e050c94';
+    const targetTitle = '「eval系统决策厅」如何建立度量系统';
+    const unrelatedTitle = '仅仅是预取候选，不是最终选择';
+    const service = createVerifiedThreadLookupService(
+      'opus',
+      targetThreadId,
+      targetMessageId,
+      `PR #3017 来自「${targetTitle}」thread。`,
+    );
+    const currentUserMessageId = '0001784244122044-000002-d22e5ff3';
+    const currentText = 'https://github.com/zts212653/clowder-ai/pull/3017 哪个thread的啊';
+    const timestamp = Date.now();
+    const candidate = {
+      id: 'message-prefetch-candidate',
+      threadId: 'thread_prefetch_candidate',
+      userId: 'user1',
+      catId: 'opus',
+      // A duplicate question is a real literal search hit in the wrong thread.
+      // It must still lose to the verified lookup, without a live semantic judge.
+      content: currentText,
+      mentions: [],
+      timestamp,
+    };
+    const source = {
+      id: currentUserMessageId,
+      threadId: 'thread-concierge',
+      userId: 'user1',
+      catId: null,
+      content: currentText,
+      mentions: [],
+      timestamp,
+    };
+    const threads = new Map(
+      [
+        ['thread-concierge', '猫猫球'],
+        [targetThreadId, targetTitle],
+        [candidate.threadId, unrelatedTitle],
+      ].map(([id, title]) => [
+        id,
+        {
+          id,
+          title,
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: timestamp,
+          createdAt: timestamp,
+          projectPath: 'default',
+          ...(id === source.threadId ? { threadKind: 'concierge' } : {}),
+        },
+      ]),
+    );
+    const deps = createMockDeps({ opus: service }, appendCalls, {
+      async get(id) {
+        return threads.get(id) ?? null;
+      },
+      async list(userId) {
+        return [...threads.values()].filter((thread) => thread.createdBy === userId);
+      },
+      async getParticipantsWithActivity() {
+        return [];
+      },
+      async updateParticipantActivity() {},
+    });
+    deps.invocationDeps.conciergeConfigStore = {
+      async get() {
+        return { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'opus' };
+      },
+    };
+    deps.evidenceStore = {
+      async search() {
+        assert.fail('ordinary prefetch must not use legacy thread aggregation');
+      },
+      readMessagePassageState() {
+        return { current: true, suppressThreadTitle: false };
+      },
+      async searchMessagePassages(query, options) {
+        assert.equal(query, currentText);
+        assert.deepEqual(options.excludeSource, { threadId: source.threadId, messageId: source.id });
+        assert.deepEqual(options.visibleThreadIds, [...threads.keys()]);
+        return {
+          passages: [
+            {
+              docAnchor: `thread-${candidate.threadId}`,
+              passageId: `msg-${candidate.id}`,
+              threadId: candidate.threadId,
+              messageId: candidate.id,
+              content: candidate.content,
+              match: 'lexical',
+            },
+          ],
+          meta: {
+            effectiveMode: 'lexical',
+            degraded: true,
+            sort: 'time',
+            candidateLimit: 2000,
+            truncated: false,
+            semanticCandidatesLimited: false,
+            sourceCoverage: 'unknown',
+            freshness: 'unknown',
+          },
+        };
+      },
+    };
+    deps.messageStore.getById = async (id) => (id === source.id ? source : id === candidate.id ? candidate : null);
+    deps.deliveryCursorStore = {
+      getCursor: async () => undefined,
+      ackCursor: async () => {},
+      ackSeenCursor: async () => {},
+    };
+    deps.messageStore.getByThreadAfter = async () => [source];
+
+    const assertVerifiedAction = (mode) => {
+      assert.ok(
+        service.calls.at(-1).includes(unrelatedTitle),
+        `${mode} must receive a real unrelated prefetch candidate before rejecting it as the action target`,
+      );
+      const actions =
+        appendCalls
+          .find((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus')
+          ?.extra?.rich?.blocks?.flatMap((block) => block.actions ?? []) ?? [];
+      assert.equal(actions.length, 1, `${mode} should persist one verified teleport action`);
+      assert.equal(actions[0].action, 'concierge_teleport');
+      assert.equal(actions[0].label, `跳过去：${targetTitle}`);
+      assert.equal(actions[0].payload.threadId, targetThreadId);
+      assert.equal(actions[0].payload.messageId, targetMessageId);
+    };
+
+    for await (const _ of routeSerial(deps, ['opus'], currentText, 'user1', 'thread-concierge', {
+      currentUserMessageId,
+    })) {
+    }
+    assertVerifiedAction('serial');
+
+    appendCalls.length = 0;
+    for await (const _ of routeParallel(deps, ['opus'], currentText, 'user1', 'thread-concierge', {
+      currentUserMessageId,
+    })) {
+    }
+    assertVerifiedAction('parallel');
+  });
+
+  it('routeParallel avoids duplicating the current message after canonical cold removes anchors', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const captureService = createCapturingService('opus', 'ack');
+    const currentUserMessageId = '0000000000000001-000001-aaaaaaaa';
+    const currentText = 'CURRENT USER MESSAGE';
+    const currentAttachment = {
+      v: 1,
+      id: 'ctx-smart-anchor-parallel',
+      kind: 'thread',
+      threadId: 'thread-smart-anchor',
+      title: 'Smart anchor context',
+    };
+    const baseTs = Date.now() - 16 * 60_000;
+
+    const unseen = Array.from({ length: 16 }, (_, i) => {
+      const index = i + 1;
+      return {
+        id: index === 1 ? currentUserMessageId : `000000000000000${index}-000001-${String(index).padStart(8, '0')}`,
+        threadId: 'thread1',
+        userId: 'user1',
+        catId: index === 1 ? null : 'codex',
+        content: index === 1 ? currentText : `history-${index}`,
+        ...(index === 1 ? { contentBlocks: [{ type: 'context_attachment', attachment: currentAttachment }] } : {}),
+        mentions: [],
+        timestamp: baseTs + i * 60_000,
+      };
+    });
+
+    const deps = createMockDeps({ opus: captureService }, undefined, {
+      async get() {
+        return {
+          id: 'thread1',
+          title: 'Test Thread',
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          projectPath: 'default',
+        };
+      },
+      async getParticipantsWithActivity() {
+        return [];
+      },
+      async updateParticipantActivity() {},
+    });
+
+    deps.deliveryCursorStore = {
+      getCursor: async () => undefined,
+      ackCursor: async () => {},
+    };
+    deps.messageStore.getByThreadAfter = async () => unseen;
+
+    for await (const _ of routeParallel(deps, ['opus'], currentText, 'user1', 'thread1', {
+      currentUserMessageId,
+      persistedPromptMessageIds: [currentUserMessageId],
+      persistedPromptMessages: [
+        {
+          messageId: currentUserMessageId,
+          content: currentText,
+          contentBlocks: [{ type: 'context_attachment', attachment: currentAttachment }],
+        },
+      ],
+    })) {
+    }
+
+    const prompt = captureService.calls[0];
+    assert.equal(
+      (prompt.match(/CURRENT USER MESSAGE/g) || []).length,
+      1,
+      'current message should appear once even when anchor already contains it',
+    );
+    assert.equal(
+      prompt.split('"id":"ctx-smart-anchor-parallel"').length - 1,
+      1,
+      'current attachment should appear once in its exact smart-window anchor',
+    );
+    assert.doesNotMatch(prompt, /\[Anchor /, 'canonical cold must not restore the message through an unbound anchor');
+  });
+});
+
 describe('routeSerial', () => {
   it('executes single cat and yields text + done', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
@@ -118,6 +1783,21 @@ describe('routeSerial', () => {
     assert.ok(textMsgs.length > 0, 'should have text messages');
     assert.ok(doneMsgs.length > 0, 'should have done message');
     assert.equal(textMsgs[0].content, 'serial response');
+    assert.equal(doneMsgs[0].content, undefined, 'ordinary serial done must not acquire a content contract');
+  });
+
+  it('keeps ordinary parallel done events free of persisted content', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const deps = createMockDeps({ opus: createMockService('opus', 'parallel response') });
+
+    const messages = [];
+    for await (const msg of routeParallel(deps, ['opus'], 'test message', 'user1', 'thread1')) {
+      messages.push(msg);
+    }
+
+    const done = messages.find((message) => message.type === 'done' && message.catId === 'opus');
+    assert.ok(done, 'parallel route should yield a done event');
+    assert.equal(done.content, 'parallel response', 'done projects the content of the same canonical response');
   });
 
   it('persists toolEvents when agent yields tool_use and tool_result', async () => {
@@ -156,168 +1836,218 @@ describe('routeSerial', () => {
     assert.ok(stored.toolEvents[0].label.includes('Read'));
     assert.equal(stored.toolEvents[1].type, 'tool_result');
   });
+
+  it('strips leaked tool-call payloads from streamed text before yielding and persisting', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+
+    const contaminatedService = {
+      async *invoke() {
+        yield { type: 'tool_use', catId: 'opus', toolName: 'Read', toolInput: { path: '/a.ts' }, timestamp: 1000 };
+        yield {
+          type: 'text',
+          catId: 'opus',
+          content: `先看实现，再补测试。
+
+{"tool_uses":[{"recipient_name":"functions.exec_command","parameters":{"cmd":"sed -n '1,220p' foo.ts"}}]}`,
+          timestamp: 1001,
+        };
+        yield { type: 'done', catId: 'opus', timestamp: 1002 };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: contaminatedService }, appendCalls);
+
+    const messages = [];
+    for await (const msg of routeSerial(deps, ['opus'], 'read a.ts', 'user1', 'thread1')) {
+      messages.push(msg);
+    }
+
+    const textMsgs = messages.filter((m) => m.type === 'text');
+    assert.equal(textMsgs.length, 1, 'should still yield one text message');
+    assert.equal(textMsgs[0].content, '先看实现，再补测试。');
+
+    assert.equal(appendCalls.length, 1, 'should persist one final message');
+    assert.equal(appendCalls[0].content, '先看实现，再补测试。');
+  });
+
+  it('strips leaked tool-call payloads split across streamed text chunks', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+
+    const contaminatedService = {
+      async *invoke() {
+        yield {
+          type: 'text',
+          catId: 'opus',
+          content: `先看实现，再补测试。
+
+{`,
+          timestamp: 1000,
+        };
+        yield {
+          type: 'text',
+          catId: 'opus',
+          content: `"tool_uses":[{"recipient_name":"functions.exec_command","parameters":{"cmd":"echo leaked"}}]}`,
+          timestamp: 1001,
+        };
+        yield { type: 'done', catId: 'opus', timestamp: 1002 };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: contaminatedService }, appendCalls);
+
+    const messages = [];
+    for await (const msg of routeSerial(deps, ['opus'], 'read a.ts', 'user1', 'thread1')) {
+      messages.push(msg);
+    }
+
+    const textMsgs = messages.filter((m) => m.type === 'text');
+    assert.equal(textMsgs.length, 1, 'should yield only the prose chunk');
+    assert.equal(textMsgs[0].content, '先看实现，再补测试。');
+    assert.ok(textMsgs.every((m) => !m.content.includes('tool_uses')));
+    assert.ok(textMsgs.every((m) => !m.content.includes('recipient_name')));
+
+    assert.equal(appendCalls.length, 1, 'should persist one final message');
+    assert.equal(appendCalls[0].content, '先看实现，再补测试。');
+  });
+
+  it('keeps legitimate tool-use JSON examples when prose continues afterwards', async () => {
+    const { stripLeakedToolCallPayload } = await import(
+      '../dist/domains/cats/services/agents/routing/route-helpers.js'
+    );
+
+    const example = `示例 payload：
+
+{"tool_uses":[{"recipient_name":"functions.exec_command","parameters":{"cmd":"echo hi"}}]}
+上面只是文档示例，不是泄漏。`;
+
+    assert.equal(stripLeakedToolCallPayload(example), example);
+  });
 });
 
-describe('routeSerial A2A worklist', () => {
-  it('extends worklist when cat response contains line-start @mention', async () => {
+describe('agent message timestamp uses invocation start time (#557)', () => {
+  it('routeSerial stores message at invocation start, not stream completion', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    // opus responds with a line-start mention of codex
-    const deps = createMockDeps({
-      opus: createMockService('opus', '我写好了代码\n@缅因猫 请 review 一下'),
-      codex: createMockService('codex', 'LGTM, 代码没问题'),
-    });
 
-    const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'write hello world', 'user1', 'thread1')) {
-      messages.push(msg);
+    const STREAM_DELAY_MS = 50;
+    let firstTextTimestamp = 0;
+    // Service that delays before yielding done — simulates non-trivial stream time
+    const delayedService = {
+      async *invoke() {
+        firstTextTimestamp = Date.now();
+        yield { type: 'text', catId: 'opus', content: 'thinking...', timestamp: firstTextTimestamp };
+        await new Promise((r) => setTimeout(r, STREAM_DELAY_MS));
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: delayedService }, appendCalls);
+
+    const beforeInvocation = Date.now();
+    for await (const _ of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+      // drain
     }
+    const afterCompletion = Date.now();
 
-    // Should have text from both cats (opus + codex via A2A)
-    const opusText = messages.filter((m) => m.type === 'text' && m.catId === 'opus');
-    const codexText = messages.filter((m) => m.type === 'text' && m.catId === 'codex');
-    assert.ok(opusText.length > 0, 'opus should produce text');
-    assert.ok(codexText.length > 0, 'codex should be invoked via A2A');
-  });
-
-  it('yields a2a_handoff event when A2A chain triggers', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const deps = createMockDeps({
-      opus: createMockService('opus', '请看一下\n@缅因猫 帮忙检查'),
-      codex: createMockService('codex', '已检查完毕'),
-    });
-
-    const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'check code', 'user1', 'thread1')) {
-      messages.push(msg);
-    }
-
-    const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
-    assert.equal(handoffs.length, 1, 'should yield exactly one a2a_handoff');
-    assert.equal(handoffs[0].catId, 'opus', 'handoff should be from opus');
-    assert.ok(handoffs[0].content.includes('→'), 'handoff content should show arrow');
-  });
-
-  it('A2A cat receives previousResponses in prompt (debug mode)', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const codexService = createCapturingService('codex', '已审查');
-    const deps = createMockDeps({
-      opus: createMockService('opus', '代码完成\n@缅因猫 请review'),
-      codex: codexService,
-    });
-
-    for await (const _ of routeSerial(deps, ['opus'], 'write code', 'user1', 'thread1', { thinkingMode: 'debug' })) {
-    }
-
-    assert.equal(codexService.calls.length, 1, 'codex should be called once');
+    assert.equal(appendCalls.length, 1, 'should persist one message');
+    const storedTs = appendCalls[0].timestamp;
     assert.ok(
-      codexService.calls[0].includes('代码完成'),
-      'codex prompt should include opus response content in debug mode',
+      storedTs >= beforeInvocation && storedTs <= firstTextTimestamp,
+      `stored timestamp (${storedTs}) should be between invocation start (${beforeInvocation}) and first text event (${firstTextTimestamp})`,
+    );
+    assert.ok(
+      afterCompletion - storedTs >= STREAM_DELAY_MS - 10,
+      `stored timestamp should be at least ${STREAM_DELAY_MS - 10}ms before completion (delta=${afterCompletion - storedTs}ms)`,
     );
   });
 
-  it('A2A cat does NOT receive previousResponses in play mode (thinking isolation)', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const codexService = createCapturingService('codex', '已审查');
-    const deps = createMockDeps({
-      opus: createMockService('opus', '代码完成\n@缅因猫 请review'),
-      codex: codexService,
-    });
+  it('routeParallel stores message at invocation start, not stream completion', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
 
-    // Explicitly set play mode — cats should not see each other's thinking (default is now debug)
-    for await (const _ of routeSerial(deps, ['opus'], 'write code', 'user1', 'thread1', { thinkingMode: 'play' })) {
+    const STREAM_DELAY_MS = 50;
+    let firstTextTimestamp = 0;
+    const delayedService = {
+      async *invoke() {
+        firstTextTimestamp = Date.now();
+        yield { type: 'text', catId: 'opus', content: 'thinking...', timestamp: firstTextTimestamp };
+        await new Promise((r) => setTimeout(r, STREAM_DELAY_MS));
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: delayedService }, appendCalls);
+
+    const beforeInvocation = Date.now();
+    for await (const _ of routeParallel(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+      // drain
     }
+    const afterCompletion = Date.now();
 
-    assert.equal(codexService.calls.length, 1, 'codex should be called once');
+    assert.equal(appendCalls.length, 1, 'should persist one message');
+    const storedTs = appendCalls[0].timestamp;
     assert.ok(
-      !codexService.calls[0].includes('代码完成'),
-      'codex prompt should NOT include opus response content in play mode',
+      storedTs >= beforeInvocation && storedTs <= firstTextTimestamp,
+      `stored timestamp (${storedTs}) should be between invocation start (${beforeInvocation}) and first text event (${firstTextTimestamp})`,
+    );
+    assert.ok(
+      afterCompletion - storedTs >= STREAM_DELAY_MS - 10,
+      `stored timestamp should be at least ${STREAM_DELAY_MS - 10}ms before completion (delta=${afterCompletion - storedTs}ms)`,
     );
   });
+});
 
-  it('isFinal is true only on the last done in the chain', async () => {
+describe('routeSerial message wake and incremental context', () => {
+  it('publishes a line-start mention through the completed response wake without inline execution', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const deps = createMockDeps({
-      opus: createMockService('opus', '好的\n@缅因猫 帮忙'),
-      codex: createMockService('codex', '搞定了'),
-    });
-
-    const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'help', 'user1', 'thread1')) {
-      messages.push(msg);
-    }
-
-    const doneMsgs = messages.filter((m) => m.type === 'done');
-    assert.ok(doneMsgs.length >= 2, 'should have done from both cats');
-    // First done (opus) should NOT be isFinal
-    const opusDone = doneMsgs.find((m) => m.catId === 'opus');
-    assert.ok(!opusDone.isFinal, 'opus done should not be isFinal');
-    // Last done (codex) should be isFinal
-    const codexDone = doneMsgs.find((m) => m.catId === 'codex');
-    assert.ok(codexDone.isFinal, 'codex done (chain end) should be isFinal');
-  });
-
-  it('does not extend worklist beyond maxA2ADepth', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    // opus mentions codex, codex mentions gemini, gemini mentions opus
-    // With maxA2ADepth=1, only first A2A hop should trigger
-    const deps = createMockDeps({
-      opus: createMockService('opus', '看看吧\n@缅因猫 帮忙'),
-      codex: createMockService('codex', '需要设计\n@暹罗猫 帮忙设计'),
-      gemini: createMockService('gemini', '设计好了'),
-    });
-
-    const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1', { maxA2ADepth: 1 })) {
-      messages.push(msg);
-    }
-
-    // Only opus + codex should produce text (depth=1 allows 1 hop)
-    const catIds = [...new Set(messages.filter((m) => m.type === 'text').map((m) => m.catId))];
-    assert.ok(catIds.includes('opus'), 'opus should have text');
-    assert.ok(catIds.includes('codex'), 'codex should be invoked (1st hop)');
-    assert.ok(!catIds.includes('gemini'), 'gemini should NOT be invoked (2nd hop blocked by depth=1)');
-  });
-
-  it('does not extend A2A worklist when queue has queued user messages', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const deps = createMockDeps({
-      opus: createMockService('opus', '我先回复\n@缅因猫 帮忙继续'),
-      codex: createMockService('codex', 'should not run when queue pending'),
-    });
-
-    const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1', {
-      queueHasQueuedMessages: () => true,
-    })) {
-      messages.push(msg);
-    }
-
-    const codexText = messages.filter((m) => m.type === 'text' && m.catId === 'codex');
-    assert.equal(codexText.length, 0, 'A2A should yield to queued user messages');
-
-    const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
-    assert.equal(handoffs.length, 0, 'should not emit handoff when fairness guard blocks extension');
-  });
-
-  it('skips A2A text-scan @mention when cat already dispatched via callback (cross-path dedup)', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const inlineTargetCalls = [];
     const deps = createMockDeps({
       opus: createMockService('opus', '代码完成\n@缅因猫 请 review'),
-      codex: createMockService('codex', 'should not be invoked via text-scan'),
+      codex: {
+        async *invoke() {
+          inlineTargetCalls.push(true);
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        },
+      },
     });
-
+    const commits = [];
     const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1', {
-      hasQueuedOrActiveAgentForCat: (_tid, catId) => catId === 'codex',
+
+    for await (const msg of routeSerial(deps, ['opus'], 'write code', 'user1', 'thread1', {
+      ownerAuthProvenance: 'unknown',
+      parentInvocationId: 'parent-route-serial',
+      onLifecycleInvocationStarted: async (input) => ({
+        responseMessageId: 'response-route-serial',
+        priorFrontierMessageId: null,
+        activeRun: {
+          threadId: input.threadId,
+          targetId: input.catId,
+          invocationId: input.invocationId,
+          responseMessageId: 'response-route-serial',
+          inputEntryIds: [],
+          inputMessageIds: [],
+          privateInputEntryIds: [],
+          startedAt: input.startedAt,
+        },
+      }),
+      commitCompletedA2AWake: async (input) => {
+        commits.push(input);
+        return { ...input.message, id: input.responseMessageId };
+      },
     })) {
       messages.push(msg);
     }
 
-    const codexText = messages.filter((m) => m.type === 'text' && m.catId === 'codex');
-    assert.equal(codexText.length, 0, 'codex must NOT be invoked when already in InvocationQueue');
-
-    const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
-    assert.equal(handoffs.length, 0, 'should not emit handoff for deduped cat');
+    assert.equal(inlineTargetCalls.length, 0, 'the mentioned target must not execute inside the current route');
+    assert.equal(commits.length, 1, 'the completed response must publish exactly one durable wake');
+    assert.deepEqual(commits[0].targetCats, ['codex']);
+    assert.deepEqual(commits[0].message.mentions, ['codex']);
+    assert.equal(
+      messages.some((message) => message.type === 'a2a_handoff'),
+      false,
+    );
   });
 
   it('self-mention does not trigger A2A', async () => {
@@ -379,58 +2109,65 @@ describe('routeSerial A2A worklist', () => {
     assert.equal(codexText.length, 0, 'codex should not be invoked after abort');
   });
 
-  it('stores mentions correctly in messageStore.append', async () => {
+  it('incremental play mode does not expose or receipt an invisible A2A trigger', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const appendCalls = [];
-    const deps = createMockDeps(
+    const codexService = createOptionsCapturingService('codex', 'ack');
+    const deps = createMockDeps({ codex: codexService });
+    const userMessageId = '0000000000000001-000001-aaaaaaaa';
+    const whisperTriggerId = '0000000000000002-000001-bbbbbbbb';
+    const messages = [
       {
-        opus: createMockService('opus', '写完了\n@缅因猫 帮review'),
-        codex: createMockService('codex', '审查完毕'),
+        id: userMessageId,
+        threadId: 'thread1',
+        userId: 'user1',
+        catId: null,
+        content: 'VISIBLE USER MESSAGE',
+        mentions: ['codex'],
+        timestamp: 1_000,
+        visibilitySeq: 1,
       },
-      appendCalls,
+      {
+        id: whisperTriggerId,
+        threadId: 'thread1',
+        userId: 'user1',
+        catId: 'opus',
+        content: 'SECRET A2A BODY',
+        mentions: ['codex'],
+        timestamp: 2_000,
+        visibilitySeq: 2,
+        origin: 'stream',
+        visibility: 'whisper',
+        whisperTo: ['opus'],
+      },
+    ];
+    deps.deliveryCursorStore = {
+      getCursor: async () => undefined,
+      ackCursor: async () => {},
+      ackSeenCursor: async () => {},
+    };
+    deps.messageStore.getByThreadAfter = async () => messages;
+    deps.messageStore.getById = async (id) => messages.find((candidate) => candidate.id === id);
+
+    for await (const _ of routeSerial(deps, ['codex'], 'VISIBLE USER MESSAGE', 'user1', 'thread1', {
+      currentUserMessageId: userMessageId,
+      a2aTriggerMessageId: whisperTriggerId,
+      a2aCallerCatId: 'opus',
+      thinkingMode: 'play',
+    })) {
+      /* drain */
+    }
+
+    assert.equal(codexService.calls.length, 1, 'codex should be invoked once');
+    assert.ok(!codexService.calls[0].prompt.includes('SECRET A2A BODY'), 'invisible whisper content must stay hidden');
+    assert.ok(
+      !codexService.calls[0].options.recoveryAnchor?.promptMessageIds.includes(whisperTriggerId),
+      'an invisible trigger must not earn an exact body-exposure receipt',
     );
-
-    for await (const _ of routeSerial(deps, ['opus'], 'code', 'user1', 'thread1')) {
-    }
-
-    // opus's stored message should have mentions: ['codex']
-    const opusAppend = appendCalls.find((c) => c.catId === 'opus');
-    assert.ok(opusAppend, 'opus response should be stored');
-    assert.deepEqual(opusAppend.mentions, ['codex'], 'opus mentions should include codex');
-
-    // codex's stored message (no mention in response) → mentions: []
-    const codexAppend = appendCalls.find((c) => c.catId === 'codex');
-    assert.ok(codexAppend, 'codex response should be stored');
-    assert.deepEqual(codexAppend.mentions, [], 'codex mentions should be empty');
-  });
-
-  it('supports 2-hop A2A chain: user→A→B→A', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    let opusCallCount = 0;
-    const deps = createMockDeps({
-      opus: {
-        async *invoke() {
-          opusCallCount++;
-          if (opusCallCount === 1) {
-            yield { type: 'text', catId: 'opus', content: '写好了\n@缅因猫 review', timestamp: Date.now() };
-          } else {
-            yield { type: 'text', catId: 'opus', content: '已修复', timestamp: Date.now() };
-          }
-          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
-        },
-      },
-      codex: createMockService('codex', '有bug\n@布偶猫 请修复'),
-    });
-
-    const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'implement feature', 'user1', 'thread1', { maxA2ADepth: 2 })) {
-      messages.push(msg);
-    }
-
-    // Chain: opus → codex → opus (2 hops)
-    const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
-    assert.equal(handoffs.length, 2, 'should have 2 A2A handoffs');
-    assert.equal(opusCallCount, 2, 'opus should be called twice');
+    assert.match(
+      codexService.calls[0].prompt,
+      /Direct message from .*\(opus\)/,
+      'Queue caller provenance must reach the child prompt without exposing the trigger body',
+    );
   });
 
   it('incremental mode: falls back to explicit user message when current message is missing from incremental context', async () => {
@@ -466,6 +2203,75 @@ describe('routeSerial A2A worklist', () => {
       prompt.includes('CURRENT USER MESSAGE'),
       'prompt must include current user message explicitly when missing from unseen history',
     );
+  });
+
+  it('incremental mode: Auto with unresolved capacity preserves unseen history in both routes', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+
+    for (const [routeName, route] of [
+      ['serial', routeSerial],
+      ['parallel', routeParallel],
+    ]) {
+      const captureService = createCapturingService(UNKNOWN_AUTO_CONTEXT_CAT, 'ack');
+      const deps = createMockDeps({ [UNKNOWN_AUTO_CONTEXT_CAT]: captureService });
+      deps.deliveryCursorStore = {
+        getCursor: async () => undefined,
+        ackCursor: async () => {},
+        ackSeenCursor: async () => {},
+      };
+      deps.messageStore.getByThreadAfter = async () => [
+        {
+          id: '0000000000000001-000001-unknown1',
+          threadId: 'thread1',
+          userId: 'user1',
+          catId: null,
+          content: 'history must survive unresolved Auto capacity',
+          mentions: [],
+          timestamp: Date.now() - 1000,
+        },
+      ];
+
+      for await (const _ of route(deps, [UNKNOWN_AUTO_CONTEXT_CAT], 'CURRENT USER MESSAGE', 'user1', 'thread1', {
+        currentUserMessageId: 'missing-current-id',
+      })) {
+      }
+
+      assert.equal(captureService.calls.length, 1, routeName);
+      assert.ok(captureService.calls[0].includes('history must survive unresolved Auto capacity'), routeName);
+    }
+  });
+
+  it('legacy mode: Auto with unresolved capacity preserves history in both routes', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const history = [
+      {
+        id: 'history-unknown-auto',
+        threadId: 'thread1',
+        userId: 'user1',
+        catId: null,
+        content: 'legacy history must survive unresolved Auto capacity',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+      },
+    ];
+
+    for (const [routeName, route] of [
+      ['serial', routeSerial],
+      ['parallel', routeParallel],
+    ]) {
+      const captureService = createCapturingService(UNKNOWN_AUTO_CONTEXT_CAT, 'ack');
+      const deps = createMockDeps({ [UNKNOWN_AUTO_CONTEXT_CAT]: captureService });
+
+      for await (const _ of route(deps, [UNKNOWN_AUTO_CONTEXT_CAT], 'CURRENT USER MESSAGE', 'user1', 'thread1', {
+        history,
+      })) {
+      }
+
+      assert.equal(captureService.calls.length, 1, routeName);
+      assert.ok(captureService.calls[0].includes('legacy history must survive unresolved Auto capacity'), routeName);
+    }
   });
 
   it('incremental mode: does NOT inject whisper content for non-recipient cat (F35 privacy fix)', async () => {
@@ -507,30 +2313,26 @@ describe('routeSerial A2A worklist', () => {
     assert.ok(!prompt.includes('SECRET'), 'whisper content must NOT leak via fallback injection');
   });
 
-  it('line-start @mention always routes without keyword gate (no suppression feedback)', async () => {
+  it('does not inject the removed one-shot routing feedback', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const threadStore = new ThreadStore();
     const thread = threadStore.create('user1', 'no suppression');
-    const opusService = createCapturingService('opus', '收到');
-    const codexService = createSequentialCapturingService('codex', ['@布偶猫', '第二次调用']);
-    const deps = createMockDeps({ codex: codexService, opus: opusService }, undefined, threadStore);
+    const codexService = createSequentialCapturingService('codex', ['第一次调用', '第二次调用']);
+    const deps = createMockDeps({ codex: codexService }, undefined, threadStore);
 
-    const messages = [];
-    for await (const msg of routeSerial(deps, ['codex'], 'first', 'user1', thread.id, { thinkingMode: 'debug' })) {
-      messages.push(msg);
+    for await (const _ of routeSerial(deps, ['codex'], 'first', 'user1', thread.id, {
+      thinkingMode: 'debug',
+    })) {
+    }
+    for await (const _ of routeSerial(deps, ['codex'], 'second', 'user1', thread.id, {
+      thinkingMode: 'debug',
+    })) {
     }
 
-    // @布偶猫 alone should now trigger A2A handoff (no keyword required)
-    const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
-    assert.equal(handoffs.length, 1, 'bare @布偶猫 should trigger A2A handoff without action keywords');
-
-    // Second invocation should NOT have any routing feedback (suppression system removed)
-    for await (const _ of routeSerial(deps, ['codex'], 'second', 'user1', thread.id, { thinkingMode: 'debug' })) {
-    }
     assert.ok(
       !codexService.calls[1].includes('Routing feedback(one-shot):'),
-      'no routing feedback should be injected (suppression system removed)',
+      'removed routing feedback must not be injected',
     );
   });
 
@@ -547,7 +2349,7 @@ describe('routeSerial A2A worklist', () => {
     for await (const _ of routeSerial(deps, ['opus'], 'markdown test', 'user1', 'thread1')) {
     }
 
-    const saved = appendCalls.find((c) => c.catId === 'opus');
+    const saved = appendCalls.find((c) => c.from?.kind === 'agent' && c.from.catId === 'opus');
     assert.ok(saved, 'stored message should exist');
     assert.equal(saved.content, '章节A\n---\n章节B', 'sanitizer must not remove normal markdown separator lines');
   });
@@ -564,9 +2366,10 @@ describe('routeSerial resilience', () => {
       invocationDeps: {
         registry: {
           create: () => ({ invocationId: `inv-${++counter}`, callbackToken: `tok-${counter}` }),
-          verify: () => null,
+          verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
         },
         sessionManager: {
+          get: async () => undefined,
           getOrCreate: async () => ({}),
           resolveWorkingDirectory: () => '/tmp/test',
         },
@@ -625,6 +2428,7 @@ describe('routeSerial cursor ack on error', () => {
         content: 'user message',
         mentions: [],
         timestamp: Date.now(),
+        visibilitySeq: 1,
       },
     ];
 
@@ -638,8 +2442,8 @@ describe('routeSerial cursor ack on error', () => {
     assert.ok(cursorBoundaries.has('opus'), 'cursor boundary must be set for opus even when hadError=true');
     assert.equal(
       cursorBoundaries.get('opus'),
-      '0000000000000001-000001-aaaaaaaa',
-      'boundary should match the last unseen message ID',
+      'v2:0000000000000001:0000000000000001-000001-aaaaaaaa',
+      'boundary should match the last unseen visibility cursor',
     );
   });
 });
@@ -673,6 +2477,7 @@ describe('routeParallel cursor ack on error', () => {
         content: 'user message',
         mentions: [],
         timestamp: Date.now(),
+        visibilitySeq: 2,
       },
     ];
 
@@ -685,6 +2490,66 @@ describe('routeParallel cursor ack on error', () => {
 
     assert.ok(cursorBoundaries.has('opus'), 'cursor boundary must be set for opus even when it errored');
     assert.ok(cursorBoundaries.has('codex'), 'cursor boundary must be set for codex (no error)');
+  });
+
+  it('uses the deferred cursor overlay and exposes only the exact A2A stream trigger in play mode', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const codexService = createOptionsCapturingService('codex', 'ack');
+    const deps = createMockDeps({ codex: codexService });
+    const oldMessage = {
+      id: '0000000000000001-000001-aaaaaaaa',
+      threadId: 'thread1',
+      userId: 'user1',
+      catId: null,
+      content: 'OLD PARALLEL USER MESSAGE',
+      mentions: [],
+      timestamp: 1_000,
+      visibilitySeq: 1,
+    };
+    const triggerMessage = {
+      id: '0000000000000002-000001-bbbbbbbb',
+      threadId: 'thread1',
+      userId: 'user1',
+      catId: 'opus',
+      content: 'PARALLEL EXACT A2A BODY',
+      mentions: ['codex'],
+      timestamp: 2_000,
+      visibilitySeq: 2,
+      origin: 'stream',
+    };
+    const messages = [oldMessage, triggerMessage];
+    deps.deliveryCursorStore = {
+      // Simulate a legacy durable v1 value beside the route-scoped canonical v2 overlay.
+      getCursor: async () => oldMessage.id,
+      ackCursor: async () => {},
+      ackSeenCursor: async () => {},
+    };
+    deps.messageStore.getById = async (id) => messages.find((candidate) => candidate.id === id);
+    deps.messageStore.getByThreadAfter = async (_threadId, afterCursor) => {
+      const afterSeq = afterCursor?.startsWith('v2:') ? Number(afterCursor.slice(3, 19)) : 0;
+      return messages.filter((candidate) => candidate.visibilitySeq > afterSeq);
+    };
+
+    const cursorBoundaries = new Map([['codex', 'v2:0000000000000001:0000000000000001-000001-aaaaaaaa']]);
+    for await (const _ of routeParallel(deps, ['codex'], triggerMessage.content, 'user1', 'thread1', {
+      currentUserMessageId: triggerMessage.id,
+      a2aTriggerMessageId: triggerMessage.id,
+      cursorBoundaries,
+      thinkingMode: 'play',
+    })) {
+      /* drain */
+    }
+
+    assert.equal(codexService.calls.length, 1, 'codex should be invoked once');
+    assert.ok(codexService.calls[0].prompt.includes(triggerMessage.content), 'exact A2A body must be exposed');
+    assert.ok(
+      !codexService.calls[0].prompt.includes(oldMessage.content),
+      'overlay must suppress older delivered history',
+    );
+    assert.ok(
+      codexService.calls[0].options.recoveryAnchor?.promptMessageIds.includes(triggerMessage.id),
+      'the exact unchanged body must earn its exposure receipt',
+    );
   });
 });
 
@@ -712,6 +2577,783 @@ describe('routeParallel resilience', () => {
       doneMsgs.some((m) => m.isFinal),
       'one done should be isFinal',
     );
+  });
+
+  it('strips leaked tool-call payloads from parallel text before yielding and persisting', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+
+    const contaminatedService = {
+      async *invoke() {
+        yield { type: 'tool_use', catId: 'opus', toolName: 'Read', toolInput: { path: '/a.ts' }, timestamp: 1000 };
+        yield {
+          type: 'text',
+          catId: 'opus',
+          content: `继续落实现，别把内部参数露出去。
+
+{"tool_uses":[{"recipient_name":"functions.exec_command","parameters":{"cmd":"sed -n '1,220p' foo.ts"}}]}`,
+          timestamp: 1001,
+        };
+        yield { type: 'done', catId: 'opus', timestamp: 1002 };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: contaminatedService }, appendCalls);
+
+    const messages = [];
+    for await (const msg of routeParallel(deps, ['opus'], 'read a.ts', 'user1', 'thread1')) {
+      messages.push(msg);
+    }
+
+    const textMsgs = messages.filter((m) => m.type === 'text');
+    assert.equal(textMsgs.length, 1, 'should still yield one text message');
+    assert.equal(textMsgs[0].content, '继续落实现，别把内部参数露出去。');
+
+    assert.equal(appendCalls.length, 1, 'should persist one final message');
+    assert.equal(appendCalls[0].content, '继续落实现，别把内部参数露出去。');
+  });
+
+  it('strips leaked tool-call payloads split across parallel text chunks', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+
+    const contaminatedService = {
+      async *invoke() {
+        yield {
+          type: 'text',
+          catId: 'opus',
+          content: `继续落实现，别把内部参数露出去。
+
+{`,
+          timestamp: 1000,
+        };
+        yield {
+          type: 'text',
+          catId: 'opus',
+          content: `"tool_uses":[{"recipient_name":"functions.exec_command","parameters":{"cmd":"echo leaked"}}]}`,
+          timestamp: 1001,
+        };
+        yield { type: 'done', catId: 'opus', timestamp: 1002 };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: contaminatedService }, appendCalls);
+
+    const messages = [];
+    for await (const msg of routeParallel(deps, ['opus'], 'read a.ts', 'user1', 'thread1')) {
+      messages.push(msg);
+    }
+
+    const textMsgs = messages.filter((m) => m.type === 'text');
+    assert.equal(textMsgs.length, 1, 'should yield only the prose chunk');
+    assert.equal(textMsgs[0].content, '继续落实现，别把内部参数露出去。');
+    assert.ok(textMsgs.every((m) => !m.content.includes('tool_uses')));
+    assert.ok(textMsgs.every((m) => !m.content.includes('recipient_name')));
+
+    assert.equal(appendCalls.length, 1, 'should persist one final message');
+    assert.equal(appendCalls[0].content, '继续落实现，别把内部参数露出去。');
+  });
+
+  it('preserves metadata when parallel provider only attaches it to done', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { prepareInvocationExecutionBinding } = await import(
+      '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'
+    );
+
+    const doneMetadata = {
+      model: 'codex-test',
+      usage: { inputTokens: 12, outputTokens: 7 },
+    };
+
+    const metadataOnDoneService = {
+      async *invoke() {
+        yield { type: 'text', catId: 'opus', content: 'metadata should survive', timestamp: 1000 };
+        yield { type: 'done', catId: 'opus', metadata: doneMetadata, timestamp: 1001 };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: metadataOnDoneService }, appendCalls);
+    // Account resolution is upstream of this merge: preserve that snapshot together with provider metadata.
+    const { executionAccount } = await prepareInvocationExecutionBinding(deps.invocationDeps, {
+      catId: 'opus',
+      threadId: 'thread1',
+      userId: 'user1',
+      service: metadataOnDoneService,
+    });
+    assert.ok(executionAccount, 'the opus fixture must bind an execution account');
+
+    for await (const _ of routeParallel(deps, ['opus'], 'test metadata', 'user1', 'thread1')) {
+    }
+
+    assert.equal(appendCalls.length, 1, 'should persist one final message');
+    assert.deepEqual(appendCalls[0].metadata, {
+      ...doneMetadata,
+      executionAccount,
+      usage: { ...doneMetadata.usage, executionAccount },
+    });
+  });
+});
+
+describe('routeParallel abort marks healthy (#267)', () => {
+  it('abort/cancel writes healthy=true, not false', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+
+    const ac = new AbortController();
+    const activityUpdates = [];
+    const threadStore = {
+      get: () => ({ id: 't1', participants: ['opus'], preferredCats: [] }),
+      addParticipants: () => {},
+      getParticipants: () => ['opus'],
+      getParticipantsWithActivity: () => [{ catId: 'opus', lastMessageAt: 1, messageCount: 1 }],
+      consumeMentionRoutingFeedback: () => null,
+      updateParticipantActivity: (threadId, catId, healthy) => {
+        activityUpdates.push({ threadId, catId, healthy });
+      },
+      updateLastActive: () => {},
+    };
+
+    const deps = createMockDeps(
+      {
+        opus: {
+          async *invoke() {
+            yield { type: 'text', catId: 'opus', content: 'working...', timestamp: Date.now() };
+            ac.abort();
+            yield { type: 'error', catId: 'opus', error: 'AbortError', timestamp: Date.now() };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          },
+        },
+      },
+      null,
+      threadStore,
+    );
+
+    const messages = [];
+    for await (const msg of routeParallel(deps, ['opus'], 'test', 'user1', 't1', { signal: ac.signal })) {
+      messages.push(msg);
+    }
+
+    const opusUpdate = activityUpdates.find((u) => u.catId === 'opus');
+    assert.ok(opusUpdate, 'should have updated opus activity');
+    assert.equal(opusUpdate.healthy, true, '#267: abort should be treated as healthy, not provider failure');
+  });
+});
+
+describe('F155 guide offer ownership', () => {
+  it('serial: suppresses fresh guide offers when another user has a non-terminal guide on shared default thread', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const codexService = createCapturingService('codex', '我来处理这个请求');
+    const { threadStore, sessionStore } = await createSharedDefaultGuideFixture({
+      v: 1,
+      guideId: 'configure-provider',
+      status: 'active',
+      offeredAt: Date.now(),
+      startedAt: Date.now(),
+      offeredBy: 'opus',
+      userId: 'other-user',
+    });
+    const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
+
+    for await (const _ of routeSerial(deps, ['codex'], '请帮我添加成员', 'user1', 'default')) {
+    }
+
+    assert.ok(
+      !codexService.calls[0].includes('Guide Matched:'),
+      'foreign non-terminal guide must block fresh guide matching for another user',
+    );
+    assert.ok(
+      !codexService.calls[0].includes('status="offered"'),
+      'routing must not emit a fresh offered guide when another user already owns the active guide',
+    );
+  });
+
+  it('serial: ignores another user guide state on shared default thread', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const codexService = createCapturingService('codex', '我来处理这个请求');
+    const { threadStore, sessionStore } = await createSharedDefaultGuideFixture({
+      v: 1,
+      guideId: 'configure-provider',
+      status: 'completed',
+      offeredAt: Date.now(),
+      completedAt: Date.now(),
+      offeredBy: 'opus',
+      userId: 'other-user',
+    });
+    const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
+
+    for await (const _ of routeSerial(deps, ['codex'], '请帮我添加成员', 'user1', 'default')) {
+    }
+
+    assert.ok(
+      !codexService.calls[0].includes('Guide Matched:'),
+      'foreign guide state should be hidden without creating a fresh guide offer from raw user text',
+    );
+    assert.ok(
+      !codexService.calls[0].includes('Guide Completed:'),
+      'foreign completed guide must not leak into the current user prompt',
+    );
+  });
+
+  it('serial: does not synthesize a fresh offered guide from raw user text', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const opusService = createCapturingService('opus', '我来处理引导');
+    const codexService = createCapturingService('codex', '不该收到引导 offer');
+    const deps = createMockDeps({ opus: opusService, codex: codexService });
+
+    for await (const _ of routeSerial(deps, ['opus', 'codex'], '请帮我添加成员', 'user1', 'thread1')) {
+    }
+
+    assert.equal(opusService.calls.length, 1, 'first cat should be invoked');
+    assert.equal(codexService.calls.length, 1, 'second cat should still be invoked');
+    assert.ok(
+      !opusService.calls[0].includes('status="offered"'),
+      'raw user text should not cause routing to inject a fresh guide offer',
+    );
+    assert.ok(
+      !codexService.calls[0].includes('status="offered"'),
+      'second cat must also remain free of any synthesized guide offer',
+    );
+  });
+
+  it('serial: passes guide selection context to a non-owner target cat', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const codexService = createCapturingService('codex', '我来给步骤概览');
+    const threadStore = {
+      async get() {
+        return {
+          id: 'thread1',
+          title: 'Test',
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          projectPath: 'default',
+          guideState: {
+            v: 1,
+            guideId: 'add-member',
+            status: 'offered',
+            offeredAt: Date.now(),
+            offeredBy: 'opus',
+          },
+        };
+      },
+      async getParticipantsWithActivity() {
+        return [];
+      },
+      async consumeMentionRoutingFeedback() {
+        return null;
+      },
+      async updateParticipantActivity() {},
+    };
+    const deps = createMockDeps({ codex: codexService }, null, threadStore);
+
+    for await (const _ of routeSerial(deps, ['codex'], '引导流程：步骤概览', 'user1', 'thread1')) {
+    }
+
+    assert.equal(codexService.calls.length, 1, 'non-owner target cat should still be invoked');
+    assert.ok(
+      codexService.calls[0].includes('用户选择了「步骤概览」'),
+      'selected guide branch must be visible to the routed cat even when it did not offer the guide',
+    );
+    assert.ok(
+      !codexService.calls[0].includes('status="offered"'),
+      'selection follow-up must not regress into a duplicate offered prompt',
+    );
+  });
+
+  it('serial: routes owner-missing guide selection to only the first target cat', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const opusService = createCapturingService('opus', '我来给步骤概览');
+    const codexService = createCapturingService('codex', '我不该收到选择分支');
+    const threadStore = {
+      async get() {
+        return {
+          id: 'thread1',
+          title: 'Test',
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          projectPath: 'default',
+          guideState: {
+            v: 1,
+            guideId: 'add-member',
+            status: 'offered',
+            offeredAt: Date.now(),
+            offeredBy: 'gemini',
+          },
+        };
+      },
+      async getParticipantsWithActivity() {
+        return [];
+      },
+      async consumeMentionRoutingFeedback() {
+        return null;
+      },
+      async updateParticipantActivity() {},
+    };
+    const deps = createMockDeps({ opus: opusService, codex: codexService }, null, threadStore);
+
+    for await (const _ of routeSerial(deps, ['opus', 'codex'], '引导流程：步骤概览', 'user1', 'thread1')) {
+    }
+
+    assert.ok(
+      opusService.calls[0].includes('用户选择了「步骤概览」'),
+      'first target cat should receive selection fallback',
+    );
+    assert.ok(
+      !codexService.calls[0].includes('用户选择了「步骤概览」'),
+      'second target cat must not receive duplicate selection fallback',
+    );
+  });
+
+  it('serial: routes owner-missing awaiting_choice guide to only the first target cat', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const opusService = createCapturingService('opus', '我来处理等待中的引导');
+    const codexService = createCapturingService('codex', '我不该收到 pending guide');
+    const threadStore = {
+      async get() {
+        return {
+          id: 'thread1',
+          title: 'Test',
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          projectPath: 'default',
+          guideState: {
+            v: 1,
+            guideId: 'add-member',
+            status: 'awaiting_choice',
+            offeredAt: Date.now(),
+            offeredBy: 'gemini',
+          },
+        };
+      },
+      async getParticipantsWithActivity() {
+        return [];
+      },
+      async consumeMentionRoutingFeedback() {
+        return null;
+      },
+      async updateParticipantActivity() {},
+    };
+    const deps = createMockDeps({ opus: opusService, codex: codexService }, null, threadStore);
+
+    for await (const _ of routeSerial(deps, ['opus', 'codex'], '继续', 'user1', 'thread1')) {
+    }
+
+    assert.ok(
+      opusService.calls[0].includes('Guide Pending:'),
+      'first target cat should receive the awaiting_choice reminder fallback',
+    );
+    assert.ok(
+      !codexService.calls[0].includes('Guide Pending:'),
+      'second target cat must not receive duplicate awaiting_choice context',
+    );
+  });
+
+  it('parallel: passes guide selection context to a non-owner target cat', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const codexService = createCapturingService('codex', '我来给步骤概览');
+    const threadStore = {
+      async get() {
+        return {
+          id: 'thread1',
+          title: 'Test',
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          projectPath: 'default',
+          guideState: {
+            v: 1,
+            guideId: 'add-member',
+            status: 'offered',
+            offeredAt: Date.now(),
+            offeredBy: 'opus',
+          },
+        };
+      },
+      async getParticipantsWithActivity() {
+        return [];
+      },
+      async updateParticipantActivity() {},
+    };
+    const deps = createMockDeps({ codex: codexService }, null, threadStore);
+
+    for await (const _ of routeParallel(deps, ['codex'], '引导流程：步骤概览', 'user1', 'thread1')) {
+    }
+
+    assert.equal(codexService.calls.length, 1, 'parallel non-owner target cat should still be invoked');
+    assert.ok(
+      codexService.calls[0].includes('用户选择了「步骤概览」'),
+      'parallel routed cat must see the selected guide context when the offer owner is absent',
+    );
+    assert.ok(
+      !codexService.calls[0].includes('status="offered"'),
+      'parallel selection follow-up must not regress into a duplicate offered prompt',
+    );
+  });
+
+  it('parallel: routes owner-missing guide selection to only the first target cat', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const opusService = createCapturingService('opus', '我来给步骤概览');
+    const codexService = createCapturingService('codex', '我不该收到选择分支');
+    const threadStore = {
+      async get() {
+        return {
+          id: 'thread1',
+          title: 'Test',
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          projectPath: 'default',
+          guideState: {
+            v: 1,
+            guideId: 'add-member',
+            status: 'offered',
+            offeredAt: Date.now(),
+            offeredBy: 'gemini',
+          },
+        };
+      },
+      async getParticipantsWithActivity() {
+        return [];
+      },
+      async updateParticipantActivity() {},
+    };
+    const deps = createMockDeps({ opus: opusService, codex: codexService }, null, threadStore);
+
+    for await (const _ of routeParallel(deps, ['opus', 'codex'], '引导流程：步骤概览', 'user1', 'thread1')) {
+    }
+
+    assert.ok(
+      opusService.calls[0].includes('用户选择了「步骤概览」'),
+      'first target cat should receive selection fallback',
+    );
+    assert.ok(
+      !codexService.calls[0].includes('用户选择了「步骤概览」'),
+      'second target cat must not receive duplicate selection fallback',
+    );
+  });
+
+  it('parallel: routes owner-missing awaiting_choice guide to only the first target cat', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const opusService = createCapturingService('opus', '我来处理等待中的引导');
+    const codexService = createCapturingService('codex', '我不该收到 pending guide');
+    const threadStore = {
+      async get() {
+        return {
+          id: 'thread1',
+          title: 'Test',
+          createdBy: 'user1',
+          participants: [],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          projectPath: 'default',
+          guideState: {
+            v: 1,
+            guideId: 'add-member',
+            status: 'awaiting_choice',
+            offeredAt: Date.now(),
+            offeredBy: 'gemini',
+          },
+        };
+      },
+      async getParticipantsWithActivity() {
+        return [];
+      },
+      async updateParticipantActivity() {},
+    };
+    const deps = createMockDeps({ opus: opusService, codex: codexService }, null, threadStore);
+
+    for await (const _ of routeParallel(deps, ['opus', 'codex'], '继续', 'user1', 'thread1')) {
+    }
+
+    assert.ok(
+      opusService.calls[0].includes('Guide Pending:'),
+      'first target cat should receive the awaiting_choice reminder fallback',
+    );
+    assert.ok(
+      !codexService.calls[0].includes('Guide Pending:'),
+      'second target cat must not receive duplicate awaiting_choice context',
+    );
+  });
+
+  it('parallel: injects offered guide only to the first target cat', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const opusService = createCapturingService('opus', '我来处理引导');
+    const codexService = createCapturingService('codex', '不该收到引导 offer');
+    const deps = createMockDeps({ opus: opusService, codex: codexService });
+
+    for await (const _ of routeParallel(deps, ['opus', 'codex'], '请帮我添加成员', 'user1', 'thread1')) {
+    }
+
+    assert.equal(opusService.calls.length, 1, 'first cat should be invoked');
+    assert.equal(codexService.calls.length, 1, 'second cat should still be invoked');
+    assert.ok(
+      !opusService.calls[0].includes('status="offered"'),
+      'raw user text should not cause parallel routing to inject a fresh guide offer',
+    );
+    assert.ok(
+      !codexService.calls[0].includes('status="offered"'),
+      'second cat must also remain free of any synthesized guide offer',
+    );
+  });
+
+  it('parallel: suppresses fresh guide offers when another user has a non-terminal guide on shared default thread', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const codexService = createCapturingService('codex', '我来处理这个请求');
+    const { threadStore, sessionStore } = await createSharedDefaultGuideFixture({
+      v: 1,
+      guideId: 'configure-provider',
+      status: 'active',
+      offeredAt: Date.now(),
+      startedAt: Date.now(),
+      offeredBy: 'opus',
+      userId: 'other-user',
+    });
+    const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
+
+    for await (const _ of routeParallel(deps, ['codex'], '请帮我添加成员', 'user1', 'default')) {
+    }
+
+    assert.ok(
+      !codexService.calls[0].includes('Guide Matched:'),
+      'foreign non-terminal guide must block fresh guide matching for another user',
+    );
+    assert.ok(
+      !codexService.calls[0].includes('status="offered"'),
+      'parallel routing must not emit a fresh offered guide when another user already owns the active guide',
+    );
+  });
+
+  it('parallel: ignores another user guide state on shared default thread', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const codexService = createCapturingService('codex', '我来处理这个请求');
+    const { threadStore, sessionStore } = await createSharedDefaultGuideFixture({
+      v: 1,
+      guideId: 'configure-provider',
+      status: 'completed',
+      offeredAt: Date.now(),
+      completedAt: Date.now(),
+      offeredBy: 'opus',
+      userId: 'other-user',
+    });
+    const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
+
+    for await (const _ of routeParallel(deps, ['codex'], '请帮我添加成员', 'user1', 'default')) {
+    }
+
+    assert.ok(
+      !codexService.calls[0].includes('Guide Matched:'),
+      'foreign guide state should be hidden without creating a fresh guide offer from raw user text',
+    );
+    assert.ok(
+      !codexService.calls[0].includes('Guide Completed:'),
+      'foreign completed guide must not leak into the current user prompt',
+    );
+  });
+});
+
+describe('F155 guide completion ack ownership', () => {
+  it('serial: does not ack a different guide that replaced the completed one', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { threadStore, sessionStore } = await createSwitchingGuideAckFixture(
+      {
+        v: 1,
+        guideId: 'add-member',
+        status: 'completed',
+        offeredAt: Date.now(),
+        completedAt: Date.now(),
+        offeredBy: 'opus',
+      },
+      { v: 1, guideId: 'configure-provider', status: 'offered', offeredAt: Date.now(), offeredBy: 'codex' },
+    );
+    const deps = createMockDeps({ opus: createMockService('opus', 'done') }, null, threadStore, sessionStore);
+
+    for await (const _ of routeSerial(deps, ['opus'], '继续', 'user1', 'thread1')) {
+    }
+
+    const gs = await sessionStore.getByThread('thread1');
+    assert.ok(!gs.completionAcked, 'must not ack a replacement guide');
+  });
+
+  it('parallel: does not ack a different guide that replaced the completed one', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { threadStore, sessionStore } = await createSwitchingGuideAckFixture(
+      {
+        v: 1,
+        guideId: 'add-member',
+        status: 'completed',
+        offeredAt: Date.now(),
+        completedAt: Date.now(),
+        offeredBy: 'opus',
+      },
+      {
+        v: 1,
+        guideId: 'configure-provider',
+        status: 'active',
+        offeredAt: Date.now(),
+        startedAt: Date.now(),
+        offeredBy: 'codex',
+      },
+    );
+    const deps = createMockDeps({ opus: createMockService('opus', 'done') }, null, threadStore, sessionStore);
+
+    for await (const _ of routeParallel(deps, ['opus'], '继续', 'user1', 'thread1')) {
+    }
+
+    const gs = await sessionStore.getByThread('thread1');
+    assert.ok(!gs.completionAcked, 'must not ack a replacement guide');
+  });
+
+  it('serial: does not ack completed guide after a silent done-only turn', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const completedGuide = {
+      v: 1,
+      guideId: 'add-member',
+      status: 'completed',
+      offeredAt: Date.now(),
+      completedAt: Date.now(),
+      offeredBy: 'codex',
+    };
+    const { threadStore, sessionStore, bridge } = await createGuideAckFixture(completedGuide, 'default');
+    const deps = createMockDeps({ codex: createDoneOnlyService('codex') }, null, threadStore, sessionStore);
+
+    for await (const _ of routeSerial(deps, ['codex'], '继续', 'user1', 'thread1')) {
+    }
+
+    const gs = await bridge.get('thread1');
+    assert.ok(!gs.completionAcked, 'silent done-only turn must not ack guide completion');
+  });
+
+  it('parallel: does not ack completed guide after a silent done-only turn', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const completedGuide = {
+      v: 1,
+      guideId: 'add-member',
+      status: 'completed',
+      offeredAt: Date.now(),
+      completedAt: Date.now(),
+      offeredBy: 'codex',
+    };
+    const { threadStore, sessionStore, bridge } = await createGuideAckFixture(completedGuide, 'default');
+    const deps = createMockDeps({ codex: createDoneOnlyService('codex') }, null, threadStore, sessionStore);
+
+    for await (const _ of routeParallel(deps, ['codex'], '继续', 'user1', 'thread1')) {
+    }
+
+    const gs = await bridge.get('thread1');
+    assert.ok(!gs.completionAcked, 'silent done-only turn must not ack guide completion');
+  });
+
+  it('serial: injects and acks completed guide when owner cat is not routed', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const completedGuide = {
+      v: 1,
+      guideId: 'add-member',
+      status: 'completed',
+      offeredAt: Date.now(),
+      completedAt: Date.now(),
+      offeredBy: 'opus',
+    };
+    const { threadStore, sessionStore, bridge } = await createGuideAckFixture(completedGuide, 'default');
+    const codexService = createCapturingService('codex', '好的，我继续帮你');
+    const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
+
+    for await (const _ of routeSerial(deps, ['codex'], '继续', 'user1', 'thread1')) {
+    }
+
+    assert.equal(codexService.calls.length, 1, 'routed non-owner cat should still be invoked');
+    assert.ok(
+      codexService.calls[0].includes('Guide Completed:'),
+      'routed non-owner cat must see completed guide context when owner is absent',
+    );
+    const gs = await bridge.get('thread1');
+    assert.equal(gs.completionAcked, true, 'visible non-owner response should ack guide completion');
+  });
+
+  it('serial: routes completed-guide fallback only to the first target cat', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const completedGuide = {
+      v: 1,
+      guideId: 'add-member',
+      status: 'completed',
+      offeredAt: Date.now(),
+      completedAt: Date.now(),
+      offeredBy: 'gemini',
+    };
+    const { threadStore, sessionStore, bridge } = await createGuideAckFixture(completedGuide, 'default');
+    const opusService = createCapturingService('opus', '我来接着处理');
+    const codexService = createCapturingService('codex', '我也看到了');
+    const deps = createMockDeps({ opus: opusService, codex: codexService }, null, threadStore, sessionStore);
+
+    for await (const _ of routeSerial(deps, ['opus', 'codex'], '继续', 'user1', 'thread1')) {
+    }
+
+    assert.ok(opusService.calls[0].includes('Guide Completed:'), 'first target cat should receive completed guide');
+    assert.ok(
+      !codexService.calls[0].includes('Guide Completed:'),
+      'second target cat must not receive duplicate completed guide fallback',
+    );
+    const gs = await bridge.get('thread1');
+    assert.equal(gs.completionAcked, true, 'only one routed cat should ack the completed guide');
+  });
+
+  it('parallel: injects and acks completed guide when owner cat is not routed', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const completedGuide = {
+      v: 1,
+      guideId: 'add-member',
+      status: 'completed',
+      offeredAt: Date.now(),
+      completedAt: Date.now(),
+      offeredBy: 'opus',
+    };
+    const { threadStore, sessionStore, bridge } = await createGuideAckFixture(completedGuide, 'default');
+    const codexService = createCapturingService('codex', '好的，我继续帮你');
+    const deps = createMockDeps({ codex: codexService }, null, threadStore, sessionStore);
+
+    for await (const _ of routeParallel(deps, ['codex'], '继续', 'user1', 'thread1')) {
+    }
+
+    assert.equal(codexService.calls.length, 1, 'routed non-owner cat should still be invoked');
+    assert.ok(
+      codexService.calls[0].includes('Guide Completed:'),
+      'routed non-owner cat must see completed guide context when owner is absent',
+    );
+    const gs = await bridge.get('thread1');
+    assert.equal(gs.completionAcked, true, 'visible non-owner response should ack guide completion');
+  });
+
+  it('parallel: routes completed-guide fallback only to the first target cat', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const completedGuide = {
+      v: 1,
+      guideId: 'add-member',
+      status: 'completed',
+      offeredAt: Date.now(),
+      completedAt: Date.now(),
+      offeredBy: 'gemini',
+    };
+    const { threadStore, sessionStore, bridge } = await createGuideAckFixture(completedGuide, 'default');
+    const opusService = createCapturingService('opus', '我来接着处理');
+    const codexService = createCapturingService('codex', '我也看到了');
+    const deps = createMockDeps({ opus: opusService, codex: codexService }, null, threadStore, sessionStore);
+
+    for await (const _ of routeParallel(deps, ['opus', 'codex'], '继续', 'user1', 'thread1')) {
+    }
+
+    assert.ok(opusService.calls[0].includes('Guide Completed:'), 'first target cat should receive completed guide');
+    assert.ok(
+      !codexService.calls[0].includes('Guide Completed:'),
+      'second target cat must not receive duplicate completed guide fallback',
+    );
+    const gs = await bridge.get('thread1');
+    assert.equal(gs.completionAcked, true, 'only one routed cat should ack the completed guide');
   });
 });
 
@@ -775,7 +3417,7 @@ describe('routeParallel tool events persistence', () => {
     }
 
     // opus message should have toolEvents
-    const opusAppend = appendCalls.find((c) => c.catId === 'opus');
+    const opusAppend = appendCalls.find((c) => c.from?.kind === 'agent' && c.from.catId === 'opus');
     assert.ok(opusAppend, 'opus message should be appended');
     assert.ok(opusAppend.toolEvents, 'opus should have toolEvents');
     assert.equal(opusAppend.toolEvents.length, 2);
@@ -783,7 +3425,7 @@ describe('routeParallel tool events persistence', () => {
     assert.equal(opusAppend.toolEvents[1].type, 'tool_result');
 
     // codex message should NOT have toolEvents (no tool usage)
-    const codexAppend = appendCalls.find((c) => c.catId === 'codex');
+    const codexAppend = appendCalls.find((c) => c.from?.kind === 'agent' && c.from.catId === 'codex');
     assert.ok(codexAppend, 'codex message should be appended');
     assert.ok(!codexAppend.toolEvents, 'codex should not have toolEvents');
   });
@@ -808,7 +3450,7 @@ describe('routeParallel tool events persistence', () => {
     }
 
     // Even though opus had no text, it should still be persisted with tool events
-    const opusAppend = appendCalls.find((c) => c.catId === 'opus');
+    const opusAppend = appendCalls.find((c) => c.from?.kind === 'agent' && c.from.catId === 'opus');
     assert.ok(opusAppend, 'tool-only cat should still be persisted');
     assert.equal(opusAppend.content, '', 'content should be empty');
     assert.ok(opusAppend.toolEvents, 'should have toolEvents');
@@ -1056,11 +3698,11 @@ describe('routeParallel per-cat budget', () => {
 });
 
 describe('routeSerial degradation notification', () => {
-  it('yields system_info when history exceeds budget maxMessages', async () => {
+  it('does not truncate purely because history exceeds the retired count cap', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const deps = createMockDeps({ opus: createMockService('opus', 'response') });
 
-    // Generate 250 messages to exceed opus default maxMessages=200
+    // Candidate selection belongs to the route/Smart Window, not a hidden member count field.
     const history = Array.from({ length: 250 }, (_, i) => ({
       id: `m${i}`,
       threadId: 'thread1',
@@ -1077,15 +3719,14 @@ describe('routeSerial degradation notification', () => {
     }
 
     const sysInfos = degradationSystemInfos(messages);
-    assert.ok(sysInfos.length > 0, 'should yield degradation system_info');
-    assert.ok(sysInfos[0].content.includes('截断'), 'degradation message should mention truncation');
+    assert.equal(sysInfos.length, 0, 'message count alone must not trigger a retired budget policy');
   });
 
   it('does not yield system_info when history is within budget', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const deps = createMockDeps({ opus: createMockService('opus', 'response') });
 
-    // 5 messages — well within opus maxMessages=200
+    // A short selected history remains within the invocation ceiling.
     const history = Array.from({ length: 5 }, (_, i) => ({
       id: `m${i}`,
       threadId: 'thread1',
@@ -1107,35 +3748,28 @@ describe('routeSerial degradation notification', () => {
 
   it('yields system_info when context is truncated by token budget (not count)', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const deps = createMockDeps({ opus: createMockService('opus', 'response') });
+    const deps = createMockDeps({
+      [SMALL_CONTEXT_OPUS]: createMockService(SMALL_CONTEXT_OPUS, 'response'),
+    });
 
-    // Override maxPromptTokens to a small value via env.
-    // budgetForContext = maxPromptTokens - systemTokens - promptTokens - 200
-    // With maxPromptTokens=500, budgetForContext ≈ 90 tokens → truncation.
-    // Count (20) is within maxMessages (200), but total tokens exceed context budget.
-    process.env.CAT_OPUS_MAX_PROMPT_TOKENS = '500';
-    try {
-      const history = Array.from({ length: 20 }, (_, i) => ({
-        id: `m${i}`,
-        threadId: 'thread1',
-        userId: 'user1',
-        catId: null,
-        content: `message ${i} with some padding text here`,
-        mentions: [],
-        timestamp: Date.now() - (20 - i) * 1000,
-      }));
+    const history = Array.from({ length: 20 }, (_, i) => ({
+      id: `m${i}`,
+      threadId: 'thread1',
+      userId: 'user1',
+      catId: null,
+      content: `message ${i} with some padding text here`,
+      mentions: [],
+      timestamp: Date.now() - (20 - i) * 1000,
+    }));
 
-      const messages = [];
-      for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1', { history })) {
-        messages.push(msg);
-      }
-
-      const sysInfos = degradationSystemInfos(messages);
-      assert.ok(sysInfos.length > 0, 'should yield degradation when token budget truncates context');
-      assert.ok(sysInfos[0].content.includes('截断'), 'degradation message should mention truncation');
-    } finally {
-      delete process.env.CAT_OPUS_MAX_PROMPT_TOKENS;
+    const messages = [];
+    for await (const msg of routeSerial(deps, [SMALL_CONTEXT_OPUS], 'test', 'user1', 'thread1', { history })) {
+      messages.push(msg);
     }
+
+    const sysInfos = degradationSystemInfos(messages);
+    assert.ok(sysInfos.length > 0, 'should yield degradation when the invocation ceiling truncates context');
+    assert.ok(sysInfos[0].content.includes('截断'), 'degradation message should mention truncation');
   });
 });
 
@@ -1143,11 +3777,11 @@ describe('routeParallel degradation notification', () => {
   it('yields system_info for each degraded cat', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
     const deps = createMockDeps({
-      opus: createMockService('opus', 'opus says'),
-      codex: createMockService('codex', 'codex says'),
+      [SMALL_CONTEXT_OPUS]: createMockService(SMALL_CONTEXT_OPUS, 'opus says'),
+      [SMALL_CONTEXT_CODEX]: createMockService(SMALL_CONTEXT_CODEX, 'codex says'),
     });
 
-    // 250 messages — exceeds both opus (200) and codex (200) limits
+    // Both cats share selected history but resolve independent member ceilings.
     const history = Array.from({ length: 250 }, (_, i) => ({
       id: `m${i}`,
       threadId: 'thread1',
@@ -1159,7 +3793,9 @@ describe('routeParallel degradation notification', () => {
     }));
 
     const messages = [];
-    for await (const msg of routeParallel(deps, ['opus', 'codex'], 'test', 'user1', 'thread1', { history })) {
+    for await (const msg of routeParallel(deps, [SMALL_CONTEXT_OPUS, SMALL_CONTEXT_CODEX], 'test', 'user1', 'thread1', {
+      history,
+    })) {
       messages.push(msg);
     }
 
@@ -1171,38 +3807,33 @@ describe('routeParallel degradation notification', () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
     const deps = createMockDeps({
       opus: createMockService('opus', 'opus says'),
-      codex: createMockService('codex', 'codex says'),
+      [SMALL_CONTEXT_CODEX]: createMockService(SMALL_CONTEXT_CODEX, 'codex says'),
     });
 
-    // Count is within both cats' maxMessages (codex=200, opus=200), but token budget should force truncation.
-    // Override codex maxPromptTokens to a small value so assembleContext can't fit the full history.
-    process.env.CAT_CODEX_MAX_PROMPT_TOKENS = '500';
-    try {
-      const history = Array.from({ length: 50 }, (_, i) => ({
-        id: `m${i}`,
-        threadId: 'thread1',
-        userId: 'user1',
-        catId: null,
-        content: `message ${i} ${'y'.repeat(2100)}`,
-        mentions: [],
-        timestamp: Date.now() - (50 - i) * 1000,
-      }));
+    const history = Array.from({ length: 50 }, (_, i) => ({
+      id: `m${i}`,
+      threadId: 'thread1',
+      userId: 'user1',
+      catId: null,
+      content: `message ${i} ${'y'.repeat(2100)}`,
+      mentions: [],
+      timestamp: Date.now() - (50 - i) * 1000,
+    }));
 
-      const messages = [];
-      for await (const msg of routeParallel(deps, ['opus', 'codex'], 'test', 'user1', 'thread1', { history })) {
-        messages.push(msg);
-      }
-
-      const sysInfos = degradationSystemInfos(messages);
-      assert.ok(sysInfos.length > 0, 'should yield at least one degradation system_info');
-    } finally {
-      delete process.env.CAT_CODEX_MAX_PROMPT_TOKENS;
+    const messages = [];
+    for await (const msg of routeParallel(deps, ['opus', SMALL_CONTEXT_CODEX], 'test', 'user1', 'thread1', {
+      history,
+    })) {
+      messages.push(msg);
     }
+
+    const sysInfos = degradationSystemInfos(messages);
+    assert.ok(sysInfos.length > 0, 'should yield at least one degradation system_info');
   });
 });
 
 describe('routeParallel A2A safety', () => {
-  it('does not chain A2A even when mentions are detected', async () => {
+  it('does not chain A2A even when mentions are detected (F167 L2 AC-A5: mentions NOT persisted in parallel)', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
     const appendCalls = [];
     const deps = createMockDeps(
@@ -1222,10 +3853,12 @@ describe('routeParallel A2A safety', () => {
     const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
     assert.equal(handoffs.length, 0, 'parallel mode should never chain A2A');
 
-    // But mentions should still be stored
-    const opusAppend = appendCalls.find((c) => c.catId === 'opus');
+    // F167 L2 AC-A5: mentions must be persisted as [] in parallel mode so that
+    // MessageStore.getMentionsFor / pending-mentions flow does NOT surface parallel @ messages.
+    // The raw @ tokens are still captured in the `suppressedMentions` log for observability.
+    const opusAppend = appendCalls.find((c) => c.from?.kind === 'agent' && c.from.catId === 'opus');
     assert.ok(opusAppend, 'opus response should be stored');
-    assert.deepEqual(opusAppend.mentions, ['codex'], 'mentions should be detected and stored');
+    assert.deepEqual(opusAppend.mentions, [], 'AC-A5: parallel-mode mentions must be []');
   });
 
   it('executes multiple cats independently and yields interleaved messages', async () => {
@@ -1287,10 +3920,12 @@ describe('routeSerial: CLI error without text should not persist empty message (
     const errorMsgs = messages.filter((m) => m.type === 'error');
     assert.ok(errorMsgs.length > 0, 'error message should be yielded to frontend');
 
-    // Error text is appended to textContent and persisted ([错误] prefix)
-    const catAppends = appendCalls.filter((c) => c.catId === 'codex');
-    assert.equal(catAppends.length, 1, 'error text should be persisted as message content');
-    assert.ok(catAppends[0].content.includes('[错误]'), 'persisted content should contain error marker');
+    // Error-only response: no cat message, error persisted as system message
+    const catAppends = appendCalls.filter((c) => c.from?.kind === 'agent' && c.from.catId === 'codex');
+    assert.equal(catAppends.length, 0, 'error-only should NOT persist as cat message');
+    const sysAppends = appendCalls.filter((c) => c.from?.kind === 'system' && c.from.service === 'agent-error');
+    assert.equal(sysAppends.length, 1, 'error should be persisted as system message');
+    assert.ok(sysAppends[0].content.startsWith('Error:'), 'system error should start with Error: prefix');
 
     // Done should still be yielded
     const doneMsgs = messages.filter((m) => m.type === 'done');
@@ -1310,7 +3945,7 @@ describe('routeSerial: CLI error without text should not persist empty message (
     for await (const _ of routeSerial(deps, ['codex'], 'test', 'user1', 'thread1')) {
     }
 
-    const catAppends = appendCalls.filter((c) => c.catId === 'codex');
+    const catAppends = appendCalls.filter((c) => c.from?.kind === 'agent' && c.from.catId === 'codex');
     assert.equal(catAppends.length, 1, 'normal response should be persisted');
     assert.equal(catAppends[0].content, 'normal response');
   });
@@ -1334,11 +3969,18 @@ describe('routeSerial: CLI error without text should not persist empty message (
     for await (const _ of routeSerial(deps, ['codex'], 'test', 'user1', 'thread1')) {
     }
 
-    // Partial text + error suffix should be persisted
-    const catAppends = appendCalls.filter((c) => c.catId === 'codex');
+    // Partial text persisted as cat message (clean, no [错误] contamination)
+    const catAppends = appendCalls.filter((c) => c.from?.kind === 'agent' && c.from.catId === 'codex');
     assert.equal(catAppends.length, 1, 'partial response with text should still be persisted');
-    assert.ok(catAppends[0].content.startsWith('partial output before error'), 'should start with partial text');
-    assert.ok(catAppends[0].content.includes('[错误] timeout'), 'should include error suffix');
+    assert.equal(
+      catAppends[0].content,
+      'partial output before error',
+      'cat content should be clean text without error suffix',
+    );
+    // Error persisted separately as system message
+    const sysAppends = appendCalls.filter((c) => c.from?.kind === 'system' && c.from.service === 'agent-error');
+    assert.equal(sysAppends.length, 1, 'error should be persisted as separate system message');
+    assert.ok(sysAppends[0].content.includes('timeout'), 'system error should contain error text');
   });
 });
 
@@ -1348,6 +3990,16 @@ describe('routeSerial: CLI error without text should not persist empty message (
 function createDoneOnlyService(catId) {
   return {
     async *invoke() {
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+}
+
+/** Mock service that yields a visible system_info notice but no text */
+function createVisibleNoticeOnlyService(catId, content, metadata) {
+  return {
+    async *invoke() {
+      yield { type: 'system_info', catId, content, ...(metadata ? { metadata } : {}), timestamp: Date.now() };
       yield { type: 'done', catId, timestamp: Date.now() };
     },
   };
@@ -1369,8 +4021,79 @@ describe('routeSerial: done-only (no text, no error)', () => {
     })) {
     }
 
-    const catAppends = appendCalls.filter((c) => c.catId === 'codex');
+    const catAppends = appendCalls.filter((c) => c.from?.kind === 'agent' && c.from.catId === 'codex');
     assert.equal(catAppends.length, 0, 'done-only cat should not persist a blank message');
+  });
+
+  it('does not append silent_completion when a visible system notice already exists', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const deps = createMockDeps({
+      codex: createVisibleNoticeOnlyService(
+        'codex',
+        '⚠️ Shared-state files committed but not pushed: docs/ROADMAP.md. Please `git push` soon.',
+      ),
+    });
+
+    const messages = [];
+    for await (const msg of routeSerial(deps, ['codex'], 'test', 'user1', 'thread1', {
+      thinkingMode: 'play',
+    })) {
+      messages.push(msg);
+    }
+
+    const notices = messages.filter((m) => m.type === 'system_info' && m.content?.includes('Shared-state files'));
+    assert.equal(notices.length, 1, 'visible notice should be forwarded exactly once');
+    assert.equal(
+      messages.some((m) => m.type === 'system_info' && m.content?.includes('completed without textual output')),
+      false,
+      'should not add a duplicate silent_completion after a visible notice',
+    );
+  });
+
+  it('keeps provider silent_completion system notice off the error path', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const deps = createMockDeps(
+      {
+        codex: createVisibleNoticeOnlyService(
+          'codex',
+          JSON.stringify({ type: 'silent_completion', detail: 'No text' }),
+          {
+            cliDiagnostics: {
+              reasonCode: 'silent_completion',
+              publicSummary: 'CLI 完成但无文字输出',
+              publicHint: '展开详细诊断',
+              debugRef: { command: 'opencode', exitCode: 0, signal: null },
+            },
+          },
+        ),
+      },
+      appendCalls,
+    );
+
+    const messages = [];
+    for await (const msg of routeSerial(deps, ['codex'], 'test', 'user1', 'thread1', {
+      thinkingMode: 'play',
+    })) {
+      messages.push(msg);
+    }
+
+    assert.equal(
+      messages.some((m) => m.type === 'error' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'),
+      false,
+      'silent_completion diagnostic must not mark provider error',
+    );
+    assert.equal(
+      messages.filter((m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion')
+        .length,
+      1,
+      'silent_completion diagnostic should remain user-visible as system_info',
+    );
+    assert.equal(
+      appendCalls.some((c) => c.userId === 'system' && c.content?.startsWith('Error:')),
+      false,
+      'route must not persist silent_completion as red system error',
+    );
   });
 
   it('still yields a final done event when cat is silent', async () => {
@@ -1393,7 +4116,12 @@ describe('routeSerial: done-only (no text, no error)', () => {
     const doneMsgs = messages.filter((m) => m.type === 'done');
     assert.equal(doneMsgs.length, 1, 'silent cat should still produce one done event');
     assert.equal(doneMsgs[0].isFinal, true, 'silent single-cat run should mark done as final');
-    const catAppends = appendCalls.filter((c) => c.catId === 'codex');
+    assert.equal(
+      messages.some((m) => m.type === 'system_info' && m.content?.includes('silent_completion')),
+      false,
+      'silent completion belongs to the original response, without an extra generated notice',
+    );
+    const catAppends = appendCalls.filter((c) => c.from?.kind === 'agent' && c.from.catId === 'codex');
     assert.equal(catAppends.length, 0, 'silent cat should not persist blank content');
   });
 });
@@ -1417,8 +4145,75 @@ describe('routeParallel: done-only (no text, no error)', () => {
     const doneMsgs = messages.filter((m) => m.type === 'done');
     assert.equal(doneMsgs.length, 1, 'silent parallel cat should still produce one done event');
     assert.equal(doneMsgs[0].isFinal, true, 'silent parallel single-cat run should mark done as final');
-    const catAppends = appendCalls.filter((c) => c.catId === 'codex');
+    const catAppends = appendCalls.filter((c) => c.from?.kind === 'agent' && c.from.catId === 'codex');
     assert.equal(catAppends.length, 0, 'silent parallel cat should not persist blank content');
+  });
+
+  it('does not append silent_completion when a visible system notice already exists', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const deps = createMockDeps({
+      codex: createVisibleNoticeOnlyService(
+        'codex',
+        '⚠️ Shared-state files committed but not pushed: docs/ROADMAP.md. Please `git push` soon.',
+      ),
+    });
+
+    const messages = [];
+    for await (const msg of routeParallel(deps, ['codex'], 'test', 'user1', 'thread1')) {
+      messages.push(msg);
+    }
+
+    const notices = messages.filter((m) => m.type === 'system_info' && m.content?.includes('Shared-state files'));
+    assert.equal(notices.length, 1, 'visible notice should be forwarded exactly once');
+    assert.equal(
+      messages.some((m) => m.type === 'system_info' && m.content?.includes('completed without textual output')),
+      false,
+      'should not add a duplicate silent_completion after a visible notice',
+    );
+  });
+
+  it('keeps provider silent_completion system notice off the error path', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const appendCalls = [];
+    const deps = createMockDeps(
+      {
+        codex: createVisibleNoticeOnlyService(
+          'codex',
+          JSON.stringify({ type: 'silent_completion', detail: 'No text' }),
+          {
+            cliDiagnostics: {
+              reasonCode: 'silent_completion',
+              publicSummary: 'CLI 完成但无文字输出',
+              publicHint: '展开详细诊断',
+              debugRef: { command: 'opencode', exitCode: 0, signal: null },
+            },
+          },
+        ),
+      },
+      appendCalls,
+    );
+
+    const messages = [];
+    for await (const msg of routeParallel(deps, ['codex'], 'test', 'user1', 'thread1')) {
+      messages.push(msg);
+    }
+
+    assert.equal(
+      messages.some((m) => m.type === 'error' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'),
+      false,
+      'silent_completion diagnostic must not mark provider error',
+    );
+    assert.equal(
+      messages.filter((m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion')
+        .length,
+      1,
+      'silent_completion diagnostic should remain user-visible as system_info',
+    );
+    assert.equal(
+      appendCalls.some((c) => c.userId === 'system' && c.content?.startsWith('Error:')),
+      false,
+      'route must not persist silent_completion as red system error',
+    );
   });
 });
 
@@ -1497,6 +4292,77 @@ describe('routeParallel thinking persistence (F045)', () => {
     }
 
     assert.equal(appendCalls[0].thinking, 'First thought\n\n---\n\nSecond thought');
+  });
+
+  it('deduplicates cumulative thinking snapshots by prefix in parallel mode', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+
+    const cumulativeService = {
+      async *invoke(_prompt) {
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-think-2b' }),
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'thinking', text: 'A' }),
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'thinking', text: 'A and more' }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'text', catId: 'opus', content: 'done', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: cumulativeService }, appendCalls);
+
+    for await (const _msg of routeParallel(deps, ['opus'], 'test', 'user1', 'thread1')) {
+      /* drain */
+    }
+
+    assert.equal(appendCalls[0].thinking, 'A and more');
+  });
+
+  it('persists replacement text snapshots without appending stale text in parallel mode', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+
+    const service = {
+      async *invoke(_prompt) {
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-replace-parallel' }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'text', catId: 'opus', content: 'draft answer', timestamp: Date.now() };
+        yield {
+          type: 'text',
+          catId: 'opus',
+          content: 'final corrected answer',
+          textMode: 'replace',
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: service }, appendCalls);
+
+    for await (const _msg of routeParallel(deps, ['opus'], 'test', 'user1', 'thread1')) {
+      /* drain */
+    }
+
+    assert.equal(appendCalls[0].content, 'final corrected answer');
   });
 
   it('forwards invocation_created system_info to frontend while still persisting content', async () => {
@@ -1595,5 +4461,161 @@ describe('routeSerial thinking persistence (F045)', () => {
     );
     assert.ok(invocationCreated, 'routeSerial must forward invocation_created');
     assert.equal(appendCalls.length, 1, 'content persistence should still work');
+  });
+
+  it('deduplicates cumulative thinking snapshots by prefix in serial mode', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+
+    const service = {
+      async *invoke(_prompt) {
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-think-s2' }),
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'thinking', text: 'A' }),
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'thinking', text: 'A and more' }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'text', catId: 'opus', content: 'Serial answer', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: service }, appendCalls);
+
+    for await (const _msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1')) {
+      /* drain */
+    }
+
+    assert.equal(appendCalls[0].thinking, 'A and more', 'serial mode should keep only the latest cumulative snapshot');
+  });
+
+  it('persists replacement text snapshots without appending stale text in serial mode', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+
+    const service = {
+      async *invoke(_prompt) {
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-replace-serial' }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'text', catId: 'opus', content: 'draft answer', timestamp: Date.now() };
+        yield {
+          type: 'text',
+          catId: 'opus',
+          content: 'final corrected answer',
+          textMode: 'replace',
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: service }, appendCalls);
+
+    for await (const _msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1')) {
+      /* drain */
+    }
+
+    assert.equal(appendCalls[0].content, 'final corrected answer');
+  });
+});
+
+// F193 Phase B AC-B2: cross-thread reply hint integration via queue path.
+// Closes Codex review round 2 P1 (砚砚 2026-05-08): regression test must lock
+// the actual seam (QueueProcessor messageId → routeSerial currentUserMessageId
+// → buildInvocationContext prompt), not re-implement the fallback in test code.
+describe('routeSerial cross-thread reply hint (F193 AC-B2 queue-path integration)', () => {
+  it('queue-path cross-post: prompt contains FULL sourceThreadId + targetCats=["sender"]', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const captureService = createCapturingService('codex', 'ack');
+    const deps = createMockDeps({ codex: captureService });
+
+    // Simulate queue path: trigger message id arrives via routeOptions.currentUserMessageId
+    // (QueueProcessor backfills it from callback-a2a-trigger). Stored message has
+    // F052 crossPost metadata + sender catId. worklistEntry.a2aTriggerMessageId
+    // map is empty for the initial target via this path — fallback chain MUST kick in.
+    const triggerMessageId = '0000000000000001-000001-aaaaaaaa';
+    const fullSourceThreadId = 'thread_source_full_id_round2_p1_lock';
+    deps.messageStore.getById = (id) =>
+      id === triggerMessageId
+        ? {
+            id: triggerMessageId,
+            threadId: 'target-thread',
+            userId: 'user1',
+            catId: 'opus',
+            content: '@codex please help on cross thread relay',
+            mentions: ['codex'],
+            timestamp: Date.now(),
+            extra: {
+              crossPost: { sourceThreadId: fullSourceThreadId, sourceInvocationId: 'inv-source-1' },
+            },
+          }
+        : null;
+
+    for await (const _ of routeSerial(deps, ['codex'], 'message body', 'user1', 'target-thread', {
+      currentUserMessageId: triggerMessageId,
+    })) {
+      /* drain */
+    }
+
+    const prompt = captureService.calls[0];
+    assert.ok(
+      prompt.includes(fullSourceThreadId),
+      `prompt must contain FULL sourceThreadId (not truncated): expected "${fullSourceThreadId}" in prompt`,
+    );
+    // Tool-call hint must use raw catId (no bilingual label leakage)
+    assert.ok(
+      prompt.match(/cross_post_message\([^)]*targetCats=\["opus"\]/),
+      `prompt must contain cross_post_message(threadId=..., targetCats=["opus"]) tool-call hint`,
+    );
+  });
+
+  it('queue-path same-thread post (no extra.crossPost): no reply hint injected', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const captureService = createCapturingService('codex', 'ack');
+    const deps = createMockDeps({ codex: captureService });
+
+    const triggerMessageId = '0000000000000002-000002-bbbbbbbb';
+    deps.messageStore.getById = (id) =>
+      id === triggerMessageId
+        ? {
+            id: triggerMessageId,
+            threadId: 'thread-same',
+            userId: 'user1',
+            catId: 'opus',
+            content: 'just a same-thread @ mention',
+            mentions: ['codex'],
+            timestamp: Date.now(),
+            // NO extra.crossPost — same-thread post (or agent-key target-thread write per KD-1 boundary)
+          }
+        : null;
+
+    for await (const _ of routeSerial(deps, ['codex'], 'message body', 'user1', 'thread-same', {
+      currentUserMessageId: triggerMessageId,
+    })) {
+      /* drain */
+    }
+
+    const prompt = captureService.calls[0];
+    // No reply hint section when trigger message lacks crossPost metadata.
+    // The base MCP tools section may still document cross_post_message generically,
+    // so this must assert the F193 reply-hint wording, not the tool name itself.
+    assert.ok(!prompt.includes('来自跨线程消息'), 'no cross-thread reply hint header should be injected');
+    assert.ok(!prompt.includes('回复请用 cross_post_message('), 'no cross-thread reply tool hint should be injected');
   });
 });

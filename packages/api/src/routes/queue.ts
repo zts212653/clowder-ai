@@ -1,56 +1,368 @@
+import { isTaskHandoffSource } from '../domains/ball-custody/OrdinaryTaskHandoffContract.js';
 /**
  * Queue Management API Routes (F39)
  *
  * GET    /api/threads/:threadId/queue               → 列出队列条目
  * DELETE /api/threads/:threadId/queue/:entryId       → 撤回条目
- * POST   /api/threads/:threadId/queue/next          → 手动触发处理下一条
- * POST   /api/threads/:threadId/queue/:entryId/steer → Steer queued entry（立即执行/提到队首）
+ * GET    /api/threads/:threadId/queue/:entryId/targets → 读取同源逐目标终局/待处理真相
+ * POST   /api/threads/:threadId/queue/:entryId/targets → 绑定同源逐目标意图并通过共同 Queue 执行 Steer
+ * POST   /api/threads/:threadId/queue/:entryId/steer → Steer queued entry（取消当前轮并以同一消息立即启动）
+ * POST   /api/threads/:threadId/queue/:entryId/continue → 立即引导当前回复，或保留为排队等待
+ * POST   /api/threads/:threadId/queue/:entryId/append → Append queued entry into exact existing Active Run(s)
  * PATCH  /api/threads/:threadId/queue/:entryId/move → 重排序（上移/下移）
+ * PATCH  /api/threads/:threadId/queue/reorder       → F175: 批量设置 position（拖拽重排）
  * DELETE /api/threads/:threadId/queue               → 清空队列
  * POST   /api/threads/:threadId/cancel/:catId       → F122B AC-B9: Per-cat cancel
  */
 
-import type { CatId } from '@cat-cafe/shared';
+import { randomUUID } from 'node:crypto';
+import type { CatId, FreshnessCarrierCapability } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import {
+  type AgentSessionMutexLike,
+  agentSessionMutex,
+} from '../domains/cats/services/agents/invocation/AgentSessionMutex.js';
+import {
+  type ActiveInvocationProjection,
+  type InvocationTrackerLike,
+  resolveActiveInvocations,
+  responseStatusFromMessages,
+} from '../domains/cats/services/agents/invocation/active-execution-service.js';
+import {
+  type InvocationQueue,
+  isSystemPinnedQueueEntry,
+  type QueueEntry,
+  queueEntryMessageIds,
+  queueEntryOwnerId,
+  queueEntryTargetCats,
+} from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import { DEFAULT_PRESTART_RESERVATION_TTL_MS } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
+import {
+  projectLifecycleAppendAction,
+  projectLifecycleAppendCapability,
+} from '../domains/cats/services/agents/invocation/lifecycle-append-projection.js';
+import { emitLifecycleMessageUpdated } from '../domains/cats/services/agents/invocation/lifecycle-message-update.js';
+import type { NativeControlReceiptPort } from '../domains/cats/services/agents/invocation/NativeControlReceipt.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
-import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
-import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { queueEntryId } from '../domains/cats/services/agents/invocation/queue-ledger/QueueLedger.js';
+import { settleResponseFromDraft } from '../domains/cats/services/agents/invocation/response-draft-settlement.js';
+import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
+import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
+import { type IMessageStore, isTimelinePublished } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import type { ITurnExecutionStore } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
+import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
+import type { CliExecutionOwnerService, LiveCliExecutionOwner } from '../utils/cli-process-ownership.js';
+import {
+  emitQueueUpdated,
+  enrichQueueEntries,
+  isPublicQueueEntry,
+  projectPublicQueueEntry,
+} from '../utils/queue-enrichment.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { type LiveExecutionCandidate, registerActiveExecutionRoutes } from './active-execution-routes.js';
+import { commitRecoveredFailedResponse } from './callback-a2a-trigger.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
+import { resolveQueueAuthorIntentByCatId } from './message-disposition-admission.js';
+import { nativeControlReceiptHooks, nativeQueueControlCommand } from './native-control-receipts.js';
+import { registerQueueRoutingRecovery } from './queue-routing-recovery.js';
+import { admitThreadParticipants } from './thread-participant-admission.js';
 
-interface InvocationTrackerLike {
-  has(threadId: string, catId?: string): boolean;
-  getUserId(threadId: string, catId: string): string | null;
-  cancel(
+interface ManagedCommandWakeRecoveryLike {
+  retireCarrier(messageIds: readonly string[], reason: 'withdrawn'): Promise<number>;
+  retireThread(
     threadId: string,
-    catId: string,
-    requestUserId?: string,
-    abortReason?: string,
-  ): { cancelled: boolean; catIds: string[] };
-  /** Issue #83: Get all active catIds for a thread (F5 refresh recovery) */
-  getActiveSlots(threadId: string): string[];
+    userId: string,
+    reason: 'force_reset',
+  ): Promise<{ retired: number; messageIds: string[] }>;
 }
 
 export interface QueueRoutesOptions {
+  controlReceipts?: () => NativeControlReceiptPort | undefined;
   threadStore: IThreadStore;
   invocationQueue: InvocationQueue;
   queueProcessor: QueueProcessor;
   invocationTracker: InvocationTrackerLike;
+  /** Exact concrete provider carrier used by active-turn delivery surfaces. */
+  resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined;
+  /** Current roster availability, rechecked when a Steer plan is committed. */
+  isCatAvailable?: (catId: CatId) => boolean;
+  /** Shared owner-aware session lock released by explicit terminal actions. */
+  agentSessionMutex?: AgentSessionMutexLike;
   socketManager: SocketManager;
-  /** F117: MessageStore for marking queued messages as canceled on withdraw/clear */
+  /** MessageStore supplies History preview/lifecycle truth; Queue withdrawal never deletes author history. */
   messageStore?: IMessageStore;
+  /** F194 Phase B: canonical liveness read source. When omitted, GET /queue's activeInvocations
+   *  falls back to legacy tracker-only enumeration for backward compat in tests. */
+  invocationRecordStore?: IInvocationRecordStore;
+  /** F117 KD-21: the streamed body a response R settles with when a stop ends it outside its route. */
+  draftStore?: IDraftStore;
+  /** Durable child turns: the KD-21 ledger, and a running child standing in for an owner no snapshot can verify. */
+  turnExecutionStore?: Pick<
+    ITurnExecutionStore,
+    'get' | 'listByParent' | 'transitionTerminal' | 'clearResponsePending'
+  >;
+  /** Existing managed-wake receipt owner; late-bound after delivery composition. */
+  getManagedCommandWakeRecovery?: () => ManagedCommandWakeRecoveryLike | undefined;
+  /** F295: existing durable task truth used only to project active managed commands. */
+  dynamicTaskStore?: Pick<DynamicTaskStore, 'getAll'>;
+  /**
+   * F297 AC-D3: the one composition service. Supplying it lets the 4s project scan reuse the
+   * same sparse candidate algorithm as Sidebar without rereading managed-command truth twice.
+   */
+  activeExecutionService?: {
+    buildLiveCandidateSnapshot(userId: string): Promise<{ threadIds: readonly string[]; complete: boolean }>;
+  };
+  /** Durable OS owner truth used when the in-memory tracker handle is gone. */
+  cliExecutionOwnerService?: CliExecutionOwnerService;
+}
+
+function liveExecutionCandidateKey(candidate: Pick<LiveExecutionCandidate, 'catId' | 'executionId'>): string {
+  return `${candidate.catId}\u0000${candidate.executionId ?? ''}`;
+}
+
+interface ProcessOwnerSnapshot {
+  readonly owners: readonly LiveCliExecutionOwner[];
+  readonly complete: boolean;
+}
+
+const processOwnerSnapshotByRequest = new WeakMap<FastifyRequest, Promise<ProcessOwnerSnapshot>>();
+const CONTROL_PLANE_RETRY_ATTEMPTS = 3;
+const CONTROL_PLANE_RETRY_DELAY_MS = 50;
+
+type ExecutionFailureReason = 'control_plane_unavailable' | 'execution_owner_lost';
+
+function executionFailureExplanation(reason: ExecutionFailureReason): string {
+  return reason === 'control_plane_unavailable' ? '执行控制面不可用' : '执行进程归属已丢失';
+}
+
+async function waitForControlPlaneRetry(): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, CONTROL_PLANE_RETRY_DELAY_MS));
+}
+
+async function processOwnerSnapshotForRequest(
+  request: FastifyRequest,
+  service: CliExecutionOwnerService | undefined,
+): Promise<ProcessOwnerSnapshot> {
+  if (!service) return { owners: [], complete: true };
+  const cached = processOwnerSnapshotByRequest.get(request);
+  if (cached) return cached;
+  const pending = service
+    .listLive()
+    .then((snapshot) => ({ owners: snapshot.owners, complete: snapshot.complete }))
+    .catch((err) => {
+      request.log.warn({ err }, 'CLI execution owner snapshot unavailable; active execution scan will fail open');
+      return { owners: [], complete: false };
+    });
+  processOwnerSnapshotByRequest.set(request, pending);
+  return pending;
+}
+
+async function retryProcessOwnerSnapshot(
+  request: FastifyRequest,
+  service: CliExecutionOwnerService | undefined,
+): Promise<ProcessOwnerSnapshot> {
+  if (!service) return { owners: [], complete: true };
+  let latest = await processOwnerSnapshotForRequest(request, service);
+  for (let attempt = 1; !latest.complete && attempt < CONTROL_PLANE_RETRY_ATTEMPTS; attempt += 1) {
+    await waitForControlPlaneRetry();
+    try {
+      const snapshot = await service.listLive();
+      latest = { owners: snapshot.owners, complete: snapshot.complete };
+    } catch (err) {
+      request.log.warn({ err, attempt }, 'CLI execution owner retry failed');
+      latest = { owners: [], complete: false };
+    }
+  }
+  processOwnerSnapshotByRequest.set(request, Promise.resolve(latest));
+  return latest;
+}
+
+function projectCanonicalLiveCandidate(
+  threadId: string,
+  fallbackUserId: string,
+  candidate: ActiveInvocationProjection,
+  tracker: InvocationTrackerLike,
+): LiveExecutionCandidate {
+  const ownerUserId = tracker.getUserId(threadId, candidate.catId) ?? fallbackUserId;
+  const trackerExecutionId = tracker.getExecutionId?.(threadId, candidate.catId);
+  const append = projectLifecycleAppendCapability({
+    threadId,
+    userId: fallbackUserId,
+    targetId: candidate.catId,
+    activeRun: candidate.activeRun,
+    invocationTracker: tracker,
+  });
+  return {
+    ...candidate,
+    ...(candidate.turnInvocationId ? { invocationId: candidate.turnInvocationId } : {}),
+    ownerUserId,
+    controlSource: candidate.executionId && trackerExecutionId === candidate.executionId ? 'tracker' : 'unavailable',
+    ...(append.available ? { inputCapabilities: { append: append.capability } } : {}),
+  };
+}
+
+async function resolveLiveExecutionCandidates(
+  threadId: string,
+  userId: string,
+  request: FastifyRequest,
+  opts: QueueRoutesOptions,
+): Promise<LiveExecutionCandidate[]> {
+  // F117 KD-23: one owner snapshot per request. The classifier weighs running children against it,
+  // and the same owners become process-owned candidates below.
+  const processOwnerSnapshot = await processOwnerSnapshotForRequest(request, opts.cliExecutionOwnerService);
+  const canonical = await resolveActiveInvocations(
+    threadId,
+    userId,
+    opts.invocationTracker,
+    opts.invocationRecordStore,
+    opts.messageStore ? responseStatusFromMessages(opts.messageStore) : undefined,
+    opts.turnExecutionStore,
+    request.log,
+    opts.cliExecutionOwnerService ? processOwnerSnapshot : undefined,
+  );
+  const byExecution = new Map<string, LiveExecutionCandidate>();
+  for (const candidate of canonical) {
+    const projected = projectCanonicalLiveCandidate(threadId, userId, candidate, opts.invocationTracker);
+    byExecution.set(liveExecutionCandidateKey(projected), projected);
+  }
+  for (const owner of processOwnerSnapshot.owners) {
+    if (owner.threadId !== threadId) continue;
+    const candidate: LiveExecutionCandidate = {
+      catId: owner.catId,
+      startedAt: owner.startedAt,
+      executionId: owner.executionId,
+      invocationId: owner.invocationId,
+      ownerUserId: owner.userId,
+      controlSource: processOwnerSnapshot.complete ? 'process_owner' : 'unavailable',
+    };
+    const key = liveExecutionCandidateKey(candidate);
+    byExecution.delete(liveExecutionCandidateKey({ catId: owner.catId }));
+    const existing = byExecution.get(key);
+    byExecution.set(
+      key,
+      existing?.controlSource === 'tracker'
+        ? { ...candidate, ...existing, invocationId: owner.invocationId }
+        : { ...existing, ...candidate },
+    );
+  }
+  return [...byExecution.values()];
+}
+
+async function terminalizeTrackerlessTurn(input: {
+  turnExecutionStore: Pick<ITurnExecutionStore, 'transitionTerminal'> | undefined;
+  invocationId: string;
+  threadId: string;
+  catId: string;
+  executionId: string;
+  request: FastifyRequest;
+}): Promise<void> {
+  try {
+    await input.turnExecutionStore?.transitionTerminal(input.invocationId, {
+      status: 'canceled',
+      endedAt: Date.now(),
+      terminalReason: 'user_cancel',
+    });
+  } catch (err) {
+    // The provider iterator normally performs the same idempotent transition
+    // when SIGTERM unwinds it. Keep the process cancellation successful, but
+    // retain a loud recovery signal if durable terminalization is unavailable.
+    input.request.log.error(
+      {
+        err,
+        threadId: input.threadId,
+        catId: input.catId,
+        executionId: input.executionId,
+        invocationId: input.invocationId,
+      },
+      'tracker-less process canceled but child terminalization failed',
+    );
+  }
+}
+
+async function retireWithdrawnManagedWake(opts: QueueRoutesOptions, entry: QueueEntry): Promise<void> {
+  const recovery = opts.getManagedCommandWakeRecovery?.();
+  if (!recovery) return;
+  await recovery.retireCarrier(queueEntryMessageIds(entry), 'withdrawn');
 }
 
 const moveBodySchema = z.object({
   direction: z.enum(['up', 'down']),
 });
 
-const steerBodySchema = z.object({
-  mode: z.enum(['promote', 'immediate']),
-});
+const steerBodySchema = z
+  .object({
+    mode: z.literal('immediate').optional(),
+    targetCatId: z.string().min(1).optional(),
+  })
+  .strict();
+
+const continueBodySchema = z.object({ targetCatId: z.string().min(1) }).strict();
+
+const steerTargetsBodySchema = z
+  .object({
+    sourceRecordId: z.string().min(1),
+    observedPendingTargetIds: z.array(z.string().min(1)),
+    targets: z
+      .array(
+        z
+          .object({
+            targetCatId: z.string().min(1),
+            strategy: z.enum(['guide_reply', 'interrupt_reply']),
+            membershipAtOpen: z.enum(['member', 'admit']),
+          })
+          .strict(),
+      )
+      .min(1)
+      .superRefine((targets, context) => {
+        const seen = new Set<string>();
+        for (const target of targets) {
+          if (seen.has(target.targetCatId)) {
+            context.addIssue({ code: z.ZodIssueCode.custom, message: `Duplicate target: ${target.targetCatId}` });
+          }
+          seen.add(target.targetCatId);
+        }
+      }),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (new Set(value.observedPendingTargetIds).size !== value.observedPendingTargetIds.length) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'Duplicate observed pending target' });
+    }
+  });
+
+const appendBodySchema = z
+  .object({
+    expectedQueueRevision: z.string().min(1),
+    expectedRuns: z
+      .array(
+        z
+          .object({
+            targetId: z.string().min(1),
+            invocationId: z.string().min(1),
+            responseMessageId: z.string().min(1),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+
+function projectQueueStartResult(result: { started: boolean; entry?: QueueEntry }) {
+  return result.entry && isPublicQueueEntry(result.entry)
+    ? { ...result, entry: projectPublicQueueEntry(result.entry) }
+    : { started: result.started };
+}
+
+async function cancelUnpublishedQueueSource(messageStore: IMessageStore | undefined, messageId: string): Promise<void> {
+  const source = await messageStore?.getById(messageId);
+  // Queue owns only future work. Published speech and existing delivery refs
+  // remain History even when the owner withdraws its remaining Queue target.
+  if (source && (isTimelinePublished(source) || source.lifecycle?.dispatchRefs?.length)) return;
+  await messageStore?.markCanceled(messageId);
+}
 
 /**
  * Auth + ownership guard.
@@ -61,7 +373,7 @@ async function guardThreadOwnership(
   reply: FastifyReply,
   threadStore: IThreadStore,
   threadId: string,
-): Promise<{ userId: string } | null> {
+): Promise<{ userId: string; thread: Thread } | null> {
   const userId = resolveUserId(request, {});
   if (!userId) {
     reply.status(401);
@@ -83,11 +395,602 @@ async function guardThreadOwnership(
     return null;
   }
 
-  return { userId };
+  return { userId, thread };
 }
 
 export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, opts) => {
   const { threadStore, invocationQueue, queueProcessor, invocationTracker, socketManager, messageStore } = opts;
+  registerQueueRoutingRecovery(app, opts, (request, reply, threadId) =>
+    guardThreadOwnership(request, reply, threadStore, threadId),
+  );
+  const sessionLocks = opts.agentSessionMutex ?? agentSessionMutex;
+  const releaseAgentSessionLocks = (
+    scope: { threadId: string; userId: string; catId?: string },
+    request: FastifyRequest,
+    reason: 'steer' | 'cancel' | 'force-reset',
+    preserveHolderExecutionIds: readonly string[] = [],
+  ) => {
+    const result = sessionLocks.forceReleaseByScope(scope, { preserveHolderExecutionIds });
+    if (result.releasedHolders > 0 || result.rejectedWaiters > 0) {
+      request.log.warn(
+        { event: 'agent_session_mutex_force_release', reason, scope, ...result },
+        'Released stuck agent session locks after terminal action',
+      );
+    }
+    return result;
+  };
+  const releaseSlotUnlessExecutionOwnsRetirement = (threadId: string, catId: string): void => {
+    // A QueueProcessor execute promise must retain its reservation until its
+    // finally path records the cancellation and drains the next row. Releasing
+    // it here makes that completion stale and strands following Queue work.
+    if (!queueProcessor.hasProcessingSlotReservation(threadId, catId)) {
+      queueProcessor.releaseSlot(threadId, catId);
+    }
+  };
+
+  const preemptSteerTarget = async (
+    threadId: string,
+    userId: string,
+    steerCatId: string,
+    reservedEntryId: string,
+    request: FastifyRequest,
+  ): Promise<{ ok: true; deferred: boolean } | { ok: false; status: 409 | 503; error: string; code: string }> => {
+    if (invocationTracker.has(threadId, steerCatId)) {
+      const activeUserId = invocationTracker.getUserId(threadId, steerCatId);
+      if (activeUserId && activeUserId !== userId) {
+        return { ok: false, status: 409, error: '当前有其他用户的调用在执行，无法立即执行', code: 'INVOCATION_ACTIVE' };
+      }
+      const cancelResult = invocationTracker.cancel(threadId, steerCatId, userId, 'preempted');
+      releaseAgentSessionLocks(
+        { threadId, userId, catId: steerCatId },
+        request,
+        'steer',
+        cancelResult.executionIds ?? [],
+      );
+      if (cancelResult.cancelled) {
+        const scopedResult = { ...cancelResult, catIds: [steerCatId] };
+        for (const message of buildCancelMessages(scopedResult)) {
+          socketManager.broadcastAgentMessage(message, threadId);
+        }
+      }
+      getMultiMentionOrchestrator().abortBySlot(threadId, steerCatId as CatId);
+      if (!cancelResult.cancelled && invocationTracker.has(threadId, steerCatId)) {
+        return { ok: false, status: 409, error: '当前调用无法取消，无法立即执行', code: 'INVOCATION_CANCEL_FAILED' };
+      }
+      queueProcessor.releaseSlot(threadId, steerCatId);
+      return { ok: true, deferred: false };
+    }
+
+    releaseAgentSessionLocks({ threadId, userId, catId: steerCatId }, request, 'steer');
+    const inflight = invocationQueue.findProcessingByCat(threadId, steerCatId, reservedEntryId);
+    if (inflight && queueEntryOwnerId(inflight) !== userId) {
+      return { ok: false, status: 409, error: '当前有其他用户的调用在执行，无法立即执行', code: 'INVOCATION_ACTIVE' };
+    }
+    if (!inflight) {
+      return { ok: true, deferred: false };
+    }
+
+    // A tracker-less processing entry is in the create→startAll window. Install
+    // a retirement barrier before awaiting durable terminalization; the old
+    // coroutine loses its reservation immediately, while the complete group
+    // remains visible and recoverable until every durable projection closes.
+    const retirement = await queueProcessor.retirePrestartProcessingGroup(threadId, steerCatId, userId);
+    if (retirement === 'state_changed') {
+      return { ok: false, status: 409, error: '启动中的队列状态已变化，请重试', code: 'PRESTART_STATE_CHANGED' };
+    }
+    if (retirement === 'terminalization_failed') {
+      return {
+        ok: false,
+        status: 503,
+        error: '旧队列条目的持久终态未完全写入，请重试',
+        code: 'PRESTART_TERMINALIZATION_FAILED',
+      };
+    }
+    // Durable retirement committed and released the old barrier. The route can
+    // now atomically claim its already-persisted exact reservation in this turn.
+    return { ok: true, deferred: false };
+  };
+
+  const failUncontrollableInvocation = async (input: {
+    threadId: string;
+    userId: string;
+    catId: string;
+    executionId: string;
+    invocationId?: string;
+    request: FastifyRequest;
+    reason?: ExecutionFailureReason;
+  }): Promise<{ reconciled: boolean }> => {
+    if (!messageStore || !opts.invocationRecordStore) {
+      throw new Error('durable execution failure stores are unavailable');
+    }
+    const hasReplacementProducer = () =>
+      queueProcessor.hasProcessingSlotReservation(input.threadId, input.catId) &&
+      !queueProcessor.hasProcessingSlotReservation(input.threadId, input.catId, input.executionId);
+    const failedAt = Date.now();
+    const failureReason = input.reason ?? 'control_plane_unavailable';
+    const childExecutions = opts.turnExecutionStore
+      ? (await opts.turnExecutionStore.listByParent(input.executionId)).filter(
+          (child) => child.threadId === input.threadId && child.userId === input.userId && child.catId === input.catId,
+        )
+      : [];
+    const childInvocationIds = [
+      ...new Set([
+        ...(input.invocationId ? [input.invocationId] : []),
+        ...childExecutions.map((child) => child.invocationId),
+      ]),
+    ];
+    // KD-21: the turn ends first, which enters it in the response-pending ledger atomically; its R
+    // settles next, so a settlement that fails here is retried by the next startup.
+    for (const invocationId of childInvocationIds) {
+      await opts.turnExecutionStore?.transitionTerminal(invocationId, {
+        status: 'failed',
+        endedAt: failedAt,
+        terminalReason: failureReason,
+      });
+    }
+    let responseTerminalized = false;
+    for (const invocationId of childInvocationIds) {
+      // KD-21: the failed R carries what the turn had streamed, then the draft goes.
+      const settlement = await settleResponseFromDraft(
+        {
+          messageStore,
+          ...(opts.draftStore ? { draftStore: opts.draftStore } : {}),
+          ...(opts.turnExecutionStore ? { turnStore: opts.turnExecutionStore } : {}),
+          ...(opts.invocationRecordStore ? { invocationRecords: opts.invocationRecordStore } : {}),
+          commitFailedResponse: (response, patch) =>
+            commitRecoveredFailedResponse(
+              {
+                socketManager,
+                messageStore,
+                invocationQueue,
+                queueProcessor,
+                log: app.log,
+              },
+              response,
+              patch,
+            ),
+          emit: (userId, message) => emitLifecycleMessageUpdated(socketManager, userId, message),
+        },
+        {
+          userId: input.userId,
+          threadId: input.threadId,
+          invocationId,
+          status: 'failed',
+          reason: failureReason,
+          endedAt: failedAt,
+          explanation: executionFailureExplanation(failureReason),
+        },
+      );
+      if (settlement.kind !== 'no_response') responseTerminalized = true;
+    }
+
+    const inflight = invocationQueue.findProcessingByCat(input.threadId, input.catId);
+    if (!responseTerminalized && inflight && !hasReplacementProducer()) {
+      if (queueEntryOwnerId(inflight) !== input.userId) throw new Error('pre-start execution owner changed');
+      const outcome = await queueProcessor.failPrestartProcessingGroup(
+        input.threadId,
+        input.catId,
+        input.userId,
+        failureReason,
+      );
+      if (outcome !== 'retired') throw new Error(`pre-start failure terminalization ${outcome}`);
+    }
+
+    const record = await opts.invocationRecordStore.get(input.executionId);
+    const siblingCatIds = (record?.targetCats ?? []).filter((catId) => catId !== input.catId);
+    const ownerSnapshot = await processOwnerSnapshotForRequest(input.request, opts.cliExecutionOwnerService);
+    const siblingStillActive = siblingCatIds.some(
+      (catId) =>
+        invocationTracker.has(input.threadId, catId) ||
+        ownerSnapshot.owners.some(
+          (owner) =>
+            owner.executionId === input.executionId &&
+            owner.threadId === input.threadId &&
+            owner.userId === input.userId &&
+            owner.catId === catId,
+        ),
+    );
+    if (record?.status === 'running' && !siblingStillActive) {
+      const updated = await opts.invocationRecordStore.update(input.executionId, {
+        status: 'failed',
+        error: failureReason,
+        expectedStatus: 'running',
+      });
+      if (!updated) throw new Error('control-plane failure parent terminalization lost its running fence');
+    }
+
+    // Durable repair may await while another invocation owns this cat's local
+    // settlement. Never retire that producer's locks or reservation for this orphan.
+    if (!hasReplacementProducer()) {
+      releaseAgentSessionLocks(
+        { threadId: input.threadId, userId: input.userId, catId: input.catId },
+        input.request,
+        'cancel',
+      );
+      if (queueProcessor.canReleaseSlotForUser(input.threadId, input.catId, input.userId)) {
+        queueProcessor.releaseSlot(input.threadId, input.catId);
+      }
+    }
+    for (const message of buildCancelMessages({
+      cancelled: true,
+      catIds: [input.catId],
+      executionIds: [input.executionId],
+    })) {
+      socketManager.broadcastAgentMessage(message, input.threadId);
+    }
+    return { reconciled: true };
+  };
+
+  const cancelProcessOwnedInvocation = async (input: {
+    threadId: string;
+    userId: string;
+    catId: string;
+    executionId: string;
+    invocationId: string;
+    ownerUserId?: string;
+    request: FastifyRequest;
+  }): Promise<{ cancelled: boolean; reconciled?: boolean; controlPlaneUnavailable?: boolean }> => {
+    const executionOwner = {
+      executionId: input.executionId,
+      invocationId: input.invocationId,
+      threadId: input.threadId,
+      catId: input.catId,
+      userId: input.ownerUserId ?? input.userId,
+    };
+    let processResult = await opts.cliExecutionOwnerService?.terminateExact(executionOwner);
+    for (
+      let attempt = 1;
+      processResult && !processResult.complete && attempt < CONTROL_PLANE_RETRY_ATTEMPTS;
+      attempt += 1
+    ) {
+      await waitForControlPlaneRetry();
+      processResult = await opts.cliExecutionOwnerService?.terminateExact(executionOwner);
+    }
+    if (!processResult?.complete) {
+      try {
+        await failUncontrollableInvocation({ ...input, invocationId: input.invocationId });
+        return { cancelled: false, reconciled: true };
+      } catch (err) {
+        input.request.log.error({ err, ...executionOwner }, 'failed to persist control-plane failure terminal');
+        return { cancelled: false, controlPlaneUnavailable: true };
+      }
+    }
+    // The request already resolved this exact live owner. A zero-signal result
+    // means it exited in the snapshot-to-signal race; cancellation is
+    // idempotently complete and its durable child truth still needs closing.
+    await terminalizeTrackerlessTurn({
+      turnExecutionStore: opts.turnExecutionStore,
+      invocationId: input.invocationId,
+      threadId: input.threadId,
+      catId: input.catId,
+      executionId: input.executionId,
+      request: input.request,
+    });
+    releaseAgentSessionLocks(
+      { threadId: input.threadId, userId: input.ownerUserId ?? input.userId, catId: input.catId },
+      input.request,
+      'cancel',
+      [input.executionId],
+    );
+    for (const message of buildCancelMessages({
+      cancelled: true,
+      catIds: [input.catId],
+      executionIds: [input.executionId],
+    })) {
+      socketManager.broadcastAgentMessage(message, input.threadId);
+    }
+    return { cancelled: true };
+  };
+
+  const cancelTrackedInvocation = (input: {
+    threadId: string;
+    userId: string;
+    catId: string;
+    request: FastifyRequest;
+  }): { cancelled: boolean } => {
+    const cancelResult = invocationTracker.cancel(input.threadId, input.catId, input.userId, 'user_cancel');
+    releaseAgentSessionLocks(
+      { threadId: input.threadId, userId: input.userId, catId: input.catId },
+      input.request,
+      'cancel',
+      cancelResult.executionIds ?? [],
+    );
+    if (cancelResult.cancelled) {
+      for (const message of buildCancelMessages({ ...cancelResult, catIds: [input.catId] })) {
+        socketManager.broadcastAgentMessage(message, input.threadId);
+      }
+      releaseSlotUnlessExecutionOwnsRetirement(input.threadId, input.catId);
+    }
+    return { cancelled: cancelResult.cancelled };
+  };
+
+  const reconcileInactiveLiveInvocation = async (input: {
+    threadId: string;
+    userId: string;
+    catId: string;
+    executionId: string;
+    request: FastifyRequest;
+  }): Promise<{
+    reconciled: boolean;
+    replacement?: boolean;
+    controlPlaneUnavailable?: boolean;
+    error?: string;
+    code?: string;
+  }> => {
+    const trackerExecutionId = invocationTracker.getExecutionId?.(input.threadId, input.catId);
+    if (invocationTracker.has(input.threadId, input.catId)) {
+      const result = cancelTrackedInvocation(input);
+      return {
+        reconciled: result.cancelled,
+        ...(trackerExecutionId !== input.executionId ? { replacement: true } : {}),
+      };
+    }
+
+    const processSnapshot = await retryProcessOwnerSnapshot(input.request, opts.cliExecutionOwnerService);
+    if (!processSnapshot.complete) {
+      try {
+        return await failUncontrollableInvocation(input);
+      } catch (err) {
+        input.request.log.error(
+          { err, threadId: input.threadId, catId: input.catId, executionId: input.executionId },
+          'failed to persist control-plane failure terminal',
+        );
+        return {
+          reconciled: false,
+          controlPlaneUnavailable: true,
+          error: '执行失败终态未能持久化，请重试',
+          code: 'EXECUTION_TERMINAL_PERSISTENCE_UNAVAILABLE',
+        };
+      }
+    }
+    const processOwner = processSnapshot.owners.find(
+      (owner) => owner.threadId === input.threadId && owner.catId === input.catId && owner.userId === input.userId,
+    );
+    if (processOwner) {
+      const result = await cancelProcessOwnedInvocation({
+        ...input,
+        executionId: processOwner.executionId,
+        invocationId: processOwner.invocationId,
+        ownerUserId: processOwner.userId,
+      });
+      return {
+        reconciled: result.cancelled || result.reconciled === true,
+        ...(processOwner.executionId !== input.executionId ? { replacement: true } : {}),
+        ...(result.controlPlaneUnavailable ? { controlPlaneUnavailable: true } : {}),
+      };
+    }
+
+    const inflight = invocationQueue.findProcessingByCat(input.threadId, input.catId);
+    if (inflight && queueEntryOwnerId(inflight) !== input.userId) {
+      return {
+        reconciled: false,
+        controlPlaneUnavailable: true,
+        error: '当前执行归属已变化，请重试',
+        code: 'EXECUTION_OWNER_CHANGED',
+      };
+    }
+    if (inflight) {
+      const retirement = await queueProcessor.retirePrestartProcessingGroup(input.threadId, input.catId, input.userId);
+      if (retirement === 'terminalization_failed') {
+        return {
+          reconciled: false,
+          controlPlaneUnavailable: true,
+          error: '启动中的执行未能写入持久终态，请重试',
+          code: 'PRESTART_TERMINALIZATION_FAILED',
+        };
+      }
+      if (retirement === 'state_changed') {
+        return {
+          reconciled: false,
+          controlPlaneUnavailable: true,
+          error: '启动中的执行状态已变化，请重试',
+          code: 'PRESTART_STATE_CHANGED',
+        };
+      }
+    }
+
+    // Re-check after durable retirement: a newer run may have claimed the cat
+    // while the request awaited Redis. Never release that run's lock or slot.
+    if (invocationTracker.has(input.threadId, input.catId)) {
+      const replacementExecutionId = invocationTracker.getExecutionId?.(input.threadId, input.catId);
+      const result = cancelTrackedInvocation(input);
+      return {
+        reconciled: result.cancelled,
+        ...(replacementExecutionId !== input.executionId ? { replacement: true } : {}),
+      };
+    }
+
+    let canceledRecord = false;
+    if (opts.invocationRecordStore) {
+      const runningRecords = await opts.invocationRecordStore.listRunningByThread(input.threadId, input.userId);
+      const exactRecord = runningRecords.find(
+        (record) => record.id === input.executionId && (record.targetCats as string[]).includes(input.catId),
+      );
+      if (exactRecord) {
+        const siblingStillActive = (exactRecord.targetCats as string[])
+          .filter((catId) => catId !== input.catId)
+          .some((catId) => invocationTracker.has(input.threadId, catId));
+        if (!siblingStillActive) {
+          await opts.invocationRecordStore.update(exactRecord.id, { status: 'canceled' });
+          canceledRecord = true;
+        }
+      }
+    }
+
+    if (invocationTracker.has(input.threadId, input.catId)) {
+      const replacementExecutionId = invocationTracker.getExecutionId?.(input.threadId, input.catId);
+      const result = cancelTrackedInvocation(input);
+      return {
+        reconciled: result.cancelled,
+        ...(replacementExecutionId !== input.executionId ? { replacement: true } : {}),
+      };
+    }
+    const lockRelease = releaseAgentSessionLocks(
+      { threadId: input.threadId, userId: input.userId, catId: input.catId },
+      input.request,
+      'cancel',
+    );
+    const canReleaseSlot = queueProcessor.canReleaseSlotForUser(input.threadId, input.catId, input.userId);
+    if (canReleaseSlot && !invocationTracker.has(input.threadId, input.catId)) {
+      queueProcessor.releaseSlot(input.threadId, input.catId);
+    }
+    // The socket projection is only a legacy witness. Once every authoritative
+    // source says the exact run is gone, publish convergence even when there was
+    // no remaining local artifact to remove.
+    for (const message of buildCancelMessages({
+      cancelled: true,
+      catIds: [input.catId],
+      executionIds: [input.executionId],
+    })) {
+      socketManager.broadcastAgentMessage(message, input.threadId);
+    }
+    return {
+      reconciled: Boolean(
+        inflight ||
+          canceledRecord ||
+          lockRelease.releasedHolders > 0 ||
+          lockRelease.rejectedWaiters > 0 ||
+          canReleaseSlot,
+      ),
+    };
+  };
+
+  const resolveAndRepairLiveExecutions = async (
+    threadId: string,
+    userId: string,
+    request: FastifyRequest,
+  ): Promise<LiveExecutionCandidate[]> => {
+    const candidates = await resolveLiveExecutionCandidates(threadId, userId, request, opts);
+    // Without an owner service nobody can tell whether a process owns a running record: the
+    // classifier then lists it as unverified, and repairing it here would erase that.
+    if (!opts.invocationRecordStore || !opts.cliExecutionOwnerService) return candidates;
+    const processSnapshot = await processOwnerSnapshotForRequest(request, opts.cliExecutionOwnerService);
+    if (!processSnapshot.complete) return candidates;
+    const ownerExecutionTargets = new Set(
+      processSnapshot.owners
+        .filter((owner) => owner.threadId === threadId && owner.userId === userId)
+        .map((owner) => `${owner.executionId}\u0000${owner.catId}`),
+    );
+    const repairedExecutionIds = new Set<string>();
+    const runningRecords = await opts.invocationRecordStore.listRunningByThread(threadId, userId);
+    for (const record of runningRecords) {
+      if (Date.now() - record.updatedAt <= DEFAULT_PRESTART_RESERVATION_TTL_MS) continue;
+      // Provider/tracker ownership can end before Queue commits the aggregate
+      // terminal (outbound delivery and cursor acknowledgement still await).
+      // The exact local producer owns that whole parent, including sibling cats.
+      if (record.targetCats.some((catId) => queueProcessor.hasProcessingSlotReservation(threadId, catId, record.id)))
+        continue;
+      const repairTargets = (record.targetCats as string[]).filter((catId) => {
+        const canceled = invocationTracker.getCanceledSlotIdentity?.(threadId, catId);
+        const exactCanceledOwner = canceled?.executionId === record.id && canceled.userId === userId;
+        return (
+          !exactCanceledOwner &&
+          !invocationTracker.has(threadId, catId) &&
+          !ownerExecutionTargets.has(`${record.id}\u0000${catId}`)
+        );
+      });
+      if (repairTargets.length === 0) continue;
+      try {
+        for (const catId of repairTargets) {
+          await failUncontrollableInvocation({
+            threadId,
+            userId,
+            catId,
+            executionId: record.id,
+            request,
+            reason: 'execution_owner_lost',
+          });
+        }
+        const repairedRecord = await opts.invocationRecordStore.get(record.id);
+        if (repairedRecord?.status !== 'running') repairedExecutionIds.add(record.id);
+      } catch (err) {
+        request.log.error(
+          { err, threadId, userId, executionId: record.id, targetCats: repairTargets },
+          'active execution read-repair failed closed',
+        );
+      }
+    }
+    return candidates.filter((candidate) => !candidate.executionId || !repairedExecutionIds.has(candidate.executionId));
+  };
+
+  registerActiveExecutionRoutes(app, {
+    threadStore,
+    ...(opts.controlReceipts ? { controlReceipts: opts.controlReceipts } : {}),
+    ...(opts.turnExecutionStore ? { turnExecutions: opts.turnExecutionStore } : {}),
+    invocationTracker,
+    dynamicTaskStore: opts.dynamicTaskStore,
+    // F297 AC-D3：与 Sidebar 共用同一个 composition service；project scan 只取
+    // live/child 候选，managed-command 表留给随后完整投影读取一次。
+    ...(opts.activeExecutionService
+      ? {
+          buildLiveCandidateSnapshot: async (userId: string, request: FastifyRequest) => {
+            const live = await opts.activeExecutionService!.buildLiveCandidateSnapshot(userId);
+            const processOwners = await processOwnerSnapshotForRequest(request, opts.cliExecutionOwnerService);
+            return {
+              threadIds: [...new Set([...live.threadIds, ...processOwners.owners.map((owner) => owner.threadId)])],
+              complete: live.complete && processOwners.complete,
+            };
+          },
+        }
+      : {}),
+    resolveLiveExecutions: resolveAndRepairLiveExecutions,
+    isLiveExecutionControlPlaneComplete: async (request) =>
+      (await processOwnerSnapshotForRequest(request, opts.cliExecutionOwnerService)).complete,
+    cancelExactLiveInvocation: async ({ threadId, userId, catId, executionId, candidate, request }) => {
+      if (candidate.controlSource === 'process_owner' && opts.cliExecutionOwnerService && candidate.invocationId) {
+        return cancelProcessOwnedInvocation({
+          threadId,
+          userId,
+          catId,
+          executionId,
+          invocationId: candidate.invocationId,
+          ownerUserId: candidate.ownerUserId,
+          request,
+        });
+      }
+      if (candidate.controlSource === 'tracker' && invocationTracker.has(threadId, catId)) {
+        return cancelTrackedInvocation({ threadId, userId, catId, request });
+      }
+      const snapshot = await retryProcessOwnerSnapshot(request, opts.cliExecutionOwnerService);
+      if (!snapshot.complete) {
+        try {
+          await failUncontrollableInvocation({
+            threadId,
+            userId,
+            catId,
+            executionId,
+            ...(candidate.invocationId ? { invocationId: candidate.invocationId } : {}),
+            request,
+          });
+          return { cancelled: false, reconciled: true };
+        } catch (err) {
+          request.log.error({ err, threadId, catId, executionId }, 'failed to persist control-plane failure terminal');
+          return { cancelled: false, controlPlaneUnavailable: true };
+        }
+      }
+      const owner = snapshot.owners.find(
+        (item) => item.threadId === threadId && item.catId === catId && item.userId === userId,
+      );
+      if (owner) {
+        return cancelProcessOwnedInvocation({
+          threadId,
+          userId,
+          catId,
+          executionId: owner.executionId,
+          invocationId: owner.invocationId,
+          ownerUserId: owner.userId,
+          request,
+        });
+      }
+      const reconciled = await reconcileInactiveLiveInvocation({ threadId, userId, catId, executionId, request });
+      return {
+        cancelled: false,
+        reconciled: reconciled.reconciled,
+        ...(reconciled.controlPlaneUnavailable ? { controlPlaneUnavailable: true } : {}),
+      };
+    },
+    reconcileInactiveLiveInvocation,
+  });
 
   // GET /api/threads/:threadId/queue
   app.get<{ Params: { threadId: string } }>('/api/threads/:threadId/queue', async (request, reply) => {
@@ -95,19 +998,112 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
     if (!guard) return;
 
+    const ownerSnapshot = opts.cliExecutionOwnerService
+      ? await processOwnerSnapshotForRequest(request, opts.cliExecutionOwnerService)
+      : undefined;
+    const activeInvocations = (
+      await resolveActiveInvocations(
+        threadId,
+        guard.userId,
+        invocationTracker,
+        opts.invocationRecordStore,
+        opts.messageStore ? responseStatusFromMessages(opts.messageStore) : undefined,
+        opts.turnExecutionStore,
+        request.log,
+        ownerSnapshot,
+      )
+    ).map((invocation) => ({
+      ...invocation,
+      freshnessCarrierCapability: opts.resolveCarrierCapability?.(invocation.catId as CatId) ?? {
+        provider: 'other' as const,
+        carrier: 'other' as const,
+        deliverySemantics: 'undeclared' as const,
+        activeInvocationGuidance: 'undeclared' as const,
+      },
+    }));
+    const queueEntries = invocationQueue.list(threadId, guard.userId);
+    const queueRevision = invocationQueue.snapshotRevision(threadId, guard.userId);
+    const enrichedQueue = await enrichQueueEntries(queueEntries, messageStore);
     return {
-      queue: invocationQueue.list(threadId, guard.userId),
-      paused: queueProcessor.isPaused(threadId),
-      pauseReason: queueProcessor.getPauseReason(threadId),
-      // Issue #83: Expose active invocation slots for F5 refresh recovery.
-      // Frontend can use this to restore processing state even when drafts expire.
-      activeInvocations: invocationTracker.getActiveSlots(threadId),
+      queue: await Promise.all(
+        enrichedQueue.map(async (entry) => {
+          const internal = queueEntries.find((candidate) => candidate.id === entry.id);
+          if (!internal || !messageStore) return entry;
+          const sources = await Promise.all(queueEntryMessageIds(internal).map((id) => messageStore.getById(id)));
+          if (sources.some(isTaskHandoffSource)) return entry;
+          const projection = projectLifecycleAppendAction({
+            threadId,
+            userId: guard.userId,
+            queueRevision,
+            entry: internal,
+            invocationTracker,
+          });
+          return projection.available ? { ...entry, lifecycleActions: { append: projection.action } } : entry;
+        }),
+      ),
+      queueRevision,
+      activeInvocations,
     };
   });
 
+  app.post<{ Params: { threadId: string; entryId: string } }>(
+    '/api/threads/:threadId/queue/:entryId/append',
+    async (request, reply) => {
+      const { threadId, entryId } = request.params;
+      const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
+      if (!guard) return;
+      const parsed = appendBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400);
+        return { error: 'Append 请求格式无效', code: 'INVALID_APPEND_REQUEST' };
+      }
+      const result = await queueProcessor.appendExactEntry({
+        threadId,
+        userId: guard.userId,
+        entryId,
+        ...parsed.data,
+      });
+      if (result.outcome === 'appended') {
+        const queueRevision = invocationQueue.snapshotRevision(threadId, guard.userId);
+        return {
+          ...result,
+          queue: await enrichQueueEntries(invocationQueue.list(threadId, guard.userId), messageStore),
+          queueRevision,
+        };
+      }
+      if (result.recovery?.length) {
+        reply.status(202);
+        return {
+          outcome: 'recovered',
+          recovery: result.recovery,
+          queue: await enrichQueueEntries(invocationQueue.list(threadId, guard.userId), messageStore),
+          queueRevision: invocationQueue.snapshotRevision(threadId, guard.userId),
+        };
+      }
+      const status = result.reason === 'custody_unavailable' ? 503 : result.reason === 'provider_rejected' ? 502 : 409;
+      reply.status(status);
+      return {
+        error:
+          result.reason === 'append_unavailable'
+            ? '当前回复已不能接收补充，消息仍保留在队列中'
+            : result.reason === 'state_changed'
+              ? 'Queue 或 Active Run 已变化，请刷新后重试'
+              : result.reason === 'provider_rejected'
+                ? '这次补充未能确认送达，正在核对消息状态'
+                : '暂时无法更新消息状态，请稍后核对',
+        code: result.reason.toUpperCase(),
+        ...(result.rejectedTargetIds ? { rejectedTargetIds: result.rejectedTargetIds } : {}),
+      };
+    },
+  );
+
   // DELETE /api/threads/:threadId/queue/:entryId
-  app.delete<{ Params: { threadId: string; entryId: string }; Querystring: { deleteMessage?: string } }>(
+  app.delete<{
+    Params: { threadId: string; entryId: string };
+    Querystring: { deleteMessage?: string; expectedSourceMessageId?: string; expectedTargetCatId?: string };
+  }>(
     '/api/threads/:threadId/queue/:entryId',
+    nativeControlReceiptHooks(opts.controlReceipts, nativeQueueControlCommand),
     async (request, reply) => {
       const { threadId, entryId } = request.params;
       const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
@@ -116,52 +1112,604 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       // Check if entry exists and is not processing
       const entries = invocationQueue.list(threadId, guard.userId);
       const entry = entries.find((e) => e.id === entryId);
-      if (!entry) {
+      if (!entry || !isPublicQueueEntry(entry)) {
         reply.status(404);
         return { error: '队列条目不存在', code: 'ENTRY_NOT_FOUND' };
       }
-      if (entry.status === 'processing') {
+      if (entry.status !== 'queued') {
         reply.status(409);
         return { error: '条目正在处理中，无法撤回', code: 'ENTRY_PROCESSING' };
       }
-
-      // F117: Collect message IDs before removing (entry contains messageId + mergedMessageIds)
-      const messageIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(Boolean) as string[];
-
-      const removed = invocationQueue.remove(threadId, guard.userId, entryId);
-      // F122B B6 P2: Clean up completion hook to prevent leak when entry removed before execution
-      queueProcessor.unregisterEntryCompleteHook?.(entryId);
-      socketManager.emitToUser(guard.userId, 'queue_updated', {
-        threadId,
-        queue: invocationQueue.list(threadId, guard.userId),
-        action: 'removed',
-      });
-
-      // F117: Mark queued messages as canceled + emit message_deleted
-      if (messageStore) {
-        for (const msgId of messageIds) {
-          await messageStore.markCanceled(msgId);
-          socketManager.emitToUser(guard.userId, 'message_deleted', {
-            messageId: msgId,
-            threadId,
-            deletedBy: guard.userId,
-          });
+      const { expectedSourceMessageId, expectedTargetCatId } = request.query;
+      const scoped = expectedSourceMessageId !== undefined || expectedTargetCatId !== undefined;
+      const expected = scoped
+        ? z
+            .object({ messageId: z.string().min(1).max(256), catId: z.string().min(1).max(100) })
+            .safeParse({ messageId: expectedSourceMessageId, catId: expectedTargetCatId })
+        : undefined;
+      if (expected && !expected.success)
+        return reply.code(400).send({ error: 'Invalid exact queue source', code: 'INVALID_REQUEST' });
+      const matchesScope = (row: QueueEntry) =>
+        !expected?.success ||
+        (row.payload.messageId === expected.data.messageId &&
+          row.targets.length === 1 &&
+          row.targets[0] === expected.data.catId);
+      if (!matchesScope(entry))
+        return reply.code(409).send({ error: '该队列项不再只包含这次请求，尚未撤回', code: 'ENTRY_SCOPE_CHANGED' });
+      const claimed = await invocationQueue.claimQueuedEntryForWithdrawal(threadId, guard.userId, entryId);
+      if (!claimed) {
+        reply.status(409);
+        return { error: '条目正在处理中，无法撤回', code: 'ENTRY_PROCESSING' };
+      }
+      let removed: QueueEntry | null = null;
+      try {
+        // The async canonical claim may return a newer target set. Never apply a
+        // frozen native control request to it, and never leave a rejected claim held.
+        if (!matchesScope(claimed)) {
+          if (!(await invocationQueue.restoreClaimedEntries(threadId, [entryId])))
+            throw new Error('Scoped Queue withdrawal could not release its claim');
+          return reply.code(409).send({ error: '该队列项范围已变化，尚未撤回', code: 'ENTRY_SCOPE_CHANGED' });
+        }
+        if (expected?.success) {
+          const source = await messageStore?.getById(expected.data.messageId);
+          if (!source || source.userId !== guard.userId || source.threadId !== threadId)
+            throw new Error('Exact Queue source History unavailable');
+          if (source.lifecycle?.dispatchRefs?.some((ref) => ref.targetId !== expected.data.catId)) {
+            if (!(await invocationQueue.restoreClaimedEntries(threadId, [entryId])))
+              throw new Error('Scoped Queue withdrawal could not release its claim');
+            return reply.code(409).send({ error: '该消息还对应其他目标，尚未撤回', code: 'ENTRY_SCOPE_CHANGED' });
+          }
+        }
+        const messageIds = queueEntryMessageIds(claimed);
+        const remaining = invocationQueue.list(threadId, guard.userId).filter((candidate) => candidate.id !== entryId);
+        for (const messageId of messageIds) {
+          const hasSibling = remaining.some((candidate) => queueEntryMessageIds(candidate).includes(messageId));
+          if (!hasSibling) await cancelUnpublishedQueueSource(messageStore, messageId);
+        }
+        removed = await invocationQueue.commitClaimedWithdrawal(threadId, entryId);
+        if (!removed) throw new Error('Queue withdrawal claim changed before commit');
+      } catch (err) {
+        await invocationQueue.restoreClaimedEntries(threadId, [entryId]);
+        request.log.error({ err, entryId, threadId }, 'durable Queue withdrawal failed; entry restored');
+        await emitQueueUpdated(
+          socketManager,
+          guard.userId,
+          threadId,
+          invocationQueue.list(threadId, guard.userId),
+          'withdraw_failed',
+        );
+        reply.status(503);
+        return {
+          error: '撤出未完成，消息仍保留在待处理队列中',
+          code: 'QUEUE_WITHDRAWAL_FAILED',
+          queue: await enrichQueueEntries(invocationQueue.list(threadId, guard.userId), messageStore),
+        };
+      }
+      if (removed) {
+        queueProcessor.registerCallerDispatchQueueWithdrawal(removed);
+        try {
+          await retireWithdrawnManagedWake(opts, removed);
+        } catch (err) {
+          request.log.error({ err, entryId, threadId }, 'managed wake producer retirement deferred to recovery sweep');
         }
       }
+      // F122B B6 P2: Clean up completion hook to prevent leak when entry removed before execution
+      queueProcessor.unregisterEntryCompleteHook?.(entryId);
 
-      return { removed };
+      await emitQueueUpdated(
+        socketManager,
+        guard.userId,
+        threadId,
+        invocationQueue.list(threadId, guard.userId),
+        'removed',
+      );
+
+      return { removed: removed ? projectPublicQueueEntry(removed) : removed };
     },
   );
 
-  // POST /api/threads/:threadId/queue/next
-  app.post<{ Params: { threadId: string } }>('/api/threads/:threadId/queue/next', async (request, reply) => {
-    const { threadId } = request.params;
-    const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
-    if (!guard) return;
+  // GET /api/threads/:threadId/queue/:entryId/targets
+  // Join the one pending Queue target set with actual History dispatch refs.
+  // Queue never manufactures delivered or terminal target state.
+  app.get<{ Params: { threadId: string; entryId: string } }>(
+    '/api/threads/:threadId/queue/:entryId/targets',
+    async (request, reply) => {
+      const { threadId, entryId } = request.params;
+      const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
+      if (!guard) return;
 
-    const result = await queueProcessor.processNext(threadId, guard.userId);
-    return result;
-  });
+      const anchor = invocationQueue
+        .list(threadId, guard.userId)
+        .find((candidate) => candidate.id === entryId && isPublicQueueEntry(candidate));
+      if (
+        !anchor ||
+        anchor.status !== 'queued' ||
+        anchor.kind !== 'conversation_input' ||
+        !anchor.payload.messageId ||
+        isSystemPinnedQueueEntry(anchor)
+      ) {
+        reply.status(409);
+        return { error: '该消息当前不可 Steer', code: 'STEER_ENTRY_UNAVAILABLE' };
+      }
+
+      const source = await messageStore?.getById(anchor.payload.messageId);
+      if (!source || source.threadId !== threadId || source.userId !== guard.userId) {
+        reply.status(409);
+        return { error: '该消息当前不可 Steer', code: 'STEER_SOURCE_UNAVAILABLE' };
+      }
+      const pending = new Set(anchor.targets);
+      const dispatchRefs = source.lifecycle?.dispatchRefs ?? [];
+      const dispatched = new Map(dispatchRefs.map((ref) => [ref.targetId, ref]));
+      const targetIds = [...new Set([...pending, ...dispatched.keys()])];
+      return {
+        sourceRecordId: source.id,
+        targets: targetIds.map((targetCatId) => ({
+          targetCatId,
+          state: dispatched.get(targetCatId)?.phase ?? 'pending',
+          actionable: pending.has(targetCatId) && !dispatched.has(targetCatId),
+          ...(dispatched.get(targetCatId)?.dispatchedAt !== undefined
+            ? { dispatchedAt: dispatched.get(targetCatId)!.dispatchedAt }
+            : {}),
+          ...(dispatched.get(targetCatId)?.statusMessageId
+            ? { statusMessageId: dispatched.get(targetCatId)!.statusMessageId }
+            : {}),
+        })),
+      };
+    },
+  );
+
+  type TargetExecutionResult = { status: number; result: Record<string, unknown> };
+
+  // Both the combined Console operation and the legacy single-target routes use
+  // the same Queue handoff. Intent is bound once, before these execution steps.
+  const guideQueuedTarget = async (
+    threadId: string,
+    userId: string,
+    entryId: string,
+    targetCatId: CatId,
+    authorIntent: NonNullable<ReturnType<typeof resolveQueueAuthorIntentByCatId>[string]>,
+    drain = true,
+    onHandoff?: () => void,
+  ): Promise<TargetExecutionResult> => {
+    if (authorIntent.fallbackAt === undefined) {
+      const append = await queueProcessor.tryAutoAppendExactEntry(
+        { threadId, userId, entryId, targetCatId },
+        onHandoff,
+      );
+      if (append.outcome === 'appended') return { status: 200, result: append };
+      if (append.reason === 'active_run_pending') {
+        if (drain) void queueProcessor.requestDrain(threadId);
+        await emitQueueUpdated(
+          socketManager,
+          userId,
+          threadId,
+          invocationQueue.list(threadId, userId),
+          'continue_current_pending',
+        );
+        return {
+          status: 200,
+          result: { outcome: 'queued', targetCatId, effective: 'continue_current', reason: 'active_run_pending' },
+        };
+      }
+      if (append.reason === 'provider_rejected') {
+        return {
+          status: 502,
+          result: { error: '当前 Agent Client 拒绝了 Append；失败回执已保留', code: 'PROVIDER_REJECTED' },
+        };
+      }
+      await invocationQueue.fallbackQueuedAuthorIntentDurable(
+        threadId,
+        userId,
+        entryId,
+        targetCatId,
+        'parent_terminal_before_exposure',
+      );
+    }
+
+    if (drain) void queueProcessor.requestDrain(threadId);
+    await emitQueueUpdated(
+      socketManager,
+      userId,
+      threadId,
+      invocationQueue.list(threadId, userId),
+      'continue_current_fallback',
+    );
+    return {
+      status: 200,
+      result: {
+        outcome: 'queued',
+        targetCatId,
+        effective: 'next_work',
+        reason: authorIntent.fallbackReason ?? 'parent_terminal_before_exposure',
+      },
+    };
+  };
+
+  const interruptQueuedTarget = async (
+    threadId: string,
+    userId: string,
+    entryId: string,
+    steerCatId: string,
+    request: FastifyRequest,
+  ): Promise<TargetExecutionResult> => {
+    // The ledger claim is the one durable dequeue fence. It happens before
+    // cancellation so a losing claim cannot kill the active turn, and it can
+    // be restored in place if cancellation fails.
+    let claimed;
+    try {
+      claimed = await invocationQueue.claimExactSteerEntryDurable(threadId, userId, entryId, steerCatId);
+    } catch (err) {
+      request.log.error({ err, threadId, entryId }, 'Failed to claim durable Queue row before Steer preemption');
+      return { status: 503, result: { error: 'Steer 暂不可用', code: 'STEER_CLAIM_FAILED' } };
+    }
+    if (claimed.outcome === 'rejected') {
+      const status = claimed.reason === 'entry_not_found' ? 404 : 409;
+      return {
+        status,
+        result:
+          claimed.reason === 'entry_processing'
+            ? { error: '条目正在处理中，无法 steer', code: 'ENTRY_PROCESSING' }
+            : { error: '队列条目不存在', code: 'ENTRY_NOT_FOUND' },
+      };
+    }
+
+    let handedOff = false;
+    try {
+      const preemption = await preemptSteerTarget(threadId, userId, steerCatId, entryId, request);
+      if (!preemption.ok) {
+        await invocationQueue.restoreClaimedEntries(threadId, [entryId]);
+        return { status: preemption.status, result: { error: preemption.error, code: preemption.code } };
+      }
+
+      const result = await queueProcessor.processClaimedSteerEntries(threadId, userId, [entryId], steerCatId);
+      if (!result.started) {
+        await invocationQueue.restoreClaimedEntries(threadId, [entryId]);
+        await emitQueueUpdated(socketManager, userId, threadId, invocationQueue.list(threadId, userId), 'steer_failed');
+        return { status: 503, result: { error: 'Steer 启动失败，请重试', code: 'STEER_START_FAILED' } };
+      }
+
+      handedOff = true;
+      await emitQueueUpdated(
+        socketManager,
+        userId,
+        threadId,
+        invocationQueue.list(threadId, userId),
+        'steer_immediate',
+      );
+
+      return { status: 200, result: projectQueueStartResult(result) };
+    } catch (error) {
+      if (!handedOff) await invocationQueue.restoreClaimedEntries(threadId, [entryId]);
+      throw error;
+    }
+  };
+
+  // POST /api/threads/:threadId/queue/:entryId/targets
+  // Merge explicit modal edits into current Queue + History truth. Delivery
+  // that wins while the modal is open is an idempotent no-op, not a conflict.
+  app.post<{ Params: { threadId: string; entryId: string } }>(
+    '/api/threads/:threadId/queue/:entryId/targets',
+    async (request, reply) => {
+      const { threadId, entryId } = request.params;
+      const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
+      if (!guard) return;
+      const parsed = steerTargetsBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        reply.status(400);
+        return { error: '请选择至少一位当前对话成员', code: 'STEER_TARGETS_REQUIRED' };
+      }
+      if (!messageStore) {
+        reply.status(503);
+        return { error: 'Steer 目标映射暂不可用', code: 'STEER_TARGET_MAPPING_UNAVAILABLE' };
+      }
+
+      const { sourceRecordId, observedPendingTargetIds } = parsed.data;
+      if (queueEntryId(sourceRecordId) !== entryId) {
+        reply.status(400);
+        return { error: 'Steer 来源身份不匹配', code: 'STEER_SOURCE_IDENTITY_MISMATCH' };
+      }
+      const source = await messageStore.getById(sourceRecordId);
+      if (
+        !source ||
+        source.threadId !== threadId ||
+        source.userId !== guard.userId ||
+        !source.from ||
+        source.recall ||
+        source.deliveryStatus === 'canceled'
+      ) {
+        reply.status(409);
+        return { error: '该消息当前不可 Steer', code: 'STEER_ENTRY_UNAVAILABLE' };
+      }
+
+      const currentEntries = invocationQueue.list(threadId, guard.userId);
+      const anchor = currentEntries.find((candidate) => candidate.id === entryId);
+      if (
+        anchor &&
+        (!isPublicQueueEntry(anchor) ||
+          anchor.status !== 'queued' ||
+          anchor.kind !== 'conversation_input' ||
+          anchor.payload.messageId !== sourceRecordId ||
+          isSystemPinnedQueueEntry(anchor))
+      ) {
+        reply.status(409);
+        return { error: '该消息当前不可 Steer', code: 'STEER_ENTRY_UNAVAILABLE' };
+      }
+
+      // Preserve the user's per-target choice exactly. Unsupported guide is a
+      // truthful next-work fallback in /continue; it must never be rewritten
+      // into the destructive /steer action.
+      const normalizedTargets = parsed.data.targets;
+      const alreadyDispatched = new Set((source.lifecycle?.dispatchRefs ?? []).map((ref) => ref.targetId));
+      const eligibleTargets = normalizedTargets.filter((target) => {
+        if (alreadyDispatched.has(target.targetCatId)) return false;
+        const currentMember = guard.thread.participants.includes(target.targetCatId as CatId);
+        return !(
+          opts.isCatAvailable?.(target.targetCatId as CatId) === false ||
+          (target.membershipAtOpen === 'member' && !currentMember)
+        );
+      });
+      const selectedIds = new Set(eligibleTargets.map((target) => target.targetCatId));
+      const observedPending = new Set(observedPendingTargetIds);
+      const addTargetIds = [...selectedIds].filter((targetId) => !observedPending.has(targetId));
+      const removeTargetIds = [
+        ...new Set([
+          ...observedPendingTargetIds.filter((targetId) => !selectedIds.has(targetId)),
+          ...alreadyDispatched,
+        ]),
+      ].filter((targetId) => !addTargetIds.includes(targetId));
+      const tracker = invocationTracker.getExecutionId
+        ? {
+            has: (candidateThreadId: string, catId: CatId) => invocationTracker.has(candidateThreadId, catId),
+            getUserId: (candidateThreadId: string, catId: CatId) =>
+              invocationTracker.getUserId(candidateThreadId, catId),
+            getExecutionId: (candidateThreadId: string, catId: CatId) =>
+              invocationTracker.getExecutionId?.(candidateThreadId, catId),
+          }
+        : undefined;
+      const authorIntentByCatId = Object.fromEntries(
+        eligibleTargets.flatMap((target) => {
+          const intent = resolveQueueAuthorIntentByCatId({
+            targetCats: [target.targetCatId as CatId],
+            requested: target.strategy === 'guide_reply' ? 'continue_current' : 'next_work',
+            threadId,
+            userId: guard.userId,
+            invocationTracker: tracker,
+            resolveCarrierCapability: opts.resolveCarrierCapability,
+          })[target.targetCatId];
+          return intent ? [[target.targetCatId, intent] as const] : [];
+        }),
+      );
+      const buildQueueInput = (targetCats: string[]) => ({
+        threadId,
+        userId: guard.userId,
+        owner: { kind: 'user' as const, userId: guard.userId },
+        sourceId: source.id,
+        kind: 'conversation_input' as const,
+        ownerAuthProvenance: 'strict' as const,
+        content: source.content,
+        messageId: source.id,
+        from: source.from!,
+        targetCats,
+        ...(source.extra?.routingWarnings ? { routingWarnings: [...source.extra.routingWarnings] } : {}),
+        authorIntentByCatId,
+        intent: anchor?.execution.intent ?? 'execute',
+        autoExecute: anchor?.execution.autoExecute ?? true,
+        priority: anchor?.priority ?? 'normal',
+        ...(anchor?.sourceCategory
+          ? { sourceCategory: anchor.sourceCategory }
+          : source.from?.kind === 'agent'
+            ? { sourceCategory: 'a2a' as const }
+            : {}),
+      });
+
+      let reconciled = await invocationQueue.reconcileQueuedMessageTargetsDurable(
+        threadId,
+        guard.userId,
+        entryId,
+        addTargetIds,
+        removeTargetIds,
+        authorIntentByCatId,
+      );
+      if (reconciled.outcome === 'not_found' && addTargetIds.length > 0) {
+        try {
+          const admitted = await invocationQueue.enqueueDurable(buildQueueInput(addTargetIds));
+          if (admitted.outcome === 'full') {
+            reply.status(429);
+            return { error: '消息队列已满', code: 'QUEUE_FULL' };
+          }
+          reconciled = { outcome: 'updated' as const, entry: admitted.entry ?? null };
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.startsWith('Queue admission identity conflict')) throw error;
+          reconciled = await invocationQueue.reconcileQueuedMessageTargetsDurable(
+            threadId,
+            guard.userId,
+            entryId,
+            addTargetIds,
+            removeTargetIds,
+            authorIntentByCatId,
+          );
+        }
+      }
+      if (reconciled.outcome === 'state_changed') {
+        // Claims are short reversible reservations. Yield once so the winning
+        // delivery removes its exact target, then merge against current truth.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        reconciled = await invocationQueue.reconcileQueuedMessageTargetsDurable(
+          threadId,
+          guard.userId,
+          entryId,
+          addTargetIds,
+          removeTargetIds,
+          authorIntentByCatId,
+        );
+      }
+      if (reconciled.outcome === 'state_changed') {
+        reply.status(409);
+        return { error: 'Steer 正在与投递收敛，请重试', code: 'STEER_DELIVERY_IN_FLIGHT' };
+      }
+      const pendingAfter = new Set('entry' in reconciled ? (reconciled.entry?.targets ?? []) : []);
+      queueProcessor.registerCallerDispatchSteerChanges?.(source, {
+        addedTargetIds: addTargetIds.filter((targetId) => pendingAfter.has(targetId)),
+        removedTargetIds: removeTargetIds.filter(
+          (targetId) => !alreadyDispatched.has(targetId) && !pendingAfter.has(targetId),
+        ),
+      });
+      const targets = eligibleTargets
+        .filter((target) => pendingAfter.has(target.targetCatId))
+        .map((target) => ({ targetCatId: target.targetCatId, strategy: target.strategy, entryId }));
+      try {
+        await admitThreadParticipants({
+          userId: guard.userId,
+          threadId,
+          targetCats: eligibleTargets
+            .filter((target) => target.membershipAtOpen === 'admit')
+            .map((target) => target.targetCatId as CatId),
+          threadStore,
+          socketManager,
+          emitPolicy: 'membership-changed',
+        });
+      } catch (error) {
+        request.log.error(
+          { error, threadId, entryId, targets },
+          'Steer target changes committed; participant admission remains retryable',
+        );
+        reply.status(503);
+        return {
+          error: '目标工单已保存，成员加入尚未完成；请重试同一操作',
+          code: 'STEER_PARTICIPANT_ADMISSION_PENDING',
+          mappingCommitted: true,
+          targets,
+        };
+      }
+      await emitQueueUpdated(
+        socketManager,
+        guard.userId,
+        threadId,
+        invocationQueue.list(threadId, guard.userId),
+        'steer_targets_resolved',
+      );
+      // Serialize Queue claims until their durable handoff, not until native ACK.
+      // Keep every completion so late rejection still returns its exact result
+      // after the processor records failure and detaches the refused input.
+      const completions: Array<Promise<(typeof targets)[number] & TargetExecutionResult>> = [];
+      for (const target of targets) {
+        let releaseHandoff!: () => void;
+        const handoff = new Promise<void>((resolve) => {
+          releaseHandoff = resolve;
+        });
+        const completion = (async () => {
+          try {
+            const execution =
+              target.strategy === 'interrupt_reply'
+                ? await interruptQueuedTarget(threadId, guard.userId, entryId, target.targetCatId, request)
+                : await guideQueuedTarget(
+                    threadId,
+                    guard.userId,
+                    entryId,
+                    target.targetCatId as CatId,
+                    authorIntentByCatId[target.targetCatId]!,
+                    false,
+                    releaseHandoff,
+                  );
+            return { ...target, ...execution };
+          } catch (error) {
+            request.log.error(
+              { error, threadId, entryId, targetCatId: target.targetCatId },
+              'Queue target execution failed',
+            );
+            return {
+              ...target,
+              status: 503,
+              result: { code: 'STEER_EXECUTION_FAILED', error: '投递未完成，请查看队列状态后重试' },
+            };
+          }
+        })();
+        completions.push(completion);
+        await Promise.race([completion, handoff]);
+      }
+      void queueProcessor.requestDrain(threadId);
+      return {
+        targets: await Promise.all(completions),
+        skippedAlreadyDispatched: normalizedTargets
+          .filter((target) => alreadyDispatched.has(target.targetCatId))
+          .map((target) => target.targetCatId),
+      };
+    },
+  );
+
+  // POST /api/threads/:threadId/queue/:entryId/continue
+  app.post<{ Params: { threadId: string; entryId: string } }>(
+    '/api/threads/:threadId/queue/:entryId/continue',
+    async (request, reply) => {
+      const { threadId, entryId } = request.params;
+      const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
+      if (!guard) return;
+      const parsed = continueBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        reply.status(400);
+        return { error: '请选择当前对话中的成员', code: 'CONTINUE_TARGET_REQUIRED' };
+      }
+
+      const entry = invocationQueue.list(threadId, guard.userId).find((candidate) => candidate.id === entryId);
+      if (!entry || !isPublicQueueEntry(entry)) {
+        reply.status(404);
+        return { error: '队列条目不存在', code: 'ENTRY_NOT_FOUND' };
+      }
+      if (entry.status !== 'queued') {
+        reply.status(409);
+        return { error: '条目正在处理中，无法改派', code: 'ENTRY_PROCESSING' };
+      }
+      if (isSystemPinnedQueueEntry(entry) || entry.kind !== 'conversation_input') {
+        reply.status(409);
+        return { error: '该条目不支持不中断发送', code: 'ENTRY_CONTINUE_UNAVAILABLE' };
+      }
+
+      const targetCatId = parsed.data.targetCatId as CatId;
+      const currentTargets = queueEntryTargetCats(entry);
+      if (
+        !guard.thread.participants.includes(targetCatId) ||
+        (currentTargets.length > 0 && !currentTargets.includes(targetCatId))
+      ) {
+        reply.status(400);
+        return { error: '所选成员不属于此消息的当前对话目标', code: 'INVALID_CONTINUE_TARGET' };
+      }
+
+      const authorIntent = resolveQueueAuthorIntentByCatId({
+        targetCats: [targetCatId],
+        requested: 'continue_current',
+        threadId,
+        userId: guard.userId,
+        invocationTracker: invocationTracker.getExecutionId
+          ? {
+              has: (candidateThreadId, catId) => invocationTracker.has(candidateThreadId, catId),
+              getUserId: (candidateThreadId, catId) => invocationTracker.getUserId(candidateThreadId, catId),
+              getExecutionId: (candidateThreadId, catId) =>
+                invocationTracker.getExecutionId?.(candidateThreadId, catId),
+            }
+          : undefined,
+        resolveCarrierCapability: opts.resolveCarrierCapability,
+      })[targetCatId];
+      if (!authorIntent) {
+        reply.status(409);
+        return { error: '无法保存发送意图', code: 'CONTINUE_STATE_CHANGED' };
+      }
+      const bound = await invocationQueue.bindContinueCurrentIntentDurable(
+        threadId,
+        guard.userId,
+        entryId,
+        targetCatId,
+        authorIntent,
+      );
+      if (!bound) {
+        reply.status(409);
+        return { error: '队列状态已变化，请刷新后重试', code: 'CONTINUE_STATE_CHANGED' };
+      }
+
+      const execution = await guideQueuedTarget(threadId, guard.userId, entryId, targetCatId, authorIntent);
+      reply.status(execution.status);
+      return execution.result;
+    },
+  );
 
   // POST /api/threads/:threadId/queue/:entryId/steer
   app.post<{ Params: { threadId: string; entryId: string } }>(
@@ -171,7 +1719,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
       if (!guard) return;
 
-      const parseResult = steerBodySchema.safeParse(request.body);
+      const parseResult = steerBodySchema.safeParse(request.body ?? {});
       if (!parseResult.success) {
         reply.status(400);
         return { error: 'Invalid body', details: parseResult.error.issues };
@@ -179,69 +1727,38 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
 
       const entries = invocationQueue.list(threadId, guard.userId);
       const entry = entries.find((e) => e.id === entryId);
-      if (!entry) {
+      if (!entry || !isPublicQueueEntry(entry)) {
         reply.status(404);
         return { error: '队列条目不存在', code: 'ENTRY_NOT_FOUND' };
       }
-      if (entry.status === 'processing') {
+      if (entry.status !== 'queued') {
         reply.status(409);
         return { error: '条目正在处理中，无法 steer', code: 'ENTRY_PROCESSING' };
       }
-
-      const { mode } = parseResult.data;
-      if (mode === 'promote') {
-        invocationQueue.promote(threadId, guard.userId, entryId);
-        socketManager.emitToUser(guard.userId, 'queue_updated', {
-          threadId,
-          queue: invocationQueue.list(threadId, guard.userId),
-          action: 'steer_promote',
-        });
-        return { ok: true };
-      }
-
-      // mode === 'immediate'
-      const steerCatId = entry.targetCats[0] ?? 'unknown';
-      if (invocationTracker.has(threadId, steerCatId)) {
-        const activeUserId = invocationTracker.getUserId(threadId, steerCatId);
-        if (activeUserId && activeUserId !== guard.userId) {
-          reply.status(409);
-          return { error: '当前有其他用户的调用在执行，无法立即执行', code: 'INVOCATION_ACTIVE' };
-        }
-        const cancelResult = invocationTracker.cancel(threadId, steerCatId, guard.userId, 'preempted');
-        // Broadcast cancel+done so frontend clears old invocation's "正在回复中" state.
-        // Without this, activeInvocations retains the old invocationId permanently.
-        // Scope to steerCatId only — cancelResult.catIds may include co-dispatched cats
-        // whose separate invocations should not be terminated.
-        if (cancelResult.cancelled) {
-          const scopedResult = { ...cancelResult, catIds: [steerCatId] };
-          for (const m of buildCancelMessages(scopedResult)) {
-            socketManager.broadcastAgentMessage(m, threadId);
-          }
-        }
-        // F108 P1-4 fix: abort only the target cat's dispatches, not the entire thread
-        getMultiMentionOrchestrator().abortBySlot(threadId, steerCatId as CatId);
-        if (!cancelResult.cancelled && invocationTracker.has(threadId, steerCatId)) {
-          reply.status(409);
-          return { error: '当前调用无法取消，无法立即执行', code: 'INVOCATION_CANCEL_FAILED' };
-        }
-        queueProcessor.clearPause(threadId, steerCatId);
-        queueProcessor.releaseSlot(threadId, steerCatId);
-      }
-
-      invocationQueue.promote(threadId, guard.userId, entryId);
-      socketManager.emitToUser(guard.userId, 'queue_updated', {
-        threadId,
-        queue: invocationQueue.list(threadId, guard.userId),
-        action: 'steer_immediate',
-      });
-
-      const result = await queueProcessor.processNext(threadId, guard.userId);
-      if (!result.started) {
+      if (isSystemPinnedQueueEntry(entry)) {
         reply.status(409);
-        return { error: '队列繁忙，暂无法立即执行', code: 'QUEUE_BUSY' };
+        return { error: '系统续接条目不可手动调整位置', code: 'ENTRY_POSITION_LOCKED' };
       }
 
-      return result;
+      // Steer has exactly one meaning: cancel the current target invocation and
+      // immediately start this same durable queue entry. Reordering remains a
+      // separate drag/move interaction and is never accepted as a Steer mode.
+      const requestedTargetCatId = parseResult.data.targetCatId;
+      const targetCats = queueEntryTargetCats(entry);
+      const steerCatId = requestedTargetCatId ?? targetCats[0];
+      if (!steerCatId) {
+        reply.status(400);
+        return { error: '请选择当前对话中的成员', code: 'STEER_TARGET_REQUIRED' };
+      }
+      const targetInThread = guard.thread.participants.includes(steerCatId as CatId);
+      const targetMatchesEntry = targetCats.length === 0 || targetCats.includes(steerCatId);
+      if (!targetInThread || !targetMatchesEntry) {
+        reply.status(400);
+        return { error: '所选成员不属于此消息的当前对话目标', code: 'INVALID_STEER_TARGET' };
+      }
+      const execution = await interruptQueuedTarget(threadId, guard.userId, entryId, steerCatId, request);
+      reply.status(execution.status);
+      return execution.result;
     },
   );
 
@@ -262,25 +1779,103 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       // Check if entry is processing
       const entries = invocationQueue.list(threadId, guard.userId);
       const entry = entries.find((e) => e.id === entryId);
-      if (!entry) {
+      if (!entry || !isPublicQueueEntry(entry)) {
         reply.status(404);
         return { error: '队列条目不存在', code: 'ENTRY_NOT_FOUND' };
       }
-      if (entry.status === 'processing') {
+      if (entry.status !== 'queued') {
         reply.status(409);
         return { error: '正在处理中的条目不可移动', code: 'ENTRY_PROCESSING' };
       }
+      if (isSystemPinnedQueueEntry(entry)) {
+        reply.status(409);
+        return { error: '系统续接条目不可手动调整位置', code: 'ENTRY_POSITION_LOCKED' };
+      }
 
-      invocationQueue.move(threadId, guard.userId, entryId, parseResult.data.direction);
-      socketManager.emitToUser(guard.userId, 'queue_updated', {
+      const queued = entries.filter((candidate) => candidate.status === 'queued');
+      const index = queued.findIndex((candidate) => candidate.id === entryId);
+      const neighborIndex = parseResult.data.direction === 'up' ? index - 1 : index + 1;
+      if (neighborIndex >= 0 && neighborIndex < queued.length) {
+        const neighbor = queued[neighborIndex]!;
+        if (!(await invocationQueue.setPositionDurable(threadId, guard.userId, entryId, neighborIndex))) {
+          reply.status(409);
+          return { error: '队列状态已变化，请重试', code: 'ENTRY_PROCESSING' };
+        }
+        if (!(await invocationQueue.setPositionDurable(threadId, guard.userId, neighbor.id, index))) {
+          reply.status(409);
+          return { error: '队列状态已变化，请重试', code: 'ENTRY_PROCESSING' };
+        }
+      }
+      await emitQueueUpdated(
+        socketManager,
+        guard.userId,
         threadId,
-        queue: invocationQueue.list(threadId, guard.userId),
-        action: 'reordered',
-      });
+        invocationQueue.list(threadId, guard.userId),
+        'reordered',
+      );
 
       return { ok: true };
     },
   );
+
+  // PATCH /api/threads/:threadId/queue/reorder (F175)
+  app.patch<{ Params: { threadId: string } }>('/api/threads/:threadId/queue/reorder', async (request, reply) => {
+    const { threadId } = request.params;
+    const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
+    if (!guard) return;
+
+    const reorderSchema = z.object({
+      positions: z
+        .array(z.object({ entryId: z.string(), position: z.number().int().nonnegative().finite() }))
+        .superRefine((items, ctx) => {
+          const ids = new Set<string>();
+          for (const { entryId } of items) {
+            if (ids.has(entryId)) {
+              ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Duplicate entryId: ${entryId}` });
+            }
+            ids.add(entryId);
+          }
+        }),
+    });
+    const parseResult = reorderSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      reply.status(400);
+      return { error: 'Invalid body', details: parseResult.error.issues };
+    }
+
+    const entries = invocationQueue.list(threadId, guard.userId);
+    for (const { entryId } of parseResult.data.positions) {
+      const entry = entries.find((e) => e.id === entryId);
+      if (!entry || !isPublicQueueEntry(entry)) {
+        reply.status(400);
+        return { error: `Cannot reorder entry ${entryId} (not found)` };
+      }
+      if (entry.status !== 'queued') {
+        reply.status(409);
+        return { error: `Cannot reorder entry ${entryId} (processing)` };
+      }
+      if (isSystemPinnedQueueEntry(entry)) {
+        reply.status(409);
+        return { error: '系统续接条目不可手动调整位置', code: 'ENTRY_POSITION_LOCKED' };
+      }
+    }
+
+    for (const { entryId, position } of parseResult.data.positions) {
+      if (!(await invocationQueue.setPositionDurable(threadId, guard.userId, entryId, position))) {
+        reply.status(409);
+        return { error: `Cannot reorder entry ${entryId} (state changed)`, code: 'ENTRY_PROCESSING' };
+      }
+    }
+
+    await emitQueueUpdated(
+      socketManager,
+      guard.userId,
+      threadId,
+      invocationQueue.list(threadId, guard.userId),
+      'reordered',
+    );
+    return { ok: true };
+  });
 
   // DELETE /api/threads/:threadId/queue
   app.delete<{ Params: { threadId: string } }>('/api/threads/:threadId/queue', async (request, reply) => {
@@ -288,37 +1883,78 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
     if (!guard) return;
 
-    // F117: Collect message IDs from non-processing entries for cancelation
-    // Skip 'processing' entries — their invocation is already running and will markDelivered itself
-    const entriesBeforeClear = invocationQueue.list(threadId, guard.userId);
-    const allMessageIds: string[] = [];
-    for (const e of entriesBeforeClear) {
-      if (e.status === 'processing') continue;
-      queueProcessor.unregisterEntryCompleteHook?.(e.id);
-      if (e.messageId) allMessageIds.push(e.messageId);
-      if (e.mergedMessageIds) allMessageIds.push(...e.mergedMessageIds);
-    }
+    // Claim one exact ledger row at a time; the canonical claim also protects in-flight Append custody.
+    const cleared: QueueEntry[] = [];
+    const candidates = invocationQueue.list(threadId, guard.userId);
+    for (const candidate of candidates) {
+      if (!isPublicQueueEntry(candidate)) continue;
+      const current = invocationQueue.getEntrySnapshot(threadId, guard.userId, candidate.id);
+      if (!current || current.status === 'processing') continue;
+      const claimed = await invocationQueue.claimQueuedEntryForWithdrawal(threadId, guard.userId, current.id);
+      if (!claimed) continue;
 
-    const cleared = invocationQueue.clear(threadId, guard.userId);
-    socketManager.emitToUser(guard.userId, 'queue_updated', {
-      threadId,
-      queue: [],
-      action: 'cleared',
-    });
-
-    // F117: Mark all queued messages as canceled + emit message_deleted
-    if (messageStore) {
-      for (const msgId of allMessageIds) {
-        await messageStore.markCanceled(msgId);
-        socketManager.emitToUser(guard.userId, 'message_deleted', {
-          messageId: msgId,
-          threadId,
-          deletedBy: guard.userId,
-        });
+      try {
+        const messageIds = queueEntryMessageIds(claimed);
+        const remaining = invocationQueue.list(threadId, guard.userId).filter((entry) => entry.id !== claimed.id);
+        for (const messageId of messageIds) {
+          const hasSibling = remaining.some((entry) => queueEntryMessageIds(entry).includes(messageId));
+          if (!hasSibling) await cancelUnpublishedQueueSource(messageStore, messageId);
+        }
+        const removed = await invocationQueue.commitClaimedWithdrawal(threadId, claimed.id);
+        if (!removed) throw new Error('Queue clear claim changed before commit');
+      } catch (err) {
+        await invocationQueue.restoreClaimedEntries(threadId, [claimed.id]);
+        request.log.error(
+          { err, entryId: claimed.id, threadId, clearedCount: cleared.length },
+          'durable Queue clear stopped; unsettled entries retained',
+        );
+        const remaining = invocationQueue.list(threadId, guard.userId);
+        await emitQueueUpdated(socketManager, guard.userId, threadId, remaining, 'withdraw_failed');
+        reply.status(503);
+        return {
+          error:
+            cleared.length > 0
+              ? '只撤出了部分消息；其余消息仍保留在待处理队列中'
+              : '撤出未完成，消息仍保留在待处理队列中',
+          code: cleared.length > 0 ? 'QUEUE_WITHDRAWAL_PARTIAL' : 'QUEUE_WITHDRAWAL_FAILED',
+          cleared: cleared.map(projectPublicQueueEntry),
+          queue: await enrichQueueEntries(remaining, messageStore),
+        };
       }
-    }
 
-    return { cleared };
+      queueProcessor.registerCallerDispatchQueueWithdrawal(claimed);
+
+      try {
+        await retireWithdrawnManagedWake(opts, claimed);
+      } catch (err) {
+        request.log.error(
+          { err, entryId: claimed.id, threadId },
+          'managed wake producer retirement deferred to recovery sweep',
+        );
+      }
+
+      queueProcessor.unregisterEntryCompleteHook?.(claimed.id);
+      cleared.push(claimed);
+    }
+    const remaining = invocationQueue.list(threadId, guard.userId);
+    const queue = await enrichQueueEntries(remaining, messageStore);
+    await emitQueueUpdated(
+      socketManager,
+      guard.userId,
+      threadId,
+      remaining,
+      queue.length ? 'withdraw_failed' : 'cleared',
+    );
+    const result = { cleared: cleared.map(projectPublicQueueEntry), queue };
+    if (queue.length) {
+      reply.status(409);
+      return {
+        ...result,
+        code: cleared.length ? 'QUEUE_WITHDRAWAL_PARTIAL' : 'QUEUE_WITHDRAWAL_FAILED',
+        error: cleared.length ? '已停止部分消息；其余消息仍保留在待处理队列中' : '尚未停止，消息仍保留在待处理队列中',
+      };
+    }
+    return result;
   });
 
   // POST /api/threads/:threadId/cancel/:catId — F122B AC-B9: Per-cat cancel
@@ -330,21 +1966,248 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       if (!guard) return;
 
       if (!invocationTracker.has(threadId, catId)) {
+        // F-invocation-stale-recovery: 404 short-circuit blocked orphan cleanup (Thread 1 bug).
+        // When the in-memory tracker has no slot, the invocation may still have a persistent
+        // running InvocationRecord (e.g., CLI exited before record was marked done, or process
+        // restarted mid-invocation). Check the record store and mark any found record canceled
+        // so F194 liveness won't classify it as a zombie forever.
+        if (opts.invocationRecordStore) {
+          const runningRecords = await opts.invocationRecordStore.listRunningByThread(threadId, guard.userId);
+          const orphanRecord = runningRecords.find((r) => (r.targetCats as string[]).includes(catId));
+          if (orphanRecord) {
+            // P2 guard: only cancel the record when it's safe — i.e., when no sibling cat
+            // of this multi-cat invocation still has an active tracker slot.
+            // Marking a record canceled while siblings are still running would remove it from
+            // liveness tracking prematurely, causing state inconsistency for the sibling.
+            const siblingCats = (orphanRecord.targetCats as string[]).filter((c) => c !== catId);
+            const siblingStillActive = siblingCats.some((c) => invocationTracker.has(threadId, c));
+            if (siblingStillActive) {
+              releaseAgentSessionLocks({ threadId, userId: guard.userId, catId }, request, 'cancel');
+              // Orphan cancel skipped — a sibling cat is still active; let normal lifecycle handle it
+              reply.status(404);
+              return { error: '该猫当前未在执行', code: 'CAT_NOT_ACTIVE' };
+            }
+
+            await opts.invocationRecordStore.update(orphanRecord.id, { status: 'canceled' });
+            // P2-1 + P2 (codex 第4轮 a5e8eea2): the WHOLE record is being canceled, so broadcast
+            // done + release slot for EVERY targetCat — not just the requested one.
+            // Otherwise sibling cats in a multi-cat orphan record stay stuck in the client's active
+            // state and their processingSlots leak; and since the record is no longer running,
+            // force-reset can't rediscover those siblings via listRunningByThread.
+            const orphanCats = orphanRecord.targetCats as string[];
+            for (const orphanCat of orphanCats) {
+              releaseAgentSessionLocks({ threadId, userId: guard.userId, catId: orphanCat }, request, 'cancel');
+            }
+            const terminalOrphanCats = orphanCats.filter((orphanCat) =>
+              queueProcessor.canReleaseSlotForUser(threadId, orphanCat, guard.userId),
+            );
+            if (terminalOrphanCats.length > 0) {
+              for (const m of buildCancelMessages({ cancelled: true, catIds: terminalOrphanCats })) {
+                socketManager.broadcastAgentMessage(m, threadId);
+              }
+            }
+            for (const c of terminalOrphanCats) {
+              queueProcessor.releaseSlot(threadId, c);
+            }
+            return { ok: true, cancelled: true };
+          }
+        }
+        const lockRelease = releaseAgentSessionLocks({ threadId, userId: guard.userId, catId }, request, 'cancel');
+        if (
+          (lockRelease.releasedHolders > 0 || lockRelease.rejectedWaiters > 0) &&
+          queueProcessor.canReleaseSlotForUser(threadId, catId, guard.userId)
+        ) {
+          for (const m of buildCancelMessages({ cancelled: true, catIds: [catId] })) {
+            socketManager.broadcastAgentMessage(m, threadId);
+          }
+          queueProcessor.releaseSlot(threadId, catId);
+          return { ok: true, cancelled: true };
+        }
+        if (lockRelease.releasedHolders > 0 || lockRelease.rejectedWaiters > 0) {
+          return { ok: true, cancelled: false };
+        }
         reply.status(404);
         return { error: '该猫当前未在执行', code: 'CAT_NOT_ACTIVE' };
       }
 
-      const cancelResult = invocationTracker.cancel(threadId, catId, guard.userId, 'user_stop');
+      const cancelResult = invocationTracker.cancel(threadId, catId, guard.userId, 'user_cancel');
+      releaseAgentSessionLocks(
+        { threadId, userId: guard.userId, catId },
+        request,
+        'cancel',
+        cancelResult.executionIds ?? [],
+      );
       if (cancelResult.cancelled) {
         const scopedResult = { ...cancelResult, catIds: [catId] };
         for (const m of buildCancelMessages(scopedResult)) {
           socketManager.broadcastAgentMessage(m, threadId);
         }
-        queueProcessor.clearPause(threadId, catId);
-        queueProcessor.releaseSlot(threadId, catId);
+        releaseSlotUnlessExecutionOwnsRetirement(threadId, catId);
       }
 
       return { ok: true, cancelled: cancelResult.cancelled };
     },
   );
+
+  // POST /api/threads/:threadId/force-reset — escape hatch for stuck threads
+  // Bug: both Thread 1 (cancel 404 short-circuit) and Thread 2 (empty-result session stale)
+  // could leave the thread in a permanently stuck state that users could not recover from.
+  // This endpoint provides a last-resort manual reset:
+  //   1. invocationTracker.cancelAll — aborts all active controllers + clears tracker slots
+  //   2. queueProcessor.releaseSlot — clears only the canceled cats' in-memory slots
+  //   3. listRunningByThread + update canceled — marks all persistent running records done
+  // Returns { ok: true, canceledRecords: N }
+  app.post<{ Params: { threadId: string } }>('/api/threads/:threadId/force-reset', async (request, reply) => {
+    const { threadId } = request.params;
+    const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
+    if (!guard) return;
+
+    // 1. Abort all active InvocationTracker slots (controllers + slot deletion).
+    //    This clears the primary busy source (invocationTracker.has) that hasActiveExecution checks.
+    //    cancelAll aborts in-flight requests and removes active slots atomically.
+    //    P2 (codex 第5轮 34e07c79): use the 'cancel_all' abort reason (NOT a bespoke 'force_reset').
+    //    QueueProcessor.executeEntry only routes 'user_cancel'/'cancel_all' to canceled_by_user, and
+    //    only 'cancel_all' suppresses auto-resume. A custom reason falls into the plain 'canceled'
+    //    branch → pause + 10s auto-recover → queued work restarts, re-busying the thread right after
+    //    reset. 'cancel_all' matches force-reset's "stop everything" intent and suppresses auto-resume.
+    const cancelAllResult = invocationTracker.cancelAll?.(threadId, guard.userId, 'cancel_all') ?? {
+      catIds: [],
+      executionIds: [],
+      executionIdByCatId: {},
+    };
+    // The Queue reservation is canonical pre-start ownership. Tracker, record,
+    // and session-lock rows are only secondary witnesses and may all still be
+    // absent in the create→startAll window. Install exact retirement barriers
+    // before this route performs another await, then close the durable group.
+    const prestartRetirement = await queueProcessor.retireThreadPrestartProcessingGroups(threadId, guard.userId);
+    if (prestartRetirement.outcome === 'terminalization_failed') {
+      reply.status(503);
+      return {
+        error: '启动中的队列条目未能写入持久终态，请重试',
+        code: 'PRESTART_TERMINALIZATION_FAILED',
+      };
+    }
+    if (prestartRetirement.outcome === 'state_changed') {
+      reply.status(409);
+      return { error: '启动中的队列状态已变化，请重试', code: 'PRESTART_STATE_CHANGED' };
+    }
+    if (prestartRetirement.retiredCatIds.length > 0) {
+      await emitQueueUpdated(
+        socketManager,
+        guard.userId,
+        threadId,
+        invocationQueue.list(threadId, guard.userId),
+        'force_reset',
+      );
+    }
+    const managedWakeRetirement = await opts
+      .getManagedCommandWakeRecovery?.()
+      ?.retireThread(threadId, guard.userId, 'force_reset');
+    if (managedWakeRetirement && managedWakeRetirement.messageIds.length > 0) {
+      const managedMessageIds = new Set(managedWakeRetirement.messageIds);
+      const managedCarriers = invocationQueue
+        .list(threadId, guard.userId)
+        .filter((entry) => queueEntryMessageIds(entry).some((messageId) => managedMessageIds.has(messageId)));
+      for (const carrier of managedCarriers) {
+        const claimed = await invocationQueue.claimQueuedEntryForWithdrawal(threadId, guard.userId, carrier.id);
+        if (!claimed) continue;
+        try {
+          const withdrawn = await invocationQueue.commitClaimedWithdrawal(threadId, carrier.id);
+          if (!withdrawn) {
+            await invocationQueue.restoreClaimedEntries(threadId, [carrier.id]);
+            continue;
+          }
+        } catch (err) {
+          await invocationQueue.restoreClaimedEntries(threadId, [carrier.id]);
+          request.log.error(
+            { err, entryId: carrier.id, threadId },
+            'force-reset could not terminalize managed wake carrier; producer remains retired',
+          );
+          continue;
+        }
+        queueProcessor.unregisterEntryCompleteHook?.(claimed.id);
+      }
+      await emitQueueUpdated(
+        socketManager,
+        guard.userId,
+        threadId,
+        invocationQueue.list(threadId, guard.userId),
+        'force_reset',
+      );
+    }
+    const cancelledCatIds = cancelAllResult.catIds;
+    const canceledExecutionIdsByCatId = new Map<string, Set<string>>();
+    const addCanceledExecution = (catId: string, executionId: string): void => {
+      const executionIds = canceledExecutionIdsByCatId.get(catId) ?? new Set<string>();
+      executionIds.add(executionId);
+      canceledExecutionIdsByCatId.set(catId, executionIds);
+    };
+    for (const [catId, executionId] of Object.entries(cancelAllResult.executionIdByCatId ?? {})) {
+      addCanceledExecution(catId, executionId);
+    }
+
+    // 2+3. Collect EVERY user-owned cat whose processingSlot may still pin hasActiveExecution:
+    //    cancelledCatIds (tracker slots just aborted) ∪ pre-start reservation owners ∪ running
+    //    records' targetCats. The latter two cover both recordless and recorded stale slots after
+    //    the tracker slot is gone, so force-reset does not leave hasActiveExecution pinned until TTL.
+    //    Sources are guard.userId-scoped, but QueueProcessor slots are not; the final owner check
+    //    below prevents a stale source from colliding with a newer foreign tracker slot.
+    const slotsToRelease = new Set<string>([...cancelledCatIds, ...prestartRetirement.retiredCatIds]);
+    let canceledRecords = 0;
+    if (opts.invocationRecordStore) {
+      const runningRecords = await opts.invocationRecordStore.listRunningByThread(threadId, guard.userId);
+      for (const record of runningRecords) {
+        for (const c of record.targetCats as string[]) {
+          slotsToRelease.add(c);
+          addCanceledExecution(c, record.id);
+        }
+        await opts.invocationRecordStore.update(record.id, { status: 'canceled' });
+        canceledRecords++;
+      }
+    }
+    const lockRelease = releaseAgentSessionLocks(
+      { threadId, userId: guard.userId },
+      request,
+      'force-reset',
+      cancelAllResult.executionIds,
+    );
+    for (const catId of lockRelease.catIds ?? []) slotsToRelease.add(catId);
+
+    // QueueProcessor slots are not user-scoped. Re-check ownership at the final cleanup boundary,
+    // after all awaited record writes, so a foreign invocation that started during force-reset is
+    // never terminal-broadcast or released by this user's stale record/lock cleanup.
+    const terminalCatIds = [...slotsToRelease].filter((catId) =>
+      queueProcessor.canReleaseSlotForUser(threadId, catId, guard.userId),
+    );
+
+    // Broadcast cancel + release processingSlot for EVERY still-owned cat in
+    // terminalCatIds. P2 (opus-4.6 cross-cat
+    // review): broadcasting only cancelledCatIds left stale records' cats without a done broadcast,
+    // so the frontend "正在回复中" never cleared after force-reset (user had to F5). Doing all three
+    // over the owner-filtered set keeps force-reset aligned with the orphan/normal cancel paths and
+    // covers the stale case cancelAll missed without touching a foreign live slot.
+    if (terminalCatIds.length > 0) {
+      for (const m of buildCancelMessages({ cancelled: true, catIds: terminalCatIds })) {
+        socketManager.broadcastAgentMessage(m, threadId);
+      }
+    }
+    for (const cid of terminalCatIds) {
+      // Force-reset means stop, not "retry in ten seconds". Fence both Queue
+      // cleanup and a late connector wake before releasing the slot. Terminal
+      // consumption is restricted to executions this reset actually canceled.
+      const canceledExecutionIds = [...(canceledExecutionIdsByCatId.get(cid) ?? [])];
+      if (canceledExecutionIds.length > 0) {
+        queueProcessor.suppressAutoResume(threadId, cid, canceledExecutionIds);
+      }
+      releaseSlotUnlessExecutionOwnsRetirement(threadId, cid);
+    }
+
+    return { ok: true, canceledRecords };
+  });
 };
+
+/**
+ * Re-export：`resolveActiveInvocations` 的实现已迁到 domain
+ * (`active-execution-service.ts`，R3 P2-1)，此处仅为既有 import 路径保持兼容。
+ */
+export { type ActiveInvocationProjection, type InvocationTrackerLike, resolveActiveInvocations };

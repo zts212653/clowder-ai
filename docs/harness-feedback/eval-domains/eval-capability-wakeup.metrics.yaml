@@ -1,0 +1,78 @@
+miss_rate:
+  label: 该用却没用的比例
+  means: 明明该唤醒某项能力却没有使用的样本占比；越低越好，持续高于约 5% 需要检查触发规则。
+  goodDirection: lower
+  category: friction
+  component: wakeup
+miss_count:
+  label: 能力漏用次数
+  means: 观察窗口里应该使用能力、实际却没用的次数；例如该开浏览器时没有开。
+  goodDirection: lower
+  category: friction
+  component: wakeup
+negative_count:
+  label: 未漏用样本数
+  means: 用来计算漏用率的对照样本数量；它主要说明分母和样本规模，不代表问题多少。
+  goodDirection: neutral
+  category: context
+  component: wakeup
+false_positive_count:
+  label: 不该用却唤醒的次数
+  means: 场景不需要某项能力却触发或使用了它的次数；越少越好，过多会制造额外流程和成本。
+  goodDirection: lower
+  category: friction
+  component: wakeup
+opportunity_count:
+  label: 能力唤醒机会数
+  means: 观察窗口里根据规则判定为可能需要某项能力的总机会数；是漏用率的样本分母。
+  goodDirection: neutral
+  category: context
+  component: wakeup
+cognitive_count:
+  label: 认知路径漏用数
+  means: 观察窗口里能力存在且适用，但猫没有在认知路径中识别到它的次数。
+  goodDirection: lower
+  category: friction
+  component: wakeup
+behavioral_count:
+  label: 识别后未调用数
+  means: 观察窗口里猫已识别适用能力、最终却没有调用的次数。
+  goodDirection: lower
+  category: friction
+  component: wakeup
+attention_dilution_count:
+  label: 注意力稀释漏用数
+  means: 观察窗口里因上下文或能力列表噪音使适用能力没有被唤醒的次数。
+  goodDirection: lower
+  category: friction
+  component: wakeup
+reachability_doubt_count:
+  label: 可达性疑虑漏用数
+  means: 观察窗口里猫因误判工具不可达或不确定能否使用而放弃适用能力的次数。
+  goodDirection: lower
+  category: friction
+  component: wakeup
+eligible_sealed_sessions:
+  label: 可评估已封存会话数
+  means: 观察窗口里满足完整性与适用性条件、可纳入能力唤醒评估的已封存会话数。
+  goodDirection: neutral
+  category: context
+  component: wakeup
+baseline_miss_rate:
+  label: 对照漏用率
+  means: 对照窗口中适用能力未被使用的比例；用于判断当前漏用率是改善还是退化。
+  goodDirection: neutral
+  category: context
+  component: wakeup
+raw_navigate_calls_week:
+  label: 每周工作区导航次数
+  means: 一周内真实调用 workspace 导航能力的次数；用于观察能力是否有实际使用场景。
+  goodDirection: neutral
+  category: activation
+  component: workspace-navigate
+grep_hits_open_phrase:
+  label: “打开看看”机会线索数
+  means: 文本里出现打开或查看文件意图的次数，作为旧版机会代理；它只用于对照，不等于每次都必须导航。
+  goodDirection: neutral
+  category: context
+  component: workspace-navigate

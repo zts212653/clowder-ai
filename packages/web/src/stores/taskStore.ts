@@ -1,20 +1,12 @@
+import type { TaskItem } from '@cat-cafe/shared';
 import { create } from 'zustand';
 
-export interface TaskItem {
-  id: string;
-  threadId: string;
-  title: string;
-  ownerCatId: string | null;
-  status: 'todo' | 'doing' | 'blocked' | 'done';
-  why: string;
-  createdBy: string;
-  createdAt: number;
-  updatedAt: number;
-}
+export type { TaskItem } from '@cat-cafe/shared';
 
 interface TaskState {
   tasks: TaskItem[];
-  setTasks: (tasks: TaskItem[]) => void;
+  loadedThreadId: string | null;
+  setTasks: (tasks: TaskItem[], loadedThreadId?: string) => void;
   addTask: (task: TaskItem) => void;
   updateTask: (task: TaskItem) => void;
   removeTask: (taskId: string) => void;
@@ -23,8 +15,9 @@ interface TaskState {
 
 export const useTaskStore = create<TaskState>((set) => ({
   tasks: [],
+  loadedThreadId: null,
 
-  setTasks: (tasks) => set({ tasks }),
+  setTasks: (tasks, loadedThreadId) => set({ tasks, loadedThreadId: loadedThreadId ?? null }),
 
   addTask: (task) =>
     set((state) => {
@@ -47,5 +40,5 @@ export const useTaskStore = create<TaskState>((set) => ({
       tasks: state.tasks.filter((t) => t.id !== taskId),
     })),
 
-  clearTasks: () => set({ tasks: [] }),
+  clearTasks: () => set({ tasks: [], loadedThreadId: null }),
 }));

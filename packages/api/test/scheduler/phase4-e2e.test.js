@@ -1,0 +1,404 @@
+/**
+ * F139 Phase 4 E2E (AC-H5): Template Execution + Builtin Control
+ * Full chain: register → hydrate → trigger → deliver → panel control
+ */
+
+import assert from 'node:assert/strict';
+import { beforeEach, describe, mock, test } from 'node:test';
+import Database from 'better-sqlite3';
+import { applyMigrations } from '../../dist/domains/memory/schema.js';
+import { DynamicTaskStore } from '../../dist/infrastructure/scheduler/DynamicTaskStore.js';
+import { createDeliverFn } from '../../dist/infrastructure/scheduler/delivery.js';
+import { GlobalControlStore } from '../../dist/infrastructure/scheduler/GlobalControlStore.js';
+import { RunLedger } from '../../dist/infrastructure/scheduler/RunLedger.js';
+import { TaskRunnerV2 } from '../../dist/infrastructure/scheduler/TaskRunnerV2.js';
+import { templateRegistry } from '../../dist/infrastructure/scheduler/templates/registry.js';
+
+describe('F139 Phase 4 E2E', () => {
+  let db;
+  let ledger;
+  let runner;
+  let store;
+  let globalControlStore;
+  let deliverCalls;
+  let deliverMock;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    applyMigrations(db);
+    ledger = new RunLedger(db);
+    globalControlStore = new GlobalControlStore(db);
+    store = new DynamicTaskStore(db);
+    deliverCalls = [];
+
+    // Mock messageStore + socketManager for delivery
+    const mockMessageStore = {
+      append: mock.fn((msg) => ({ id: `msg-${Date.now()}`, threadId: msg.threadId })),
+    };
+    const mockSocketManager = {
+      broadcastToRoom: mock.fn(),
+      emitToUser: mock.fn(),
+    };
+    // RFC §5.1: a scheduled wake crosses the durable-admission seam, not a bare append.
+    const mockPersistedQueueDelivery = {
+      async deliver(input) {
+        const id = `msg-${Date.now()}`;
+        return { state: 'started', entryId: `entry-${id}`, message: { id, ...input } };
+      },
+    };
+    deliverMock = createDeliverFn({
+      messageStore: mockMessageStore,
+      socketManager: mockSocketManager,
+      persistedQueueDelivery: mockPersistedQueueDelivery,
+    });
+
+    // Wrap to capture calls
+    const wrappedDeliver = async (opts) => {
+      deliverCalls.push(opts);
+      return deliverMock(opts);
+    };
+
+    runner = new TaskRunnerV2({
+      logger: { info: () => {}, error: () => {} },
+      ledger,
+      globalControlStore,
+      deliver: wrappedDeliver,
+    });
+  });
+
+  test('AC-H1+H5: reminder register → hydrate → trigger → deliver', async () => {
+    // 1. Register a reminder task ("每天九点提醒我喝水")
+    store.insert({
+      id: 'remind-water',
+      templateId: 'reminder',
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: { message: '记得喝水！' },
+      display: { label: '喝水提醒', category: 'system', description: '每天九点提醒喝水' },
+      deliveryThreadId: 'thread-user-123',
+      enabled: true,
+      createdBy: 'opus',
+      createdAt: new Date().toISOString(),
+    });
+
+    // 2. Hydrate into runner
+    const loaded = runner.hydrateDynamic(store, templateRegistry);
+    assert.equal(loaded, 1);
+
+    // 3. Verify task visible in summaries
+    const summaries = runner.getTaskSummaries();
+    assert.equal(summaries.length, 1);
+    assert.equal(summaries[0].id, 'remind-water');
+    assert.equal(summaries[0].source, 'dynamic');
+    assert.equal(summaries[0].effectiveEnabled, true);
+
+    // 4. Manual trigger → execute
+    await runner.triggerNow('remind-water', { manual: true });
+
+    // 5. Verify message was delivered
+    assert.equal(deliverCalls.length, 1);
+    assert.equal(deliverCalls[0].threadId, 'thread-user-123');
+    assert.equal(deliverCalls[0].content, '[定时任务] 记得喝水！');
+
+    // 6. Verify ledger recorded RUN_DELIVERED
+    const runs = ledger.query('remind-water', 5);
+    assert.ok(runs.length >= 1);
+    assert.equal(runs[0].outcome, 'RUN_DELIVERED');
+    assert.equal(runs[0].subject_key, 'thread-thread-user-123');
+  });
+
+  test('Phase 4b: reminder with invokeTrigger stores trigger message then wakes cat', async () => {
+    const triggerCalls = [];
+    const mockInvokeTrigger = {
+      trigger: (...args) => triggerCalls.push(args),
+    };
+
+    // Use wrapped deliver so deliverCalls captures the trigger-message store
+    const runnerWithTrigger = new TaskRunnerV2({
+      logger: { info: () => {}, error: () => {} },
+      ledger,
+      globalControlStore,
+      deliver: async (opts) => {
+        deliverCalls.push(opts);
+        return deliverMock(opts);
+      },
+      invokeTrigger: mockInvokeTrigger,
+    });
+
+    store.insert({
+      id: 'remind-cat-wake',
+      templateId: 'reminder',
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: { message: '搜三天内 Anthropic 新闻' },
+      display: { label: '新闻速递', category: 'external' },
+      deliveryThreadId: 'thread-news-123',
+      enabled: true,
+      createdBy: 'opus',
+      createdAt: new Date().toISOString(),
+    });
+    runnerWithTrigger.hydrateDynamic(store, templateRegistry);
+
+    await runnerWithTrigger.triggerNow('remind-cat-wake', { manual: true });
+
+    // 1. deliver was called FIRST to store the trigger message (real messageId for retry)
+    assert.equal(deliverCalls.length, 1);
+    assert.equal(deliverCalls[0].threadId, 'thread-news-123');
+    assert.ok(deliverCalls[0].content.includes('搜三天内 Anthropic 新闻'));
+    // F117 ADR-043 D.4 (sol adjudication R4): stored trigger-message userId is the
+    // verified trigger owner (triggerUserId), not the author 'scheduler'. Scheduler
+    // authorship is expressed via from: system:scheduler in createDeliverFn instead.
+    assert.equal(deliverCalls[0].userId, 'default-user'); // === triggerUserId
+    // RFC §5.2: the envelope names its member and admission is the wake — one seam, not two.
+    assert.equal(deliverCalls.length, 1, 'one envelope, one admission');
+    assert.equal(deliverCalls[0].threadId, 'thread-news-123');
+    assert.equal(deliverCalls[0].targetCatId, 'opus'); // default, no actor resolver
+    assert.equal(deliverCalls[0].sourceCategory, 'scheduled');
+    assert.ok(deliverCalls[0].idempotencyKey, 'a scheduled wake carries a stable admission identity');
+
+    // Ledger still records RUN_DELIVERED
+    const runs = ledger.query('remind-cat-wake', 1);
+    assert.equal(runs[0].outcome, 'RUN_DELIVERED');
+  });
+
+  test('hold continuation stays queued and urgent until canonical Queue admission publishes it', async () => {
+    const triggerCalls = [];
+    const runnerWithTrigger = new TaskRunnerV2({
+      logger: { info: () => {}, error: () => {} },
+      ledger,
+      globalControlStore,
+      deliver: async (opts) => {
+        deliverCalls.push(opts);
+        return deliverMock(opts);
+      },
+      invokeTrigger: { trigger: (...args) => triggerCalls.push(args) },
+    });
+    const fireAt = Date.now() + 60_000;
+    store.insert({
+      id: 'hold-ball-timer-1',
+      templateId: 'reminder',
+      trigger: { type: 'once', fireAt },
+      params: {
+        message: '等待 CI 完成后复核',
+        targetCatId: 'codex-sol',
+        triggerUserId: 'user-1',
+        holdLifecycle: {
+          mode: 'timer',
+          status: 'active',
+          wakeAt: fireAt,
+          createdBy: 'hold-ball:codex-sol',
+        },
+      },
+      display: { label: 'hold', category: 'system' },
+      deliveryThreadId: 'thread-hold-1',
+      enabled: true,
+      createdBy: 'hold-ball:codex-sol',
+      createdAt: new Date().toISOString(),
+    });
+    runnerWithTrigger.hydrateDynamic(store, templateRegistry);
+
+    await runnerWithTrigger.triggerNow('hold-ball-timer-1', { manual: true });
+
+    // One envelope carries the hold's identity, urgency and member; admission is the wake.
+    assert.equal(deliverCalls.length, 1);
+    assert.equal(deliverCalls[0].source.connector, 'hold-ball');
+    assert.equal(deliverCalls[0].source.meta.phase, 'wake');
+    assert.equal(deliverCalls[0].targetCatId, 'codex-sol');
+    assert.equal(deliverCalls[0].priority, 'urgent');
+    assert.equal(deliverCalls[0].sourceCategory, 'scheduled');
+  });
+
+  test('AC-H4: builtin task pause via override → trigger skipped', async () => {
+    // Register a reminder
+    store.insert({
+      id: 'remind-pause-test',
+      templateId: 'reminder',
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: { message: 'test' },
+      display: { label: 'Test', category: 'system' },
+      deliveryThreadId: 'thread-t1',
+      enabled: true,
+      createdBy: 'opus',
+      createdAt: new Date().toISOString(),
+    });
+    runner.hydrateDynamic(store, templateRegistry);
+
+    // Pause via task override (same as panel UI would do)
+    globalControlStore.setTaskOverride('remind-pause-test', false, 'user');
+
+    // Verify effectiveEnabled is false
+    const summaries = runner.getTaskSummaries();
+    assert.equal(summaries[0].effectiveEnabled, false);
+
+    // Trigger — should be skipped due to override
+    await runner.triggerNow('remind-pause-test', { manual: true });
+
+    // Manual trigger bypasses overrides — so it still delivers
+    // (This is correct per Phase 3B: manual triggers bypass governance)
+    assert.equal(deliverCalls.length, 1);
+
+    // But a non-manual trigger should skip
+    deliverCalls.length = 0;
+    await runner.triggerNow('remind-pause-test');
+
+    // Non-manual trigger respects override → skip
+    assert.equal(deliverCalls.length, 0);
+
+    // Verify ledger has SKIP_TASK_OVERRIDE
+    const runs = ledger.query('remind-pause-test', 10);
+    const skipRun = runs.find((r) => r.outcome === 'SKIP_TASK_OVERRIDE');
+    assert.ok(skipRun, 'should have SKIP_TASK_OVERRIDE ledger entry');
+  });
+
+  test('AC-H4: resume after pause → delivery works again', async () => {
+    store.insert({
+      id: 'remind-resume-test',
+      templateId: 'reminder',
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: { message: 'resume test' },
+      display: { label: 'Resume', category: 'system' },
+      deliveryThreadId: 'thread-t2',
+      enabled: true,
+      createdBy: 'opus',
+      createdAt: new Date().toISOString(),
+    });
+    runner.hydrateDynamic(store, templateRegistry);
+
+    // Pause
+    globalControlStore.setTaskOverride('remind-resume-test', false, 'user');
+    await runner.triggerNow('remind-resume-test');
+    assert.equal(deliverCalls.length, 0);
+
+    // Resume
+    globalControlStore.setTaskOverride('remind-resume-test', true, 'user');
+    await runner.triggerNow('remind-resume-test');
+    assert.equal(deliverCalls.length, 1);
+    assert.equal(deliverCalls[0].content, '[定时任务] resume test');
+  });
+
+  test('AC-H2: web-digest trigger delivers formatted digest', async () => {
+    // Create runner with fetchContent mock
+    const fetchMock = mock.fn(async () => ({
+      text: 'Anthropic released Claude 5.0 today with major improvements',
+      title: 'Anthropic Blog',
+      url: 'https://blog.anthropic.com',
+      method: 'server-fetch',
+      truncated: false,
+    }));
+
+    const runnerWithFetch = new TaskRunnerV2({
+      logger: { info: () => {}, error: () => {} },
+      ledger,
+      globalControlStore,
+      deliver: async (opts) => {
+        deliverCalls.push(opts);
+        return deliverMock(opts);
+      },
+      fetchContent: fetchMock,
+    });
+
+    store.insert({
+      id: 'digest-anthropic',
+      templateId: 'web-digest',
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: { url: 'https://blog.anthropic.com', topic: 'AI' },
+      display: { label: 'AI 摘要', category: 'external', description: 'Anthropic blog digest' },
+      deliveryThreadId: 'thread-news',
+      enabled: true,
+      createdBy: 'opus',
+      createdAt: new Date().toISOString(),
+    });
+    runnerWithFetch.hydrateDynamic(store, templateRegistry);
+
+    await runnerWithFetch.triggerNow('digest-anthropic', { manual: true });
+
+    assert.equal(fetchMock.mock.calls.length, 1);
+    assert.equal(deliverCalls.length, 1);
+    assert.ok(deliverCalls[0].content.includes('Anthropic Blog'));
+    assert.ok(deliverCalls[0].content.includes('Claude 5.0'));
+    assert.equal(deliverCalls[0].threadId, 'thread-news');
+  });
+
+  test('AC-H2b: web-digest browser path stores trigger message then wakes target cat', async () => {
+    const fetchMock = mock.fn(async () => ({
+      text: '',
+      title: '',
+      url: 'https://x.com/anthropic',
+      method: 'browser',
+      truncated: false,
+    }));
+    const triggerCalls = [];
+
+    const runnerWithFetchAndTrigger = new TaskRunnerV2({
+      logger: { info: () => {}, error: () => {} },
+      ledger,
+      globalControlStore,
+      deliver: async (opts) => {
+        deliverCalls.push(opts);
+        return deliverMock(opts);
+      },
+      fetchContent: fetchMock,
+      invokeTrigger: {
+        trigger: (...args) => triggerCalls.push(args),
+      },
+    });
+
+    store.insert({
+      id: 'digest-browser',
+      templateId: 'web-digest',
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: { url: 'https://x.com/anthropic', topic: '今天 AI 新闻', targetCatId: 'gpt52' },
+      display: { label: 'AI 新闻巡查', category: 'external', description: 'JS-heavy digest' },
+      deliveryThreadId: 'thread-browser',
+      enabled: true,
+      createdBy: 'gpt52',
+      createdAt: new Date().toISOString(),
+    });
+    runnerWithFetchAndTrigger.hydrateDynamic(store, templateRegistry);
+
+    await runnerWithFetchAndTrigger.triggerNow('digest-browser', { manual: true });
+
+    assert.equal(fetchMock.mock.calls.length, 1);
+    assert.equal(deliverCalls.length, 1);
+    assert.equal(deliverCalls[0].threadId, 'thread-browser');
+    // F117 ADR-043 D.4 (sol adjudication R4): stored trigger-message userId is the
+    // verified trigger owner (triggerUserId), not the author 'scheduler'. Scheduler
+    // authorship is expressed via from: system:scheduler in createDeliverFn instead.
+    assert.equal(deliverCalls[0].userId, 'default-user'); // === triggerUserId
+    assert.ok(deliverCalls[0].content.includes('browser-automation'));
+    assert.ok(deliverCalls[0].content.includes('https://x.com/anthropic'));
+    assert.ok(deliverCalls[0].content.includes('今天 AI 新闻'));
+
+    // The skill hint travels in the envelope the admission persists, not in a second wake call.
+    assert.equal(deliverCalls[0].targetCatId, 'gpt52');
+    assert.equal(deliverCalls[0].suggestedSkill, 'browser-automation');
+    assert.equal(deliverCalls[0].sourceCategory, 'scheduled');
+
+    const runs = ledger.query('digest-browser', 1);
+    assert.equal(runs[0].outcome, 'RUN_DELIVERED');
+  });
+
+  test('AC-D1: global pause stops all non-manual triggers', async () => {
+    store.insert({
+      id: 'remind-global-pause',
+      templateId: 'reminder',
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: { message: 'global test' },
+      display: { label: 'Global', category: 'system' },
+      deliveryThreadId: 'thread-gp',
+      enabled: true,
+      createdBy: 'opus',
+      createdAt: new Date().toISOString(),
+    });
+    runner.hydrateDynamic(store, templateRegistry);
+
+    // Pause globally
+    globalControlStore.setGlobalEnabled(false, 'test', 'user');
+
+    // Non-manual trigger → skipped
+    await runner.triggerNow('remind-global-pause');
+    assert.equal(deliverCalls.length, 0);
+
+    // Manual trigger → still works
+    await runner.triggerNow('remind-global-pause', { manual: true });
+    assert.equal(deliverCalls.length, 1);
+  });
+});

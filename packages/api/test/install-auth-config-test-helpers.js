@@ -6,24 +6,55 @@ const testDir = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(testDir, '..', '..', '..');
 const helperScript = resolve(repoRoot, 'scripts', 'install-auth-config.mjs');
 
+/** Extract --project-dir from args to use as global config root for test isolation. */
+function extractProjectDir(args) {
+  const idx = args.indexOf('--project-dir');
+  return idx >= 0 && idx + 1 < args.length ? args[idx + 1] : undefined;
+}
+
+/** Build env overrides: isolate both global root and HOME to prevent homedir migration leaks. */
+function isolatedEnv(projectDir, extraEnv) {
+  return {
+    ...process.env,
+    ...(projectDir ? { CAT_CAFE_GLOBAL_CONFIG_ROOT: projectDir, HOME: projectDir } : {}),
+    ...extraEnv,
+  };
+}
+
 export function runHelper(args) {
+  const projectDir = extractProjectDir(args);
   return execFileSync('node', [helperScript, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
+    env: isolatedEnv(projectDir),
   });
 }
 
 export function runHelperResult(args) {
+  const projectDir = extractProjectDir(args);
   return spawnSync('node', [helperScript, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
+    env: isolatedEnv(projectDir),
   });
 }
 
 export function runHelperWithEnv(args, env) {
+  const projectDir = extractProjectDir(args);
   return execFileSync('node', [helperScript, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: { ...process.env, ...env },
+    env: isolatedEnv(projectDir, env),
+  });
+}
+
+/** Run installer WITHOUT CAT_CAFE_GLOBAL_CONFIG_ROOT — exercises _activeProjectDir fallback. */
+export function runHelperNoGlobalOverride(args) {
+  const projectDir = extractProjectDir(args);
+  const { CAT_CAFE_GLOBAL_CONFIG_ROOT: _stripped, ...cleanEnv } = process.env;
+  return spawnSync('node', [helperScript, ...args], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: { ...cleanEnv, ...(projectDir ? { HOME: projectDir } : {}) },
   });
 }

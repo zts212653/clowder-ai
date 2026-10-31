@@ -11,7 +11,9 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Lightbox } from '@/components/Lightbox';
+import { CopyButton, Lightbox } from '@/components/Lightbox';
+import { writeShellLanguage } from '@/components/shell/shell-language';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -50,6 +52,24 @@ function renderLightbox(props: Partial<React.ComponentProps<typeof Lightbox>> = 
   });
   return { onClose };
 }
+
+it.each([
+  ['v2', 'zh', '复制', '复制图片', '已复制'],
+  ['v2', 'en', 'Copy', 'Copy image', 'Copied!'],
+  ['classic', 'zh', 'Copy', 'Copy image', 'Copied!'],
+] as const)('uses %s/%s for the image copy action and successful feedback', async (presentation, language, copy, title, copied) => {
+  writeShellPresentation(presentation);
+  writeShellLanguage(language);
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  await act(async () => root.render(React.createElement(CopyButton, { url: '/test-image.png', placement: 'below' })));
+  expect(container.textContent).toBe(copy);
+  expect(container.querySelector('button')?.title).toBe(title);
+  await act(async () => container.querySelector('button')?.click());
+  expect(writeText).toHaveBeenCalledWith('/test-image.png');
+  expect(container.textContent).toBe(copied);
+  await act(async () => writeShellPresentation('classic'));
+});
 
 describe('Lightbox', () => {
   it('renders image with correct src and alt', () => {

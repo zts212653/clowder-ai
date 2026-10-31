@@ -5,6 +5,7 @@ import { ChatMessage } from '@/components/ChatMessage';
 import { MessageNavigator } from '@/components/MessageNavigator';
 import { useCatData } from '@/hooks/useCatData';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
+import { scrollToMessage } from '@/utils/scrollToMessage';
 
 const now = Date.now();
 
@@ -12,7 +13,7 @@ const messages: ChatMessageType[] = [
   {
     id: 'u-1',
     type: 'user',
-    content: '跨线程那条消息怎么把作者标错了？（这是正常的铲屎官消息）',
+    content: '跨线程那条消息怎么把作者标错了？（这是正常的co-creator消息）',
     timestamp: now - 1000 * 60 * 5,
   },
   {
@@ -47,20 +48,43 @@ export default function ShowcaseF052CrossThreadAuthorLabel() {
   return (
     <div className="mx-auto max-w-4xl p-6">
       <h1 className="text-xl font-semibold">F052 — Cross-thread Author Label</h1>
-      <p className="mt-2 text-sm text-gray-600">
+      <p className="mt-2 text-sm text-cafe-secondary">
         Fixture: one message is <code className="font-mono">type=&quot;user&quot;</code> but still has a{' '}
         <code className="font-mono">catId</code>. UI should render it as a cat message (avatar/name/color), not as
-        &quot;铲屎官&quot;.
+        &quot;co-creator&quot;.
       </p>
 
-      <div className="relative mt-4 overflow-hidden rounded-xl border border-gray-200 bg-white">
+      <div className="relative mt-4 overflow-hidden rounded-xl border border-cafe bg-cafe-surface">
         <div ref={scrollContainerRef} className="relative max-h-[520px] overflow-y-auto p-4 space-y-3">
           {messages.map((message) => (
             <ChatMessage key={message.id} message={message} getCatById={getCatById} />
           ))}
         </div>
 
-        <MessageNavigator messages={messages} scrollContainerRef={scrollContainerRef} />
+        <MessageNavigator
+          messages={messages}
+          scrollContainerRef={scrollContainerRef}
+          // This static author-label demo has no thread history or persisted reading state.
+          onJumpToMessage={(id) => {
+            const container = scrollContainerRef.current;
+            return container ? scrollToMessage(id, container) : false;
+          }}
+          beginUserScroll={() => {
+            const container = scrollContainerRef.current;
+            if (!container) return null;
+            let active = true;
+            return {
+              scrollTo(top) {
+                if (!active || !Number.isFinite(top)) return false;
+                container.scrollTop = Math.max(0, Math.min(top, container.scrollHeight - container.clientHeight));
+                return true;
+              },
+              end() {
+                active = false;
+              },
+            };
+          }}
+        />
       </div>
     </div>
   );

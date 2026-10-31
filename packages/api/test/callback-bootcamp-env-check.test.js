@@ -65,14 +65,13 @@ describe('Callback Bootcamp Env Check', () => {
     const app = await createApp();
 
     const thread = await threadStore.create('user-1', '🎓 训练营');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/bootcamp-env-check',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: thread.id,
       },
     });
@@ -84,6 +83,9 @@ describe('Callback Bootcamp Env Check', () => {
     assert.ok('pnpm' in body);
     assert.ok('git' in body);
     assert.ok('claudeCli' in body);
+    assert.ok('codexCli' in body);
+    assert.ok('geminiCli' in body);
+    assert.ok('kimiCli' in body);
     assert.ok('mcp' in body);
     assert.ok('tts' in body);
     assert.ok('asr' in body);
@@ -97,7 +99,7 @@ describe('Callback Bootcamp Env Check', () => {
     const app = await createApp();
 
     const thread = await threadStore.create('user-1', '🎓 训练营');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
     await threadStore.updateBootcampState(thread.id, {
       v: 1,
       phase: 'phase-2-env-check',
@@ -108,9 +110,8 @@ describe('Callback Bootcamp Env Check', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/bootcamp-env-check',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: thread.id,
       },
     });
@@ -136,14 +137,13 @@ describe('Callback Bootcamp Env Check', () => {
     });
 
     // Invocation with default thread (no threadId passed)
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/bootcamp-env-check',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: threadB.id,
       },
     });
@@ -164,15 +164,14 @@ describe('Callback Bootcamp Env Check', () => {
     });
 
     // Invocation is bound to thread A
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', threadA.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadA.id);
 
     // Try to env-check thread B — should be rejected
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/bootcamp-env-check',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: threadB.id,
       },
     });
@@ -186,14 +185,13 @@ describe('Callback Bootcamp Env Check', () => {
 
   test('returns 404 for non-existent thread', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'nonexistent');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'nonexistent');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/bootcamp-env-check',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: 'nonexistent',
       },
     });

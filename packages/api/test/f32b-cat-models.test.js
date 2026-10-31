@@ -9,9 +9,8 @@ import { describe, it } from 'node:test';
 const { getCatModel, getAllCatModels } = await import('../dist/config/cat-models.js');
 
 describe('F32-b: getCatModel dynamic env key', () => {
-  it('resolves default model from CAT_CONFIGS fallback', () => {
-    // Without catRegistry population from cat-config.json, falls through to CAT_CONFIGS
-    // catRegistry IS populated by setup-cat-registry.js, so it reads from there
+  it('resolves default model from catRegistry', () => {
+    // catRegistry is populated by setup-cat-registry.js from runtime config
     const model = getCatModel('opus');
     assert.ok(typeof model === 'string');
     assert.ok(model.length > 0);
@@ -39,7 +38,7 @@ describe('F32-b: getCatModel dynamic env key', () => {
     }
   });
 
-  it('throws for unknown cat (no env, no registry, no CAT_CONFIGS)', () => {
+  it('throws for unknown cat (no env, no registry entry)', () => {
     assert.throws(() => getCatModel('nonexistent-cat-xyz'), /No model configured/);
   });
 

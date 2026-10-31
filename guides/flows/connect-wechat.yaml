@@ -1,0 +1,34 @@
+# F155 Guide Flow: 对接微信
+# 引导用户完成微信渠道的接入配置
+# Schema: OrchestrationFlow v2 (tag-based engine)
+
+schemaVersion: 1
+id: connect-wechat
+name: 对接微信
+description: 引导你完成微信渠道的接入和扫码配置
+
+steps:
+  - id: open-im-hub
+    target: im-hub.trigger
+    tips: 点击这里打开 IM Hub
+    advance: click
+
+  - id: go-to-config
+    target: im-hub.config-tab
+    tips: 切换到平台配置页面
+    advance: click
+
+  - id: expand-wechat
+    target: connector.weixin
+    tips: 展开微信渠道配置
+    advance: click
+
+  - id: generate-qr
+    target: connector.weixin.qr-panel
+    tips: 点击生成二维码，然后打开手机微信扫一扫扫描屏幕上的二维码
+    advance: confirm
+
+  - id: done
+    target: connector.weixin
+    tips: 微信已成功接入，可以开始使用了
+    advance: confirm

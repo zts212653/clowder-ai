@@ -50,56 +50,106 @@ describe('MessageActions position', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('places user-message action toolbar below header to avoid timestamp/avatar overlap', async () => {
+  it('keeps the user fallback dock inside its own row without vertical reservation', async () => {
     const { MessageActions } = await import('@/components/MessageActions');
 
     await act(async () => {
       root.render(
-        React.createElement(
-          MessageActions,
-          {
-            message: {
-              id: 'msg-user-1',
-              type: 'user',
-              content: 'hi',
-              timestamp: Date.now(),
-            },
-            threadId: 'thread-1',
+        // eslint-disable-next-line react/no-children-prop -- createElement in test
+        React.createElement(MessageActions, {
+          message: {
+            id: 'msg-user-1',
+            type: 'user',
+            content: 'hi',
+            timestamp: Date.now(),
           },
-          React.createElement('div', null, 'user message'),
-        ),
+          threadId: 'thread-1',
+          // biome-ignore lint/correctness/noChildrenProp: createElement in test
+          children: React.createElement('div', null, 'user message'),
+        }),
       );
     });
 
-    const toolbar = container.querySelector('div.absolute.right-1');
+    const toolbar = container.querySelector('div.absolute.right-10');
     expect(toolbar).not.toBeNull();
-    expect(toolbar?.className).toContain('top-8');
+    expect(toolbar?.className).toContain('top-0');
+    expect(toolbar?.className).toContain('sm:right-auto');
+    expect(toolbar?.className).toContain('sm:left-10');
+    expect(toolbar?.className).not.toContain('-translate-y-full');
+    const host = container.querySelector('[data-context-quote-source="message"]');
+    expect(host?.className).not.toContain('hover:pt-8');
+    expect(host?.className).not.toContain('focus-within:pt-8');
   });
 
-  it('keeps assistant toolbar compact near top edge', async () => {
+  it('keeps the assistant fallback dock beside the author edge without vertical reservation', async () => {
     const { MessageActions } = await import('@/components/MessageActions');
 
     await act(async () => {
       root.render(
+        // eslint-disable-next-line react/no-children-prop -- createElement in test
+        React.createElement(MessageActions, {
+          message: {
+            id: 'msg-assistant-1',
+            type: 'assistant',
+            catId: 'codex',
+            content: 'hello',
+            timestamp: Date.now(),
+          },
+          threadId: 'thread-1',
+          // biome-ignore lint/correctness/noChildrenProp: createElement in test
+          children: React.createElement('div', null, 'assistant message'),
+        }),
+      );
+    });
+
+    const toolbar = container.querySelector('div.absolute.left-10');
+    expect(toolbar).not.toBeNull();
+    expect(toolbar?.className).toContain('top-0');
+    expect(toolbar?.className).not.toContain('sm:left-auto');
+    expect(toolbar?.className).not.toContain('sm:right-10');
+    expect(toolbar?.className).not.toContain('-translate-y-full');
+    const host = container.querySelector('[data-context-quote-source="message"]');
+    expect(host?.className).not.toContain('hover:pt-8');
+    expect(host?.className).not.toContain('focus-within:pt-8');
+    expect(host?.className).not.toContain('sm:hover:pt-0');
+  });
+
+  it('does not paint a fallback dock before a processing response has a message bubble', async () => {
+    const { MessageActions } = await import('@/components/MessageActions');
+    const TestMessageActions = MessageActions as React.ComponentType<
+      Omit<React.ComponentProps<typeof MessageActions>, 'children'> & { children?: React.ReactNode }
+    >;
+
+    await act(async () => {
+      root.render(
         React.createElement(
-          MessageActions,
+          TestMessageActions,
           {
             message: {
-              id: 'msg-assistant-1',
+              id: 'msg-processing-empty',
               type: 'assistant',
               catId: 'codex',
-              content: 'hello',
+              content: '',
               timestamp: Date.now(),
+              lifecycle: {
+                kind: 'response',
+                orderKey: '1:inv-processing',
+                invocationId: 'inv-processing',
+                targetId: 'codex',
+                inputEntryIds: ['entry-1'],
+                inputMessageIds: ['source-1'],
+                status: 'processing',
+                startedAt: Date.now(),
+              },
             },
             threadId: 'thread-1',
           },
-          React.createElement('div', null, 'assistant message'),
+          React.createElement('div', { 'data-testid': 'response-lifecycle-tip' }, '...'),
         ),
       );
     });
 
-    const toolbar = container.querySelector('div.absolute.right-1');
-    expect(toolbar).not.toBeNull();
-    expect(toolbar?.className).toContain('top-1');
+    expect(container.querySelector('[data-testid="message-actions-toolbar"]')).toBeNull();
+    expect(container.querySelector('[data-testid="message-actions-compact-trigger"]')).toBeNull();
   });
 });

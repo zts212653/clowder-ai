@@ -1,0 +1,510 @@
+import './helpers/setup-cat-registry.js';
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+const { getCoCreatorConfig } = await import('../dist/config/cat-config-loader.js');
+const coCreator = getCoCreatorConfig();
+const userLabel = coCreator.nickname ?? coCreator.name;
+
+const { extractBatonContext, summarizeActiveTasks, formatNavigationHeader } = await import(
+  '../dist/domains/cats/services/agents/routing/navigation-context.js'
+);
+
+it('shows known absent waits only for the current owner, without treating unknown as absent', () => {
+  const text = formatNavigationHeader({
+    currentCatId: 'codex',
+    baton: null,
+    tasks: [
+      { id: '1', title: '自己的待办', status: 'doing', ownerCatId: 'codex', hasActiveWait: false },
+      { id: '2', title: '别猫的待办', status: 'todo', ownerCatId: 'opus', hasActiveWait: false },
+      { id: '3', title: '状态未知', status: 'todo', ownerCatId: 'codex' },
+      { id: '4', title: '已登记等待', status: 'blocked', ownerCatId: 'codex', hasActiveWait: true },
+    ],
+  });
+  assert.match(text, /自己的待办.*\[未挂等待\]/);
+  assert.doesNotMatch(text, /(?:别猫的待办|状态未知|已登记等待).*\[未挂等待\]/);
+});
+
+describe('extractBatonContext', () => {
+  const messages = [
+    { id: 'm1', catId: 'codex', content: '我在干活，你别动', timestamp: 1000, userId: 'u1' },
+    { id: 'm2', catId: 'codex', content: '@opus 帮我看看这个\n还有别的问题', timestamp: 2000, userId: 'u1' },
+    { id: 'm3', catId: null, content: '@opus 你觉得呢？', timestamp: 3000, userId: 'user1' },
+  ];
+
+  it('finds last @ mention directed at target cat', () => {
+    const baton = extractBatonContext(messages, 'opus');
+    assert.equal(baton.fromMessageId, 'm3');
+    assert.equal(baton.fromSpeaker, 'user');
+    assert.equal(baton.timestamp, 3000);
+  });
+
+  it('extracts mention excerpt (first line of @ message)', () => {
+    const baton = extractBatonContext(messages.slice(0, 2), 'opus');
+    assert.ok(baton.mentionExcerpt.includes('帮我看看'));
+  });
+
+  it('identifies cat speaker by catId', () => {
+    const baton = extractBatonContext(messages.slice(0, 2), 'opus');
+    assert.equal(baton.fromSpeaker, 'codex');
+    assert.equal(baton.fromSpeakerDisplay, '缅因猫');
+  });
+
+  it('identifies human speaker as "user"', () => {
+    const baton = extractBatonContext(messages, 'opus');
+    assert.equal(baton.fromSpeaker, 'user');
+    assert.equal(baton.fromSpeakerDisplay, userLabel);
+  });
+
+  it('does not infer custody changes from same-author prose', () => {
+    const baton = extractBatonContext(messages.slice(0, 2), 'opus');
+    assert.equal(baton.staleHoldWarning, false);
+  });
+
+  it('no stale hold when different speaker @ mentions', () => {
+    // user (not codex) @opus — the hold was from codex, not user
+    const baton = extractBatonContext(messages, 'opus');
+    assert.equal(baton.staleHoldWarning, false);
+  });
+
+  it('does not false-positive on code keyword "await" (P2 fix)', () => {
+    const msgs = [
+      { id: 'm30', catId: 'codex', content: 'await doWork()', timestamp: 1000, userId: 'u1' },
+      { id: 'm31', catId: 'codex', content: '@opus 帮看下', timestamp: 2000, userId: 'u1' },
+    ];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.equal(baton.staleHoldWarning, false);
+  });
+
+  it('returns null when no @ found', () => {
+    const baton = extractBatonContext([messages[0]], 'opus');
+    assert.equal(baton, null);
+  });
+
+  it('handles @ in middle of content', () => {
+    const msgs = [{ id: 'm10', catId: null, content: '看看这个 @opus 帮忙', timestamp: 5000, userId: 'u2' }];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.ok(baton !== null);
+    assert.equal(baton.fromMessageId, 'm10');
+  });
+
+  it('ignores @ for other cats', () => {
+    const msgs = [{ id: 'm20', catId: null, content: '@codex 帮忙', timestamp: 6000, userId: 'u3' }];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.equal(baton, null);
+  });
+
+  it('preserves excerpt for persisted stream-origin messages', () => {
+    const msgs = [
+      {
+        id: 'm40',
+        catId: 'codex',
+        content: '@opus 这个方案需要再看一下',
+        timestamp: 1000,
+        userId: 'u1',
+        origin: 'stream',
+      },
+    ];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.ok(baton !== null);
+    assert.equal(baton.fromSpeaker, 'codex');
+    assert.ok(baton.mentionExcerpt.includes('这个方案需要再看一下'));
+  });
+
+  it('preserves excerpt for non-stream messages', () => {
+    const msgs = [
+      { id: 'm41', catId: 'codex', content: '@opus 帮我看看这个', timestamp: 1000, userId: 'u1', origin: 'callback' },
+    ];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.ok(baton.mentionExcerpt.includes('帮我看看'));
+  });
+
+  it('does not false-positive on work status "我在想怎么做" (P2-R2)', () => {
+    const msgs = [
+      { id: 'm50', catId: 'codex', content: '我在想这个怎么做，先看下日志', timestamp: 1000, userId: 'u1' },
+      { id: 'm51', catId: 'codex', content: '@opus 帮看下', timestamp: 2000, userId: 'u1' },
+    ];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.equal(baton.staleHoldWarning, false, '"我在想怎么做" is work status, not hold');
+  });
+
+  it('does not false-positive on "正在review" (P2-R2)', () => {
+    const msgs = [
+      { id: 'm52', catId: 'codex', content: '正在review代码', timestamp: 1000, userId: 'u1' },
+      { id: 'm53', catId: 'codex', content: '@opus 看完了帮忙合入', timestamp: 2000, userId: 'u1' },
+    ];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.equal(baton.staleHoldWarning, false, '"正在review" is work status, not hold');
+  });
+
+  it('keeps persisted stream speech without declaring a hold superseded', () => {
+    const msgs = [
+      { id: 'm60', catId: 'codex', content: '别动，等我看完这段代码', timestamp: 1000, userId: 'u1', origin: 'stream' },
+      { id: 'm61', catId: 'codex', content: '@opus 帮我看看', timestamp: 2000, userId: 'u1', origin: 'callback' },
+    ];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.equal(baton.staleHoldWarning, false, 'navigation cannot override custody from prose');
+  });
+
+  it('finds baton via canonical mentions field (alias @宪宪 → catId opus)', () => {
+    const msgs = [
+      { id: 'm70', catId: null, content: '@宪宪 帮我看看这个', timestamp: 1000, userId: 'u1', mentions: ['opus'] },
+    ];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.ok(baton !== null, 'mentions.includes("opus") should match even without @opus in text');
+    assert.equal(baton.fromMessageId, 'm70');
+  });
+
+  it('finds baton when mentions metadata present but no @ in text', () => {
+    const msgs = [
+      { id: 'm71', catId: 'codex', content: '帮我看看这个 PR', timestamp: 2000, userId: 'u1', mentions: ['opus'] },
+    ];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.ok(baton !== null, 'should find baton from mentions even without any @ in content');
+    assert.equal(baton.fromMessageId, 'm71');
+  });
+
+  it('falls back to regex when mentions is empty array (safeParseMentions legacy)', () => {
+    const msgs = [
+      { id: 'm80', catId: 'codex', content: '@opus 帮我看看', timestamp: 1000, userId: 'u1', mentions: [] },
+    ];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.ok(baton !== null, 'empty mentions[] must fall back to regex, not silently miss @opus');
+    assert.equal(baton.fromMessageId, 'm80');
+  });
+
+  it('strips all @mentions from excerpt, not just target (P3: multi-mention)', () => {
+    const msgs = [
+      {
+        id: 'm90',
+        catId: null,
+        content: '@opus @gemini 帮我看看这个',
+        timestamp: 1000,
+        userId: 'u1',
+        mentions: ['opus', 'gemini'],
+      },
+    ];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.ok(baton !== null);
+    assert.ok(
+      !baton.mentionExcerpt.includes('@'),
+      `excerpt "${baton.mentionExcerpt}" should not contain any @mentions`,
+    );
+    assert.ok(baton.mentionExcerpt.includes('帮我看看'));
+  });
+
+  it('strips Chinese @mentions from excerpt (P2-R2: Unicode handles)', () => {
+    const msgs = [
+      {
+        id: 'm92',
+        catId: null,
+        content: '@宪宪 帮我看看这个',
+        timestamp: 1000,
+        userId: 'u1',
+        mentions: ['opus'],
+      },
+    ];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.ok(baton !== null);
+    assert.ok(
+      !baton.mentionExcerpt.includes('@'),
+      `excerpt "${baton.mentionExcerpt}" should not contain Chinese @mentions`,
+    );
+    assert.ok(baton.mentionExcerpt.includes('帮我看看'));
+  });
+
+  it('strips mixed Chinese+ASCII @mentions from excerpt (P2-R2)', () => {
+    const msgs = [
+      {
+        id: 'm93',
+        catId: null,
+        content: '@opus @烁烁 一起验收',
+        timestamp: 1000,
+        userId: 'u1',
+        mentions: ['opus', 'gemini'],
+      },
+    ];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.ok(baton !== null);
+    assert.ok(
+      !baton.mentionExcerpt.includes('@'),
+      `excerpt "${baton.mentionExcerpt}" should not contain any @mentions`,
+    );
+    assert.ok(baton.mentionExcerpt.includes('验收'));
+  });
+
+  it('strips inline @mentions when target cat is not first (P3)', () => {
+    const msgs = [
+      {
+        id: 'm91',
+        catId: 'codex',
+        content: '@gemini @opus 验收一下猫粮',
+        timestamp: 2000,
+        userId: 'u1',
+        mentions: ['gemini', 'opus'],
+      },
+    ];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.ok(baton !== null);
+    assert.ok(
+      !baton.mentionExcerpt.includes('@'),
+      `excerpt "${baton.mentionExcerpt}" should not contain any @mentions`,
+    );
+    assert.ok(baton.mentionExcerpt.includes('验收'));
+  });
+
+  it('shows co-creator instead of internal userId for human speaker display (Bug: default-user leak)', () => {
+    const msgs = [{ id: 'm100', catId: null, content: '@opus 帮我看看', timestamp: 1000, userId: 'default-user' }];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.ok(baton !== null);
+    assert.equal(
+      baton.fromSpeakerDisplay,
+      userLabel,
+      `expected 'co-creator', got '${baton.fromSpeakerDisplay}' — internal userId leaked to display`,
+    );
+  });
+
+  it('prefers source.label for connector-origin baton messages (cloud P2)', () => {
+    const msgs = [
+      {
+        id: 'm110',
+        catId: null,
+        content: '@opus CI pipeline failed',
+        timestamp: 1000,
+        userId: 'system',
+        from: { kind: 'external', connectorId: 'github' },
+        source: { connector: 'github', label: 'GitHub CI', icon: 'github' },
+      },
+    ];
+    const baton = extractBatonContext(msgs, 'opus');
+    assert.ok(baton !== null);
+    assert.equal(baton.fromSpeakerDisplay, 'GitHub CI', 'connector baton must show source.label, not co-creator');
+  });
+
+  it('does not declare any human or agent hold superseded by an excerpt', () => {
+    const holdPhrases = ['别动，我来', '你等等', '稍等一下', 'hold on', 'wait for me'];
+    for (const phrase of holdPhrases) {
+      const msgs = [
+        { id: 'h0', catId: 'codex', content: phrase, timestamp: 1000, userId: 'u1' },
+        { id: 'h1', catId: 'codex', content: '@opus 好了你来', timestamp: 2000, userId: 'u1' },
+      ];
+      const baton = extractBatonContext(msgs, 'opus');
+      assert.equal(baton.staleHoldWarning, false, `"${phrase}" requires an explicit custody action`);
+    }
+  });
+});
+
+describe('summarizeActiveTasks', () => {
+  it('returns top 3 non-done tasks sorted by recency', () => {
+    const tasks = [
+      { id: 't1', title: 'Fix Redis bug', status: 'todo', ownerCatId: 'opus', updatedAt: 1000 },
+      { id: 't2', title: 'Review PR #900', status: 'in-progress', ownerCatId: 'codex', updatedAt: 3000 },
+      { id: 't3', title: 'Write tests', status: 'done', ownerCatId: 'opus', updatedAt: 4000 },
+      { id: 't4', title: 'Deploy v2', status: 'todo', ownerCatId: null, updatedAt: 2000 },
+      { id: 't5', title: 'Phase F plan', status: 'in-progress', ownerCatId: 'opus', updatedAt: 5000 },
+    ];
+    const result = summarizeActiveTasks(tasks);
+    assert.equal(result.length, 3);
+    assert.equal(result[0].title, 'Phase F plan');
+    assert.ok(result.every((t) => t.status !== 'done'));
+  });
+
+  it('returns empty for no tasks', () => {
+    assert.deepEqual(summarizeActiveTasks([]), []);
+  });
+
+  it('caps at 3 even with many active tasks', () => {
+    const tasks = Array.from({ length: 10 }, (_, i) => ({
+      id: `t${i}`,
+      title: `Task ${i}`,
+      status: 'todo',
+      ownerCatId: 'opus',
+      updatedAt: i * 1000,
+    }));
+    assert.equal(summarizeActiveTasks(tasks).length, 3);
+  });
+});
+
+describe('formatNavigationHeader', () => {
+  it('renders exact other-member lifecycle state with its source handoff', () => {
+    const header = formatNavigationHeader({
+      baton: null,
+      tasks: [],
+      currentCatId: 'codex',
+      executionSituation: {
+        kind: 'thread_execution_situation.v1',
+        complete: true,
+        activeRuns: [
+          {
+            phase: 'processing',
+            targetId: 'kimi',
+            invocationId: 'inv-kimi',
+            responseMessageId: 'response-kimi',
+            startedAt: 200,
+            sources: [{ messageId: 'source-opus', from: { kind: 'agent', catId: 'opus' } }],
+          },
+        ],
+      },
+    });
+
+    assert.match(header, /成员运行态（生命周期真相）/);
+    assert.match(header, /\(kimi\).*来源 source-opus ← 布偶猫.*response=response-kimi.*invocation=inv-kimi/);
+  });
+
+  it('states that no other member is running only when the exact projection is complete', () => {
+    const header = formatNavigationHeader({
+      baton: null,
+      tasks: [],
+      currentCatId: 'codex',
+      executionSituation: {
+        kind: 'thread_execution_situation.v1',
+        complete: true,
+        activeRuns: [
+          {
+            phase: 'processing',
+            targetId: 'codex',
+            invocationId: 'self-invocation',
+            responseMessageId: 'self-response',
+            startedAt: 100,
+            sources: [{ messageId: 'source-user', from: { kind: 'user', userId: 'owner' } }],
+          },
+        ],
+      },
+    });
+
+    assert.match(header, /成员运行态: 当前无其他成员执行/);
+    assert.doesNotMatch(header, /self-invocation/);
+  });
+
+  it('does not infer execution from recent speech when the lifecycle join is incomplete', () => {
+    const header = formatNavigationHeader({
+      baton: null,
+      tasks: [],
+      executionSituation: {
+        kind: 'thread_execution_situation.v1',
+        complete: false,
+        activeRuns: [],
+      },
+    });
+
+    assert.match(header, /当前无法完整验证（不按最近发言推断）/);
+    assert.doesNotMatch(header, /当前无其他成员执行/);
+  });
+
+  it('formats baton with @ message excerpt', () => {
+    const header = formatNavigationHeader({
+      baton: {
+        fromMessageId: 'm1',
+        fromSpeaker: 'codex',
+        fromSpeakerDisplay: 'codex',
+        timestamp: 1000,
+        mentionExcerpt: '帮我看看这个 PR 的 Redis 改动',
+        staleHoldWarning: false,
+      },
+      tasks: [{ id: 't1', title: 'Fix Redis', status: 'in-progress', ownerCatId: 'opus' }],
+    });
+    assert.ok(header.includes('codex'));
+    assert.ok(header.includes('帮我看看'));
+    assert.ok(header.includes('Fix Redis'));
+  });
+
+  it('shows co-creator local time and UTC in the baton timestamp', () => {
+    const header = formatNavigationHeader({
+      baton: {
+        fromMessageId: 'm1',
+        fromSpeaker: 'user',
+        fromSpeakerDisplay: 'co-creator',
+        timestamp: Date.UTC(2026, 5, 1, 6, 20, 0, 0),
+        mentionExcerpt: '现在不是凌晨',
+        staleHoldWarning: false,
+      },
+      tasks: [],
+    });
+    assert.ok(header.includes(`${userLabel}本地 2026-05-31 23:20 America/Los_Angeles / 2026-06-01 06:20 UTC`), header);
+  });
+
+  it('injects a per-invocation temporal envelope with local and UTC dates', () => {
+    const header = formatNavigationHeader({ baton: null, tasks: [] }, { nowMs: Date.UTC(2026, 6, 6, 3, 14, 0, 0) });
+    assert.ok(
+      header.includes(`当前时间: ${userLabel}本地 2026-07-05 20:14 America/Los_Angeles / 2026-07-06 03:14 UTC`),
+      header,
+    );
+    assert.ok(header.includes('relative terms use this now'), header);
+  });
+
+  it('includes stale hold warning when present', () => {
+    const header = formatNavigationHeader({
+      baton: {
+        fromMessageId: 'm1',
+        fromSpeaker: 'codex',
+        fromSpeakerDisplay: 'codex',
+        timestamp: 1000,
+        mentionExcerpt: '看一下',
+        staleHoldWarning: true,
+      },
+      tasks: [],
+    });
+    assert.ok(header.includes('⚠️'));
+  });
+
+  it('handles missing baton and tasks gracefully', () => {
+    const header = formatNavigationHeader({ baton: null, tasks: [] });
+    assert.ok(header.includes('[导航]'));
+    assert.ok(!header.includes('undefined'));
+  });
+
+  it('does not include intent labels (KD-8)', () => {
+    const header = formatNavigationHeader({
+      baton: {
+        fromMessageId: 'm1',
+        fromSpeaker: 'user',
+        fromSpeakerDisplay: 'user1',
+        timestamp: 1000,
+        mentionExcerpt: '帮我 review 这个',
+        staleHoldWarning: false,
+      },
+      tasks: [],
+    });
+    assert.ok(!header.includes('intent'));
+    assert.ok(!header.includes('分类'));
+    assert.ok(!header.includes('type:'));
+  });
+
+  it('shows task owner as 未分配 when null', () => {
+    const header = formatNavigationHeader({
+      baton: null,
+      tasks: [{ id: 't1', title: 'Deploy', status: 'todo', ownerCatId: null }],
+    });
+    assert.ok(header.includes('未分配'));
+  });
+
+  it('renders a structured thread lookup when truth source is not yet located', () => {
+    const header = formatNavigationHeader({
+      baton: null,
+      tasks: [],
+      threadId: 'thread-drill',
+      truthSource: null,
+    });
+
+    assert.ok(header.includes('真相源: 未定位'));
+    assert.ok(header.includes('threadId=thread-drill'), header);
+    assert.ok(header.includes('cat_cafe_get_thread_context({ threadId: "thread-drill" })'), header);
+    assert.ok(!header.includes('query: "thread-drill"'), header);
+    assert.ok(!header.includes('cat_cafe_search_evidence'), header);
+  });
+
+  it('renders the canonical source ref, not only its display label', () => {
+    const header = formatNavigationHeader({
+      baton: null,
+      tasks: [],
+      threadId: 'thread-drill',
+      truthSource: {
+        label: 'F263 spec',
+        ref: 'docs/features/F263-memory-system.md',
+        provenance: 'canonical',
+      },
+    });
+
+    assert.ok(header.includes('docs/features/F263-memory-system.md'), header);
+  });
+});

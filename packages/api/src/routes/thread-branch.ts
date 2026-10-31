@@ -8,6 +8,7 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { messageFrom } from '../domains/cats/services/stores/message-from.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
@@ -127,7 +128,7 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
       reply.status(404);
       return { error: '对话不存在', code: 'THREAD_NOT_FOUND' };
     }
-    if (sourceThread.createdBy !== userId) {
+    if (sourceThread.createdBy !== userId && sourceThread.createdBy !== 'system') {
       reply.status(403);
       return { error: '无权对此对话创建分支', code: 'UNAUTHORIZED' };
     }
@@ -141,7 +142,9 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
 
     // ③ Get all visible messages up to and including fromMessage
     // getByThread filters soft-deleted/tombstone — cannot branch from deleted messages
-    const allMessages = await messageStore.getByThread(id, 10000);
+    const allMessages = await messageStore.getByThread(id, 10000, undefined, {
+      includeQueuedCatMessages: true,
+    });
     const cutIndex = allMessages.findIndex((m) => m.id === fromMessageId);
     if (cutIndex === -1) {
       reply.status(400);
@@ -151,7 +154,12 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
 
     // ④ Create new thread with "(分支)" suffix
     const branchTitle = sourceThread.title ? `${sourceThread.title} (分支)` : '分支对话';
-    const newThread = await threadStore.create(userId, branchTitle, sourceThread.projectPath);
+    const branchedAt = Date.now();
+    const newThread = await threadStore.create(userId, branchTitle, sourceThread.projectPath, id, undefined, {
+      sourceThreadId: id,
+      sourceMessageId: fromMessageId,
+      branchedAt,
+    });
 
     // ⑤ Copy participants + messages inside guarded block; rollback on any failure
     try {
@@ -162,17 +170,23 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
       for (let i = 0; i < messagesToCopy.length; i++) {
         const src = messagesToCopy[i]!;
         const isLast = i === messagesToCopy.length - 1;
-        const content = isLast && editedContent !== undefined ? editedContent : src.content;
+        const isEdited = isLast && editedContent !== undefined;
+        const content = isEdited ? editedContent : src.content;
 
+        const from = isEdited ? ({ kind: 'user', userId } as const) : messageFrom(src);
+        const pluginMessage = from.kind === 'plugin' ? src.extra?.pluginMessage : undefined;
+        if (from.kind === 'plugin' && !pluginMessage) {
+          throw new Error(`Cannot branch plugin message ${src.id}: canonical plugin payload is missing`);
+        }
         await messageStore.append({
-          userId: src.userId,
-          catId: src.catId,
+          from,
+          userId: isEdited ? userId : src.userId,
           content,
-          ...(src.contentBlocks && !(isLast && editedContent !== undefined)
-            ? { contentBlocks: src.contentBlocks }
-            : {}),
+          ...(src.contentBlocks && !isEdited ? { contentBlocks: src.contentBlocks } : {}),
           ...(src.metadata ? { metadata: src.metadata } : {}),
           ...(src.origin ? { origin: src.origin } : {}),
+          ...(src.source && !isEdited ? { source: src.source } : {}),
+          ...(pluginMessage ? { extra: { pluginMessage: structuredClone(pluginMessage) } } : {}),
           mentions: [...src.mentions],
           timestamp: src.timestamp,
           threadId: newThread.id,

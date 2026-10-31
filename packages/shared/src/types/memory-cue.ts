@@ -1,0 +1,425 @@
+import { z } from 'zod';
+import { CURRENT_CORPUS_PROFILE_URI, CURRENT_RELATIONSHIP_PROFILE_URI } from '../profile-contract.js';
+import { contextSourcePayloadV1Schema } from './memory-cue-context.js';
+
+export const RECALL_OPPORTUNITY_CATALOG_VERSION = 7 as const;
+
+/** A selector within an already authenticated, revision-pinned canonical document. */
+export const memoryCueDocumentWindowRequestSchema = z
+  .object({
+    offset: z
+      .number()
+      .int()
+      .min(0)
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional()
+      .describe('Zero-based UTF-16 code-unit offset; use nextOffset from the previous page.'),
+    query: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe('Case-insensitive literal phrase or heading to locate in this document (1–200 characters).'),
+  })
+  .strict()
+  .refine((value) => value.offset === undefined || value.query === undefined, {
+    message: 'Use either offset (for example 4000) or query (for example "Release sequence"), not both.',
+  });
+export type MemoryCueDocumentWindowRequest = z.infer<typeof memoryCueDocumentWindowRequestSchema>;
+
+export const RECALL_RESOLVER_FAMILIES = [
+  'person_entity',
+  'operational_precedent',
+  'taste',
+  'profile',
+  'event',
+  'decision',
+  'project_knowledge',
+  'cat_owned_seed',
+  'thread_overview',
+] as const;
+
+export const MEMORY_CUE_INVALIDATORS = [
+  'source_corrected',
+  'source_forgotten',
+  'scope_revoked',
+  'superseded',
+  'expired',
+] as const;
+
+export const RECALL_OPPORTUNITY_V1_PAIRS = Object.freeze([
+  Object.freeze({ kind: 'subject_seen' as const, producer: 'entity_nudge' as const }),
+  Object.freeze({ kind: 'delivery_decision' as const, producer: 'github_ci' as const }),
+  Object.freeze({
+    kind: 'judgment_surface_entered' as const,
+    producer: 'workflow_sop' as const,
+  }),
+  Object.freeze({
+    kind: 'approved_taste_invoked' as const,
+    producer: 'owner_message' as const,
+  }),
+  Object.freeze({
+    kind: 'profile_revision_available' as const,
+    producer: 'profile_repository' as const,
+  }),
+  Object.freeze({
+    kind: 'recent_event_available' as const,
+    producer: 'event_memory' as const,
+  }),
+  Object.freeze({
+    kind: 'accepted_decision_required' as const,
+    producer: 'owner_message' as const,
+  }),
+  Object.freeze({
+    kind: 'project_source_required' as const,
+    producer: 'task_context' as const,
+  }),
+  Object.freeze({
+    kind: 'owned_seed_available' as const,
+    producer: 'present_loop' as const,
+  }),
+  Object.freeze({ kind: 'thread_opened' as const, producer: 'owner_message' as const }),
+  Object.freeze({ kind: 'fresh_context_sources' as const, producer: 'context_epoch' as const }),
+  Object.freeze({ kind: 'authorized_task_sources' as const, producer: 'task_action_custody' as const }),
+]);
+
+// F321: timing is server-owned; Luna decides relevance after seeing the whole directory.
+const boundedIdentifier = (max: number) => z.string().trim().min(1).max(max);
+const timestampSchema = z.number().int().nonnegative().finite();
+
+export const recallScopeV1Schema = z
+  .object({
+    ownerUserId: boundedIdentifier(160),
+    threadId: boundedIdentifier(160),
+    invocationId: boundedIdentifier(160),
+  })
+  .strict();
+
+const opportunityBaseShape = {
+  v: z.literal(1),
+  opportunityId: boundedIdentifier(200),
+  consumer: z.literal('agent_route'),
+  scope: recallScopeV1Schema,
+  occurredAt: timestampSchema,
+};
+
+export const subjectSeenOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('subject_seen'),
+    producer: z.literal('entity_nudge'),
+    payload: z
+      .object({
+        entityId: boundedIdentifier(200),
+        matchedAlias: boundedIdentifier(160),
+        sourceMessageId: boundedIdentifier(200),
+        sourceRevision: boundedIdentifier(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const deliveryDecisionOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('delivery_decision'),
+    producer: z.literal('github_ci'),
+    payload: z
+      .object({
+        repoFullName: z
+          .string()
+          .regex(/^[^/\s]+\/[^/\s]+$/)
+          .max(240),
+        prNumber: z.number().int().positive(),
+        headSha: z.string().regex(/^[0-9a-f]{40}$/),
+        phase: z.literal('merge_gate'),
+        gateOutcome: z.literal('source_evidence_complete'),
+        externalCondition: z.literal('billing_spending_limit_zero_step'),
+        candidateAction: z.literal('merge'),
+        sourceMessageId: boundedIdentifier(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+/** Server-private transport frame; sourceMessageId and execution scope are rebound after queue admission. */
+export const deliveryDecisionCueCarrierV1Schema = z
+  .object({
+    v: z.literal(1),
+    producer: z.literal('github_ci'),
+    producerProvenance: z.literal('server_github_ci'),
+    repoFullName: z
+      .string()
+      .regex(/^[^/\s]+\/[^/\s]+$/)
+      .max(240),
+    prNumber: z.number().int().positive(),
+    headSha: z.string().regex(/^[0-9a-f]{40}$/),
+    phase: z.literal('merge_gate'),
+    gateOutcome: z.literal('source_evidence_complete'),
+    externalCondition: z.literal('billing_spending_limit_zero_step'),
+    candidateAction: z.literal('merge'),
+    occurredAt: timestampSchema,
+  })
+  .strict();
+
+/** Server-private, content-free transport frame produced by one F255 Present Loop wake. */
+export const catOwnedSeedCueCarrierV1Schema = z
+  .object({
+    v: z.literal(1),
+    producer: z.literal('present_loop'),
+    producerProvenance: z.literal('server_scheduler'),
+    runId: boundedIdentifier(200),
+    producingCatId: boundedIdentifier(120),
+    seedId: boundedIdentifier(200),
+    sourceRevision: boundedIdentifier(200),
+    occurredAt: timestampSchema,
+  })
+  .strict();
+
+export const judgmentSurfaceEnteredOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('judgment_surface_entered'),
+    producer: z.literal('workflow_sop'),
+    payload: z
+      .object({
+        stage: z.enum(['quality_gate', 'review']),
+        selectedSkill: z.enum(['writing-plans', 'co-creation-docs', 'fresh-context-review', 'request-review']),
+        selectionSource: z.enum(['override', 'explicit_prompt_tag']),
+        featureId: z.string().regex(/^F\d{3,}$/),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const approvedTasteInvokedOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('approved_taste_invoked'),
+    producer: z.literal('owner_message'),
+    payload: z
+      .object({
+        triggerKey: z.literal('ELI5'),
+        sourceMessageId: boundedIdentifier(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const profileRevisionAvailableOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('profile_revision_available'),
+    producer: z.literal('profile_repository'),
+    payload: z
+      .object({
+        profileUri: z.union([z.literal(CURRENT_RELATIONSHIP_PROFILE_URI), z.literal(CURRENT_CORPUS_PROFILE_URI)]),
+        sourceRevision: boundedIdentifier(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const recentEventAvailableOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('recent_event_available'),
+    producer: z.literal('event_memory'),
+    payload: z
+      .object({
+        eventId: boundedIdentifier(200),
+        subjectThreadId: boundedIdentifier(160),
+        sourceRevision: boundedIdentifier(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const acceptedDecisionRequiredOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('accepted_decision_required'),
+    producer: z.literal('owner_message'),
+    payload: z
+      .object({
+        decisionAnchor: z.string().regex(/^ADR-\d{3}$/),
+        sourceMessageId: boundedIdentifier(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const projectSourceRequiredOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('project_source_required'),
+    producer: z.literal('task_context'),
+    payload: z
+      .object({
+        featureId: z.string().regex(/^F\d{3,}$/),
+        selectionSource: z.enum(['workflow_feature', 'explicit_owner_reference']),
+        sourceMessageId: boundedIdentifier(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const ownedSeedAvailableOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('owned_seed_available'),
+    producer: z.literal('present_loop'),
+    payload: z
+      .object({
+        runId: boundedIdentifier(200),
+        producingCatId: boundedIdentifier(120),
+        seedId: boundedIdentifier(200),
+        sourceRevision: boundedIdentifier(200),
+        sourceMessageId: boundedIdentifier(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const threadOpenedOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('thread_opened'),
+    producer: z.literal('owner_message'),
+    payload: z.object({ sourceMessageId: boundedIdentifier(200) }).strict(),
+  })
+  .strict();
+export type ThreadOpenedOpportunityV1 = z.infer<typeof threadOpenedOpportunityV1Schema>;
+
+export const freshContextSourcesOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('fresh_context_sources'),
+    producer: z.literal('context_epoch'),
+    payload: contextSourcePayloadV1Schema,
+  })
+  .strict();
+export const authorizedTaskSourcesOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('authorized_task_sources'),
+    producer: z.literal('task_action_custody'),
+    payload: contextSourcePayloadV1Schema,
+  })
+  .strict();
+export type FreshContextSourcesOpportunityV1 = z.infer<typeof freshContextSourcesOpportunityV1Schema>;
+export type AuthorizedTaskSourcesOpportunityV1 = z.infer<typeof authorizedTaskSourcesOpportunityV1Schema>;
+
+export const recallOpportunityV1Schema = z.discriminatedUnion('kind', [
+  subjectSeenOpportunityV1Schema,
+  deliveryDecisionOpportunityV1Schema,
+  judgmentSurfaceEnteredOpportunityV1Schema,
+  approvedTasteInvokedOpportunityV1Schema,
+  profileRevisionAvailableOpportunityV1Schema,
+  recentEventAvailableOpportunityV1Schema,
+  acceptedDecisionRequiredOpportunityV1Schema,
+  projectSourceRequiredOpportunityV1Schema,
+  ownedSeedAvailableOpportunityV1Schema,
+  threadOpenedOpportunityV1Schema,
+  freshContextSourcesOpportunityV1Schema,
+  authorizedTaskSourcesOpportunityV1Schema,
+]);
+
+const memoryCueInvalidatorsSchema = z.tuple([
+  z.literal('source_corrected'),
+  z.literal('source_forgotten'),
+  z.literal('scope_revoked'),
+  z.literal('superseded'),
+  z.literal('expired'),
+]);
+
+export const cueEnvelopeV1Schema = z
+  .object({
+    v: z.literal(1),
+    cueId: boundedIdentifier(200),
+    opportunityId: boundedIdentifier(200),
+    catalogVersion: z.literal(RECALL_OPPORTUNITY_CATALOG_VERSION),
+    resolverFamily: z.enum(RECALL_RESOLVER_FAMILIES),
+    resolverVersion: z.number().int().positive(),
+    whyNow: boundedIdentifier(400),
+    title: boundedIdentifier(160),
+    summary: boundedIdentifier(2000),
+    source: z
+      .object({
+        anchor: boundedIdentifier(500),
+        revision: boundedIdentifier(200),
+        asOf: timestampSchema.optional(),
+        visibility: z.enum(['owner_public', 'owner_private']),
+      })
+      .strict(),
+    drill: z
+      .object({
+        family: z.enum(['person_memory', 'evidence', 'taste', 'profile', 'event', 'owned_seed', 'thread_overview']),
+        handle: boundedIdentifier(2_000),
+      })
+      .strict(),
+    scope: recallScopeV1Schema,
+    invalidators: memoryCueInvalidatorsSchema,
+    expiresAt: timestampSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.resolverFamily !== 'thread_overview' && value.summary.length > 600) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['summary'],
+        message: 'ordinary cue summaries remain bounded to 600',
+      });
+    }
+    if (value.resolverFamily === 'person_entity' && value.source.asOf === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['source', 'asOf'],
+        message: 'person memory cues require a source asOf coordinate',
+      });
+    }
+  });
+
+export type RecallScopeV1 = z.infer<typeof recallScopeV1Schema>;
+export type SubjectSeenOpportunityV1 = z.infer<typeof subjectSeenOpportunityV1Schema>;
+export type DeliveryDecisionOpportunityV1 = z.infer<typeof deliveryDecisionOpportunityV1Schema>;
+export type DeliveryDecisionCueCarrierV1 = z.infer<typeof deliveryDecisionCueCarrierV1Schema>;
+export type CatOwnedSeedCueCarrierV1 = z.infer<typeof catOwnedSeedCueCarrierV1Schema>;
+export type JudgmentSurfaceEnteredOpportunityV1 = z.infer<typeof judgmentSurfaceEnteredOpportunityV1Schema>;
+export type ApprovedTasteInvokedOpportunityV1 = z.infer<typeof approvedTasteInvokedOpportunityV1Schema>;
+export type ProfileRevisionAvailableOpportunityV1 = z.infer<typeof profileRevisionAvailableOpportunityV1Schema>;
+export type RecentEventAvailableOpportunityV1 = z.infer<typeof recentEventAvailableOpportunityV1Schema>;
+export type AcceptedDecisionRequiredOpportunityV1 = z.infer<typeof acceptedDecisionRequiredOpportunityV1Schema>;
+export type ProjectSourceRequiredOpportunityV1 = z.infer<typeof projectSourceRequiredOpportunityV1Schema>;
+export type OwnedSeedAvailableOpportunityV1 = z.infer<typeof ownedSeedAvailableOpportunityV1Schema>;
+export type RecallOpportunityV1 = z.infer<typeof recallOpportunityV1Schema>;
+export type CueEnvelopeV1 = z.infer<typeof cueEnvelopeV1Schema>;
+export type RecallResolverFamily = (typeof RECALL_RESOLVER_FAMILIES)[number];
+export type MemoryCueInvalidator = (typeof MEMORY_CUE_INVALIDATORS)[number];
+
+const MEMORY_CUE_DRILL_FAMILY_BY_RESOLVER = Object.freeze({
+  person_entity: 'person_memory' as const,
+  operational_precedent: 'evidence' as const,
+  taste: 'taste' as const,
+  profile: 'profile' as const,
+  event: 'event' as const,
+  decision: 'evidence' as const,
+  project_knowledge: 'evidence' as const,
+  cat_owned_seed: 'owned_seed' as const,
+  thread_overview: 'thread_overview' as const,
+});
+
+export function memoryCueDrillFamilyForResolver(
+  resolverFamily: RecallResolverFamily,
+): CueEnvelopeV1['drill']['family'] | null {
+  return MEMORY_CUE_DRILL_FAMILY_BY_RESOLVER[resolverFamily];
+}
+
+export function isRecallOpportunityV1(value: unknown): value is RecallOpportunityV1 {
+  return recallOpportunityV1Schema.safeParse(value).success;
+}
+
+export function isCueEnvelopeV1(value: unknown): value is CueEnvelopeV1 {
+  return cueEnvelopeV1Schema.safeParse(value).success;
+}

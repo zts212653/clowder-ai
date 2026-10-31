@@ -1,0 +1,24 @@
+id: L5
+name: MCP 工具 quick index
+stage: session-init
+order: 500
+version: 1
+enabled: true
+
+# Content resolution
+template: l5-mcp-tools-index.md
+
+# Dependencies
+inputs:
+  []
+
+# Override constraints
+disableable: false
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: opt-in-view
+governanceTier: immutable
+
+# operator-facing
+userExplanation: "MCP 工具家族快速索引"

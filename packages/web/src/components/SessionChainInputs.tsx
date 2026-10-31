@@ -1,3 +1,5 @@
+import { sessionChainCopy } from '@/components/session-chain.shell-copy';
+import { useTrajectoryCopy } from '@/components/workspace/trajectory/use-trajectory-copy';
 /**
  * Sub-components for SessionChainPanel: BindSessionInput + SessionIdTag.
  * Extracted to keep SessionChainPanel under 350 lines.
@@ -5,23 +7,27 @@
 
 // biome-ignore lint/correctness/noUnusedImports: React needed for JSX in vitest environment
 import React, { useState } from 'react';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
-import { truncateId } from './status-helpers';
-
 export function BindSessionInput({
   threadId,
   catId,
   onBound,
+  disabled,
 }: {
   threadId: string;
   catId: string;
   onBound: () => void;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const t = useTrajectoryCopy(sessionChainCopy);
   const [value, setValue] = useState('');
   const [status, setStatus] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle');
+  const ime = useIMEGuard();
 
   const handleBind = async () => {
+    if (disabled) return;
     const trimmed = value.trim();
     if (!trimmed || status === 'saving') return;
     setStatus('saving');
@@ -52,9 +58,10 @@ export function BindSessionInput({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-[9px] text-gray-400 hover:text-gray-600 transition-colors"
+        disabled={disabled}
+        className="text-xs text-cafe-muted hover:text-cafe-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        bind...
+        {t.bindId}
       </button>
     );
   }
@@ -64,27 +71,29 @@ export function BindSessionInput({
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
+        onCompositionStart={ime.onCompositionStart}
+        onCompositionEnd={ime.onCompositionEnd}
         onKeyDown={(e) => {
-          if (e.nativeEvent.isComposing) return;
+          if (ime.isComposing()) return;
           if (e.key === 'Enter') void handleBind();
           if (e.key === 'Escape') {
             setOpen(false);
             setStatus('idle');
           }
         }}
-        placeholder="CLI session ID"
+        placeholder={t.cliId}
         maxLength={500}
-        className="flex-1 text-[10px] font-mono px-1.5 py-0.5 rounded border border-gray-200 bg-gray-50 focus:outline-none focus:ring-1 focus:ring-cocreator-primary"
+        className="flex-1 text-xs font-mono px-1.5 py-0.5 rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] focus:outline-none focus:ring-1 focus:ring-cafe-accent"
         // biome-ignore lint/a11y/noAutofocus: intentional UX — focus input immediately on open
         autoFocus
       />
       <button
         type="button"
         onClick={() => void handleBind()}
-        disabled={status === 'saving' || !value.trim()}
-        className="text-[9px] px-1.5 py-0.5 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-40 transition-colors"
+        disabled={status === 'saving' || !value.trim() || disabled}
+        className="text-xs px-1.5 py-0.5 rounded bg-cafe-surface hover:bg-[var(--console-hover-bg)] disabled:opacity-40 transition-colors"
       >
-        {status === 'saving' ? '...' : status === 'ok' ? 'ok' : status === 'error' ? 'err' : 'bind'}
+        {status === 'saving' ? '...' : status === 'ok' ? t.bound : status === 'error' ? t.bindRetry : t.bind}
       </button>
       <button
         type="button"
@@ -92,7 +101,7 @@ export function BindSessionInput({
           setOpen(false);
           setStatus('idle');
         }}
-        className="text-[9px] text-gray-400 hover:text-gray-600"
+        className="text-micro text-cafe-muted hover:text-cafe-secondary"
       >
         ✕
       </button>
@@ -100,21 +109,31 @@ export function BindSessionInput({
   );
 }
 
-export function SessionIdTag({ id }: { id: string }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = () => {
-    void navigator.clipboard.writeText(id);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
+export function SessionIdTag({ id, label }: { id: string; label?: string }) {
+  const t = useTrajectoryCopy(sessionChainCopy);
+  const displayLabel = label ?? t.sessionId;
+  const [copyResult, setCopyResult] = useState<{ id: string; state: 'copied' | 'failed' } | null>(null);
+  const copyState = copyResult?.id === id ? copyResult.state : 'idle';
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopyResult({ id, state: 'copied' });
+    } catch {
+      setCopyResult({ id, state: 'failed' });
+    }
   };
   return (
     <button
       type="button"
-      className="text-[9px] font-mono text-gray-400 hover:text-gray-600 cursor-pointer transition-colors"
-      title={`点击复制: ${id}`}
-      onClick={handleCopy}
+      className="flex min-w-0 flex-1 items-center gap-1 text-left text-xs font-mono text-cafe-muted hover:text-cafe-secondary cursor-pointer transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cafe-accent"
+      title={t.copyTitle(displayLabel, id)}
+      aria-label={t.copyLabel(displayLabel, id)}
+      onClick={() => void handleCopy()}
     >
-      {copied ? 'copied!' : truncateId(id, 10)}
+      <span className="min-w-0 truncate">{id}</span>
+      <span role="status" aria-live="polite" className="shrink-0 font-sans">
+        {copyState === 'copied' ? t.copied : copyState === 'failed' ? t.copyFailedRetry : ''}
+      </span>
     </button>
   );
 }

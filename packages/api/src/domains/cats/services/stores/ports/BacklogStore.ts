@@ -36,8 +36,64 @@ export class BacklogTransitionError extends Error {
   }
 }
 
+export interface EnsureTaskBackedBacklogItemInput {
+  readonly userId: string;
+  readonly taskId: string;
+  readonly featureId: string;
+  readonly title: string;
+  readonly summary: string;
+  readonly createdBy: CreateBacklogItemInput['createdBy'];
+}
+
+export function taskBacklogItemId(taskId: string): string {
+  return `task:${taskId}`;
+}
+
+export function buildTaskBackedBacklogItem(input: EnsureTaskBackedBacklogItemInput, now = Date.now()): BacklogItem {
+  const id = taskBacklogItemId(input.taskId);
+  const createInput: CreateBacklogItemInput = {
+    userId: input.userId,
+    title: input.title,
+    summary: input.summary,
+    priority: 'p2',
+    tags: ['source:task', `feature:${input.featureId.toLowerCase()}`],
+    createdBy: input.createdBy,
+  };
+  return {
+    id,
+    userId: input.userId,
+    title: input.title,
+    summary: input.summary,
+    priority: 'p2',
+    tags: [...createInput.tags],
+    status: 'open',
+    createdBy: input.createdBy,
+    createdAt: now,
+    updatedAt: now,
+    audit: [
+      {
+        id: generateSortableId(now + 1),
+        action: 'created',
+        actor: makeCreatorActor(createInput),
+        timestamp: now,
+        detail: `task:${input.taskId}`,
+      },
+    ],
+  };
+}
+
+export function isMatchingTaskBackedItem(item: BacklogItem, input: EnsureTaskBackedBacklogItemInput): boolean {
+  return (
+    item.id === taskBacklogItemId(input.taskId) &&
+    item.userId === input.userId &&
+    item.tags.includes('source:task') &&
+    item.tags.includes(`feature:${input.featureId.toLowerCase()}`)
+  );
+}
+
 export interface IBacklogStore {
   create(input: CreateBacklogItemInput): BacklogItem | Promise<BacklogItem>;
+  ensureTaskBackedItem(input: EnsureTaskBackedBacklogItemInput): BacklogItem | Promise<BacklogItem>;
   refreshMetadata(itemId: string, input: RefreshBacklogItemInput): BacklogItem | null | Promise<BacklogItem | null>;
   get(itemId: string, userId?: string): BacklogItem | null | Promise<BacklogItem | null>;
   listByUser(userId: string): BacklogItem[] | Promise<BacklogItem[]>;
@@ -114,6 +170,22 @@ export class BacklogStore implements IBacklogStore {
       ...(input.initialStatus === 'done' ? { doneAt: now } : {}),
     };
     this.items.set(id, item);
+    return item;
+  }
+
+  ensureTaskBackedItem(input: EnsureTaskBackedBacklogItemInput): BacklogItem {
+    const id = taskBacklogItemId(input.taskId);
+    const existing = this.items.get(id);
+    if (existing) {
+      if (!isMatchingTaskBackedItem(existing, input)) {
+        throw new BacklogTransitionError(`Task-backed backlog identity collision for "${input.taskId}"`);
+      }
+      return existing;
+    }
+
+    this.evictIfNeeded();
+    const item = buildTaskBackedBacklogItem(input);
+    this.items.set(item.id, item);
     return item;
   }
 

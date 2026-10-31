@@ -170,6 +170,7 @@ describe('isValidRichBlock', () => {
 
   it('validates checklist items shape', () => {
     assert.equal(isValidRichBlock({ id: 'b1', kind: 'checklist', v: 1, items: 'bad' }), false);
+    assert.equal(isValidRichBlock({ id: 'b1', kind: 'checklist', v: 1, items: [] }), false);
     assert.equal(isValidRichBlock({ id: 'b1', kind: 'checklist', v: 1, items: [{ id: 'i1' }] }), false);
     assert.equal(isValidRichBlock({ id: 'b1', kind: 'checklist', v: 1, items: [{ id: 'i1', text: 'OK' }] }), true);
   });
@@ -263,6 +264,18 @@ describe('isValidRichBlock', () => {
       isValidRichBlock({ id: 'b1', kind: 'checklist', v: 1, items: [{ id: 'i1', text: 'OK', checked: true }] }),
       true,
     );
+  });
+
+  it('validates the explicit interactive auto-group boundary', () => {
+    const base = {
+      id: 'question-1',
+      kind: 'interactive',
+      v: 1,
+      interactiveType: 'select',
+      options: [{ id: 'yes', label: 'Yes' }],
+    };
+    assert.equal(isValidRichBlock({ ...base, autoGroup: false }), true);
+    assert.equal(isValidRichBlock({ ...base, autoGroup: 'false' }), false);
   });
 
   it('validates audio blocks (F34)', () => {
@@ -478,5 +491,112 @@ describe('extractRichFromText F34-b audio voice messages', () => {
 \`\`\``;
     const result = extractRichFromText(input);
     assert.equal(result.blocks.length, 0);
+  });
+
+  // F088 Phase J: file block
+  it('extracts file block from cc_rich', () => {
+    const input = `\`\`\`cc_rich
+{"v":1,"blocks":[{"id":"f1","kind":"file","v":1,"url":"/uploads/report.pdf","fileName":"调研报告.pdf"}]}
+\`\`\``;
+    const result = extractRichFromText(input);
+    assert.equal(result.blocks.length, 1);
+    assert.equal(result.blocks[0].kind, 'file');
+    assert.equal(result.blocks[0].url, '/uploads/report.pdf');
+    assert.equal(result.blocks[0].fileName, '调研报告.pdf');
+  });
+
+  it('extracts file block with optional mimeType and fileSize', () => {
+    const input = `\`\`\`cc_rich
+{"v":1,"blocks":[{"id":"f2","kind":"file","v":1,"url":"/uploads/doc.docx","fileName":"doc.docx","mimeType":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","fileSize":12345}]}
+\`\`\``;
+    const result = extractRichFromText(input);
+    assert.equal(result.blocks.length, 1);
+    assert.equal(result.blocks[0].mimeType, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    assert.equal(result.blocks[0].fileSize, 12345);
+  });
+
+  it('validates file block: rejects missing url', () => {
+    assert.equal(isValidRichBlock({ id: 'f1', kind: 'file', v: 1, fileName: 'x.pdf' }), false);
+  });
+
+  it('validates file block: rejects missing fileName', () => {
+    assert.equal(isValidRichBlock({ id: 'f1', kind: 'file', v: 1, url: '/uploads/x.pdf' }), false);
+  });
+
+  it('validates file block: rejects empty url', () => {
+    assert.equal(isValidRichBlock({ id: 'f1', kind: 'file', v: 1, url: '  ', fileName: 'x.pdf' }), false);
+  });
+
+  it('validates file block: rejects empty fileName', () => {
+    assert.equal(isValidRichBlock({ id: 'f1', kind: 'file', v: 1, url: '/uploads/x.pdf', fileName: '' }), false);
+  });
+
+  it('validates file block: rejects non-string mimeType', () => {
+    assert.equal(
+      isValidRichBlock({ id: 'f1', kind: 'file', v: 1, url: '/x', fileName: 'x.pdf', mimeType: 123 }),
+      false,
+    );
+  });
+
+  it('validates file block: rejects non-number fileSize', () => {
+    assert.equal(
+      isValidRichBlock({ id: 'f1', kind: 'file', v: 1, url: '/x', fileName: 'x.pdf', fileSize: 'big' }),
+      false,
+    );
+  });
+
+  it('validates file block: accepts valid file block', () => {
+    assert.equal(
+      isValidRichBlock({ id: 'f1', kind: 'file', v: 1, url: '/uploads/report.pdf', fileName: 'report.pdf' }),
+      true,
+    );
+  });
+
+  // P0 security: reject arbitrary local paths (prevents file exfiltration via Telegram)
+  it('validates file block: rejects absolute path outside whitelist', () => {
+    assert.equal(isValidRichBlock({ id: 'f1', kind: 'file', v: 1, url: '/etc/passwd', fileName: 'passwd' }), false);
+  });
+
+  it('validates file block: rejects path traversal', () => {
+    assert.equal(
+      isValidRichBlock({ id: 'f1', kind: 'file', v: 1, url: '/uploads/../../etc/passwd', fileName: 'passwd' }),
+      false,
+    );
+  });
+
+  // P1 security: reject javascript: URLs (prevents XSS via frontend <a href>)
+  it('validates file block: rejects javascript: URL', () => {
+    assert.equal(
+      isValidRichBlock({ id: 'f1', kind: 'file', v: 1, url: 'javascript:alert(1)', fileName: 'xss.pdf' }),
+      false,
+    );
+  });
+
+  it('validates file block: rejects data:text/html URL', () => {
+    assert.equal(
+      isValidRichBlock({
+        id: 'f1',
+        kind: 'file',
+        v: 1,
+        url: 'data:text/html,<script>alert(1)</script>',
+        fileName: 'xss',
+      }),
+      false,
+    );
+  });
+
+  // Whitelist: accepts safe URL patterns
+  it('validates file block: accepts /api/ prefixed URLs', () => {
+    assert.equal(
+      isValidRichBlock({ id: 'f1', kind: 'file', v: 1, url: '/api/connector-media/file.pdf', fileName: 'file.pdf' }),
+      true,
+    );
+  });
+
+  it('validates file block: accepts https:// URLs', () => {
+    assert.equal(
+      isValidRichBlock({ id: 'f1', kind: 'file', v: 1, url: 'https://example.com/doc.pdf', fileName: 'doc.pdf' }),
+      true,
+    );
   });
 });

@@ -22,13 +22,13 @@ F094 立项时，家里共有 97 个 Feature 文档，质量参差不齐。F086/
 - **基线分档**（第一轮，立项时 97 份文档）：Green 20 / Yellow 70 / Red 7
 - **平均合规度**：100%
 - **最高频缺失项（当前）**：无（13 项检查全部清零）
-- **重复 Feature ID**：F055、F061、F081 各有 2 份文档（待team lead拍板去留）
+- **重复 Feature ID**：F055、F061、F081 各有 2 份文档（待operator拍板去留）
 - **TEMPLATE.md 过时**：不反映实际最佳实践（已有 `feature-doc-template.md` 取代）
 - **ROADMAP.md 脱节**：已清零（`PASS check-feature-truth`）
 
 **Mission Hub Dashboard parser（F058）依赖统一格式**：Phase 标题、AC 编号、Status 行、Dependencies 段——格式不统一就无法自动提取进度。
 
-team experience（2026-03-10）：
+operator experience（2026-03-10）：
 > "历史遗留债务必须清理！甚至 mission hub 那个 feat 做了的模板 大家按照那个模板迁移优化重构！"
 > "如果模板里有的模块 md 没有就要补齐！如果自己的 feat 有多的文本也要保留 方便我们未来有记忆有回顾！"
 
@@ -52,14 +52,14 @@ team experience（2026-03-10）：
 5. Dependencies 段：`**Evolved from** / **Blocked by** / **Related**`
 
 **内容完整性（每个 feat 必须有）**：
-- Why（保留team experience/原始动机）
+- Why（保留operator experience/原始动机）
 - What（设计说明）
 - Acceptance Criteria（done 的 feat 全部 `[x]`）
 - Dependencies
 
 **保留原则**：
 - 已有的文本内容**全部保留**，只做格式迁移和结构补齐
-- team experience、讨论记录、设计决策等历史文本是宝贵记忆，不删不改
+- operator experience、讨论记录、设计决策等历史文本是宝贵记忆，不删不改
 - done 的 feat 如果有 Phase 表格/Timeline 等，保留并补齐
 
 ### Phase A: 审计 + 模板升级
@@ -202,7 +202,7 @@ team experience（2026-03-10）：
 - 审计结果升级为：`averageScore=100`、`missingFrequency={}`
 
 ### 技术决策
-- **不解决的问题**：F055/F081 重复 ID 暂时只标注，等team lead拍板后单独处理（不污染主迁移批次）
+- **不解决的问题**：F055/F081 重复 ID 暂时只标注，等operator拍板后单独处理（不污染主迁移批次）
 - **检查失败处理**：Phase C 已完成 BACKLOG 对齐，`check:features` 已全量通过
 
 ## Key Decisions
@@ -214,6 +214,6 @@ team experience（2026-03-10）：
 
 ## Review Gate
 
-- Phase A: 审计报告 → team lead确认分档合理
+- Phase A: 审计报告 → operator确认分档合理
 - Phase B: 每批迁移 → 跨猫 review（确认没丢内容）
 - Phase C: lint 脚本 → 跨猫 review

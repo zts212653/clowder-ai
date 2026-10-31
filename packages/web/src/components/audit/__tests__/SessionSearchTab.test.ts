@@ -31,6 +31,7 @@ describe('SessionSearchTab', () => {
   let root: Root;
 
   beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     mocks.apiFetch.mockReset();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -40,6 +41,7 @@ describe('SessionSearchTab', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
   async function renderSearch(props = {}) {
@@ -143,6 +145,37 @@ describe('SessionSearchTab', () => {
       resultBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(onViewSession).toHaveBeenCalledWith('s1');
+    expect(onViewSession).toHaveBeenCalledWith('s1', 't1');
+  });
+
+  it('ignores a slow result from the previous thread after the thread changes', async () => {
+    let resolveSearch!: (value: { ok: true; json: () => Promise<{ hits: typeof searchHits }> }) => void;
+    const slowSearch = new Promise<{ ok: true; json: () => Promise<{ hits: typeof searchHits }> }>((resolve) => {
+      resolveSearch = resolve;
+    });
+    mocks.apiFetch.mockReturnValueOnce(slowSearch);
+
+    await renderSearch({ threadId: 'thread-a' });
+    const input = container.querySelector('input[type="text"]') as HTMLInputElement;
+    await act(async () => {
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      nativeInputValueSetter?.call(input, 'stale');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[type="submit"]')?.click();
+    });
+
+    const { SessionSearchTab } = await import('../SessionSearchTab');
+    await act(async () => {
+      root.render(React.createElement(SessionSearchTab, { threadId: 'thread-b', onViewSession: vi.fn() }));
+    });
+    await act(async () => {
+      resolveSearch({ ok: true, json: async () => ({ hits: searchHits }) });
+      await slowSearch;
+    });
+
+    expect(container.textContent).not.toContain('found the bug in handler');
+    expect(container.querySelector('[data-testid="search-result-session"]')).toBeNull();
   });
 });

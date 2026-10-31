@@ -1,0 +1,285 @@
+import { createHash } from 'node:crypto';
+import { readdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { resolveCanonicalTasteRoot, type TasteRepository } from '../../../taste/services/TasteRepository.js';
+import type { TasteMemoryLifecycleStore } from '../../taste/TasteMemoryLifecycleStore.js';
+import { TasteMemoryReader, type TasteMemoryReadResult } from '../../taste/TasteMemoryReader.js';
+import {
+  EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX,
+  getExplicitApprovedTasteTrigger,
+  getExplicitApprovedTasteTriggerBySourcePath,
+} from '../ExplicitApprovedTasteTriggerCatalog.js';
+import type { TasteDimensionMapSource, TasteTaskBundleProjection } from '../resolvers/TasteCueResolver.js';
+import {
+  findTasteTaskBundle,
+  parseTasteTaskBundleAnchor,
+  TASTE_TASK_BUNDLE_SOURCE_ANCHOR_PREFIX,
+} from '../TasteTaskBundleCatalog.js';
+
+export {
+  F315_WORKSPACE_READABILITY_TASTE_BUNDLE_V1,
+  TASTE_TASK_BUNDLE_SOURCE_ANCHOR_PREFIX,
+  tasteTaskBundleAnchor,
+} from '../TasteTaskBundleCatalog.js';
+
+const TASTE_MAP_VERSION = 1;
+const MAX_DRILL_PAYLOAD_CHARS = 32_768;
+const PUBLIC_DIRECTORY = 'docs/taste/vignettes';
+const PRIVATE_DIRECTORY = 'private/taste';
+const KNOWN_DIMENSIONS = new Set([
+  'relationship-stance',
+  'cognitive-honesty',
+  'architecture-aesthetics',
+  'visual-quality',
+  'authentic-expression',
+  'system-philosophy',
+  'creative-craft',
+]);
+
+export const TASTE_SKILL_DIMENSIONS_V1 = Object.freeze({
+  'writing-plans': Object.freeze(['cognitive-honesty', 'architecture-aesthetics']),
+  'co-creation-docs': Object.freeze(['cognitive-honesty', 'authentic-expression']),
+  'fresh-context-review': Object.freeze(['cognitive-honesty', 'architecture-aesthetics']),
+  'request-review': Object.freeze(['cognitive-honesty', 'architecture-aesthetics']),
+});
+
+type TasteSkill = keyof typeof TASTE_SKILL_DIMENSIONS_V1;
+
+interface TasteSnapshot {
+  dimensions: string[];
+  revision: string;
+  visibility: 'owner_public' | 'owner_private';
+  results: TasteMemoryReadResult[];
+  totalCount: number;
+}
+
+export type TasteMemoryCueReadResult =
+  | { status: 'ok'; payload: unknown }
+  | { status: 'not_available'; invalidationReason: 'source_corrected' | 'source_forgotten' };
+
+async function listSourcePaths(root: string): Promise<string[]> {
+  const paths: string[] = [];
+  for (const directory of [PUBLIC_DIRECTORY, PRIVATE_DIRECTORY]) {
+    try {
+      const entries = await readdir(join(root, directory), { withFileTypes: true });
+      paths.push(
+        ...entries
+          .filter((entry) => entry.isFile() || entry.isSymbolicLink())
+          .map((entry) => `${directory}/${entry.name}`),
+      );
+    } catch {
+      /* absent private directory is valid */
+    }
+  }
+  return paths;
+}
+
+function boundedResults(results: TasteMemoryReadResult[], dimensions: readonly string[]): TasteMemoryReadResult[] {
+  const selected: TasteMemoryReadResult[] = [];
+  for (const result of results) {
+    const candidate = [...selected, result];
+    if (JSON.stringify({ dimensions, vignettes: candidate }).length > MAX_DRILL_PAYLOAD_CHARS) break;
+    selected.push(result);
+  }
+  return selected;
+}
+
+/** Read-only dimension directory over approved F221 vignettes. */
+export class CanonicalTasteMemoryCueSource implements TasteDimensionMapSource {
+  private readonly reader: TasteMemoryReader;
+
+  constructor(
+    private readonly repository: TasteRepository,
+    private readonly ownerUserId: string,
+    private readonly lifecycle?: Pick<TasteMemoryLifecycleStore, 'isReadable'>,
+  ) {
+    this.reader = new TasteMemoryReader(repository, ownerUserId, { lifecycle });
+  }
+
+  async resolve(input: {
+    ownerUserId: string;
+    stage: 'quality_gate' | 'review';
+    selectedSkill: TasteSkill;
+    featureId: string;
+  }): Promise<Pick<TasteSnapshot, 'dimensions' | 'revision' | 'visibility'> | null> {
+    void input.stage;
+    void input.featureId;
+    if (input.ownerUserId !== this.ownerUserId) return null;
+    const snapshot = await this.snapshot(input.ownerUserId, TASTE_SKILL_DIMENSIONS_V1[input.selectedSkill]);
+    return snapshot
+      ? { dimensions: snapshot.dimensions, revision: snapshot.revision, visibility: snapshot.visibility }
+      : null;
+  }
+
+  async resolveTaskBundle(input: {
+    ownerUserId: string;
+    stage: 'quality_gate' | 'review';
+    selectedSkill: TasteSkill;
+    featureId: string;
+  }): Promise<TasteTaskBundleProjection | null> {
+    if (input.ownerUserId !== this.ownerUserId) return null;
+    const definition = findTasteTaskBundle(input);
+    if (!definition) return null;
+    const root = await resolveCanonicalTasteRoot(this.repository);
+    const reader = new TasteMemoryReader({ canonicalRoot: () => root, approvalLockKey: () => root }, this.ownerUserId, {
+      lifecycle: this.lifecycle,
+    });
+    const sources: TasteTaskBundleProjection['sources'] = [];
+    for (const sourcePath of definition.sourcePaths) {
+      const result = await reader.read({ ownerUserId: input.ownerUserId, sourcePath });
+      if (result?.visibility === 'public')
+        sources.push({ sourcePath: result.sourcePath, revision: result.revision, visibility: 'owner_public' });
+    }
+    if (sources.length !== definition.sourcePaths.length) return null;
+    return {
+      bundleId: definition.bundleId,
+      consumerTaskRef: definition.consumerTaskRef,
+      sources,
+    };
+  }
+
+  matchesTaskBundle(input: {
+    ownerUserId: string;
+    stage: 'quality_gate' | 'review';
+    selectedSkill: TasteSkill;
+    featureId: string;
+  }): boolean {
+    return input.ownerUserId === this.ownerUserId && findTasteTaskBundle(input) !== null;
+  }
+
+  async resolveExplicit(input: { ownerUserId: string; triggerKey: 'ELI5' }): Promise<{
+    triggerKey: 'ELI5';
+    sourcePath: string;
+    revision: string;
+    visibility: 'owner_public' | 'owner_private';
+  } | null> {
+    if (input.ownerUserId !== this.ownerUserId) return null;
+    const trigger = getExplicitApprovedTasteTrigger(input.triggerKey);
+    if (!trigger) return null;
+    const result = await this.reader.read({ ownerUserId: input.ownerUserId, sourcePath: trigger.sourcePath });
+    if (!result || !trigger.requiredTags.every((tag) => result.payload.tags.includes(tag))) return null;
+    return {
+      triggerKey: trigger.triggerKey,
+      sourcePath: trigger.sourcePath,
+      revision: result.revision,
+      visibility: result.visibility === 'private' ? 'owner_private' : 'owner_public',
+    };
+  }
+
+  async read(input: {
+    ownerUserId: string;
+    anchor: string;
+    expectedRevision: string;
+  }): Promise<TasteMemoryCueReadResult> {
+    if (input.ownerUserId !== this.ownerUserId) {
+      return { status: 'not_available', invalidationReason: 'source_forgotten' };
+    }
+    if (input.anchor.startsWith(TASTE_TASK_BUNDLE_SOURCE_ANCHOR_PREFIX)) {
+      return this.readTaskBundleItem(input);
+    }
+    if (input.anchor.startsWith(EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX)) {
+      return this.readExplicit(input);
+    }
+    if (!input.anchor.startsWith('taste-dimensions:')) {
+      return { status: 'not_available', invalidationReason: 'source_forgotten' };
+    }
+    const dimensions = [...new Set(input.anchor.slice('taste-dimensions:'.length).split(',').filter(Boolean))].sort();
+    if (dimensions.length === 0 || dimensions.length > 6 || dimensions.some((value) => !KNOWN_DIMENSIONS.has(value))) {
+      return { status: 'not_available', invalidationReason: 'source_forgotten' };
+    }
+    const snapshot = await this.snapshot(input.ownerUserId, dimensions);
+    if (!snapshot) return { status: 'not_available', invalidationReason: 'source_forgotten' };
+    if (snapshot.revision !== input.expectedRevision) {
+      return { status: 'not_available', invalidationReason: 'source_corrected' };
+    }
+    return {
+      status: 'ok',
+      payload: {
+        dimensions: snapshot.dimensions,
+        totalCount: snapshot.totalCount,
+        vignettes: snapshot.results,
+      },
+    };
+  }
+
+  private async readTaskBundleItem(input: {
+    ownerUserId: string;
+    anchor: string;
+    expectedRevision: string;
+  }): Promise<TasteMemoryCueReadResult> {
+    const coordinate = parseTasteTaskBundleAnchor(input.anchor);
+    if (!coordinate) return { status: 'not_available', invalidationReason: 'source_forgotten' };
+    const current = await this.reader.read({ ownerUserId: input.ownerUserId, sourcePath: coordinate.sourcePath });
+    if (!current) return { status: 'not_available', invalidationReason: 'source_forgotten' };
+    if (current.revision !== input.expectedRevision) {
+      return { status: 'not_available', invalidationReason: 'source_corrected' };
+    }
+    return {
+      status: 'ok',
+      payload: {
+        bundleId: coordinate.definition.bundleId,
+        consumerTaskRef: coordinate.definition.consumerTaskRef,
+        vignette: current,
+      },
+    };
+  }
+
+  private async readExplicit(input: {
+    ownerUserId: string;
+    anchor: string;
+    expectedRevision: string;
+  }): Promise<TasteMemoryCueReadResult> {
+    const sourcePath = input.anchor.slice(EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX.length);
+    const trigger = getExplicitApprovedTasteTriggerBySourcePath(sourcePath);
+    if (!trigger) return { status: 'not_available', invalidationReason: 'source_forgotten' };
+    const current = await this.reader.read({ ownerUserId: input.ownerUserId, sourcePath });
+    if (!current) return { status: 'not_available', invalidationReason: 'source_forgotten' };
+    if (
+      current.revision !== input.expectedRevision ||
+      !trigger.requiredTags.every((tag) => current.payload.tags.includes(tag))
+    ) {
+      return { status: 'not_available', invalidationReason: 'source_corrected' };
+    }
+    return {
+      status: 'ok',
+      payload: {
+        triggerKey: trigger.triggerKey,
+        applicationContract: trigger.applicationContract,
+        vignette: current.payload,
+      },
+    };
+  }
+
+  private async snapshot(ownerUserId: string, requestedDimensions: readonly string[]): Promise<TasteSnapshot | null> {
+    const dimensions = [...new Set(requestedDimensions)].sort();
+    const root = await resolveCanonicalTasteRoot(this.repository);
+    const reader = new TasteMemoryReader({ canonicalRoot: () => root, approvalLockKey: () => root }, this.ownerUserId, {
+      lifecycle: this.lifecycle,
+    });
+    const all: TasteMemoryReadResult[] = [];
+    for (const sourcePath of (await listSourcePaths(root)).sort()) {
+      const result = await reader.read({ ownerUserId, sourcePath });
+      if (result?.payload.dimension && dimensions.includes(result.payload.dimension)) all.push(result);
+    }
+    if (all.length === 0) return null;
+    const availableDimensions = dimensions.filter((dimension) =>
+      all.some((result) => result.payload.dimension === dimension),
+    );
+    const revision = `sha256:${createHash('sha256')
+      .update(
+        JSON.stringify({
+          v: TASTE_MAP_VERSION,
+          dimensions: availableDimensions,
+          sources: all.map((result) => [result.sourcePath, result.revision]),
+        }),
+      )
+      .digest('hex')}`;
+    return {
+      dimensions: availableDimensions,
+      revision,
+      visibility: all.some((result) => result.visibility === 'private') ? 'owner_private' : 'owner_public',
+      results: boundedResults(all, availableDimensions),
+      totalCount: all.length,
+    };
+  }
+}

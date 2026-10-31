@@ -23,7 +23,7 @@ import {
 ensureFakeCliOnPath('opencode');
 
 describe('OMOC Sisyphus Isolation (AC-9)', () => {
-  test('delegate-task targets are OMOC internal agents, not Cat Cafe cats', () => {
+  test('delegate-task targets are OMOC internal agents, not Clowder AI cats', () => {
     const delegateEvents = [OMOC_DELEGATE_ORACLE, OMOC_DELEGATE_LIBRARIAN, OMOC_DELEGATE_FRONTEND];
 
     for (const event of delegateEvents) {
@@ -35,7 +35,7 @@ describe('OMOC Sisyphus Isolation (AC-9)', () => {
       const agentTarget = result.toolInput?.agent;
       assert.ok(agentTarget, 'delegate-task must have agent field in input');
       assert.ok(OMOC_INTERNAL_AGENTS.includes(agentTarget), `agent "${agentTarget}" must be OMOC-internal`);
-      assert.ok(!CAT_CAFE_CAT_IDS.includes(agentTarget), `agent "${agentTarget}" must NOT be a Cat Cafe cat`);
+      assert.ok(!CAT_CAFE_CAT_IDS.includes(agentTarget), `agent "${agentTarget}" must NOT be a Clowder AI cat`);
     }
   });
 
@@ -50,7 +50,7 @@ describe('OMOC Sisyphus Isolation (AC-9)', () => {
     }
   });
 
-  test('OMOC text events do not contain Cat Cafe cat handles', () => {
+  test('OMOC text events do not contain Clowder AI cat handles', () => {
     const result = transformOpenCodeEvent(OMOC_SISYPHUS_TEXT, 'opencode');
     assert.ok(result);
     assert.strictEqual(result.type, 'text');
@@ -61,7 +61,18 @@ describe('OMOC Sisyphus Isolation (AC-9)', () => {
 
   test('full OMOC session: all events stay within opencode boundary', async () => {
     const proc = createMockProcess();
-    const spawnFn = mock.fn(() => proc);
+    const finalizerProc = createMockProcess();
+    let spawnCalls = 0;
+    const spawnFn = mock.fn(() => {
+      spawnCalls++;
+      if (spawnCalls === 2) {
+        process.nextTick(() => {
+          emitOpenCodeEvents(finalizerProc, [OMOC_STEP_START, OMOC_SISYPHUS_TEXT, OMOC_STEP_FINISH]);
+        });
+        return finalizerProc;
+      }
+      return proc;
+    });
     const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-sonnet-4-6' });
 
     const promise = collect(service.invoke('Analyze and fix the auth module'));
@@ -72,9 +83,18 @@ describe('OMOC Sisyphus Isolation (AC-9)', () => {
       OMOC_DELEGATE_LIBRARIAN,
       OMOC_BASH_TOOL,
       OMOC_DELEGATE_FRONTEND,
+      {
+        ...OMOC_SISYPHUS_TEXT,
+        part: {
+          ...OMOC_SISYPHUS_TEXT.part,
+          text: 'The auth middleware was analyzed and the login form was implemented.',
+        },
+      },
       OMOC_STEP_FINISH,
     ]);
     const messages = await promise;
+
+    assert.strictEqual(spawnCalls, 1, 'valid OMOC completion must not start a no-tool finalizer');
 
     const toolUses = messages.filter((m) => m.type === 'tool_use');
     assert.ok(toolUses.length >= 4, `expected >=4 tool_use, got ${toolUses.length}`);
@@ -90,7 +110,7 @@ describe('OMOC Sisyphus Isolation (AC-9)', () => {
     ];
     for (const tu of toolUses) {
       for (const mcpTool of catCafeMcpTools) {
-        assert.notStrictEqual(tu.toolName, mcpTool, `Cat Cafe MCP tool "${mcpTool}" must not appear`);
+        assert.notStrictEqual(tu.toolName, mcpTool, `Clowder AI MCP tool "${mcpTool}" must not appear`);
       }
     }
 
@@ -106,7 +126,7 @@ describe('OMOC Sisyphus Isolation (AC-9)', () => {
     }
   });
 
-  test('delegate-task with Cat Cafe cat ID as agent would be detected', () => {
+  test('delegate-task with Clowder AI cat ID as agent would be detected', () => {
     const maliciousEvent = {
       type: 'tool_use',
       timestamp: 1773304960000,
@@ -122,6 +142,6 @@ describe('OMOC Sisyphus Isolation (AC-9)', () => {
     const result = transformOpenCodeEvent(maliciousEvent, 'opencode');
     assert.ok(result);
     // Architecturally can't happen (process boundary), but proves detectability
-    assert.ok(CAT_CAFE_CAT_IDS.includes(result.toolInput?.agent), 'should detect Cat Cafe cat ID in agent field');
+    assert.ok(CAT_CAFE_CAT_IDS.includes(result.toolInput?.agent), 'should detect Clowder AI cat ID in agent field');
   });
 });

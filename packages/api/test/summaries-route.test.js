@@ -62,7 +62,7 @@ describe('Summaries Routes', () => {
     assert.equal(body.conclusions.length, 2);
   });
 
-  test('POST broadcasts thread_summary event', async () => {
+  test('POST does NOT broadcast thread_summary (clowder-ai#343)', async () => {
     const app = await createApp();
     await app.inject({
       method: 'POST',
@@ -71,9 +71,7 @@ describe('Summaries Routes', () => {
     });
 
     const events = socketManager.getEvents();
-    assert.equal(events.length, 1);
-    assert.equal(events[0].room, 'thread:thread-1');
-    assert.equal(events[0].event, 'thread_summary');
+    assert.equal(events.length, 0, 'summary should not be broadcast to chat flow');
   });
 
   test('POST rejects missing conclusions', async () => {

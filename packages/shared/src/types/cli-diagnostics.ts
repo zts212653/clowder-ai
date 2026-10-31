@@ -1,0 +1,140 @@
+/**
+ * F212 — Cross-package CLI error diagnostics types.
+ *
+ * Phase A (api) produces `CliDiagnostics` payloads from `cli-spawn.ts`; Phase B (web)
+ * consumes them in the folded error panel. Types live in shared so both packages
+ * agree on shape without circular import via api utils.
+ *
+ * The classifier regex pool + sanitizer stay in api (Node-only deps); only the
+ * data contract is shared.
+ */
+
+/** Whitelist of known CLI failure reasons (Phase A AC-A4 + Phase G AC-G1). */
+export type CliErrorReasonCode =
+  | 'invalid_thinking_signature'
+  | 'missing_rollout'
+  /** opencode (and similar) reports the resumed session no longer exists — stderr
+   *  `Error: Session not found` — e.g. the CLI session DB was recreated/cleared while
+   *  Redis still held the old cliSessionId. Self-heals by dropping the sessionId and
+   *  retrying fresh (invoke-single-cat Path A). clowder-ai#1038 */
+  | 'session_not_found'
+  | 'model_not_found'
+  | 'auth_failed'
+  | 'quota_exceeded'
+  | 'network_error'
+  /** Provider explicitly reported failure while processing the request. */
+  | 'upstream_service_error'
+  /** Stream ended without evidence that identifies a network or provider cause. */
+  | 'stream_disconnected'
+  | 'invalid_config'
+  | 'spawn_failed'
+  | 'context_window_exceeded'
+  | 'tool_call_parse_failed'
+  | 'server_overloaded'
+  /** F212 post-close hotfix: the response timer fired while the CLI was still alive. */
+  | 'cli_response_timeout'
+  /** F212 post-close hotfix: liveness probe confirmed idle-silent stall before termination. */
+  | 'cli_stall_timeout'
+  /** Phase G (clowder-ai#875): CLI exited cleanly with event stream that has events but
+   *  no text events (e.g. OpenCode + DeepSeek producing only `step_start`). NOT an error
+   *  per se but surfaced via cliDiagnostics so users get evidence instead of generic
+   *  "completed without textual output" message. */
+  | 'silent_completion'
+  /** Phase H (Sol runtime forensics 2026-07-09): upstream provider (Codex 0.98+) sent
+   *  `{type:"error", message:"This content was flagged for possible cybersecurity risk..."}`
+   *  followed by `turn.failed` + exit 1. NOT a Clowder AI bug — upstream policy engine decision.
+   *  Users get humanized rephrase guidance instead of generic "unknown CLI error". Excluded
+   *  from F222 FrustrationDetector auto-issue triggering (not user-actionable within our scope). */
+  | 'upstream_policy_reject'
+  /** clowder-ai#1324 (refs #848): the CLI's own argument parser rejected the argv the
+   *  harness built — the installed CLI version and our call shape have drifted apart
+   *  (flag removed / renamed / newly mutually-exclusive). Deterministic by construction:
+   *  the same argv is rejected identically every time, so this reasonCode also switches
+   *  OFF the transient-exit retry in invoke-helpers.isTransientCliExitCode1. Distinct from
+   *  invalid_config (a config *file* is malformed) and spawn_failed (binary missing). */
+  | 'incompatible_cli_arguments';
+
+/**
+ * Structured CLI error payload (Phase A KD-1 white-list admission).
+ *
+ * Travels on:
+ *  - api side: `AgentMessage.metadata.cliDiagnostics` (from cli-spawn `__cliError`/`__cliTimeout` events)
+ *  - wire:    `BroadcastAgentMessage.metadata.cliDiagnostics` (SSE/socket spread, no special serialization)
+ *  - web side: `ChatMessage.extra.cliDiagnostics` (after useAgentMessages error-path unpacking)
+ */
+export interface CliDiagnostics {
+  /** Same-request evidence from Codex's startup account check. No arbitrary error.data. */
+  accountCheck?: {
+    category:
+      | 'discovery_failed'
+      | 'discovery_timeout'
+      | 'network_error'
+      | 'rate_limited'
+      | 'upstream_error'
+      | 'auth_rejected'
+      | 'configuration_conflict'
+      | 'unknown';
+    rpcMethod?: string;
+    rpcCode?: number;
+    httpStatus?: number;
+    causeCode?: string;
+    causeMessage?: string;
+    causeProvided: boolean;
+    attempt: number;
+    /** Which attempt actually returned this evidence, distinct from the total startup attempts. */
+    evidenceAttempt?: number;
+    elapsedMs: number;
+  };
+  /** Whitelist classification; undefined = unknown stderr / stream error */
+  reasonCode?: CliErrorReasonCode;
+  /** Always present; humanized title for error bubble (i18n: zh-CN in Phase A) */
+  publicSummary: string;
+  /** Always present; humanized hint for next action */
+  publicHint: string;
+  /** Sanitized + length-capped CC error excerpt. KD-1 white-list: only filled from a
+   *  whitelisted safe source (see `excerptSource`). When reasonCode is known, source =
+   *  'classifier'; when reasonCode is unknown but CC emitted a structured result error,
+   *  source = 'cc_structured' (Phase D AC-D3). When source is undefined, the excerpt
+   *  MUST NOT be rendered — frontend treats missing source as a malformed/persisted
+   *  payload and fails closed (defense-in-depth alongside backend admission). */
+  safeExcerpt?: string;
+  /** F212 Phase D (P2 fix per cloud codex review on a429aada3): safe-source whitelist for
+   *  `safeExcerpt`. 'classifier' = known reasonCode classifier hit; 'cc_structured' = CC
+   *  result event with structured error message (AC-D3 unknown fallback). Frontend gates
+   *  excerpt rendering on `KNOWN_EXCERPT_SOURCES.has(excerptSource)` — both protects
+   *  malformed payloads (no source) AND fails closed when older clients see a future
+   *  source value they don't recognize (e.g. a hypothetical 'pii_redacted'). */
+  excerptSource?: 'classifier' | 'cc_structured' | 'unknown_raw';
+  /** Debug correlation metadata — safe to expose */
+  debugRef: {
+    command: string;
+    /** Absent for timeout causes: any observed exit happened after our termination request. */
+    exitCode?: number | null;
+    signal: NodeJS.Signals | string | null;
+    invocationId?: string;
+    /** Provider request correlation ID; admitted only as a UUID from an error event. */
+    upstreamRequestId?: string;
+    /**
+     * Provider-owned, path-safe spawn context. Values must be finite enum/hash
+     * tokens only: no raw cwd/HOME/prompt/env values.
+     */
+    homeMode?: 'process_home' | 'child_env_home' | 'agy_profile_home';
+    spawnCwdMode?: 'cat_cafe_agy_cwd' | 'agy_profile_cwd';
+    spawnCwdKey?: string;
+    profileId?: string;
+  };
+}
+
+/** Runner-owned projection on the invocation's original response, including no-text waits. */
+export interface CodexStartupRecovery {
+  invocationId: string;
+  stage: 'checking' | 'retry_wait' | 'ready' | 'failed' | 'cancelled';
+  sequence: number;
+  attempt: number;
+  maxAttempts: number;
+  startedAt: number;
+  deadlineAt: number;
+  updatedAt: number;
+  nextRetryAt?: number;
+  diagnostics?: CliDiagnostics;
+}

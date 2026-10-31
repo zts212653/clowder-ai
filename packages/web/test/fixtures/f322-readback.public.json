@@ -1,0 +1,1074 @@
+{
+  "v": 1,
+  "redisPort": 6398,
+  "provenance": {
+    "kind": "public_safe_capture_projection",
+    "version": 1,
+    "producer": "packages/api/test/f322-reply-output-readback.journey.mjs",
+    "transformations": [
+      "consumer field allowlist",
+      "consistent identity aliases",
+      "wall clock translation",
+      "MessageFrom projection of legacy agent rows"
+    ],
+    "originalArchive": "retained privately; this projection is not the original capture"
+  },
+  "traces": [
+    {
+      "route": "serial",
+      "userId": "owner-public-readback-serial",
+      "threadId": "public-readback-serial",
+      "childId": "child-public-readback-serial",
+      "live": [
+        {
+          "type": "system_info",
+          "catId": "codex",
+          "timestamp": 1700000000005,
+          "invocationId": "child-public-readback-serial",
+          "turnInvocationId": "child-public-readback-serial",
+          "content": "{\"type\":\"invocation_created\",\"executionKind\":\"ordinary\",\"invocationId\":\"child-public-readback-serial\",\"parentInvocationId\":\"child-public-readback-serial\",\"startedAt\":1700000000004,\"freshnessCarrierCapability\":{\"provider\":\"other\",\"carrier\":\"other\",\"deliverySemantics\":\"undeclared\"}}"
+        },
+        {
+          "type": "text",
+          "catId": "codex",
+          "origin": "stream",
+          "textMode": "replace",
+          "timestamp": 1700000000014,
+          "invocationId": "child-public-readback-serial",
+          "content": "检查 **日志** 🐾。",
+          "extra": {
+            "outputLayout": {
+              "v": 1,
+              "contentRevision": {
+                "length": 13,
+                "sha256": "a63e8f2935cc193f3d52186b59b99091469e907b44e14407f62d580bb01e485f"
+              },
+              "status": "unavailable",
+              "reason": "no_final",
+              "owner": {
+                "threadId": "public-readback-serial",
+                "catId": "codex",
+                "turnInvocationId": "child-public-readback-serial"
+              }
+            }
+          }
+        },
+        {
+          "type": "tool_use",
+          "catId": "codex",
+          "toolName": "read",
+          "toolUseId": "readback-pair",
+          "timestamp": 2,
+          "invocationId": "child-public-readback-serial",
+          "toolEventId": "tool_use-public-readback-serial",
+          "toolExecutionRef": "child-public-readback-serial"
+        },
+        {
+          "type": "tool_result",
+          "catId": "codex",
+          "toolUseId": "readback-pair",
+          "timestamp": 3,
+          "invocationId": "child-public-readback-serial",
+          "toolEventId": "tool_result-public-readback-serial",
+          "toolExecutionRef": "child-public-readback-serial",
+          "content": "ok"
+        },
+        {
+          "type": "text",
+          "catId": "codex",
+          "origin": "stream",
+          "textMode": "replace",
+          "timestamp": 1700000000033,
+          "invocationId": "child-public-readback-serial",
+          "content": "检查 **日志** 🐾。\n\n保留 **答案段** 🐾。\n\n第二段完整回答。",
+          "extra": {
+            "outputLayout": {
+              "v": 1,
+              "contentRevision": {
+                "length": 39,
+                "sha256": "f60a8ae3b2f97f9926d5ca86c55d5e6687c05e5c49471e6acb5b690a9bf9a0f4"
+              },
+              "status": "available",
+              "owner": {
+                "threadId": "public-readback-serial",
+                "catId": "codex",
+                "turnInvocationId": "child-public-readback-serial"
+              },
+              "runs": [
+                {
+                  "id": "run-0",
+                  "channel": "commentary",
+                  "complete": true,
+                  "start": 0,
+                  "end": 13,
+                  "gluePrefixLength": 0,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "process"
+                  }
+                },
+                {
+                  "id": "run-1",
+                  "channel": "final",
+                  "complete": true,
+                  "start": 13,
+                  "end": 39,
+                  "gluePrefixLength": 2,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "answer"
+                  }
+                }
+              ],
+              "order": [
+                {
+                  "kind": "run",
+                  "runId": "run-0"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_use-public-readback-serial",
+                  "executionRef": "child-public-readback-serial"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_result-public-readback-serial",
+                  "executionRef": "child-public-readback-serial"
+                },
+                {
+                  "kind": "run",
+                  "runId": "run-1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "text",
+          "catId": "codex",
+          "origin": "stream",
+          "textMode": "replace",
+          "timestamp": 1700000000038,
+          "invocationId": "child-public-readback-serial",
+          "content": "检查 **日志** 🐾。\n\n保留 **答案段** 🐾。\n\n第二段完整回答。\n\n[Sol/gpt-6.1-sol🐾]",
+          "extra": {
+            "outputLayout": {
+              "v": 1,
+              "contentRevision": {
+                "length": 60,
+                "sha256": "308c889aafc4c73ebf2c65e1e5121680ce936096cee309e15bfd5f9e9d95e94e"
+              },
+              "status": "available",
+              "owner": {
+                "threadId": "public-readback-serial",
+                "catId": "codex",
+                "turnInvocationId": "child-public-readback-serial"
+              },
+              "runs": [
+                {
+                  "id": "run-0",
+                  "channel": "commentary",
+                  "complete": true,
+                  "start": 0,
+                  "end": 13,
+                  "gluePrefixLength": 0,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "process"
+                  }
+                },
+                {
+                  "id": "run-1",
+                  "channel": "final",
+                  "complete": true,
+                  "start": 13,
+                  "end": 39,
+                  "gluePrefixLength": 2,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "answer"
+                  }
+                }
+              ],
+              "order": [
+                {
+                  "kind": "run",
+                  "runId": "run-0"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_use-public-readback-serial",
+                  "executionRef": "child-public-readback-serial"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_result-public-readback-serial",
+                  "executionRef": "child-public-readback-serial"
+                },
+                {
+                  "kind": "run",
+                  "runId": "run-1"
+                }
+              ],
+              "hostTail": {
+                "kind": "cat_signature",
+                "producer": "codex_stream_finalizer",
+                "basis": "runtime_canonical",
+                "start": 39,
+                "end": 60,
+                "gluePrefixLength": 2
+              }
+            }
+          }
+        },
+        {
+          "type": "system_info",
+          "catId": "codex",
+          "timestamp": 1700000000041,
+          "invocationId": "child-public-readback-serial",
+          "content": "{\"type\":\"invocation_metrics\",\"kind\":\"invocation_complete\",\"durationMs\":37,\"invocationId\":\"child-public-readback-serial\"}"
+        },
+        {
+          "type": "done",
+          "catId": "codex",
+          "timestamp": 6,
+          "invocationId": "child-public-readback-serial",
+          "content": "检查 **日志** 🐾。\n\n保留 **答案段** 🐾。\n\n第二段完整回答。\n\n[Sol/gpt-6.1-sol🐾]",
+          "extra": {
+            "outputLayout": {
+              "v": 1,
+              "contentRevision": {
+                "length": 60,
+                "sha256": "308c889aafc4c73ebf2c65e1e5121680ce936096cee309e15bfd5f9e9d95e94e"
+              },
+              "status": "available",
+              "owner": {
+                "threadId": "public-readback-serial",
+                "catId": "codex",
+                "turnInvocationId": "child-public-readback-serial"
+              },
+              "runs": [
+                {
+                  "id": "run-0",
+                  "channel": "commentary",
+                  "complete": true,
+                  "start": 0,
+                  "end": 13,
+                  "gluePrefixLength": 0,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "process"
+                  }
+                },
+                {
+                  "id": "run-1",
+                  "channel": "final",
+                  "complete": true,
+                  "start": 13,
+                  "end": 39,
+                  "gluePrefixLength": 2,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "answer"
+                  }
+                }
+              ],
+              "order": [
+                {
+                  "kind": "run",
+                  "runId": "run-0"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_use-public-readback-serial",
+                  "executionRef": "child-public-readback-serial"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_result-public-readback-serial",
+                  "executionRef": "child-public-readback-serial"
+                },
+                {
+                  "kind": "run",
+                  "runId": "run-1"
+                }
+              ],
+              "hostTail": {
+                "kind": "cat_signature",
+                "producer": "codex_stream_finalizer",
+                "basis": "runtime_canonical",
+                "start": 39,
+                "end": 60,
+                "gluePrefixLength": 2
+              }
+            }
+          }
+        }
+      ],
+      "api": {
+        "type": "assistant",
+        "catId": "codex",
+        "content": "检查 **日志** 🐾。\n\n保留 **答案段** 🐾。\n\n第二段完整回答。\n\n[Sol/gpt-6.1-sol🐾]",
+        "origin": "stream",
+        "from": {
+          "kind": "agent",
+          "catId": "codex"
+        },
+        "id": "0001700000000000-000000-00000000",
+        "timestamp": 1700000000000,
+        "extra": {
+          "outputLayout": {
+            "v": 1,
+            "contentRevision": {
+              "length": 60,
+              "sha256": "308c889aafc4c73ebf2c65e1e5121680ce936096cee309e15bfd5f9e9d95e94e"
+            },
+            "status": "available",
+            "owner": {
+              "threadId": "public-readback-serial",
+              "catId": "codex",
+              "turnInvocationId": "child-public-readback-serial"
+            },
+            "runs": [
+              {
+                "id": "run-0",
+                "channel": "commentary",
+                "complete": true,
+                "start": 0,
+                "end": 13,
+                "gluePrefixLength": 0,
+                "identity": {
+                  "provider": "codex",
+                  "runtimeSessionId": "native-readback",
+                  "turnId": "native-turn",
+                  "nativeId": "process"
+                }
+              },
+              {
+                "id": "run-1",
+                "channel": "final",
+                "complete": true,
+                "start": 13,
+                "end": 39,
+                "gluePrefixLength": 2,
+                "identity": {
+                  "provider": "codex",
+                  "runtimeSessionId": "native-readback",
+                  "turnId": "native-turn",
+                  "nativeId": "answer"
+                }
+              }
+            ],
+            "order": [
+              {
+                "kind": "run",
+                "runId": "run-0"
+              },
+              {
+                "kind": "tool",
+                "toolEventId": "tool_use-public-readback-serial",
+                "executionRef": "child-public-readback-serial"
+              },
+              {
+                "kind": "tool",
+                "toolEventId": "tool_result-public-readback-serial",
+                "executionRef": "child-public-readback-serial"
+              },
+              {
+                "kind": "run",
+                "runId": "run-1"
+              }
+            ],
+            "hostTail": {
+              "kind": "cat_signature",
+              "producer": "codex_stream_finalizer",
+              "basis": "runtime_canonical",
+              "start": 39,
+              "end": 60,
+              "gluePrefixLength": 2
+            }
+          },
+          "stream": {
+            "invocationId": "child-public-readback-serial",
+            "turnInvocationId": "child-public-readback-serial"
+          }
+        },
+        "toolEvents": [
+          {
+            "type": "tool_use",
+            "label": "codex → read",
+            "toolUseId": "readback-pair",
+            "toolName": "read",
+            "startTimeMs": 2,
+            "id": "tool_use-public-readback-serial",
+            "executionRef": "child-public-readback-serial",
+            "timestamp": 2
+          },
+          {
+            "type": "tool_result",
+            "label": "codex ← result",
+            "detail": "ok",
+            "toolUseId": "readback-pair",
+            "endTimeMs": 3,
+            "id": "tool_result-public-readback-serial",
+            "executionRef": "child-public-readback-serial",
+            "timestamp": 3
+          }
+        ]
+      },
+      "draft": {
+        "api": {
+          "type": "assistant",
+          "catId": "codex",
+          "content": "检查 **日志** 🐾。\n\n保留 **答案段** 🐾。\n\n第二段完整回答。\n\n[Sol/gpt-6.1-sol🐾]",
+          "origin": "stream",
+          "isDraft": true,
+          "from": {
+            "kind": "agent",
+            "catId": "codex"
+          },
+          "id": "draft-child-public-readback-serial",
+          "timestamp": 1700000000038,
+          "extra": {
+            "outputLayout": {
+              "v": 1,
+              "contentRevision": {
+                "length": 60,
+                "sha256": "308c889aafc4c73ebf2c65e1e5121680ce936096cee309e15bfd5f9e9d95e94e"
+              },
+              "status": "available",
+              "owner": {
+                "threadId": "public-readback-serial",
+                "catId": "codex",
+                "turnInvocationId": "child-public-readback-serial"
+              },
+              "runs": [
+                {
+                  "id": "run-0",
+                  "channel": "commentary",
+                  "complete": true,
+                  "start": 0,
+                  "end": 13,
+                  "gluePrefixLength": 0,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "process"
+                  }
+                },
+                {
+                  "id": "run-1",
+                  "channel": "final",
+                  "complete": true,
+                  "start": 13,
+                  "end": 39,
+                  "gluePrefixLength": 2,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "answer"
+                  }
+                }
+              ],
+              "order": [
+                {
+                  "kind": "run",
+                  "runId": "run-0"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_use-public-readback-serial",
+                  "executionRef": "child-public-readback-serial"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_result-public-readback-serial",
+                  "executionRef": "child-public-readback-serial"
+                },
+                {
+                  "kind": "run",
+                  "runId": "run-1"
+                }
+              ],
+              "hostTail": {
+                "kind": "cat_signature",
+                "producer": "codex_stream_finalizer",
+                "basis": "runtime_canonical",
+                "start": 39,
+                "end": 60,
+                "gluePrefixLength": 2
+              }
+            },
+            "stream": {
+              "invocationId": "child-public-readback-serial",
+              "turnInvocationId": "child-public-readback-serial"
+            }
+          },
+          "toolEvents": [
+            {
+              "type": "tool_use",
+              "label": "codex → read",
+              "toolUseId": "readback-pair",
+              "toolName": "read",
+              "startTimeMs": 2,
+              "id": "tool_use-public-readback-serial",
+              "executionRef": "child-public-readback-serial",
+              "timestamp": 2
+            },
+            {
+              "type": "tool_result",
+              "label": "codex ← result",
+              "detail": "ok",
+              "toolUseId": "readback-pair",
+              "endTimeMs": 3,
+              "id": "tool_result-public-readback-serial",
+              "executionRef": "child-public-readback-serial",
+              "timestamp": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "route": "parallel",
+      "userId": "owner-public-readback-parallel",
+      "threadId": "public-readback-parallel",
+      "childId": "child-public-readback-parallel",
+      "live": [
+        {
+          "type": "system_info",
+          "catId": "codex",
+          "timestamp": 1700000000196,
+          "invocationId": "child-public-readback-parallel",
+          "turnInvocationId": "child-public-readback-parallel",
+          "content": "{\"type\":\"invocation_created\",\"executionKind\":\"ordinary\",\"invocationId\":\"child-public-readback-parallel\",\"parentInvocationId\":\"child-public-readback-parallel\",\"startedAt\":1700000000196,\"freshnessCarrierCapability\":{\"provider\":\"other\",\"carrier\":\"other\",\"deliverySemantics\":\"undeclared\"}}"
+        },
+        {
+          "type": "text",
+          "catId": "codex",
+          "textMode": "replace",
+          "timestamp": 1700000000198,
+          "invocationId": "child-public-readback-parallel",
+          "content": "检查 **日志** 🐾。",
+          "extra": {
+            "outputLayout": {
+              "v": 1,
+              "contentRevision": {
+                "length": 13,
+                "sha256": "a63e8f2935cc193f3d52186b59b99091469e907b44e14407f62d580bb01e485f"
+              },
+              "status": "unavailable",
+              "reason": "no_final",
+              "owner": {
+                "threadId": "public-readback-parallel",
+                "catId": "codex",
+                "turnInvocationId": "child-public-readback-parallel"
+              }
+            }
+          }
+        },
+        {
+          "type": "tool_use",
+          "catId": "codex",
+          "toolName": "read",
+          "toolUseId": "readback-pair",
+          "timestamp": 2,
+          "invocationId": "child-public-readback-parallel",
+          "toolEventId": "tool_use-public-readback-parallel",
+          "toolExecutionRef": "child-public-readback-parallel"
+        },
+        {
+          "type": "tool_result",
+          "catId": "codex",
+          "toolUseId": "readback-pair",
+          "timestamp": 3,
+          "invocationId": "child-public-readback-parallel",
+          "toolEventId": "tool_result-public-readback-parallel",
+          "toolExecutionRef": "child-public-readback-parallel",
+          "content": "ok"
+        },
+        {
+          "type": "text",
+          "catId": "codex",
+          "textMode": "replace",
+          "timestamp": 1700000000201,
+          "invocationId": "child-public-readback-parallel",
+          "content": "检查 **日志** 🐾。\n\n保留 **答案段** 🐾。\n\n第二段完整回答。",
+          "extra": {
+            "outputLayout": {
+              "v": 1,
+              "contentRevision": {
+                "length": 39,
+                "sha256": "f60a8ae3b2f97f9926d5ca86c55d5e6687c05e5c49471e6acb5b690a9bf9a0f4"
+              },
+              "status": "available",
+              "owner": {
+                "threadId": "public-readback-parallel",
+                "catId": "codex",
+                "turnInvocationId": "child-public-readback-parallel"
+              },
+              "runs": [
+                {
+                  "id": "run-0",
+                  "channel": "commentary",
+                  "complete": true,
+                  "start": 0,
+                  "end": 13,
+                  "gluePrefixLength": 0,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "process"
+                  }
+                },
+                {
+                  "id": "run-1",
+                  "channel": "final",
+                  "complete": true,
+                  "start": 13,
+                  "end": 39,
+                  "gluePrefixLength": 2,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "answer"
+                  }
+                }
+              ],
+              "order": [
+                {
+                  "kind": "run",
+                  "runId": "run-0"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_use-public-readback-parallel",
+                  "executionRef": "child-public-readback-parallel"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_result-public-readback-parallel",
+                  "executionRef": "child-public-readback-parallel"
+                },
+                {
+                  "kind": "run",
+                  "runId": "run-1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "text",
+          "catId": "codex",
+          "textMode": "replace",
+          "timestamp": 1700000000204,
+          "invocationId": "child-public-readback-parallel",
+          "content": "检查 **日志** 🐾。\n\n保留 **答案段** 🐾。\n\n第二段完整回答。\n\n[Sol/gpt-6.1-sol🐾]",
+          "extra": {
+            "outputLayout": {
+              "v": 1,
+              "contentRevision": {
+                "length": 60,
+                "sha256": "308c889aafc4c73ebf2c65e1e5121680ce936096cee309e15bfd5f9e9d95e94e"
+              },
+              "status": "available",
+              "owner": {
+                "threadId": "public-readback-parallel",
+                "catId": "codex",
+                "turnInvocationId": "child-public-readback-parallel"
+              },
+              "runs": [
+                {
+                  "id": "run-0",
+                  "channel": "commentary",
+                  "complete": true,
+                  "start": 0,
+                  "end": 13,
+                  "gluePrefixLength": 0,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "process"
+                  }
+                },
+                {
+                  "id": "run-1",
+                  "channel": "final",
+                  "complete": true,
+                  "start": 13,
+                  "end": 39,
+                  "gluePrefixLength": 2,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "answer"
+                  }
+                }
+              ],
+              "order": [
+                {
+                  "kind": "run",
+                  "runId": "run-0"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_use-public-readback-parallel",
+                  "executionRef": "child-public-readback-parallel"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_result-public-readback-parallel",
+                  "executionRef": "child-public-readback-parallel"
+                },
+                {
+                  "kind": "run",
+                  "runId": "run-1"
+                }
+              ],
+              "hostTail": {
+                "kind": "cat_signature",
+                "producer": "codex_stream_finalizer",
+                "basis": "runtime_canonical",
+                "start": 39,
+                "end": 60,
+                "gluePrefixLength": 2
+              }
+            }
+          }
+        },
+        {
+          "type": "system_info",
+          "catId": "codex",
+          "timestamp": 1700000000207,
+          "invocationId": "child-public-readback-parallel",
+          "content": "{\"type\":\"invocation_metrics\",\"kind\":\"invocation_complete\",\"durationMs\":11,\"invocationId\":\"child-public-readback-parallel\"}"
+        },
+        {
+          "type": "done",
+          "catId": "codex",
+          "timestamp": 6,
+          "invocationId": "child-public-readback-parallel",
+          "content": "检查 **日志** 🐾。\n\n保留 **答案段** 🐾。\n\n第二段完整回答。\n\n[Sol/gpt-6.1-sol🐾]",
+          "extra": {
+            "outputLayout": {
+              "v": 1,
+              "contentRevision": {
+                "length": 60,
+                "sha256": "308c889aafc4c73ebf2c65e1e5121680ce936096cee309e15bfd5f9e9d95e94e"
+              },
+              "status": "available",
+              "owner": {
+                "threadId": "public-readback-parallel",
+                "catId": "codex",
+                "turnInvocationId": "child-public-readback-parallel"
+              },
+              "runs": [
+                {
+                  "id": "run-0",
+                  "channel": "commentary",
+                  "complete": true,
+                  "start": 0,
+                  "end": 13,
+                  "gluePrefixLength": 0,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "process"
+                  }
+                },
+                {
+                  "id": "run-1",
+                  "channel": "final",
+                  "complete": true,
+                  "start": 13,
+                  "end": 39,
+                  "gluePrefixLength": 2,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "answer"
+                  }
+                }
+              ],
+              "order": [
+                {
+                  "kind": "run",
+                  "runId": "run-0"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_use-public-readback-parallel",
+                  "executionRef": "child-public-readback-parallel"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_result-public-readback-parallel",
+                  "executionRef": "child-public-readback-parallel"
+                },
+                {
+                  "kind": "run",
+                  "runId": "run-1"
+                }
+              ],
+              "hostTail": {
+                "kind": "cat_signature",
+                "producer": "codex_stream_finalizer",
+                "basis": "runtime_canonical",
+                "start": 39,
+                "end": 60,
+                "gluePrefixLength": 2
+              }
+            }
+          }
+        }
+      ],
+      "api": {
+        "type": "assistant",
+        "catId": "codex",
+        "content": "检查 **日志** 🐾。\n\n保留 **答案段** 🐾。\n\n第二段完整回答。\n\n[Sol/gpt-6.1-sol🐾]",
+        "origin": "stream",
+        "from": {
+          "kind": "agent",
+          "catId": "codex"
+        },
+        "id": "0001700000000195-000001-00000000",
+        "timestamp": 1700000000195,
+        "extra": {
+          "outputLayout": {
+            "v": 1,
+            "contentRevision": {
+              "length": 60,
+              "sha256": "308c889aafc4c73ebf2c65e1e5121680ce936096cee309e15bfd5f9e9d95e94e"
+            },
+            "status": "available",
+            "owner": {
+              "threadId": "public-readback-parallel",
+              "catId": "codex",
+              "turnInvocationId": "child-public-readback-parallel"
+            },
+            "runs": [
+              {
+                "id": "run-0",
+                "channel": "commentary",
+                "complete": true,
+                "start": 0,
+                "end": 13,
+                "gluePrefixLength": 0,
+                "identity": {
+                  "provider": "codex",
+                  "runtimeSessionId": "native-readback",
+                  "turnId": "native-turn",
+                  "nativeId": "process"
+                }
+              },
+              {
+                "id": "run-1",
+                "channel": "final",
+                "complete": true,
+                "start": 13,
+                "end": 39,
+                "gluePrefixLength": 2,
+                "identity": {
+                  "provider": "codex",
+                  "runtimeSessionId": "native-readback",
+                  "turnId": "native-turn",
+                  "nativeId": "answer"
+                }
+              }
+            ],
+            "order": [
+              {
+                "kind": "run",
+                "runId": "run-0"
+              },
+              {
+                "kind": "tool",
+                "toolEventId": "tool_use-public-readback-parallel",
+                "executionRef": "child-public-readback-parallel"
+              },
+              {
+                "kind": "tool",
+                "toolEventId": "tool_result-public-readback-parallel",
+                "executionRef": "child-public-readback-parallel"
+              },
+              {
+                "kind": "run",
+                "runId": "run-1"
+              }
+            ],
+            "hostTail": {
+              "kind": "cat_signature",
+              "producer": "codex_stream_finalizer",
+              "basis": "runtime_canonical",
+              "start": 39,
+              "end": 60,
+              "gluePrefixLength": 2
+            }
+          },
+          "stream": {
+            "invocationId": "child-public-readback-parallel",
+            "turnInvocationId": "child-public-readback-parallel",
+            "parallelBatchId": "batch-public-readback-parallel"
+          }
+        },
+        "toolEvents": [
+          {
+            "type": "tool_use",
+            "label": "codex → read",
+            "toolUseId": "readback-pair",
+            "toolName": "read",
+            "startTimeMs": 2,
+            "id": "tool_use-public-readback-parallel",
+            "executionRef": "child-public-readback-parallel",
+            "timestamp": 2
+          },
+          {
+            "type": "tool_result",
+            "label": "codex ← result",
+            "detail": "ok",
+            "toolUseId": "readback-pair",
+            "endTimeMs": 3,
+            "id": "tool_result-public-readback-parallel",
+            "executionRef": "child-public-readback-parallel",
+            "timestamp": 3
+          }
+        ]
+      },
+      "draft": {
+        "api": {
+          "type": "assistant",
+          "catId": "codex",
+          "content": "检查 **日志** 🐾。\n\n保留 **答案段** 🐾。\n\n第二段完整回答。\n\n[Sol/gpt-6.1-sol🐾]",
+          "origin": "stream",
+          "isDraft": true,
+          "from": {
+            "kind": "agent",
+            "catId": "codex"
+          },
+          "id": "draft-child-public-readback-parallel",
+          "timestamp": 1700000000204,
+          "extra": {
+            "outputLayout": {
+              "v": 1,
+              "contentRevision": {
+                "length": 60,
+                "sha256": "308c889aafc4c73ebf2c65e1e5121680ce936096cee309e15bfd5f9e9d95e94e"
+              },
+              "status": "available",
+              "owner": {
+                "threadId": "public-readback-parallel",
+                "catId": "codex",
+                "turnInvocationId": "child-public-readback-parallel"
+              },
+              "runs": [
+                {
+                  "id": "run-0",
+                  "channel": "commentary",
+                  "complete": true,
+                  "start": 0,
+                  "end": 13,
+                  "gluePrefixLength": 0,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "process"
+                  }
+                },
+                {
+                  "id": "run-1",
+                  "channel": "final",
+                  "complete": true,
+                  "start": 13,
+                  "end": 39,
+                  "gluePrefixLength": 2,
+                  "identity": {
+                    "provider": "codex",
+                    "runtimeSessionId": "native-readback",
+                    "turnId": "native-turn",
+                    "nativeId": "answer"
+                  }
+                }
+              ],
+              "order": [
+                {
+                  "kind": "run",
+                  "runId": "run-0"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_use-public-readback-parallel",
+                  "executionRef": "child-public-readback-parallel"
+                },
+                {
+                  "kind": "tool",
+                  "toolEventId": "tool_result-public-readback-parallel",
+                  "executionRef": "child-public-readback-parallel"
+                },
+                {
+                  "kind": "run",
+                  "runId": "run-1"
+                }
+              ],
+              "hostTail": {
+                "kind": "cat_signature",
+                "producer": "codex_stream_finalizer",
+                "basis": "runtime_canonical",
+                "start": 39,
+                "end": 60,
+                "gluePrefixLength": 2
+              }
+            },
+            "stream": {
+              "invocationId": "child-public-readback-parallel",
+              "turnInvocationId": "child-public-readback-parallel"
+            }
+          },
+          "toolEvents": [
+            {
+              "type": "tool_use",
+              "label": "codex → read",
+              "toolUseId": "readback-pair",
+              "toolName": "read",
+              "startTimeMs": 2,
+              "id": "tool_use-public-readback-parallel",
+              "executionRef": "child-public-readback-parallel",
+              "timestamp": 2
+            },
+            {
+              "type": "tool_result",
+              "label": "codex ← result",
+              "detail": "ok",
+              "toolUseId": "readback-pair",
+              "endTimeMs": 3,
+              "id": "tool_result-public-readback-parallel",
+              "executionRef": "child-public-readback-parallel",
+              "timestamp": 3
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

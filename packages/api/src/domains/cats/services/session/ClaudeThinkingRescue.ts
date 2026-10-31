@@ -68,7 +68,6 @@ export function hasShortThinkingSignature(entry: unknown): boolean {
       item.type === 'thinking' &&
       'signature' in item &&
       typeof item.signature === 'string' &&
-      item.signature.length > 0 &&
       item.signature.length < MIN_VALID_SIGNATURE_LENGTH,
   );
 }
@@ -107,8 +106,7 @@ export function isPureThinkingAssistantTurn(entry: unknown): boolean {
         'type' in item &&
         item.type === 'thinking' &&
         'signature' in item &&
-        typeof item.signature === 'string' &&
-        item.signature.length > 0,
+        typeof item.signature === 'string',
     )
   );
 }

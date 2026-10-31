@@ -1,0 +1,181 @@
+import assert from 'node:assert/strict';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+import {
+  handleCapturePawFeel,
+  handleCensusLegacyPawFeelBlockers,
+  handleLinkPawFeelRepairOutcome,
+  handleListPawFeelInbox,
+  handleTriagePawFeel,
+  pawFeelDispositionTools,
+} from '../dist/tools/paw-feel-disposition-tools.js';
+import { handleScanPawFeelInbox, pawFeelInboxAuditScanTools } from '../dist/tools/paw-feel-inbox-audit-scan-tool.js';
+
+describe('F278 MCP paw-feel tools', () => {
+  const saved = {};
+  let previousFetch;
+  const requests = [];
+
+  beforeEach(() => {
+    for (const key of ['CAT_CAFE_API_URL', 'CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CALLBACK_TOKEN']) {
+      saved[key] = process.env[key];
+    }
+    process.env.CAT_CAFE_API_URL = 'http://localhost:3004';
+    process.env.CAT_CAFE_INVOCATION_ID = 'inv-1';
+    process.env.CAT_CAFE_CALLBACK_TOKEN = 'token-1';
+    previousFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), init });
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+  });
+
+  afterEach(() => {
+    globalThis.fetch = previousFetch;
+    requests.length = 0;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it('lists bounded inbox rows through callback auth filters', async () => {
+    const result = await handleListPawFeelInbox({
+      states: ['new', 'seen'],
+      sourceCatId: 'codex-sol',
+      overdueOnly: true,
+      resolution: 'open',
+      issueOverdueOnly: true,
+      limit: 25,
+      cursor: 'opaque',
+      sort: 'newest',
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.equal(requests.length, 1);
+    const url = new URL(requests[0].url);
+    assert.equal(url.pathname, '/api/callbacks/paw-feel-inbox');
+    assert.equal(url.searchParams.get('states'), 'new,seen');
+    assert.equal(url.searchParams.get('sourceCatId'), 'codex-sol');
+    assert.equal(url.searchParams.get('overdueOnly'), 'true');
+    assert.equal(url.searchParams.get('resolution'), 'open');
+    assert.equal(url.searchParams.get('issueOverdueOnly'), 'true');
+    assert.equal(url.searchParams.get('limit'), '25');
+    assert.equal(url.searchParams.get('sort'), 'newest');
+    assert.equal(requests[0].init.headers['x-invocation-id'], 'inv-1');
+  });
+
+  it('continues the authenticated refs-only legacy blocker census', async () => {
+    const result = await handleCensusLegacyPawFeelBlockers({ limit: 25, cursor: 'signed-cursor' });
+
+    assert.equal(result.isError, undefined);
+    const url = new URL(requests[0].url);
+    assert.equal(url.pathname, '/api/callbacks/paw-feel-legacy-blocker-census');
+    assert.equal(url.search, '');
+    assert.equal(requests[0].init.method, 'POST');
+    assert.deepEqual(JSON.parse(requests[0].init.body), { limit: 25, cursor: 'signed-cursor' });
+    const tool = pawFeelDispositionTools.find(
+      (candidate) => candidate.name === 'cat_cafe_census_legacy_paw_feel_blockers',
+    );
+    assert.ok(tool);
+    assert.ok(tool.description.includes('partial'));
+  });
+
+  it('scans bounded audit rows through an authenticated POST continuation', async () => {
+    const result = await handleScanPawFeelInbox({ limit: 25, cursor: 'signed-audit-cursor' });
+
+    assert.equal(result.isError, undefined);
+    const url = new URL(requests[0].url);
+    assert.equal(url.pathname, '/api/callbacks/paw-feel-inbox-audit-scan');
+    assert.equal(url.search, '');
+    assert.equal(requests[0].init.method, 'POST');
+    assert.deepEqual(JSON.parse(requests[0].init.body), { limit: 25, cursor: 'signed-audit-cursor' });
+    const tool = pawFeelInboxAuditScanTools.find((candidate) => candidate.name === 'cat_cafe_scan_paw_feel_inbox');
+    assert.ok(tool);
+    assert.match(tool.description, /Use when:/);
+    assert.match(tool.description, /NOT for:.*cat_cafe_list_paw_feel_inbox/);
+    assert.match(tool.description, /Output:/);
+    assert.match(tool.description, /GOTCHA:.*live.*not.*frozen/i);
+    assert.deepEqual(tool.policy.standaloneReason, {
+      disposition: 'accepted-boundary',
+      kind: 'progressive-disclosure',
+      admissionRef: 'file:docs/features/F278-paw-feel-disposition-inbox.md',
+    });
+  });
+
+  it('declares current-invocation capture before the final source message exists', async () => {
+    const result = await handleCapturePawFeel({});
+
+    assert.equal(result.isError, undefined);
+    assert.equal(requests.length, 1);
+    assert.equal(new URL(requests[0].url).pathname, '/api/callbacks/paw-feel-capture-intent');
+    const body = JSON.parse(requests[0].init.body);
+    assert.deepEqual(body, {});
+    assert.equal(JSON.stringify(body).includes('sourceMessageId'), false);
+    const tool = pawFeelDispositionTools.find((candidate) => candidate.name === 'cat_cafe_capture_paw_feel');
+    assert.match(tool.description, /Agent-key sessions.*standalone source marker.*ambiguous/);
+  });
+
+  it('sends one common bundle action plus explicit exceptions without actor identity', async () => {
+    const input = {
+      bundleKey: 'turn:turn-1',
+      membershipToken: 'signed-list-snapshot',
+      eventIdPrefix: 'bundle-event-1',
+      members: [
+        { signalId: 'signal-1', expectedSequence: 1 },
+        { signalId: 'signal-2', expectedSequence: 2 },
+      ],
+      action: { type: 'no_action', reasonCode: 'not_actionable' },
+      exceptions: [
+        {
+          signalId: 'signal-2',
+          action: { type: 'fix', leaseId: 'lease-active', actionRef: 'opaque-action' },
+        },
+      ],
+    };
+    const result = await handleTriagePawFeel(input);
+
+    assert.equal(result.isError, undefined);
+    assert.equal(requests.length, 1);
+    assert.equal(new URL(requests[0].url).pathname, '/api/callbacks/paw-feel-bundle-triage');
+    const body = JSON.parse(requests[0].init.body);
+    assert.deepEqual(body, input);
+    assert.equal(JSON.stringify(body).includes('actor'), false);
+    assert.equal(JSON.stringify(body).includes('targetThreadId'), false);
+    const tool = pawFeelDispositionTools.find((candidate) => candidate.name === 'cat_cafe_triage_paw_feel');
+    assert.equal(
+      tool.inputSchema.action.safeParse({
+        type: 'request_signature',
+        action: { type: 'no_action', reasonCode: 'not_actionable' },
+        preferredSignerCatId: 'opus5',
+      }).success,
+      true,
+    );
+    assert.equal(
+      tool.inputSchema.action.safeParse({
+        type: 'block',
+        blockerCode: 'external_wait',
+        blockerRef: 'case:123',
+        resume: { kind: 'bounded_time', recheckAt: '2026-09-08T00:00:00.000Z' },
+      }).success,
+      true,
+    );
+  });
+
+  it('links a refs-only owner repair outcome through callback auth', async () => {
+    const input = {
+      eventId: 'outcome-1',
+      signalId: 'signal-1',
+      expectedSequence: 2,
+      bindingRef: { ownerFeatureId: 'F278', ownerStateRef: 'paw-feel-direct-repair-binding:one' },
+      ownerOutcomeRef: { ownerFeatureId: 'F167', ownerStateRef: 'owner-outcome:one' },
+    };
+    const result = await handleLinkPawFeelRepairOutcome(input);
+
+    assert.equal(result.isError, undefined);
+    assert.equal(new URL(requests[0].url).pathname, '/api/callbacks/paw-feel-repair-outcome');
+    assert.deepEqual(JSON.parse(requests[0].init.body), { ...input, type: 'link_repair_outcome' });
+  });
+});

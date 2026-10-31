@@ -1,75 +1,167 @@
-import { mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type {
+  AgyProfileConfig,
   CatBreed,
   CatCafeConfig,
+  CatCarrier,
   CatColor,
-  CatProvider,
   CatVariant,
   CliConfig,
+  ClientId,
   CoCreatorConfig,
-  ContextBudget,
+  VoiceConfig,
 } from '@cat-cafe/shared';
-import { CAT_CONFIGS, createCatId } from '@cat-cafe/shared';
+import { backgroundImageUrlSchema, createCatId } from '@cat-cafe/shared';
+import { saveSpan } from '../utils/member-save-diagnostics.js';
 import { clearBudgetCache } from './cat-budgets.js';
 import { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
-import { _resetCachedConfig, loadCatConfig, toAllCatConfigs } from './cat-config-loader.js';
+import type { AcpVariantConfig } from './cat-config-loader.js';
+import { _resetCachedConfig, loadCatConfig, parseRawCatConfig, toAllCatConfigs } from './cat-config-loader.js';
 import { clearVoiceCache } from './cat-voices.js';
+import { planClaudeAccountBinding } from './claude-account-binding.js';
+import { coCreatorMentionInputSchema } from './co-creator-mention.js';
+import {
+  assertCodexMemberMutationReady,
+  type CodexBindingSelection,
+  planCodexAccountBinding,
+} from './codex-account-binding.js';
+import { readLocalAccountSelection } from './local-account-selection.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
+import { addTemplateVariantTombstone, type TemplateVariantTombstoneInput } from './template-variant-tombstones.js';
+
+const runtimeCatMutationTails = new Map<string, Promise<void>>();
+
+/** Serialize catalog mutations within this API process so retried first-run writes cannot lose a member. */
+export async function withRuntimeCatMutationLock<T>(projectRoot: string, operation: () => T): Promise<T> {
+  const previous = runtimeCatMutationTails.get(projectRoot) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  runtimeCatMutationTails.set(projectRoot, current);
+  await saveSpan('catalog.queue', () => previous);
+  let lockFd: number | undefined;
+  const lockPath = `${resolveCatCatalogPath(projectRoot)}.lock`;
+  try {
+    mkdirSync(dirname(lockPath), { recursive: true });
+    await saveSpan('catalog.file_lock', async () => {
+      for (let attempt = 0; attempt < 300; attempt += 1) {
+        try {
+          lockFd = openSync(lockPath, 'wx');
+          break;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+          try {
+            if (Date.now() - statSync(lockPath).mtimeMs > 30_000) unlinkSync(lockPath);
+          } catch {
+            // The writer may have released the lock between stat and unlink.
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+      if (lockFd === undefined) throw new Error('Timed out waiting for runtime cat catalog lock');
+    });
+    return saveSpan('catalog.write', operation);
+  } finally {
+    if (lockFd !== undefined) {
+      closeSync(lockFd);
+      try {
+        unlinkSync(lockPath);
+      } catch {
+        // Best-effort release; stale locks are reclaimed above.
+      }
+    }
+    release();
+    if (runtimeCatMutationTails.get(projectRoot) === current) runtimeCatMutationTails.delete(projectRoot);
+  }
+}
 
 export interface RuntimeCatInput {
   catId: string;
+  creationReceipt?: CatVariant['creationReceipt'];
   breedId?: string;
   name: string;
   displayName: string;
+  variantLabel?: string;
   nickname?: string;
   avatar: string;
+  banner?: string;
   color: CatColor;
   mentionPatterns: string[];
   accountRef?: string;
+  configurationSource?: 'native_tool' | 'managed_account';
+  agentProvider?: string | null;
   roleDescription: string;
   personality?: string;
   teamStrengths?: string;
   caution?: string | null;
   strengths?: string[];
   sessionChain?: boolean;
-  provider: CatProvider;
+  clientId: ClientId;
+  carrier: CatCarrier;
   defaultModel: string;
   mcpSupport: boolean;
-  cli: CliConfig;
+  /** F247 KD-17: cloud-only cats (Remote MCP) omit cli to skip local dispatch.
+   * When cli is absent, mention routing queues the mention without spawning a CLI. */
+  cli?: CliConfig;
   commandArgs?: string[];
   cliConfigArgs?: string[];
-  contextBudget?: ContextBudget;
+  /** clowder-ai#1208: explicit context window cap (tokens). undefined = Auto. */
+  contextWindow?: number;
+  voiceConfig?: VoiceConfig;
+  /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
+  provider?: string;
+  /** F161: ACP transport config — presence triggers ACP transport instead of CLI. */
+  acp?: AcpVariantConfig;
+  agyProfile?: AgyProfileConfig;
 }
 
 export interface RuntimeCatUpdate {
+  /** Move this member into an existing breed without changing its catId. */
+  breedId?: string;
   name?: string;
   displayName?: string;
+  variantLabel?: string | null;
   nickname?: string;
   avatar?: string;
+  banner?: string | null;
   color?: CatColor;
   mentionPatterns?: string[];
   accountRef?: string | null;
+  configurationSource?: 'native_tool' | 'managed_account' | null;
+  agentProvider?: string | null;
+  accountBindingMode?: 'follow' | 'override';
   roleDescription?: string;
   personality?: string;
   teamStrengths?: string;
   caution?: string | null;
   strengths?: string[];
   sessionChain?: boolean;
-  provider?: CatProvider;
+  clientId?: ClientId;
+  carrier?: CatCarrier;
   defaultModel?: string;
   mcpSupport?: boolean;
-  cli?: CliConfig;
+  /** F247 KD-17: cli null to remove (cloud-only mode), CliConfig to update, undefined to skip. */
+  cli?: CliConfig | null;
   commandArgs?: string[];
   cliConfigArgs?: string[];
-  contextBudget?: ContextBudget | null;
+  /** clowder-ai#1208: explicit context window cap. null to remove, undefined to skip. */
+  contextWindow?: number | null;
+  voiceConfig?: VoiceConfig | null;
+  /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
+  provider?: string | null;
   available?: boolean;
+  /** F161: ACP transport config — null to remove, undefined to skip. */
+  acp?: AcpVariantConfig | null;
+  agyProfile?: AgyProfileConfig | null;
 }
 
 export interface RuntimeCoCreatorUpdate {
   name?: string;
   aliases?: string[];
   mentionPatterns?: string[];
+  timeZone?: string;
   avatar?: string | null;
   color?: CatColor | null;
 }
@@ -95,8 +187,48 @@ function normalizeCoCreatorMentionPatterns(mentionPatterns: readonly string[]): 
   const values = mentionPatterns
     .map((pattern) => pattern.trim())
     .filter((pattern) => pattern.length > 0)
-    .map((pattern) => (pattern.startsWith('@') ? pattern : `@${pattern}`));
+    .map((pattern) => coCreatorMentionInputSchema.parse(pattern));
   return Array.from(new Set(values));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function findTemplateVariantTombstoneInput(projectRoot: string, catId: string): TemplateVariantTombstoneInput | null {
+  let templateRaw: string;
+  try {
+    templateRaw = readFileSync(resolveProjectTemplatePath(projectRoot), 'utf-8');
+  } catch {
+    return null;
+  }
+
+  let templateJson: unknown;
+  try {
+    templateJson = JSON.parse(templateRaw);
+  } catch {
+    return null;
+  }
+
+  if (!isRecord(templateJson) || !Array.isArray(templateJson.breeds)) return null;
+  for (const breedUnknown of templateJson.breeds) {
+    if (!isRecord(breedUnknown)) continue;
+    if (typeof breedUnknown.id !== 'string') continue;
+    const breedCatId = typeof breedUnknown.catId === 'string' ? breedUnknown.catId : undefined;
+    const variants = Array.isArray(breedUnknown.variants) ? breedUnknown.variants : [];
+    for (const variantUnknown of variants) {
+      if (!isRecord(variantUnknown)) continue;
+      if (typeof variantUnknown.id !== 'string') continue;
+      const resolvedCatId = typeof variantUnknown.catId === 'string' ? variantUnknown.catId : breedCatId;
+      if (resolvedCatId !== catId) continue;
+      return {
+        breedId: breedUnknown.id,
+        variantId: variantUnknown.id,
+        catId: resolvedCatId,
+      };
+    }
+  }
+  return null;
 }
 
 function readOrBootstrapCatalog(projectRoot: string): CatCafeConfig {
@@ -107,16 +239,6 @@ function readOrBootstrapCatalog(projectRoot: string): CatCafeConfig {
     throw new Error(`Runtime cat catalog missing at ${projectRoot}`);
   }
   return catalog;
-}
-
-function isSeedCat(projectRoot: string, catId: string): boolean {
-  try {
-    const templatePath = resolveProjectTemplatePath(projectRoot);
-    const seedCats = toAllCatConfigs(loadCatConfig(templatePath));
-    return Object.hasOwn(seedCats, catId);
-  } catch {
-    return Object.hasOwn(CAT_CONFIGS, catId);
-  }
 }
 
 function invalidateRuntimeCatalogCaches(): void {
@@ -212,16 +334,27 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
     variants: [
       {
         id: variantId,
-        provider: input.provider,
+        ...(input.banner ? { banner: input.banner } : {}),
+        clientId: input.clientId,
+        ...(input.creationReceipt ? { creationReceipt: input.creationReceipt } : {}),
+        ...(input.configurationSource ? { configurationSource: input.configurationSource } : {}),
+        ...(input.agentProvider !== undefined ? { agentProvider: input.agentProvider } : {}),
+        carrier: input.carrier,
+        ...(input.variantLabel != null && input.variantLabel.trim().length > 0
+          ? { variantLabel: input.variantLabel.trim() }
+          : {}),
         defaultModel: input.defaultModel,
         mcpSupport: input.mcpSupport,
-        cli: input.cli,
+        // F247 KD-17: omit cli for cloud-only cats (Remote MCP, no local dispatch).
+        ...(input.cli ? { cli: input.cli } : {}),
         ...(input.accountRef != null && input.accountRef.trim().length > 0
-          ? { accountRef: input.accountRef.trim(), providerProfileId: input.accountRef.trim() }
+          ? { accountRef: input.accountRef.trim() }
           : {}),
         ...(input.commandArgs && input.commandArgs.length > 0 ? { commandArgs: input.commandArgs } : {}),
         ...(input.cliConfigArgs && input.cliConfigArgs.length > 0 ? { cliConfigArgs: input.cliConfigArgs } : {}),
-        ...(input.contextBudget ? { contextBudget: input.contextBudget } : {}),
+        ...(input.provider ? { provider: input.provider } : {}),
+        ...(input.contextWindow != null ? { contextWindow: input.contextWindow } : {}),
+        ...(input.voiceConfig !== undefined ? { voiceConfig: input.voiceConfig } : {}),
         ...(input.personality != null && input.personality.trim().length > 0 ? { personality: input.personality } : {}),
         ...(input.teamStrengths != null && input.teamStrengths.trim().length > 0
           ? { teamStrengths: input.teamStrengths.trim() }
@@ -230,6 +363,8 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
           ? { caution: input.caution && input.caution.trim().length > 0 ? input.caution.trim() : null }
           : {}),
         ...(input.strengths ? { strengths: input.strengths } : {}),
+        ...(input.acp ? { acp: input.acp } : {}),
+        ...(input.agyProfile ? { agyProfile: input.agyProfile } : {}),
       },
     ],
   } as unknown as CatBreed;
@@ -258,29 +393,129 @@ export function readRuntimeCatCatalog(projectRoot: string): CatCafeConfig {
   return readOrBootstrapCatalog(projectRoot);
 }
 
+/** Account previews must not bootstrap or normalize the member owner as a read side effect. */
+export function readRuntimeAccountMembers(projectRoot: string): CatCafeConfig {
+  return parseRawCatConfig(readFileSync(resolveCatCatalogPath(projectRoot), 'utf8'));
+}
+
+/** One synchronous catalog commit for the complete confirmed selection, never a per-member PATCH loop. */
+export function bindRuntimeClaudeAccounts(
+  projectRoot: string,
+  selection: CodexBindingSelection,
+  previewToken: string,
+  accountProjectRoot = projectRoot,
+): CatCafeConfig {
+  return bindRuntimeLocalAccounts(projectRoot, selection, previewToken, accountProjectRoot, 'anthropic');
+}
+export function bindRuntimeCodexAccounts(
+  projectRoot: string,
+  selection: CodexBindingSelection,
+  previewToken: string,
+  accountProjectRoot = projectRoot,
+): CatCafeConfig {
+  return bindRuntimeLocalAccounts(projectRoot, selection, previewToken, accountProjectRoot, 'openai');
+}
+function bindRuntimeLocalAccounts(
+  projectRoot: string,
+  selection: CodexBindingSelection,
+  previewToken: string,
+  accountProjectRoot: string,
+  client: 'openai' | 'anthropic',
+): CatCafeConfig {
+  const current = readRuntimeAccountMembers(projectRoot);
+  const plan =
+    client === 'openai'
+      ? planCodexAccountBinding(accountProjectRoot, current, selection)
+      : planClaudeAccountBinding(accountProjectRoot, current, selection);
+  if (plan.previewToken !== previewToken) throw new Error('Binding preview changed; please review it again');
+  const targets = new Set(plan.targets.map((target) => target.catId));
+  const previous = readLocalAccountSelection(current, client);
+  const selectedRef =
+    selection.scope === 'local' ? selection.accountRef : readLocalAccountSelection(current, client).accountRef;
+  const next = {
+    ...current,
+    ...(selectedRef
+      ? {
+          selectedAccountRefs: { ...current.selectedAccountRefs, [client]: selectedRef },
+        }
+      : {}),
+    breeds: current.breeds.map((breed) => ({
+      ...breed,
+      variants: breed.variants.map((variant) => {
+        const id = variant.catId ?? breed.catId ?? '';
+        if (targets.has(id))
+          return {
+            ...variant,
+            accountRef: selection.accountRef,
+            accountBindingMode: selection.accountRef === selectedRef ? ('follow' as const) : ('override' as const),
+          };
+        if (selection.scope === 'local') {
+          const member = previous.members.find((m) => m.id === id);
+          if (member)
+            return {
+              ...variant,
+              // Inactive members keep their effective ref but retain explicit intent for re-enable.
+              accountBindingMode: member.bindingMode === 'follow' ? ('follow' as const) : ('override' as const),
+            };
+        }
+        return variant;
+      }),
+    })),
+  };
+  return writeAndValidateCatalog(projectRoot, next);
+}
+
 export function createRuntimeCat(projectRoot: string, input: RuntimeCatInput): CatCafeConfig {
+  if (input.banner !== undefined) backgroundImageUrlSchema.parse(input.banner);
   const catalog = cloneCatalog(readOrBootstrapCatalog(projectRoot));
   if (findBreedVariant(catalog as unknown as CatCafeConfig, input.catId)) {
     throw new Error(`Cat "${input.catId}" already exists in runtime catalog`);
   }
   const nextBreed = createBreedFromInput(input) as unknown as Record<string, any>;
-  catalog.breeds = [...catalog.breeds, nextBreed];
+  const targetBreedId = input.breedId?.trim();
+  if (targetBreedId && targetBreedId !== input.catId) {
+    const targetBreed = catalog.breeds.find((breed: { id: string }) => breed.id === targetBreedId);
+    if (!targetBreed) throw new Error(`Unknown breedId "${targetBreedId}"; choose an existing breed`);
+    const variant = nextBreed.variants[0];
+    if (targetBreed.variants.some((member: { id: string }) => member.id === variant.id)) {
+      throw new Error(`Variant "${variant.id}" already exists in breed "${targetBreedId}"`);
+    }
+    targetBreed.variants.push({
+      ...variant,
+      catId: input.catId,
+      relationshipKey: input.catId,
+      name: input.name,
+      displayName: input.displayName,
+      nickname: input.nickname?.trim() || null,
+      avatar: input.avatar,
+      color: input.color,
+      mentionPatterns: normalizeMentionPatterns(input.catId, input.mentionPatterns),
+      roleDescription: input.roleDescription,
+      ...(input.sessionChain !== undefined ? { sessionChain: input.sessionChain } : {}),
+    });
+  } else {
+    if (catalog.breeds.some((breed: { id: string }) => breed.id === nextBreed.id)) {
+      throw new Error(`Breed "${nextBreed.id}" already exists in runtime catalog`);
+    }
+    catalog.breeds = [...catalog.breeds, nextBreed];
+  }
   if (catalog.version === 2) {
     catalog.roster = {
       ...catalog.roster,
-      [input.catId]: buildDefaultRuntimeRosterEntry(
-        input.catId,
-        String(nextBreed.id ?? input.catId),
-        String(nextBreed.displayName ?? nextBreed.name ?? input.catId),
-        true,
-      ),
+      [input.catId]: buildDefaultRuntimeRosterEntry(input.catId, targetBreedId || input.catId, input.displayName, true),
     };
   }
+  assertCodexMemberMutationReady(projectRoot, catalog as unknown as CatCafeConfig, input.catId);
   return writeAndValidateCatalog(projectRoot, catalog);
 }
 
 export function updateRuntimeCat(projectRoot: string, catId: string, patch: RuntimeCatUpdate): CatCafeConfig {
+  if (patch.banner != null) backgroundImageUrlSchema.parse(patch.banner);
   const catalog = cloneCatalog(readOrBootstrapCatalog(projectRoot));
+  const previous = {
+    cat: toAllCatConfigs(catalog as unknown as CatCafeConfig)[catId],
+    available: catalog.version !== 2 || catalog.roster[catId]?.available !== false,
+  };
   const located = findBreedVariant(catalog as unknown as CatCafeConfig, catId);
   if (!located) {
     throw new Error(`Cat "${catId}" not found in runtime catalog`);
@@ -288,13 +523,31 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
 
   const breed = catalog.breeds[located.breedIndex] as Record<string, any>;
   const variant = breed.variants[located.variantIndex] as Record<string, any>;
+  const shouldWriteBreedIdentity = located.isDefaultVariant && breed.variants.length === 1;
+  const bindingClient = (patch.clientId ?? variant.clientId) === 'anthropic' ? 'anthropic' : 'openai';
+  const selectedAccountRef = readLocalAccountSelection(catalog as unknown as CatCafeConfig, bindingClient).accountRef;
 
-  if (patch.name !== undefined) breed.name = patch.name;
-  if (patch.nickname !== undefined) {
-    if (patch.nickname && patch.nickname.trim().length > 0) {
-      breed.nickname = patch.nickname.trim();
+  if (patch.name !== undefined) {
+    if (shouldWriteBreedIdentity) {
+      breed.name = patch.name;
+      delete variant.name;
     } else {
-      delete breed.nickname;
+      variant.name = patch.name;
+    }
+  }
+  if (patch.nickname !== undefined) {
+    const nickname = patch.nickname.trim();
+    if (shouldWriteBreedIdentity) {
+      if (nickname.length > 0) {
+        breed.nickname = nickname;
+      } else {
+        delete breed.nickname;
+      }
+      delete variant.nickname;
+    } else if (nickname.length > 0) {
+      variant.nickname = nickname;
+    } else {
+      variant.nickname = null;
     }
   }
   if (patch.roleDescription !== undefined) {
@@ -306,11 +559,30 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
   }
 
   if (patch.displayName !== undefined) {
-    if (located.isDefaultVariant) {
+    if (shouldWriteBreedIdentity) {
       breed.displayName = patch.displayName;
       delete variant.displayName;
     } else {
+      // Multi-variant breed: keep name/displayName editing independent.
+      // toAllCatConfigs resolves `name` as `variant.name ?? variant.displayName ?? breed.name`;
+      // if we overwrite variant.displayName without a variant.name override,
+      // the resolved name silently follows the new displayName (P2 finding on
+      // clowder-ai#1090). Snapshot the currently-resolved name into variant.name
+      // so a displayName-only patch cannot alter this member's resolved name.
+      // Legacy variants that inherited name via variant.displayName fallback
+      // keep that name explicitly on their first displayName edit.
+      if (variant.name === undefined) {
+        variant.name = variant.displayName ?? breed.name;
+      }
       variant.displayName = patch.displayName;
+    }
+  }
+
+  if (patch.variantLabel !== undefined) {
+    if (patch.variantLabel && patch.variantLabel.trim().length > 0) {
+      variant.variantLabel = patch.variantLabel.trim();
+    } else {
+      delete variant.variantLabel;
     }
   }
 
@@ -321,6 +593,11 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
     } else {
       variant.avatar = patch.avatar;
     }
+  }
+
+  if (patch.banner !== undefined) {
+    // Null is a durable removal, including a value inherited from the shipped template.
+    variant.banner = patch.banner;
   }
 
   if (patch.color !== undefined) {
@@ -342,16 +619,11 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
     }
   }
 
-  if (patch.accountRef !== undefined) {
-    if (patch.accountRef && patch.accountRef.trim().length > 0) {
-      const normalizedAccountRef = patch.accountRef.trim();
-      variant.accountRef = normalizedAccountRef;
-      variant.providerProfileId = normalizedAccountRef;
-    } else {
-      delete variant.accountRef;
-      delete variant.providerProfileId;
-    }
+  if (patch.configurationSource !== undefined) {
+    if (patch.configurationSource) variant.configurationSource = patch.configurationSource;
+    else delete variant.configurationSource;
   }
+  if (patch.agentProvider !== undefined) variant.agentProvider = patch.agentProvider;
   if (patch.personality !== undefined) {
     if (patch.personality && patch.personality.trim().length > 0) {
       variant.personality = patch.personality;
@@ -383,15 +655,80 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
       variant.sessionChain = patch.sessionChain;
     }
   }
-  if (patch.provider !== undefined) variant.provider = patch.provider;
+  if (patch.clientId !== undefined) {
+    if (patch.clientId !== variant.clientId) delete variant.accountBindingMode;
+    variant.clientId = patch.clientId;
+  }
+  if (patch.carrier !== undefined) {
+    variant.carrier = patch.carrier;
+    // Access-mode compatibility exists only at read time. Any write converges
+    // the catalog to the canonical top-level field.
+    delete variant.transport;
+    if (variant.cli && typeof variant.cli === 'object') delete variant.cli.carrier;
+  }
   if (patch.defaultModel !== undefined) variant.defaultModel = patch.defaultModel;
   if (patch.mcpSupport !== undefined) variant.mcpSupport = patch.mcpSupport;
-  if (patch.cli !== undefined) variant.cli = patch.cli;
-  if (patch.contextBudget !== undefined) {
-    if (patch.contextBudget) {
-      variant.contextBudget = patch.contextBudget;
+  // F247 KD-17: patch.cli === null means remove (cloud-only mode); object means update.
+  if (patch.cli !== undefined) {
+    if (patch.cli === null) {
+      delete variant.cli;
     } else {
-      delete variant.contextBudget;
+      variant.cli = patch.cli;
+    }
+  }
+  if (!['openai', 'anthropic'].includes(variant.clientId) || !variant.cli || catId === 'gpt-pro')
+    delete variant.accountBindingMode;
+  if (patch.accountRef !== undefined) {
+    if (patch.accountRef && patch.accountRef.trim().length > 0) {
+      variant.accountRef = patch.accountRef.trim();
+      if (['openai', 'anthropic'].includes(variant.clientId) && variant.cli && catId !== 'gpt-pro')
+        variant.accountBindingMode = selectedAccountRef === variant.accountRef ? 'follow' : 'override';
+    } else {
+      delete variant.accountRef;
+      delete variant.accountBindingMode;
+    }
+  }
+  if (patch.accountBindingMode !== undefined) {
+    if (!['openai', 'anthropic'].includes(variant.clientId) || !variant.cli || catId === 'gpt-pro')
+      throw new Error('跟随账号仅适用于本地 Codex / Claude');
+    const selected = selectedAccountRef;
+    if (patch.accountBindingMode === 'follow') {
+      if (
+        !selected ||
+        (patch.accountRef ?? variant.accountRef ?? (bindingClient === 'anthropic' ? 'claude' : 'codex')) !== selected
+      )
+        throw new Error('请先在账号页选定正在用的账号，再恢复跟随');
+      catalog.selectedAccountRefs = { ...catalog.selectedAccountRefs, [bindingClient]: selected };
+      variant.accountRef = selected;
+    }
+    variant.accountBindingMode =
+      (patch.accountRef ?? variant.accountRef ?? (bindingClient === 'anthropic' ? 'claude' : 'codex')) === selected
+        ? 'follow'
+        : patch.accountBindingMode;
+  }
+  if (
+    patch.available === true &&
+    patch.accountRef === undefined &&
+    patch.accountBindingMode === undefined &&
+    variant.accountBindingMode === 'follow' &&
+    ['openai', 'anthropic'].includes(variant.clientId) &&
+    variant.cli &&
+    catId !== 'gpt-pro' &&
+    selectedAccountRef
+  )
+    variant.accountRef = selectedAccountRef;
+  if (patch.contextWindow !== undefined) {
+    if (patch.contextWindow != null) {
+      variant.contextWindow = patch.contextWindow;
+    } else {
+      delete variant.contextWindow;
+    }
+  }
+  if (patch.voiceConfig !== undefined) {
+    if (patch.voiceConfig) {
+      variant.voiceConfig = patch.voiceConfig;
+    } else {
+      delete variant.voiceConfig;
     }
   }
   if (patch.commandArgs !== undefined) {
@@ -406,6 +743,22 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
       variant.cliConfigArgs = patch.cliConfigArgs;
     } else {
       delete variant.cliConfigArgs;
+    }
+  }
+  if (patch.provider !== undefined) {
+    if (patch.provider) {
+      variant.provider = patch.provider;
+    } else {
+      delete variant.provider;
+    }
+  }
+  // F161: ACP transport config — null removes it (revert to CLI transport).
+  if (patch.agyProfile !== undefined) variant.agyProfile = patch.agyProfile;
+  if (patch.acp !== undefined) {
+    if (patch.acp) {
+      (variant as Record<string, unknown>).acp = patch.acp;
+    } else {
+      (variant as Record<string, unknown>).acp = null;
     }
   }
   if (patch.available !== undefined && catalog.version === 2) {
@@ -423,6 +776,63 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
     };
   }
 
+  if (patch.breedId !== undefined && patch.breedId !== breed.id) {
+    const targetBreed = catalog.breeds.find((candidate: { id: string }) => candidate.id === patch.breedId);
+    if (!targetBreed) throw new Error(`Unknown breedId "${patch.breedId}"; choose an existing breed`);
+    if (located.isDefaultVariant && breed.variants.length > 1) {
+      throw new Error(`Cannot move default member "${catId}" from a multi-member breed`);
+    }
+    if (targetBreed.variants.some((member: { id: string }) => member.id === variant.id)) {
+      throw new Error(`Variant "${variant.id}" already exists in breed "${patch.breedId}"`);
+    }
+
+    // A standalone cat stores its identity at breed level. Snapshot the resolved
+    // member before moving so target-breed defaults cannot silently rename it or
+    // replace its avatar, aliases, role, or session behavior.
+    const resolved = toAllCatConfigs(catalog as unknown as CatCafeConfig)[catId];
+    if (!resolved.relationshipKey) {
+      throw new Error(`Cat "${catId}" has no relationshipKey; refusing breed move`);
+    }
+    const movingVariant = {
+      ...variant,
+      catId,
+      relationshipKey: resolved.relationshipKey,
+      name: resolved.name,
+      displayName: resolved.displayName,
+      nickname: resolved.nickname ?? null,
+      avatar: resolved.avatar,
+      color: resolved.color,
+      mentionPatterns: [...resolved.mentionPatterns],
+      roleDescription: resolved.roleDescription,
+      personality: resolved.personality,
+      teamStrengths: resolved.teamStrengths ?? '',
+      caution: resolved.caution ?? null,
+      restrictions: resolved.restrictions ?? [],
+      sessionChain: resolved.sessionChain ?? true,
+      ...((variant.sessionStrategy ?? breed.features?.sessionStrategy)
+        ? { sessionStrategy: variant.sessionStrategy ?? breed.features.sessionStrategy }
+        : {}),
+    };
+    breed.variants.splice(located.variantIndex, 1);
+    if (breed.variants.length === 0) {
+      catalog.breeds.splice(located.breedIndex, 1);
+    }
+    targetBreed.variants.push(movingVariant);
+    if (catalog.version === 2) {
+      const existingEntry = catalog.roster[catId];
+      catalog.roster[catId] = existingEntry
+        ? { ...existingEntry, family: patch.breedId }
+        : buildDefaultRuntimeRosterEntry(catId, patch.breedId, resolved.displayName, true);
+    }
+  }
+
+  assertCodexMemberMutationReady(
+    projectRoot,
+    catalog as unknown as CatCafeConfig,
+    catId,
+    previous,
+    patch.available === true || patch.accountBindingMode !== undefined,
+  );
   return writeAndValidateCatalog(projectRoot, catalog);
 }
 
@@ -433,9 +843,9 @@ export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCrea
   }
 
   const currentOwner = (catalog.coCreator ?? {
-    name: '铲屎官',
+    name: 'co-creator',
     aliases: [],
-    mentionPatterns: ['@co-creator', '@铲屎官'],
+    mentionPatterns: ['@co-creator', '@co-creator'],
   }) as CoCreatorConfig;
 
   const nextOwner: Record<string, unknown> = {
@@ -452,6 +862,10 @@ export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCrea
         }
       : {}),
   };
+
+  if (patch.timeZone !== undefined) {
+    nextOwner.timeZone = patch.timeZone.trim();
+  }
 
   if (patch.avatar !== undefined) {
     if (patch.avatar && patch.avatar.trim().length > 0) {
@@ -471,10 +885,12 @@ export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCrea
 
   const normalizedOwner: CoCreatorConfig = {
     name: String(nextOwner.name ?? currentOwner.name),
+    ...(typeof nextOwner.nickname === 'string' ? { nickname: nextOwner.nickname } : {}),
     aliases: Array.isArray(nextOwner.aliases) ? (nextOwner.aliases as string[]) : [...currentOwner.aliases],
     mentionPatterns: Array.isArray(nextOwner.mentionPatterns)
       ? (nextOwner.mentionPatterns as string[])
       : [...currentOwner.mentionPatterns],
+    ...(typeof nextOwner.timeZone === 'string' ? { timeZone: nextOwner.timeZone } : {}),
     ...(typeof nextOwner.avatar === 'string' ? { avatar: nextOwner.avatar } : {}),
     ...(nextOwner.color ? { color: nextOwner.color as CatColor } : {}),
   };
@@ -484,15 +900,12 @@ export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCrea
 }
 
 export function deleteRuntimeCat(projectRoot: string, catId: string): CatCafeConfig {
-  if (isSeedCat(projectRoot, catId)) {
-    throw new Error(`Cannot delete seed cat "${catId}" from runtime catalog`);
-  }
   const catalog = cloneCatalog(readOrBootstrapCatalog(projectRoot));
   const located = findBreedVariant(catalog as unknown as CatCafeConfig, catId);
   if (!located) {
     throw new Error(`Cat "${catId}" not found in runtime catalog`);
   }
-
+  const templateVariantTombstoneInput = findTemplateVariantTombstoneInput(projectRoot, catId);
   const breed = catalog.breeds[located.breedIndex] as Record<string, any>;
   if (breed.variants.length === 1) {
     catalog.breeds = catalog.breeds.filter((_: unknown, index: number) => index !== located.breedIndex);
@@ -507,6 +920,10 @@ export function deleteRuntimeCat(projectRoot: string, catId: string): CatCafeCon
     const nextRoster = { ...catalog.roster };
     delete nextRoster[catId];
     catalog.roster = nextRoster;
+  }
+
+  if (templateVariantTombstoneInput) {
+    addTemplateVariantTombstone(catalog as Record<string, unknown>, templateVariantTombstoneInput);
   }
 
   return writeAndValidateCatalog(projectRoot, catalog);

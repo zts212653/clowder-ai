@@ -1,0 +1,239 @@
+/* Clowder AI — Site Styles */
+
+:root {
+  --color-terracotta: #c06b4e;
+  --color-terracotta-light: #d4896f;
+  --color-cream: #faf6f1;
+  --color-warm-gray: #f5f0eb;
+  --color-dark-bg: #0f172a;
+  --color-opus-blue: #60a5fa;
+  --color-codex-green: #34d399;
+  --color-gemini-amber: #fbbf24;
+  --color-bengal-orange: #fb923c;
+}
+
+/* Theme toggle transitions */
+html {
+  transition:
+    background-color 0.3s,
+    color 0.3s;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #475569;
+}
+
+/* Nav glassmorphism */
+.nav-glass {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+html:not(.dark) .nav-glass {
+  background: rgba(255, 255, 255, 0.85);
+}
+html.dark .nav-glass {
+  background: rgba(15, 23, 42, 0.85);
+}
+
+/* Feature tab active state */
+.feature-tab {
+  position: relative;
+  cursor: pointer;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+}
+.feature-tab.active {
+  background: var(--color-terracotta);
+  color: white;
+}
+html:not(.dark) .feature-tab:not(.active) {
+  color: #57534e;
+  background: #f5f0eb;
+}
+html:not(.dark) .feature-tab:not(.active):hover {
+  background: #ede5dc;
+}
+html.dark .feature-tab:not(.active) {
+  color: #94a3b8;
+  background: #1e293b;
+}
+html.dark .feature-tab:not(.active):hover {
+  background: #334155;
+}
+
+/* Feature panels */
+.feature-panel {
+  display: none;
+}
+.feature-panel.active {
+  display: block;
+}
+
+/* Roadmap Gantt chart */
+.gantt-track {
+  position: relative;
+  min-height: 64px;
+}
+.gantt-bar {
+  position: absolute;
+  height: 24px;
+  border-radius: 6px;
+  padding: 0 8px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 1;
+  transition:
+    opacity 0.2s,
+    transform 0.15s;
+}
+.gantt-bar:hover {
+  transform: scaleY(1.15);
+  z-index: 2;
+}
+.gantt-shipped {
+  background: var(--color-codex-green);
+  color: white;
+}
+.gantt-progress {
+  background: var(--color-gemini-amber);
+  color: #78350f;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.25);
+}
+.gantt-planned {
+  border: 1.5px dashed #94a3b8;
+  color: #94a3b8;
+  background: transparent;
+}
+html.dark .gantt-planned {
+  border-color: #64748b;
+  color: #64748b;
+}
+
+.gantt-gridline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #e7e5e4;
+}
+html.dark .gantt-gridline {
+  background: #334155;
+}
+
+/* Scenario cards hover effect */
+.scenario-card {
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
+}
+.scenario-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
+}
+html.dark .scenario-card:hover {
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* Code block */
+.code-block {
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+/* Install tab & panels */
+.install-tab {
+  cursor: pointer;
+  padding: 0.375rem 0.875rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+.install-tab.active {
+  background: var(--color-terracotta);
+  color: white;
+}
+.install-panel {
+  display: none;
+}
+.install-panel.active {
+  display: block;
+}
+
+/* Issue filter (feedback page) */
+.issue-filter {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.issue-filter.active {
+  background: var(--color-terracotta);
+  color: white;
+  border-color: var(--color-terracotta);
+}
+
+/* Doc card & feedback card hover */
+.doc-card,
+.feedback-card {
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
+}
+.doc-card:hover,
+.feedback-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.06);
+}
+html.dark .doc-card:hover,
+html.dark .feedback-card:hover {
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+}
+
+/* Floating TOC */
+#floating-toc {
+  transition: opacity 0.3s ease;
+}
+.toc-link {
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+.toc-link.text-terracotta {
+  color: var(--color-terracotta) !important;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .roadmap-lane {
+    margin-bottom: 0.5rem;
+  }
+}

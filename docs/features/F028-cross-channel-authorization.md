@@ -12,7 +12,7 @@ created: 2026-02-26
 > **Created**: 2026-02-26
 
 ## Why
-- 2026-02-14 team lead提议
+- 2026-02-14 operator提议
 
 ## What
 - **F28**: ✅ b98230f + R1 fix 70e8321, PR #6. Desktop Notification + Tab flash + header badge + pulse animation. 计划: 2026-02-14-f28-authorization-cross-channel-notification.md

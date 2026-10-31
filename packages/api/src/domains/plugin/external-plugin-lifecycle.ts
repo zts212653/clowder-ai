@@ -1,0 +1,484 @@
+import { hasRetainedDesktopLoss } from './desktop-window-runtime/desktop-loss.js';
+import {
+  logPluginStartFailure,
+  type PluginStartPhase,
+  pluginStartFailureReport,
+  startFailureRecord,
+} from './diagnostics/plugin-start-failure.js';
+import {
+  type ExternalPluginLifecycleServiceOptions,
+  PLUGIN_OWNER_DISABLED_REASON,
+  PLUGIN_OWNER_UNINSTALLED_REASON,
+  PluginLifecycleError,
+  type PluginMaintenanceInput,
+  type PluginMaintenanceResult,
+  type PluginMaintenanceResumeFailureCode,
+} from './external-plugin-lifecycle-types.js';
+import type { PluginInventoryTransaction } from './host-inventory/ports.js';
+import { normalizePluginInstanceAfterRestart } from './host-inventory/restart-recovery.js';
+import { withoutRuntimeFailure, withRuntimeFailure } from './host-inventory/runtime-failure-record.js';
+import type { ActivationState, PluginInstanceRecord } from './host-inventory/types.js';
+import { InstanceOperationQueue } from './lifecycle/instance-operation-queue.js';
+
+export * from './external-plugin-lifecycle-types.js';
+
+export interface ExternalPluginRestartRecovery {
+  readonly recoveredInstances: number;
+  readonly resumeRequested: number;
+}
+
+export interface ExternalPluginRestartRecoveryOptions {
+  /** Holds an instance's resume until the returned gate settles; undefined resumes it
+   * at once. A held instance takes no runtime authority while waiting, and a gate that
+   * never opens or fails leaves its enabled intent for the next boot. */
+  readonly resumeGate?: (instance: PluginInstanceRecord) => PromiseLike<unknown> | undefined;
+}
+
+function currentInstance(transaction: PluginInventoryTransaction, instanceId: string): PluginInstanceRecord {
+  const instance = transaction.instances.get(instanceId);
+  if (!instance) throw new PluginLifecycleError('INSTANCE_NOT_FOUND', `unknown plugin instance ${instanceId}`);
+  const current = transaction.instances.getCurrent(instance.pluginId);
+  if (instance.lifecycleState !== 'installed' || current?.pluginInstanceId !== instanceId) {
+    throw new PluginLifecycleError('STALE_INSTANCE', `${instanceId} is not the current installed instance`);
+  }
+  return instance;
+}
+
+function assertRevision(instance: PluginInstanceRecord, expectedRevision: number): void {
+  if (instance.lifecycleRevision !== expectedRevision) {
+    throw new PluginLifecycleError(
+      'STALE_REVISION',
+      `expected lifecycle revision ${expectedRevision}, current ${instance.lifecycleRevision}`,
+    );
+  }
+}
+
+export class ExternalPluginLifecycleService {
+  private readonly queue = new InstanceOperationQueue();
+  private readonly now: () => number;
+  private restartRecoveryStopped = false;
+  private readonly pendingRestartResumes = new Set<Promise<void>>();
+
+  constructor(private readonly options: ExternalPluginLifecycleServiceOptions) {
+    this.now = options.now ?? Date.now;
+  }
+
+  cancelRestartRecovery(): void {
+    this.restartRecoveryStopped = true;
+  }
+
+  async drainRestartRecovery(): Promise<void> {
+    await Promise.all([...this.pendingRestartResumes]);
+  }
+  prepare(instanceId: string, expectedRevision: number): Promise<PluginInstanceRecord> {
+    return this.queue.run(instanceId, async () => {
+      const current = await this.readCurrent(instanceId);
+      await this.assertCompatible(current);
+      assertRevision(current, expectedRevision);
+      if (current.configReadiness === 'ready') return current;
+      this.assertState(current, ['disabled'], ['stopped'], 'prepare');
+      return this.advance(instanceId, expectedRevision, { configReadiness: 'ready' });
+    });
+  }
+  enable(instanceId: string, expectedRevision: number): Promise<PluginInstanceRecord> {
+    return this.queue.run(instanceId, async () => {
+      const current = await this.readCurrent(instanceId);
+      await this.assertCompatible(current);
+      assertRevision(current, expectedRevision);
+      if (current.configReadiness !== 'ready') {
+        throw new PluginLifecycleError('INVALID_TRANSITION', 'plugin configuration is not ready');
+      }
+      this.assertState(current, ['disabled', 'error'], ['stopped', 'crashed'], 'enable');
+      return this.startFromDormant(instanceId, expectedRevision, 'enable');
+    });
+  }
+  disable(instanceId: string, expectedRevision: number): Promise<PluginInstanceRecord> {
+    return this.queue.run(instanceId, async () => {
+      const current = await this.readCurrent(instanceId);
+      assertRevision(current, expectedRevision);
+      this.assertState(current, ['enabled'], undefined, 'disable');
+      const disabling = await this.advance(instanceId, expectedRevision, { activationState: 'disabling' });
+      await this.stopOrFail(instanceId, disabling.lifecycleRevision, PLUGIN_OWNER_DISABLED_REASON);
+      return this.advance(instanceId, disabling.lifecycleRevision, {
+        activationState: 'disabled',
+        runtimeState: 'stopped',
+      });
+    });
+  }
+  repair(instanceId: string, expectedRevision: number): Promise<PluginInstanceRecord> {
+    return this.queue.run(instanceId, async () => {
+      const current = await this.readCurrent(instanceId);
+      await this.assertCompatible(current);
+      assertRevision(current, expectedRevision);
+      const retainedCompanionLoss = current.pluginId === 'official.companion' && hasRetainedDesktopLoss(current);
+      if (
+        current.activationState !== 'error' &&
+        !(current.activationState === 'enabled' && current.runtimeState === 'crashed') &&
+        !retainedCompanionLoss
+      ) {
+        throw new PluginLifecycleError('INVALID_TRANSITION', 'repair is not valid from the current plugin state');
+      }
+      await this.stopOrFail(instanceId, expectedRevision, 'owner_repair');
+      const dormant = await this.advance(instanceId, expectedRevision, {
+        configReadiness: 'ready',
+        activationState: 'disabled',
+        runtimeState: 'stopped',
+      });
+      return this.startFromDormant(instanceId, dormant.lifecycleRevision, 'repair');
+    });
+  }
+  uninstall(instanceId: string, expectedRevision: number): Promise<PluginInstanceRecord> {
+    return this.queue.run(instanceId, async () => {
+      const current = await this.readCurrent(instanceId);
+      assertRevision(current, expectedRevision);
+      const disabling = await this.advance(instanceId, expectedRevision, { activationState: 'disabling' });
+      await this.stopOrFail(instanceId, disabling.lifecycleRevision, PLUGIN_OWNER_UNINSTALLED_REASON);
+      return this.advance(instanceId, disabling.lifecycleRevision, {
+        lifecycleState: 'retired',
+        activationState: 'disabled',
+        runtimeState: 'stopped',
+        retiredAt: this.now(),
+      });
+    });
+  }
+
+  runWithRuntimeSuspended<T>(input: PluginMaintenanceInput<T>): Promise<PluginMaintenanceResult<T>> {
+    return this.queue.run(input.instanceId, async () => {
+      const initial = await this.readCurrent(input.instanceId);
+      assertRevision(initial, input.expectedRevision);
+      if (initial.activationState === 'enabling' || initial.activationState === 'disabling') {
+        throw new PluginLifecycleError(
+          'INVALID_TRANSITION',
+          'plugin maintenance is not valid during an activation transition',
+        );
+      }
+      const shouldResume =
+        initial.activationState === 'enabled' &&
+        (await this.options.store.snapshot()).packages.find((pkg) => pkg.packageDigest === initial.packageDigest)
+          ?.manifest != null;
+      if (!shouldResume && !['stopped', 'crashed'].includes(initial.runtimeState)) {
+        throw new PluginLifecycleError('INVALID_TRANSITION', 'dormant plugin maintenance requires a stopped runtime');
+      }
+      await input.preflight?.();
+      if (
+        input.stopReason === 'configuration_update' &&
+        shouldResume &&
+        ['healthy', 'degraded'].includes(initial.runtimeState)
+      ) {
+        const result = await input.operation(initial);
+        const current = await this.readCurrent(input.instanceId);
+        if (current.configReadiness !== 'ready') {
+          await this.stopOrFail(input.instanceId, current.lifecycleRevision, 'configuration_update');
+          await this.advance(input.instanceId, current.lifecycleRevision, { runtimeState: 'stopped' });
+        } else {
+          try {
+            await this.options.supervisor.configRefresh?.(input.instanceId);
+          } catch (_error) {
+            try {
+              await this.options.supervisor.stop(input.instanceId, 'configuration_refresh_failed');
+            } finally {
+              await this.projectMaintenanceResumeFailure(input.instanceId, input.resumeFailureCode);
+            }
+            throw new PluginLifecycleError(input.resumeFailureCode, 'Configuration saved but plugin refresh failed');
+          }
+        }
+        return { result, instance: await this.readCurrent(input.instanceId) };
+      }
+      let stopped = initial;
+      if (!['stopped', 'crashed'].includes(initial.runtimeState)) {
+        await this.stopOrFail(input.instanceId, initial.lifecycleRevision, input.stopReason);
+        stopped = await this.advance(input.instanceId, initial.lifecycleRevision, { runtimeState: 'stopped' });
+      } else if (initial.runtimeState === 'crashed') {
+        stopped = await this.advance(input.instanceId, initial.lifecycleRevision, { runtimeState: 'stopped' });
+      }
+      let result: T;
+      try {
+        result = await input.operation(stopped);
+      } catch (error) {
+        if (input.rollback) {
+          await this.restoreMaintenance(input, stopped, shouldResume);
+          throw error;
+        }
+        if (shouldResume) {
+          try {
+            await this.options.supervisor.start(input.instanceId);
+          } catch (resumeError) {
+            this.reportStartFailure(stopped, 'maintenance_rollback_resume', resumeError, this.now());
+            const resumeFailureCode =
+              input.stopReason === 'package_update' ? 'UPDATE_ROLLBACK_RESUME_FAILED' : input.resumeFailureCode;
+            await this.projectMaintenanceResumeFailure(input.instanceId, resumeFailureCode);
+            throw new PluginLifecycleError(
+              resumeFailureCode,
+              'official plugin maintenance failed and the previous runtime could not be restored',
+            );
+          }
+        }
+        throw error;
+      }
+      if (shouldResume && (await this.readCurrent(input.instanceId)).configReadiness === 'ready') {
+        try {
+          await this.options.supervisor.start(input.instanceId);
+        } catch (resumeError) {
+          this.reportStartFailure(
+            await this.readCurrent(input.instanceId),
+            'maintenance_resume',
+            resumeError,
+            this.now(),
+          );
+          if (input.rollback) {
+            await this.restoreMaintenance(input, stopped, shouldResume);
+            throw new PluginLifecycleError(
+              input.resumeFailureCode,
+              'replacement failed to start; previous package restored',
+            );
+          }
+          await this.projectMaintenanceResumeFailure(input.instanceId, input.resumeFailureCode);
+          throw new PluginLifecycleError(
+            input.resumeFailureCode,
+            'official plugin maintenance completed but the runtime could not be restored',
+          );
+        }
+      }
+      return { result, instance: await this.readCurrent(input.instanceId) };
+    });
+  }
+
+  private async assertCompatible(instance: PluginInstanceRecord): Promise<void> {
+    const snapshot = await this.options.store.snapshot();
+    if (snapshot.packages.find((pkg) => pkg.packageDigest === instance.packageDigest)?.manifest == null)
+      throw new PluginLifecycleError('INVALID_TRANSITION', 'Plugin version is incompatible; update or reinstall it');
+  }
+
+  private async restoreMaintenance<T>(
+    input: PluginMaintenanceInput<T>,
+    previous: PluginInstanceRecord,
+    shouldResume: boolean,
+  ): Promise<void> {
+    try {
+      // A rejected start may have acquired resources. Release them before changing authority.
+      await this.options.supervisor.stop(input.instanceId, 'package_update_rollback');
+      await input.rollback!();
+      if (shouldResume) await this.options.supervisor.start(input.instanceId);
+    } catch (error) {
+      this.reportStartFailure(previous, 'maintenance_rollback_resume', error, this.now());
+      await this.projectMaintenanceResumeFailure(input.instanceId, 'UPDATE_ROLLBACK_RESUME_FAILED', shouldResume);
+      throw new PluginLifecycleError(
+        'UPDATE_ROLLBACK_RESUME_FAILED',
+        'replacement failed and the previous runtime could not be restored',
+      );
+    }
+  }
+
+  async recoverAfterRestart(
+    options: ExternalPluginRestartRecoveryOptions = {},
+  ): Promise<ExternalPluginRestartRecovery> {
+    if (this.restartRecoveryStopped) return { recoveredInstances: 0, resumeRequested: 0 };
+    const recovery = await this.options.store.transaction((transaction) => {
+      let recoveredInstances = 0;
+      for (const instance of transaction.instances.list()) {
+        const recovered = normalizePluginInstanceAfterRestart(instance, this.now());
+        if (recovered === undefined) continue;
+        transaction.instances.put(recovered);
+        recoveredInstances += 1;
+      }
+      const resumable = transaction.instances
+        .list()
+        .filter(
+          (instance) =>
+            instance.lifecycleState === 'installed' &&
+            transaction.packages.get(instance.packageDigest)?.manifest != null &&
+            transaction.instances.getCurrent(instance.pluginId)?.pluginInstanceId === instance.pluginInstanceId &&
+            instance.configReadiness === 'ready' &&
+            instance.activationState === 'enabled' &&
+            instance.runtimeState === 'stopped',
+        );
+      return { recoveredInstances, resumable };
+    });
+    for (const instance of recovery.resumable) {
+      const resume = () => {
+        if (this.restartRecoveryStopped) return;
+        const pending = this.resumeAfterRestart(instance.pluginInstanceId).catch(() => undefined);
+        this.pendingRestartResumes.add(pending);
+        void pending.then(() => this.pendingRestartResumes.delete(pending));
+      };
+      const gate = options.resumeGate?.(instance);
+      if (gate === undefined) void resume();
+      else void Promise.resolve(gate).then(resume, () => undefined);
+    }
+    return {
+      recoveredInstances: recovery.recoveredInstances,
+      resumeRequested: recovery.resumable.length,
+    };
+  }
+
+  private resumeAfterRestart(instanceId: string): Promise<void> {
+    return this.queue.run(instanceId, async () => {
+      const current = await this.readCurrent(instanceId);
+      if (
+        this.restartRecoveryStopped ||
+        current.configReadiness !== 'ready' ||
+        current.activationState !== 'enabled' ||
+        (current.runtimeState !== 'stopped' && current.runtimeState !== 'crashed')
+      ) {
+        return;
+      }
+      try {
+        await this.options.supervisor.start(instanceId);
+      } catch (error) {
+        const failedAt = this.now();
+        this.reportStartFailure(current, 'restart_resume', error, failedAt);
+        if (!this.restartRecoveryStopped) await this.projectResumeFailure(instanceId, startFailureRecord(failedAt));
+      }
+    });
+  }
+
+  private reportStartFailure(
+    instance: PluginInstanceRecord,
+    phase: PluginStartPhase,
+    error: unknown,
+    at: number,
+  ): void {
+    try {
+      const { pluginId, pluginInstanceId } = instance;
+      const report = pluginStartFailureReport({ pluginId, pluginInstanceId, phase, occurredAt: at, error });
+      (this.options.onStartFailure ?? logPluginStartFailure)(report);
+    } catch {
+      /* Observers cannot change lifecycle state. */
+    }
+  }
+
+  private projectResumeFailure(instanceId: string, failure: ReturnType<typeof startFailureRecord>): Promise<void> {
+    return this.options.store.transaction((transaction) => {
+      const current = transaction.instances.get(instanceId);
+      if (
+        !current ||
+        current.lifecycleState !== 'installed' ||
+        transaction.instances.getCurrent(current.pluginId)?.pluginInstanceId !== instanceId ||
+        current.activationState !== 'enabled' ||
+        (current.runtimeState !== 'stopped' && current.runtimeState !== 'crashed')
+      ) {
+        return;
+      }
+      transaction.instances.put({
+        ...withRuntimeFailure(current, failure.record),
+        activationState: 'error',
+        runtimeState: 'stopped',
+        lifecycleRevision: current.lifecycleRevision + 1,
+        updatedAt: failure.record.occurredAt,
+      });
+    });
+  }
+
+  private projectMaintenanceResumeFailure(
+    instanceId: string,
+    code: PluginMaintenanceResumeFailureCode,
+    preserveEnabledIntent = false,
+  ): Promise<void> {
+    return this.options.store.transaction((transaction) => {
+      const current = currentInstance(transaction, instanceId);
+      const now = this.now();
+      transaction.instances.put({
+        ...withRuntimeFailure(current, { code, exitCode: null, signal: null, occurredAt: now }),
+        activationState: preserveEnabledIntent
+          ? 'enabled'
+          : code === 'CONFIGURATION_RESUME_FAILED'
+            ? current.activationState
+            : 'error',
+        runtimeState: preserveEnabledIntent ? 'crashed' : 'stopped',
+        lifecycleRevision: current.lifecycleRevision + 1,
+        updatedAt: now,
+      });
+    });
+  }
+
+  private advance(
+    instanceId: string,
+    expectedRevision: number,
+    patch: Partial<PluginInstanceRecord>,
+    options: {
+      readonly clearRuntimeError?: boolean;
+      readonly failure?: ReturnType<typeof startFailureRecord>;
+      readonly at?: number;
+    } = {},
+  ): Promise<PluginInstanceRecord> {
+    return this.options.store.transaction((transaction) => {
+      const current = currentInstance(transaction, instanceId);
+      assertRevision(current, expectedRevision);
+      const base = options.failure
+        ? withRuntimeFailure(current, options.failure.record)
+        : options.clearRuntimeError
+          ? withoutRuntimeFailure(current)
+          : current;
+      const next = {
+        ...base,
+        ...patch,
+        lifecycleRevision: current.lifecycleRevision + 1,
+        updatedAt: options.at ?? this.now(),
+      };
+      transaction.instances.put(next);
+      return next;
+    });
+  }
+
+  private async startFromDormant(
+    instanceId: string,
+    expectedRevision: number,
+    phase: Extract<PluginStartPhase, 'enable' | 'repair'>,
+  ): Promise<PluginInstanceRecord> {
+    const enabling = await this.advance(
+      instanceId,
+      expectedRevision,
+      { activationState: 'enabling' },
+      { clearRuntimeError: true },
+    );
+    const enabled = await this.advance(instanceId, enabling.lifecycleRevision, { activationState: 'enabled' });
+    try {
+      await this.options.supervisor.start(instanceId);
+    } catch (error) {
+      const failedAt = this.now();
+      this.reportStartFailure(enabled, phase, error, failedAt);
+      const failure = startFailureRecord(failedAt);
+      await this.advance(
+        instanceId,
+        enabled.lifecycleRevision,
+        { activationState: 'error', runtimeState: 'stopped' },
+        { failure, at: failedAt },
+      );
+      throw new PluginLifecycleError('START_FAILED', 'official plugin runtime failed to start');
+    }
+    return this.readCurrent(instanceId);
+  }
+
+  private async readCurrent(instanceId: string): Promise<PluginInstanceRecord> {
+    const snapshot = await this.options.store.snapshot();
+    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === instanceId);
+    if (!instance) throw new PluginLifecycleError('INSTANCE_NOT_FOUND', `unknown plugin instance ${instanceId}`);
+    const current = snapshot.instances.find(
+      (candidate) => candidate.pluginId === instance.pluginId && candidate.lifecycleState === 'installed',
+    );
+    if (current?.pluginInstanceId !== instanceId) {
+      throw new PluginLifecycleError('STALE_INSTANCE', `${instanceId} is not the current installed instance`);
+    }
+    return instance;
+  }
+
+  private assertState(
+    instance: PluginInstanceRecord,
+    activation: readonly ActivationState[],
+    runtime: readonly PluginInstanceRecord['runtimeState'][] | undefined,
+    action: string,
+  ): void {
+    if (!activation.includes(instance.activationState) || (runtime && !runtime.includes(instance.runtimeState))) {
+      throw new PluginLifecycleError('INVALID_TRANSITION', `${action} is not valid from the current plugin state`);
+    }
+  }
+
+  private async stopOrFail(instanceId: string, revision: number, reason: string): Promise<void> {
+    try {
+      await this.options.supervisor.stop(instanceId, reason);
+    } catch {
+      await this.advance(instanceId, revision, { activationState: 'error' });
+      throw new PluginLifecycleError('STOP_FAILED', 'official plugin runtime failed to stop');
+    }
+  }
+}

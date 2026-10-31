@@ -1,0 +1,210 @@
+[
+  {
+    "id": "opus55",
+    "breed": "ragdoll",
+    "group": "布偶猫",
+    "label": "宪宪 5.5",
+    "src": "/avatars/family/opus55.png",
+    "roleTemplateId": "ragdoll"
+  },
+  {
+    "id": "opus5",
+    "breed": "ragdoll",
+    "group": "布偶猫",
+    "label": "宪宪 5",
+    "src": "/avatars/family/opus5.png",
+    "roleTemplateId": "ragdoll"
+  },
+  {
+    "id": "opus-47",
+    "breed": "ragdoll",
+    "group": "布偶猫",
+    "label": "宪宪 4.7",
+    "src": "/avatars/family/opus-47.png",
+    "roleTemplateId": "ragdoll"
+  },
+  {
+    "id": "fable-5",
+    "breed": "ragdoll",
+    "group": "布偶猫",
+    "label": "宪宪 Fable",
+    "src": "/avatars/family/fable-5.png",
+    "roleTemplateId": "ragdoll"
+  },
+  {
+    "id": "sonnet",
+    "breed": "ragdoll",
+    "group": "布偶猫",
+    "label": "宪宪 Sonnet",
+    "src": "/avatars/family/sonnet.png",
+    "roleTemplateId": "ragdoll"
+  },
+  {
+    "id": "opus",
+    "breed": "ragdoll",
+    "group": "布偶猫",
+    "label": "宪宪 初代",
+    "src": "/avatars/family/opus.png",
+    "roleTemplateId": "ragdoll"
+  },
+  {
+    "id": "opus-45",
+    "breed": "ragdoll",
+    "group": "布偶猫",
+    "label": "宪宪 4.5",
+    "src": "/avatars/family/opus-45.png",
+    "roleTemplateId": "ragdoll"
+  },
+  {
+    "id": "codex61-sol",
+    "breed": "maine-coon",
+    "group": "缅因猫",
+    "label": "小太阳 6.1",
+    "src": "/avatars/family/codex61-sol.png",
+    "roleTemplateId": "maine-coon"
+  },
+  {
+    "id": "codex6-sol",
+    "breed": "maine-coon",
+    "group": "缅因猫",
+    "label": "小太阳 6",
+    "src": "/avatars/family/codex6-sol.png",
+    "roleTemplateId": "maine-coon"
+  },
+  {
+    "id": "codex-sol",
+    "breed": "maine-coon",
+    "group": "缅因猫",
+    "label": "小太阳",
+    "src": "/avatars/family/codex-sol.png",
+    "roleTemplateId": "maine-coon"
+  },
+  {
+    "id": "codex-astra",
+    "breed": "maine-coon",
+    "group": "缅因猫",
+    "label": "小星星",
+    "src": "/avatars/family/codex-astra.png",
+    "roleTemplateId": "maine-coon"
+  },
+  {
+    "id": "codex-luna",
+    "breed": "maine-coon",
+    "group": "缅因猫",
+    "label": "小月亮",
+    "src": "/avatars/family/codex-luna.png",
+    "roleTemplateId": "maine-coon"
+  },
+  {
+    "id": "codex6-luna",
+    "breed": "maine-coon",
+    "group": "缅因猫",
+    "label": "Luna 6",
+    "src": "/avatars/family/codex6-luna.png",
+    "roleTemplateId": "maine-coon"
+  },
+  {
+    "id": "codex-terra",
+    "breed": "maine-coon",
+    "group": "缅因猫",
+    "label": "小团团",
+    "src": "/avatars/family/codex-terra.png",
+    "roleTemplateId": "maine-coon"
+  },
+  {
+    "id": "gpt-pro",
+    "breed": "maine-coon",
+    "group": "缅因猫",
+    "label": "砚砚 Pro",
+    "src": "/avatars/family/gpt-pro.png",
+    "roleTemplateId": "maine-coon"
+  },
+  {
+    "id": "codex",
+    "breed": "maine-coon",
+    "group": "缅因猫",
+    "label": "砚砚 初代",
+    "src": "/avatars/family/codex.png",
+    "roleTemplateId": "maine-coon"
+  },
+  {
+    "id": "spark",
+    "breed": "maine-coon",
+    "group": "缅因猫",
+    "label": "Spark",
+    "src": "/avatars/family/spark.png",
+    "roleTemplateId": "maine-coon"
+  },
+  {
+    "id": "gemini38",
+    "breed": "siamese",
+    "group": "暹罗猫",
+    "label": "烁烁 3.8",
+    "src": "/avatars/family/gemini38.png",
+    "roleTemplateId": "siamese"
+  },
+  {
+    "id": "gemini",
+    "breed": "siamese",
+    "group": "暹罗猫",
+    "label": "烁烁 初代",
+    "src": "/avatars/family/gemini.png",
+    "roleTemplateId": "siamese"
+  },
+  {
+    "id": "gemini25",
+    "breed": "siamese",
+    "group": "暹罗猫",
+    "label": "烁烁 2.5",
+    "src": "/avatars/family/gemini25.png",
+    "roleTemplateId": "siamese"
+  },
+  {
+    "id": "kimi",
+    "breed": "turkish-van",
+    "group": "其他",
+    "label": "墨墨",
+    "src": "/avatars/family/kimi.png",
+    "roleTemplateId": "turkish-van"
+  },
+  {
+    "id": "dsh",
+    "breed": "dsh",
+    "group": "其他",
+    "label": "鲸鲸",
+    "src": "/avatars/family/dsh.png",
+    "roleTemplateId": "dsh"
+  },
+  {
+    "id": "glm52",
+    "breed": "dragon-li",
+    "group": "其他",
+    "label": "小狸花",
+    "src": "/avatars/family/glm52.png",
+    "roleTemplateId": "dragon-li"
+  },
+  {
+    "id": "antigravity",
+    "breed": "bengal",
+    "group": "其他",
+    "label": "斑斑",
+    "src": "/avatars/family/antigravity.png",
+    "roleTemplateId": "bengal"
+  },
+  {
+    "id": "antig-opus",
+    "breed": "bengal",
+    "group": "其他",
+    "label": "斑斑 Opus",
+    "src": "/avatars/family/antig-opus.png",
+    "roleTemplateId": "bengal"
+  },
+  {
+    "id": "opencode",
+    "breed": "golden-chinchilla",
+    "group": "其他",
+    "label": "金哥",
+    "src": "/avatars/family/opencode.png",
+    "roleTemplateId": "golden-chinchilla"
+  }
+]

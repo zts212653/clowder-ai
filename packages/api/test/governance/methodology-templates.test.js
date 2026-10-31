@@ -23,12 +23,19 @@ describe('methodology-templates', () => {
     assert.ok(backlog.content.includes('doc_kind:'));
   });
 
-  it('SOP template has workflow table', () => {
-    const templates = getMethodologyTemplates();
-    const sop = templates.find((t) => t.relativePath === 'docs/SOP.md');
-    assert.ok(sop);
-    assert.ok(sop.content.includes('worktree'));
-    assert.ok(sop.content.includes('quality-gate'));
+  it('SOP template uses repository commands without Clowder AI workflow assumptions', () => {
+    const unknown = getMethodologyTemplates().find((t) => t.relativePath === 'docs/SOP.md');
+    assert.ok(unknown);
+    assert.ok(unknown.content.includes('unknown'));
+    assert.ok(!unknown.content.includes('worktree'));
+    assert.ok(!unknown.content.includes('quality-gate'));
+    assert.ok(!unknown.content.includes('pnpm gate'));
+
+    const discovered = getMethodologyTemplates([{ script: 'test', command: 'npm run test' }]).find(
+      (t) => t.relativePath === 'docs/SOP.md',
+    );
+    assert.ok(discovered);
+    assert.ok(discovered.content.includes('| test | `npm run test` |'));
   });
 
   it('Feature template has standard sections', () => {

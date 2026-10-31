@@ -33,8 +33,8 @@ describe('ConsolePanel', () => {
   it('renders level-specific colors', () => {
     const html = renderToStaticMarkup(<ConsolePanel entries={entries} onClear={() => {}} />);
     // Error entries should have red styling
-    expect(html).toContain('text-red');
+    expect(html).toContain('text-conn-red-text');
     // Warn entries should have amber/yellow styling
-    expect(html).toContain('text-amber');
+    expect(html).toContain('text-conn-amber-text');
   });
 });

@@ -1,0 +1,127 @@
+/**
+ * F231 KD-19: authenticated logical profile read surface.
+ *
+ * The caller never supplies userId/catId/relationshipKey. Callback auth owns
+ * identity and the repository projects the current cat onto its stable persona.
+ */
+
+import { PROFILE_UPDATE_TARGET_LAYERS } from '@cat-cafe/shared';
+import { CURRENT_CAPSULE_PROFILE_URI } from '@cat-cafe/shared/profile-contract';
+import type Database from 'better-sqlite3';
+import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import type { FileProfileRepository } from '../domains/cats/services/profile/ProfileRepository.js';
+import { ProfileReadConflict, recordProfileRead } from '../domains/memory/profile/ProfileReadEvidence.js';
+import { profilePointerMissing, profilePointerResolved } from '../infrastructure/telemetry/instruments.js';
+import { requireCallbackPrincipal } from './callback-auth-prehandler.js';
+
+const READABLE_LAYERS = new Set<string>(PROFILE_UPDATE_TARGET_LAYERS);
+
+export interface CallbackReadProfileDeps {
+  repository: FileProfileRepository;
+  evidenceDb?: Database.Database;
+}
+
+export function registerCallbackReadProfileRoutes(app: FastifyInstance, deps: CallbackReadProfileDeps): void {
+  app.get('/api/callbacks/profile', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const query = z
+      .object({
+        layer: z.string().optional(),
+        requestId: z.string().trim().min(1).max(200).optional(),
+        expectedRevision: z
+          .string()
+          .regex(/^sha256:[a-f0-9]{64}$/)
+          .optional(),
+      })
+      .safeParse(request.query);
+    if (!query.success) return reply.status(400).send({ error: 'invalid_profile_query' });
+    const expectedRevision = query.data.expectedRevision;
+    reply.header('Cache-Control', 'private, no-store');
+    const finishRead = <T extends { revision: string }>(memoryId: string, snapshot: T) => {
+      const requestId = query.data.requestId;
+      if (!requestId) return { ...snapshot, usageRecorded: false };
+      if (!deps.evidenceDb)
+        return reply.status(503).send({ error: 'profile_read_recording_unavailable', readRequestId: requestId });
+      try {
+        recordProfileRead(deps.evidenceDb, { principal, requestId, memoryId, revision: snapshot.revision });
+        return { ...snapshot, readRequestId: requestId, usageRecorded: true };
+      } catch (error) {
+        if (error instanceof ProfileReadConflict)
+          return reply.status(409).send({ error: error.message, readRequestId: requestId });
+        request.log.warn({ err: error }, 'Profile read evidence could not be persisted');
+        return reply.status(503).send({ error: 'profile_read_recording_unavailable', readRequestId: requestId });
+      }
+    };
+
+    // Phase E: layer query param — auth resolved BEFORE layer dispatch (INV-6).
+    const layer = query.data.layer ?? 'primer';
+    if (!READABLE_LAYERS.has(layer)) {
+      reply.status(400);
+      return {
+        error: 'invalid_target_layer',
+        detail: `Unknown layer "${layer}"; valid: ${[...READABLE_LAYERS].join(', ')}`,
+      };
+    }
+
+    if (layer === 'corpus' || layer === 'capsule') {
+      const uri = layer === 'capsule' ? CURRENT_CAPSULE_PROFILE_URI : deps.repository.currentCorpusUri();
+      try {
+        const corpus =
+          layer === 'capsule'
+            ? deps.repository.readCapsule(principal.userId)
+            : deps.repository.readCorpus(principal.userId);
+        if (!corpus) {
+          profilePointerMissing.add(1, { 'profile.layer': layer });
+          reply.status(404);
+          return { error: `no_${layer}`, uri };
+        }
+        if (expectedRevision && corpus.revision !== expectedRevision) {
+          return reply.status(409).send({ error: 'profile_revision_changed' });
+        }
+        profilePointerResolved.add(1, { 'profile.layer': layer });
+        return finishRead(layer, {
+          layer,
+          uri,
+          content: corpus.content,
+          revision: corpus.revision,
+        });
+      } catch {
+        reply.status(503);
+        return { error: `${layer}_target_unavailable`, uri };
+      }
+    }
+
+    // Default: primer — existing flow.
+    let scope: ReturnType<FileProfileRepository['scope']>;
+    try {
+      scope = deps.repository.scope(principal.userId, principal.catId as string);
+    } catch {
+      profilePointerMissing.add(1, { 'profile.layer': 'primer' });
+      reply.status(404);
+      return { error: 'no_primer', uri: deps.repository.currentRelationshipUri() };
+    }
+
+    const primer = deps.repository.readPrimer(scope);
+    if (!primer) {
+      profilePointerMissing.add(1, { 'profile.layer': 'primer' });
+      reply.status(404);
+      return { error: 'no_primer', uri: deps.repository.currentRelationshipUri() };
+    }
+
+    if (expectedRevision && primer.revision !== expectedRevision) {
+      return reply.status(409).send({ error: 'profile_revision_changed' });
+    }
+    profilePointerResolved.add(1, { 'profile.layer': 'primer' });
+
+    return finishRead(`primer:${scope.relationshipKey}`, {
+      layer: 'primer',
+      uri: deps.repository.currentRelationshipUri(),
+      relationshipKey: scope.relationshipKey,
+      content: primer.content,
+      revision: primer.revision,
+    });
+  });
+}

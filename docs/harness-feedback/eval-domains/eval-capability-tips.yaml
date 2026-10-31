@@ -1,0 +1,63 @@
+---
+# F244 Phase D AC-D2 — Capability Tips eval domain registration.
+#
+# Data flow (F268 Phase B wired):
+#   1. Web client records events into a bounded, retrying 7d queue
+#   2. Authenticated API atomically writes a 14d receipt + 90d UTC-day aggregate
+#   3. capability-tips-usage projects an explicit window with no_data/insufficient
+#   4. Future Phase C verdict consumes the projection after F267 certification
+#
+# Current state:
+#   - Web→API→durable aggregate→source adapter is implemented (F268 Phase B)
+#   - Opportunity denominator is unavailable; exposure is not substituted
+#   - enabled: false — F267 certificate + checked-in replay evidence refs are absent
+#   - Production pnpm check consumes registry/eval-capability-tips-enable-gate.yaml
+#     and validates typed/provenanced F267 certificate + F268 replay artifacts
+#
+# Why a separate domain (not extending eval:capability-wakeup):
+#   - Different signal source: tips usage events vs session trace analysis
+#   - Different cadence: tips effectiveness needs multi-week window
+#   - Different handoff target: tips → F244, wakeup → F203
+#
+# Phase C ownership:
+#   - operator message private-source-id assigns the active run to
+#     Sol with Terra as the independent calibrator while the Ragdoll seats are
+#     unavailable.
+#   - Terra is a review role, not a second runtime evalCat field; final Phase C
+#     artifacts still require his non-author exact-artifact review.
+domainId: eval:capability-tips
+displayName: Capability Tips Effectiveness
+descriptionForHuman: 能力提示有没有用——给猫弹的 tip 真被点了吗、点完真用上了吗
+systemThreadId: thread_eval_capability_tips
+evalCat:
+  catId: codex-sol
+  handle: "@codex-sol"
+  model: gpt-5.6-sol
+frequency: weekly
+triggerPolicy:
+  mode: time_only
+  maxDetectionDelayHours: 168
+sourceAdapter: capability-tips-usage
+sourceRefsKind: capability-tips-usage-window
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds: []
+handoffTargetResolver:
+  featureId: F244
+  ownerCatId: codex-sol
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 72
+  reevalWithinHours: 336
+fixtures: []
+# 2026-10-01 dormant: see feature-discussions/2026-10-01-eval-into-f311/README.md
+dormancy:
+  reason: "Never enabled and has no opportunity denominator, certificate or action surface; this retires the eval registration, not F244 tips."
+  revivalPath: "Bind or create a qualified measure when a specific Program has a consumer and a valid opportunity denominator."
+  decisionRef: "private-thread-id#private-source-id"
+enabled: false

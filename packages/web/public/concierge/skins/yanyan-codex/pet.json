@@ -1,0 +1,105 @@
+{
+  "id": "yanyan-codex",
+  "displayName": "砚砚 v1",
+  "description": "Maine Coon codex pet — 9-state animated pixel art spritesheet.",
+  "version": 1,
+  "format": "atlas",
+  "atlas": {
+    "src": "spritesheet.webp",
+    "columns": 8,
+    "rows": 9,
+    "cellWidth": 192,
+    "cellHeight": 208,
+    "totalWidth": 1536,
+    "totalHeight": 1872
+  },
+  "states": {
+    "idle": {
+      "row": 0,
+      "frameCount": 6,
+      "frameDurations": [1200, 400, 400, 500, 500, 800]
+    },
+    "running-right": {
+      "row": 1,
+      "frameCount": 8,
+      "frameDurations": [120, 120, 120, 120, 120, 120, 120, 220]
+    },
+    "running-left": {
+      "row": 2,
+      "frameCount": 8,
+      "frameDurations": [120, 120, 120, 120, 120, 120, 120, 220]
+    },
+    "waving": {
+      "row": 3,
+      "frameCount": 4,
+      "frameDurations": [140, 140, 140, 280]
+    },
+    "jumping": {
+      "row": 4,
+      "frameCount": 5,
+      "frameDurations": [140, 140, 140, 140, 280]
+    },
+    "failed": {
+      "row": 5,
+      "frameCount": 8,
+      "frameDurations": [140, 140, 140, 140, 140, 140, 140, 240]
+    },
+    "waiting": {
+      "row": 6,
+      "frameCount": 6,
+      "frameDurations": [150, 150, 150, 150, 150, 260]
+    },
+    "running": {
+      "row": 7,
+      "frameCount": 6,
+      "frameDurations": [120, 120, 120, 120, 120, 220]
+    },
+    "review": {
+      "row": 8,
+      "frameCount": 6,
+      "frameDurations": [150, 150, 150, 150, 150, 280]
+    }
+  },
+  "projection": {
+    "version": 1,
+    "fallback": "idle",
+    "map": {
+      "idle": "idle",
+      "sleeping": "idle",
+      "listening": "waiting",
+      "thinking": "running",
+      "found": "review",
+      "needs-confirmation": "waiting",
+      "handoff": "running-right",
+      "error": "failed"
+    }
+  },
+  "identity": {
+    "species": "cat",
+    "breedOrForm": "maine-coon",
+    "palette": [],
+    "markings": ["brown tabby", "fluffy mane", "green eyes", "large frame"],
+    "silhouetteNotes": "compact full-body maine coon, readable at 64x64, scale-consistent across states",
+    "allowedProps": []
+  },
+  "provenance": {
+    "source": "image-generation",
+    "generator": "cloud-imagegen",
+    "promptTemplate": "docs/features/assets/F229/desktop-pet-sprite/raw/prompts/",
+    "generatedBy": "codex (gpt-5.5)",
+    "qaBy": "sonnet (claude-sonnet-4-6)",
+    "scaleFixNote": "R6 idle regenerated for scale consistency (R5 was 1.91x larger). R6 ratio: 0.97x vs running-right.",
+    "tasteWatchItems": [
+      "R6 white chest fur reduced vs R5 — operator may prefer more chest fluff",
+      "F4-F5 head angle slightly large — monitor in jumping state"
+    ]
+  },
+  "qa": {
+    "readabilityCheck": "pass",
+    "identityDiffCheck": "pass",
+    "provenanceCheck": "pass",
+    "scaleConsistencyCheck": "pass (R6: idle 18119px vs running-right 18768px = 0.97x)",
+    "reviewer": "sonnet",
+    "reviewedAt": "2026-06-17"
+  }
+}

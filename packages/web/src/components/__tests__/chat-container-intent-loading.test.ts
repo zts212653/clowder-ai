@@ -2,6 +2,16 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
+import { ThreadChatRuntimeProvider } from '@/components/thread-chat';
+import type { ChatMessage, ThreadState } from '@/stores/chat-types';
+
+function renderChatContainer(threadId: string) {
+  return React.createElement(
+    ThreadChatRuntimeProvider,
+    { routeThreadId: threadId },
+    React.createElement(ChatContainer, { threadId }),
+  );
+}
 
 const mockSetLoading = vi.fn();
 const mockSetHasActiveInvocation = vi.fn();
@@ -10,48 +20,49 @@ const mockSetTargetCats = vi.fn();
 const mockSetCurrentThread = vi.fn();
 const mockClearUnread = vi.fn();
 const mockHandleAgentMessage = vi.fn();
-
 let capturedSocketCallbacks: {
   onIntentMode?: (data: { threadId: string; mode: string; targetCats: string[] }) => void;
-  onMessage?: (msg: unknown) => boolean | undefined;
+  onMessage?: (msg: unknown) => void;
 } | null = null;
 
-const mockStoreState = () => ({
-  messages: [],
-  isLoading: false,
-  hasActiveInvocation: false,
-  intentMode: null,
-  targetCats: [],
-  catStatuses: {},
-  catInvocations: {},
-  activeInvocations: {},
-  addMessage: vi.fn(),
-  removeMessage: vi.fn(),
-  setLoading: mockSetLoading,
-  setHasActiveInvocation: mockSetHasActiveInvocation,
-  setIntentMode: mockSetIntentMode,
-  setTargetCats: mockSetTargetCats,
-  clearCatStatuses: vi.fn(),
-  setCurrentThread: mockSetCurrentThread,
-  updateThreadTitle: vi.fn(),
-  setCurrentGame: vi.fn(),
-  currentGame: null,
+function createMockStoreState() {
+  return {
+    messages: [] as ChatMessage[],
+    isLoading: false,
+    hasActiveInvocation: false,
+    intentMode: null as ThreadState['intentMode'],
+    targetCats: [] as string[],
+    catStatuses: {} as Record<string, string>,
+    catInvocations: {},
+    activeInvocations: {},
+    addMessage: vi.fn(),
+    removeMessage: vi.fn(),
+    setLoading: mockSetLoading,
+    setHasActiveInvocation: mockSetHasActiveInvocation,
+    setIntentMode: mockSetIntentMode,
+    setTargetCats: mockSetTargetCats,
+    clearCatStatuses: vi.fn(),
+    setCurrentThread: mockSetCurrentThread,
+    updateThreadTitle: vi.fn(),
 
-  viewMode: 'single' as const,
-  setViewMode: vi.fn(),
-  clearUnread: mockClearUnread,
-  confirmUnreadAck: vi.fn(),
-  armUnreadSuppression: vi.fn(),
-  splitPaneThreadIds: [],
-  setSplitPaneThreadIds: vi.fn(),
-  setSplitPaneTarget: vi.fn(),
-  threads: [],
-});
+    viewMode: 'single' as const,
+    setViewMode: vi.fn(),
+    clearUnread: mockClearUnread,
+    confirmUnreadAck: vi.fn(),
+    settleUnreadAck: vi.fn(),
+    armUnreadSuppression: vi.fn(),
+    splitPaneThreadIds: [],
+    setSplitPaneThreadIds: vi.fn(),
+    setSplitPaneTarget: vi.fn(),
+    threads: [],
+  };
+}
+
+let storeState = createMockStoreState();
 
 vi.mock('@/stores/chatStore', () => {
-  const hook = (selector?: (s: ReturnType<typeof mockStoreState>) => unknown) => {
-    const state = mockStoreState();
-    return selector ? selector(state) : state;
+  const hook = (selector?: (s: ReturnType<typeof createMockStoreState>) => unknown) => {
+    return selector ? selector(storeState) : storeState;
   };
   return { useChatStore: hook };
 });
@@ -83,13 +94,13 @@ vi.mock('@/hooks/useAgentMessages', () => ({
   useAgentMessages: () => ({
     handleAgentMessage: mockHandleAgentMessage,
     handleStop: vi.fn(),
-    resetRefs: vi.fn(),
-    resetTimeout: vi.fn(),
   }),
 }));
 
 vi.mock('@/hooks/useChatHistory', () => ({
   useChatHistory: () => ({
+    messages: storeState.messages,
+    handleReadingIntent: vi.fn(),
     handleScroll: vi.fn(),
     scrollContainerRef: { current: null },
     messagesEndRef: { current: null },
@@ -102,26 +113,34 @@ vi.mock('@/hooks/useSendMessage', () => ({
   useSendMessage: () => ({ handleSend: vi.fn() }),
 }));
 
-vi.mock('@/hooks/useAuthorization', () => ({
-  useAuthorization: () => ({ pending: [], respond: vi.fn(), handleAuthRequest: vi.fn(), handleAuthResponse: vi.fn() }),
-}));
-
 vi.mock('@/hooks/useSplitPaneKeys', () => ({ useSplitPaneKeys: vi.fn() }));
 
-vi.mock('@/components/ChatMessage', () => ({ ChatMessage: () => null }));
-vi.mock('@/components/ChatInput', () => ({ ChatInput: () => null }));
-vi.mock('@/components/ThreadSidebar', () => ({ ThreadSidebar: () => null }));
-vi.mock('@/components/RightStatusPanel', () => ({ RightStatusPanel: () => null }));
-vi.mock('@/components/ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
-vi.mock('@/components/ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
-vi.mock('@/components/A2ACollapsible', () => ({ A2ACollapsible: () => null }));
-vi.mock('@/components/ConfirmDialog', () => ({ ConfirmDialog: () => null }));
-vi.mock('@/components/ExportButton', () => ({ ExportButton: () => null }));
-vi.mock('@/components/MessageNavigator', () => ({ MessageNavigator: () => null }));
-vi.mock('@/components/MessageActions', () => ({
+vi.mock('../BootcampListModal', () => ({ BootcampListModal: () => null }));
+vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }));
+vi.mock('../ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
+vi.mock('../ChatInput', () => ({ ChatInput: () => null }));
+vi.mock('../ChatMessage', () => ({ ChatMessage: () => null }));
+vi.mock('../HubListModal', () => ({ HubListModal: () => null }));
+vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock('@/components/CatCafeHub', () => ({ CatCafeHub: () => null }));
+vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
+vi.mock('../ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
+vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));
+vi.mock('../RightStatusPanel', () => ({ RightStatusPanel: () => null }));
+vi.mock('../ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
+vi.mock('../SplitPaneView', () => ({
+  SplitPaneView: ({ children }: { children?: React.ReactNode }) => children ?? null,
+  SplitPaneChatView: ({ children }: { children?: React.ReactNode }) => children ?? null,
+}));
+vi.mock('../ThreadExecutionBar', () => ({
+  ThreadExecutionBar: () => React.createElement('div', { 'data-testid': 'thread-execution-bar' }),
+}));
+vi.mock('../ThreadSidebar', () => ({ ThreadSidebar: () => null }));
+vi.mock('../VoteActiveBar', () => ({ VoteActiveBar: () => null }));
+vi.mock('../VoteConfigModal', () => ({ VoteConfigModal: () => null }));
+vi.mock('../WorkspacePanel', () => ({ WorkspacePanel: () => null }));
+vi.mock('../workspace/ResizeHandle', () => ({ ResizeHandle: () => null }));
 
 describe('ChatContainer intent_mode loading lock', () => {
   let container: HTMLDivElement;
@@ -141,6 +160,7 @@ describe('ChatContainer intent_mode loading lock', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
+    storeState = createMockStoreState();
     capturedSocketCallbacks = null;
     mockSetLoading.mockClear();
     mockSetHasActiveInvocation.mockClear();
@@ -160,7 +180,7 @@ describe('ChatContainer intent_mode loading lock', () => {
 
   it('locks input when current thread receives intent_mode', () => {
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+      root.render(renderChatContainer('thread-1'));
     });
 
     expect(capturedSocketCallbacks?.onIntentMode).toBeTruthy();
@@ -180,7 +200,7 @@ describe('ChatContainer intent_mode loading lock', () => {
 
   it('sets hasActiveInvocation when current thread receives intent_mode', () => {
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+      root.render(renderChatContainer('thread-1'));
     });
 
     act(() => {
@@ -200,7 +220,7 @@ describe('ChatContainer intent_mode loading lock', () => {
   // (since useSocket guarantees correctness).
   it('processes intent_mode unconditionally (guard is in useSocket, not here)', () => {
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-main' }));
+      root.render(renderChatContainer('thread-main'));
     });
 
     act(() => {
@@ -220,11 +240,11 @@ describe('ChatContainer intent_mode loading lock', () => {
 
   it('does not drop onMessage during thread switch suppression window', () => {
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+      root.render(renderChatContainer('thread-1'));
     });
 
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-2' }));
+      root.render(renderChatContainer('thread-2'));
     });
 
     expect(capturedSocketCallbacks?.onMessage).toBeTruthy();

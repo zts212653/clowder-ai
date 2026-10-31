@@ -10,7 +10,7 @@ import type {
   ResolutionItem,
   Slice,
 } from '@cat-cafe/shared';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useExternalProjectStore } from '@/stores/externalProjectStore';
 import { apiFetch } from '@/utils/api-client';
 import { CreateIntentCardForm } from './CreateIntentCardForm';
@@ -51,17 +51,25 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [projectItems, setProjectItems] = useState<BacklogItem[]>([]);
+  const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
 
-  // Load all data for the active project, with cancellation guard
+  // Data is stale when it belongs to a different project than the one we're viewing
+  const isStale = loadedProjectId !== project.id;
+
+  // Sync inert attribute with stale state — pointer-events-none blocks mouse
+  // interactions but not keyboard/focus; inert blocks everything.
+  const contentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    if (isStale) el.setAttribute('inert', '');
+    else el.removeAttribute('inert');
+  }, [isStale]);
+
+  // Load all data for the active project — stale-while-revalidate:
+  // keep old project data visible until the new project's data arrives.
   useEffect(() => {
     let cancelled = false;
-    setIntentCards([]);
-    setAuditFrame(null);
-    setExecutionDigests([]);
-    setResolutions([]);
-    setSlices([]);
-    setRefluxPatterns([]);
-    setProjectItems([]);
     setLoading(true);
 
     const load = async () => {
@@ -76,35 +84,54 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
       ]);
       if (cancelled) return;
 
+      // Per-source clearing: on failure, clear that data source so no
+      // stale data from the previous project survives a partial success.
       if (cardsRes.status === 'fulfilled' && cardsRes.value.ok) {
         const body = (await cardsRes.value.json()) as { cards: IntentCard[] };
         if (!cancelled) setIntentCards(body.cards);
+      } else if (!cancelled) {
+        setIntentCards([]);
       }
       if (frameRes.status === 'fulfilled' && frameRes.value.ok) {
         const body = (await frameRes.value.json()) as { frame: NeedAuditFrameType };
         if (!cancelled) setAuditFrame(body.frame);
+      } else if (!cancelled) {
+        setAuditFrame(null);
       }
       if (itemsRes.status === 'fulfilled' && itemsRes.value.ok) {
         const body = (await itemsRes.value.json()) as { items: BacklogItem[] };
         if (!cancelled) setProjectItems(body.items);
+      } else if (!cancelled) {
+        setProjectItems([]);
       }
       if (digestsRes.status === 'fulfilled' && digestsRes.value.ok) {
         const body = (await digestsRes.value.json()) as { digests: DispatchExecutionDigest[] };
         if (!cancelled) setExecutionDigests(body.digests);
+      } else if (!cancelled) {
+        setExecutionDigests([]);
       }
       if (resRes.status === 'fulfilled' && resRes.value.ok) {
         const body = (await resRes.value.json()) as { resolutions: ResolutionItem[] };
         if (!cancelled) setResolutions(body.resolutions);
+      } else if (!cancelled) {
+        setResolutions([]);
       }
       if (slicesRes.status === 'fulfilled' && slicesRes.value.ok) {
         const body = (await slicesRes.value.json()) as { slices: Slice[] };
         if (!cancelled) setSlices(body.slices);
+      } else if (!cancelled) {
+        setSlices([]);
       }
       if (refluxRes.status === 'fulfilled' && refluxRes.value.ok) {
         const body = (await refluxRes.value.json()) as { patterns: RefluxPattern[] };
         if (!cancelled) setRefluxPatterns(body.patterns);
+      } else if (!cancelled) {
+        setRefluxPatterns([]);
       }
-      if (!cancelled) setLoading(false);
+      if (!cancelled) {
+        setLoadedProjectId(project.id);
+        setLoading(false);
+      }
     };
     void load();
     return () => {
@@ -139,8 +166,9 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
     try {
       const res = await apiFetch(`/api/external-projects/${project.id}/import-backlog`, { method: 'POST' });
       if (res.ok) {
-        const body = (await res.json()) as { imported: number; skipped: number; total: number };
-        setImportStatus(`导入完成: ${body.imported} 新增, ${body.skipped} 跳过, ${body.total} 总计`);
+        const body = (await res.json()) as { imported: number; skipped: number; total: number; orphans?: number };
+        const orphanStatus = body.orphans ? `，检测到 ${body.orphans} 个历史未绑定项；项目内条目已可见` : '';
+        setImportStatus(`导入完成: ${body.imported} 新增, ${body.skipped} 跳过, ${body.total} 总计${orphanStatus}`);
         void reloadProjectItems();
       } else {
         const body = (await res.json()) as { error?: string };
@@ -206,15 +234,17 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Sub-header */}
-      <div className="flex items-center justify-between border-b border-[#E7DAC7] bg-[#FFFDF8] px-6 py-2">
+      <div className="flex items-center justify-between console-divider-b bg-[var(--console-card-bg)] px-6 py-2">
         <div className="flex gap-1">
           {SUB_TABS.map((t) => (
             <button
               key={t.id}
               type="button"
               onClick={() => setSubTab(t.id)}
-              className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
-                subTab === t.id ? 'bg-[#8B6F47] text-white' : 'bg-[#F4EFE7] text-[#6B5D4F] hover:bg-[#E7DAC7]'
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                subTab === t.id
+                  ? 'bg-[var(--mc-accent)] text-[var(--cafe-surface)]'
+                  : 'bg-[var(--console-hover-bg)] text-cafe-secondary hover:bg-[var(--console-border-soft)]'
               }`}
             >
               {t.label}
@@ -222,27 +252,35 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          {importStatus && <span className="text-[10px] text-[#9A866F]">{importStatus}</span>}
+          {importStatus && <span className="text-micro text-cafe-secondary">{importStatus}</span>}
           <button
             type="button"
             onClick={() => void handleImportBacklog()}
-            className="rounded-lg border border-[#D8C6AD] bg-[#FCF7EE] px-3 py-1.5 text-xs font-medium text-[#7A6B5A] hover:bg-[#F7EEDB]"
+            disabled={isStale}
+            className="rounded-lg bg-[var(--console-shell-bg)] px-3 py-1.5 text-xs font-medium text-cafe-secondary hover:bg-[var(--console-hover-bg)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             导入 Backlog
           </button>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="min-h-0 flex-1 overflow-auto">
+      {/* Stale barrier: show refreshing indicator and block interactions until fresh data arrives */}
+      {isStale && (
+        <div className="px-6 py-1 text-center text-micro text-cafe-secondary animate-pulse">
+          Refreshing project data...
+        </div>
+      )}
+
+      {/* Content — inert when stale blocks ALL interaction (mouse + keyboard + focus) to prevent cross-project writes */}
+      <div ref={contentRef} className={`min-h-0 flex-1 overflow-auto ${isStale ? 'opacity-60' : ''}`}>
         <div className="grid min-h-0 grid-cols-1 gap-4 p-6 xl:grid-cols-[minmax(0,1fr)_300px]">
           {/* Left column */}
           <div className="space-y-4">
             {/* Stage 0 Frame prompt */}
             {!auditFrame && subTab === 'audit' && (
-              <div className="rounded-lg border-2 border-dashed border-[#D8C6AD] bg-[#FBF7F0] p-4 text-center">
-                <div className="text-sm font-medium text-[#6B5D4F]">Stage 0: Frame 尚未完成</div>
-                <div className="mt-1 text-xs text-[#9A866F]">建议先完成六问定位，再开始需求翻译</div>
+              <div className="rounded-lg bg-[var(--console-shell-bg)] p-4 text-center">
+                <div className="text-sm font-medium text-cafe-secondary">Stage 0: Frame 尚未完成</div>
+                <div className="mt-1 text-xs text-cafe-secondary">建议先完成六问定位，再开始需求翻译</div>
               </div>
             )}
 
@@ -294,7 +332,7 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
 
             {subTab === 'features' &&
               (projectItems.length === 0 ? (
-                <div className="rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] p-8 text-center text-sm text-[#9A866F]">
+                <div className="rounded-lg bg-[var(--console-shell-bg)] p-8 text-center text-sm text-cafe-secondary">
                   暂无功能 — 使用上方「导入 Backlog」按钮从项目导入
                 </div>
               ) : (
@@ -302,21 +340,21 @@ export function ExternalProjectTab({ project }: ExternalProjectTabProps) {
                   {projectItems.map((item) => (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between rounded-lg border border-[#E7DAC7] bg-[#FFFDF8] px-4 py-3"
+                      className="flex items-center justify-between rounded-xl bg-[var(--console-card-bg)] px-4 py-3 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
                     >
                       <div className="flex items-center gap-3">
-                        <span className="rounded bg-[#F4EFE7] px-2 py-0.5 text-[10px] font-bold text-[#8B6F47]">
+                        <span className="rounded bg-[var(--console-hover-bg)] px-2 py-0.5 text-micro font-bold text-cafe-secondary">
                           {item.tags[0] ?? '—'}
                         </span>
-                        <span className="text-sm font-medium text-[#4B3A2A]">{item.title}</span>
+                        <span className="text-sm font-medium text-cafe">{item.title}</span>
                       </div>
                       <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                        className={`rounded-full px-2 py-0.5 text-micro font-medium ${
                           item.status === 'done'
-                            ? 'bg-green-100 text-green-800'
+                            ? 'bg-conn-green-bg text-conn-emerald-text'
                             : item.status === 'dispatched'
-                              ? 'bg-blue-100 text-blue-800'
-                              : 'bg-[#F4EFE7] text-[#8B6F47]'
+                              ? 'bg-[var(--semantic-info-surface)] text-conn-blue-text'
+                              : 'bg-[var(--console-hover-bg)] text-cafe-secondary'
                         }`}
                       >
                         {item.status}

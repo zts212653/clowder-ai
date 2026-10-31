@@ -6,6 +6,7 @@ import type { CreateResolutionInput, ResolutionPath } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { ExternalProjectStore } from '../domains/projects/external-project-store.js';
 import type { ResolutionStore } from '../domains/projects/resolution-store.js';
+import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 export interface ResolutionRoutesOptions {
   externalProjectStore: ExternalProjectStore;
@@ -16,7 +17,7 @@ export const resolutionRoutes: FastifyPluginAsync<ResolutionRoutesOptions> = asy
   const { externalProjectStore, resolutionStore } = opts;
 
   function requireUserId(request: FastifyRequest, reply: FastifyReply): string | null {
-    const userId = request.headers['x-cat-cafe-user'] as string | undefined;
+    const userId = resolveHeaderUserId(request) ?? undefined;
     if (!userId) {
       void reply.status(401).send({ error: 'Identity required' });
       return null;
@@ -24,8 +25,8 @@ export const resolutionRoutes: FastifyPluginAsync<ResolutionRoutesOptions> = asy
     return userId;
   }
 
-  function requireOwnedProject(id: string, userId: string, reply: FastifyReply) {
-    const project = externalProjectStore.getById(id);
+  async function requireOwnedProject(id: string, userId: string, reply: FastifyReply) {
+    const project = await externalProjectStore.getById(id);
     if (!project || project.userId !== userId) {
       void reply.status(404).send({ error: 'Project not found' });
       return null;
@@ -37,7 +38,7 @@ export const resolutionRoutes: FastifyPluginAsync<ResolutionRoutesOptions> = asy
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId } = request.params as { projectId: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
 
     const body = request.body as Record<string, unknown>;
     const input: CreateResolutionInput = {
@@ -55,7 +56,7 @@ export const resolutionRoutes: FastifyPluginAsync<ResolutionRoutesOptions> = asy
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId } = request.params as { projectId: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
 
     const query = request.query as { status?: string };
     const items =
@@ -67,7 +68,7 @@ export const resolutionRoutes: FastifyPluginAsync<ResolutionRoutesOptions> = asy
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId, id } = request.params as { projectId: string; id: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
 
     const resolution = resolutionStore.getById(id);
     if (!resolution || resolution.projectId !== projectId) {
@@ -80,7 +81,7 @@ export const resolutionRoutes: FastifyPluginAsync<ResolutionRoutesOptions> = asy
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId, id } = request.params as { projectId: string; id: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
 
     const existing = resolutionStore.getById(id);
     if (!existing || existing.projectId !== projectId) {
@@ -99,7 +100,7 @@ export const resolutionRoutes: FastifyPluginAsync<ResolutionRoutesOptions> = asy
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId, id } = request.params as { projectId: string; id: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
 
     const existing = resolutionStore.getById(id);
     if (!existing || existing.projectId !== projectId) {
@@ -115,7 +116,7 @@ export const resolutionRoutes: FastifyPluginAsync<ResolutionRoutesOptions> = asy
     const userId = requireUserId(request, reply);
     if (!userId) return;
     const { projectId, id } = request.params as { projectId: string; id: string };
-    if (!requireOwnedProject(projectId, userId, reply)) return;
+    if (!(await requireOwnedProject(projectId, userId, reply))) return;
 
     const existing = resolutionStore.getById(id);
     if (!existing || existing.projectId !== projectId) {

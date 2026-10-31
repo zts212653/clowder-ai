@@ -1,10 +1,13 @@
 'use client';
 
 import { formatCatName, useCatData } from '@/hooks/useCatData';
-import { hexToRgba } from '@/lib/color-utils';
+import { catColorMix, catColorVar } from '@/lib/cat-slug';
 
 interface CatSelectorProps {
   selectedCats: string[];
+  label?: string;
+  familyLabel?: (name: string) => string;
+  compact?: boolean;
   onSelectionChange: (ids: string[]) => void;
 }
 
@@ -12,7 +15,13 @@ interface CatSelectorProps {
  * F32-b Phase 3: Breed-grouped cat chip selector.
  * Used in thread creation (DirectoryPickerModal) and thread settings.
  */
-export function CatSelector({ selectedCats, onSelectionChange }: CatSelectorProps) {
+export function CatSelector({
+  selectedCats,
+  onSelectionChange,
+  label = '默认猫猫 (可选)',
+  familyLabel = (name) => `${name}家族`,
+  compact = false,
+}: CatSelectorProps) {
   const { getCatsByBreed } = useCatData();
   const groups = getCatsByBreed();
 
@@ -24,25 +33,25 @@ export function CatSelector({ selectedCats, onSelectionChange }: CatSelectorProp
     }
   };
 
-  // Provider display name mapping
-  const providerLabel = (provider: string) => {
+  // Client display name mapping
+  const clientIdLabel = (clientId: string) => {
     const map: Record<string, string> = {
       anthropic: 'Anthropic',
       openai: 'OpenAI',
       google: 'Google',
     };
-    return map[provider] ?? provider;
+    return map[clientId] ?? clientId;
   };
 
   return (
     <div className="space-y-2">
-      <div className="text-xs text-gray-500 font-medium">默认猫猫 (可选)</div>
+      <div className="text-xs text-cafe-secondary font-medium">{label}</div>
       {[...groups.entries()].map(([breedId, cats]) => {
         const breedName = cats[0].breedDisplayName ?? cats[0].displayName;
         return (
           <div key={breedId}>
-            <div className="text-[10px] text-gray-400 mb-1">
-              {breedName}家族 · {providerLabel(cats[0].provider)}
+            <div className="text-micro text-cafe-muted mb-1">
+              {familyLabel(breedName)} · {clientIdLabel(cats[0].clientId)}
             </div>
             <div className="flex flex-wrap gap-1.5">
               {cats.map((cat) => {
@@ -51,26 +60,28 @@ export function CatSelector({ selectedCats, onSelectionChange }: CatSelectorProp
                   <button
                     key={cat.id}
                     type="button"
+                    aria-pressed={isSelected}
                     onClick={() => toggleCat(cat.id)}
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs transition-colors border ${
-                      isSelected ? 'font-medium border-current' : 'border-gray-200 text-gray-500 hover:border-gray-400'
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 ${compact ? 'rounded-lg shell-focusable' : 'rounded-full'} text-xs transition-colors border ${
+                      isSelected
+                        ? 'font-medium border-current'
+                        : 'border-cafe text-cafe-secondary hover:border-[var(--console-border-strong)]'
                     }`}
                     style={
                       isSelected
                         ? {
-                            color: cat.color.primary,
-                            backgroundColor: hexToRgba(cat.color.primary, 0.1),
-                            borderColor: cat.color.primary,
+                            color: catColorVar(cat.id, 'primary'),
+                            backgroundColor: catColorMix(cat.id, 0.1, 'primary'),
+                            borderColor: catColorVar(cat.id, 'primary'),
                           }
                         : undefined
                     }
                   >
                     <span
                       className="inline-block w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: cat.color.primary }}
+                      style={{ backgroundColor: catColorVar(cat.id, 'primary') }}
                     />
                     {formatCatName(cat)}
-                    {!cat.variantLabel && cat.nickname ? `(${cat.nickname})` : ''}
                   </button>
                 );
               })}

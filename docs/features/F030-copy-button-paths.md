@@ -12,7 +12,7 @@ created: 2026-02-26
 > **Created**: 2026-02-26
 
 ## Why
-- 2026-02-14 team lead提议
+- 2026-02-14 operator提议
 
 ## What
 - **F30**: ✅ 9ffd972 + R1 fix 70e8321, PR #6. CodeBlock 复制按钮 + linkifyFilePaths vscode:// 链接.

@@ -3,12 +3,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
 
+const { mockApiFetch } = vi.hoisted(() => ({ mockApiFetch: vi.fn() }));
+
 const mockAddMessage = vi.fn();
-const mockAppendToMessage = vi.fn();
-const mockAppendToolEvent = vi.fn();
-const mockSetStreaming = vi.fn();
 const mockSetLoading = vi.fn();
 const mockSetHasActiveInvocation = vi.fn();
+const mockRemoveActiveInvocation = vi.fn();
 const mockClearAllActiveInvocations = vi.fn(() => {
   mockSetHasActiveInvocation(false);
 });
@@ -16,14 +16,42 @@ const mockSetIntentMode = vi.fn();
 const mockSetCatStatus = vi.fn();
 const mockClearCatStatuses = vi.fn();
 const mockSetCatInvocation = vi.fn();
-const mockSetMessageUsage = vi.fn();
 const mockRequestStreamCatchUp = vi.fn();
 
 const mockAddMessageToThread = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
 const mockResetThreadInvocationState = vi.fn();
 const mockSetThreadMessageStreaming = vi.fn();
-const mockGetThreadState = vi.fn(() => ({ messages: [] }));
+const mockRemoveThreadActiveInvocation = vi.fn();
+const mockPatchThreadMessage = vi.fn();
+const mockSetThreadCatInvocation = vi.fn();
+const mockSetThreadLoading = vi.fn();
+const mockUpdateThreadCatStatus = vi.fn();
+const mockGetThreadState: ReturnType<
+  typeof vi.fn<
+    (tid?: string) => {
+      messages: Array<{
+        id: string;
+        type: string;
+        catId?: string;
+        content: string;
+        isStreaming?: boolean;
+        timestamp: number;
+      }>;
+      activeInvocations?: Record<string, { catId: string; mode: string }>;
+      catInvocations?: Record<string, { invocationId?: string; turnInvocationId?: string }>;
+    }
+  >
+> = vi.fn(() => ({
+  messages: [] as Array<{
+    id: string;
+    type: string;
+    catId?: string;
+    content: string;
+    isStreaming?: boolean;
+    timestamp: number;
+  }>,
+}));
 
 const storeState = {
   messages: [] as Array<{
@@ -35,24 +63,36 @@ const storeState = {
     timestamp: number;
   }>,
   addMessage: mockAddMessage,
-  appendToMessage: mockAppendToMessage,
-  appendToolEvent: mockAppendToolEvent,
-  setStreaming: mockSetStreaming,
   setLoading: mockSetLoading,
   setHasActiveInvocation: mockSetHasActiveInvocation,
+  removeActiveInvocation: mockRemoveActiveInvocation,
   clearAllActiveInvocations: mockClearAllActiveInvocations,
   setIntentMode: mockSetIntentMode,
   setCatStatus: mockSetCatStatus,
   clearCatStatuses: mockClearCatStatuses,
   setCatInvocation: mockSetCatInvocation,
-  setMessageUsage: mockSetMessageUsage,
   requestStreamCatchUp: mockRequestStreamCatchUp,
+  catInvocations: {} as Record<string, { invocationId?: string; turnInvocationId?: string }>,
 
   addMessageToThread: mockAddMessageToThread,
+  // named-message-writer: body events that name their message write through these thread-scoped members.
+  appendToThreadMessage: vi.fn(),
+  appendToolEventToThread: vi.fn(),
+  setThreadMessageThinking: vi.fn(),
+  appendRichBlockToThread: vi.fn(),
+  setThreadMessageMetadata: vi.fn(),
+  setThreadMessageUsage: vi.fn(),
+  incrementUnread: vi.fn(),
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
   resetThreadInvocationState: mockResetThreadInvocationState,
   setThreadMessageStreaming: mockSetThreadMessageStreaming,
+  removeThreadActiveInvocation: mockRemoveThreadActiveInvocation,
+  patchThreadMessage: mockPatchThreadMessage,
+  setThreadCatInvocation: mockSetThreadCatInvocation,
+  setThreadLoading: mockSetThreadLoading,
+  updateThreadCatStatus: mockUpdateThreadCatStatus,
   getThreadState: mockGetThreadState,
+  activeInvocations: {} as Record<string, { catId: string; mode: string }>,
   currentThreadId: 'thread-1',
 };
 
@@ -64,6 +104,8 @@ vi.mock('@/stores/chatStore', () => {
     useChatStore: useChatStoreMock,
   };
 });
+
+vi.mock('@/utils/api-client', () => ({ apiFetch: mockApiFetch }));
 
 function Harness() {
   captured = useAgentMessages();
@@ -91,24 +133,29 @@ describe('useAgentMessages loading lifecycle', () => {
     captured = undefined;
     storeState.messages = [];
     mockAddMessage.mockClear();
-    mockAppendToMessage.mockClear();
-    mockAppendToolEvent.mockClear();
-    mockSetStreaming.mockClear();
     mockSetLoading.mockClear();
     mockSetHasActiveInvocation.mockClear();
+    mockRemoveActiveInvocation.mockClear();
     mockClearAllActiveInvocations.mockClear();
     mockSetIntentMode.mockClear();
     mockSetCatStatus.mockClear();
     mockClearCatStatuses.mockClear();
     mockSetCatInvocation.mockClear();
-    mockSetMessageUsage.mockClear();
 
     mockAddMessageToThread.mockClear();
     mockClearThreadActiveInvocation.mockClear();
     mockResetThreadInvocationState.mockClear();
     mockSetThreadMessageStreaming.mockClear();
+    mockRemoveThreadActiveInvocation.mockClear();
+    mockPatchThreadMessage.mockClear();
+    mockSetThreadCatInvocation.mockClear();
+    mockSetThreadLoading.mockClear();
+    mockUpdateThreadCatStatus.mockClear();
+    mockApiFetch.mockReset();
     mockGetThreadState.mockClear();
     mockGetThreadState.mockImplementation(() => ({ messages: [] }));
+    storeState.activeInvocations = {};
+    storeState.catInvocations = {};
     storeState.currentThreadId = 'thread-1';
   });
 
@@ -129,6 +176,7 @@ describe('useAgentMessages loading lifecycle', () => {
       captured?.handleAgentMessage({
         type: 'done',
         catId: 'codex',
+        messageId: 'resp-1',
         isFinal: true,
       });
     });
@@ -144,6 +192,7 @@ describe('useAgentMessages loading lifecycle', () => {
       root.render(React.createElement(Harness));
     });
 
+    // No messageId: a preflight/registration failure keeps its own error row.
     act(() => {
       captured?.handleAgentMessage({
         type: 'error',
@@ -165,32 +214,6 @@ describe('useAgentMessages loading lifecycle', () => {
     );
   });
 
-  it('closes existing streaming bubble on done even when activeRefs are empty', () => {
-    storeState.messages = [
-      {
-        id: 'bg-msg-1',
-        type: 'assistant',
-        catId: 'codex',
-        content: 'partial',
-        isStreaming: true,
-        timestamp: Date.now(),
-      },
-    ];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'done',
-        catId: 'codex',
-      });
-    });
-
-    expect(mockSetStreaming).toHaveBeenCalledWith('bg-msg-1', false);
-  });
-
   it('keeps handleAgentMessage stable when only messages change', () => {
     act(() => {
       root.render(React.createElement(Harness));
@@ -201,7 +224,7 @@ describe('useAgentMessages loading lifecycle', () => {
 
     storeState.messages = [
       {
-        id: 'msg-new',
+        id: 'resp-1',
         type: 'assistant',
         catId: 'codex',
         content: 'delta',
@@ -215,252 +238,6 @@ describe('useAgentMessages loading lifecycle', () => {
     });
 
     expect(captured?.handleAgentMessage).toBe(firstHandler);
-  });
-
-  it('routes timeout to original thread after switching active thread', () => {
-    vi.useFakeTimers();
-    try {
-      act(() => {
-        root.render(React.createElement(Harness));
-      });
-
-      act(() => {
-        captured?.handleAgentMessage({
-          type: 'text',
-          catId: 'codex',
-          content: 'partial',
-        });
-      });
-
-      // Simulate user switching from thread-1 to thread-2 while old invocation is still active.
-      storeState.currentThreadId = 'thread-2';
-
-      act(() => {
-        vi.advanceTimersByTime(5 * 60 * 1000);
-      });
-
-      expect(mockAddMessage).not.toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: '⏱ Response timed out. The operation may still be running in the background.',
-        }),
-      );
-      expect(mockAddMessageToThread).toHaveBeenCalledWith(
-        'thread-1',
-        expect.objectContaining({
-          type: 'system',
-          variant: 'info',
-          content: '⏱ Response timed out. The operation may still be running in the background.',
-        }),
-      );
-      expect(mockResetThreadInvocationState).toHaveBeenCalledWith('thread-1');
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('stopping a background thread does not clear active thread invocation state', () => {
-    const cancelInvocation = vi.fn();
-    mockGetThreadState.mockImplementation((tid?: string) => {
-      if (tid === 'thread-2') {
-        return {
-          messages: [
-            {
-              id: 'bg-stream-1',
-              type: 'assistant',
-              catId: 'opus',
-              content: 'running',
-              isStreaming: true,
-              timestamp: Date.now(),
-            },
-          ],
-        };
-      }
-      return { messages: [] };
-    });
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    // Seed activeRefs with an active-thread stream.
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'text',
-        catId: 'codex',
-        content: 'active stream chunk',
-      });
-    });
-
-    act(() => {
-      captured?.handleStop(cancelInvocation, 'thread-2');
-    });
-
-    expect(cancelInvocation).toHaveBeenCalledWith('thread-2');
-    expect(mockResetThreadInvocationState).toHaveBeenCalledWith('thread-2');
-    expect(mockSetThreadMessageStreaming).toHaveBeenCalledWith('thread-2', 'bg-stream-1', false);
-
-    // Active thread state must remain untouched.
-    expect(mockSetLoading).not.toHaveBeenCalledWith(false);
-    expect(mockSetHasActiveInvocation).not.toHaveBeenCalledWith(false);
-    expect(mockSetIntentMode).not.toHaveBeenCalledWith(null);
-    expect(mockClearCatStatuses).not.toHaveBeenCalled();
-    expect(mockSetStreaming).not.toHaveBeenCalled();
-  });
-
-  it('stopping a background thread clears its pending timeout guard', () => {
-    vi.useFakeTimers();
-    try {
-      const cancelInvocation = vi.fn();
-
-      act(() => {
-        root.render(React.createElement(Harness));
-      });
-
-      // Arm timeout for thread-1.
-      act(() => {
-        captured?.handleAgentMessage({
-          type: 'text',
-          catId: 'codex',
-          content: 'partial',
-        });
-      });
-
-      // Switch active thread, then stop the old thread from split-pane context.
-      storeState.currentThreadId = 'thread-2';
-      act(() => {
-        captured?.handleStop(cancelInvocation, 'thread-1');
-      });
-
-      act(() => {
-        vi.advanceTimersByTime(5 * 60 * 1000);
-      });
-
-      expect(mockAddMessageToThread).not.toHaveBeenCalledWith(
-        'thread-1',
-        expect.objectContaining({
-          content: '⏱ Response timed out. The operation may still be running in the background.',
-        }),
-      );
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('stopping another thread does not clear active thread timeout guard', () => {
-    vi.useFakeTimers();
-    try {
-      const cancelInvocation = vi.fn();
-
-      act(() => {
-        root.render(React.createElement(Harness));
-      });
-
-      // Arm timeout for thread-1.
-      act(() => {
-        captured?.handleAgentMessage({
-          type: 'text',
-          catId: 'codex',
-          content: 'thread-1 partial',
-        });
-      });
-
-      // Switch to thread-2 and arm its timeout.
-      storeState.currentThreadId = 'thread-2';
-      act(() => {
-        captured?.handleAgentMessage({
-          type: 'text',
-          catId: 'codex',
-          content: 'thread-2 partial',
-        });
-      });
-
-      // Stop old thread-1 from split-pane context.
-      act(() => {
-        captured?.handleStop(cancelInvocation, 'thread-1');
-      });
-
-      act(() => {
-        vi.advanceTimersByTime(5 * 60 * 1000);
-      });
-
-      expect(mockAddMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: '⏱ Response timed out. The operation may still be running in the background.',
-        }),
-      );
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('cleans timeout guard on unmount to prevent stale timeout side effects', () => {
-    vi.useFakeTimers();
-    try {
-      act(() => {
-        root.render(React.createElement(Harness));
-      });
-
-      // Arm the done-timeout guard.
-      act(() => {
-        captured?.handleAgentMessage({
-          type: 'text',
-          catId: 'codex',
-          content: 'partial',
-        });
-      });
-
-      // Unmount hook instance (e.g. HMR / remount path).
-      act(() => {
-        root.render(null);
-      });
-
-      mockAddMessage.mockClear();
-      mockAddMessageToThread.mockClear();
-      mockSetLoading.mockClear();
-      mockSetHasActiveInvocation.mockClear();
-      mockSetIntentMode.mockClear();
-      mockClearCatStatuses.mockClear();
-
-      act(() => {
-        vi.advanceTimersByTime(5 * 60 * 1000);
-      });
-
-      expect(mockAddMessage).not.toHaveBeenCalled();
-      expect(mockAddMessageToThread).not.toHaveBeenCalled();
-      expect(mockSetLoading).not.toHaveBeenCalled();
-      expect(mockSetHasActiveInvocation).not.toHaveBeenCalled();
-      expect(mockSetIntentMode).not.toHaveBeenCalled();
-      expect(mockClearCatStatuses).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('closes existing streaming bubble on error even when activeRefs are empty', () => {
-    storeState.messages = [
-      {
-        id: 'bg-msg-err',
-        type: 'assistant',
-        catId: 'opus',
-        content: 'partial',
-        isStreaming: true,
-        timestamp: Date.now(),
-      },
-    ];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'error',
-        catId: 'opus',
-        error: 'failed',
-      });
-    });
-
-    expect(mockSetStreaming).toHaveBeenCalledWith('bg-msg-err', false);
   });
 
   it('system_info context_health without parsed catId falls back to msg.catId', () => {
@@ -517,6 +294,7 @@ describe('useAgentMessages loading lifecycle', () => {
     });
 
     expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
     expect(mockSetCatInvocation).toHaveBeenCalledWith(
       'opus',
       expect.objectContaining({
@@ -545,6 +323,7 @@ describe('useAgentMessages loading lifecycle', () => {
     });
 
     expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
     expect(mockSetCatInvocation).toHaveBeenCalledWith(
       'opus',
       expect.objectContaining({

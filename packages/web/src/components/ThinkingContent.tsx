@@ -1,21 +1,10 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { MarkdownContent } from './MarkdownContent';
+import { useMessageDisclosureState } from './message-disclosure-state';
 
-/** Blend accent into a dark base → tinted dark surface */
-function tintedDark(hex: string, ratio = 0.25, base = '#1A1625'): string {
-  const parse = (h: string) => [
-    Number.parseInt(h.slice(1, 3), 16),
-    Number.parseInt(h.slice(3, 5), 16),
-    Number.parseInt(h.slice(5, 7), 16),
-  ];
-  const [r1, g1, b1] = parse(hex);
-  const [r2, g2, b2] = parse(base);
-  return `rgb(${Math.round(r2 + (r1 - r2) * ratio)}, ${Math.round(g2 + (g1 - g2) * ratio)}, ${Math.round(b2 + (b1 - b2) * ratio)})`;
-}
-
-const DIVIDER = '#334155';
+const DIVIDER = 'var(--console-border-strong)';
 
 function ThinkingChevron({ expanded, color }: { expanded: boolean; color?: string }) {
   return (
@@ -25,7 +14,7 @@ function ThinkingChevron({ expanded, color }: { expanded: boolean; color?: strin
       height="12"
       viewBox="0 0 24 24"
       fill="none"
-      stroke={color || '#6B7280'}
+      stroke={color || 'var(--cat-msg-inset-text)'}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -51,7 +40,7 @@ function BrainIcon() {
       strokeLinecap="round"
       strokeLinejoin="round"
       className="flex-shrink-0"
-      style={{ color: '#94A3B8' }}
+      style={{ color: 'var(--cat-msg-inset-text)' }}
     >
       <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" />
       <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
@@ -74,6 +63,7 @@ export function ThinkingContent({
   defaultExpanded = false,
   expandInExport = true,
   breedColor,
+  disclosureKey,
 }: {
   content: string;
   className?: string;
@@ -81,15 +71,19 @@ export function ThinkingContent({
   defaultExpanded?: boolean;
   expandInExport?: boolean;
   breedColor?: string;
+  disclosureKey?: string;
 }) {
   const isExport =
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('export') === 'true';
   const shouldExpand = (isExport && expandInExport) || defaultExpanded;
-  const [expanded, setExpanded] = useState(shouldExpand);
+  const { expanded, setExpanded, hasOverride } = useMessageDisclosureState(disclosureKey, shouldExpand);
+  const userInteracted = useRef(hasOverride);
   const hasMounted = useRef(false);
   useEffect(() => {
-    setExpanded((isExport && expandInExport) || defaultExpanded);
-  }, [isExport, expandInExport, defaultExpanded]);
+    if (!disclosureKey && !userInteracted.current) {
+      setExpanded((isExport && expandInExport) || defaultExpanded);
+    }
+  }, [disclosureKey, isExport, expandInExport, defaultExpanded, setExpanded]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: expanded is intentional — dispatch on toggle
   useLayoutEffect(() => {
     if (!hasMounted.current) {
@@ -102,39 +96,37 @@ export function ThinkingContent({
   }, [expanded]);
   const previewLength = 60;
   const preview = content.length > previewLength ? `${content.slice(0, previewLength)}…` : content;
-  // Breed-tinted dark surface: accent blended into dark base → visibly colored AND text-readable
-  const accent = breedColor || '#7C3AED';
-  const surface = tintedDark(accent, 0.25);
-  const surfaceInner = tintedDark(accent, 0.18);
 
   return (
-    <div className="mt-2 mb-1 overflow-hidden" style={{ backgroundColor: surface, borderRadius: 10 }}>
+    <div className="mt-2 mb-1 overflow-hidden" style={{ backgroundColor: 'var(--cat-msg-inset)', borderRadius: 10 }}>
       <button
         type="button"
+        data-reading-disclosure
         onClick={() => {
+          userInteracted.current = true;
           setExpanded((v) => !v);
         }}
-        className="w-full flex items-center gap-2 text-[11px] font-mono transition-colors"
-        style={{ padding: '8px 12px', backgroundColor: surface }}
+        className="w-full flex items-center gap-2 text-xs font-mono transition-colors"
+        style={{ padding: '8px 12px', backgroundColor: 'var(--cat-msg-inset)' }}
       >
-        <span style={{ color: breedColor || '#6B7280' }}>
+        <span style={{ color: breedColor || 'var(--cat-msg-inset-text)' }}>
           <ThinkingChevron expanded={expanded} color={breedColor} />
         </span>
         <BrainIcon />
-        <span className="font-medium" style={{ color: '#94A3B8' }}>
+        <span className="font-medium" style={{ color: 'var(--cat-msg-inset-text)' }}>
           {label}
         </span>
         {!expanded && (
-          <span className="truncate max-w-[240px]" style={{ color: '#6B7280' }}>
+          <span className="truncate max-w-[240px]" style={{ color: 'var(--cat-msg-inset-text)' }}>
             {preview}
           </span>
         )}
       </button>
       {expanded && (
-        <div style={{ backgroundColor: surfaceInner }}>
+        <div style={{ backgroundColor: 'var(--cat-msg-inset)' }}>
           <div style={{ height: 1, backgroundColor: DIVIDER }} />
           <div
-            style={{ padding: '8px 12px 10px 12px', color: '#CBD5E1' }}
+            style={{ padding: '8px 12px 10px 12px', color: 'var(--cat-msg-inset-text)' }}
             className="text-xs leading-relaxed cli-output-md"
           >
             <MarkdownContent content={content} className={className} />

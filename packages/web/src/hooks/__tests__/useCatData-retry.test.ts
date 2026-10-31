@@ -2,7 +2,7 @@
  * F32-b Phase 3: Regression test for useCatData in-session retry mechanism.
  *
  * Verifies: first fetch fails → 10s timer → retry succeeds →
- *           cats updated from fallback to API data → no further retries.
+ *           cats updated from empty to API data → no further retries.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -15,28 +15,12 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
 
-vi.mock('@cat-cafe/shared', () => ({
-  CAT_CONFIGS: {
-    opus: {
-      id: 'opus',
-      displayName: '布偶猫',
-      nickname: '宪宪',
-      color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
-      mentionPatterns: ['@布偶', '@布偶猫', '@opus'],
-      provider: 'anthropic',
-      defaultModel: 'opus',
-      avatar: '/a.png',
-      roleDescription: 'dev',
-      personality: 'kind',
-    },
-  },
-}));
-
 vi.mock('@/lib/mention-highlight', () => ({ refreshMentionData: vi.fn() }));
 vi.mock('@/utils/transcription-corrector', () => ({ refreshSpeechAliases: vi.fn() }));
 
 import type { CatData } from '@/hooks/useCatData';
 import { _resetCatDataCache, useCatData } from '@/hooks/useCatData';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 
 // ── API response cats (distinguishable from fallback via breedId) ──
 
@@ -48,7 +32,8 @@ const API_CATS = [
     color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
     mentionPatterns: ['@布偶', '@布偶猫', '@opus'],
     breedId: 'ragdoll',
-    provider: 'anthropic',
+    clientId: 'anthropic',
+    carrier: 'cli',
     defaultModel: 'claude-opus-4',
     avatar: '/avatars/opus.png',
     roleDescription: '主架构师',
@@ -69,7 +54,8 @@ const API_CATS = [
     color: { primary: '#5B8C5A', secondary: '#D5E8D4' },
     mentionPatterns: ['@缅因', '@缅因猫', '@codex'],
     breedId: 'maine-coon',
-    provider: 'openai',
+    clientId: 'openai',
+    carrier: 'cli',
     defaultModel: 'codex-mini',
     avatar: '/avatars/codex.png',
     roleDescription: '代码审查',
@@ -86,6 +72,7 @@ let root: Root;
 let hookResult: ReturnType<typeof useCatData>;
 let hookResultA: ReturnType<typeof useCatData>;
 let hookResultB: ReturnType<typeof useCatData>;
+let resolvedCatLabel = '';
 
 function TestComponent() {
   hookResult = useCatData();
@@ -96,6 +83,31 @@ function MultiHookComponent() {
   hookResultA = useCatData();
   hookResultB = useCatData();
   return null;
+}
+
+function PassiveHookComponent() {
+  hookResult = useCatData({ fetch: false });
+  return null;
+}
+
+function PassiveResolverComponent() {
+  const resolveCatName = useCatNameResolver();
+  resolvedCatLabel = resolveCatName('opus');
+  return null;
+}
+
+function RegistryLoaderComponent() {
+  useCatData();
+  return null;
+}
+
+function PassiveResolverWithRegistryLoader() {
+  return React.createElement(
+    React.Fragment,
+    null,
+    React.createElement(PassiveResolverComponent),
+    React.createElement(RegistryLoaderComponent),
+  );
 }
 
 beforeAll(() => {
@@ -123,13 +135,61 @@ afterEach(() => {
 // ── Tests ──────────────────────────────────────────────────
 
 describe('useCatData retry mechanism', () => {
+  it('lets leaf presentation consumers subscribe without starting registry I/O', async () => {
+    await act(async () => {
+      root.render(React.createElement(PassiveHookComponent));
+    });
+
+    expect(mockApiFetch).not.toHaveBeenCalled();
+    expect(hookResult.cats).toEqual([]);
+    expect(hookResult.isLoading).toBe(false);
+  });
+
+  it('hydrates a passive name resolver after the shared registry loads without duplicate cat requests', async () => {
+    let resolveCatsResponse: ((response: Response) => void) | undefined;
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/config/cat-order') return Promise.resolve({ ok: false } as Response);
+      if (path === '/api/cats') {
+        return new Promise<Response>((resolve) => {
+          resolveCatsResponse = resolve;
+        });
+      }
+      return Promise.resolve({ ok: false } as Response);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(PassiveResolverWithRegistryLoader));
+    });
+
+    const catsCallCount = () => mockApiFetch.mock.calls.filter((call) => call[0] === '/api/cats').length;
+    expect(resolvedCatLabel).toBe('opus');
+    expect(catsCallCount()).toBe(1);
+
+    const completeCatsRequest = resolveCatsResponse;
+    if (!completeCatsRequest) throw new Error('Expected the registry request to be pending');
+    await act(async () => {
+      completeCatsRequest({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            cats: API_CATS.map((cat) => (cat.id === 'opus' ? { ...cat, variantLabel: '4.8' } : cat)),
+          }),
+      } as Response);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(resolvedCatLabel).toBe('布偶猫（4.8）');
+    expect(catsCallCount()).toBe(1);
+  });
+
   it('retries after 10s on failure and stops after success', async () => {
-    // First call: API down → fallback returned
-    mockApiFetch.mockResolvedValueOnce({ ok: false });
-    // Second call (10s retry): API up → real cats
-    mockApiFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ cats: API_CATS }),
+    // F166: /api/config/cat-order always returns empty order; /api/cats follows
+    // the retry sequence (fail → success).
+    const catsResponses = [{ ok: false }, { ok: true, json: () => Promise.resolve({ cats: API_CATS }) }];
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/config/cat-order') return Promise.resolve({ ok: false });
+      return Promise.resolve(catsResponses.shift() ?? { ok: false });
     });
 
     // Render — triggers first fetchCats()
@@ -137,13 +197,12 @@ describe('useCatData retry mechanism', () => {
       root.render(React.createElement(TestComponent));
     });
 
-    // First fetch resolved (failure) → fallback cats, no breedId
+    const catsCallCount = () => mockApiFetch.mock.calls.filter((call) => call[0] === '/api/cats').length;
+
+    // First fetch resolved (failure) → empty runtime catalog, no fallback members
     expect(hookResult.isLoading).toBe(false);
-    expect(hookResult.cats[0].id).toBe('opus');
-    expect(hookResult.cats[0].breedId).toBeUndefined(); // fallback marker
-    expect((hookResult.cats[0] as CatData & { source?: string }).source).toBe('seed');
-    expect((hookResult.cats[0] as CatData & { roster?: unknown }).roster ?? null).toBeNull();
-    expect(mockApiFetch).toHaveBeenCalledTimes(1);
+    expect(hookResult.cats).toEqual([]);
+    expect(catsCallCount()).toBe(1);
 
     // Advance 10s → retry timer fires → retryCount increments → re-fetch
     await act(async () => {
@@ -158,39 +217,41 @@ describe('useCatData retry mechanism', () => {
     expect((hookResult.cats[0] as CatData & { roster?: { lead?: boolean } | null }).roster?.lead).toBe(true);
     expect((hookResult.cats[1] as CatData & { source?: string }).source).toBe('runtime');
     expect((hookResult.cats[1] as CatData & { roster?: unknown }).roster ?? null).toBeNull();
-    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    expect(catsCallCount()).toBe(2);
 
     // Advance another 30s → no further retries (success stops the cycle)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
-    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    expect(catsCallCount()).toBe(2);
   });
 
   it('stops retrying after MAX_RETRIES (3) failures', async () => {
-    // All calls fail
+    // All calls fail (both /api/cats and /api/config/cat-order)
     mockApiFetch.mockResolvedValue({ ok: false });
 
     await act(async () => {
       root.render(React.createElement(TestComponent));
     });
 
+    const catsCallCount = () => mockApiFetch.mock.calls.filter((call) => call[0] === '/api/cats').length;
+
     // Initial fetch = call #1
-    expect(mockApiFetch).toHaveBeenCalledTimes(1);
+    expect(catsCallCount()).toBe(1);
 
     // Retry 1 (10s), Retry 2 (20s), Retry 3 (30s)
     for (let i = 1; i <= 3; i++) {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10_000);
       });
-      expect(mockApiFetch).toHaveBeenCalledTimes(1 + i);
+      expect(catsCallCount()).toBe(1 + i);
     }
 
     // No retry #4 — MAX_RETRIES reached
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
-    expect(mockApiFetch).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
+    expect(catsCallCount()).toBe(4); // 1 initial + 3 retries
   });
 
   it('refresh updates all mounted hook consumers, not only the caller', async () => {
@@ -199,7 +260,8 @@ describe('useCatData retry mechanism', () => {
         id: 'opus',
         displayName: '布偶猫',
         mentionPatterns: ['@opus'],
-        provider: 'anthropic',
+        clientId: 'anthropic',
+        carrier: 'cli',
         defaultModel: 'claude-opus-4',
         avatar: '/a.png',
         roleDescription: 'dev',
@@ -214,7 +276,8 @@ describe('useCatData retry mechanism', () => {
         id: 'codex',
         displayName: '缅因猫',
         mentionPatterns: ['@codex'],
-        provider: 'openai',
+        clientId: 'openai',
+        carrier: 'cli',
         defaultModel: 'gpt-5.4',
         avatar: '/b.png',
         roleDescription: 'review',
@@ -223,15 +286,14 @@ describe('useCatData retry mechanism', () => {
         source: 'runtime',
       },
     ];
-    mockApiFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ cats: initialCats }),
-      } as unknown as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ cats: refreshedCats }),
-      } as unknown as Response);
+    const catsResponses = [
+      { ok: true, json: () => Promise.resolve({ cats: initialCats }) },
+      { ok: true, json: () => Promise.resolve({ cats: refreshedCats }) },
+    ];
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/config/cat-order') return Promise.resolve({ ok: false } as Response);
+      return Promise.resolve((catsResponses.shift() ?? { ok: false }) as Response);
+    });
 
     await act(async () => {
       root.render(React.createElement(MultiHookComponent));

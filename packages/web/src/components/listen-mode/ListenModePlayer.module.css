@@ -1,0 +1,21 @@
+.container {
+  container-type: inline-size;
+}
+
+.layout {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.actions {
+  grid-column: 1 / -1;
+}
+
+@container (min-width: 42rem) {
+  .layout {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .actions {
+    grid-column: auto;
+  }
+}

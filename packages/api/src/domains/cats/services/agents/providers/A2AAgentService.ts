@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import type { A2AAgentConfig, A2AJsonRpcResponse, CatId } from '@cat-cafe/shared';
 import { createCatId } from '@cat-cafe/shared';
-import type { AgentMessage, AgentService, AgentServiceOptions } from '../../types.js';
+import type { AgentMessage, AgentService, AgentServiceOptions, PreparedProviderRequestV1 } from '../../types.js';
 import { transformA2ATaskToMessages } from './a2a-event-transform.js';
 
 export interface A2AAgentServiceOptions {
@@ -21,10 +21,23 @@ export interface A2AAgentServiceOptions {
 }
 
 function agentMsg(type: AgentMessage['type'], catId: CatId, content?: string): AgentMessage {
-  return { type, catId, content, timestamp: Date.now() };
+  return { type, catId, content, ...(type === 'error' ? { error: content } : {}), timestamp: Date.now() };
 }
 
 export class A2AAgentService implements AgentService {
+  contextCapability(): import('../../types.js').AgentContextCapability {
+    return {
+      provider: 'a2a',
+      carrier: 'a2a',
+      reportsRuntimeWindow: false,
+      authoritativeUsage: false,
+      usageTelemetry: 'unavailable',
+      nativeWindowControl: false,
+      nativeCompressionControl: false,
+      observesCompression: false,
+      reason: 'A2A does not expose the remote agent context state',
+    };
+  }
   private readonly catId: CatId;
   private readonly config: A2AAgentConfig;
   private readonly fetchFn: typeof fetch;
@@ -38,6 +51,16 @@ export class A2AAgentService implements AgentService {
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     const taskId = randomUUID();
 
+    const preparedRequest: PreparedProviderRequestV1 = Object.freeze({
+      v: 1,
+      message: Object.freeze({ body: prompt }),
+      nativeInstructions: Object.freeze([]),
+      runtime: Object.freeze({ provider: 'a2a', carrier: 'remote', protocol: 'json_rpc' }),
+      tools: Object.freeze({ finalSurface: 'unsupported' as const }),
+      providerNativeVisibility: 'unsupported' as const,
+    });
+    if (!('body' in preparedRequest.message)) throw new Error('a2a_prepared_message_not_exact');
+
     const body = {
       jsonrpc: '2.0' as const,
       id: taskId,
@@ -46,7 +69,7 @@ export class A2AAgentService implements AgentService {
         id: taskId,
         message: {
           role: 'user' as const,
-          parts: [{ type: 'text' as const, text: prompt }],
+          parts: [{ type: 'text' as const, text: preparedRequest.message.body }],
         },
       },
     };
@@ -56,22 +79,23 @@ export class A2AAgentService implements AgentService {
       headers['Authorization'] = `Bearer ${this.config.apiKey}`;
     }
 
-    // Combine caller's abort signal with timeout (P1-2: cancellation support)
-    const timeoutMs = this.config.timeoutMs ?? 120_000;
-    const signals: AbortSignal[] = [AbortSignal.timeout(timeoutMs)];
-    if (options?.signal) {
-      signals.push(options.signal);
-    }
-    const combinedSignal = signals.length === 1 ? signals[0] : AbortSignal.any(signals);
+    // The synchronous tasks/send response is the whole remote turn, not a
+    // connection handshake. A local request deadline would race the member's
+    // sole no-output timer and cannot prove the remote task was cancelled.
+    const signal = options?.signal;
 
     yield agentMsg('session_init', this.catId);
-
+    let dispatched = false;
     try {
+      await options?.beforeProviderLaunch?.(preparedRequest);
+      if (signal?.aborted) throw signal.reason ?? new Error('aborted before send');
+      dispatched = true;
+      options?.onRemoteExecutionDispatched?.({ kind: 'a2a_task', id: taskId });
       const response = await this.fetchFn(this.config.url, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        signal: combinedSignal,
+        signal,
       });
 
       if (!response.ok) {
@@ -100,14 +124,25 @@ export class A2AAgentService implements AgentService {
         yield m;
       }
 
-      if (!messages.some((m) => m.type === 'done')) {
-        yield agentMsg('done', this.catId);
+      if (!messages.some((message) => message.type === 'done' || message.type === 'error')) {
+        yield agentMsg(
+          'error',
+          this.catId,
+          `A2A task status ${rpcResponse.result.status} does not confirm successful completion; remote task termination is unconfirmed`,
+        );
       }
     } catch (err) {
-      // Distinguish caller-initiated cancel from timeout
+      // Aborting fetch only ends our local wait. The remote task may still be
+      // running; without an acknowledged tasks/cancel, never report success.
       const isCallerAbort = options?.signal?.aborted === true;
       if (isCallerAbort) {
-        yield agentMsg('done', this.catId); // Graceful cancel = done
+        yield agentMsg(
+          'error',
+          this.catId,
+          dispatched
+            ? 'A2A local wait cancelled; remote task termination is unconfirmed'
+            : 'A2A cancelled before remote dispatch',
+        );
       } else {
         const errMsg = err instanceof Error ? err.message : String(err);
         yield agentMsg('error', this.catId, `A2A connection error: ${errMsg}`);

@@ -1,5 +1,13 @@
 // Polyfills for jsdom test environment
-import { vi } from 'vitest';
+import { beforeEach, vi } from 'vitest';
+import { approvalResultRead } from './lib/approval-result-read';
+import { observeApiSessionOwner } from './utils/api-session-identity';
+
+// Each case starts as a new browser session; remounts within a case retain the shared resource.
+beforeEach(() => {
+  approvalResultRead.clear();
+  observeApiSessionOwner(null);
+});
 
 // React Flow requires ResizeObserver
 if (typeof globalThis.ResizeObserver === 'undefined') {
@@ -30,6 +38,12 @@ if (typeof globalThis.localStorage === 'undefined' || typeof globalThis.localSto
     key: (i: number) => Object.keys(store)[i] ?? null,
   } as Storage;
 }
+
+// useConfirm hook: provide a no-op confirm globally so components can render without <ConfirmProvider>
+vi.mock('@/components/useConfirm', () => ({
+  useConfirm: () => vi.fn().mockResolvedValue(true),
+  useOptionalConfirm: () => vi.fn().mockResolvedValue(true),
+}));
 
 // Next.js App Router: mock useRouter globally for test environment
 vi.mock('next/navigation', () => ({

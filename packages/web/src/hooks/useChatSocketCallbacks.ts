@@ -1,54 +1,63 @@
-import type { GameView } from '@cat-cafe/shared';
 import { useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import type { SocketCallbacks } from '@/hooks/useSocket';
-import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
-import { useGameStore } from '@/stores/gameStore';
+import { type Thread, useChatStore } from '@/stores/chatStore';
 import { type TaskItem, useTaskStore } from '@/stores/taskStore';
+import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 
 interface ExternalDeps {
   threadId: string;
-  userId: string;
   handleAgentMessage: SocketCallbacks['onMessage'];
-  resetTimeout: () => void;
-  clearDoneTimeout: (threadId?: string) => void;
-  handleAuthRequest: NonNullable<SocketCallbacks['onAuthorizationRequest']>;
-  handleAuthResponse: NonNullable<SocketCallbacks['onAuthorizationResponse']>;
-  onNavigateToThread?: (threadId: string) => void;
+  onIndexEvent?: SocketCallbacks['onIndexEvent'];
 }
 
 /**
  * Socket event callbacks for a chat thread.
  * Extracted from ChatContainer to reduce file size.
  */
-export function useChatSocketCallbacks({
-  threadId,
-  userId,
-  handleAgentMessage,
-  resetTimeout,
-  clearDoneTimeout,
-  handleAuthRequest,
-  handleAuthResponse,
-  onNavigateToThread,
-}: ExternalDeps): SocketCallbacks {
+export function useChatSocketCallbacks({ threadId, handleAgentMessage, onIndexEvent }: ExternalDeps): SocketCallbacks {
   const {
     updateThreadTitle,
+    updateThreadParticipants,
     setLoading,
     setHasActiveInvocation,
     setIntentMode,
     setTargetCats,
-    addMessage,
-    removeMessage,
-  } = useChatStore();
-  const { addTask, updateTask } = useTaskStore();
+    removeThreadMessage,
+    requestStreamCatchUp,
+  } = useChatStore(
+    useShallow((s) => ({
+      updateThreadTitle: s.updateThreadTitle,
+      updateThreadParticipants: s.updateThreadParticipants,
+      setLoading: s.setLoading,
+      setHasActiveInvocation: s.setHasActiveInvocation,
+      setIntentMode: s.setIntentMode,
+      setTargetCats: s.setTargetCats,
+      removeThreadMessage: s.removeThreadMessage,
+      requestStreamCatchUp: s.requestStreamCatchUp,
+    })),
+  );
+  const { addTask, updateTask } = useTaskStore(
+    useShallow((state) => ({ addTask: state.addTask, updateTask: state.updateTask })),
+  );
 
   return useMemo<SocketCallbacks>(
     () => ({
-      clearDoneTimeout,
       onMessage: (msg) => {
         handleAgentMessage(msg);
         return true;
       },
-      onThreadUpdated: (data) => updateThreadTitle(data.threadId, data.title),
+      onThreadUpdated: (data) => {
+        if (data.title !== undefined) updateThreadTitle(data.threadId, data.title);
+        if (data.participants !== undefined) updateThreadParticipants(data.threadId, data.participants);
+        if (data.bootcampState !== undefined) {
+          useChatStore.setState((state) => ({
+            threads: state.threads.map((t) =>
+              t.id === data.threadId ? { ...t, bootcampState: data.bootcampState as Thread['bootcampState'] } : t,
+            ),
+          }));
+        }
+      },
       onIntentMode: (data) => {
         // Socket layer (useSocket) already applies dual-pointer guard + background routing.
         // This callback only fires for the truly active thread.
@@ -57,75 +66,63 @@ export function useChatSocketCallbacks({
         setIntentMode(data.mode as 'ideate' | 'execute');
         setTargetCats((data as { targetCats?: string[] }).targetCats ?? []);
       },
-      onTaskCreated: (task) => addTask(task as unknown as TaskItem),
-      onTaskUpdated: (task) => updateTask(task as unknown as TaskItem),
-      onThreadSummary: (summary) => {
-        const s = summary as {
-          id: string;
-          threadId: string;
-          topic: string;
-          conclusions: string[];
-          openQuestions: string[];
-          createdBy: string;
-          createdAt: number;
-        };
-        addMessage({
-          id: `summary-${s.id}`,
-          type: 'summary',
-          content: s.topic,
-          timestamp: s.createdAt,
-          summary: {
-            id: s.id,
-            topic: s.topic,
-            conclusions: s.conclusions,
-            openQuestions: s.openQuestions,
-            createdBy: s.createdBy,
-          },
-        } as ChatMessageData);
+      onSpawnStarted: (data) => {
+        // F118 D2: Earliest signal — fires before intent_mode.
+        // Per-cat setCatStatus('spawning') is handled by the socket layer.
+        setLoading(true);
+        setHasActiveInvocation(true);
+        setTargetCats(data.targetCats ?? []);
       },
-      onHeartbeat: (data) => {
-        if (data.threadId === threadId) resetTimeout();
+      onTaskCreated: (task) => {
+        const t = task as Record<string, unknown>;
+        if (t.threadId !== threadId || t.kind === 'pr_tracking') return;
+        addTask(task as unknown as TaskItem);
       },
-      onMessageDeleted: (data: { messageId: string }) => removeMessage(data.messageId),
-      onMessageRestored: () => {
-        /* re-fetching history if needed */
+      onTaskUpdated: (task) => {
+        const t = task as Record<string, unknown>;
+        if (t.threadId !== threadId || t.kind === 'pr_tracking') return;
+        updateTask(task as unknown as TaskItem);
+      },
+      // onThreadSummary removed (clowder-ai#343): summaries no longer injected into chat flow.
+      onMessageDeleted: (data: { messageId: string; threadId: string }) =>
+        removeThreadMessage(data.threadId, data.messageId),
+      onMessageRestored: (data: { messageId: string; threadId: string }) => {
+        requestStreamCatchUp(data.threadId);
+      },
+      onMessageRecalled: (data) => {
+        if (data.verdict === 'zero_exposure') {
+          removeThreadMessage(data.threadId, data.messageId);
+          return;
+        }
+        requestStreamCatchUp(data.threadId);
+      },
+      onMessageReceiptUpdated: (data) => {
+        requestStreamCatchUp(data.threadId);
+      },
+      onCustodyOfferUpdated: (data) => {
+        requestStreamCatchUp(data.threadId);
       },
       onThreadBranched: () => {
-        /* branch navigation handled by the action initiator */
+        void invalidateSidebarProjection();
       },
-      onAuthorizationRequest: handleAuthRequest,
-      onAuthorizationResponse: handleAuthResponse,
-      onGameStateUpdate: (data) => {
-        const view = data.view as GameView;
-        // P1-3 fix: Only accept updates for the current thread
-        if (view.threadId !== threadId) return;
-        useGameStore.getState().setGameView(view, data.gameId, threadId);
-      },
-      onGameThreadCreated: (data) => {
-        // Only navigate the initiator — other users in the room should not be auto-redirected
-        if (data.initiatorUserId === userId) {
-          onNavigateToThread?.(data.gameThreadId);
-        }
-      },
+      // B-5: Guide events now flow directly from useSocket → guideStore.reduceServerEvent
+      // (CustomEvent bridge removed — no onGuideStart/onGuideControl/onGuideComplete needed)
+      onIndexEvent,
     }),
     [
       handleAgentMessage,
       updateThreadTitle,
+      updateThreadParticipants,
       setLoading,
       setHasActiveInvocation,
       setIntentMode,
       setTargetCats,
       addTask,
       updateTask,
-      addMessage,
-      removeMessage,
-      resetTimeout,
-      clearDoneTimeout,
-      handleAuthRequest,
-      handleAuthResponse,
-      onNavigateToThread,
+      removeThreadMessage,
+      requestStreamCatchUp,
+      onIndexEvent,
       threadId,
-      userId,
     ],
   );
 }

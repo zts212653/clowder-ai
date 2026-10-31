@@ -281,6 +281,102 @@ describe('formatTaskSnapshot', () => {
     assert.ok(result.includes('[/Task Snapshot]'));
   });
 
+  it('prepends blocked reminder when blocked tasks exist (F160 AC-C3)', () => {
+    const tasks = [
+      {
+        id: 't1',
+        threadId: 'th1',
+        title: 'Waiting for API key',
+        ownerCatId: 'opus',
+        status: 'blocked',
+        why: 'Need admin approval',
+        createdBy: 'user',
+        createdAt: Date.now() - 86400000,
+        updatedAt: Date.now() - 3600000,
+      },
+      {
+        id: 't2',
+        threadId: 'th1',
+        title: 'Build UI',
+        ownerCatId: 'opus',
+        status: 'doing',
+        why: '',
+        createdBy: 'user',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ];
+    const result = formatTaskSnapshot(tasks);
+    assert.ok(result.includes('⚠️ 有 1 个任务被阻塞'));
+    assert.ok(result.includes('Waiting for API key'));
+  });
+
+  it('does not show blocked reminder when no blocked tasks (F160 AC-C3)', () => {
+    const tasks = [
+      {
+        id: 't1',
+        threadId: 'th1',
+        title: 'Build UI',
+        ownerCatId: 'opus',
+        status: 'doing',
+        why: '',
+        createdBy: 'user',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ];
+    const result = formatTaskSnapshot(tasks);
+    assert.ok(!result.includes('⚠️ 有'));
+  });
+
+  it('shows plural blocked reminder for multiple blocked tasks (F160 AC-C3)', () => {
+    const tasks = [
+      {
+        id: 't1',
+        threadId: 'th1',
+        title: 'Task A',
+        ownerCatId: null,
+        status: 'blocked',
+        why: 'Dep 1',
+        createdBy: 'user',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+      {
+        id: 't2',
+        threadId: 'th1',
+        title: 'Task B',
+        ownerCatId: null,
+        status: 'blocked',
+        why: 'Dep 2',
+        createdBy: 'user',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ];
+    const result = formatTaskSnapshot(tasks);
+    assert.ok(result.includes('⚠️ 有 2 个任务被阻塞'));
+  });
+
+  it('caps blocked reminder entries to MAX_OPEN (F160 P2-1 fix)', () => {
+    const now = Date.now();
+    const tasks = Array.from({ length: 30 }, (_, i) => ({
+      id: `b${i}`,
+      threadId: 'th1',
+      title: `Blocked task ${i}`,
+      ownerCatId: null,
+      status: 'blocked',
+      why: 'dep',
+      createdBy: 'user',
+      createdAt: now,
+      updatedAt: now - i,
+    }));
+    const result = formatTaskSnapshot(tasks);
+    const reminderLines = result.split('\n').filter((l) => l.startsWith('  → '));
+    assert.ok(reminderLines.length <= 8, `Expected <=8 reminder entries, got ${reminderLines.length}`);
+    assert.ok(result.includes('⚠️ 有 30 个任务被阻塞'));
+  });
+
   it('strips closing marker from title to prevent spoofing (R4 P2-1)', () => {
     const tasks = [
       {

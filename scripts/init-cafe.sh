@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Cat Cafe 初始化脚本
+# Clowder AI 初始化脚本
 # 用于首次设置项目环境
 
 set -e
 
-echo "🐱 Cat Café 初始化脚本"
+echo "🐱 Clowder AI 初始化脚本"
 echo "======================"
 
 # 颜色定义
@@ -21,13 +21,13 @@ check_requirements() {
 
     if ! command -v node &> /dev/null; then
         echo -e "${RED}错误: 未找到 Node.js${NC}"
-        echo "请安装 Node.js 20+ : https://nodejs.org/"
+        echo "请安装 Node.js 24+ (<26): https://nodejs.org/"
         exit 1
     fi
 
     NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
-    if [ "$NODE_VERSION" -lt 20 ]; then
-        echo -e "${RED}错误: Node.js 版本过低 (需要 >= 20)${NC}"
+    if [ "$NODE_VERSION" -lt 24 ] || [ "$NODE_VERSION" -ge 26 ]; then
+        echo -e "${RED}错误: Node.js 版本不支持 (需要 >= 24 and < 26)${NC}"
         exit 1
     fi
     echo -e "${GREEN}✓ Node.js $(node -v)${NC}"
@@ -43,6 +43,19 @@ check_requirements() {
         echo "请安装 Redis: brew install redis (macOS)"
     else
         echo -e "${GREEN}✓ Redis CLI${NC}"
+    fi
+
+    # F088 Phase J2: pandoc for document generation (MD → PDF/DOCX)
+    if ! command -v pandoc &> /dev/null; then
+        echo -e "${YELLOW}未找到 pandoc，正在安装...${NC}"
+        if command -v brew &> /dev/null; then
+            brew install pandoc
+        else
+            echo -e "${YELLOW}警告: 未找到 brew，请手动安装 pandoc: https://pandoc.org/installing.html${NC}"
+        fi
+    fi
+    if command -v pandoc &> /dev/null; then
+        echo -e "${GREEN}✓ pandoc $(pandoc --version | head -1 | awk '{print $2}')${NC}"
     fi
 }
 
@@ -71,33 +84,16 @@ check_env() {
         if [ -f .env.example ]; then
             echo -e "${YELLOW}未找到 .env 文件，从模板创建...${NC}"
             cp .env.example .env
-            echo -e "${YELLOW}请编辑 .env 文件，填入 API Keys${NC}"
+            echo -e "${YELLOW}启动后在 Hub → 系统配置 → 账号配置 中添加 API Key${NC}"
         else
             echo -e "${RED}错误: 未找到 .env.example 模板${NC}"
             exit 1
         fi
     fi
 
-    # 检查必要的 API Keys
+    # Auth is managed via unified accounts system (~/.cat-cafe/accounts.json + credentials.json).
+    # Run `node scripts/install-auth-config.mjs` to configure API keys.
     source .env 2>/dev/null || true
-
-    if [ -z "$ANTHROPIC_API_KEY" ]; then
-        echo -e "${YELLOW}警告: ANTHROPIC_API_KEY 未设置${NC}"
-    else
-        echo -e "${GREEN}✓ ANTHROPIC_API_KEY 已设置${NC}"
-    fi
-
-    if [ -z "$OPENAI_API_KEY" ]; then
-        echo -e "${YELLOW}警告: OPENAI_API_KEY 未设置${NC}"
-    else
-        echo -e "${GREEN}✓ OPENAI_API_KEY 已设置${NC}"
-    fi
-
-    if [ -z "$GOOGLE_API_KEY" ]; then
-        echo -e "${YELLOW}警告: GOOGLE_API_KEY 未设置${NC}"
-    else
-        echo -e "${GREEN}✓ GOOGLE_API_KEY 已设置${NC}"
-    fi
 }
 
 # 安装依赖
@@ -138,10 +134,10 @@ main() {
 
     echo ""
     echo "========================"
-    echo -e "${GREEN}🎉 Cat Café 初始化完成！${NC}"
+    echo -e "${GREEN}🎉 Clowder AI 初始化完成！${NC}"
     echo ""
     echo "下一步："
-    echo "  1. 编辑 .env 文件，填入 API Keys"
+    echo "  1. 打开 http://localhost:3003 → Hub → 系统配置 → 账号配置，添加 API Key"
     echo "  2. 启动 Redis: redis-server"
     echo "  3. 运行开发服务器: pnpm run start"
     echo ""

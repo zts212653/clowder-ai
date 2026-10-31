@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "purpose": "public exploration, raw recordings and bounded paired replication; no adopted policy",
+  "files": [
+    {
+      "path": "clips/01-body-contact.mp4",
+      "bytes": 177371,
+      "sha256": "3ecbf780fc20f991e0f9bb7539ed688bf94213d5902bb481d118a3f50f4e9ff6"
+    },
+    {
+      "path": "clips/01-body-contact.png",
+      "bytes": 5749,
+      "sha256": "20c94e13c5bec7e0385fd978a1db2a07d430da3f2e5a118bc68e766d7bb5018a"
+    },
+    {
+      "path": "clips/02-cat-reposition.mp4",
+      "bytes": 307109,
+      "sha256": "16ec5319ac09184a30442bce0f5329f50302038b5f276d53e1062a8cbeb29ba4"
+    },
+    {
+      "path": "clips/02-cat-reposition.png",
+      "bytes": 6482,
+      "sha256": "8a3cb3fdb7dca4c4fddbeaa97c4935a0d7459dfc17e73617e6223ac40b999f75"
+    },
+    {
+      "path": "clips/03-late-command.mp4",
+      "bytes": 190985,
+      "sha256": "bc50fd1b5a139c48d3e6b3fbb21ec3842b1d613a600e68203aa318e2c115c223"
+    },
+    {
+      "path": "clips/03-late-command.png",
+      "bytes": 5684,
+      "sha256": "beaf50712f9b72740d856566dc26506361925ff05f238a3c535a8dbffeeb74fa"
+    },
+    {
+      "path": "clips/cortex-evidence-reel.mp4",
+      "bytes": 673865,
+      "sha256": "c58b05e3f17ecbcd8b1ac7390e92a093932351b90c920706f43ae870147b8085"
+    },
+    {
+      "path": "clips/video-spec.json",
+      "bytes": 2128,
+      "sha256": "a8eb1854ed0cde4aaacee2278e848777bae205af75ed1972e05f910020724311"
+    },
+    {
+      "path": "cortex-793-live1/annotated-match.mp4",
+      "bytes": 2019937,
+      "sha256": "65f99c86251b89e146d5db00c09f07d0cf269d6b3ac34c3e591e64ee7e5c7beb"
+    },
+    {
+      "path": "cortex-793-live1/annotation.json",
+      "bytes": 777,
+      "sha256": "55f026a3c1d889a0ca59e4dd46f61777742b61b94efa8f16cc4223ad552a1b77"
+    },
+    {
+      "path": "cortex-793-live1/contact-sheet.png",
+      "bytes": 279347,
+      "sha256": "c4e27dd487161a8d0edc73ea7ce5f2672d14b1a14e8c43b1e393f5b3d0510baa"
+    },
+    {
+      "path": "cortex-793-live1/domain-caption.png",
+      "bytes": 6605,
+      "sha256": "f52ec273017e87533e864feab1a738189292feedf510e4aefa28991e0220fb5f"
+    },
+    {
+      "path": "cortex-793-live1/events.jsonl",
+      "bytes": 8780,
+      "sha256": "bff910527f2fb96451ef1538872f1cfadbca704dad63be193995910be08ad1d8"
+    },
+    {
+      "path": "cortex-793-live1/manifest.json",
+      "bytes": 3673,
+      "sha256": "8d48b99fc0034e0a4ab6820a806d75ccce2309c91e569b66a3e8767ebf5c6579",
+      "exported": {
+        "bytes": 3670,
+        "sha256": "ec14c5aa46978107f1646d6799a7a1b0ff7f32127086b47a1d98254c975d26c8"
+      }
+    },
+    {
+      "path": "cortex-793-live1/match.mp4",
+      "bytes": 1789620,
+      "sha256": "a7c0cfa5d714ad22d4ec727e21dd92228a56eda924e0a5959946b06dafb84485"
+    },
+    {
+      "path": "cortex-793-live1/observations.jsonl",
+      "bytes": 405158,
+      "sha256": "273d3bd24aee9c9767c6bb81e3e9e503095f7d958c68e9c05a799697fa5b0e03"
+    },
+    {
+      "path": "cortex-793-live1/summary.json",
+      "bytes": 484,
+      "sha256": "943701c7168cf2bfb505b83ce9b5f81745b02cb616d24fafbc4cba5dd36938ec"
+    },
+    {
+      "path": "cortex-793-live1/trajectory.jsonl.gz",
+      "bytes": 13850063,
+      "sha256": "9a87dc48004df6cbdc8dc4e90104218831a2116da659e5021234227004a2e82a"
+    },
+    {
+      "path": "cortex-793-live2-state/annotated-match.mp4",
+      "bytes": 3990782,
+      "sha256": "b9796102725feef27677d3f2b98f09310a737795cf126ea4ce992e70858b0f75"
+    },
+    {
+      "path": "cortex-793-live2-state/annotation.json",
+      "bytes": 764,
+      "sha256": "27da834763f77e7d429be986116e694a7b1a221222977306f8e15984d83b4cbd"
+    },
+    {
+      "path": "cortex-793-live2-state/contact-sheet.png",
+      "bytes": 551141,
+      "sha256": "3284e35a9ace4632e06d58311aaad7d8bd13f5269c2aaa9f056b2276244ce4b2"
+    },
+    {
+      "path": "cortex-793-live2-state/domain-caption.png",
+      "bytes": 5606,
+      "sha256": "9dad3b3a70381ea081cf11677ecb301d21fe6fc7cc41bc577f79a22e4282ec0d"
+    },
+    {
+      "path": "cortex-793-live2-state/events.jsonl",
+      "bytes": 18674,
+      "sha256": "952ddfe80381f5b855316af3719b1122a28fdd9682ba2a831e5f03d40533659a"
+    },
+    {
+      "path": "cortex-793-live2-state/manifest.json",
+      "bytes": 4077,
+      "sha256": "a55f5d694272f958bc0b24889a49b9914414cd27f28d7b0bdbc4ce8cca6ca554",
+      "exported": {
+        "bytes": 4074,
+        "sha256": "18ef6431566dafc7516f160b65f7c541f83584a26bfc31d057056055a31f34df"
+      }
+    },
+    {
+      "path": "cortex-793-live2-state/match.mp4",
+      "bytes": 3580792,
+      "sha256": "2ad78c2534a9faa5833ab7c5bee25e71fa460afb733c7c037336278cc78217d5"
+    },
+    {
+      "path": "cortex-793-live2-state/observations.jsonl",
+      "bytes": 883535,
+      "sha256": "e4759fee96ac7506308cf0eb0bd865b5e92781dc09cbbb2fd83ee75686eaa27c"
+    },
+    {
+      "path": "cortex-793-live2-state/summary.json",
+      "bytes": 517,
+      "sha256": "1c0284601ae51e54e15f3a9aa7590bb5f3a5aef295d241612248b8e84fbc9852"
+    },
+    {
+      "path": "cortex-793-live2-state/trajectory.jsonl.gz",
+      "bytes": 27671936,
+      "sha256": "825406a0fb2997c0e351bef6966899271c430927946f5eb03a0a2131fb6aabcf"
+    },
+    {
+      "path": "cortex-kick-calibration-v1.json",
+      "bytes": 17489,
+      "sha256": "e445b655a882c14f1ecd10f0a57d89bd2012898147562f02b52910ad223ee2bb"
+    },
+    {
+      "path": "cortex-kick-calibration-v2.json",
+      "bytes": 37038,
+      "sha256": "6f5aec79a1d62dec49590170a9694cc185efe9d3e9443f54a884df7344ea3f90"
+    },
+    {
+      "path": "runs.json.gz",
+      "bytes": 45808,
+      "sha256": "60a7e0a0b496119413100268886a76cb1d1315ba5f1ab545e3edd9dac06e5f40"
+    }
+  ]
+}

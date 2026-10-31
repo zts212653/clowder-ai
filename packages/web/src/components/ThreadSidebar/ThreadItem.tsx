@@ -1,18 +1,34 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
-import type { ThreadState } from '@/stores/chat-types';
-import { API_URL } from '@/utils/api-client';
+import { useIMEGuard } from '@/hooks/useIMEGuard';
+import { resolveCatDisplayName } from '@/lib/cat-display-name';
+import { catColorVar } from '@/lib/cat-slug';
+import { useLabelStore } from '@/stores/label-store';
+import type { SidebarPresence, SidebarSystemKind } from '@/stores/sidebarProjectionStore';
+// F174 D2b-2 (rev): per-cat callback-auth dot was rejected (co-creator alpha 反馈
+// "莫名其妙的颜色" — 16px participant avatars lacked any affordance). Status now
+// surfaces system-level via <CallbackAuthHealthIndicator /> in ChatContainerHeader,
+// and per-cat (with "AFFECTED CATS" affordance) inside HubCallbackAuthPanel.
 import { CatAvatar } from '../CatAvatar';
+import { ExportButton } from '../ExportButton';
 import { HubIcon } from '../icons/HubIcon';
 import { PawIcon } from '../icons/PawIcon';
+import { useShellCopy } from '../shell/shell-copy';
+import { useShellPresentation } from '../shell/shell-presentation';
 import { ThreadCatStatus } from '../ThreadCatStatus';
-import { ThreadCatSettings } from './ThreadCatSettings';
-import { formatRelativeTime } from './thread-utils';
+import { useSidebarDraftDecoration } from './sidebar-draft-decoration';
+import { ThreadPinV2 } from './ThreadPinV2';
+import { ThreadRowSignals } from './ThreadRowSignals';
+import { RowTip, RowTitleTip } from './ThreadRowTips';
+import { ThreadSettingsPanel } from './ThreadSettingsPanel';
+import { useOpenThreadSettings } from './ThreadSettingsProvider';
+import { formatSidebarActivityTime, threadSignalsCopy } from './thread-signals.shell-copy';
+import { formatRelativeTime, formatSidebarStatusTime } from './thread-utils';
 
 export interface ThreadItemProps {
   id: string;
   title: string | null;
-  participants: string[];
+  participants: readonly string[];
   lastActiveAt: number;
   isActive: boolean;
   onSelect: (id: string) => void;
@@ -21,15 +37,26 @@ export interface ThreadItemProps {
   onTogglePin?: (id: string, pinned: boolean) => void | Promise<void>;
   onToggleFavorite?: (id: string, favorited: boolean) => void | Promise<void>;
   onUpdatePreferredCats?: (id: string, cats: string[]) => void | Promise<void>;
+  onUpdateLabels?: (id: string, labels: string[]) => void | Promise<void>;
+  /** F277: accessible fallback for entering conversation-group arrange mode. */
+  onOrganize?: (id: string) => void;
+  /** F252 Phase E: open Meow Theater replay for this thread */
+  onReplay?: (id: string) => void;
   isPinned?: boolean;
   isFavorited?: boolean;
-  threadState?: ThreadState;
+  presence: SidebarPresence;
+  unreadCount: number;
+  hasUserMention: boolean;
+  hasPendingDecision?: boolean;
+  projectPath?: string;
   indented?: boolean;
-  preferredCats?: string[];
+  preferredCats?: readonly string[];
+  threadLabels?: readonly string[];
   isHubThread?: boolean;
+  systemKind?: SidebarSystemKind | null;
 }
 
-export function ThreadItem({
+function ThreadItemComponent({
   id,
   title,
   participants,
@@ -41,13 +68,27 @@ export function ThreadItem({
   onTogglePin,
   onToggleFavorite,
   onUpdatePreferredCats,
+  onUpdateLabels,
+  onOrganize,
   isPinned,
   isFavorited,
-  threadState,
+  presence,
+  unreadCount,
+  hasUserMention,
+  hasPendingDecision,
+  projectPath,
   indented,
   preferredCats,
+  threadLabels,
   isHubThread,
+  systemKind,
+  onReplay,
 }: ThreadItemProps) {
+  const hasDraftDecoration = useSidebarDraftDecoration(id);
+  // F322 v2: one soft selection fill (no accent tint); the empty-participants note only matters as a hover fact.
+  const isV2 = useShellPresentation() === 'v2';
+  const openThreadSettings = useOpenThreadSettings();
+  const copy = useShellCopy(threadSignalsCopy);
   const { getCatById } = useCatData();
   const canDelete = id !== 'default' && onDelete;
   const canRename = id !== 'default' && onRename;
@@ -55,9 +96,20 @@ export function ThreadItem({
   const canFavorite = id !== 'default' && onToggleFavorite;
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title ?? '');
   const inputRef = useRef<HTMLInputElement>(null);
-  const isComposingRef = useRef(false);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const ime = useIMEGuard();
+  const [, refreshWorkingClock] = useState(0);
+
+  useEffect(() => {
+    if (presence.status !== 'working' || presence.activeSince === undefined) return;
+    const timer = window.setInterval(() => refreshWorkingClock((tick) => tick + 1), 60_000);
+    return () => window.clearInterval(timer);
+  }, [presence.status, presence.activeSince]);
 
   useEffect(() => {
     if (!isEditing) setDraftTitle(title ?? '');
@@ -68,6 +120,29 @@ export function ThreadItem({
     inputRef.current?.focus();
     inputRef.current?.select();
   }, [isEditing]);
+
+  useEffect(() => {
+    if (isEditing) setIsMoreOpen(false);
+  }, [isEditing]);
+
+  useEffect(() => {
+    if (!isMoreOpen) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (moreButtonRef.current?.contains(target) || moreMenuRef.current?.contains(target)) return;
+      setIsMoreOpen(false);
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsMoreOpen(false);
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isMoreOpen]);
 
   const submitRename = useCallback(async () => {
     if (!onRename) return;
@@ -93,36 +168,85 @@ export function ThreadItem({
 
   // Build hover tooltip: full title + participants + time (clowder-ai#29)
   const displayTitle = title ?? (id === 'default' ? '大厅' : '未命名对话');
-  const participantNames = participants.map((catId) => getCatById(catId)?.displayName ?? catId).join(', ');
+  const hasDraft = hasDraftDecoration && (isV2 || !isActive);
+  const participantNames = participants.map((catId) => resolveCatDisplayName(catId, getCatById)).join(', ');
   const tooltipLines = [displayTitle];
   if (participantNames) tooltipLines.push(`参与: ${participantNames}`);
+  if (projectPath && projectPath !== 'default') tooltipLines.push(`路径: ${projectPath}`);
   tooltipLines.push(formatRelativeTime(lastActiveAt, false));
   const tooltip = tooltipLines.join('\n');
+  const hasMoreActions = id !== 'default' && !isEditing;
+  const compactStatusTime = formatSidebarStatusTime(presence, lastActiveAt);
+
+  const startRename = useCallback(() => {
+    setIsMoreOpen(false);
+    setIsSettingsOpen(false);
+    setIsEditing(true);
+  }, []);
+
+  const startThreadSettings = useCallback(() => {
+    setIsMoreOpen(false);
+    if (isV2 && openThreadSettings) openThreadSettings(id, moreButtonRef);
+    else setIsSettingsOpen(true);
+  }, [id, isV2, openThreadSettings]);
+
+  const startReplay = useCallback(() => {
+    setIsMoreOpen(false);
+    onReplay?.(id);
+  }, [id, onReplay]);
+
+  const startOrganize = useCallback(() => {
+    setIsMoreOpen(false);
+    onOrganize?.(id);
+  }, [id, onOrganize]);
+
+  const toggleFavorite = useCallback(() => {
+    if (!onToggleFavorite) return;
+    setIsMoreOpen(false);
+    void onToggleFavorite(id, !isFavorited);
+  }, [id, isFavorited, onToggleFavorite]);
+
+  const deleteThread = useCallback(() => {
+    if (!onDelete) return;
+    setIsMoreOpen(false);
+    onDelete(id);
+  }, [id, onDelete]);
 
   return (
     <div
-      className={`group relative ${indented ? 'pl-7 pr-3' : 'px-3'} py-2.5 border-b border-gray-50 transition-colors cursor-pointer ${
-        isActive ? 'bg-cocreator-bg' : 'hover:bg-gray-50'
+      data-thread-id={id}
+      aria-current={isActive ? 'page' : undefined}
+      className={`group relative mx-2 ${isV2 ? 'rounded-lg py-1.5 [[data-attention-cluster-member]_&]:mx-0 [[data-attention-cluster-member]_&]:px-[11px]' : 'rounded-xl py-2.5'} ${indented ? 'pl-5 pr-3' : 'px-3'} transition-colors cursor-pointer ${
+        isV2
+          ? isActive
+            ? 'bg-[var(--shell-selected)]'
+            : 'hover:bg-[color-mix(in_srgb,var(--shell-selected)_55%,transparent)]'
+          : isActive
+            ? 'bg-[var(--console-active-bg)]'
+            : 'hover:bg-[var(--console-hover-bg)]'
       }`}
-      onClick={() => onSelect(id)}
-      title={tooltip}
+      onClick={(event) => {
+        if (
+          event.target instanceof Element &&
+          event.target.closest('[data-thread-settings-panel="true"], [role="menu"]')
+        ) {
+          return;
+        }
+        onSelect(id);
+      }}
     >
       {/* Title row */}
-      <div className="flex items-start justify-between gap-1 mb-1">
+      <div className={`flex justify-between gap-1 ${isV2 ? 'min-h-5 items-start' : 'mb-1.5 items-start'}`}>
         {isEditing ? (
           <input
             ref={inputRef}
             value={draftTitle}
             onChange={(e) => setDraftTitle(e.target.value)}
             onClick={(e) => e.stopPropagation()}
-            onCompositionStart={() => {
-              isComposingRef.current = true;
-            }}
-            onCompositionEnd={() => {
-              isComposingRef.current = false;
-            }}
+            onCompositionStart={ime.onCompositionStart}
+            onCompositionEnd={ime.onCompositionEnd}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !isComposingRef.current) {
+              if (e.key === 'Enter' && !ime.isComposing()) {
                 e.preventDefault();
                 void submitRename();
               }
@@ -137,163 +261,356 @@ export function ThreadItem({
             }}
             disabled={isSaving}
             maxLength={200}
-            className="text-sm px-1.5 py-0.5 rounded border border-cocreator-light focus:outline-none focus:border-cocreator-primary w-full mr-2 disabled:opacity-70"
+            className={`text-sm px-1.5 ${isV2 ? 'h-5 py-0' : 'py-0.5'} rounded border border-cafe-subtle focus:outline-none focus:border-cafe-accent w-full mr-2 disabled:opacity-70`}
           />
         ) : (
-          <span
-            className={`text-sm leading-snug line-clamp-2 flex-1 min-w-0 ${isActive ? 'font-semibold text-cafe-black' : 'text-gray-700'}`}
-          >
-            {isHubThread && (
-              <HubIcon className="w-3.5 h-3.5 inline-block mr-1 text-cocreator-primary align-text-bottom" />
+          <span className="flex min-w-0 flex-1 items-center gap-1">
+            {isV2 && <ThreadPinV2 id={id} title={displayTitle} pinned={isPinned} onToggle={onTogglePin} />}
+            {!isV2 && canPin && (
+              <RowTip enabled={isV2} label={isPinned ? '取消置顶' : '置顶'}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void onTogglePin(id, !isPinned);
+                  }}
+                  className={`inline-flex flex-shrink-0 p-0.5 rounded transition-all hover:bg-[var(--console-hover-bg)] hover:text-cafe-interactive ${
+                    isPinned
+                      ? 'text-cafe-accent'
+                      : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 text-cafe-muted hover:text-cafe-accent'
+                  } ${isV2 && !isPinned ? 'absolute left-0.5 top-2.5' : ''}`}
+                  aria-label={isPinned ? `取消置顶 ${displayTitle}` : `置顶 ${displayTitle}`}
+                  title={isV2 ? undefined : isPinned ? '取消置顶' : '置顶'}
+                  data-testid="thread-pin-button"
+                >
+                  <PinIcon />
+                </button>
+              </RowTip>
             )}
-            {title ?? (id === 'default' ? '大厅' : '未命名对话')}
+            {!isV2 && isPinned && !canPin && (
+              <span className="inline-flex flex-shrink-0 text-cafe-accent" role="img" aria-label="已置顶">
+                <PinIcon />
+              </span>
+            )}
+            {isFavorited && (
+              <span
+                className="inline-flex flex-shrink-0 text-conn-amber-text"
+                role="img"
+                aria-label="已收藏"
+                data-testid="thread-favorite-mark"
+              >
+                <StarIcon filled />
+              </span>
+            )}
+            {isHubThread && <HubIcon className="w-3.5 h-3.5 inline-block mr-1 text-cafe-accent align-text-bottom" />}
+            {systemKind === 'cat_bedroom' && (
+              <span
+                className="inline-flex shrink-0 items-center rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-1.5 py-0.5 text-micro leading-none text-cafe-accent"
+                title={isV2 ? undefined : '猫的私人卧室'}
+                data-testid="thread-system-kind"
+              >
+                猫卧室
+              </span>
+            )}
+            <RowTitleTip enabled={isV2} title={displayTitle}>
+              <span
+                title={isV2 ? undefined : tooltip}
+                // v2: a keyboard stop that recovers a clipped title and opens the conversation on Enter.
+                role={isV2 ? 'link' : undefined}
+                tabIndex={isV2 ? 0 : undefined}
+                onKeyDown={
+                  isV2
+                    ? (event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          onSelect(id);
+                        }
+                      }
+                    : undefined
+                }
+                className={`min-w-0 flex-1 line-clamp-2 ${isV2 ? 'break-words' : ''} text-sm ${isV2 ? 'leading-5' : 'leading-normal'} ${isV2 ? `${unreadCount > 0 || hasUserMention || presence.status === 'error' ? 'font-semibold' : 'font-normal'} text-[var(--shell-ink)]` : isActive ? 'font-medium text-cafe-black' : 'text-cafe-secondary'} ${isV2 ? 'shell-focusable rounded-sm' : ''}`}
+              >
+                {title ?? (id === 'default' ? '大厅' : '未命名对话')}
+              </span>
+            </RowTitleTip>
           </span>
         )}
-        <div className="flex items-center gap-0.5 flex-shrink-0 mt-0.5">
-          {/* Pin button */}
-          {canPin && !isEditing && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                void onTogglePin(id, !isPinned);
-              }}
-              className={`p-0.5 rounded transition-all ${
-                isPinned
-                  ? 'text-cocreator-primary'
-                  : 'opacity-0 group-hover:opacity-100 text-gray-300 hover:text-cocreator-primary'
-              }`}
-              title={isPinned ? '取消置顶' : '置顶'}
+        <div className={`flex items-center gap-0.5 flex-shrink-0 ${isV2 ? '' : 'mt-0.5'}`}>
+          {isV2 && !isEditing && (
+            <span
+              data-testid="thread-row-time"
+              className="order-last text-label leading-5 tabular-nums"
+              style={{ color: 'var(--shell-muted)' }}
             >
-              <PinIcon />
-            </button>
+              {formatSidebarActivityTime(lastActiveAt, copy)}
+            </span>
           )}
-          {/* Favorite button */}
-          {canFavorite && !isEditing && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                void onToggleFavorite(id, !isFavorited);
-              }}
-              className={`p-0.5 rounded transition-all ${
-                isFavorited
-                  ? 'text-yellow-500'
-                  : 'opacity-0 group-hover:opacity-100 text-gray-300 hover:text-yellow-400'
-              }`}
-              title={isFavorited ? '取消收藏' : '收藏'}
-            >
-              <StarIcon filled={isFavorited} />
-            </button>
-          )}
-          {/* Cat settings button */}
-          {id !== 'default' && onUpdatePreferredCats && !isEditing && (
-            <ThreadCatSettings threadId={id} currentCats={preferredCats ?? []} onSave={onUpdatePreferredCats} />
-          )}
-          {/* Rename button */}
-          {canRename && !isEditing && (
-            <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsEditing(true);
-              }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-cocreator-bg transition-all"
-              title="重命名对话"
-            >
-              <svg
-                className="w-3 h-3 text-gray-300 hover:text-cocreator-primary"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-              >
-                <path d="M11.013 1.427a1.75 1.75 0 112.474 2.474l-7.2 7.2a2 2 0 01-.84.49l-2.22.634a.75.75 0 01-.926-.926l.634-2.22a2 2 0 01.49-.84l7.588-7.588zm1.414 1.06a.25.25 0 00-.353 0L11.2 3.36l1.44 1.44.874-.874a.25.25 0 000-.353l-1.086-1.086zM11.58 5.86l-1.44-1.44-6.072 6.072a.5.5 0 00-.123.21l-.303 1.06 1.06-.303a.5.5 0 00.21-.123l6.668-6.668z" />
-                <path d="M2.25 13A.75.75 0 013 12.25v-.5a.75.75 0 011.5 0v.5c0 .138.112.25.25.25h8a.75.75 0 010 1.5h-8A1.75 1.75 0 012.25 13z" />
-              </svg>
-            </button>
-          )}
-          {/* Export button */}
-          {id !== 'default' && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                window.open(`${API_URL}/api/export/thread/${id}?format=md`);
-              }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-blue-50 transition-all"
-              title="导出对话"
-            >
-              <svg className="w-3 h-3 text-gray-300 hover:text-blue-400" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M2.75 14A1.75 1.75 0 011 12.25v-2.5a.75.75 0 011.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 00.25-.25v-2.5a.75.75 0 011.5 0v2.5A1.75 1.75 0 0113.25 14H2.75z" />
-                <path d="M7.25 7.689V2a.75.75 0 011.5 0v5.689l1.97-1.969a.749.749 0 111.06 1.06l-3.25 3.25a.749.749 0 01-1.06 0L4.22 6.78a.749.749 0 111.06-1.06l1.97 1.969z" />
-              </svg>
-            </button>
-          )}
-          {/* Delete button */}
-          {canDelete && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(id);
-              }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-50 transition-all"
-              title="删除对话"
-            >
-              <svg className="w-3 h-3 text-gray-300 hover:text-red-400" viewBox="0 0 16 16" fill="currentColor">
-                <path
-                  fillRule="evenodd"
-                  d="M5 3.25V4H2.75a.75.75 0 000 1.5h.3l.815 8.15A1.5 1.5 0 005.357 15h5.285a1.5 1.5 0 001.493-1.35l.815-8.15h.3a.75.75 0 000-1.5H11v-.75A2.25 2.25 0 008.75 1h-1.5A2.25 2.25 0 005 3.25zm2.25-.75a.75.75 0 00-.75.75V4h3v-.75a.75.75 0 00-.75-.75h-1.5z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </button>
-          )}
-        </div>
-      </div>
-      {/* Bottom row: avatars + status + compact time */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          {participants.length > 0 ? (
-            participants.map((catId) => <CatAvatar key={catId} catId={catId} size={16} />)
-          ) : id !== 'default' ? (
-            <>
-              <PawIcon className="w-3 h-3 text-gray-300" />
-              <span className="text-[10px] text-gray-300">还没有猫猫加入</span>
-            </>
-          ) : null}
-          {preferredCats && preferredCats.length > 0 && (
-            <div
-              className="flex items-center gap-0.5 ml-1"
-              title={`默认: ${preferredCats.map((id) => getCatById(id)?.displayName ?? id).join(', ')}`}
-            >
-              <span className="text-[9px] text-gray-400">🎯</span>
-              {preferredCats.map((catId) => (
-                <span
-                  key={catId}
-                  className="inline-block w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: getCatById(catId)?.color.primary ?? '#9CA3AF' }}
-                />
-              ))}
+          {hasMoreActions && (
+            <div className={isV2 ? 'relative flex h-5 items-center' : 'relative'}>
+              <RowTip enabled={isV2} label="更多操作">
+                <button
+                  type="button"
+                  ref={moreButtonRef}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsSettingsOpen(false);
+                    setIsMoreOpen((open) => !open);
+                  }}
+                  className={`p-0.5 rounded transition-all ${isV2 ? 'flex h-5 w-5 items-center justify-center' : ''} ${
+                    isMoreOpen
+                      ? 'text-cafe-secondary bg-cafe-surface-elevated'
+                      : 'text-cafe-muted hover:text-cafe-secondary'
+                  } ${isV2 && !isMoreOpen ? 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100' : ''}`}
+                  title={isV2 ? undefined : '更多操作'}
+                  aria-label="更多操作"
+                  aria-haspopup="menu"
+                  aria-expanded={isMoreOpen}
+                >
+                  <MoreVerticalIcon />
+                </button>
+              </RowTip>
+              {isMoreOpen && (
+                <div
+                  ref={moreMenuRef}
+                  role="menu"
+                  aria-label="对话操作"
+                  className="absolute right-0 top-5 z-50 min-w-[144px] rounded-lg border border-cafe bg-cafe-surface py-1 shadow-lg"
+                >
+                  <ThreadActionMenuItem icon={<SettingsIcon />} onClick={startThreadSettings}>
+                    对话设置
+                  </ThreadActionMenuItem>
+                  {onOrganize && (
+                    <ThreadActionMenuItem icon={<OrganizeIcon />} onClick={startOrganize}>
+                      整理 Group
+                    </ThreadActionMenuItem>
+                  )}
+                  {isV2 && canPin && (
+                    <ThreadActionMenuItem
+                      icon={<PinIcon />}
+                      onClick={() => {
+                        setIsMoreOpen(false);
+                        void onTogglePin(id, !isPinned);
+                      }}
+                    >
+                      {isPinned ? copy.unpin : copy.pin}
+                    </ThreadActionMenuItem>
+                  )}
+                  {canRename && (
+                    <ThreadActionMenuItem icon={<RenameIcon />} onClick={startRename}>
+                      重命名对话
+                    </ThreadActionMenuItem>
+                  )}
+                  <ExportButton threadId={id} variant="thread-menu" onSelect={() => setIsMoreOpen(false)} />
+                  {onReplay && (
+                    <ThreadActionMenuItem icon={<ReplayIcon />} onClick={startReplay}>
+                      回放剧场
+                    </ThreadActionMenuItem>
+                  )}
+                  {canFavorite && (
+                    <ThreadActionMenuItem icon={<StarIcon filled={isFavorited} />} onClick={toggleFavorite}>
+                      {isFavorited ? '取消收藏' : '收藏'}
+                    </ThreadActionMenuItem>
+                  )}
+                  {canDelete && (
+                    <>
+                      <div className="my-1 h-px bg-cafe-subtle" />
+                      <ThreadActionMenuItem icon={<DeleteIcon />} onClick={deleteThread} danger>
+                        删除对话
+                      </ThreadActionMenuItem>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           )}
-          {threadState && (
-            <ThreadCatStatus
-              threadState={threadState}
-              unreadCount={threadState.unreadCount}
-              hasUserMention={threadState.hasUserMention}
-            />
-          )}
         </div>
-        <span className="text-[10px] text-gray-400 flex-shrink-0">{formatRelativeTime(lastActiveAt, true)}</span>
       </div>
+      {isV2 ? (
+        <ThreadRowSignals
+          presence={presence}
+          unreadCount={unreadCount}
+          hasUserMention={hasUserMention}
+          hasDraft={hasDraft}
+          hasPendingDecision={hasPendingDecision}
+        />
+      ) : (
+        <>
+          {/* Bottom row: avatars + status + compact time */}
+          <div className="flex min-w-0 items-center justify-between">
+            <div className="flex min-w-0 items-center gap-1">
+              {/* ring-2 paints 2px beyond each avatar box; keep that paint inside the horizontal clip boundary. */}
+              <div
+                data-testid="thread-participant-metadata"
+                className="flex min-w-0 items-center gap-1 overflow-x-clip overflow-y-visible px-0.5"
+              >
+                {participants.length > 0 ? (
+                  participants.map((catId) => <CatAvatar key={catId} catId={catId} size={16} />)
+                ) : id !== 'default' && !isV2 ? (
+                  <>
+                    <PawIcon className="text-xs" />
+                    <span className="text-micro text-cafe-muted">还没有猫猫加入</span>
+                  </>
+                ) : null}
+                {preferredCats && preferredCats.length > 0 && (
+                  <div
+                    className="ml-1 flex items-center gap-0.5"
+                    title={`默认: ${preferredCats.map((id) => resolveCatDisplayName(id, getCatById)).join(', ')}`}
+                  >
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="h-2.5 w-2.5 shrink-0 text-cafe-muted"
+                    >
+                      <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
+                    </svg>
+                    {preferredCats.map((catId) => (
+                      <span
+                        key={catId}
+                        className="inline-block h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: catColorVar(catId, 'primary') }}
+                      />
+                    ))}
+                  </div>
+                )}
+                <LabelDots labels={threadLabels ? [...threadLabels] : undefined} />
+              </div>
+              <ThreadCatStatus presence={presence} unreadCount={unreadCount} hasUserMention={hasUserMention} />
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {hasDraft && <span className="text-micro font-medium text-conn-red-text">[草稿]</span>}
+              <span className="text-micro text-cafe-muted">{compactStatusTime}</span>
+            </div>
+          </div>
+        </>
+      )}
+      <ThreadSettingsPanel
+        open={isSettingsOpen}
+        threadId={id}
+        threadTitle={displayTitle}
+        projectPath={isV2 ? projectPath : undefined}
+        currentCats={[...(preferredCats ?? [])]}
+        currentLabels={[...(threadLabels ?? [])]}
+        onSavePreferredCats={onUpdatePreferredCats}
+        onSaveLabels={onUpdateLabels}
+        onClose={() => setIsSettingsOpen(false)}
+        returnFocusRef={moreButtonRef}
+      />
     </div>
   );
 }
 
+export const ThreadItem = memo(ThreadItemComponent);
+
 // ─── Small icon components ───
 
 function PinIcon() {
+  // demo sidebar-proposals.html line 205 — pushpin (stroke style, 24x24)
   return (
-    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M4.456 2.013a.75.75 0 011.06-.034l6.5 6a.75.75 0 01-.034 1.06l-1.99 1.838.637 3.22a.75.75 0 01-1.196.693L6.5 12.526l-2.933 2.264a.75.75 0 01-1.196-.693l.637-3.22-1.99-1.838a.75.75 0 01-.034-1.06l5.472-5.966z" />
+    <svg
+      className="w-3 h-3"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 17v5" />
+      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+    </svg>
+  );
+}
+
+function DeleteIcon() {
+  return (
+    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path
+        fillRule="evenodd"
+        d="M5 3.25V4H2.75a.75.75 0 000 1.5h.3l.815 8.15A1.5 1.5 0 005.357 15h5.285a1.5 1.5 0 001.493-1.35l.815-8.15h.3a.75.75 0 000-1.5H11v-.75A2.25 2.25 0 008.75 1h-1.5A2.25 2.25 0 005 3.25zm2.25-.75a.75.75 0 00-.75.75V4h3v-.75a.75.75 0 00-.75-.75h-1.5z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
+
+function MoreVerticalIcon() {
+  return (
+    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M8 4a1 1 0 110-2 1 1 0 010 2zm0 5a1 1 0 110-2 1 1 0 010 2zm0 5a1 1 0 110-2 1 1 0 010 2z" />
+    </svg>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg
+      className="w-3 h-3"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="8" cy="8" r="2.25" />
+      <path d="M6.8 1.8h2.4l.45 1.5c.35.14.68.33.98.56l1.52-.37 1.2 2.08-1.06 1.12c.03.2.05.42.05.63s-.02.42-.05.63l1.06 1.12-1.2 2.08-1.52-.37c-.3.23-.63.42-.98.56l-.45 1.5H6.8l-.45-1.5a4.7 4.7 0 0 1-.98-.56l-1.52.37-1.2-2.08 1.06-1.12a4.5 4.5 0 0 1 0-1.26L2.65 5.57l1.2-2.08 1.52.37c.3-.23.63-.42.98-.56l.45-1.5Z" />
+    </svg>
+  );
+}
+
+function RenameIcon() {
+  return (
+    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M11.013 1.427a1.75 1.75 0 112.474 2.474l-7.2 7.2a2 2 0 01-.84.49l-2.22.634a.75.75 0 01-.926-.926l.634-2.22a2 2 0 01.49-.84l7.588-7.588zm1.414 1.06a.25.25 0 00-.353 0L11.2 3.36l1.44 1.44.874-.874a.25.25 0 000-.353l-1.086-1.086zM11.58 5.86l-1.44-1.44-6.072 6.072a.5.5 0 00-.123.21l-.303 1.06 1.06-.303a.5.5 0 00.21-.123l6.668-6.668z" />
+      <path d="M2.25 13A.75.75 0 013 12.25v-.5a.75.75 0 011.5 0v.5c0 .138.112.25.25.25h8a.75.75 0 010 1.5h-8A1.75 1.75 0 012.25 13z" />
+    </svg>
+  );
+}
+
+function OrganizeIcon() {
+  return (
+    <svg
+      className="h-3 w-3"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="2" y="3" width="5" height="4" rx="1" />
+      <rect x="9" y="3" width="5" height="4" rx="1" />
+      <rect x="4.5" y="9" width="7" height="4" rx="1" />
+      <path d="M4.5 7.5v1M11.5 7.5v1" />
+    </svg>
+  );
+}
+
+/** F252 Phase E: play/replay icon for Meow Theater */
+function ReplayIcon() {
+  return (
+    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M4 2.5a.5.5 0 01.8-.4l8 6a.5.5 0 010 .8l-8 6a.5.5 0 01-.8-.4v-12z" />
+    </svg>
+  );
+}
+
+function LabelIcon() {
+  return (
+    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path
+        fillRule="evenodd"
+        d="M2.5 1A1.5 1.5 0 001 2.5v4.586a1.5 1.5 0 00.44 1.06l6.414 6.414a1.5 1.5 0 002.122 0l4.586-4.586a1.5 1.5 0 000-2.122L8.148 1.44A1.5 1.5 0 007.086 1H2.5zM5 4a1 1 0 11-2 0 1 1 0 012 0z"
+        clipRule="evenodd"
+      />
     </svg>
   );
 }
@@ -306,8 +623,63 @@ function StarIcon({ filled }: { filled?: boolean }) {
       fill={filled ? 'currentColor' : 'none'}
       stroke="currentColor"
       strokeWidth="1.2"
+      aria-hidden="true"
     >
       <path d="M8 1.5l2.09 4.26 4.71.68-3.41 3.32.8 4.69L8 12.26l-4.19 2.19.8-4.69L1.2 6.44l4.71-.68L8 1.5z" />
     </svg>
+  );
+}
+
+function ThreadActionMenuItem({
+  icon,
+  onClick,
+  danger,
+  children,
+}: {
+  icon: ReactNode;
+  onClick: () => void;
+  danger?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
+        danger ? 'text-conn-red-text hover:bg-conn-red-bg' : 'text-cafe-secondary hover:bg-cafe-surface-elevated'
+      }`}
+    >
+      <span className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center text-cafe-muted">{icon}</span>
+      <span>{children}</span>
+    </button>
+  );
+}
+
+function LabelDots({ labels }: { labels?: string[] }) {
+  const { labels: allLabels } = useLabelStore();
+  if (!labels || labels.length === 0) return null;
+  const resolved = labels
+    .map((id) => allLabels.find((l) => l.id === id))
+    .filter((l): l is NonNullable<typeof l> => l !== undefined);
+  if (resolved.length === 0) return null;
+  const shown = resolved.slice(0, 3);
+  const overflow = resolved.length - shown.length;
+  return (
+    <div
+      className="ml-1 inline-flex h-4 items-center gap-1 rounded-full bg-[var(--console-card-soft-bg)] px-1.5 text-cafe-muted"
+      title={resolved.map((l) => l.name).join(', ')}
+      data-testid="thread-label-dots"
+    >
+      <LabelIcon />
+      {shown.map((l) => (
+        <span
+          key={l.id}
+          className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full"
+          style={{ backgroundColor: l.color }}
+        />
+      ))}
+      {overflow > 0 && <span className="text-micro text-cafe-muted">+{overflow}</span>}
+    </div>
   );
 }

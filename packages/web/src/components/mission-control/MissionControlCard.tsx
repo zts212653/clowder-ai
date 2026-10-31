@@ -1,6 +1,9 @@
 'use client';
 
 import type { BacklogItem } from '@cat-cafe/shared';
+import { ExpandableProse } from '@/components/content-overflow';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
+import { isRowPrimaryActionTarget } from '@/utils/row-primary-action';
 
 interface MissionControlCardProps {
   item: BacklogItem;
@@ -9,43 +12,51 @@ interface MissionControlCardProps {
 }
 
 const PRIORITY_CLASS: Record<BacklogItem['priority'], string> = {
-  p0: 'bg-red-100 text-red-700',
-  p1: 'bg-orange-100 text-orange-700',
-  p2: 'bg-amber-100 text-amber-700',
-  p3: 'bg-slate-200 text-slate-600',
+  p0: 'bg-conn-red-bg text-conn-red-text',
+  p1: 'bg-[var(--semantic-warning-surface)] text-conn-amber-text',
+  p2: 'bg-conn-amber-bg text-conn-amber-text',
+  p3: 'bg-slate-200 text-cafe-secondary',
 };
 
 export function MissionControlCard({ item, selected, onSelect }: MissionControlCardProps) {
+  const resolveCatName = useCatNameResolver();
+  const selectItem = () => onSelect(item.id);
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(item.id)}
+    // biome-ignore lint/a11y: the nested native button owns keyboard/screen-reader semantics; the article restores the surrounding pointer hit area
+    <article
+      onClick={(event) => {
+        if (isRowPrimaryActionTarget(event.target, event.currentTarget)) selectItem();
+      }}
       className={[
-        'w-full rounded-xl border p-3 text-left transition-all',
+        'w-full cursor-pointer rounded-xl p-3 text-left transition-all',
         selected
-          ? 'border-[#5F4B37] bg-[#FFF7EA] shadow-sm'
-          : 'border-[#EADFCF] bg-[#FFFDF8] hover:border-[#CAB396] hover:bg-[#FFF8EE]',
+          ? 'bg-[var(--console-card-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.04)] ring-1 ring-[var(--console-button-emphasis)]'
+          : 'bg-[var(--console-card-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.04)] hover:bg-[var(--console-hover-bg)]',
       ].join(' ')}
     >
-      <div className="mb-2 flex items-center gap-2">
-        <span className="text-xs font-semibold text-[#5C4B39]">{item.title}</span>
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${PRIORITY_CLASS[item.priority]}`}>
+      <button type="button" onClick={selectItem} className="mb-2 flex w-full items-center gap-2 text-left">
+        <span className="text-xs font-semibold text-cafe">{item.title}</span>
+        <span className={`rounded-full px-2 py-0.5 text-micro font-semibold ${PRIORITY_CLASS[item.priority]}`}>
           {item.priority.toUpperCase()}
         </span>
-      </div>
-      <p className="line-clamp-2 text-[11px] leading-relaxed text-[#715F4C]">{item.summary}</p>
+        <span className="ml-auto text-micro font-semibold text-cafe-accent">查看</span>
+      </button>
+      <ExpandableProse text={item.summary} lines={2} contentClassName="text-xs leading-relaxed text-cafe-secondary" />
       {item.tags.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
           {item.tags.map((tag) => (
-            <span key={tag} className="rounded bg-[#EFE7DC] px-1.5 py-0.5 text-[10px] text-[#6B5946]">
+            <span
+              key={tag}
+              className="rounded bg-[var(--console-panel-bg)] px-1.5 py-0.5 text-micro text-cafe-secondary"
+            >
               #{tag}
             </span>
           ))}
         </div>
       )}
       {item.suggestion && (
-        <p className="mt-2 text-[10px] text-[#8A765F]">
-          建议领取：@{item.suggestion.catId} · {item.suggestion.requestedPhase}
+        <p className="mt-2 text-micro text-cafe-muted">
+          建议领取：{resolveCatName(item.suggestion.catId)} · {item.suggestion.requestedPhase}
         </p>
       )}
       {item.dependencies && (
@@ -53,7 +64,7 @@ export function MissionControlCard({ item, selected, onSelect }: MissionControlC
           {item.dependencies.evolvedFrom?.map((id) => (
             <span
               key={`ef-${id}`}
-              className="inline-block rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
+              className="inline-block rounded-md border border-conn-blue-ring bg-conn-blue-bg px-1.5 py-0.5 text-micro font-medium text-[var(--semantic-info)]"
             >
               ← {id.toUpperCase()}
             </span>
@@ -61,7 +72,7 @@ export function MissionControlCard({ item, selected, onSelect }: MissionControlC
           {item.dependencies.blockedBy?.map((id) => (
             <span
               key={`bb-${id}`}
-              className="inline-block rounded-md border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700"
+              className="inline-block rounded-md border border-conn-red-ring bg-conn-red-bg px-1.5 py-0.5 text-micro font-medium text-conn-red-text"
             >
               ⊘ {id.toUpperCase()}
             </span>
@@ -69,13 +80,13 @@ export function MissionControlCard({ item, selected, onSelect }: MissionControlC
           {item.dependencies.related?.map((id) => (
             <span
               key={`rel-${id}`}
-              className="inline-block rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] font-medium text-gray-600"
+              className="inline-block rounded-md bg-[var(--console-hover-bg)] px-1.5 py-0.5 text-micro font-medium text-cafe-secondary"
             >
               ↔ {id.toUpperCase()}
             </span>
           ))}
         </div>
       )}
-    </button>
+    </article>
   );
 }

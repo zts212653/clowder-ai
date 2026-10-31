@@ -2,6 +2,8 @@
 
 import { useEffect } from 'react';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
+import { ChatComposerActions } from './ChatComposerActions';
+import { ExpandableProse } from './content-overflow';
 import { LoadingIcon } from './icons/LoadingIcon';
 import { MicIcon } from './icons/MicIcon';
 import { SendIcon } from './icons/SendIcon';
@@ -12,24 +14,15 @@ interface ChatInputActionButtonProps {
   onSend: () => void;
   /** F39: Queue-mode send (content will be queued behind running invocation) */
   onQueueSend?: () => void;
-  /** F39: Force-mode send (cancel running + execute immediately) */
-  onForceSend?: () => void;
   onStop?: () => void;
+  stopState?: 'available' | 'pending' | 'unavailable' | 'hidden';
   disabled?: boolean;
   sendDisabled?: boolean;
   /** Whether the thread has an active invocation (broader than disabled/isLoading) */
   hasActiveInvocation?: boolean;
   hasText: boolean;
-}
-
-/** Queue send icon — arrow into a stack/list */
-function QueueSendIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
-      <path d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h7a1 1 0 110 2H4a1 1 0 01-1-1z" />
-      <path d="M15 11l3 3-3 3z" fillRule="evenodd" clipRule="evenodd" />
-    </svg>
-  );
+  /** Which shell draws this. Only the new shell (v2) changes where the stop button sits; classic is the default. */
+  presentation?: 'classic' | 'v2';
 }
 
 /** Renders the action button states:
@@ -46,15 +39,26 @@ export function ChatInputActionButton({
   onTranscript,
   onSend,
   onQueueSend,
-  onForceSend,
   onStop,
+  stopState,
   disabled,
   sendDisabled,
   hasActiveInvocation,
   hasText,
+  presentation = 'classic',
 }: ChatInputActionButtonProps) {
   const voice = useVoiceInput();
+
   const isSendDisabled = Boolean(disabled || sendDisabled);
+  const resolvedStopState = stopState ?? (onStop ? 'available' : 'hidden');
+  const showStop = Boolean(hasActiveInvocation && resolvedStopState !== 'hidden');
+  const stopDisabled = resolvedStopState !== 'available' || !onStop;
+  const stopTitle =
+    resolvedStopState === 'pending'
+      ? '正在停止'
+      : resolvedStopState === 'unavailable'
+        ? '正在确认可停止的运行状态'
+        : '停止当前对话全部回复';
 
   useEffect(() => {
     if (voice.transcript) onTranscript(voice.transcript);
@@ -80,48 +84,73 @@ export function ChatInputActionButton({
   // F39: Whether we're in queue mode (cat running + user has typed)
   const isQueueMode = Boolean(hasActiveInvocation && hasText && !disabled);
 
+  // Stop button: visible alongside queue send (primary stop covers disabled state).
+  // New shell (v2) only: with an empty draft it is the last control (the design's "send key becomes ■"); with text, an
+  // attachment or a quote the send controls own that spot and stopping lives on the one execution row. The classic
+  // interface keeps the button beside the send controls, exactly as it always was.
+  const isV2 = presentation === 'v2';
+  const sideStop =
+    showStop && !disabled && !(isV2 && hasText) ? (
+      <button
+        type="button"
+        onClick={() => onStop?.()}
+        disabled={stopDisabled}
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-conn-red-text text-[var(--cafe-surface)] transition-colors hover:bg-conn-red-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-conn-red-text/40 disabled:cursor-wait disabled:opacity-50"
+        title={stopTitle}
+        aria-label="Stop generation"
+      >
+        <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+          <rect x="4" y="4" width="12" height="12" rx="2" />
+        </svg>
+      </button>
+    ) : null;
+
   return (
     <>
       {/* Voice recording status (absolute, attaches to ancestor .relative) */}
       {voice.state === 'recording' && (
         <div className="absolute top-0 right-4 -mt-6 flex items-center gap-2">
           {voice.partialTranscript && (
-            <div className="px-2 py-0.5 bg-gray-800 text-white text-xs rounded-lg max-w-[240px] truncate opacity-80">
-              {voice.partialTranscript}
-            </div>
+            <ExpandableProse
+              text={voice.partialTranscript}
+              lines={2}
+              className="max-w-[240px] rounded-lg bg-cafe-surface-sunken px-2 py-0.5 opacity-80"
+              contentClassName="text-xs leading-4 text-cafe"
+            />
           )}
-          <div className="px-2 py-0.5 bg-red-500 text-white text-xs rounded-full animate-pulse whitespace-nowrap">
+          <div className="px-2 py-0.5 bg-conn-red-text text-[var(--cafe-accent-foreground)] text-xs rounded-full animate-pulse whitespace-nowrap">
             REC {Math.floor(voice.duration / 60)}:{String(voice.duration % 60).padStart(2, '0')}
           </div>
         </div>
       )}
       {voice.error && (
-        <div className="absolute top-0 left-4 -mt-6 px-3 py-1 bg-red-100 text-red-600 text-xs rounded-lg">
+        <div className="absolute top-0 left-4 -mt-6 px-3 py-1 bg-conn-red-bg text-conn-red-text text-xs rounded-lg">
           {voice.error}
         </div>
       )}
 
-      {/* Stop button: visible alongside queue send during active invocation (not when disabled — primary stop covers it) */}
-      {hasActiveInvocation && !disabled && onStop && (
-        <button
-          onClick={() => onStop()}
-          className="p-2 rounded-lg bg-red-500/80 text-white hover:bg-red-600 transition-colors"
-          title="停止生成"
-          aria-label="Stop generation"
-        >
-          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-            <rect x="4" y="4" width="12" height="12" rx="2" />
-          </svg>
-        </button>
-      )}
+      {!isV2 && sideStop}
 
       {/* Primary action button priority chain */}
-      {disabled && onStop && hasActiveInvocation ? (
+      {isV2 ? (
+        <ChatComposerActions
+          voice={voice}
+          hasText={hasText}
+          disabled={disabled}
+          sendDisabled={sendDisabled}
+          showStop={showStop}
+          stopState={resolvedStopState}
+          onStop={onStop}
+          onSend={onSend}
+        />
+      ) : disabled && showStop ? (
         /* Backward compat: when explicitly disabled during active invocation, Stop is the only primary action */
         <button
-          onClick={() => onStop()}
-          className="p-3 rounded-xl bg-red-500 text-white hover:bg-red-600 transition-colors"
-          title="停止生成"
+          type="button"
+          onClick={() => onStop?.()}
+          disabled={stopDisabled}
+          className="p-3 rounded-xl bg-conn-red-text text-[var(--cafe-surface)] hover:bg-conn-red-hover transition-colors disabled:cursor-wait disabled:opacity-50"
+          title={stopTitle}
           aria-label="Stop generation"
         >
           <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
@@ -131,7 +160,7 @@ export function ChatInputActionButton({
       ) : voice.state === 'recording' ? (
         <button
           onClick={voice.stopRecording}
-          className="p-3 rounded-xl bg-red-500 text-white hover:bg-red-600 transition-colors animate-pulse"
+          className="p-3 rounded-xl bg-conn-red-text text-[var(--cafe-surface)] hover:bg-conn-red-hover transition-colors animate-pulse"
           title="停止录音"
           aria-label="Stop recording"
         >
@@ -140,57 +169,39 @@ export function ChatInputActionButton({
       ) : voice.state === 'transcribing' ? (
         <button
           disabled
-          className="p-3 rounded-xl bg-gray-300 text-white cursor-wait"
+          className="p-3 rounded-xl bg-cafe-surface-sunken text-cafe-muted cursor-wait"
           title="转写中"
           aria-label="Transcribing"
         >
           <LoadingIcon className="w-5 h-5" />
         </button>
       ) : isQueueMode && onQueueSend ? (
-        /* F39: Queue send — cat is running, user typed, queue the message */
-        <div className="flex items-center gap-1">
-          <button
-            onClick={onQueueSend}
-            disabled={isSendDisabled}
-            className="p-3 rounded-xl bg-[#9B7EBD] text-white hover:bg-[#8A6DAC] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            aria-label="排队发送"
-            title="排队发送 — 猫猫忙完后处理"
-          >
-            <QueueSendIcon className="w-5 h-5" />
-          </button>
-          {onForceSend && (
-            <button
-              onClick={onForceSend}
-              disabled={isSendDisabled}
-              className="p-2 rounded-lg text-xs text-red-500 hover:bg-red-50 disabled:opacity-40 transition-colors"
-              aria-label="强制发送"
-              title="强制发送 — 中断当前猫猫"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                <path
-                  fillRule="evenodd"
-                  d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.381z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </button>
-          )}
-        </div>
-      ) : hasText ? (
+        /* Every authored message takes the same send path. Queue admission
+           applies the strategy selected from the + menu after the click. */
         <button
-          onClick={onSend}
+          onClick={onQueueSend}
           disabled={isSendDisabled}
-          className="p-3 rounded-xl bg-cocreator-primary text-white hover:bg-cocreator-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="p-3 rounded-xl bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-interactive disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           title="发送消息"
           aria-label="Send message"
         >
           <SendIcon className="w-5 h-5" />
         </button>
-      ) : (
+      ) : hasText ? (
+        <button
+          onClick={onSend}
+          disabled={isSendDisabled}
+          className="p-3 rounded-xl bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-interactive disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          title="发送消息"
+          aria-label="Send message"
+        >
+          <SendIcon className="w-5 h-5" />
+        </button>
+      ) : hasActiveInvocation ? null : (
         <button
           onClick={voice.startRecording}
           disabled={disabled}
-          className="p-3 rounded-xl text-gray-400 hover:text-cocreator-primary hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="p-3 rounded-xl text-cafe-muted hover:text-cafe-accent hover:bg-cafe-surface disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           aria-label="Start voice input (⌥V)"
           title="语音输入 (⌥V)"
         >

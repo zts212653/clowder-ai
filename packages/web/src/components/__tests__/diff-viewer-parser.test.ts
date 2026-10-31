@@ -41,8 +41,9 @@ describe('parseUnifiedDiff', () => {
     expect(files[0].hunks).toHaveLength(1);
 
     const lines = files[0].hunks[0].lines;
-    // header + 2 context + 1 remove + 2 add + 3 context (incl trailing) = 9
-    expect(lines).toHaveLength(9);
+    // A final newline terminates the closing-brace line; it is not a ninth blank context line.
+    expect(lines).toHaveLength(8);
+    expect(lines.at(-1)).toEqual({ type: 'context', content: '}', oldLine: 14, newLine: 15 });
 
     const removes = lines.filter((l) => l.type === 'remove');
     const adds = lines.filter((l) => l.type === 'add');

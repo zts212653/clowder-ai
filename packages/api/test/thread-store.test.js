@@ -7,6 +7,26 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 describe('ThreadStore', () => {
+  test('persists and clears generic plugin ownership for a thread', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'Plugin-owned thread');
+    const ownership = { v: 1, pluginInstanceId: 'pi_telegram' };
+
+    store.updatePluginOwnership(thread.id, ownership);
+    assert.deepEqual(store.get(thread.id)?.pluginOwnership, ownership);
+
+    store.updatePluginOwnership(thread.id, null);
+    assert.equal(store.get(thread.id)?.pluginOwnership, undefined);
+
+    assert.throws(
+      () => store.updatePluginOwnership(thread.id, { v: 1, pluginInstanceId: '  ' }),
+      /invalid plugin thread ownership/,
+    );
+    assert.equal(store.get(thread.id)?.pluginOwnership, undefined);
+  });
+
   test('create() returns a thread with generated id', async () => {
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
 
@@ -508,6 +528,17 @@ describe('ThreadStore', () => {
     assert.equal(updated?.backlogItemId, 'blg_123');
   });
 
+  test('updateBacklogItem() can replace and clear the reverse backlog reference', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'Post-create feature');
+
+    store.updateBacklogItem(thread.id, 'blg_123');
+    assert.equal(store.get(thread.id)?.backlogItemId, 'blg_123');
+    store.updateBacklogItem(thread.id, null);
+    assert.equal(store.get(thread.id)?.backlogItemId, undefined);
+  });
+
   // ── F079: Voting State ──
 
   test('getVotingState() returns null when no vote', async () => {
@@ -558,5 +589,237 @@ describe('ThreadStore', () => {
 
     store.updateVotingState(thread.id, null);
     assert.equal(store.getVotingState(thread.id), null);
+  });
+
+  // ── #813: Pending continuation per-cat isolation ──
+
+  test('#813: setPendingContinuation + consumePendingContinuation per-cat isolation', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'cont-test');
+
+    const capsuleA = { summary: 'cat A context' };
+    const capsuleB = { summary: 'cat B context' };
+
+    // Write continuation for two cats (same user)
+    store.setPendingContinuation(thread.id, 'catA', 'user-1', { capsule: capsuleA, createdAt: 1000 });
+    store.setPendingContinuation(thread.id, 'catB', 'user-1', { capsule: capsuleB, createdAt: 2000 });
+
+    // Consume catA — catB should remain
+    const resultA = store.consumePendingContinuation(thread.id, 'catA', 'user-1');
+    assert.ok(resultA);
+    assert.deepEqual(resultA.capsule, capsuleA);
+    assert.equal(resultA.createdAt, 1000);
+
+    // catB still present
+    const resultB = store.consumePendingContinuation(thread.id, 'catB', 'user-1');
+    assert.ok(resultB);
+    assert.deepEqual(resultB.capsule, capsuleB);
+    assert.equal(resultB.createdAt, 2000);
+  });
+
+  test('#813: consumePendingContinuation returns null for non-existent cat', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'cont-test-2');
+
+    store.setPendingContinuation(thread.id, 'catA', 'user-1', { capsule: { x: 1 }, createdAt: 1000 });
+
+    const result = store.consumePendingContinuation(thread.id, 'catX', 'user-1');
+    assert.equal(result, null);
+
+    // catA still available
+    const resultA = store.consumePendingContinuation(thread.id, 'catA', 'user-1');
+    assert.ok(resultA);
+  });
+
+  test('#813: consumePendingContinuation is one-shot (second call returns null)', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'cont-test-3');
+
+    store.setPendingContinuation(thread.id, 'catA', 'user-1', { capsule: { data: 'once' }, createdAt: 500 });
+
+    const first = store.consumePendingContinuation(thread.id, 'catA', 'user-1');
+    assert.ok(first);
+    const second = store.consumePendingContinuation(thread.id, 'catA', 'user-1');
+    assert.equal(second, null);
+  });
+
+  // Cloud Codex P1: cross-user isolation — user B must not consume user A's continuation
+  test('#813: pending continuation is scoped per-user (cross-user isolation)', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'cont-test-user-scope');
+
+    const capsuleUserA = { summary: 'user A sealed context' };
+    store.setPendingContinuation(thread.id, 'catA', 'user-1', { capsule: capsuleUserA, createdAt: 1000 });
+
+    // user-2 consuming same cat in same thread should get null
+    const resultB = store.consumePendingContinuation(thread.id, 'catA', 'user-2');
+    assert.equal(resultB, null);
+
+    // user-1 can still consume their own
+    const resultA = store.consumePendingContinuation(thread.id, 'catA', 'user-1');
+    assert.ok(resultA);
+    assert.deepEqual(resultA.capsule, capsuleUserA);
+  });
+
+  // #836: Reborn session strategy tests
+  test('#836: updateMemberSessionStrategy sets and clears reborn', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'reborn-test');
+
+    // Initially no strategy set — isRebornSession returns false
+    assert.equal(store.isRebornSession(thread.id, 'catA'), false);
+
+    // Set reborn strategy
+    store.updateMemberSessionStrategy(thread.id, 'catA', 'reborn');
+    assert.equal(store.isRebornSession(thread.id, 'catA'), true);
+
+    // Other cats not affected
+    assert.equal(store.isRebornSession(thread.id, 'catB'), false);
+
+    // Clear by setting null (removes override)
+    store.updateMemberSessionStrategy(thread.id, 'catA', null);
+    assert.equal(store.isRebornSession(thread.id, 'catA'), false);
+
+    // Verify container is cleaned up
+    const updated = store.get(thread.id);
+    assert.equal(updated.memberSessionStrategy, undefined);
+  });
+
+  test('#836: resume strategy is treated as default (not reborn)', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'resume-test');
+
+    // Explicitly setting 'resume' also clears the override (it's the default)
+    store.updateMemberSessionStrategy(thread.id, 'catA', 'reborn');
+    assert.equal(store.isRebornSession(thread.id, 'catA'), true);
+
+    store.updateMemberSessionStrategy(thread.id, 'catA', 'resume');
+    assert.equal(store.isRebornSession(thread.id, 'catA'), false);
+  });
+
+  test('#836: getMemberSessionStrategy exposes coordinator policy read', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'strategy-read-test');
+
+    assert.equal(store.getMemberSessionStrategy(thread.id, 'catA', 'user-1'), undefined);
+    store.updateMemberSessionStrategy(thread.id, 'catA', 'reborn');
+    assert.equal(store.getMemberSessionStrategy(thread.id, 'catA', 'user-1'), 'reborn');
+    store.updateMemberSessionStrategy(thread.id, 'catA', 'resume');
+    assert.equal(store.getMemberSessionStrategy(thread.id, 'catA', 'user-1'), undefined);
+  });
+
+  test('#836: reborn is per-cat-per-thread (isolation)', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const threadA = store.create('user-1', 'thread-a');
+    const threadB = store.create('user-1', 'thread-b');
+
+    // Set reborn for catA in threadA only
+    store.updateMemberSessionStrategy(threadA.id, 'catA', 'reborn');
+
+    assert.equal(store.isRebornSession(threadA.id, 'catA'), true);
+    // Same cat in different thread — not reborn
+    assert.equal(store.isRebornSession(threadB.id, 'catA'), false);
+    // Different cat in same thread — not reborn
+    assert.equal(store.isRebornSession(threadA.id, 'catB'), false);
+  });
+
+  test('#836: isRebornSession returns false for non-existent thread', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    assert.equal(store.isRebornSession('ghost-thread', 'catA'), false);
+  });
+
+  test('F262: member effort overrides are isolated by thread and cat', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const threadA = store.create('user-1', 'effort-a');
+    const threadB = store.create('user-1', 'effort-b');
+
+    store.updateMemberEffort(threadA.id, 'catA', 'max');
+    store.updateMemberEffort(threadA.id, 'catB', 'low');
+    store.updateMemberEffort(threadB.id, 'catA', 'xhigh');
+
+    assert.equal(store.getMemberEffort(threadA.id, 'catA', 'user-1'), 'max');
+    assert.equal(store.getMemberEffort(threadA.id, 'catB', 'user-1'), 'low');
+    assert.equal(store.getMemberEffort(threadB.id, 'catA', 'user-1'), 'xhigh');
+    assert.deepEqual(store.getMemberEfforts(threadA.id, 'user-1'), { catA: 'max', catB: 'low' });
+  });
+
+  test('F262: clearing the last member effort removes the container', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'effort-clear');
+
+    store.updateMemberEffort(thread.id, 'catA', 'max');
+    store.updateMemberEffort(thread.id, 'catA', null);
+
+    assert.equal(store.getMemberEffort(thread.id, 'catA', 'user-1'), undefined);
+    assert.deepEqual(store.getMemberEfforts(thread.id, 'user-1'), {});
+    assert.equal(store.get(thread.id).memberEffortOverrides, undefined);
+  });
+
+  test('F262: effort survives soft-delete restore and disappears on hard delete', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'effort-lifecycle');
+    store.updateMemberEffort(thread.id, 'catA', 'ultra');
+
+    store.softDelete(thread.id);
+    store.restore(thread.id);
+    assert.equal(store.getMemberEffort(thread.id, 'catA', 'user-1'), 'ultra');
+
+    store.delete(thread.id);
+    assert.equal(store.getMemberEffort(thread.id, 'catA', 'user-1'), undefined);
+    assert.deepEqual(store.getMemberEfforts(thread.id, 'user-1'), {});
+  });
+
+  test('F262: updating a missing thread is a no-op', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    store.updateMemberEffort('ghost-thread', 'catA', 'max');
+    assert.deepEqual(store.getMemberEfforts('ghost-thread', 'user-1'), {});
+  });
+
+  test('F291: member speed overrides are isolated, clearable, and persistent for the thread lifetime', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const threadA = store.create('user-1', 'speed-a');
+    const threadB = store.create('user-1', 'speed-b');
+
+    store.updateMemberSpeed(threadA.id, 'codex-sol', 'fast');
+    store.updateMemberSpeed(threadA.id, 'codex-terra', 'standard');
+    store.updateMemberSpeed(threadB.id, 'codex-sol', 'standard');
+
+    assert.equal(store.getMemberSpeed(threadA.id, 'codex-sol', 'user-1'), 'fast');
+    assert.deepEqual(store.getMemberSpeeds(threadA.id, 'user-1'), {
+      'codex-sol': 'fast',
+      'codex-terra': 'standard',
+    });
+    assert.equal(store.getMemberSpeed(threadB.id, 'codex-sol', 'user-1'), 'standard');
+
+    store.updateMemberSpeed(threadA.id, 'codex-sol', null);
+    assert.equal(store.getMemberSpeed(threadA.id, 'codex-sol', 'user-1'), undefined);
+    assert.deepEqual(store.getMemberSpeeds(threadA.id, 'user-1'), { 'codex-terra': 'standard' });
+
+    store.softDelete(threadA.id);
+    store.restore(threadA.id);
+    assert.equal(store.getMemberSpeed(threadA.id, 'codex-terra', 'user-1'), 'standard');
+    store.delete(threadA.id);
+    assert.deepEqual(store.getMemberSpeeds(threadA.id, 'user-1'), {});
+  });
+
+  test('F291: updating speed on a missing thread is a no-op', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    store.updateMemberSpeed('ghost-thread', 'codex-sol', 'fast');
+    assert.deepEqual(store.getMemberSpeeds('ghost-thread', 'user-1'), {});
   });
 });

@@ -1,7 +1,9 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CatData } from '@/hooks/useCatData';
 import { primeCoCreatorConfigCache, resetCoCreatorConfigCacheForTest } from '@/hooks/useCoCreatorConfig';
+import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -32,7 +34,7 @@ vi.mock('@/components/rich/RichBlocks', () => ({ RichBlocks: () => null }));
 describe('ChatMessage owner live update', () => {
   let container: HTMLDivElement;
   let root: Root;
-  let ChatMessage: React.FC<{ message: Record<string, unknown> }>;
+  let ChatMessage: React.FC<{ message: ChatMessageType; getCatById: (id: string) => CatData | undefined }>;
 
   beforeAll(async () => {
     (globalThis as { React?: typeof React }).React = React;
@@ -74,6 +76,7 @@ describe('ChatMessage owner live update', () => {
           message: {
             id: 'owner-msg',
             type: 'user',
+            from: { kind: 'user', userId: 'test-user' },
             content: '你好',
             timestamp: Date.now(),
             contentBlocks: [],
@@ -84,7 +87,9 @@ describe('ChatMessage owner live update', () => {
     });
 
     expect(container.textContent).toContain('始皇帝');
-    expect(container.querySelector('img[alt="始皇帝"]')?.getAttribute('src')).toBe('/uploads/qin-owner.png');
+    expect(container.querySelector('[data-sender-avatar="message"] img')?.getAttribute('src')).toBe(
+      '/uploads/qin-owner.png',
+    );
 
     act(() => {
       primeCoCreatorConfigCache({
@@ -98,6 +103,8 @@ describe('ChatMessage owner live update', () => {
 
     expect(container.textContent).toContain('嬴政');
     expect(container.textContent).not.toContain('始皇帝');
-    expect(container.querySelector('img[alt="嬴政"]')?.getAttribute('src')).toBe('/uploads/yingzheng.png');
+    expect(container.querySelector('[data-sender-avatar="message"] img')?.getAttribute('src')).toBe(
+      '/uploads/yingzheng.png',
+    );
   });
 });

@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('POST /api/threads/read/mark-all', () => {
   let app;
@@ -63,51 +64,159 @@ describe('POST /api/threads/read/mark-all', () => {
 
     // Add messages to each thread
     for (const t of threads) {
-      messageStore.append({
-        userId: 'alice',
-        catId: 'opus',
-        content: `msg1 in ${t.id}`,
-        mentions: [],
-        timestamp: 1000,
-        threadId: t.id,
-      });
-      messageStore.append({
-        userId: 'alice',
-        catId: 'opus',
-        content: `msg2 in ${t.id}`,
-        mentions: [],
-        timestamp: 2000,
-        threadId: t.id,
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'alice',
+          catId: 'opus',
+          content: `msg1 in ${t.id}`,
+          mentions: [],
+          timestamp: 1000,
+          threadId: t.id,
+        }),
+      );
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'alice',
+          catId: 'opus',
+          content: `msg2 in ${t.id}`,
+          mentions: [],
+          timestamp: 2000,
+          threadId: t.id,
+        }),
+      );
     }
 
     const res = await app.inject({
       method: 'POST',
-      url: '/api/threads/read/mark-all?userId=alice',
+      url: '/api/threads/read/mark-all',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
 
     assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).handledMentionCount, 0);
     const body = JSON.parse(res.body);
     // Should have advanced cursors for threads that had messages
     assert.ok(body.advancedCount >= 2, `advancedCount=${body.advancedCount} should be >= 2`);
   });
 
-  it('is idempotent — second call advances 0', async () => {
-    const t = threadStore.create('alice', 'Thread X');
-    messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'hello',
-      mentions: [],
-      timestamp: 1000,
-      threadId: t.id,
+  it('uses the same durable read evidence to move @you requests into viewed history', async () => {
+    const thread = threadStore.create('alice', 'Mention Thread');
+    const mention = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        content: '@alice please read',
+        mentions: [],
+        mentionsUser: true,
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/read/mark-all',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
 
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).handledMentionCount, 1);
+    assert.deepEqual(messageStore.listUserMentionRequests('alice'), []);
+    assert.deepEqual(
+      messageStore.listHandledUserMentions('alice').map((message) => message.id),
+      [mention.id],
+    );
+    assert.equal(messageStore.getUserMentionHandlingMetadata('alice')[mention.id]?.reason, 'viewed');
+  });
+
+  it('acks threads whose latest visible item is queued cat-authored speech', async () => {
+    const thread = threadStore.create('alice', 'Source-cat seed only');
+    const seed = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        content: 'published source-cat seed',
+        mentions: ['opus'],
+        timestamp: 1000,
+        threadId: thread.id,
+        deliveryStatus: 'queued',
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/read/mark-all',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).advancedCount, 1);
+    assert.equal((await readStateStore.get('alice', thread.id)).lastReadMessageId, seed.id);
+  });
+
+  // #1200 P1 mixed-thread regression: ordinary A + queued cat Q in same thread.
+  // mark-all must ack to Q (latest visibilitySeq), not A.
+  it('mixed thread: queued cat speech Q after ordinary A — acks to Q', async () => {
+    const thread = threadStore.create('alice', 'Mixed: ordinary + queued');
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        content: 'ordinary message A',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
+    const q = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        content: 'queued cat speech Q',
+        mentions: ['opus'],
+        timestamp: 2000,
+        threadId: thread.id,
+        deliveryStatus: 'queued',
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/read/mark-all',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).advancedCount, 1);
+    // Acked cursor must correspond to Q (the latest visible), not A.
+    // gatedReadStateAck demotes v2→raw when gate OFF, so stored ID is Q's raw ID.
+    const state = await readStateStore.get('alice', thread.id);
+    assert.ok(state, 'read state must exist');
+    assert.equal(state.lastReadMessageId, q.id, 'acked message must be Q, not A');
+  });
+
+  it('is idempotent — second call advances 0', async () => {
+    const t = threadStore.create('alice', 'Thread X');
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'hello',
+        mentions: [],
+        timestamp: 1000,
+        threadId: t.id,
+      }),
+    );
+
     // First call
-    await app.inject({ method: 'POST', url: '/api/threads/read/mark-all?userId=alice' });
+    await app.inject({ method: 'POST', url: '/api/threads/read/mark-all', headers: { 'x-cat-cafe-user': 'alice' } });
 
     // Second call — should be no-op
-    const res = await app.inject({ method: 'POST', url: '/api/threads/read/mark-all?userId=alice' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/read/mark-all',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
     const body = JSON.parse(res.body);
     assert.equal(body.advancedCount, 0);
   });
@@ -117,7 +226,8 @@ describe('POST /api/threads/read/mark-all', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: '/api/threads/read/mark-all?userId=alice',
+      url: '/api/threads/read/mark-all',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
 
     assert.equal(res.statusCode, 200);
@@ -135,7 +245,8 @@ describe('POST /api/threads/read/mark-all', () => {
 
     const res = await noReadApp.inject({
       method: 'POST',
-      url: '/api/threads/read/mark-all?userId=alice',
+      url: '/api/threads/read/mark-all',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     assert.equal(res.statusCode, 501);
     await noReadApp.close();

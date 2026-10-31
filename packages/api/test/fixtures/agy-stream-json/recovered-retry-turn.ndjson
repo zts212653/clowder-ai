@@ -1,0 +1,45 @@
+{"event":"init","conversation_id":"recovered-retry-session","init":{"agent":"fixture-agent","model":"gemini-4-argon-high","cwd":"/fixture","permission_mode":"request-review"}}
+{"event":"step_update","step_update":{"step_index":68,"state":"DONE","step_type":"user_input","conversation_id":"recovered-retry-session"}}
+{"event":"step_update","step_update":{"step_index":69,"state":"DONE","step_type":"system_message","conversation_id":"recovered-retry-session"}}
+{"event":"step_update","step_update":{"step_index":70,"state":"DONE","step_type":"error_message","conversation_id":"recovered-retry-session"}}
+{"event":"step_update","step_update":{"step_index":71,"state":"DONE","step_type":"agent_response","conversation_id":"recovered-retry-session"}}
+{"event":"step_update","step_update":{"step_index":72,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":72,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":73,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":73,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":74,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":74,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":75,"state":"DONE","step_type":"agent_response","conversation_id":"recovered-retry-session"}}
+{"event":"step_update","step_update":{"step_index":76,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":76,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":77,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":77,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":78,"state":"DONE","step_type":"agent_response","conversation_id":"recovered-retry-session"}}
+{"event":"step_update","step_update":{"step_index":79,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":79,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":80,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":80,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":81,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":81,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":82,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":82,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":83,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":83,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":84,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":84,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":85,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":85,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":86,"state":"DONE","step_type":"agent_response","conversation_id":"recovered-retry-session"}}
+{"event":"step_update","step_update":{"step_index":87,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":87,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":88,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":88,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":89,"state":"DONE","step_type":"agent_response","conversation_id":"recovered-retry-session"}}
+{"event":"step_update","step_update":{"step_index":90,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":90,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":91,"state":"DONE","step_type":"agent_response","conversation_id":"recovered-retry-session"}}
+{"event":"step_update","step_update":{"step_index":92,"state":"ACTIVE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/fixture/report.md"}}}}
+{"event":"step_update","step_update":{"step_index":92,"state":"DONE","step_type":"tool","conversation_id":"recovered-retry-session","tool_name":"view_file","tool_info":{"output":"fixture observation"}}}
+{"event":"step_update","step_update":{"step_index":93,"state":"ACTIVE","step_type":"agent_response","conversation_id":"recovered-retry-session","text_delta":"Recovered review"}}
+{"event":"step_update","step_update":{"step_index":93,"state":"DONE","step_type":"agent_response","conversation_id":"recovered-retry-session","text_delta":"\n"}}
+{"event":"result","result":{"conversation_id":"recovered-retry-session","status":"ERROR","num_turns":2,"response":"Recovered review\n","error":"API error (attempt 1): request failed: read: connection reset by peer"}}

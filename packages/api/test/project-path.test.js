@@ -1,14 +1,43 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
-const { validateProjectPath, isUnderAllowedRoot, getAllowedRoots, getDefaultRootsForPlatform, isPathUnderRoots } =
-  await import('../dist/utils/project-path.js');
+const {
+  validateProjectPath,
+  validateProjectPathDetailed,
+  isUnderAllowedRoot,
+  getAllowedRoots,
+  getDefaultDeniedRoots,
+  isPathUnderRoots,
+  isDenylistMode,
+} = await import('../dist/utils/project-path.js');
+const {
+  migrateStoredProjectPath,
+  redirectRuntimeProjectPath,
+  resolvePersistentProjectPathDetailed,
+  validateExternalProjectPathDetailed,
+} = await import('../dist/utils/persistent-project-path.js');
 
-describe('isUnderAllowedRoot', () => {
+describe('denylist mode (default)', () => {
+  let savedAllowedRoots;
+
+  before(() => {
+    savedAllowedRoots = process.env.PROJECT_ALLOWED_ROOTS;
+    delete process.env.PROJECT_ALLOWED_ROOTS;
+  });
+
+  after(() => {
+    if (savedAllowedRoots === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
+    else process.env.PROJECT_ALLOWED_ROOTS = savedAllowedRoots;
+  });
+
+  it('uses denylist mode by default', () => {
+    assert.strictEqual(isDenylistMode(), true);
+  });
+
   it('accepts path under home directory', () => {
     assert.strictEqual(isUnderAllowedRoot(join(homedir(), 'projects')), true);
   });
@@ -21,54 +50,75 @@ describe('isUnderAllowedRoot', () => {
     assert.strictEqual(isUnderAllowedRoot('/tmp/test-dir'), true);
   });
 
-  it('rejects path with home prefix but no separator boundary', () => {
-    // /home/user-evil should NOT pass for home = /home/user
-    const fakePath = `${homedir()}-evil/data`;
-    assert.strictEqual(isUnderAllowedRoot(fakePath), false);
+  it('accepts /opt, /srv, /mnt and other common project locations', () => {
+    assert.strictEqual(isUnderAllowedRoot('/opt/projects'), true);
+    assert.strictEqual(isUnderAllowedRoot('/srv/data'), true);
+    assert.strictEqual(isUnderAllowedRoot('/mnt/disk/repo'), true);
+    assert.strictEqual(isUnderAllowedRoot('/usr/code'), true);
+    assert.strictEqual(isUnderAllowedRoot('/var/www/site'), true);
   });
 
-  it('rejects path outside allowed roots', () => {
-    assert.strictEqual(isUnderAllowedRoot('/etc/passwd'), false);
-    assert.strictEqual(isUnderAllowedRoot('/var/log'), false);
+  it('rejects paths under denied system directories', () => {
+    if (process.platform === 'darwin') {
+      assert.strictEqual(isUnderAllowedRoot('/dev/null'), false);
+      assert.strictEqual(isUnderAllowedRoot('/sbin/mount'), false);
+      assert.strictEqual(isUnderAllowedRoot('/System/Library'), false);
+    } else {
+      assert.strictEqual(isUnderAllowedRoot('/proc/1/status'), false);
+      assert.strictEqual(isUnderAllowedRoot('/sys/class'), false);
+      assert.strictEqual(isUnderAllowedRoot('/dev/null'), false);
+      assert.strictEqual(isUnderAllowedRoot('/boot/vmlinuz'), false);
+      assert.strictEqual(isUnderAllowedRoot('/sbin/init'), false);
+      assert.strictEqual(isUnderAllowedRoot('/run/user'), false);
+    }
   });
 
-  it('rejects root directory', () => {
-    assert.strictEqual(isUnderAllowedRoot('/'), false);
+  it('getAllowedRoots() returns denied roots in denylist mode', () => {
+    const roots = getAllowedRoots();
+    assert.ok(Array.isArray(roots));
+    assert.ok(roots.length > 0);
+  });
+});
+
+describe('getDefaultDeniedRoots', () => {
+  it('returns system directories for macOS', () => {
+    const denied = getDefaultDeniedRoots('darwin');
+    assert.ok(denied.includes('/dev'));
+    assert.ok(denied.includes('/sbin'));
+    assert.ok(denied.includes('/System'));
   });
 
-  it('rejects cross-drive Windows paths when custom roots are configured', () => {
+  it('returns system directories for Linux', () => {
+    const denied = getDefaultDeniedRoots('linux');
+    assert.ok(denied.includes('/proc'));
+    assert.ok(denied.includes('/sys'));
+    assert.ok(denied.includes('/dev'));
+    assert.ok(denied.includes('/boot'));
+  });
+
+  it('returns SYSTEMROOT for Windows', () => {
+    const denied = getDefaultDeniedRoots('win32');
+    assert.ok(denied.length >= 1);
+  });
+});
+
+describe('isPathUnderRoots', () => {
+  it('rejects cross-drive Windows paths', () => {
     assert.strictEqual(isPathUnderRoots('D:\\repo', ['C:\\work'], 'win32'), false);
     assert.strictEqual(isPathUnderRoots('C:\\work\\repo', ['C:\\work'], 'win32'), true);
   });
 });
 
-describe('getDefaultRootsForPlatform', () => {
-  it('keeps Windows defaults scoped to the user home directory', () => {
-    const roots = getDefaultRootsForPlatform('win32', {
-      homeDir: 'C:\\Users\\share',
-      pathExists: (target) => target === 'C:\\' || target === 'D:\\',
-    });
-    assert.deepStrictEqual(roots, ['C:\\Users\\share']);
-    assert.strictEqual(isPathUnderRoots('C:\\Users\\share\\repo', roots, 'win32'), true);
-    assert.strictEqual(isPathUnderRoots('C:\\Windows', roots, 'win32'), false);
-    assert.strictEqual(isPathUnderRoots('D:\\other-user', roots, 'win32'), false);
-  });
-});
-
 describe('validateProjectPath', () => {
-  // NOTE: tests run in a workspace-write sandbox where $HOME might be read-only.
-  // Use /tmp (allowed root) for temp directory creation.
   let testDir;
   let subDir;
 
   before(() => {
-    // Create test directories
     testDir = mkdtempSync('/tmp/cat-cafe-test-path-validation-');
     subDir = join(testDir, 'project-a');
     mkdirSync(subDir, { recursive: true });
   });
 
-  // Cleanup handled by caller or next test run
   after(() => {
     rmSync(testDir, { recursive: true, force: true });
   });
@@ -84,8 +134,27 @@ describe('validateProjectPath', () => {
     assert.strictEqual(result, null);
   });
 
-  it('returns null for path outside allowed roots', async () => {
-    const result = await validateProjectPath('/etc');
+  it('classifies transient filesystem errors separately from invalid paths', async () => {
+    const result = await validateProjectPathDetailed('/tmp/project', {
+      realpath: async () => {
+        const err = new Error('disk not ready');
+        err.code = 'EIO';
+        throw err;
+      },
+      stat: async () => {
+        throw new Error('stat should not be reached');
+      },
+    });
+
+    assert.deepStrictEqual(result, {
+      ok: false,
+      reason: 'io_error',
+      message: 'disk not ready',
+    });
+  });
+
+  it('returns null for denied system path', async () => {
+    const result = await validateProjectPath('/dev');
     assert.strictEqual(result, null);
   });
 
@@ -98,23 +167,18 @@ describe('validateProjectPath', () => {
   });
 
   it('resolves symlinks and checks real path', async () => {
-    // Create a symlink under home that points to /tmp
     const linkPath = join(testDir, 'link-to-tmp');
     if (existsSync(linkPath)) rmSync(linkPath);
     symlinkSync('/tmp', linkPath);
-
-    // validateProjectPath should resolve the symlink to /tmp
-    // /tmp IS an allowed root, so this should succeed
     const result = await validateProjectPath(linkPath);
-    // /tmp is allowed, so the resolved path should be returned
     assert.ok(result);
   });
 
-  it('rejects symlinks that escape to disallowed paths', async () => {
-    const linkPath = join(testDir, 'link-to-etc');
+  it('rejects symlinks that escape to denied paths', async () => {
+    const linkPath = join(testDir, 'link-to-dev');
     if (existsSync(linkPath)) rmSync(linkPath);
     try {
-      symlinkSync('/etc', linkPath);
+      symlinkSync('/dev', linkPath);
       const result = await validateProjectPath(linkPath);
       assert.strictEqual(result, null);
     } catch {
@@ -123,89 +187,248 @@ describe('validateProjectPath', () => {
   });
 });
 
-describe('PROJECT_ALLOWED_ROOTS env var', () => {
-  let savedEnv;
-  let savedAppend;
+describe('resolvePersistentProjectPathDetailed', () => {
+  let testDir;
+  let runtimeRoot;
+  let workspaceRoot;
+  let runtimePackage;
+  let workspacePackage;
+  let externalProject;
 
   before(() => {
-    savedEnv = process.env.PROJECT_ALLOWED_ROOTS;
-    savedAppend = process.env.PROJECT_ALLOWED_ROOTS_APPEND;
+    testDir = mkdtempSync('/tmp/cat-cafe-persistent-project-path-');
+    runtimeRoot = join(testDir, 'cat-cafe-runtime');
+    workspaceRoot = join(testDir, 'cat-cafe');
+    runtimePackage = join(runtimeRoot, 'packages', 'api');
+    workspacePackage = join(workspaceRoot, 'packages', 'api');
+    externalProject = join(testDir, 'external-project');
+    mkdirSync(runtimePackage, { recursive: true });
+    mkdirSync(workspacePackage, { recursive: true });
+    mkdirSync(externalProject, { recursive: true });
   });
 
   after(() => {
-    if (savedEnv === undefined) {
-      delete process.env.PROJECT_ALLOWED_ROOTS;
-    } else {
-      process.env.PROJECT_ALLOWED_ROOTS = savedEnv;
-    }
-    if (savedAppend === undefined) {
-      delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
-    } else {
-      process.env.PROJECT_ALLOWED_ROOTS_APPEND = savedAppend;
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('remaps the runtime root to the persistent workspace root', async () => {
+    const result = await resolvePersistentProjectPathDetailed(runtimeRoot, { runtimeRoot, workspaceRoot });
+
+    assert.deepStrictEqual(result, {
+      ok: true,
+      path: realpathSync(workspaceRoot),
+      remappedFrom: realpathSync(runtimeRoot),
+    });
+    assert.equal(
+      await redirectRuntimeProjectPath(runtimeRoot, { runtimeRoot, workspaceRoot }),
+      realpathSync(workspaceRoot),
+    );
+  });
+
+  it('preserves a runtime descendant relative path when remapping to the workspace', async () => {
+    const result = await resolvePersistentProjectPathDetailed(runtimePackage, { runtimeRoot, workspaceRoot });
+
+    assert.deepStrictEqual(result, {
+      ok: true,
+      path: realpathSync(workspacePackage),
+      remappedFrom: realpathSync(runtimePackage),
+    });
+  });
+
+  it('leaves an external project unchanged', async () => {
+    const result = await resolvePersistentProjectPathDetailed(externalProject, { runtimeRoot, workspaceRoot });
+
+    assert.deepStrictEqual(result, { ok: true, path: realpathSync(externalProject) });
+    assert.equal(
+      await redirectRuntimeProjectPath(externalProject, { runtimeRoot, workspaceRoot }),
+      externalProject,
+      'configured roots outside runtime retain the caller path spelling',
+    );
+  });
+
+  it('leaves an in-place deployment root unchanged', async () => {
+    const result = await resolvePersistentProjectPathDetailed(workspacePackage, {
+      runtimeRoot: workspaceRoot,
+      workspaceRoot,
+    });
+
+    assert.deepStrictEqual(result, { ok: true, path: realpathSync(workspacePackage) });
+  });
+
+  it('fails closed when the matching workspace descendant does not exist', async () => {
+    const runtimeOnly = join(runtimeRoot, 'runtime-only');
+    mkdirSync(runtimeOnly);
+
+    const result = await resolvePersistentProjectPathDetailed(runtimeOnly, { runtimeRoot, workspaceRoot });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'runtime_target_unmappable');
+  });
+
+  it('preserves a missing external legacy path when migrating stored ownership', async () => {
+    const raw = join(testDir, 'missing-external');
+
+    assert.equal(await migrateStoredProjectPath(raw, { runtimeRoot, workspaceRoot }), raw);
+  });
+
+  it('preserves virtual game project paths during stored ownership migration', async () => {
+    const virtualProjectPath = 'games/werewolf';
+
+    assert.equal(
+      await migrateStoredProjectPath(virtualProjectPath, {
+        runtimeRoot: process.cwd(),
+        workspaceRoot,
+      }),
+      virtualProjectPath,
+    );
+  });
+
+  it('does not require the internal runtime root to be project-allowlisted for an external target', async () => {
+    const previousAllowedRoots = process.env.PROJECT_ALLOWED_ROOTS;
+    process.env.PROJECT_ALLOWED_ROOTS = realpathSync(externalProject);
+
+    try {
+      const result = await resolvePersistentProjectPathDetailed(externalProject, { runtimeRoot, workspaceRoot });
+
+      assert.deepStrictEqual(result, { ok: true, path: realpathSync(externalProject) });
+    } finally {
+      if (previousAllowedRoots === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
+      else process.env.PROJECT_ALLOWED_ROOTS = previousAllowedRoots;
     }
   });
 
-  it('uses default roots when env var is not set', () => {
-    delete process.env.PROJECT_ALLOWED_ROOTS;
+  it('remaps a runtime target before applying the project allowlist to the workspace', async () => {
+    const previousAllowedRoots = process.env.PROJECT_ALLOWED_ROOTS;
+    process.env.PROJECT_ALLOWED_ROOTS = realpathSync(workspaceRoot);
+
+    try {
+      const result = await resolvePersistentProjectPathDetailed(runtimePackage, { runtimeRoot, workspaceRoot });
+
+      assert.deepStrictEqual(result, {
+        ok: true,
+        path: realpathSync(workspacePackage),
+        remappedFrom: realpathSync(runtimePackage),
+      });
+    } finally {
+      if (previousAllowedRoots === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
+      else process.env.PROJECT_ALLOWED_ROOTS = previousAllowedRoots;
+    }
+  });
+
+  it('fails closed for a missing stored path lexically inside runtime', async () => {
+    assert.equal(await migrateStoredProjectPath(join(runtimeRoot, 'missing'), { runtimeRoot, workspaceRoot }), null);
+  });
+
+  it('fails closed for a missing stored runtime path across a canonical root alias', async () => {
+    const runtimeAlias = join(testDir, 'runtime-alias');
+    const canonicalRuntimeRoot = realpathSync(runtimeRoot);
+    const canonicalMissingPath = join(canonicalRuntimeRoot, 'missing-through-alias');
+    const realpathWithAlias = async (path) => {
+      if (resolve(path) === resolve(runtimeAlias)) return canonicalRuntimeRoot;
+      return realpath(path);
+    };
+
+    assert.equal(
+      await migrateStoredProjectPath(canonicalMissingPath, {
+        runtimeRoot: runtimeAlias,
+        workspaceRoot,
+        realpath: realpathWithAlias,
+      }),
+      null,
+    );
+  });
+
+  it('rejects Clowder AI runtime and workspace descendants as external governance targets', async () => {
+    for (const target of [runtimeRoot, runtimePackage, workspaceRoot, workspacePackage]) {
+      const result = await validateExternalProjectPathDetailed(target, runtimeRoot, { runtimeRoot, workspaceRoot });
+      assert.equal(result.ok, false, `${target} must not be treated as an external project`);
+      assert.equal(result.reason, 'cat_cafe_owned_path');
+    }
+  });
+
+  it('accepts a project outside both Clowder AI checkouts as an external governance target', async () => {
+    const result = await validateExternalProjectPathDetailed(externalProject, runtimeRoot, {
+      runtimeRoot,
+      workspaceRoot,
+    });
+
+    assert.deepStrictEqual(result, { ok: true, path: realpathSync(externalProject) });
+  });
+
+  it('does not apply the project allowlist to internal governance exclusion roots', async () => {
+    const previousAllowedRoots = process.env.PROJECT_ALLOWED_ROOTS;
+    process.env.PROJECT_ALLOWED_ROOTS = realpathSync(externalProject);
+
+    try {
+      const result = await validateExternalProjectPathDetailed(externalProject, runtimeRoot, {
+        runtimeRoot,
+        workspaceRoot,
+      });
+
+      assert.deepStrictEqual(result, { ok: true, path: realpathSync(externalProject) });
+    } finally {
+      if (previousAllowedRoots === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
+      else process.env.PROJECT_ALLOWED_ROOTS = previousAllowedRoots;
+    }
+  });
+});
+
+describe('PROJECT_ALLOWED_ROOTS legacy mode', () => {
+  let savedAllowedRootsEnv;
+  let savedAllowedRootsAppendEnv;
+
+  before(() => {
+    savedAllowedRootsEnv = process.env.PROJECT_ALLOWED_ROOTS;
+    savedAllowedRootsAppendEnv = process.env.PROJECT_ALLOWED_ROOTS_APPEND;
+  });
+
+  after(() => {
+    if (savedAllowedRootsEnv === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
+    else process.env.PROJECT_ALLOWED_ROOTS = savedAllowedRootsEnv;
+    if (savedAllowedRootsAppendEnv === undefined) delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
+    else process.env.PROJECT_ALLOWED_ROOTS_APPEND = savedAllowedRootsAppendEnv;
+  });
+
+  it('switches to allowlist mode when env var is set', () => {
     delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
-    // Default: homedir + /tmp + /private/tmp + /workspace + /Volumes (macOS)
-    assert.strictEqual(isUnderAllowedRoot(join(homedir(), 'projects')), true);
-    assert.strictEqual(isUnderAllowedRoot('/tmp/foo'), true);
-    assert.strictEqual(isUnderAllowedRoot('/workspace/foo'), true);
-  });
-
-  it('includes /Volumes in default roots on macOS', () => {
-    delete process.env.PROJECT_ALLOWED_ROOTS;
-    delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
-    if (process.platform === 'darwin') {
-      assert.strictEqual(isUnderAllowedRoot('/Volumes/shared/project'), true);
-      assert.strictEqual(isUnderAllowedRoot('/Volumes'), true);
-    }
-  });
-
-  it('replaces defaults when env var is set (backward compat)', () => {
     process.env.PROJECT_ALLOWED_ROOTS = '/opt/projects:/srv/data';
-    delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
+    assert.strictEqual(isDenylistMode(), false);
     assert.strictEqual(isUnderAllowedRoot('/opt/projects/my-app'), true);
     assert.strictEqual(isUnderAllowedRoot('/srv/data/files'), true);
-    // Default roots should no longer work (replace mode is default)
     assert.strictEqual(isUnderAllowedRoot(join(homedir(), 'projects')), false);
     assert.strictEqual(isUnderAllowedRoot('/tmp/foo'), false);
   });
 
-  it('appends to defaults when PROJECT_ALLOWED_ROOTS_APPEND=true', () => {
-    process.env.PROJECT_ALLOWED_ROOTS = '/opt/projects:/srv/data';
-    process.env.PROJECT_ALLOWED_ROOTS_APPEND = 'true';
-    // Extra roots work
-    assert.strictEqual(isUnderAllowedRoot('/opt/projects/my-app'), true);
-    assert.strictEqual(isUnderAllowedRoot('/srv/data/files'), true);
-    // Default roots still work (append mode)
-    assert.strictEqual(isUnderAllowedRoot(join(homedir(), 'projects')), true);
-    assert.strictEqual(isUnderAllowedRoot('/tmp/foo'), true);
-  });
-
-  it('falls back to defaults when env var is empty', () => {
-    process.env.PROJECT_ALLOWED_ROOTS = '';
-    delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
-    assert.strictEqual(isUnderAllowedRoot(join(homedir(), 'projects')), true);
-  });
-
   it('handles multiple colon-separated paths', () => {
-    process.env.PROJECT_ALLOWED_ROOTS = `/opt/a:/opt/b:${homedir()}`;
     delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
+    process.env.PROJECT_ALLOWED_ROOTS = `/opt/a:/opt/b:${homedir()}`;
     assert.strictEqual(isUnderAllowedRoot('/opt/a/x'), true);
     assert.strictEqual(isUnderAllowedRoot('/opt/b/y'), true);
     assert.strictEqual(isUnderAllowedRoot(join(homedir(), 'z')), true);
     assert.strictEqual(isUnderAllowedRoot('/opt/c/w'), false);
   });
 
-  it('getAllowedRoots() returns computed list', () => {
-    delete process.env.PROJECT_ALLOWED_ROOTS;
+  it('falls back to denylist when env var is empty', () => {
     delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
-    const roots = getAllowedRoots();
-    assert.ok(Array.isArray(roots));
-    assert.ok(roots.includes(homedir()));
-    assert.ok(roots.includes('/tmp'));
-    assert.ok(roots.includes('/workspace'));
+    process.env.PROJECT_ALLOWED_ROOTS = '';
+    assert.strictEqual(isDenylistMode(), true);
+    assert.strictEqual(isUnderAllowedRoot(join(homedir(), 'projects')), true);
+  });
+
+  it('append mode includes os.tmpdir() (macOS /var/folders fix — sync public gate)', () => {
+    // On macOS, os.tmpdir() returns /var/folders/…/T/ which resolves to
+    // /private/var/folders/…/T/ — NOT under /tmp or /private/tmp.
+    // Tests that mkdtemp() into tmpdir() must be allowed when
+    // PROJECT_ALLOWED_ROOTS_APPEND=true (the sync public gate mode).
+    process.env.PROJECT_ALLOWED_ROOTS = '/some/custom/root';
+    process.env.PROJECT_ALLOWED_ROOTS_APPEND = 'true';
+
+    const resolvedTmpdir = realpathSync(tmpdir());
+    const testPath = join(resolvedTmpdir, 'some-test-project');
+    assert.strictEqual(
+      isUnderAllowedRoot(testPath),
+      true,
+      `path under resolved tmpdir (${resolvedTmpdir}) must be allowed in append mode`,
+    );
   });
 });

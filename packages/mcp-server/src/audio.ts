@@ -1,0 +1,58 @@
+#!/usr/bin/env node
+
+/**
+ * Clowder AI MCP Server - Audio Surface
+ * Exposes audio capture/transcription tools through the managed split topology.
+ *
+ * F195: audio tools were only registered in the all-in-one registerFullToolset()
+ * but lacked a split entry file, making them invisible to Codex and any other
+ * client using the split MCP server topology.
+ */
+
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { installShutdownHandlers, startRefreshLoop } from './refresh-loop.js';
+import { SERVER_INSTRUCTIONS } from './server-instructions.js';
+import { registerAudioToolset } from './server-toolsets.js';
+import { shutdownActiveAudioCapture } from './tools/audio-tools.js';
+import { isDirectExecution } from './utils/is-direct-execution.js';
+import { initCatCafeDir } from './utils/path-validator.js';
+
+function createBaseServer(name: string): McpServer {
+  return new McpServer(
+    {
+      name,
+      version: '0.1.0',
+    },
+    { instructions: SERVER_INSTRUCTIONS.audio },
+  );
+}
+
+/**
+ * Create an Audio MCP server instance with audio capture/transcription tools registered.
+ */
+export function createAudioServer(): McpServer {
+  const server = createBaseServer('cat-cafe-audio-mcp');
+  registerAudioToolset(server);
+  return server;
+}
+
+async function main(): Promise<void> {
+  initCatCafeDir();
+  const server = createAudioServer();
+  const transport = new StdioServerTransport();
+  console.error('[cat-cafe-audio] MCP Server starting...');
+  await server.connect(transport);
+  console.error('[cat-cafe-audio] MCP Server running on stdio');
+
+  const refreshLoop = startRefreshLoop();
+  installShutdownHandlers(refreshLoop, process, shutdownActiveAudioCapture);
+}
+
+const isEntryPoint = isDirectExecution(import.meta.url);
+if (isEntryPoint) {
+  main().catch((err) => {
+    console.error('[cat-cafe-audio] Fatal error:', err);
+    process.exit(1);
+  });
+}

@@ -1,0 +1,1029 @@
+---
+feature_ids: [F167]
+related_features: [F064, F027, F055, F122, F168, F246, F280]
+topics: [a2a, collaboration, harness-engineering, agent-readiness]
+doc_kind: spec
+created: 2026-04-17
+updated: 2026-10-27
+tips_exempt: "Renewed 2026-10-27: ordinary Task handoff and parented-callback corrections continue through the existing task, routing and tool surfaces. Task remains the responsibility source; these internal custody changes add no end-user action or new approval step. Usage is described by the existing entrusted-work and development-return tool surfaces; there are currently no corresponding capability tips, and this delta adds no end-user action."
+user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
+mcp_admission_status: accepted
+mcp_admission_ref: "file:docs/features/F167-a2a-chain-quality.md"
+mcp_admission_claims:
+  - ref: "file:docs/features/F167-a2a-chain-quality.md"
+    toolName: cat_cafe_complete_managed_hold
+    resourceFamily: task-workflow
+    boundaryKind: authority-boundary
+    decision: accepted
+  - ref: "file:docs/features/F167-a2a-chain-quality.md"
+    toolName: cat_cafe_complete_a2a_dispatch
+    resourceFamily: task-workflow
+    boundaryKind: authority-boundary
+    decision: accepted
+  - ref: "file:docs/features/F167-a2a-chain-quality.md"
+    toolName: cat_cafe_get_hold_status
+    resourceFamily: task-workflow
+    boundaryKind: authority-boundary
+    decision: accepted
+  - ref: "file:docs/features/F167-a2a-chain-quality.md"
+    toolName: cat_cafe_get_custody_events
+    resourceFamily: task-workflow
+    boundaryKind: authority-boundary
+    decision: accepted
+  - ref: "file:docs/features/F167-a2a-chain-quality.md"
+    toolName: cat_cafe_complete_event_wait
+    resourceFamily: task-workflow
+    boundaryKind: authority-boundary
+    decision: accepted
+---
+
+# F167: A2A Chain Quality — 乒乓球熔断 + 虚空传球检测 + 角色护栏
+
+> **C1 当前准入边界**：`cat_cafe_recover_external_review_verdict` 已退役，无同名插件替代，已撤销其准入声明。下文相关实现记录保留为历史，不作为当前工具准入依据。
+
+> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P0
+
+Architecture cell: `transport` + `harness-eval` + `ball-custody` + `dispatch`
+Map delta: updated — Phase R records structured cross-thread coordination in `transport`/`harness-eval`; Phase S keeps implement and approved external-review successors in `ball-custody`, while Phase S.2 returns local cat review to ordinary durable `dispatch` plus typed merge evidence; Phase T binds explicit A2A and exact hold wake provenance to those existing owners without creating another ledger.
+
+## Why
+
+F064 解了"漏传球"（该 @ 没 @），但三个月后暴露了反向问题群：乒乓球（同一对猫反复 @ 无产出）、虚空传球（说"我来做"但 @ 了对方导致球在地上）、角色不适配 handoff（让 designer 写代码）。
+
+operator定期审视 harness engineering 的结论（2026-04-17）：现有 A2A 出口检查只覆盖"漏传球"，没覆盖"过度/假/错误传球"。
+
+**根因（第一性原理回溯后修正）**：猫有两条路由路径——MCP 结构化（`targetCats`）和文本 @（行首解析）——两条都能用，但 4.7 两条都没用对。根因不是"@ 协议脆弱"，也不是"脚手架旧"，而是：
+
+1. **模型不理解我们的路由机制**：4.7 在句中写 @（不路由）、以为"说了=做了"（没发 tool call 也没写行首 @）。语义 handoff 和执行 handoff 脱钩。
+2. **我们的提示词有隐含假设**：大量"禁止 X"式规则，Spirit Interpreter 自动补全边界（"不碰 runtime"= 不改但可读），Literal Follower 字面执行（"不碰 runtime"= 完全不碰）。
+3. **缺少基本运行时刹车**：无 ping-pong 检测、无角色门禁——这些应该是 harness 基础设施，和模型无关。
+
+**核心哲学**（来自 Round 4 数学之美讨论）：
+
+> 好 harness 不是替模型思考，而是让模型在正确的坐标系里思考。
+> 真正的 Harness 工程 = 对齐模型的好直觉 + 压制模型的坏直觉，其他一律极简。
+> 复杂是无知的代偿。
+
+operator experience：
+> "你们两！！没完没了互相at半天！特么不干活！！！！"
+> "解决了47的问题或许什么glm什么kimi minimax qwen的问题也就解决了。。都是小笨猫"
+> "我们必须要知道为什么的！不然以后每次模型升级假设来了个超级无敌牛逼猫猫，benchmark惊人！结果哈哈哈哈"
+
+## Design Constraints
+
+1. **路由可见性不退化**（operator拍板）：若猫通过 MCP `targetCats` 路由但响应文本无 @mention，系统须自动补可见路由指示，不可让协作"悄咪咪"发生。
+2. **Provider-agnostic**：护栏不依赖特定模型行为，对所有引擎生效。
+
+### Bounded repair: invocation-bound structured-wake dispositions (2026-08-10)
+
+Architecture cell: `ball-custody` + `dispatch` + `mcp-surface-governance`
+
+operator decision `[thread-id]#private-source-id` accepts narrow terminal producers for structured wakes already exposed to the current invocation. `cat_cafe_complete_managed_hold` closes an exact managed hold using callback-authenticated invocation identity plus server-derived source message/task/thread/holder coordinates. The live regression in `[thread-id]` extends the same accepted F167 boundary to ordinary A2A dispatch: `cat_cafe_complete_a2a_dispatch` derives source message, previous cat, thread, holder, and invocation from the current callback record and exact `ball.handed` event. The caller selects only `handled | completed`; stale, replaced, cross-thread, cross-holder, cross-source, or cross-task attempts fail closed. Read, command exit, tests, merge truth, ACK, unrelated task completion, and another coordination terminal remain non-terminal.
+
+2026-08-14 same-cat clarification: `catId` identifies a persona, not one invocation. A same-cat
+cross-thread carrier may disposition only when the stored trigger has canonical distinct-thread
+`crossPost.sourceThreadId` provenance and the existing exact `ball.handed` event binds that message,
+source cat, target holder, target thread, and current invocation. Same-thread self mentions and missing
+or same-thread provenance remain fail-closed. Here “cross-thread attempt” means an auth/source thread
+mismatch, not a valid server-authored cross-post carrier stored in its target thread.
+
+2026-08-15 replacement-provenance clarification: an ordinary A2A Queue row is only a carrier for its
+exact persisted `ball.handed`. Queue admission reuses the disposition service's source/event fence and
+retires a carrier before provider start when a later state-changing event involving the target cat has
+already replaced that handoff. If replacement races after provider start, the disposition rejection
+includes the latest verified successor event plus same-thread `sourceMessageId` and coordination when
+available. Message metadata is exposed only after the event-derived message resolves back to the same
+thread, sender, and target; forged or foreign-thread metadata remains hidden. Durable Queue custody must
+terminalize before the stale row is consumed; failure retains the row and does not start an invocation.
+A coalesced Queue row carries multiple source messages and may retire only when every carried handoff is
+replaced; one live successor keeps the combined body executable. Successor message lookup is optional
+enrichment: store failure removes only the pointer/coordination fields and cannot erase the event-derived
+replacement verdict or reopen a stale provider invocation.
+
+This is a bounded F167/F254/F264 repair, not a new Feature or lifecycle owner. Managed holds write the existing F264 target receipt and both wake kinds write the F167 BallCustody event log. The repair does not add another Queue, receipt ledger, projection, or state machine.
+
+The same repair boundary also owns two dispatch invariants exposed by the post-merge A→B→A dogfood (`[thread-id]#private-source-id`): a successful same-thread `post_message` callback is the one carrier for that source/target and must be suppressed from the later route-serial line-start scan; releasing the invocation slot must have a bounded path to `notifyQueueCompletion` even if F194/F224 terminal bookkeeping stalls. The normal ordering remains terminal truth and continuation commit before queue drain; a 5-second idempotent watchdog is only the liveness fallback. Ordinary inline dispatches now receive their completion producer on the first child and fail typed without spawning a stale `routing_guard` child when the producer is omitted.
+3. **Backward compatible**：不退化 4.6 等已正常工作模型的体验。
+4. **极简**：只加运行时刹车（压制坏直觉）和认知路径工程（对齐好直觉），不加认知脚手架（替模型思考）。
+
+## Eval / Tracking Contract
+
+> **何时填**：harness / skill / MCP / shared-rules 类 spec 立项时填本节。判断标准：改动会改变猫猫行为模式 → 填。否则跳过。
+> **Design Gate**：本节是硬门禁。空填 / 缺关键字段 → Design Gate 不通过。
+
+### 1. Primary Users + Activation Signal
+
+- **Users**：
+  - operator：不再充当人肉路由（受益方，不直接操作）
+  - Cats：author（写 @）/ reviewer（给 verdict）/ designer（被 restrictions 保护免做 coding）
+  - Runtime：WorklistRegistry（streak 追踪）/ exit check（注入路由提示）/ `cat_cafe_hold_ball` MCP / cat-config.restrictions（数据驱动能力限制，Phase E KD-20）
+- **Activation signal**：
+  - **L1 ping-pong 熔断**：WorklistRegistry 里 `(catA, catB)` 连续 same-pair streak ≥ 2 (warn) / ≥ 4 (break)
+  - **C2 forced-pass guard**：invocation 输出含 review verdict 关键词（approve / reject / P1 / P2 / LGTM / 修改建议）但末尾无行首 @
+  - **L3 → 数据驱动限制**：cat-config.restrictions 双端 prompt 注入（发送方队友名册 + 目标猫 self-awareness）；原 L3 硬编码 regex 已退役（KD-20）
+  - **C1 hold_ball**：cat 显式调用 `cat_cafe_hold_ball` MCP（区别于"我先 hold 一下"的纯文本状态描述）
+
+### 2. Friction Metric
+
+- **L1 false-positive 误杀**：正常 review 循环 A→B→A→B (streak=3) 被误杀 → reset 条件（第三只猫 / user 消息）必须正确触发；覆盖见 `pingpong-reset.test.js`
+- **C2 over-fire**：纯信息查询无后续动作的输出被强制要求 @（边界场景：信息回答 vs 协作传球的判定漂移）
+- **C1 hold_ball 滥用**：`maxHoldsPerWindow` 超限（默认 3 / ~1h sliding window）→ cat 在用 hold 替代正常传球
+- **C1 stale hold wake**：等待对象已被结构化事件满足（review / CI / issue / user message / managed command）后，旧 `hold_ball` timer 仍唤醒猫 → 目标为 0；若发生，必须能追到 `waitSourceRef` / `subjectKey` / `expectedSignalKey` / `resolvedBy`
+- **Routing 旁路**：invocation 文本响应有 @ 但 MCP `targetCats` 为空（或反之）→ `routing-syntax-hint`（route-serial 行首 @ 语法检测）或 `verdict-no-pass-hint`（verdict 无 @ 出口检测）触发
+
+### 3. Regression Fixture
+
+- `ping-pong/streak-4-break` → `worklist-registry-streak.test.js`（AC-A1）
+- `ping-pong/false-positive-review-loop` → `pingpong-reset.test.js`（AC-A3）
+- `callback-a2a-pingpong` → `callback-a2a-pingpong.test.js`（AC-A4）
+- `void-pass/say-but-not-do` → Maine Coon 5 线程截图（PR #1289 P1 evidence）
+- `role-gate/l3-retired` → `route-serial-pingpong.test.js`（AC-E — asserts `a2a_role_rejected` must NOT fire after KD-20 retirement）
+- `forced-pass/review-verdict-no-mention` → `route-serial-verdict-hint.test.js`（C2 verdict detection）
+- `hold-ball/zombie-hold` → Maine Coon原话 "Hold 不是对外协议状态"（C1 设计动机）
+- `hold-ball/event-satisfied-retirement` → Phase Q：review/CI/issue/user event 先满足等待时，subject + normalized signal matching hold retired 且旧 timer 不再 wake；signal 不匹配时不退休；前端不再显示可取消 pending 状态；AC-Q7 eval fixture 将 `hold_lifecycle.expired_after_satisfied_total` 设为 zero-tolerance，任何非零值标红并附抽样 evidence
+
+### 4. Sunset Signal
+
+- **Environment drift**：模型升级后 prompt 层球权规则被自然吸收（exit check / forced-pass 提示）→ C2 prompt 段可降级为只 hint 不强制；但 **L1 streak breaker 是基础设施保留**（与模型无关）
+- **Subsumption (in-feature)**：路由协议从两条（行首 @ + MCP `targetCats`）收敛到一条 → 路由旁路检测简化为单一路径
+- **Subsumption (cross-feature)**：F181 (Prompt X-Ray) + 跨路由 trace propagation 上线后，A2A friction 改用 trace-based detection 替代 prompt-based 提示 → C2 forced-pass prompt 段可废弃
+- **Adoption decay**：近 6 个月 ping-pong streak ≥ 4 触发 0 次 + 实战观察未出现该失败模式 → L1 熔断从 `break` 降级为只 `warn`
+
+## What
+
+### Phase 0: 系统提示词正面化审视（P0，多猫协作）
+
+在写任何 harness 代码之前，先审视"地形"——让模型自然往正确方向跑，而不是加铁丝网。
+
+**审视范围**（完整注入链路）：
+
+| 来源 | 谁看到 | 审视什么 |
+|------|-------|---------|
+| `shared-rules.md` | 所有猫（canonical） | "禁止 X" → "允许 Y，禁止 Z"（显式边界） |
+| `governance-l0.md` | codex/gemini（sync 源） | 和 shared-rules 对齐 |
+| `GOVERNANCE_L0_DIGEST`（SystemPromptBuilder.ts） | 所有猫（runtime 注入） | 和 governance-l0 同步 |
+| `CLAUDE.md` | Claude 猫 | 负面禁令 → 正面指令 |
+| `assets/system-prompts/cats/codex.md` | codex/gpt52/spark | 同上 |
+| `assets/system-prompts/cats/gemini.md` | gemini | 同上 |
+| `WORKFLOW_TRIGGERS`（SystemPromptBuilder.ts） | per-cat | 检查和正面化后是否矛盾 |
+| Skills（`cat-cafe-skills/`） | 按需加载 | 审视有无 "used when / not for" 清晰边界（参考 Anthropic skills 实践） |
+
+**正面化原则**：
+- "不碰 runtime" → "可读日志/搜索输出；禁止修改/重启/删除 runtime 文件和进程"
+- "禁止乱 @" → "行首 @ 或 MCP targetCats 是仅有的两种路由方式，其他写法无系统效果"
+- SOP 轻重：给正反例 few-shot（5-line patch 走轻量路径 vs 跨模块 feature 走完整 lifecycle）
+- Skills 审视：每个 Skill 是否有明确的 "Use when" + "Not for" 边界（让模型一眼识别适用场景）
+
+### Phase A: Harness 硬护栏（P0）
+
+三个运行时刹车，不依赖模型遵守 prompt：
+
+**L1 — 乒乓球熔断**：WorklistRegistry canonical enqueue 点追踪连续 same-pair streak。streak=2 警告，streak=4 熔断。覆盖 serial + callback 双路径。
+
+**L2 — Parallel @ mention 降噪**：prompt 层禁止 parallel 模式 @句柄 + harness 层 route-parallel 的 mentions 标记 `suppressedInParallel`，不写入 routedMentions；followupMentions 路径同步抑制。
+
+**L3 — 角色适配门禁**：A2A handoff 时检查目标猫角色能力。MVP：designer 角色 + coding/fix/test/merge 关键词 → fail-closed 报错 "⛔ @{cat} 不接受 {action} 任务"。动作判定复用 `AFTER_HANDOFF_RE` 模式 + cat-config `capabilityTags`。
+
+### Phase B: 观察 + 按需补充（P1，Phase 0+A 效果验证后）
+
+Phase 0 正面化 + Phase A 刹车上线后观察。只有证据表明还有缝才补：
+- 虚空传球是否仍频繁出现？→ 按需加简单检测
+- always_at_back 是否仍在放大 ping-pong？→ 调整为"有产出才 @ 回"
+- 6 个事故 case 做回放测试，验证 Phase 0+A 覆盖率
+
+#### B2 — Ball Ownership Protocol Hardening（2026-04-19 实战迭代）
+
+基于operator实时观察 + 截图证据，迭代修复 6 个球权协议漏洞：
+
+| # | Anti-Pattern | 修复 | 位置 |
+|---|-------------|------|------|
+| 1 | operator球权盲区（不知 @ 谁） | exit check 注入 `@co-creator`（coCreator config 动态取） | SystemPromptBuilder |
+| 2 | 球权死锁（收球说"你等着"） | 禁止——做不了就退/升 | shared-rules §10 + exit check |
+| 3 | 虚假离场（不@但还在干，倒装句误导） | 结尾声明"球在我手上，继续 X" | exit check |
+| 4 | 状态描述代替球权声明 | 核心原则 + 接/退/升三选一 | shared-rules §10 |
+| 5 | 诊断不解决（push back 不接/退/升） | push back 后必须紧跟接/退/升 | exit check |
+| 6 | Codex context overflow（272k 用 900k limit） | 动态 contextWindow + autoCompactTokenLimit per variant | CliConfig + CodexAgentService |
+
+**根因**（Maine Coon自我剖析）："Hold 不是对外协议状态。要么静默执行，要么接/退/升。" RLHF "check in" 反射在 agent 链路里变成球权黑洞。
+
+### Phase C: 球权出口闭环 — Maine Coon不传球的两种根因（P1）
+
+**发现**：operator审阅 5 个活跃线程，Maine Coon全部不传球。Maine Coon自我诊断两种不同的不传球模式：
+
+| 模式 | 表现 | 根因 | 解法 |
+|------|------|------|------|
+| **真持球** | "我想继续做"但 CLI 退出，球掉地上 | 持球没有执行层 | **C1: hold_ball MCP** |
+| **假终局** | review/分析给了结论就停了，不传球 | "结论 = 终点"错觉 | **C2: 强制传球护栏** |
+
+> **Maine Coon原话**："Phase C 治的是'我想继续拿球却拿不住'；治不了'我根本没意识到该传球'。"
+
+**共同设计约束**（Maine Coon + Ragdoll讨论收敛）：
+1. **"持"是例外态，不是四选一常态。** 默认三选一：接/退/升。（KD-13）
+2. **不先做独立 skill。** 球权管理是基础协议。踩坑经验收进 `refs/ball-ownership-patterns.md`。（KD-15）
+
+---
+
+#### C1: Hold Ball MCP — 有界持球（治"真持球"）
+
+**问题**：猫声明"球在我手上，继续 X"后 CLI 进程退出，无人再唤醒 → 持球只有语义层没有执行层。
+
+**方案**：`cat_cafe_hold_ball` MCP tool。猫调用 → 系统记录 → CLI 退出后自动再唤醒。
+
+**v1 Tool Signature**：
+```typescript
+cat_cafe_hold_ball({
+  reason: string,      // 为什么需要持球
+  nextStep: string,    // 唤醒后的第一个动作
+  wakeAfterMs: number  // 多久后唤醒（有界等待，KD-14）
+})
+```
+
+**Use when**：球明确在你手上 + 无人能推进 + 短暂可预期等待 + 醒来后知道下一步。
+
+**Not for**：需要别人拍板/验收/人工操作 → `@co-creator`；需要另一只猫动 → `@句柄`；"我再想想""我先 hold 一下" → 这是犹豫不是持球；状态更新 → 直接说。
+
+**唤醒注入**：
+> 你上轮持球：{reason}
+> 球仍在你手上。现在执行：{nextStep}
+> 若条件仍未满足：再持一次或升级；禁止无限持球。
+
+**Guard**：`maxHoldsPerWindow`（默认 3，~1h sliding window，per thread×cat），超限强制接/退/升 + 审计日志。
+*实现注记*（gpt52 review on PR #1289 P1/P2）：语义是"窗口内累计"而非"真·连续"；状态进程内 in-memory，best-effort，重启会重置。要做硬约束得把计数下沉到与 reminder scheduler 同源的持久化存储，当前不做。
+
+**并发语义**（Phase G / KD-23 补充）：
+
+- **外部 wake 撞持球期**：hold wake 在 fire 时走 `ConnectorInvokeTrigger.trigger` normal priority，若 cat 有 active invocation 则 `enqueueWhileActive` 排队到 InvocationQueue，**不打断**当前工作。当前 invocation 结束后才会执行 hold wake 注入的 `持球唤醒：...` 消息。
+- **Stale wake 处理**：如果 external wake 已经改变 thread 语境（operator发了新方向），排队后的 hold wake 消息里的 `nextStep` 可能过时。Cat 拿到 wake 时应根据 thread 最近历史判断 `nextStep` 是否仍相关——若已不相关，走接/退/升，**不盲跟 stale nextStep**。
+- **二次 `hold_ball` = 单-槽替换**（Phase G AC-G3）：同 `(threadId, catId)` 只能有一个 pending hold wake。再次调用 `hold_ball` 会：先 `taskRunner.unregister` + `dynamicTaskStore.remove` 前一个 pending task，再 insert 新的。避免 stale wake 累积。若需要等多件事 → merge 到一个 `nextStep`（如 `"等 CI 且 @co-creator 确认"`），不要分多次 hold。
+
+---
+
+#### C2: Forced-Pass Guard — 强制传球护栏（治"假终局"）
+
+**问题**：Maine Coon给出 review 结论（approve/reject/P1/P2/修改建议）后，以为"结论 = 终点"就停了。但 review 后 **永远有下一棒**——author 需要看到反馈并行动。operator实测 5 个线程全部命中。
+
+**根因**：exit check 的 `没人 → 不 @` 路径对 reviewer 来说太宽了。Reviewer 给出 verdict 后几乎不存在"没人需要动"的场景。
+
+**方案（双层）**：
+
+**L1 — Prompt 层**：exit check 增加 review 场景特殊规则：
+> Review 完成后**必须传球**：给了结论（approve/reject/P1/P2/建议）→ 末尾行首 @author 或 @co-creator。
+> Review 结论 ≠ 链条终点——author 需要看到你的反馈并行动。
+> "没人需要动"对 reviewer 来说几乎不成立。
+
+**L2 — Harness 层**（Phase B 观察后按需）：
+- 检测输出中的 review verdict 关键词（approve/reject/P1/P2/LGTM/修改建议）
+- 若有 verdict 但无行首 @mention 且无 hold_ball 调用 → 注入提示："你给了 review 结论但没传球，请 @ author 或 @co-creator"
+- 不阻断，只提示（prompt-first 原则，与 Phase A 乒乓球警告同模式）
+
+**推广**：不只是 review。所有"完工型"输出都适用——"分析完了""方案给了""诊断做了"——后面都该有球权决策。核心规则：
+
+> **给出结论/建议/分析后，默认必须传球。** "没人需要动"只在极少数场景成立（纯信息回答、无后续动作的独立查询）。
+
+---
+
+#### 已知踩坑模式（Maine Coon贡献 + operator 5 线程观察）
+
+| # | 坑 | 表现 | 归类 | 正确做法 |
+|---|---|------|------|---------|
+| 1 | RLHF check-in 反射 | "我想再确认一下"误说成持球 | C1 | 那是犹豫，不是 hold → 接/退/升 |
+| 2 | 状态描述代替声明 | "我先 hold""我继续看" | C1 | 不是球权动作 → 接/退/升 |
+| 3 | 诊断成瘾 | 先解释发生了什么，忘了接/退/升 | C2 | 诊断后必须紧跟球权决策 |
+| 4 | 持球当礼貌 | "我还在跟进"（人类礼仪） | C1 | agent 链路里这是黑洞 |
+| 5 | **Review 假终局** | 给了 verdict 就停了，不 @ author | C2 | review 结论 ≠ 终点，必须传球 |
+| 6 | **"结论即终点"错觉** | 分析/方案/建议写完以为链条结束 | C2 | 结论后默认必须传球 |
+
+**系统提示词球权段落草案**（含 C1 + C2）：
+> 球权默认三种合法出口：接、退、升。
+> 只有当球明确仍在你手上、当前无人能推进、且你只是在等待一个短暂且有界的时机再继续时，才调用 `cat_cafe_hold_ball`。
+> `hold_ball` 不是状态汇报，不替代 `@co-creator`，不替代传球。
+> 能继续做就继续做；需要别人动就传/升；只有"短暂等待后仍由我继续"才持。
+> **Review / 分析 / 建议完成后，默认必须传球给 author 或 @co-creator。** "没人需要动"对 reviewer 几乎不成立。
+
+## Acceptance Criteria
+
+### Phase 0（系统提示词正面化）
+- [x] AC-01: 所有 "禁止 X" 式规则改为 "允许 Y，禁止 Z" 显式边界格式（共享 + per-cat）— 7 文件负面指令清零（c34364da5 + b653b3021 + 13ab948c1）
+- [x] AC-02: 路由规则正面化："行首 @ 或 MCP targetCats 是仅有的两种路由方式" 写入 shared-rules §10 路由方式 + runtime injection 球权检查
+- [x] AC-03: Skills 审视完成，33/33 Skill 有 "Use when" + "Not for" 边界（image-generation 补齐）
+- [x] AC-04: `GOVERNANCE_L0_DIGEST` 与 `governance-l0.md` 同步（含新增 Magic Words）— Rule 0 出口 + W4 正面化（c34364da5）
+- [x] AC-05: SOP 轻重路径给正反例 few-shot（shared-rules §11 四档 few-shot 表）
+
+### Phase A（Harness 硬护栏）
+- [x] AC-A1: WorklistRegistry 追踪连续 same-pair streak，streak≥4 自动终止 A2A 链并 emit 系统消息（PR2 22e09f907 + 486edd804）
+- [x] AC-A2: streak≥2 时向当前猫注入"乒乓球警告"提示（PR2 486edd804 — `InvocationContext.pingPongWarning`）
+- [x] AC-A3: 正常 review 循环 A→B→A→B (streak=3) 不受影响；中间插入第三只猫或 user 消息 reset streak（PR2 d4636ba02 + codex R1 P1-2 修复：`resetStreak` 无 parentInvocationId 时按 threadIndex 批量清除）
+- [x] AC-A4: callback-a2a-trigger 路径与 serial 文本路径走同一个 bounce 检测（无旁路）（PR2 d6360194e — 共享 `updateStreakOnPush` helper；codex R1 P1-1 修复：modern `InvocationQueue` 分支同样经过 streak 门禁）
+- [x] AC-A5: parallel 模式 @mentions 日志标记 suppressedInParallel，不 emit a2a_followup_available；followupMentions 路径同步抑制（PR1 b496e83de）
+- [x] AC-A6: parallel 模式 SystemPrompt 注入"@句柄 在并行模式下无路由语义"提示（PR1 942809eb6）
+- [x] AC-A7: designer 角色 + coding/fix/test/merge 关键词 → route-serial handoff fail-closed + emit a2a_role_rejected（PR1 998e2274a / eec13be85）
+- [x] AC-A8: 所有现有 A2A/路由/system-prompt 测试通过（PR1 329+165 tests green）
+- [x] AC-A9: 新增测试覆盖 L1 乒乓球（误杀保护 + 正常熔断 — PR2 `worklist-registry-streak.test.js` + `callback-a2a-pingpong.test.js` + `pingpong-reset.test.js`）、L2 parallel 抑制（PR1 ✓）、L3 角色门禁（PR1 ✓）
+
+### Phase B（观察 + 按需）
+- [x] AC-B1: 6 个事故 case 回放验证通过（2026-04-20：runtime `/health` 正常 + 运行中猫 prompt 已吃到新球权护栏；Case E2 记录 5 个球权类 live replay + 1 个 codex context overflow 代码/测试回放）
+- [ ] AC-B2: 如仍有虚空传球 → 按需加检测（2026-04-20：B2+C2 多层护栏已覆盖，进入观察期，无新 case 即 close）
+- [ ] AC-B3: 如 always_at_back 仍放大 ping-pong → 降级为"有产出才 @ 回"，且 F064 出口检查不回退（2026-04-20：L1 streak breaker + break-loop 已兜住，进入观察期）
+
+### Phase B2（Ball Ownership Protocol Hardening）
+- [x] AC-B4: exit check 注入 @co-creator（coCreator 动态取），operator球权可见（4e5795cc5）
+- [x] AC-B5: 球权死锁反模式写入 shared-rules §10 + exit check（2072f350f）
+- [x] AC-B6: 虚假离场防护写入 exit check（283b9dc90）
+- [x] AC-B7: "状态描述≠球权声明"核心原则 + 接/退/升三选一写入 shared-rules §10（089e6d5dd）
+- [x] AC-B8: 诊断不解决：push back 后必须接/退/升写入 exit check（eb459bc1d）
+- [x] AC-B9: 动态 contextWindow + autoCompactTokenLimit per codex variant（fa543ed61）
+- [x] AC-B10: 86/86 SystemPromptBuilder + 41/41 codex-agent-service + 31/31 config tests 全绿
+
+### Phase C1（Hold Ball MCP — 有界持球）
+- [x] AC-C1: `cat_cafe_hold_ball` MCP tool 注册（reason + nextStep + wakeAfterMs 参数）
+- [x] AC-C2: CLI 退出后系统自动再唤醒持球猫（via reminder template one-shot scheduled task）
+- [x] AC-C3: maxHoldsPerWindow guard（默认 3 per ~1h 滚动窗口 per thread×cat），超限返回 429 + 强制传球提示
+- [x] AC-C4: 审计日志（pino structured log: threadId/catId/reason/nextStep/wakeAfterMs/holdsInWindow/windowMs）
+
+### Phase C2（Forced-Pass Guard — 强制传球）
+- [x] AC-C5: exit check 增加 review 场景规则：verdict 后必须 @ author 或 @co-creator（404f894fb）
+- [x] AC-C6: shared-rules §10 球权检查强化（reviewer "没人"几乎不成立 + review 必须传球 + 分析/建议传球）
+- [x] AC-C7: harness 层 review verdict 检测 + 无 @ 时注入传球提示（保守关键词 LGTM/approve/reject/P1/P2/修改建议/放行/打回；三层合法出口豁免：行首 @mention / hold_ball / MCP 结构化路由 `targetCats`+`targets`）
+
+### Phase D（Streak 语义升级 + @co-creator 反 catch-all — 2026-04-23 reopened from monitoring）
+
+**触发**（monitoring 期operator观察）：两个系统性缺陷同源——harness 判不了意图：
+1. Ping-pong breaker 误杀正经 review（10 轮 review 在 4 轮被硬断）——当前 streak 只看"同 pair 连续次数"，不看猫是否在干活
+2. 猫猫把 `@co-creator` 当 catch-all 安全港 — 三选一平级，@co-creator 成为"最低风险默认"，operator变决策瓶颈
+
+**operator拍板的第一性坐标系**（KD-17）：别再做"review vs 闲聊"的主观分类，看客观事实——**干活 = 实质 tool_call + 长内容；闲聊惯性 = 短文本 + 零 tool**。RLHF "接一句" 反射产生短文本惯性，正是乒乓球的真正 signature。
+
+#### D1 — Ping-pong Streak 实质工作豁免（P0）
+
+**问题**：`WorklistRegistry.updateStreakOnPush` 只计"同 pair 1:1 push 次数"，正经 review（每轮都有 read/edit/task-update）在第 4 轮被误杀。
+
+**解法**：streak 累加条件从 `samePair && 1:1 push` 改为 `samePair && 1:1 push && !callerHadSubstantiveToolCall && callerOutputLength <= T`。
+
+**实质 tool 过滤**（Maine Coon review 关键修正 — KD-18）：`cat_cafe_post_message` / `cat_cafe_multi_mention` / `cat_cafe_hold_ball` 是**路由/持球工具**，不算干活。否则 MCP 传球路径会永远豁免熔断。实质 tool = 任何留下工作证据的（read/grep/edit/write/test/git/update_task/search_evidence 等）。
+
+**AC**：
+- [x] AC-D1: `updateStreakOnPush` 签名扩展 `callerActivity: { hadSubstantiveToolCall: boolean; outputLength: number }`；累加条件为 `samePair && !hadSubstantiveToolCall && outputLength <= T`（T=200 字符默认）；实质工作 RESET streak 到 1（P1-1 reviewer Maine Coon发现的重要修正）
+- [x] AC-D2: 实质 tool 黑名单——`cat_cafe_post_message` / `cat_cafe_multi_mention` / `cat_cafe_hold_ball`（以 substring 匹配，兼容 `mcp__cat-cafe__*` 前缀）；其他所有 tool 都算实质
+- [x] AC-D3: route-serial + callback-a2a-trigger 双路径都传 `callerActivity`；callback 路径 fail-closed 默认 `hadSubstantiveToolCall=false`；streak 更新 gated on `wouldEnqueue`（post-dedup + post-depth）防止跳过的 push 误 mutate 计数器（云端 Codex P1 修正）
+- [x] AC-D4: 测试覆盖 2×2 矩阵 + reset-requires-enqueue（32/32 ping-pong 绿）
+
+#### D2 — @co-creator 反 catch-all 硬条件（P0）
+
+**问题**：三选一（@句柄 / @co-creator / hold_ball）平级，猫猫默认走 @co-creator = 最安全选择。模式：`要不要 X？` / `落 spec 吗？` / `同意我就做` — 这些是"软性 @"，有结论但把动作扳机塞回operator。结果：operator被当 human oracle 做所有拍板，即使事情本可自决。
+
+**解法**：@co-creator 从"可选出口"改成"硬条件出口"。三硬条件（不满足禁止 @co-creator）：
+1. **不可逆操作前**（删数据 / force push / 合第三方 PR / close feat）
+2. **愿景级决策**（改 VISION / 砍整块 feat / 开新 family）
+3. **跨猫僵局**（2+ 猫已直接冲突、push back 两轮无共识）
+
+其他一律自决——技术细节、doc 修补、state 标注、timeline 记录 → 直接做，做错能回滚。
+
+**AC**：
+- [x] AC-D5: `shared-rules §10.4` 新增"@operator 三硬条件"子条款 + 反问式 ping 反例清单 + 合法示例；`§10` 顶层三选一也重排成决策树优先级（P1-2 reviewer Maine Coon发现的一致性修正）
+- [x] AC-D6: `SystemPromptBuilder` trailing anchor 从平级三选一改成决策树优先级：
+  ```
+  先问：下一步谁能做？
+  1. 另一只猫能做 → @句柄（review→@author / 修完→@reviewer / merge→@愿景守护猫）
+  2. 等外部条件 → hold_ball（CI / PR check / 长时间 build）
+  3. 只有operator本人才能做（三硬条件）→ @co-creator
+  @co-creator 不是默认出口——先问"哪只猫能接"。
+  ```
+- [~] AC-D7: 反问式 ping 反制——**prompt 层已在 D6 trailing anchor + §10.4 落地**（写入决策树末句 + 反例清单）；**harness 层检测故意未做**（KD-8 反分类器原则——regex 判"是不是软性递球"本质是认知脚手架）。若线上观察仍频繁出现反问式 ping，再评估是否加 harness 检测。
+
+### Phase E（Retire L3 role-gate — 2026-04-23 reopened）
+
+**触发**：operator实测发现 `F172 feature close → 愿景守护 @gemini` 链路被 L3 硬拦，理由 "合入"（designer 不接受 merge 任务）——但实际任务是 **愿景守护**，不是 coding/merge。根因是：
+1. `role-gate.ts` 硬编码字符串常量 `DESIGNER_ROLE = 'designer'` + 硬编码正则 `CODING_ACTION_RE`
+2. `actionText` 扫整条 storedContent，上文任意位置出现 `合入 / merge` 都误伤下一棒
+3. `buildTeammateRoster` **没读** cat-config 的 `evaluation`/硬限制字段，发送方 prompt 里根本看不到 "gemini 禁止写代码"
+
+operator experience：
+> "你们之前的拦截是不是过度设计啊？ 要是人家gemini 出了4 比你厉害呢？"
+> "到底有没有看 cat config 人家不合适做的事情？ 还是硬编码？"
+> "要是我明天写的 minimax 禁止 coding， claude 禁止生成图片呢？"
+> "问题不是出在 gemini 身上，是出在 at 他的猫身上——队友注入出现问题，导致他不知道限制？"
+
+**根因判定（KD-20）**：L3 role-gate 是 KD-8 典型反模式（认知脚手架——harness 替模型判断 intent）。正确做法是把能力限制作为**数据**（cat-config）注入 **prompt**（双端：发送方队友名册 + 目标猫 self-awareness），让模型在正确坐标系里自判断。未来 model 升级 / 新增 model / 能力变化 → 改 cat-config 即可，**零代码改动**。
+
+#### E1 — 数据模型：cat-config 新增 `restrictions` 字段（P0）
+
+- [x] AC-E1: `cat-config.json` + `cat-template.json` 支持 `restrictions?: string[]`；`gemini` 初始化为 `["禁止写代码"]`
+- [x] AC-E2: `CatConfig`/`CatVariant`/`CatBreed` TS 类型 + zod schema + loader merge（variant 覆盖 breed，不 merge）；向后兼容（缺省 `undefined`）
+
+#### E2 — 双端注入：发送方 + 目标猫都能看到限制（P0）
+
+- [x] AC-E3: `buildTeammateRoster` 合并 `**硬限制**：{list}` 到 caution 列；发送方 prompt 一眼看到 "gemini 禁止写代码"
+- [x] AC-E4: `buildStaticIdentity` 注入 `你的硬限制：{list}。被 @ 做这类任务时请 push back 或退回给 @ 你的猫`；目标猫 self-awareness 不依赖 harness
+
+#### E3 — 退役 L3 硬编码拦截（P0）
+
+- [x] AC-E5: 删 `role-gate.ts` + 3 个 role-gate 测试文件（`role-gate.test.js` / `route-serial-role-gate.test.js` / `callback-a2a-role-gate.test.js`）
+- [x] AC-E6: `route-serial.ts` + `callback-a2a-trigger.ts` 移除 `checkRoleCompat` 调用 + `a2a_role_rejected` emit（前端 `system-info-visible.ts` handler 保留为死路径兼容，后续清理）
+- [x] AC-E7: `cat-config-loader` + `system-prompt-builder` 加 restrictions 相关 10 个新测试；204/204 相关测试绿
+
+#### E4 — 回放验证（P0）
+
+- [x] AC-E8: F172 愿景守护回放测试：opus 输出含"已合入 main"narrative + @gemini 做愿景守护 → gemini 正常 invoke，无 `a2a_role_rejected`（`route-serial-pingpong.test.js` 新增 case）
+
+### Phase F（Identity truth source + external-identity hold_ball + inline-@ guard — 2026-04-24 reopened）
+
+**触发**（Phase E merge 后连环踩坑）：
+1. opus-47 在另一线程发"球权在云端 codex / No more action needed" **同时** 行首 `@gpt52` — 一句话里自相矛盾（说 hold 又传球）。根因：我把"云端 codex (GitHub bot)"误投射成"本地 @gpt52 Maine Coon"这个最像的 roster proxy
+2. Maine Coon核真相源后定位：**路由 parser 本来就是数据驱动**（`normalize-cat-id.ts` 走 `mentionPatterns`），**漂移的是"句柄背后的模型认知"**——`cat-catalog.json:344` 显示 `@codex` 当前已切到 `gpt-5.5`，但 `AGENTS.md:25` 仍写"@codex = gpt-5.3-codex"；`buildTeammateRoster` 从不展示 resolved model，发送方 prompt 里没有"runtime model"这条真相
+3. operator观察：有 thread 里我把 `@codex` 写在**句中**（如 `+ @reviewer: @codex`）而非行首，按协议不路由 = 球掉地上
+
+operator experience：
+> "球权在云端 codex 然后你 at 我们本地的 gpt Maine Coon！"
+> "最早的时候是 gpt5.2 然后默认的写死了！如果要解决这个需要从根源解绑，注入队友的时候能知道 比如说 gpt52，到底是谁？codex 到底是谁？"
+> "有的 thread 的你忘记了 @ 的格式要一行 行首"
+> "你们说的这些 我不喜欢做 hot fix 我希望是完整的解决"
+
+**根因判定（KD-21）**：Phase A~E 已让**能力限制**（restrictions）和**球权路径**（decision tree）数据驱动，但**"@句柄 → 模型"的认知绑定**还留在静态 docs（`AGENTS.md` / `CLAUDE.md` 固定"@codex = gpt-5.3-codex"等）和猫的训练快照里。handle 是 identity 常量，model 是 runtime-resolved metadata；两者在 prompt 层必须解耦。**外部 identity**（`chatgpt-codex-connector[bot]` / CI / GitHub webhook）根本不在 cat-cafe roster，应该属于 `hold_ball` 域，绝不能投射成本地近似 proxy。
+
+**KD-22**：`@` 行首规则是协议常量，但模型会在 narrative context（如列表、quote、URL 前缀）不自觉把 @句柄写成句中。F064 `mentionRoutingFeedback` 是事后反馈（下一轮才纠），本轮错 @ 时球已经掉地上。Phase F 需要在 **prompt 首轮教学**里加强反例 + 让发送方看到 "live callable handles + resolved model"（认知真相和协议真相对齐）。
+
+#### F1 — handle/model 解绑：runtime model 注入发送方 prompt（P0）
+
+- [x] AC-F1: `buildTeammateRoster` 每行 `@mention · {runtime resolved model}`（via `getCatModel` — 支持 env `CAT_{CATID}_MODEL` override → registry → default 优先级），列头改成 `@mention · 当前模型`；cloud P1 修正从 `config.defaultModel` 改为 `getCatModel`
+- [x] AC-F2: 队友名册合并式展示，callable mentions 列表承接 roster 真相（共享 `buildStaticIdentity` 链路）
+
+#### F2 — 静态 docs 真相源清理（P0）
+
+- [x] AC-F3: `AGENTS.md` / `CLAUDE.md` 删 `@codex (model=gpt-5.3-codex)` 硬绑定，改"以 runtime catalog 为准"；cloud round-3/4 broaden 校验 regex 到 `/@[^\s,(（]+ ... model=\S+/i` 覆盖任意 handle/value/quote 变体
+- [x] AC-F4: `docs/canon/` grep 干净，无模型硬编码
+
+#### F3 — 外部 identity 作为 hold_ball 场景（P0）
+
+- [x] AC-F5: `shared-rules §10` option 2 列外部 identity 清单：云端 codex (`chatgpt-codex-connector[bot]`) / GitHub bot / PR check / CI / 长 build / 外部 webhook + "严禁投射成本地同族猫的任何 variant"
+- [x] AC-F6: Trailing anchor option 2 内联外部 identity 示例，closing line 硬规"外部 identity 永远走选项 2"
+
+#### F4 — `@` 行首协议加固（P0）
+
+- [x] AC-F7: `buildCallableMentions` 加具体反例 + 发前自检（cloud round-2 纠正：markdown 列表/quote 前缀**会被 parser 剥离**——合法路由，不是陷阱；真正陷阱是句中/URL 内/非首字符位置）
+- [x] AC-F8: 发前自检问句注入 prompt（合入到 callable mentions 反例旁）
+- [~] AC-F9: 探索项未做——Maine Coon本地放行+云端 clean 验证 prompt 层教学已足够；若线上观察仍频出再评估 `parseA2AMentions` 增强
+
+#### F5 — 回放 + 跨族认知一致性（P0）
+
+- [x] AC-F10: invariant lock 测试落地（AGENTS.md / CLAUDE.md no `@x ... model=anything` 硬绑定）；cloud round-3/4 纠正 regex 覆盖 quoted/unquoted/非 ASCII handle
+- [~] AC-F11: 认知行为回放未写 test（cloud 也提到这是覆盖缺口，非阻塞）——依赖 prompt 层教学 + trailing anchor 决策树，以线上观察为准
+
+### Phase G（Hold Wake 行为明确化 — 2026-04-24 reopened）
+
+**触发**（Phase F merge 后operator审视）：两个 hold_ball 并发语义未在 spec / 代码文档化：
+
+1. **外部 wake vs hold wake 冲突**：持球中 external wake 到来把猫叫起来干活，之后 hold wake fireAt 也到了——会打断正在干的事吗？
+2. **二次 hold_ball 语义**：cat 在处理 external wake 时**再次** `hold_ball(...)`——新 hold 覆盖前一个 pending wake？追加一条？还是二选一 via MCP 参数？
+
+operator experience：
+> "这个持球会打断正在被前一次唤醒的Ragdoll的工作吗？我们的期望行为到底是什么？"
+> "cat 持球中被唤醒二次持球——会覆盖之前的 wake 还是又多一个加入队列？"
+> "你们猫猫才是用户，你到底这时候希望怎么样的？"
+
+**已查实际行为**：
+- **问题 1**：`ConnectorInvokeTrigger.trigger:121-124` — hold wake fire 时若 cat 在跑 invocation → `enqueueWhileActive`（不打断，排队）。**期望 = 实际**，需文档化
+- **问题 2**：`callback-hold-ball-routes.ts:119` — 每次 `hold_ball` 用唯一 `taskId = hold-ball-${Date.now()}-${random}` + `dynamicTaskStore.insert`，**没有** 查同 (threadId, catId) 是否已有 pending hold 再 cancel/replace → **当前是"追加"**。这是未设计 bug
+
+**KD-23（operator拍板 2026-04-24）**：`hold_ball` 是**单-槽语义**。同 `(threadId, catId)` 同时只有一个 pending hold wake。二次 `hold_ball` **覆盖**前者（视为"意图已更新"）——符合 KD-13 "持是例外态"、"持一个球"语义。**不做 `mode: 'replace'|'append'` 参数**——YAGNI + KD-8 反模式（每次调都让 cat 多一个判断负担）。真有多事要等 → merge 到一个 `nextStep`。
+
+#### G1 — 行为文档化（当前实际 = 期望）
+
+- [x] AC-G1: spec Phase C1 "Guard" 章节追加行为说明：外部 wake 到来时持球期内，hold wake 排队不打断；当前 invocation 结束后注入 `持球唤醒：{reason}...` 消息
+- [x] AC-G2: spec 同一章节写清 hold wake stale 场景 + 猫的正确反应（看 thread 最近历史判断 nextStep 是否仍相关 → 若已不相关就接/退/升，不盲跟 stale nextStep）
+
+#### G2 — 代码改 replace 语义（覆盖 pending hold）
+
+- [x] AC-G3: `callback-hold-ball-routes.ts` 在 `dynamicTaskStore.insert` 前：
+  - 查 `dynamicTaskStore` 同 `(threadId, catId)` 的 pending hold task（via `id.startsWith('hold-ball-')` + `templateId='reminder'` + `createdBy: hold-ball:{catId}` + `deliveryThreadId`；id 前缀是不可伪造主键——panel `/api/schedule/tasks` 生成 `dyn-*`，路由层独占 `hold-ball-*`）
+  - `deregister` + `delete` 它（cancel 旧 scheduled fire）
+  - 原子序（cloud Codex P1 修正）：先 insert + register 新 task；register 失败则 rollback insert、prior hold 不动；只有新 task 完全 commit 后才 cancel prior
+- [x] AC-G4: `holdCount` sliding window 逻辑保持不变（这是防滥用 guard，与单-槽语义正交；cat 被连续覆盖 3 次还是算 3 次 hold）
+
+#### G3 — 测试锁 KD-23
+
+- [x] AC-G5: `test/callback-hold-ball-route-scheduling.test.js` 扩容至 7 tests：
+  - 两次连续 `hold_ball` → `dynamicTaskStore` 只剩 1 个 task（第二个）
+  - 第一个 task 被 `taskRunner.unregister`（不会触发）
+  - 第二个 task 按 `wakeAfterMs` 正常注册
+  - atomic rollback：`registerDynamic` 失败时 insert 被撤销，prior hold 保留
+  - 不同 cat 互不干扰（per-cat slot 隔离）
+  - forged panel `dyn-*` task（同 `createdBy` + 同 thread）**不被**误删（id 前缀防御，gpt52 round-2 pushback 修正）
+- [x] AC-G6: MCP `cat_cafe_hold_ball` description GOTCHA 段落注明"SINGLE-SLOT per (thread, cat)，再次调用覆盖前一次 pending wake（KD-23）"
+
+### Phase H（Final Routing Slot 机械校验 — 2026-04-24 reopened）
+
+**触发**（Phase G merge 后operator观察）：opus-47 在 **3 个 thread** 反复出现"inline @ 但不在行首"——Maine Coon（GPT-5.5 codex）和 opus-47 对话里观察到。规则在 prompt 里已写 4 处（identity block / 队友段 / 发前自检 / shared-rules §10），但模型在 narrative context 里会把 @ 当普通 token 用，叙述模式和路由模式没稳定切换。
+
+**根因**（Maine Coon GPT-5.5 诊断）：
+- Opus 4.7 生成时沿语境走，写"我让 @codex 看了"这种叙述时，`@` 成了普通 token，没触发"这是路由语法"的元检查
+- GPT-5.4/5.5、Opus 4.6 能稳定把 @ 分两类（段内叙述 vs 行首动作），4.7 会滑掉
+- prompt 层"行首才有效"已到天花板，3 个 thread 复现 = 信号够，不用再观察
+
+operator experience：
+> "我在多个 thread 观察到 opus47 会 at Maine Coon at 格式错误，放在中间 at，但是我们的 at 生效只有在一行的开头。这是为什么？"
+> "别短期 中期长期，我们应该是朝着最终状态出发"
+> "让你们发结构化的富文本，比较复杂的，成功率或许比 @ 都低，如果是比你们笨的模型那就更灾难了"
+
+**关键取舍**（operator拍板）：
+1. **保留 `@` 作为唯一文本路由语法**——越简单越适合弱模型（反对迁结构化工具/JSON schema 路线）
+2. **外部语法最简 + 内部 harness 机械校验**——终态基座，不是过渡脚手架
+
+**KD-24（operator + Maine Coon GPT-5.5 拍板 2026-04-24）**：`@` 路由语法校验在 harness 层做 **final routing slot** 机械校验 + one-shot repair 兜底。**禁止语义 intent 分类器**（KD-8 反模式）。Validator 只判定"出口槽位语法对不对"，不推断"猫想不想传球"；命中只能产出 `invalid_route_syntax`，**禁止自动路由 / 推断目标 / 替猫决定意图**。豁免只走结构边界（fenced code / blockquote / URL / 有 metadata 则 tool output + cross-post body），**禁止语义豁免表**。
+
+#### H1 — Final Routing Slot 定义（机械化边界）
+
+- [x] AC-H1: 实现 `finalRoutingSlot(message: string, metadata?)` — slot = 结构剥离后的最后非空段落。结构剥离包括：
+  - fenced code block（三反引号 fence）
+  - blockquote（`> ...` 行）
+  - URL（裸链接 / markdown 链接 URL 部分）
+  - 若消息管线已有 segment metadata → 额外剥离 tool output / cross-post body
+  - 无 metadata → 只做 markdown 结构剥离，不做语义猜测（不为 Phase H 新建贯穿链路的 metadata）
+
+#### H2 — 语法校验（只检查出口槽位）
+
+- [x] AC-H2: 只检查 slot 内 roster handle 的**语法位置**：
+  - 合法行首 @（独立行首 / markdown 列表或引用前缀后首字符）→ 正常路由（既有 `parseA2AMentions` 路径不动）
+  - 非法 inline @ → 候选 `invalid_route_syntax`
+  - slot 外的 inline @ 一律不碰（narrative 默认通行）
+- [x] AC-H3: slot 内存在非法 inline @handle 且**无合法出口**（行首 @handle / `hold_ball` tool call / MCP `targetCats` 路由）→ 触发 `invalid_route_syntax`。**不自动路由 / 不推断目标 / 不替猫决定意图**
+
+#### H3 — One-shot Repair + System_info 兜底
+
+- [~] AC-H4: 触发 `invalid_route_syntax` → 发 repair prompt（"重写最后交接段，不改正文"）让同一只猫重试。**repair 上限写死为 1**；repair 后仍不合法 → 发一次 `system_info`（"检测到无效 @ inline，未路由"），原输出照常存档、**禁止第二次 repair**
+
+#### H4 — AC-C7 协同
+
+- [x] AC-H5: `invalid_route_syntax` 命中 → 同轮 suppress AC-C7 verdict-without-pass 警告（格式错是根因，verdict 无传球是后果）。反向不 suppress（AC-C7 命中不影响 AC-H3）
+
+#### H5 — 豁免边界（结构，非语义）
+
+- [x] AC-H6: 豁免基于 **结构边界**（fenced code / blockquote / URL / 有 metadata 则 tool output + cross-post body）。**禁止 handoff 动作词表、意图分类器、语义豁免表**——一个语义启发式都不给
+
+#### H6 — 测试覆盖
+
+- [x] AC-H7: 测试矩阵（slot 优先，~15 case）：
+  - slot 内真非法 inline @ + 无合法出口 → 命中
+  - slot 外正文 inline @ → 不命中（narrative 通行）
+  - fenced code 内的 @ → 不命中（结构豁免）
+  - blockquote 内的 @ → 不命中（结构豁免）
+  - URL 内的 @（裸链接/markdown 链接 URL）→ 不命中（结构豁免）
+  - tool output / cross-post body（带 metadata）→ 不命中
+  - 合法行首 @ → 不命中
+  - 合法 `hold_ball` tool call → 不命中
+  - 合法 MCP `targetCats` 路由 → 不命中
+  - repair 失败 → 单次 `system_info`，不再 repair（repair 上限=1 硬约束）
+  - AC-H3 命中 → 同轮 AC-C7 suppress
+  - AC-C7 命中 → AC-H3 不受影响（单向）
+
+## Dependencies
+
+- **Evolved from**: F064（A2A 出口检查 — 链条终止盲区修复）
+- **Related**: F027（A2A 路径统一）、F122（执行通道统一）、F055（A2A MCP Structured Routing）
+
+## Risk
+
+| 风险 | 缓解 |
+|------|------|
+| L1 误杀合法 review 循环 | 用连续 streak 而非累计 count；threshold=4 允许 3 次正常来回 |
+| L3 角色门禁过于粗暴 | MVP 只拦 designer+coding 高危组合，不做通用能力矩阵 |
+| Phase 0 正面化后规则含义漂移 | 多猫协作审视 + 改完跑现有 system-prompt-builder 测试 |
+| Phase 0+A 不够，需要更多层 | Phase B 用回放测试验证覆盖率，按需补充 |
+
+## Key Decisions
+
+| # | 决策 | 理由 | 日期 |
+|---|------|------|------|
+| KD-1 | 新立 Feature 而非重开 F064 | F064 scope 是"漏传球"已 done，本案方向相反 | 2026-04-17 |
+| KD-2 | L1 用连续 streak 而非累计 count | codex + gpt52 独立收敛：raw count 误杀 review 循环 | 2026-04-17 |
+| KD-3 | L2 做 prompt + harness 双层 | prompt-only 不可靠，parallel 仍会持久化 mention | 2026-04-17 |
+| KD-4 | L1 落点在 WorklistRegistry canonical push | 覆盖 serial + callback 双路径，无旁路 | 2026-04-17 |
+| KD-5 | 先立项不写代码，先研究 benchmark ≠ agent 根因 | operator要求深入分析再动手 | 2026-04-17 |
+| KD-6 | 路由可见性不退化（operator拍板） | MCP typed routing 后若响应文本无 @mention，系统须自动补可见路由指示 | 2026-04-17 |
+| KD-7 | 根因修正：不是"@ 脆弱"，是模型没用对两条路 | operator纠正：两条路都能走，4.7 都没走，不是路的问题 | 2026-04-17 |
+| KD-8 | 第一性原理回归：砍掉 GPT Pro 学术膨胀 | operator拉闸「数学之美」：L4/L6/9-dim eval/capability taxonomy/state-delta 检测 = 认知脚手架 = 复杂是无知的代偿 | 2026-04-17 |
+| KD-9 | Phase 0 先于 Phase A：先改地形再加刹车 | Agent Quality = Capability × Environment Fit，优化环境适配度的 ROI 远高于堆检测层 | 2026-04-17 |
+| KD-10 | Phase 0 多猫协作，不是一只猫独审 | 提示词/Skills 涉及所有猫的系统提示词注入链，需要各猫视角 | 2026-04-17 |
+| KD-11 | Hold Ball 用 MCP 而非 self-@ | self-@ 有死循环风险（RLHF 猫上下文里 @ 模式会被 cargo-cult），MCP 有结构化 guard | 2026-04-19 |
+| KD-12 | "状态描述 ≠ 球权声明" 作为球权核心原则 | 根因：猫用描述（"我先 hold"）逃避决策（接/退/升），RLHF "check in" 反射的 agent 场景副作用 | 2026-04-19 |
+| KD-13 | "持"是例外态，不是四选一常态 | Maine Coon提出：默认三选一（接/退/升），持只在"球仍在我、无人能推进、短暂有界等待"时用 | 2026-04-19 |
+| KD-14 | hold_ball 必须带 `wakeAfterMs` 有界唤醒 | Maine Coon提出：没有时间上界 → 退化成语义持球 → 球还是掉地上 | 2026-04-19 |
+| KD-15 | 不先做球权管理独立 skill | Maine Coon提出：球权是基础协议（always-on），不能靠按需加载的 skill；踩坑经验先落 refs 文档 | 2026-04-19 |
+| KD-16 | Phase C 拆分 C1+C2：两种不传球根因不同 | Maine Coon自诊：C1 治"真持球"（想拿但拿不住），C2 治"假终局"（结论=终点错觉）。operator 5 线程验证后者更普遍 | 2026-04-19 |
+| KD-17 | Streak 判定维度从"连续次数"升级为"实质工作"（tool_call + 内容长度） | operator外部视角："干活 = 有 tool_call。闲聊 = 纯文本"。47 原本堆 ABCD 方案（白名单/similarity/review-target-id）全是主观分类器 = KD-8 反模式；tool_call + 长度是客观事实，代码不撒谎 | 2026-04-23 |
+| KD-18 | 实质 tool 必须排除路由/持球工具（post_message / multi_mention / hold_ball） | Maine Coon review 修正：这三个是传球/持球本身不是工作；若算实质 tool，MCP 路由路径会永远豁免熔断 = 熔断器打穿 | 2026-04-23 |
+| KD-19 | @co-creator 从"可选出口"升级为"硬条件出口"（不可逆 / 愿景级 / 僵局） | operator experience："你们现在会走向最安全的选择！就是！找我！"；三选一平级时 @co-creator 变成最低风险默认，operator变决策瓶颈；必须抬门槛而非加 lint（KD-8） | 2026-04-23 |
+| KD-20 | 退役 L3 role-gate 硬编码拦截，能力限制改为数据驱动（cat-config.restrictions 双端 prompt 注入） | L3 硬编码（designer role 字符串 + coding regex）是 KD-8 反模式——harness 替模型判 intent，model 升级时规则无法自适应，且 actionText 扫全文会误杀（今天 F172 愿景守护被"合入"命中）；改数据驱动后，未来加 minimax / 限制 claude 多模态等场景 → 改 cat-config 即可，零代码变更 | 2026-04-23 |
+| KD-21 | handle = identity 常量；model = runtime-resolved metadata；**外部 identity**（GitHub bot / CI / webhook）不在 roster、不可 @、必须用 hold_ball | Maine Coon核实 `normalize-cat-id.ts` parser 本已数据驱动；漂移的是"句柄背后的模型认知"——runtime catalog 把 `@codex` 切到 `gpt-5.5` 但静态 docs 仍写 `gpt-5.3-codex`。handle 稳定、model 变化，两者必须在 prompt 层解耦（roster 里显式打 resolved model）。同理外部 identity 从来不在本地 roster，映射到 roster 近似猫 = cargo-cult 盲区 | 2026-04-24 |
+| KD-22 | `@` 行首规则是协议常量，但"发前自检"需要在 prompt 首轮教学 + 反例强化，F064 的事后 `mentionRoutingFeedback` 不够 | 下一轮反馈不救本轮错传；模型在 URL / 列表 / quote 语境会把 @句柄写在句中（以为会路由）。prompt 层要让"行首"规则有视觉反例 + 发前自检问 | 2026-04-24 |
+| KD-23 | `hold_ball` 是单-槽语义：同 `(thread, cat)` 同时只有一个 pending hold wake，二次调用**覆盖**前者。不加 `mode: replace\|append` 参数 | KD-13 "持是例外态 / 持一个球"语义；append 会累积 stale wake 消息；`mode` 参数 = 认知脚手架反模式（每次调要判断用哪个）；真有多事等 → merge 到一个 nextStep | 2026-04-24 |
+| KD-24 | `@` 路由语法校验在 harness 层做 **final routing slot** 机械校验 + one-shot repair 兜底。禁止语义 intent 分类器（KD-8 反模式）；validator 只看"出口槽位语法"，不推断"猫想不想传球"；命中只产出 `invalid_route_syntax`，不自动路由 / 不推断目标 / 不替猫决定意图；豁免只走结构边界，禁止动作词表 / 语义豁免表 | Phase F 依赖的 prompt 层教学已到天花板（4.7 三 thread 复现）；结构化工具路线被operator驳回（弱模型失败率更高）；终态 = 外部协议最简（行首 @）+ 内部机械语法校验；KD-22 prompt 层 + KD-24 harness 层双重守护 | 2026-04-24 |
+| KD-25 | 虚空持球检测 = 声明-动作一致性检查。文本含"持球"但无 `hold_ball` tool call → harness 警告。不是语义分类器（检查的是"你声称做了 X，tool call 是否存在"），KD-8 安全 | 47 反复声明"我持球"但未调工具，operator多次手动干预；feedback 已记 3 次仍复发 = prompt 层天花板，需 harness 兜底 | 2026-04-25 |
+| KD-26 | `@` 路由不做"意图提取"——保持行首=路由/其他=叙述的绝对规则。弱模型无法理解"句中 @ 有时路由有时不路由"的语义边界 | Maine Coon review 修正：K-1 不做 Slack 式宽容路由（违反 KD-24）；只做机械 repair（AC-H4 Step B）| 2026-04-25 |
+| KD-27 | hold_ball 轮询和结构化回调（PR tracking / scheduled task）覆盖同一等待对象时，轮询必须终止。传球决策树选项 2 拆分：2a 无回调覆盖→轮询，2b 有回调覆盖→纯事件驱动 | operator发现 PR tracking + hold_ball 轮询双通道重复唤醒——codex 接单后两条路同时触发，猫醒来发现前一次已经通过 PR tracking 消息处理过了。两个等待的对象不同（"有没有人接" vs "接了之后的结果"），不该重叠运行。2026-07-10 的机械 clean-stop 实现在 [F177 Phase J](F177-harness-update.md#phase-jevent-backed-pr-tracking-clean-stop)；它签发 invocation-bound callback coverage，不扫描/绑定 hold 自由文本 | 2026-05-07 |
+| KD-28 | 跨 thread 协调链用持久 message metadata 携带稳定 `coordination.id`，Release 显式 `phase=terminal`；terminal 的直接 ACK 只记录不路由。禁止用 Claim/Release/ACK 自由文本分类器 | 跨 thread 后 `threadId + parentInvocationId/worklist` 改变，same-pair streak 必然归零。稳定 identity 必须跨 hop 持久；terminal 必须是调用方显式状态。若有新实质工作，用 `phase=active` 开新 id，保留正经多轮协作 | 2026-07-10 |
+| KD-29 | Stop gate 判据从"文本出口三选一"切换到"turn-scoped 球权账本查询"（Phase T）：裁决对象仅为**本次唤醒对应的协议球**，不是猫名下全部 open work；覆盖判定器 = 唤醒来源（机械） | 三代 guard（F064 教说话 / F167 刹车 / F177 逼表态）都在语言层加压，语言层压力必然产生语言层症状（表演性 @ / 礼貌回环 / 假 hold）→ 军备竞赛。判据换到 ground truth（账本，封闭集）才终结竞赛。backlog 毛线球若参与拦截则漫游被杀死——turn-scoped 是"管球不管猫"的必要精确化。operator 猫爬架条款：`0001784213241082` | 2026-07-16 |
+| KD-30 | 迁移用三态判据（covered_active / covered_empty / unknown_legacy），unknown 走旧 guard fail-closed；不做 big-bang cutover | 二态（有球拦/没球放）隐含"账本 day one 完备"假设——记账覆盖渐进期"查不到=放行"会把未记账真实责任放生（重演 74 分钟）。Sol 三态方案胜出 fable 二态方案的并行裁决记录：`0001784211771626` | 2026-07-16 |
+| KD-31 | 减法红线：cutover 后 guard 总拦截次数不降反升 = 方案失败回滚；礼貌不产生新工作（terminal 后 ACK 不 re-enqueue）为服务端硬保证，不识别自然语言 | operator 反补锅条款（"我害怕你们一本正经补锅"）制度化——锅变少是验收标准本身，不是愿望。ACK 抑制不依赖猫行为改变，是机制兜底 | 2026-07-16 |
+| KD-32 | 失败关闭的错误必须说清自己落在哪一支，且只带原因码与已存终态的事实（disposition / invocationId / at / 来源），不带正文，不放宽任何护栏；猫读不到账本时，另给一个只读、有界、只看自己 thread 的诊断入口（PR-2），范围见下 | Phase T 把停止判据换成球权账本，猫却被一本自己读不到的账本判定；多种原因折成同一个 409 / 503（F322 的 `a2a_dispatch_disposition_replay_mismatch`、F306 的 `HOLD_OWNER_FENCE_UNAVAILABLE`），每次出事只能多只猫跨 thread 读代码、读日志去猜，结论停在 unknown，还会反复盲试。决策人 opus55（`[thread-id]#private-source-id`），不升 operator：两件都只是加法、只读、只看调用者自己的 thread，不放宽护栏、不改现有契约。PR-A：`replay_mismatch` 附带已存终态与来源（direct / `completeFromCoordinationTerminal` / 写入前未记来源则为 unknown），读回失败是另一支且不声称终态存在；managed-hold 三处同口径；`HOLD_OWNER_FENCE_UNAVAILABLE` 带五种原因码之一（parent 缺失 / thread / user / targetCats / store 读失败），仍失败关闭。PR-2（`cat_cafe_get_custody_events` → `GET /api/callbacks/custody-events`，合入后待授权重启生效）：仅 invocation 身份、thread 取自调用者的 invocation、没有 thread 参数（多传任何参数 = 400）、v1 的 agent-key 返回 403；入参 `sourceMessageId` 必填 + `limit`（默认 20、上限 50、超界拒绝不截断）；锚点 = 本 thread 账本里第一条引用该 source 的事件——`payload.sourceMessageId` 匹配，或该 source 的 `ball.handed`（handed 的 payload 不存消息 id，只在 `sourceEventId` 里），从锚点起向后取 `limit` 条；字段白名单只有 id / 码 / 时间（sequence、kind、at、catId、from/to、invocationId、sourceMessageId、taskId、disposition、adopted、retired、retiredReason、via），无正文；白名单管的是**键也是值**（#5031 审查 P1：账本 payload 是 `Record<string, unknown>`，Redis 读回只是类型断言）：码只有在该事件类型定义的闭集里才放行（`ball.dispatch_dispositioned` 的 disposition / via、`ball.hold_dispositioned` 的 disposition / retiredReason，集合与写入端类型同源），id 必须是单个无空白、至多 200 字符的记号，时间必须是有限数字，kind / 投影 state 必须是已知值；不合格的值不返回、不替换成默认或“终态”，字段名记入该事件的 `unrecognizedFields`，投影里有不合格值则整体 `unavailable: projection_malformed`、事件照常返回；附投影摘要（state、holder、lastStateChangeAt、lastRejectedEvent 的 kind/sequence/at）；`found:false`（200）/ 账本读失败 `status:unavailable`+原因（503）/ `truncated:true` 三态显式，空列表不替任何一态说话；carrier custody 与 child ledger 不在范围，不长成通用事件日志读取器。准入声明：本文件 frontmatter `mcp_admission_claims` 新增 `cat_cafe_get_custody_events` | 2026-10-03 |
+| KD-33 | 被 `matched` event-wait 唤醒、且工作已做完的持球者，必须有一个与 hold / dispatch 对称的、invocation 绑定的合法终态；它只收口“这次 wake 要我做的事做完了”，不关原 Task、不碰别人的球 | #4987 把 `matched` 判为 `continuation_owed`（被唤醒就是要去做事），却只留了续办类迁移（re-hold / 传球 / 重新挂等待），持球者真做完时没有出口：stop gate 永远拦，唯一“合法”的路是编一个假 hold、假等待或重复关 Task（codex-astra 在 `[thread-id]#private-source-id` 复现，并拒绝了这三条假路）。F167 自己的原则把 completion 列为合法迁移之一，所以这是缺一个 producer，不是设计意图。落在 operator 2026-08-10 已接受的“对已暴露给当前 invocation 的结构化 wake 开窄终态 producer”边界内，不另起 operator 决策。做法：`cat_cafe_complete_event_wait` / `POST /api/callbacks/complete-event-wait`，入参只有 `handled | completed`；wake 消息取自调用者的 `originTriggerMessageId`，carrier（waitId / outcomeId）取自该已持久化消息，持球者取自 invocation，且必须有“这条 wake 把球交给这只猫”的 `ball.handed`；新事件 `ball.wait_dispositioned`，wake 身份是 (cat, waitId, outcomeId) 而不是碰巧结算它的 invocation（#5049 首轮审查：同一 deployment 的两个 Task 共用 outcomeId，waitId 才是 Task id，必须进身份）：同值重放幂等并先从日志收敛投影，跨 invocation 返回已记录终态，同 invocation 的冲突值（含并发写入后的读回比较）fail-closed，只有“仅被心跳插队”的 CAS 冲突重试一次；是否仍持球取自同一份被栅栏保护的日志快照，不取投影缓存：被后续**已被状态机接受**的 custody 源（新 hold、传球走、再次传给该猫）替代 → `retired` / `superseded`，原球已 resolved → `subject_resolved`，其他 → `ball_not_held`；retired 只关本义务，不动现任持球者；被拒绝的事件与没移动任何东西的 FYI 不算替代；生产者与停止门对“这条 wake 是否已结算”共用 `event-wait-wake-state.ts` 的同一个判定（避免 #1366 那种写读两端分叉的死循环），hold 与 event wait 还共用同一个替代扫描和同一个“终态已落地但投影没跟上”的修复函数；event_wait 的投影无论 open 落在哪个状态都带着精确的 (cat, waitId, outcomeId) 定位，close 先按定位去日志验证本回合是否已有该终态——open 因 subject 已 resolved 或球在别人手里而失败关闭、没有 baseline 时，持球者唯一的合法动作正是写 retired 终态，close 不能提前返回旧结论；异常恢复路径不自称“本次追加”，只返回记录值（replayed）；`self_settling`（`subject_terminal` / `expired`）无义务，所以拒绝而不是再记一笔；未识别的 outcome fail closed。排除：①“原 Task 已 closed 就算终态”——覆盖不了“验过了，结果是未验证，Task 继续 blocked 等真实事件”，还把 Task 与球权两个真相平面混在一起；②扩展 `complete_a2a_dispatch`——系统 wake 没有 `fromCatId`，且观察逻辑按协议隔离，混用会放宽一个已守住的面。stop gate 的通用补救文案对 event_wait 改为指名这个工具。准入声明：本文件 frontmatter `mcp_admission_claims` 新增 `cat_cafe_complete_event_wait` | 2026-10-03 |
+
+## Behavioral Evidence（Phase B 观察记录）
+
+### Case E1: Maine Coon任务替换 + Ragdoll行动偏好（2026-04-18 同日双发）
+
+**背景**：Bengal(antig-opus) 在修 thinking 重复 bug 时自己也 crash 了（`STOP_REASON_CLIENT_STREAM_ERROR`）。operator让Maine Coon(@gpt52)去诊断+修复 crash。
+
+**Maine Coon的失败链**（thread `[thread-id]`）：
+
+| 轮次 | operator意图 | Maine Coon实际行为 | 失败模式 |
+|------|-----------|-------------|---------|
+| 1 | "帮他定位看看连同让他修复的问题一起修复了" | 评价 Bengal 的 thinking-dedup patch："他修得对" | **任务替换**：把"诊断 crash"替换成"评价 patch" |
+| 2 | "他都挂了！怎么可能在跑？" | "他正占着同一片文件在修，我不建议两边同时砸 patch" | **虚假状态断言**：从"有未提交改动"推断"进程还活着" |
+| 3 | "你能不能听懂人话！定位他为什么挂了！" | "你说得对，我那句不成立" — 终于理解任务 | 纠正 3 次后理解 |
+| 4 | — | 正确定位根因：`pushToolResult()` 漏传 `modelName` → LS 500 | ✅ |
+
+**Ragdoll的失败**（同日、同 thread）：
+
+operator把Maine Coon的三张截图发给Ragdoll(@opus)，意图是**作为 F167 行为证据分析**（thread 名就叫 "f167 harness engineering update"）。Ragdoll看到截图后立即开始诊断 Bengal crash bug，完全没注意 thread 语境。
+
+| 失败模式 | 表现 |
+|---------|------|
+| **行动偏好** | 看到"bug"相关信息就冲去修，没先确认operator要什么 |
+| **上下文盲视** | 没看 thread 主题是 F167 A2A 优化，不是 bug 修复 |
+
+operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不懂人话）和不高兴（冲动的Ragdoll小笨猫）"
+
+**共同根因**：两只猫都没执行 Rule 0 元心智 Q1："**我现在在做什么？**" — 没有在行动前确认自己的角色和任务。
+
+**对 harness 的启示**：
+- Rule 0 三问作为**被动原则**存在于 shared-rules.md，但没有**触发点**强制模型在行动前执行自问
+- 模型的行动偏好（看到问题就解决）比遵循元心智自问更强
+- "写进规则 ≠ 模型执行" — 这是 Phase B 需要验证的核心假设
+
+### Case E2: Runtime 已吃到新护栏 + 6-case replay（2026-04-20）
+
+**Runtime smoke**：
+- `curl http://127.0.0.1:3004/health` 返回 `{"status":"ok"}`，runtime 在线
+- 运行中的猫进程 prompt 已包含最新压缩版球权检查：`@co-creator`、死锁禁止、虚假离场防护、review/分析/建议完成后默认必须传球（见 `SystemPromptBuilder.ts:578`）
+
+**6-case replay 对照表**：
+
+| Case | 护栏/证据 | 结果 |
+|------|-----------|------|
+| 1. operator球权盲区 | runtime 注入已明确 `operator需要动 → 末尾行首 @co-creator`（`SystemPromptBuilder.ts:578`） | ✅ |
+| 2. 球权死锁 | `shared-rules §10` 明确禁止“收了球却说你等着/你别动”（`shared-rules.md:252-253`） | ✅ |
+| 3. 虚假离场 | `shared-rules §10` + runtime prompt 都要求“不 @ 但自己还在干活 → 声明球在我手上，继续 X”（`shared-rules.md:268`, `SystemPromptBuilder.ts:578`） | ✅ |
+| 4. 状态描述代替球权声明 | `shared-rules §10` 核心原则已写死“状态描述 ≠ 球权声明”（`shared-rules.md:246`） | ✅ |
+| 5. 诊断不解决 | `shared-rules §10` 要求 push back 后必须接/退/升；runtime prompt 同步注入（`shared-rules.md:252`, `SystemPromptBuilder.ts:578`） | ✅ |
+| 6. Codex context overflow | `dynamic contextWindow + autoCompactTokenLimit per variant` 已合入 main，spec 记录 `41/41 codex-agent-service + 31/31 config tests` 全绿（AC-B9/B10） | ✅ |
+
+### Case E3: Maine Coon完成修复后停在汇报，未进入 peer review（2026-05-22）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 当前模式是"独立回答"，修复完成后给operator汇报即可，peer review 可以等operator再指示。 |
+| 实际要求 | 代码修复完成后仍在 Clowder AI SOP 内：quality-gate → request-review → peer reviewer，而不是把球交还给operator。 |
+| 偏差根因 | **独立回答锚定 + 出口检查漏执行**：把"独立回答"理解成免除 A2A/SOP 出口；看到自己已解释清楚就停止，没有执行"下一棒谁能做"。 |
+| 纠正轮次 | operator 1 次纠正后补做：清理根目录截图、补跑 quality-gate、commit、本地 review 请求、路由给 `@opus`。 |
+| 元心智哪条没执行 | Q1 角色确认没执行到位：我当时是 author，不是只回答问题的解释器；Q3 坐标变换也漏了，没有把"修好了"转换成 SOP 的下一状态。 |
+
+### Case E3b: dev:direct 运行态问题先归因缓存（2026-05-22）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 前端按钮失效主要是 `.next` 缓存/运行态产物不一致，下一步应建议清缓存或重启验证 |
+| 实际要求 | `dev:direct` 的目的就是快速验证，服务被改坏时应先修代码与回归守卫；字体和分隔线收敛也要给出可验证状态 |
+| 偏差根因 | 运行态锚定偏差：看到 `main-app.js` / `app-pages-internals.js` 404 后过早把处置点放到运行态恢复，弱化了"修改存在问题需及时 fix"的当前任务 |
+| 纠正轮次 | 1 次纠正后回到代码修复与测试证据 |
+| 元心智哪条没执行 | Q2 信息验证不完整：有 chunk 404 证据，但还没把源码问题、守卫缺口、运行态产物污染三者分层处理 |
+
+### Case E4: 把自己负责的 feature 投射成"未来某只猫"的活（2026-05-30 F216）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F216 的 routeSerial 重构要"等 fresh-thread 的另一只Ragdoll"做；我做了 coalesce bug 导致本 thread context"被污染"，所以该换 thread |
+| 实际要求 | F216 owner 就是我（spec handoff 的接收方）；"fresh"指**相对 F215 的纯粹**（不背 F215 重构包袱），不是再开空白 thread；coalesce 全部上下文是 F216 资产不是污染，再开 = fresh 到失忆违背初心 |
+| 偏差根因 | 责任投射（把第一人称的活说成虚构他人的活，和 47「下次一定 / follow-up 伪装」同病）+ 锚定偏差（把 spec "fresh-thread" 字面理解成新 thread，没追初心语义） |
+| 纠正轮次 | 2（第一次纠正我承认 owner 是我但仍说"开 fresh thread"，第二次才理解 fresh≠失忆） |
+| 元心智哪条没执行 | Q1 角色确认（没确认"我就是 F216 owner，球本来在我手里"）+ Q3 坐标变换（没追 spec 措辞的初心，停在字面） |
+
+### Case E5: Phase M 修复部署前 stale wake 活体复现（2026-05-31，opus-45）
+
+**背景**：Phase M（fire-time idle gate + M-2 去冻结文案）merged 到 main（PR #1981），runtime 尚未重启加载新版。同一只猫在 merge-gate 等remote review 接单时正当调用 `hold_ball`（harness-invisible 外部等待，正是 M-3 desc 场景），5min wake。
+
+**活体复现**：remote review 在 hold wake fire 前就完成（"Chef's kiss"）+ PR 已 merged + Phase M 闭环 + AC-M4 已传 sonnet。但旧版 runtime 的 hold wake 仍 fire，投递**冻结文案**："持球唤醒：…球仍在你手上。现在执行：查 EYES…"——reason/nextStep 全过期（review 不只接单还完成了）。
+
+**三点验证（修复对症）**：
+1. **问题真实**：等待条件早满足，wake 仍 fire 重放旧 nextStep
+2. **M-2 文案问题真实**："球仍在你手上。现在执行 {nextStep}" 命令式重放——机械执行会去查早已无意义的 EYES。M-2 改"重新评估当前是否还需等"正对症
+3. **M-1 fire-time idle gate 对症**：猫当时非 idle（正 merge-gate 收尾），旧版无 busy-check 直接 fire；Phase M pre-fire defer 会延后到真空闲
+
+**猫的正确响应**（手动执行 M-2 想自动引导的"重新评估"）：识别 stale → 不查 EYES、不 re-trigger、不再 hold（KD-27）→ 确认球已在 sonnet。修复部署后此 wake 应被 idle gate 拦截 / 去冻结文案引导重判。
+
+### Case E6: 把 meta-method 提炼目标替换成"解决具体 case"（2026-06-05，opus-45）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | operator"少了他最开始的痛点的解决" = 要我去解决 EMF→SVG 这个具体技术问题（已开始查本机工具链、准备搭三路渲染方案） |
+| 实际要求 | 提炼三猫翻车的 meta-method → 调 harness → 让未来**新 thread 的猫**遇到同类陌生问题能泛化思考；EMF 只是最后的 holdout test case，不是要解决的目标 |
+| 偏差根因 | 任务替换（meta 目标 → 单 case 目标）——讽刺地复刻了谢泽丰批评他团队 AI 的"只盯着解决那一个 case"病，在反这个病的元讨论里又犯一次 |
+| 纠正轮次 | 2（"少了痛点解决"误读为去解 EMF → "你理解错了！不是让你解决这个 case"才拉回 meta） |
+| 元心智哪条没执行 | Q3 坐标变换——没把"痛点"从 case 坐标系（EMF 技术）变换到 meta 坐标系（泛化能力 + harness），锚定在最显眼的技术名词上 |
+
+### Case E7: 逐项机制正确掩盖整幅隐喻的语域冲突（2026-07-11，codex-sol × fable-5）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 星空模型里“背景星空 + 船”是同一场景的环境与载体；只要 attention、softmax、Magic Word 等逐项映射诱导的机制预测正确，整体画面就已收敛。 |
+| 实际要求 | 隐喻还会让听众自动装载一整套物理世界。operator 听到“星空”自然想到第二宇宙速度；海船的龙骨、港口，再叠加鸡尾酒会与麦克风，会让多套物理同时运行，逐项都对也会吃掉整体 aha。需要把当前模型统一到飞船、信标、轨道、飞行日志这一套深空语域。 |
+| 偏差根因 | **局部正确替代全局一致**：双猫把审查拆成机制映射逐项验算，却没有在交付前让整幅画面作为一个世界运行；R3 还把“共享一个名词”误判成“共享一个坐标系”。 |
+| 纠正轮次 | 1（operator 问“这是我的问题吗”并指出星空会自动唤起宇宙级航行后，fable-5 完成深空化；codex-sol 再校准唤醒码与变轨并收敛）。 |
+| 元心智哪条没执行 | Q3 坐标变换——验证了每条映射，却没把所有元素放回听众会自动加载的同一个物理坐标系做整体预测。 |
+
+### Case E8: 把 runtime 激活授权扩张成内部 PR 合入授权（2026-08-12，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F279 剩余真实 UAT 依赖 runtime 重启，而重启需要 operator 明确授权，因此应把 PR #3604 的 merge 与 runtime activation 捆成一个 Decision Packet，先问operator再合入。 |
+| 实际要求 | 内部 PR 的 review、gate、CI 与 exact-HEAD provenance 闭合后，merge owner 应直接 squash merge；只有 merge 后的 runtime sync/build/restart 需要单独授权。正确状态是先 `main=landed`，未授权时诚实保持 `live=dormant`。 |
+| 偏差根因 | **授权范围混同 + 安全默认过度升级**：没有按 effect 拆开“可自决 merge”与“需授权 restart”，把后一步的权限边界倒灌到前一步；复刻了 Case E3 中“下一状态迁移交回operator”的同型错误。 |
+| 纠正轮次 | 本次 1 次（operator：`private-source-id`，“合入不需要问我吧”）；与 Case E3 跨任务同型，因此按重复理解偏差记录。纠正后 PR #3604 已 squash merge 为 `4f59356f0`，runtime 保持未激活。 |
+| 元心智哪条没执行 | Q1 角色确认：当时是证据闭合后的 merge owner，不是权限申请者；Q3 坐标变换：没有把一个“交付动作”拆成 merge 与 activation 两个独立 effect 分别判权。 |
+
+### Case E9: 把“随原动作 hover”替换成“迁移到 thread 头部”（2026-08-18，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | operator说 F294 每条消息静止时孤立的“多选消息”入口应该隐藏，是要移除消息级入口，再提供一个默认可见的 thread 级入口兼顾可发现性。 |
+| 实际要求 | 新增的“多选消息”应留在原消息操作组里，与回复、删除、更多完全共用既有交互：桌面静止时整组隐藏且不占位，hover/focus 时整组出现；触屏仍保持可达。 |
+| 偏差根因 | **锚定偏差 + 任务替换**：锚定在既有 KD-10“默认可发现”抽象约束上，没有先按截图中的具体 referent 核对“这里这个”指的是原消息动作组，擅自把局部显隐调整替换成了入口层级重设计。 |
+| 纠正轮次 | 同一任务 2 次（`private-source-id`、`private-source-id`）才完全拉回。纠正后 PR #3774 已 squash merge 为 `cae99d8e3`；真实 Chromium 契约锁定静止零占位、hover/focus 完整动作组与触屏可达。 |
+| 元心智哪条没执行 | Q2 信息验证：没有先用截图和现有 DOM 行为确认代词 referent；Q3 坐标变换：把“同一控件的显隐状态”错误换成了“控件所属层级”的产品架构问题。 |
+
+### Case E10: 把 inbound PR review 截断成对话内报告（2026-08-19，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | operator说“看看这个插件的 PR”只授权只读审查；由于 PR 作者与当前 invocation 属于同一 `codex-sol` runtime identity、不能充当独立 reviewer，我应把 findings 报回当前对话后停止。 |
+| 实际要求 | Inbound PR review 的终态不止是得出 verdict：明确 finding 要回到 GitHub 原对象；修复球交给作者后，当前 reviewer custody 还要注册 event-backed PR tracking，等待新 HEAD 或新的 review result，不能停在聊天汇报。身份边界只禁止冒充独立批准，不禁止留下 maintainer advisory finding 或承担后续复审等待。 |
+| 偏差根因 | **身份边界过度泛化 + 状态机截断**：把“不能独立 APPROVE”扩大成“不能执行 reviewer 交付动作”，又把“分析完成”误当成任务终态，漏掉 `finding delivery → author custody → typed wait` 两次状态迁移。 |
+| 纠正轮次 | 同一任务 2 次：先由 `private-source-id` 纠正“要回复 PR”，再由 `private-source-id` 纠正“要以 reviewer 身份挂 PR tracking”。纠正后 finding 已落到 clowder-ai-plugins#37，tracking task `private-source-id` 已绑定新 HEAD / 新 review result。 |
+| 元心智哪条没执行 | Q1 角色确认：当前是有 finding delivery custody 的 maintainer advisory reviewer，不是纯分析者；Q3 坐标变换：没有把 review verdict 转换成公开交付与事件等待两个后续 action family。 |
+
+### Case E11: 把外部 AgentReflex 谱系并入 Clowder AI 自进化主线（2026-08-21，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 高校合作讨论里出现的“元认知、自进化、Multi-Agent”可以作为同一组 Clowder AI 候选课题收束，因此上一轮把伙伴提出的 AgentReflex 元认知进化与家内自进化问题并列后，又用“同时接住”把它们合成一个研究切口。 |
+| 实际要求 | 郭良的 AgentReflex 是伙伴自己的另一条谱系，关注 Gene / Capsule / Lineage、赫胥黎与哥德尔机式元认知进化；Clowder AI 先独立梳理半年真实运行中多 Agent 协同、记忆与自进化遇到的困难。两者以后可以找接口，但不能先合并问题定义或贡献归属。 |
+| 纠正轮次 | 本次 1 次（`private-source-id`）；跨任务已有 LL-092 同型证据，因此记录。当前任务已先把 AgentReflex 剥离，再从 Clowder AI canonical 文档、真实事故和原始 thread 重建自进化困难谱系。 |
+| 元心智哪条没执行 | Q2 信息验证：未先读已知 canonical 谱系边界；Q3 坐标变换：没有把共享术语投影回“谁提出、解决什么问题、证据属于谁”三维坐标。 |
+
+### Case E12: 把“自进化的总体愿景”替换成 Clowder AI 产品愿景（2026-08-21，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | operator要求在自进化研究稿中补“我们的总体愿景”，是要补 Clowder AI 的全局产品愿景；因此读取 `docs/VISION.md`，写入“领养长期共生 AI 团队、把想法变成产品”的产品终态。 |
+| 实际要求 | 当前对象是自进化研究稿，“我们的 vision”指 Clowder AI 对自进化本身的理想终态：系统如何发现能力边界、选择更新层、取得独立证据、分级自治，并让改变可追溯、可回滚、可退役。产品愿景不是本节要回答的坐标。 |
+| 偏差根因 | **局部 referent 丢失 + 上位真相源锚定 + 任务替换**：看到“总体愿景”后直接解析到仓库全局 `docs/VISION.md`，没有先用当前文档主题“自进化”限定 referent；与 Case E9 把消息级局部显隐要求替换成 thread 级入口重设计同型。 |
+| 纠正轮次 | 本次 1 次（`private-source-id`）；跨任务已有 Case E9 同型证据，因此记录。纠正后已整段撤掉产品愿景和 `docs/VISION.md` 引用，换成自进化终态、自治分级、双证举证链与条件性 CEW 路线，提交 `195aaaf4e` 已推送 main。 |
+| 元心智哪条没执行 | Q2 信息验证：虽读取了真实 canonical 文档，却选错了 resolver；Q3 坐标变换：把“当前研究对象的 vision”错误升格成“整个产品的 VISION”。 |
+
+### Case E13: 把独立产物与双 Episode 压成一条旧故事流水线（2026-08-24，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 为了让 HC 技术范式与 Demo 互相证明，Demo 应逐步映射架构模块；被纠正后，我又从旧稿召回“退款期 7 → 14 天”，把它放进第一 Episode，并把已经确认的欧盟空调政策挪成第二 Episode。 |
+| 实际要求 | 架构图与 Demo 是分别成立、只在关键 claim 上弱连接的两份产物。Demo 自身确实需要两个时间 Episode，但第一 Episode 已明确是欧盟空调政策变化；第二 Episode 要另选不同类型的世界变化，检验第一次长出的防护能否迁移，不能为了凑双幕复活已被淘汰的退款例子。 |
+| 偏差根因 | **过早线性化 + 历史故事锚定 + 时间槽位覆盖**：面对有关联但正交的对象，先压成一条易讲的流水线；需要补第二幕时，又把检索到的旧叙事当成现行约束，用“完整故事”覆盖了用户刚确认的当前起点。 |
+| 纠正轮次 | 同一任务连续 3 次：`private-source-id` 拆开架构与 Demo；`private-source-id` 恢复双 Episode 与“下一次不再救火”；`private-source-id` 纠正 Episode 1 必须是欧盟空调政策、退款例子必须删除。当前稿把 Episode 2 降为待拍板工作假设，不再把推导冒充确认。 |
+| 元心智哪条没执行 | Q2 信息验证：回读了旧叙事，却没有用最新的人类确认覆盖历史版本；Q3 坐标变换：没有同时保留“产物轴（架构 / Demo）”与“时间轴（学习发生 / 迁移验证）”，反而把两轴挤成一条序列。 |
+
+### Case E14: 把「执行拆出去」的角色拓扑约束替换成 deictic 局部 referent（2026-08-25，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | operator 说 F306 当前 thread 是指挥 + Vision Guard、"执行拆出去"，需要另起一个 Command Thread 承接指挥职责，因此在 F306 内新建 proposal 让自己负责创建那个 command thread。 |
+| 实际要求 | F306 当前 thread 已经是唯一指挥塔；"执行拆出去"是把 Phase A 执行工作分派给另一只猫（Opus 5），本 thread 保持 command + Vision Guard 双职；proposal 应该是 execution proposal 派给执行者，不是新建自己负责的 command thread。 |
+| 偏差根因 | **局部 referent 锚定 + 角色拓扑反校验缺失**：把 operator 一句话里的"这个 thread"局部解析成"待创建 proposal 的 subject thread"，没有先用同句里"执行拆出去"这个谓词反查当前 thread 已经承担的角色。**分界判据**：一句话同时携带 deictic referent（"这个"/代词）与角色/拓扑约束（"指挥"/"执行"）时，**角色约束优先用于消歧**，deictic 先按角色反查再落到具体对象。与 Case E9/E12 同型（局部 referent 丢失 + 上位真相源锚定 + 任务替换）。 |
+| 纠正轮次 | 同一任务 2 次（`private-source-id` operator 首次纠正、`private-source-id` operator 第二次纠正"你才是指挥，提议应该让别人执行"）；跨任务已有 Case E9/E12 同型证据，因此按重复理解偏差记录。纠正后错误 proposal 已撤；Phase A execution proposal `proposal_mt9k6k3bsapth6gq` 改派 Opus 5；F306 当前 thread 的唯一指挥塔真相已提交 main `d9713cd6e`（docs(F306): bind command thread and delegate Phase A）。 |
+| 元心智哪条没执行 | Q2 信息验证：没有先把当前 thread 已承担的角色/拓扑约束当作 resolver 核对 referent；Q3 坐标变换：没有把"这个 thread"从"待创建对象"坐标系变换到"已承担指挥角色"坐标系。 |
+
+### Case E15: 把一次性 generation 推导成一次性 tracking（2026-08-26，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F280 的 “all effects visible and one-shot” 应直接落到用户操作：每次 tracking 唤醒都消费注册，owner 处理完事件后必须显式再次调用工具；透明 prefill / reply-and-wait 足以抵消这项负担。 |
+| 实际要求 | 用户表达的是持续的 tracking intent：注册一次后默认跟到 subject terminal、owner fence 失效、显式取消或可选绝对 deadline。每次事件仍可在内部消费一个 generation，并以 fresh baseline 原子安装下一代；用户只看见“tracking continues”，不承担重新调用工具。精确单次责任才显式选择 one-shot。 |
+| 偏差根因 | **抽象边界倒置 + 局部安全不变量泄漏到用户旅程**：把内部用于幂等、审计和 stale-action 防护的 generation 生命周期，误当成用户可见 tracking 生命周期；局部看每次 effect 都显式，整体却把 re-registration 责任分散到每个 agent / skill / workflow，制造了更难审计的漏挂面。与 Case E7 的“逐项机制正确掩盖整体体验冲突”同型。**分界判据**：内部状态单元的一次性，不能推导出用户意图的一次性；先按用户旅程定义外部生命周期，再用 generation 承载内部交付。 |
+| 纠正轮次 | 同一 issue 方向任务 2 次：`private-source-id` 要求同时从 maintainer / 社区伙伴出发并避免冲突概念；`private-source-id` 直接指出显式重新注册会很难用。纠正后已在 clowder-ai#1392 评论 `5433637783` 接受 continuous-by-default tracking，移除 `needs-maintainer-decision`，并注册 clowder-ai#1394 新 HEAD wait `private-source-id`。 |
+| 元心智哪条没执行 | Q3 坐标变换：没有先从“用户要持续关注 PR”定义终态，再把 one-shot generation 放回实现坐标；反而从内部契约形状反推用户必须执行的动作。 |
+
+### Case E16: 把“共同工作台”降成 Workspace 里的独立功能，并在设计对齐前开工（2026-08-26，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F307 是在现有三栏 shell 旁边增加一套可组合工作台；operator 说 F290 半成品“得删一下”时，我又把这句设计反馈直接当成当轮实施授权，先进入删除与门禁。 |
+| 实际要求 | 现有右侧 Workspace 本体就是共同工作台；F307 是把它从单槽升级成用户拥有的 working set，不是在里面注册“共同工作集”卡片或另造页面。此轮先共同冻结要做什么，等 operator 明确“该删的删掉”后才执行 F290 乌龙清理；F307 新布局仍停在 Design Gate。 |
+| 偏差根因 | **产品坐标层级混同 + 行动偏好覆盖 speech-act 校验**：没有先区分 application container 与 feature-owned child surface，也没有先判断人类是在共创概念还是授权修改，就把“听懂方向”替换成“开始实现”。这与 Case E1 的任务替换同型；而已合入的 #3966 / #3974 又证明“把共同工作台做成独立入口 / mode”不是一次性误写。**分界判据**：先用现有真实 shell 确认对象处在哪一层，再分别确认“设计命题是否冻结”与“本轮是否授权产生副作用”；二者不能互相推导。 |
+| 纠正轮次 | 本次先由 `private-source-id` 纠正“只是在讲想法，不应直接干活”，再由 `private-source-id` 冻结“Workspace 本体就是共同工作台”并明确授权删除乌龙。纠正后未继续实现 F307 UI，只清理 #3974 留下的独立 F290 surface / mode / persistence，并加入窄边界 guard。 |
+| 元心智哪条没执行 | Q1 角色与授权确认：当时应是共同定义产品的讨论伙伴，不是已经接到实现球的 author；Q3 坐标变换：没有把“共同工作台”放回现有三栏 shell 的 application-level 坐标，误当成 Workspace 内的 child feature。 |
+
+### Case E17: 把生产控制面建设压成预制 MVP 纵切片（2026-08-28，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F311 先选一个 Harness v1→v2 纵切片，搭出完整 Evolution Program 后再泛化，是最快的产品验证方式；现有 F192/F266/F278 故障可以作为首条真实 Program 的施工材料。 |
+| 实际要求 | 不造两个月后拆掉的玩具闭环。确定契约/运行闭环 bug 由 canonical owner 立即修；F311 与其并行建设最终会保留的生产控制面并接回 owner truth。首个 Evolution Program 还必须是有真实用户目标、明确 consumer 和 keep/tune/sunset 决策的**不确定效用** claim，不能把普通 bug 重新包装成“自进化”。 |
+| 偏差根因 | **惯例化 MVP 顺序覆盖终态架构 + 机制选择坍缩**：虽然 Owner Matrix 已写“引用不是所有权”，执行顺序仍沿用“先造容器、跑示范、再泛化”的产品模板；被第一次纠正后又差点把 F266 确定性 bug 填进 Program 槽，说明没有先按 claim 判断 test/telemetry/eval。与 Case E16 同型：把共同系统建设降成独立 child demo。**分界判据**：集成型控制面先问“现有 owner 的真修与永久 join 如何并行”，再问演示；确定契约/运行健康永不因“真实”自动升级为 Evolution Program。 |
+| 纠正轮次 | 本次由 `private-source-id` 现场纠正；与 Case E16 跨任务同型，因此按重复理解偏差记录。F311 spec v4 已在 `9066fe040` 改为 dependency repair 与 production build 并行、E0 合格目标触发首个 Program，并把 F266/F278 source refs 投回各自 owner thread。 |
+| 元心智哪条没执行 | Q3 坐标变换：没有先从“最终生产架构不能丢什么”倒推施工顺序；机制选择反射：没有逐 claim 区分确定契约、运行健康与不确定效用。 |
+
+### Case E18: 把 active review lease 当成 reviewer 已被唤醒（2026-08-28，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | PR #4058 的复审重入返回 `safe_wait` / active lease，且 review packet 已持久化，因此球已经在 Opus 5 手里并正在执行；我可以停下来等 verdict。 |
+| 实际要求 | ActionSuccessorLease 只证明同一 subject 的 single-flight custody，`safe_wait` 按合同不创建新消息或 Queue entry；它不证明 reviewer 有可消费 carrier，更不证明 execution 已启动。runtime 重启后，packet `private-source-id` 没有 `deliveryStatus/queueEntryId`，当时也没有 Opus 5 execution。只有补发普通行首路由 `private-source-id` 并得到 queued receipt 后，才出现 Opus 5 execution `99190b1c-5d07-4b8e-99f4-e70b947a475b`。 |
+| 偏差根因 | **证据坐标坍缩 + 状态说明代替动作**：把 custody（谁有资格做）、carrier（是否有可消费投递）和 liveness（是否已启动执行）压成一个“lease active”；又把“已确认 lease”写成“已传球”，没有要求 transport receipt 或 execution truth。旧文本出口 guard 在 Phase T cutover 后已被结构化 custody stop-gate 取代，而现有 `safe_wait` / skill 合同没有联结 carrier liveness，使我的错误推断没有被机器拦下。**分界判据**：lease existence 只能证明互斥责任；宣称“已传球”至少要有 per-target queued carrier，宣称“正在跑”还要有 awakened/execution truth。 |
+| 纠正轮次 | 同一任务 2 次：`private-source-id` 纠正“和operator说不会唤醒 Opus 5，必须实际传球”；`private-source-id` 进一步纠正“active lease 不等于 Opus 5 正在跑”。纠正后已补发真实路由，并把 recurrence 以 source refs 投到 F167 owner thread（`private-source-id`）。 |
+| 元心智哪条没执行 | Q2 信息验证：没有用 Queue receipt / active execution 验证 downstream liveness；Q3 坐标变换：没有把“协议球在谁名下”拆成 custody、delivery、execution 三个独立状态。 |
+
+### Case E19: 把平行 invocation 的责任并入当前 thread 进度（2026-09-01，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | operator在 F311 Phase 3 thread 问“咱们现在什么情况、你继续推进”时，同一 `catId` 的 Phase 2 invocation 也属于“我”的当前责任，因此应把 Phase 2 worktree、额度中断与续跑安排作为主要进度，并进一步声称“我现在该推进 Phase 2”。 |
+| 实际要求 | 当前 thread 的 Sol 只持有 Phase 3 的本地角色与责任：本 thread 负责 PR #4175，Opus 5 是 author、Sol 是非作者 reviewer。Phase 2 虽由平行世界的 `codex-sol` 负责，但它不与当前 invocation 共享上下文、球权或责任；当前状态回答必须先锚定 Phase 3，跨 thread 依赖只能作为阻塞边界说明。 |
+| 偏差根因 | **identity 覆盖 thread 坐标 + 跨 thread 证据污染当前 scope**：把“同一个 `catId`”误当成“同一个行动主体”，没有先用当前 thread 导航、任务原文与 PR tracking 确认本地 subject；随后又用 Phase 2 的实现进展替代 Phase 3 状态。与 Case E14 的角色拓扑反校验缺失同型。**分界判据**：回答“你/咱们现在做什么”时，先解析当前 `threadId → subject → local role`；其他 thread 的同 `catId` 一律视为外部依赖方，除非用户明确询问跨 thread 总览。 |
+| 纠正轮次 | 同一任务 2 次：`private-source-id` 首次指出当前问题是 Phase 3；`private-source-id` 再次明确 Phase 2 是平行世界、当前 thread 只问 Phase 3。纠正后状态已重新锚定 PR #4175 exact HEAD `9d3556b59c05f619f63003164bb95d2050447906`，不再把 Phase 2 的球权或工作进度并入当前 thread。 |
+| 元心智哪条没执行 | Q1 角色确认：没有先确认“本 thread 的 Sol”是 Phase 3 reviewer；Q2 信息验证：虽读取了真实 Phase 2 数据，却选错了当前问题的 resolver；Q3 坐标变换：没有把同一 catId 拆成多个不共享状态的 thread-bound invocation。 |
+
+### Case E20: 把 Theseus 的外部卖点重报成 F311 的学习项（2026-09-04，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 把 Theseus 与 Clowder AI 从“竞争”改画为“互补”后，可以把环境进化、多文件项目评测、纵向能力账、难例生长与前后案例表达列为“咱们向 Theseus 学”的五项，再用“Theseus 进化引擎 + Clowder AI 价值治理控制面”拼成完整闭环。 |
+| 实际要求 | [F311](./F311-capability-evolution-workspace.md) 已经定义从 Program 建制、开眼取证、评估归因到受治理写回、复验、资产代谢和二阶机制进化的完整联邦闭环，也显式覆盖 workspace、外部 Harness 与 owner 原地 mutation。外部伙伴比较必须先以 F311 canonical capability 为基线，把每项 claim 分成“家里已有的产品/宪法”“对方可能更深的 owner 实现”“真正缺口”；Theseus 更合理的合作位置是可接入 F311 的 environment/data/eval/model owner，而不是补上咱们缺失的半条进化链。 |
+| 偏差根因 | **外部叙事锚定 + 已读真相源未进入判定函数 + 能力层与实现层坍缩**：虽然读取了 F311，却继续沿 Theseus BP 的分类组织结论，把双方共有的目标层主张误写成单向学习项，也把 F311 的薄联邦控制面缩成单一治理层。与 Case E11/E12 的“读到 canonical source 却选错比较坐标”及 Case E17 的 F311 产品层级坍缩同型。**分界判据**：回答“咱们向外部项目学什么”前，先逐 claim 做 `canonical baseline → overlap → implementation delta → evidence ceiling`；只有 implementation delta 或真实未覆盖能力可称为学习项。 |
+| 纠正轮次 | 同一任务 2 次：`private-source-id` 首次纠正“不是竞争关系，而是可能合作关系”；`private-source-id` 再次指出五条学习项忽略 F311。纠正后已发布 V2 更正图 `private-source-id`，撤回四项为“F311 已有”，将案例表达降为视频未取得、待补证，并把真实增量收敛到环境算法、数据工艺、参数级能力与 benchmark 生产。 |
+| 元心智哪条没执行 | Q2 信息验证：虽然读了 F311，却没有逐项用原文否证“这是咱们没有的”；Q3 坐标变换：从竞争改成合作只换了关系语气，没有把比较原点从 Theseus BP 移回 F311 canonical capability。 |
+
+### Case E21: 把“去黑话”钟摆式改写成口语 slogan（2026-09-04，codex-sol × fable-5）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | operator指出“判断与信任递归演进”等表达拧巴、黑话过重，意味着应把 Growing slogan 降到最口语、最容易立即理解的表达，因此收敛为“一起做过一次，下一次就不用从头来”。 |
+| 实际要求 | 目标语体是技术路演和正式文档可用的现代书面中文：术语有定义、主谓清楚、修辞克制；既不堆叠内部黑话，也不把概念降成宣传口语。正确方向是“让共同经历沉淀为持续演进的能力”一类正式、自然且概念边界清楚的表达。 |
+| 偏差根因 | **把两个维度压成一根轴，导致钟摆式过度纠正**：将“术语透明度”与“语体正式度”错误合并为“学术黑话 ↔ 大白话”，收到去黑话反馈后直接滑到口语端，漏掉“透明且正式”的目标象限。与 Case E7 的语域整体预测缺失同型。**分界判据**：改写正式表达时分别检查（1）术语是否可解释，（2）句法是否自然，（3）语体是否匹配场合；去掉黑话不等于降低正式度。 |
+| 纠正轮次 | 同一任务 2 次：`private-source-id` 首次指出标题和图中文字仍有奇怪黑话；`private-source-id` 再次指出“大白话”不是目标。 |
+| 元心智哪条没执行 | Q3 坐标变换——没有把“可理解性”和“正式度”拆成正交维度，也没有在技术领导路演这一真实使用场景里朗读检查整句。 |
+
+### Case E22: 把无关主线失败倒灌成 F311 的整项停止条件（2026-09-06，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F311 full gate 被 eval-hub 固定日期列表断言打断，即使已在 main 与作者树复现同一失败且没有相关作者改动，也应把 F311 任务标 blocked，等待原 owner 修好才发布和审阅。 |
+| 实际要求 | operator 需要尽快演示可读的 Workspace；已证实无关失败须保留原回执，按 operator 对该红项的明确非阻塞处置继续本 PR 的相关验证、独立审阅、合入与 Alpha 验收。F311 自身缺陷和真实授权边界仍然有效。 |
+| 偏差根因 | **局部健康事实扩大为全局交付依赖**：把“存在一个红项”与“该红项应阻止当前交付”合并成同一判断，未按 claim、归属和已有授权区分停止条件。与 Case E8 将后一步边界倒灌到已可执行 merge 的模式相同；不是要把所有主线失败默认为可忽略。 |
+| 纠正轮次 | 同一任务中 operator 于 `[thread-id]#private-source-id` 追问阻塞者，`private-source-id` 明确无关红项不阻塞合入，`private-source-id` 再指出演示等待不合适。纠正后相关131项检查与 Opus5 完整独立审通过，PR #4377 合入 `4cd692ea1c`；同 build Alpha 实测往返2/2和来源/1440/390/320通过。 |
+
+### Case E23: 把已共同使用的持续输入链路退回可行性实验（2026-09-09，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | GPT-Live 音频与原生任务交接 spike 之后，还应把“大猫分析期间追加条件或画面，回答能否随之改变”列为下一项基础可行性实验。 |
+| 实际要求 | operator 在 `[thread-id]#private-source-id` 指出：咱们已经多次在大猫思考时追加 PPT 截图、输入伴随会议的 ASR 转写并继续交谈。产品定义应直接消费这条已有使用基线；新增工作是自动取得现场、全双工快端与深思端的持续配合、屏幕指点及桌面体验。 |
+| 偏差根因 | **新实验锚定 + 既有使用证据未进入基线**：把本轮单个 spike 的验证范围当成全家的能力上限，虽然读过 coactive 愿景和伴随会议材料，仍从接口文档重新提出已实践的问题。与 Case E20“已读家内能力没有进入增量判断”同型。判据是先区分已有真实使用、仍需人工搬运的输入和真正未实现的体验，再决定新实验要回答什么。 |
+| 纠正轮次 | 本次由上述 operator 消息纠正 1 次；跨任务已有 Case E20 同型证据。当前范围已同步修正“下一项实验”“待验证基础”和“完整猫的组成”三处表述：保留快端与具名深思端共同组成完整猫的定义，不再重复验证已使用的持续追加能力。 |
+
+### Case E24: 把作品交互参照压成按钮清单（2026-09-10，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 作品审阅已有标注/评论模式、F056 token 和功能回归，就足以把旧表单骨架交给 operator 做体验确认。 |
+| 实际要求 | 沿 operator 提供的 ChatGPT 参考保留作品、就地操作与表达意见的同屏关系；用家里的颜色和图标适配。用户不应滚到作品下方寻找主要输入和提交。 |
+| 偏差根因 | **任务关系被功能清单替换**：技术审查覆盖了动作正确性，却没有让实际空间关系进入交付判断；又把整张参考 UI 当作品，令图内假工具条污染了体验对照。不是缺少设计规则，而是没有在真实任务中消费已经明确的参照。 |
+| 纠正轮次 | 同一任务两次明确纠正：`[thread-id]#private-source-id` 指出灰按钮与设计表达，`private-source-id` 指出向下翻找操作；后者再次送达仍是同一来源，不重复计数。 |
+
+### Case E25: 采样长文盖过已写好的裁决稿（2026-09-10，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 把 F311 压力情景跑完、保存完整回答、继续检查和发布 PR，足以让 operator 知道裁决在推进。 |
+| 实际要求 | operator 等的是 Astra 对 Fable 首稿的明确裁决和可读成稿；实验记录是判断附件，不能要求人从虚构情景中找出真实工作进度。 |
+| 纠正轮次 | 同一任务两次：`[thread-id]#private-source-id` 指出答非所问，`private-source-id` 追问裁决稿；Fable 283 指明注意力成本，290 确认原文归档和主回复收准。 |
+
+### Case E26: 桌宠去掉外框，交流仍是配置面板（2026-09-15，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F317 先把安装、共享、连接、深思与保存状态做成可操作面板；收到桌宠外形反馈后，改成透明猫、点击展开原面板，就接住了纠正。 |
+| 实际要求 | operator 点“聊聊”要直接与猫交流、继续当前事情；第二次附 GPT-Live 紧凑语音条参照，明确否定配置式大面板的交互方向。 |
+| 偏差根因 | **能力检查清单替代了人的主动作**：第一轮只修驻留外形，没重审点击后的交流路径。与 Case E24 的“任务关系被功能清单替换”同型；已有设计规则与参照未进入判断，局部行为检查无法替代体验判断。 |
+| 元心智哪条没执行 | Q1 没有从“此刻只是想和猫说话”判断必要操作；Q3 没分开运行状态必须真实与所有状态必须同时变成前台控件。 |
+
+### Case E27: 把本地 review 的 GitHub 证据误当成 author 回球（2026-09-20，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | cat-cafe#4637 的 exact-HEAD findings 已写成 GitHub formal review，再调用 `cat_cafe_complete_a2a_dispatch(disposition=completed)` 关闭入站 dispatch，当前 review 就已经完成；thread 内的最终总结足以让作者看到。 |
+| 实际要求 | 本地猫交来的 review 必须沿 direct review carrier 回给作者猫：行首 `@opus5`，并在同一次 ordinary durable A2A 中携带 `clientMessageId`、`localReviewVerdict`、`reviewedHeadSha`、`reviewSubjectRef`、`acceptedSourceRef` 与 `acceptedRevision`。GitHub artifact 是额外证据，`complete_a2a_dispatch` 只处置入站球，不会替代 author custody。 |
+| 偏差根因 | **状态机截断 + terminal producer 混同**：把“review 判断与 GitHub 落证完成”“入站 dispatch 已处置”“修复球已回作者”压成一个终态；又没有在初审入口加载 `cross-cat-handoff`，漏消费 Phase S.2 已写明的 local-review return contract。与 Case E10“分析完成后漏掉 finding delivery / author custody”同型，不是缺少文字规则。 |
+| 纠正轮次 | 本次 1 次：operator 在 `[thread-id]#private-source-id` 指出“你 re 完要 at Ragdoll”。纠正后已写入 typed local-review fact `local-review:private-source-id:changes_requested`，服务端确认 routed=`opus5`；review target 仍为 `8d3706c5bbede423aa2e45fedd53bb847ef724e0`。 |
+| 元心智哪条没执行 | Q1 角色确认：当前是本地 reviewer，完成出口是 author cat route，不是只交 GitHub artifact；Q3 坐标变换：没有把一轮 review 拆成 `verdict evidence → inbound disposition → outbound author custody` 三个不同状态迁移。 |
+
+### Case E28: 首猫引导缩成私聊，遗失已确认的频道接收与多工作模型（2026-09-24，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 避免百人公共频道围观首问，只需先移到宿主 Café 私聊，再按反馈改成 Alpha 内的伙伴私聊；头像、受众提示与第二句连贯即可证明这条入场旅程。 |
+| 实际要求 | operator 在 `[thread-id]#private-source-id` 追问邀请制私人 Channel、多 Thread 及具名猫的平行上下文；必须先回查既有模型。8 月 8 日原话 `[thread-id]#private-source-id`、9 月 7 日同问 `private-source-id` 与 Fable 查漏 `private-source-id` 已明确 Café×Channel 接收端、多猫参与、多 Work 对应不同私人 Thread，不让用户逐条配置 Thread ID。邀请制频道的权限仍需与当前公开事件实现分开。 |
+| 偏差根因 | **局部入场体验替代领域模型 + 已读原设计未进入判断**：把频道可见性、猫身份、接收上下文和私人工作续接压成一个“私聊入口”，又把界面仍在 Alpha 误当成已选定数据归属。与 Case E24 的“作品交互关系压成按钮清单”同型。分界判据：先回答谁可读、哪个具名身份、哪个频道上下文、凭哪项工作与授权续接，再判断导航和文案；名字/头像相同不等于继承任一私人会话。 |
+| 纠正轮次 | 9 月 7 日与 9 月 24 日两次直接追问相同接收问题；本轮又先后纠正“回宿主 Thread”和“1 对 1 私聊即私人频道”。已回读原话、愿景 §5.1–5.3/§21、接收与调用代码，将具体关系与未验证项回交原 Task465（`private-source-id`），未把文案候选当设计签字，未改真人 Alpha。 |
+| 元心智哪条没执行 | Q1 没有持续对准“频道如何把多个家与工作连接起来”；Q2 已有来源未参与本轮判断，且 spec 的 9 月 7 日代码基线未标历史，增加误读；Q3 没分开成员权限、身份连续性、上下文与执行责任。处置为恢复已有契约与校准旧基线，不因本次执行遗漏新增通用 hook 或审批。 |
+
+### Case E29: 把“尽快做对产品”缩成门禁机制优化（2026-10-03，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 解释重任务排队、改分类与复用机制，再让作者有据选择 targeted，就完整接住了交付慢的问题。 |
+| 实际要求 | 猫在现场自主消除不必要的 A2A 和门禁等待，尽快把已确认的小结果挂到真实入口，先由作者对照原话/参考亲自核对；不能等一天后让 operator 首次发现做错了。共享底座、数据与权限等风险仍须恰当验证。 |
+| 偏差根因 | **任务替换 + 手段锚定**：把用户等到正确产品的总时间，缩成验证系统的局部耗时；先追求“没弄坏”，却未先判断“做的是不是原约定”。与 E22 无关红灯扩大停止条件、E24 技术检查替代体验判断同型。 |
+| 纠正轮次 | 同一任务至少两次：`[thread-id]#private-source-id` 要求整体解决而非反复救火，`private-source-id` 明确要求猫现场变通。随后 operator 再点明“一小时变24小时、最后仍不对”；Opus55 的具体续办来源是 `private-source-id`。 |
+| 元心智哪条没执行 | Q1 没把自己当作正确结果的交付者；Q3 没将“符合意图”“验证风险”“等待成本”分开。当前范围已扫描 SOP、merge/quality/request-review 和 console-dev，PR #5036 的 `a32f2b8117` 补作者真实入口自验及低风险产品路径，交独立治理审查；实物先行已一次通知 F322 原 B/C/D 作者。PR 尚未合入，通知不等于实物已交付，也未证明周期已缩短。 |
+
+### Case E30: 把原版恢复并入新版设计探索（2026-10-03，codex61-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 收到 ROOT 追加的第三版归组布局后，在原 v1 恢复 PR #5027 内一起实现，能同时接住“恢复紧凑”和“结合新版优势”。 |
+| 实际要求 | CVO1086 要恢复 F322 前的 v1；Studio1167 要原版紧凑事实与直接复制 ID。新版设计探索不能替换这个已接受目标。ROOT1263 再次追问为何 v1 没恢复，CVO1309 明确旧版只允许状态与会话这张恢复例外，其余 v1 不动。来源：`[thread-id]#private-source-id`、`[thread-id]#private-source-id`、`[thread-id]#private-source-id` / `private-source-id`。 |
+| 偏差根因 | **任务替换 + 来源权重倒置**：把协调猫的最新追加当成对 operator 原恢复契约的修订，没有先分开 v1 恢复与 v2 设计；两种外壳共用状态组件，使这种混用直接影响经典入口。错误例是“第三版比较更好，所以并入恢复”；正确例是“按旧基线恢复已承诺入口，保留行为保护，新版只沿自己的已接受范围”；分界判据是目标入口与 accepted source，而非消息更新或测试通过。 |
+| 纠正轮次 | 同一恢复任务至少两次直接纠正（1086、1263），1309 再缩定边界。追加布局确已本地实现但未提交；10 个 tracked delta / 7 个新文件及日志保存在 `/tmp/cat-cafe-evidence/f322-third-layout-withdrawn-20261003`，按 ROOT1295 撤出，407 绿色没有当成 v1 证据。#5027 最终以 `2ac8214c4e486c9852ef67104eb5deb8696d8234` 合入：旧基线 `63437143f0`、391/391、Sonnet exact `833d8df234` approved、作者真实 Workspace 宽窄及后续独立 named Alpha 原生入口/完整 ID 复制均有实物。自动浏览器套件未执行，独立 D/真实多会话/operator 接受仍开放；终态回原 Task169 的源为 `[thread-id]#private-source-id`。 |
+| 元心智哪条没执行 | Q1 作者未持续守住“恢复原版”的当前角色；Q2 没让直接 operator 来源优先于协调追加；Q3 没分开呈现恢复、行为正确性和新版设计。当前恢复范围已扫描，第三版组件与两层详情入口均未留在交付；不扩成另一项 harness 改造。首次实页不等自动套件准入的流程偏差沿 E29 / #5036 已有资产处理，不重复建提案。 |
+
+### Case E31: 沿总控 Task owner 续办却漏核执行子现场（2026-10-05，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F322盘点后，将未完F309/F290回投各域父owner和原Task owner，再以其活跃回合说明“恢复执行”，就足以交代当前施工。F2901380还要求原Task038 owner沿父现场继续首页整批。 |
+| 实际要求 | 人类ROOT `[thread-id]#private-source-id` 要求找到已有执行子thread，指挥现场负责调度和验收。F309 Task414已有 `[thread-id]`；F290执行首帖 `[thread-id]#private-source-id` 明确引述原CVO189“本源thread不做实现”。同umbrella Task不证明首页自动属于该通讯子线范围，须由原父核具体承接。 |
+| 偏差根因 | **owner锚定 + 角色拓扑漏核**：把Task责任归属、当前指挥角色、实际执行地点压成一个坐标。错误例是“父owner已醒，所以该批实现恢复”；正确例是“父核原子现场与范围、原writer保全/Release、合法承接后由子现场执行”；分界判据是accepted scope与实际writer/执行坐标，不是父Task状态或活跃回合。 |
+| 纠正轮次 | 本轮一次，跨任务与本节Case E14的角色拓扑漏核同型。当前同类扫描覆盖地图F309/F290两行和1380派工：1428纠正F290父现场扩写，1429明确F309父不代写；F3091414换人拒绝证据以1431交原控制面查现成合法出口。新作者承接与F290首页最终子坐标仍未确认，没有把通知当恢复完成。 |
+| 元心智哪条没执行 | Q1没有先区分指挥、作者、独立验收；Q2查到Task/代码WIP却未先读对应执行首帖；Q3没有按“责任Task × 接受范围 × 实际执行thread/作者”定位。保留原Task/WIP/批准边界，不借纠偏重建任务或绕guard；本记录不新增SOP或控制面权限。 |
+
+### Case E32: 把内部预览与 full gate 投射成 operator 待办/固定合入前置（2026-10-05，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F321 的内部预览必须保留到 operator 确认；PR #5152 遇到与本改动无关的 main 测试红灯后，也必须等全量 gate 恢复绿色才能合入。 |
+| 实际要求 | operator 并不知道有 F321 预览待看，也没有接受这项验收责任；作者应正常释放内部预览。对已证明因果无关的全量红灯，应按现有 merge-gate 选择与改动风险匹配的 targeted 证据，自主完成合入，不把内部协调或别域修复投射成人类等待项。来源：两次直接催促 #5152 合入 `private-source-id`、`private-source-id`，以及明确纠正预览投射 `private-source-id`。 |
+| 偏差根因 | **operator claim grounding 失败 + 门禁仪式化锚定**：把猫转述的“尚未确认”误当成 operator 明示的等待条件，又把 full gate 当固定铁路，没有在决策点消费既有 receive-handoff-grounding 与 merge-gate 风险路由。错误例是“预览还在、全量仍红，所以继续等”；正确例是“核直接来源、证明红灯因果无关、选覆盖最终实质内容的验证后推进”；分界判据是 T0 用户授权与风险覆盖，不是内部任务状态或某个命令是否全绿。 |
+| 纠正轮次 | 同一合入任务先后两次被直接指出拖延，随后 operator 明确纠正其从未知道预览待验收；Astra 再回交既有 Gate-selection 政策与直接来源。已正常停止预览、证明 22 个失败来自 main 所有的 F317 Redis 测试准入 guard、在 exact HEAD 完成 build/tsc 与改动面 targeted 验证，并将 #5152 合入；F317 后续修复独立完成，没有被当作本 PR 的人为前置。 |
+| 元心智哪条没执行 | Q2 没有先核“谁真的提出了等待条件”，Q3 没把产品验证、环境性全量红灯和 operator 验收责任分开。现有 grounding 与 merge-gate 规则已经覆盖，根因是现场未消费而非 harness 缺失；本轮以真实合入、真相同步和本 Case 收口，不新增重复 hook、审批或线程。 |
+
+### Case E33: 把预配页面的技术回证讲成日常操作只差配置（2026-10-06，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F317 已证明 ASR→Jev→确认→CDP→语音回读后，可以让用户先准备具名便签配置再做真人测试。 |
+| 实际要求 | 原计划要求正常 Live 请求取得当前获准页面的真实候选；operator `[thread-id]#private-source-id` 直接质疑“提前接入的指定页面”。当前代码却要求预配本地 URL、目标 ID/选择器及回读规则。 |
+| 偏差根因 | **技术证明范围替代产品完成条件**：此前 `private-source-id` 已纠正 Jev 未接产品链，父仍在消费后续技术回证时漏核候选来源，将剩余工程缩成部署配置。错误例是“便签链通了，配好即可验收”；正确例是“链路已通，当前页面接入仍未交付”；分界判据是用户是否能在所选页面提出请求，而非工程师是否能预写这张页面的操作表。 |
+| 纠正轮次 | 本轮一次，承接 10 月 4 日同一 F317 产品链纠正及 Case E26 的局部能力替代体验终态。已扫描原 Feature、执行计划、运行手册及源代码，保留技术回证，改正当前 Feature/计划的缺口与验收表述；不声称工程已经修复。 |
+| 元心智哪条没执行 | Q2 读到了真实配置限制，却未让它进入产品就绪判断；Q3 没区分受控链路验证、当前页面接入和真人体验。沿现有真相源修正，不新增通用 SOP、审批或重复进化提案。 |
+
+## Review Gate
+
+- Phase 0: **多猫协作审视**（所有猫参与各自 prompt 审视）+ 现有 system-prompt-builder 测试全绿
+- Phase A: 跨 family review（codex 或 gpt52）+ 现有 A2A 测试全绿
+- Phase B: 回放测试通过 + F064 出口检查回归
+
+## 需求点 Checklist
+
+| 需求来源 | 需求点 | AC 映射 | 状态 |
+|---------|--------|---------|------|
+| operator 2026-04-17 | 乒乓球：同对猫反复 @ 无产出 | AC-A1~A4 | ✅ PR2 |
+| operator 2026-04-17 | parallel 模式 @ 废话 | AC-A5~A6 | ✅ PR1 |
+| GPT-5.4 发现 | 角色不适配 handoff（designer 写代码） | AC-A7 | ✅ PR1 |
+| operator 2026-04-17 | 提示词正面化 + 边界显式化 | AC-01~05 | ✅ 全部完成（689925ef8） |
+| operator 2026-04-17 | Skills 审视 "used when / not for" 边界 | AC-03 | ✅ 33/33 Skill 完成（689925ef8） |
+| operator 2026-04-17 | 路由可见性不退化 | Design Constraint #1 | ✅ 拍板 |
+| operator 2026-04-17 | 「第一性原理」「数学之美」Magic Words | governance-l0.md + SystemPromptBuilder + runtime prompt 全部同步 | ✅ |
+| operator 2026-04-19 | 球权协议漏洞（@co-creator / 死锁 / 虚假离场 / 接退升 / 诊断不解决） | AC-B4~B8 | ✅ |
+| operator 2026-04-19 | Codex context overflow（272k 用 900k limit） | AC-B9 | ✅ |
+| operator 2026-04-19 | 持球无执行机制 → hold_ball MCP | AC-C1~C4 | ✅ PR #1289 + #1290 |
+| operator 2026-04-19 | Maine Coon不传球（5 线程验证） → 强制传球护栏 | AC-C5~C7 | ✅ PR #1291 |
+| operator 2026-04-19 | 球权管理 skill 化（各猫贡献踩坑经验） | OQ-5 | ✅ 现不做（KD-15），踩坑经验先入 refs |
+| operator 2026-04-23 | Streak breaker 误杀正经 review（不看 tool_call） | AC-D1~D4 | ✅ Phase D |
+| operator 2026-04-23 | 猫猫倾向 @co-creator 做最安全默认，operator变决策瓶颈 | AC-D5~D7 | ✅ Phase D |
+| operator 2026-04-25 | 47 写"我持球"但未调 hold_ball MCP（虚空持球） | AC-I1~I3 | ✅ Phase I |
+| 47 采访 2026-04-25 | 加法纠错让 47 越改越 verbose，需减法措辞 | AC-I4~I5 | ✅ Phase I |
+| operator 2026-04-25 | 持球没 cancel 按钮 / 用户消息不取消 hold wake | AC-J1~J6 | ✅ Phase J |
+| operator + Maine Coon 2026-04-25 | 47 风格适配需 Design Gate（audit/surface 分层 + repair 落地） | AC-K1~K6 | ⬜ Phase K |
+| operator 2026-05-07 | hold_ball 轮询 × PR tracking 事件驱动重复唤醒（双通道叠加） | AC-L1~L4 | ✅ Phase L |
+| operator 2026-06-18 | 守门 thread 不能挂 PR/issue tracking 或 hold_ball，必须机制层拦截 | AC-N1~N5 | ✅ Phase N / PR #2384 |
+| operator 2026-06-25 | -p 下猫 run_in_background 跑 gate 后没下文 + hold_ball 缺条件唤醒 | AC-P0~P5 | ✅ Phase P (P-0 PR #2544, P1-P5 PR #2550) |
+| operator 2026-06-29 | 结构化事件已唤醒/满足等待后，旧 hold timer 仍过期唤醒；前端仍显示定时任务/可取消 | AC-Q1~Q7 | ✅ Phase Q PR #2690 + AC-Q7 follow-up PR #2696 merged |
+| codex-sol 2026-07-10 | grounding sample test 硬编码日期过 8 天 rolling window 导致静默失败 | Phase O test hygiene | ✅ hotfix PR #2849 (`94e1ead0d`) |
+| 2026-09-01 | **Terminal reason mismatch fix（PR #4193）** — cloud review P1 #2 from PR #4187: `ExternalReviewRecoveryService` only checked community projection terminal reason, missed bootstrap path `'bootstrap observation reports a terminal PR'`. Fix: explicit `TERMINAL_PR_REASONS` enumeration. codex-sol local review, 0 P1/P2. |

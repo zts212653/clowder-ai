@@ -1,16 +1,18 @@
-/** Vote system icons — monoline SVG, 24x24, currentColor */
+/** Vote system icons — monoline SVG, 24x24, fixed dark color for light avatar bg */
 
 interface IconProps {
   className?: string;
+  /** Fixed icon color — defaults to a dark value for light avatar backgrounds. */
+  color?: string;
 }
 
 /** Ballot box: box with slot + paper going in */
-export function BallotIcon({ className = 'w-5 h-5' }: IconProps) {
+export function BallotIcon({ className = 'w-5 h-5', color = '#374151' }: IconProps) {
   return (
     <svg
       viewBox="0 0 24 24"
       fill="none"
-      stroke="currentColor"
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -30,12 +32,12 @@ export function BallotIcon({ className = 'w-5 h-5' }: IconProps) {
 }
 
 /** Tally chart: bar chart with results */
-export function TallyIcon({ className = 'w-5 h-5' }: IconProps) {
+export function TallyIcon({ className = 'w-5 h-5', color = '#374151' }: IconProps) {
   return (
     <svg
       viewBox="0 0 24 24"
       fill="none"
-      stroke="currentColor"
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -45,9 +47,9 @@ export function TallyIcon({ className = 'w-5 h-5' }: IconProps) {
       <line x1="4" y1="4" x2="4" y2="20" />
       <line x1="4" y1="20" x2="20" y2="20" />
       {/* Bars */}
-      <rect x="7" y="8" width="3" height="12" rx="1" fill="currentColor" opacity="0.15" />
-      <rect x="12" y="12" width="3" height="8" rx="1" fill="currentColor" opacity="0.15" />
-      <rect x="17" y="5" width="3" height="15" rx="1" fill="currentColor" opacity="0.15" />
+      <rect x="7" y="8" width="3" height="12" rx="1" fill={color} opacity="0.15" />
+      <rect x="12" y="12" width="3" height="8" rx="1" fill={color} opacity="0.15" />
+      <rect x="17" y="5" width="3" height="15" rx="1" fill={color} opacity="0.15" />
     </svg>
   );
 }

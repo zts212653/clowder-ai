@@ -26,6 +26,8 @@ export interface ClaudeQuota {
   activeBlock: CcusageBillingBlock | null;
   usageItems?: CodexUsageItem[];
   recentBlocks: CcusageBillingBlock[];
+  officialError?: string;
+  cliError?: string;
   error?: string;
   lastChecked: string | null;
 }
@@ -53,6 +55,15 @@ export interface GeminiQuota {
   lastChecked: string | null;
 }
 
+export interface KimiQuota {
+  platform: 'kimi';
+  usageItems: CodexUsageItem[];
+  error?: string;
+  lastChecked: string | null;
+  status?: 'ok' | 'unavailable';
+  note?: string;
+}
+
 export interface AntigravityQuota {
   platform: 'antigravity';
   usageItems: CodexUsageItem[];
@@ -64,6 +75,7 @@ export interface QuotaResponse {
   claude: ClaudeQuota;
   codex: CodexQuota;
   gemini: GeminiQuota;
+  kimi: KimiQuota;
   antigravity: AntigravityQuota;
   fetchedAt: string;
 }
@@ -119,19 +131,18 @@ export function toUtilization(item: CodexUsageItem): number {
 
 export function riskDotClass(utilization: number): string {
   if (utilization >= 80) return 'text-rose-500';
-  if (utilization >= 50) return 'text-amber-500';
-  return 'text-emerald-500';
+  if (utilization >= 50) return 'text-conn-amber-text';
+  return 'text-conn-emerald-text';
 }
 
 function barColor(utilization: number): string {
   if (utilization >= 80) return 'bg-rose-500';
-  if (utilization >= 50) return 'bg-amber-400';
-  return 'bg-emerald-500';
+  if (utilization >= 50) return 'bg-[var(--semantic-warning)]';
+  return 'bg-[var(--semantic-success)]';
 }
 
 function formatPercent(item: CodexUsageItem): string {
-  if (item.percentKind === 'remaining') return `${item.usedPercent}% 剩余`;
-  return `${item.usedPercent}% 已用`;
+  return `${100 - toUtilization(item)}% 剩余`;
 }
 
 export function degradationHint(poolId: string | undefined, utilization: number): string | null {
@@ -163,7 +174,7 @@ function ProgressBar({ percent, utilization }: { percent: number; utilization: n
   const clamped = Math.max(0, Math.min(100, percent));
   const color = barColor(utilization);
   return (
-    <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+    <div className="w-full h-1.5 bg-cafe-surface rounded-full overflow-hidden">
       <div className={`h-full rounded-full ${color}`} style={{ width: `${clamped}%` }} />
     </div>
   );
@@ -180,26 +191,23 @@ export function QuotaPoolRow({ item }: { item: CodexUsageItem }) {
           <span className={`text-sm ${dot}`} aria-hidden="true">
             {'\u25CF'}
           </span>
-          <span className="text-sm text-gray-700 truncate">{item.label}</span>
+          <span className="text-sm text-cafe-secondary truncate">{item.label}</span>
         </div>
         <span
-          className={`text-sm font-semibold whitespace-nowrap ${utilization >= 80 ? 'text-rose-600' : 'text-gray-900'}`}
+          className={`text-sm font-semibold whitespace-nowrap ${utilization >= 80 ? 'text-conn-red-text' : 'text-cafe'}`}
         >
           {formatPercent(item)}
         </span>
       </div>
       <div className="mt-1 ml-5">
-        <ProgressBar
-          percent={item.percentKind === 'remaining' ? item.usedPercent : 100 - item.usedPercent}
-          utilization={utilization}
-        />
+        <ProgressBar percent={100 - utilization} utilization={utilization} />
       </div>
       {(item.resetsText || item.resetsAt) && (
-        <div className="mt-0.5 ml-5 text-xs text-gray-400">
+        <div className="mt-0.5 ml-5 text-xs text-cafe-muted">
           {item.resetsText ?? `resets ${new Date(item.resetsAt!).toLocaleString()}`}
         </div>
       )}
-      {hint && <div className="mt-0.5 ml-5 text-xs text-amber-600">{hint}</div>}
+      {hint && <div className="mt-0.5 ml-5 text-xs text-conn-amber-text">{hint}</div>}
     </div>
   );
 }

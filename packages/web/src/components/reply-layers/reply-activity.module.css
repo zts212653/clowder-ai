@@ -1,0 +1,67 @@
+.cat {
+  display: inline-block;
+  flex: none;
+  height: 1rem;
+  line-height: 1rem;
+  color: var(--semantic-info);
+}
+.cat[data-pulse="true"] {
+  animation: reply-tool-step 600ms ease-out 1;
+}
+.status {
+  flex: 0 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.duration {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+@keyframes reply-tool-step {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  35% {
+    transform: translateY(-6px);
+  }
+  65% {
+    transform: translateY(-2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cat[data-pulse] {
+    animation: none;
+  }
+}
+
+.durationCompact {
+  display: none;
+}
+@container reply (max-width: 26rem) {
+  /* Ordinary replies reserve object space before abbreviating their expandable record text. */
+  .ordinaryWorking .status:has(.object) {
+    flex-shrink: 0;
+    max-inline-size: 50%;
+  }
+  /* The changing object has priority; the verb remains in the accessible text and full tip. */
+  .verb {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .object::before {
+    content: attr(data-short-verb) " ";
+  }
+  .durationFull {
+    display: none;
+  }
+  .durationCompact {
+    display: inline;
+  }
+}

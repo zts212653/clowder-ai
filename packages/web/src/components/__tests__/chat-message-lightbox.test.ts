@@ -45,6 +45,7 @@ describe('ChatMessage image lightbox', () => {
     const message = {
       id: 'user-img-1',
       type: 'user',
+      from: { kind: 'user', userId: 'test-user' },
       catId: null,
       timestamp: Date.now(),
       deliveredAt: undefined,

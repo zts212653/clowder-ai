@@ -18,7 +18,8 @@ const ragdollVariants: CatData[] = [
     color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
     breedId: 'ragdoll',
     breedDisplayName: '布偶猫', // ← breed-level name
-    provider: 'anthropic',
+    clientId: 'anthropic',
+    carrier: 'cli',
     defaultModel: 'claude-sonnet-4-5-20250929',
     avatar: '/avatars/opus.png',
     mentionPatterns: ['@opus-custom'],
@@ -33,7 +34,8 @@ const ragdollVariants: CatData[] = [
     color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
     breedId: 'ragdoll',
     breedDisplayName: '布偶猫',
-    provider: 'anthropic',
+    clientId: 'anthropic',
+    carrier: 'cli',
     defaultModel: 'claude-sonnet-4-5-20250929',
     avatar: '/avatars/opus.png',
     mentionPatterns: ['@opus'],
@@ -90,7 +92,7 @@ describe('CatSelector breed group title (R24 P2-2)', () => {
     });
 
     // Group title text should contain the breed name, NOT the first variant's override
-    const groupTitle = container.querySelector('.text-\\[10px\\]');
+    const groupTitle = container.querySelector('.text-micro');
     expect(groupTitle).toBeTruthy();
     expect(groupTitle?.textContent).toContain('布偶猫家族');
     expect(groupTitle?.textContent).not.toContain('定制布偶家族');

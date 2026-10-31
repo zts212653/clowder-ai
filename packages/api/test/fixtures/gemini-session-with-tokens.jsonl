@@ -1,0 +1,8 @@
+{"sessionId":"test-session-uuid-001","startedAt":"2026-05-09T01:00:00.000Z"}
+{"id":"msg-001","timestamp":"2026-05-09T01:00:01.000Z","type":"user","content":"Hello"}
+{"id":"msg-002","timestamp":"2026-05-09T01:00:02.000Z","type":"gemini","content":"Hi there!","tokens":{"input":50,"output":10,"cached":0,"thoughts":0,"tool":0,"total":60},"model":"gemini-test"}
+{"$set":{"lastUpdated":"2026-05-09T01:00:02.000Z"}}
+{"id":"msg-003","timestamp":"2026-05-09T01:00:03.000Z","type":"user","content":"Tell me more"}
+{"id":"msg-004","timestamp":"2026-05-09T01:00:04.000Z","type":"gemini","content":"Here is more info about the topic","thoughts":[{"subject":"Analyzing","description":"Considering the user request"}],"tokens":{"input":100,"output":20,"cached":50,"thoughts":5,"tool":0,"total":125},"model":"gemini-test"}
+{"$set":{"lastUpdated":"2026-05-09T01:00:04.000Z"}}
+{"id":"msg-004","timestamp":"2026-05-09T01:00:04.500Z","type":"gemini","content":"Here is more info about the topic","thoughts":[{"subject":"Analyzing","description":"Considering the user request"}],"tokens":{"input":105,"output":25,"cached":50,"thoughts":5,"tool":0,"total":130},"model":"gemini-test","toolCalls":[{"id":"tc1","name":"read_file","args":{}}]}

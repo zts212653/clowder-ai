@@ -1,22 +1,37 @@
 ---
 feature_ids: [F050]
-related_features: [F002, F005, F027, F032, F041, F043, F061, F105, F126]
+related_features: [F002, F005, F027, F032, F041, F043, F061, F105, F126, F135, F143, F158]
 topics: [a2a, external-agent, cli-integration, interoperability, dare, system-prompt, governance]
 doc_kind: spec
 created: 2026-03-02
-updated: 2026-03-13
+updated: 2026-07-07
 ---
 
 # F050: External Agent Onboarding（A2A/CLI 接入契约）
 
-> **Status**: in-progress | **Owner**: 三猫（Phase 1 leader: Ragdoll Opus 4.6）
-> **Created**: 2026-03-02
+> **Status**: done | **Owner**: 三猫（Phase 1 leader: Ragdoll Opus 4.6）
+> **Created**: 2026-03-02 | **Closed**: 2026-04-10
+
+## Closure Summary
+
+**核心使命已完成**：EAC v1 契约定义 + L1 CLI Adapter 通道落地 + 被 4 个真实接入验证。
+
+| 接入猫 | Feature | 验证通道 |
+|--------|---------|---------|
+| 狸花猫 (DARE) | F135 | L1 CLI — 首个 proof-of-concept |
+| 金渐层 (OpenCode) | F105 | L1 CLI — Claude Code 运行时共享 |
+| Bengal (Antigravity) | F061 | L1 CLI — CDP bridge 适配 |
+| 梵花猫 (Kimi) | F158 | L1 CLI — 社区贡献 NDJSON 流式 |
+
+**拆出的后续方向**：
+- **L2 A2A Protocol Adapter** — 远程 agent 协议对接（`A2AAgentService` 设计稿已完成 PR #519，真实验收待独立立项）
+- **Phase 1b stdin 控制面** — DARE 特有需求，`--auto-approve` 已满足当前场景，如需推进归 DARE 侧 feature
 
 ## Why
 
 我们已经有成熟的三猫协作内核，但“接入外部 agent”的边界还不清晰，导致讨论里反复出现三个关键问题：
 
-1. Cat Cafe 若要对接 A2A，到底要改什么？
+1. Clowder AI 若要对接 A2A，到底要改什么？
 2. 被接入 agent 需要满足哪些硬条件？
 3. “任何支持 A2A 的 agent 都能接入吗？”
 
@@ -90,7 +105,7 @@ updated: 2026-03-13
 
 ### D. Capability Contract（必须）
 
-- 可接受 Cat Cafe 的 MCP 编排结果（静态配置或运行期 reload）
+- 可接受 Clowder AI 的 MCP 编排结果（静态配置或运行期 reload）
 - 若不支持运行期动态注入，需提供明确降级路径
 
 ### E. Collaboration Contract（L2 必须）
@@ -117,7 +132,7 @@ updated: 2026-03-13
 
 ### H. System Prompt Configuration Map（必须）
 
-Cat Café 通过 `SystemPromptBuilder` 动态注入身份和家规到 prompt 文本中，但各 agent **也有自己的原生系统提示词配置**。更新家规/身份时，**两层都要同步**。
+Clowder AI 通过 `SystemPromptBuilder` 动态注入身份和家规到 prompt 文本中，但各 agent **也有自己的原生系统提示词配置**。更新家规/身份时，**两层都要同步**。
 
 | Agent | 原生配置路径 | 格式 | 说明 |
 |-------|-------------|------|------|
@@ -125,7 +140,7 @@ Cat Café 通过 `SystemPromptBuilder` 动态注入身份和家规到 prompt 文
 | Codex (Maine Coon) | `~/.codex/AGENTS.md` + App Personalization | Markdown | CLI 和 App 都读；截图里的 Custom instructions |
 | Gemini (Siamese) | `~/.gemini/GEMINI.md` | Markdown | 项目级可用 `.gemini/GEMINI.md` |
 | OpenCode (金渐层) | `~/.config/opencode/opencode.json` | JSON | 系统提示词走 OMOC plugin；底层 Claude Code 运行时共享 `~/.claude/` 配置和 skills（见下方说明） |
-| Antigravity (孟加拉猫) | CDP bridge / prompt 注入 | — | 无独立配置文件，纯靠 Cat Café 动态注入 |
+| Antigravity (Bengal) | CDP bridge / prompt 注入 | — | 无独立配置文件，纯靠 Clowder AI 动态注入 |
 
 **变更 SOP**：
 1. 改了 Codex/Gemini 原生配置相关内容 → 编辑 `assets/system-prompts/` 分片文件（Codex/Gemini 原生配置的仓库内真相源）
@@ -134,7 +149,7 @@ Cat Café 通过 `SystemPromptBuilder` 动态注入身份和家规到 prompt 文
 4. Commit 分片变更
 
 **OpenCode 配置共享说明**：OpenCode 底层使用 Claude Code 运行时（`claude-opus-4-6`），因此天然共享 `~/.claude/` 下的配置和 skills。这意味着：
-- `~/.claude/skills/` 中的 Cat Café symlink skills 金渐层可直接加载
+- `~/.claude/skills/` 中的 Clowder AI symlink skills 金渐层可直接加载
 - `~/.claude/projects/` 中的项目级配置也会生效
 - 无需为金渐层单独维护 skills 同步链
 
@@ -144,7 +159,7 @@ Cat Café 通过 `SystemPromptBuilder` 动态注入身份和家规到 prompt 文
 
 ## 结论问题逐条回答
 
-### Q1: Cat Cafe 要接入 A2A 需要做什么？
+### Q1: Clowder AI 要接入 A2A 需要做什么？
 
 最小变更集（按优先级）：
 
@@ -176,7 +191,7 @@ Cat Café 通过 `SystemPromptBuilder` 动态注入身份和家规到 prompt 文
 
 ### Phase 1: DARE L1 CLI 接入（当前 — 2026-03-04 起）
 
-**目标**：Cat Café 能通过 CLI adapter 驱动 DARE agent 完成单轮任务。
+**目标**：Clowder AI 能通过 CLI adapter 驱动 DARE agent 完成单轮任务。
 
 **改造清单**：
 
@@ -195,7 +210,7 @@ Cat Café 通过 `SystemPromptBuilder` 动态注入身份和家规到 prompt 文
    - 改为可选 `stdin: 'pipe'`，支持 DARE `--control-stdin` 通道
 
 4. **DARE 事件映射层**（P2）
-   - DARE headless envelope → Cat Café `AgentMessage` 的转换
+   - DARE headless envelope → Clowder AI `AgentMessage` 的转换
    - DARE envelope 格式（`client-headless-event-envelope.v1`）：
      ```json
      { “schema_version”: “...”, “ts”: float, “session_id”: “...”,
@@ -226,7 +241,7 @@ Cat Café 通过 `SystemPromptBuilder` 动态注入身份和家规到 prompt 文
 
 DARE 支持 OpenRouter adapter，可用免费/低成本模型测试，不需要 OpenAI key。
 
-**环境变量**（team lead已在 `~/.zshrc` 中配置）：
+**环境变量**（operator已在 `~/.zshrc` 中配置）：
 
 ```bash
 export OPENROUTER_API_KEY=”sk-or-v1-...”  # OpenRouter API key
@@ -246,7 +261,7 @@ export OPENROUTER_API_KEY=”sk-or-v1-...”  # OpenRouter API key
 |------|------|--------|-------------|
 | 1. doctor | `python -m client --adapter openrouter --api-key dummy --output json doctor` | DARE 能启动、配置正确 | 否 |
 | 2. headless run | `python -m client --adapter openrouter --model zhipu/glm-4.7 --api-key $OPENROUTER_API_KEY run --task “say hello” --auto-approve --headless` | 端到端推理 + JSON 事件流 | 是 |
-| 3. Cat Café 集成 | DareAgentService 通过 spawnCli 驱动 DARE | 完整接入链路 | 是 |
+| 3. Clowder AI 集成 | DareAgentService 通过 spawnCli 驱动 DARE | 完整接入链路 | 是 |
 
 ### DARE 协议参考
 
@@ -274,7 +289,7 @@ export OPENROUTER_API_KEY=”sk-or-v1-...”  # OpenRouter API key
 - OpenRouter adapter 原生支持（env: `OPENROUTER_API_KEY`）
 - 结构化 JSON 事件流（headless envelope v1）
 
-剩余 gap（对 Cat Cafe 侧）：
+剩余 gap（对 Clowder AI 侧）：
 
 1. **我们的 provider 入口仍是三值**（Phase 1 解决）
 2. **缺 DareAgentService 实现**（Phase 1 解决）
@@ -310,10 +325,10 @@ export OPENROUTER_API_KEY=”sk-or-v1-...”  # OpenRouter API key
 - [x] `DareAgentService` 实现 `AgentService` 接口
 - [x] DARE headless envelope → AgentMessage 事件映射（15 tests）
 - [x] cat-config.json 可注册 DARE 猫
-- [x] Cat Café 集成验证通过（smoke test: 真实 DARE CLI 调用）
+- [x] Clowder AI 集成验证通过（smoke test: 真实 DARE CLI 调用）
 
-### Phase 1b: stdin 控制面（延期）
-- [ ] spawnCli 支持 stdin pipe（DARE control-stdin）— Phase 1 使用 `--auto-approve` 不需要 stdin
+### Phase 1b: stdin 控制面（deferred — DARE 特有，不阻塞 close）
+- [ ] ~~spawnCli 支持 stdin pipe（DARE control-stdin）~~ — `--auto-approve` 满足当前场景，如需推进归 DARE 侧
 
 ### Phase 2: 接入验收
 - [x] DARE CLI 兼容性测试套件完成（含 session/event/auth；`resume` 用例因 DARE #184 暂以 `test.skip` 标注）
@@ -322,37 +337,37 @@ export OPENROUTER_API_KEY=”sk-or-v1-...”  # OpenRouter API key
 
 ### Phase 4: Native Prompt Sync for Codex + Gemini（2026-03-13 起）
 
-**背景**：F105（金渐层接入）过程中发现系统提示词存在动态层（SystemPromptBuilder）与静态层（各猫 `~/` 原生配置）不同步问题。team lead直接 CLI 裸跑 opencode 时完全无身份/家规意识（回复"大猫猫你好"），而 Codex 因team lead手动在 `~/.codex/AGENTS.md` 写了身份所以裸跑也正常。
+**背景**：F105（金渐层接入）过程中发现系统提示词存在动态层（SystemPromptBuilder）与静态层（各猫 `~/` 原生配置）不同步问题。operator直接 CLI 裸跑 opencode 时完全无身份/家规意识（回复"大猫猫你好"），而 Codex 因operator手动在 `~/.codex/AGENTS.md` 写了身份所以裸跑也正常。
 
 **愿景**：
 1. Codex/Gemini 原生配置有**仓库内真相源**（`assets/system-prompts/`），不再在各猫 `~/` 中各自为政
-2. team lead改了原生配置相关内容后，跑一条命令就能同步到 Codex + Gemini 的 `~/` 配置，**不会漏改 `~/`**
-3. 不支持原生配置的猫（OpenCode、Antigravity）继续靠 Cat Café 动态注入，**不假装有配置**
+2. operator改了原生配置相关内容后，跑一条命令就能同步到 Codex + Gemini 的 `~/` 配置，**不会漏改 `~/`**
+3. 不支持原生配置的猫（OpenCode、Antigravity）继续靠 Clowder AI 动态注入，**不假装有配置**
 4. 禁止 runtime 自动覆写 `~/` 配置（ADR 记录）
 
-**本 Phase 不覆盖**：Cat Café 运行时动态注入层（`SystemPromptBuilder` 的 `GOVERNANCE_L0_DIGEST` 等常量）仍维持现状。将动态层也收拢到分片源是 Phase 5 候选方向（见 Open Questions）。
+**本 Phase 不覆盖**：Clowder AI 运行时动态注入层（`SystemPromptBuilder` 的 `GOVERNANCE_L0_DIGEST` 等常量）仍维持现状。将动态层也收拢到分片源是 Phase 5 候选方向（见 Open Questions）。
 
 **方案**（Ragdoll × Maine Coon讨论收敛）：
 - 真相源：`assets/system-prompts/` 语义分片（`governance-l0.md`、`collab-rules.md`、`cats/{catId}.md`）
 - 渲染器：`scripts/sync-system-prompts.ts` — 按 provider 差异拼装为各猫目标格式
 - 同步：`--apply`（写入 `~/` 对应位置）+ `--check`（drift 检查，CI 可跑）
-- 不做：runtime 动态改 `~/`、OpenCode wrapper（team lead否决，非真实使用场景）
+- 不做：runtime 动态改 `~/`、OpenCode wrapper（operator否决，非真实使用场景）
 
 **否决记录**：
 - ❌ 调度时动态覆写各猫 home 配置 — 侵入性强、易竞态、污染个人环境
-- ❌ OpenCode wrapper（`scripts/opencode-cat-cafe-run`）— team lead否决，裸跑场景是测试触发非日常使用
+- ❌ OpenCode wrapper（`scripts/opencode-cat-cafe-run`）— operator否决，裸跑场景是测试触发非日常使用
 
 - [x] AC-P4-1: `assets/system-prompts/` 语义分片结构建立（governance-l0 + collab-rules + 各猫身份）
 - [x] AC-P4-2: `scripts/sync-system-prompts.ts --check` 能检测 Codex/Gemini `~/` 配置 drift
 - [x] AC-P4-3: `scripts/sync-system-prompts.ts --apply` 能渲染并写入 `~/.codex/AGENTS.md` + `~/.gemini/GEMINI.md`
 - [x] AC-P4-4: ADR 记录"禁止 runtime 覆写 `~/` 配置"决策 → [ADR-017](../decisions/017-no-runtime-home-overwrite.md)
 - [x] AC-P4-5: F050 §H 配置地图与实际同步脚本一致
-- [ ] AC-P4-6: 愿景守护 — 改了 governance-l0 后跑 `--check` 能发现 Codex/Gemini 未同步（merge 后由守护猫验证）
+- [x] AC-P4-6: 愿景守护 — `--check` 能发现 drift（2026-04-10 验证：检测到 gemini drift）
 
-### Phase 3: A2A L2 Protocol Adapter
+### Phase 3: A2A L2 Protocol Adapter（拆出 — 独立方向，不阻塞 close）
 - [x] `A2AAgentService` 设计稿 + 接口定义完成（PR #519）
-- [ ] opencode CLI 兼容性测试清单完成
-- [ ] 至少 1 个 A2A agent 通过 L2 验收
+- [ ] ~~opencode CLI 兼容性测试清单完成~~ — 拆出，如需推进单独立项
+- [ ] ~~至少 1 个 A2A agent 通过 L2 验收~~ — 拆出，L2 远程协议对接是独立方向
 
 ---
 
@@ -367,5 +382,5 @@ export OPENROUTER_API_KEY=”sk-or-v1-...”  # OpenRouter API key
 ## Dependencies
 
 - **DARE 仓库**：`github.com/zts212653/Deterministic-Agent-Runtime-Engine`（issue #135 已基本完成）
-- **OpenRouter API key**：team lead已在 `~/.zshrc` 配置 `OPENROUTER_API_KEY`
+- **OpenRouter API key**：operator已在 `~/.zshrc` 配置 `OPENROUTER_API_KEY`
 - **Evolved from**: F032（Agent Plugin Architecture）、F041/F043（MCP 统一管理）

@@ -1,0 +1,9 @@
+.projectControl {
+  container-type: inline-size;
+}
+
+@container (max-width: 1.999rem) {
+  .projectName {
+    display: none;
+  }
+}

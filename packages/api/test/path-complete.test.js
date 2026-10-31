@@ -38,10 +38,10 @@ describe('GET /api/projects/complete', () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  it('returns 401 when only a spoofed userId query param is provided', async () => {
+  it('returns 401 without trusted identity header', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: `/api/projects/complete?prefix=${encodeURIComponent(join(testDir, 'src/'))}&cwd=${encodeURIComponent(testDir)}&userId=spoofed`,
+      url: `/api/projects/complete?prefix=${encodeURIComponent(join(testDir, 'src/'))}&cwd=${encodeURIComponent(testDir)}`,
     });
     assert.equal(res.statusCode, 401);
     const body = JSON.parse(res.body);
@@ -125,10 +125,10 @@ describe('GET /api/projects/complete', () => {
     assert.ok(!names.some((n) => n.startsWith('node_modules')), 'should not include node_modules');
   });
 
-  it('returns 403 for prefix outside allowed roots', async () => {
+  it('returns 403 for prefix under denied system directory', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: `/api/projects/complete?prefix=${encodeURIComponent('/etc/pass')}&cwd=/etc`,
+      url: `/api/projects/complete?prefix=${encodeURIComponent('/dev/null')}&cwd=/dev`,
       headers: AUTH_HEADERS,
     });
     assert.equal(res.statusCode, 403);

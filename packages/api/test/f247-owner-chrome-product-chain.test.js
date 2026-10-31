@@ -1,0 +1,324 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { catRegistry, isCloudBridgeFailureDiagnosticV1 } from '@cat-cafe/shared';
+import Fastify from 'fastify';
+import { AgentKeyRegistry } from '../dist/domains/cats/services/agents/agent-key/AgentKeyRegistry.js';
+import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
+import { invokeSingleCat } from '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
+import { persistUserFacingSystemInfoNotices } from '../dist/domains/cats/services/agents/routing/persist-system-info-warnings.js';
+import { buildCloudBridgeStatusContent } from '../dist/domains/cats/services/cloud-bridge/cloud-bridge-fallback.js';
+import { CloudReturnBindingSigner } from '../dist/domains/cats/services/cloud-bridge/cloud-return-binding.js';
+import { MemoryCloudReturnGrantStore } from '../dist/domains/cats/services/cloud-bridge/cloud-return-grant.js';
+import { dispatchBoundConversationThroughHost } from '../dist/domains/cats/services/cloud-bridge/conversation-host-dispatch.js';
+import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
+import { callbacksRoutes } from '../dist/routes/callbacks.js';
+import { boundedFailureDiagnostic } from './helpers/f202-cloud-failure-diagnostic.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
+
+function ensureGptProRegistered() {
+  if (catRegistry.has('gpt-pro')) return;
+  catRegistry.register('gpt-pro', {
+    catId: 'gpt-pro',
+    clientId: 'openai',
+    provider: 'openai-chatgpt-pro',
+    avatar: '/avatars/gpt-pro.png',
+  });
+}
+
+async function drain(generator) {
+  const messages = [];
+  for await (const message of generator) messages.push(message);
+  return messages;
+}
+
+describe('F247 normal owner-Chrome product chain', () => {
+  it('persists the exact Host receipt and accepts only the matching source-bound gpt-pro return', async () => {
+    process.env.DEFAULT_OWNER_USER_ID = 'alice';
+    ensureGptProRegistered();
+    const messageStore = new MessageStore();
+    const threadStore = new ThreadStore();
+    const thread = await threadStore.create('alice', 'F247 product chain');
+    await threadStore.updateCloudCatBinding(thread.id, 'gpt-pro', 'https://chatgpt.com/c/conversation-product-chain');
+    const source = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        threadId: thread.id,
+        content: '@gpt-pro verify this exact source',
+        mentions: ['gpt-pro'],
+        timestamp: 1_000,
+        extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
+      }),
+    );
+    const signer = new CloudReturnBindingSigner(Buffer.alloc(32, 17));
+    // F117: the Host dispatch issues exactly one server-custodied return grant into
+    // this store before dispatching; the callback route claims it on source-bound returns.
+    const grantStore = new MemoryCloudReturnGrantStore(Date.now, { historyBoundary: 0 });
+    const bridgeCalls = [];
+    const events = await drain(
+      invokeSingleCat(
+        {
+          registry: new InvocationRegistry(),
+          sessionManager: {},
+          messageStore,
+          threadStore,
+          apiUrl: 'http://localhost:0',
+          cloudInvokeBridge: {
+            async dispatch(params) {
+              bridgeCalls.push(params);
+              return {
+                kind: 'sent',
+                capturedUrl: 'https://chatgpt.com/c/conversation-product-chain',
+                transport: 'host',
+                hostMessageId: 'host-message-product-chain',
+                idempotentReplay: false,
+              };
+            },
+          },
+          cloudReturnGrantStore: grantStore,
+        },
+        {
+          catId: 'gpt-pro',
+          service: {
+            usesChainKeyResume: () => false,
+            freshnessCarrierCapability: () => ({
+              provider: 'other',
+              carrier: 'other',
+              activeInvocationGuidance: 'undeclared',
+              deliverySemantics: 'undeclared',
+            }),
+          },
+          prompt: 'orchestrated prompt',
+          mentionContent: source.content,
+          mentioningCatId: 'codex-sol',
+          userId: 'alice',
+          ownerAuthProvenance: 'strict',
+          threadId: thread.id,
+          isLastCat: true,
+          parentInvocationId: 'inv-source',
+          a2aTriggerMessageId: source.id,
+          executionCausal: { triggerMessageId: source.id },
+          promptMessageIds: [source.id],
+        },
+      ),
+    );
+
+    assert.equal(bridgeCalls.length, 1);
+    assert.equal(bridgeCalls[0].sourceMessageId, source.id);
+    assert.equal('cloudReturnBinding' in bridgeCalls[0], false);
+    const statusEvent = events.find(
+      (event) =>
+        event.type === 'system_info' && event.content && JSON.parse(event.content).type === 'cloud_bridge_status',
+    );
+    const createdEvent = events.find(
+      (event) =>
+        event.type === 'system_info' && event.content && JSON.parse(event.content).type === 'invocation_created',
+    );
+    const status = JSON.parse(statusEvent.content);
+    const created = JSON.parse(createdEvent.content);
+    assert.deepEqual(
+      {
+        sourceMessageId: status.outboundReceipt.sourceMessageId,
+        dispatchInvocationId: created.invocationId,
+        status: status.outboundReceipt.status,
+        transport: status.outboundReceipt.transport,
+        hostMessageId: status.outboundReceipt.hostMessageId,
+      },
+      {
+        sourceMessageId: source.id,
+        dispatchInvocationId: status.outboundReceipt.dispatchInvocationId,
+        status: 'sent',
+        transport: 'host',
+        hostMessageId: 'host-message-product-chain',
+      },
+    );
+
+    await persistUserFacingSystemInfoNotices({
+      messageStore,
+      threadId: thread.id,
+      catId: 'gpt-pro',
+      expectedSourceMessageId: source.id,
+      expectedDispatchInvocationId: status.outboundReceipt.dispatchInvocationId,
+      contents: [statusEvent.content],
+    });
+    const durableReceipt = (await messageStore.getByThread(thread.id)).find(
+      (message) => message.source?.connector === 'cloud-bridge-status',
+    );
+    assert.equal(durableReceipt.replyTo, source.id);
+    assert.deepEqual(durableReceipt.source.meta.cloudBridgeOutboundReceipt, status.outboundReceipt);
+
+    const agentKeyRegistry = new AgentKeyRegistry({ ttlMs: 86_400_000 });
+    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice', { scope: 'cloud-conversation' });
+    const app = Fastify();
+    await app.register(callbacksRoutes, {
+      registry: new InvocationRegistry(),
+      agentKeyRegistry,
+      cloudReturnBindingSigner: signer,
+      cloudReturnGrantStore: grantStore,
+      messageStore,
+      threadStore,
+      socketManager: { broadcastAgentMessage: () => undefined },
+    });
+    // F117 new contract: a legacy cloudReturnBinding without its exact replyTo source
+    // is rejected 400 before any grant claim; the normal source-bound path is
+    // authorized by the server-custodied grant, not by a client-sent binding.
+    const missingBinding = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: {
+        content: 'must not return without the exact capability',
+        threadId: thread.id,
+        cloudReturnBinding: signer.sign({
+          threadId: thread.id,
+          userId: 'alice',
+          sourceMessageId: bridgeCalls[0].sourceMessageId,
+          dispatchInvocationId: 'inv-cloud',
+          targetCatId: 'gpt-pro',
+        }),
+      },
+    });
+    assert.equal(missingBinding.statusCode, 400);
+    assert.equal(missingBinding.json().kind, 'cloud_return_binding_required');
+
+    const wrongSource = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        threadId: thread.id,
+        content: 'a different source in the same thread',
+        timestamp: 2_000,
+      }),
+    );
+    const substitutedSource = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: {
+        content: 'must not return to a substituted source',
+        threadId: thread.id,
+        replyTo: wrongSource.id,
+      },
+    });
+    assert.equal(substitutedSource.statusCode, 403);
+    assert.equal(substitutedSource.json().kind, 'cloud_return_grant_not_found');
+
+    const returned = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: {
+        content: 'source-bound product return',
+        threadId: thread.id,
+        replyTo: bridgeCalls[0].sourceMessageId,
+      },
+    });
+
+    assert.equal(returned.statusCode, 200);
+    const remoteReply = (await messageStore.getByThread(thread.id)).find(
+      (message) => message.content === 'source-bound product return',
+    );
+    assert.equal(remoteReply.replyTo, source.id);
+    await app.close();
+  });
+
+  it('persists only the bounded text-free fingerprint from a terminal Host failure', async () => {
+    const messageStore = new MessageStore();
+    const source = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        threadId: 'thread-failed-dispatch',
+        content: '@gpt-pro private source body',
+        mentions: ['gpt-pro'],
+        timestamp: 1_000,
+        extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
+      }),
+    );
+    const diagnostic = boundedFailureDiagnostic('composer/#node-8[0]');
+    assert.equal(isCloudBridgeFailureDiagnosticV1(diagnostic), true);
+    for (const firstUnsupportedPath of [
+      'composer/#node-8[0]/prompt_secret[0]',
+      'composer/#node-8[4294967296]',
+      `composer/${'a'.repeat(33)}[0]`,
+      `composer${'/p[0]'.repeat(110)}`,
+    ]) {
+      const unsafeDiagnostic = {
+        ...diagnostic,
+        fingerprint: { ...diagnostic.fingerprint, firstUnsupportedPath },
+      };
+      assert.equal(isCloudBridgeFailureDiagnosticV1(unsafeDiagnostic), false);
+    }
+    const oversizedCountDiagnostic = {
+      ...diagnostic,
+      fingerprint: {
+        ...diagnostic.fingerprint,
+        nodes: [{ path: 'composer', kind: 'element', tag: 'DIV', childCount: 0x1_0000_0000 }],
+      },
+    };
+    assert.equal(isCloudBridgeFailureDiagnosticV1(oversizedCountDiagnostic), false);
+    const hostError = Object.assign(new Error('ChatGPT composer DOM is unsupported'), {
+      code: 'COMPOSER_DOM_UNSUPPORTED',
+      diagnostic,
+      idempotentReplay: false,
+    });
+    const decision = await dispatchBoundConversationThroughHost({
+      adapter: {
+        async append_message() {
+          throw hostError;
+        },
+      },
+      boundUrl: 'https://chatgpt.com/c/conversation-product-chain',
+      renderedPrompt: 'must never enter diagnostics',
+      params: { sourceMessageId: source.id },
+    });
+
+    assert.equal(decision.outcome.kind, 'error');
+    const content = buildCloudBridgeStatusContent({
+      catId: 'gpt-pro',
+      outcome: decision.outcome,
+      audit: {
+        sourceMessageId: source.id,
+        sourceSender: { kind: 'cat', id: 'codex-sol', invocationId: 'inv-source' },
+        dispatchInvocationId: 'inv-failed-dispatch',
+      },
+    });
+    assert.equal(content.includes('must never enter diagnostics'), false);
+    await persistUserFacingSystemInfoNotices({
+      messageStore,
+      threadId: 'thread-failed-dispatch',
+      catId: 'gpt-pro',
+      expectedSourceMessageId: source.id,
+      expectedDispatchInvocationId: 'inv-failed-dispatch',
+      contents: [content],
+    });
+
+    const durableReceipt = (await messageStore.getByThread('thread-failed-dispatch')).find(
+      (message) => message.source?.connector === 'cloud-bridge-status',
+    );
+    assert.equal(durableReceipt.replyTo, source.id);
+    assert.deepEqual(durableReceipt.source.meta.cloudBridgeOutboundReceipt.failure, diagnostic);
+
+    const forgedDecision = await dispatchBoundConversationThroughHost({
+      adapter: {
+        async append_message() {
+          throw Object.assign(new Error('forged diagnostic'), {
+            code: 'COMPOSER_DOM_UNSUPPORTED',
+            diagnostic: {
+              ...diagnostic,
+              fingerprint: {
+                ...diagnostic.fingerprint,
+                nodes: [{ path: 'composer', kind: 'must never enter diagnostics' }],
+              },
+            },
+          });
+        },
+      },
+      boundUrl: 'https://chatgpt.com/c/conversation-product-chain',
+      renderedPrompt: 'private prompt',
+      params: { sourceMessageId: source.id },
+    });
+    assert.equal(forgedDecision.outcome.failureDiagnostic, undefined);
+  });
+});

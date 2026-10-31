@@ -2,9 +2,26 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
+import { ThreadChatRuntimeProvider } from '@/components/thread-chat';
+
+function renderChatContainer(threadId: string) {
+  return React.createElement(
+    ThreadChatRuntimeProvider,
+    { routeThreadId: threadId },
+    React.createElement(ChatContainer, { threadId }),
+  );
+}
+
+type MockApiResponse = {
+  ok: boolean;
+  json: () => Promise<unknown>;
+};
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const mockApiFetch = vi.fn(async (_url: string, _opts?: Record<string, unknown>) => ({ ok: true }));
+const mockApiFetch = vi.fn<(_url: string, _opts?: Record<string, unknown>) => Promise<MockApiResponse>>(async () => ({
+  ok: true,
+  json: async () => ({ caughtUp: false, advanced: false }),
+}));
 
 // Mutable store state — mutate between renders to simulate thread switching
 let storeState = {
@@ -19,6 +36,12 @@ let storeState = {
     },
   ],
 };
+
+// #1304: Stable spies that persist across baseStore() calls so tests can
+// assert on the same instance the component actually invoked.
+const confirmUnreadAckSpy = vi.fn();
+const settleUnreadAckSpy = vi.fn();
+const armUnreadSuppressionSpy = vi.fn();
 
 const baseStore = () => ({
   ...storeState,
@@ -38,22 +61,19 @@ const baseStore = () => ({
   clearCatStatuses: vi.fn(),
   setCurrentThread: vi.fn(),
   updateThreadTitle: vi.fn(),
-  setCurrentGame: vi.fn(),
-  currentGame: null,
 
   viewMode: 'single' as const,
   setViewMode: vi.fn(),
   clearUnread: vi.fn(),
-  confirmUnreadAck: vi.fn(),
-  armUnreadSuppression: vi.fn(),
+  confirmUnreadAck: confirmUnreadAckSpy,
+  settleUnreadAck: settleUnreadAckSpy,
+  armUnreadSuppression: armUnreadSuppressionSpy,
   splitPaneThreadIds: [],
   setSplitPaneThreadIds: vi.fn(),
   setSplitPaneTarget: vi.fn(),
   rightPanelMode: null,
   uiThinkingExpandedByDefault: false,
   queue: [],
-  queuePaused: false,
-  queuePauseReason: null,
   queueFull: false,
   queueFullSource: null,
   threads: [],
@@ -88,13 +108,13 @@ vi.mock('@/hooks/useAgentMessages', () => ({
   useAgentMessages: () => ({
     handleAgentMessage: vi.fn(),
     handleStop: vi.fn(),
-    resetRefs: vi.fn(),
-    resetTimeout: vi.fn(),
   }),
 }));
 
 vi.mock('@/hooks/useChatHistory', () => ({
   useChatHistory: () => ({
+    messages: storeState.messages,
+    handleReadingIntent: vi.fn(),
     handleScroll: vi.fn(),
     scrollContainerRef: { current: null },
     messagesEndRef: { current: null },
@@ -107,32 +127,33 @@ vi.mock('@/hooks/useSendMessage', () => ({
   useSendMessage: () => ({ handleSend: vi.fn() }),
 }));
 
-vi.mock('@/hooks/useAuthorization', () => ({
-  useAuthorization: () => ({ pending: [], respond: vi.fn(), handleAuthRequest: vi.fn(), handleAuthResponse: vi.fn() }),
+vi.mock('@/hooks/useSplitPaneKeys', () => ({ useSplitPaneKeys: vi.fn() }));
+vi.mock('@/hooks/useCatData', () => ({
+  useCatData: () => ({
+    cats: [],
+    isLoading: false,
+    hasFetched: true,
+    getCatById: () => undefined,
+    getCatsByBreed: () => new Map(),
+    refresh: async () => [],
+  }),
 }));
 
-vi.mock('@/hooks/useSplitPaneKeys', () => ({ useSplitPaneKeys: vi.fn() }));
-vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ getCatById: () => undefined }) }));
-
-vi.mock('@/components/ChatMessage', () => ({ ChatMessage: () => null }));
-vi.mock('@/components/ChatInput', () => ({ ChatInput: () => null }));
-vi.mock('@/components/ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
-vi.mock('@/components/ThreadSidebar', () => ({ ThreadSidebar: () => null }));
-vi.mock('@/components/RightStatusPanel', () => ({ RightStatusPanel: () => null }));
-vi.mock('@/components/ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
-vi.mock('@/components/ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
-vi.mock('@/components/A2ACollapsible', () => ({ A2ACollapsible: () => null }));
-vi.mock('@/components/ConfirmDialog', () => ({ ConfirmDialog: () => null }));
-vi.mock('@/components/MessageNavigator', () => ({ MessageNavigator: () => null }));
-vi.mock('@/components/MessageActions', () => ({
+vi.mock('../ChatMessage', () => ({ ChatMessage: () => null }));
+vi.mock('../ChatInput', () => ({ ChatInput: () => null }));
+vi.mock('../ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
+vi.mock('../ThreadSidebar', () => ({ ThreadSidebar: () => null }));
+vi.mock('../RightStatusPanel', () => ({ RightStatusPanel: () => null }));
+vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
+vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock('@/components/CatCafeHub', () => ({ CatCafeHub: () => null }));
-vi.mock('@/components/SplitPaneView', () => ({ SplitPaneView: () => null }));
-vi.mock('@/components/MobileStatusSheet', () => ({ MobileStatusSheet: () => null }));
-vi.mock('@/components/QueuePanel', () => ({ QueuePanel: () => null }));
+vi.mock('../SplitPaneView', () => ({
+  SplitPaneView: () => null,
+  SplitPaneChatView: () => null,
+}));
+vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));
 vi.mock('@/components/ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
-vi.mock('@/components/AuthorizationCard', () => ({ AuthorizationCard: () => null }));
 vi.mock('@/components/WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));
 
@@ -151,10 +172,15 @@ describe('F069-R5: read ack via POST /read/latest', () => {
   });
 
   beforeEach(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    mockApiFetch.mockClear();
+    mockApiFetch.mockReset();
+    mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ caughtUp: false, advanced: false }) });
+    confirmUnreadAckSpy.mockClear();
+    settleUnreadAckSpy.mockClear();
+    armUnreadSuppressionSpy.mockClear();
     storeState = {
       currentThreadId: 'thread-A',
       messages: [
@@ -178,7 +204,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
 
   it('sends POST /read/latest on mount (no message ID needed)', async () => {
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -189,13 +215,16 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     );
     expect(ackCalls.length).toBe(1);
     expect(ackCalls[0][0]).toContain('thread-A');
-    // POST with no body — server finds latest message
-    expect((ackCalls[0]?.[1] as { method: string }).method).toBe('POST');
+    expect(ackCalls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
   });
 
   it('fires new POST /read/latest when threadId changes', async () => {
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -204,7 +233,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
 
     // Switch to thread-B
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-B' }));
+      root.render(renderChatContainer('thread-B'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -234,7 +263,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     };
 
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -250,7 +279,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
   it('re-acks when new messages arrive in the active thread (P1 regression)', async () => {
     // Initial render with 1 message
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -286,7 +315,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
 
     // Re-render with updated store state (simulating store update from socket)
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -299,5 +328,117 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     );
     expect(newCalls.length).toBe(1);
     expect(newCalls[0][0]).toContain('thread-A');
+  });
+
+  it('re-acks when the same mutable bubble reaches final delivery', async () => {
+    act(() => {
+      root.render(renderChatContainer('thread-A'));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    mockApiFetch.mockClear();
+
+    storeState = {
+      ...storeState,
+      messages: storeState.messages.map((message) => ({ ...message, deliveredAt: Date.now() })),
+    };
+    act(() => {
+      root.render(renderChatContainer('thread-A'));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const ackCalls = mockApiFetch.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].includes('/read/latest'),
+    );
+    expect(ackCalls).toHaveLength(1);
+  });
+
+  it('does not ACK while hidden and retries only after the selected document becomes visible', async () => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    act(() => {
+      root.render(renderChatContainer('thread-A'));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(mockApiFetch.mock.calls.filter((call) => String(call[0]).includes('/read/latest'))).toHaveLength(0);
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const ackCalls = mockApiFetch.mock.calls.filter((call) => String(call[0]).includes('/read/latest'));
+    expect(ackCalls).toHaveLength(1);
+    expect(ackCalls[0]?.[0]).toContain('thread-A');
+  });
+
+  it('settles without confirming when read/latest returns caughtUp=false', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ caughtUp: false, advanced: false }),
+    });
+
+    act(() => {
+      root.render(renderChatContainer('thread-A'));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(settleUnreadAckSpy).toHaveBeenCalledWith('thread-A', false);
+  });
+
+  it('settles as confirmed when read/latest returns caughtUp=true', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ caughtUp: true, advanced: true }),
+    });
+
+    act(() => {
+      root.render(renderChatContainer('thread-A'));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(settleUnreadAckSpy).toHaveBeenCalledWith('thread-A', true);
+  });
+
+  it.each([
+    ['a durable closure', { caughtUp: true, handledMention: true }, 1],
+    ['an unchanged mention', { caughtUp: true, handledMention: false }, 0],
+    ['a legacy receipt', { caughtUp: true }, 0],
+    ['an unconfirmed read', { caughtUp: false, handledMention: true }, 0],
+  ] as const)('invalidates the inbox only for %s', async (_case, receipt, expected) => {
+    const changed = vi.fn();
+    window.addEventListener('cat-cafe:user-mention-updated', changed);
+    mockApiFetch.mockResolvedValue({ ok: true, json: async () => receipt });
+    try {
+      await act(async () => root.render(renderChatContainer('thread-A')));
+      expect(changed).toHaveBeenCalledTimes(expected);
+    } finally {
+      window.removeEventListener('cat-cafe:user-mention-updated', changed);
+    }
+  });
+
+  it('settles as unconfirmed on a non-2xx response', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: 'failed' }),
+    });
+
+    act(() => {
+      root.render(renderChatContainer('thread-A'));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(settleUnreadAckSpy).toHaveBeenCalledWith('thread-A', false);
   });
 });

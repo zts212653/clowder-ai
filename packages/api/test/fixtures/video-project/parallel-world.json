@@ -1,0 +1,3590 @@
+{
+  "schemaVersion": 1,
+  "title": "平行世界",
+  "kind": "film",
+  "tags": [],
+  "roles": [],
+  "origin": {
+    "kind": "imported",
+    "actor": null,
+    "at": "2026-10-08T07:54:33Z",
+    "refs": [
+      "remotion-studio:src/ParallelWorld/Film.tsx",
+      "remotion-studio:src/ParallelWorld/Ghost.tsx",
+      "remotion-studio:src/ParallelWorld/Root.tsx",
+      "remotion-studio:src/ParallelWorld/craft/Reveal.tsx",
+      "remotion-studio:src/ParallelWorld/craft/motion.ts",
+      "remotion-studio:src/ParallelWorld/index.ts",
+      "remotion-studio:src/ParallelWorld/layers.ts",
+      "remotion-studio:src/ParallelWorld/parts/Stage.tsx",
+      "remotion-studio:src/ParallelWorld/parts/Ui.tsx",
+      "remotion-studio:src/ParallelWorld/scenes/Guilty.tsx",
+      "remotion-studio:src/ParallelWorld/scenes/Intro.tsx",
+      "remotion-studio:src/ParallelWorld/scenes/Outro.tsx",
+      "remotion-studio:src/ParallelWorld/scenes/Panels.tsx",
+      "remotion-studio:src/ParallelWorld/scenes/Reveal.tsx",
+      "remotion-studio:src/ParallelWorld/scenes/Sound.tsx",
+      "remotion-studio:src/ParallelWorld/scenes/Walls.tsx",
+      "remotion-studio:src/ParallelWorld/theme.ts",
+      "remotion-studio:src/ParallelWorld/timeline.ts",
+      "remotion-studio:public/parallel-world/layers.json"
+    ],
+    "converter": {
+      "id": "editing-desk-sample-adapter",
+      "version": "1.0.3"
+    },
+    "sources": [
+      {
+        "ref": "remotion-studio:src/ParallelWorld/Film.tsx",
+        "digest": "sha256:5b654107dec11fbcf7e9d827d53993b4a3deb1e78c2024aabd62646af6770c07"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/Ghost.tsx",
+        "digest": "sha256:87690e02e753e258803568a9f046892b1062d9b904f0eefd2eba90e0dd0be961"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/Root.tsx",
+        "digest": "sha256:69fe67c06d36e04a7d9e92daad5846e37f7cb99935f06f67eb25dd5595505f14"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/craft/Reveal.tsx",
+        "digest": "sha256:6629887f5aa135c482a6b13f53605566e6e158348565d414307a831596160fce"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/craft/motion.ts",
+        "digest": "sha256:656d5cbce7e2b20ce5d566fe43df72ce4abe651d5990e140f18a57d52a7e996d"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/index.ts",
+        "digest": "sha256:32185b5fe29233ed658013191cf02a1ba3181fe15dd4c43848136a344887ff0f"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/layers.ts",
+        "digest": "sha256:f923d47ed60389dc2a1c8b6b27299349cfc2f325a1910eb5e43c7f044c70baff"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/parts/Stage.tsx",
+        "digest": "sha256:b37c53a70f1bd3b0f56fcc2ed86b2b2b925e5f08f2e7348a38f7bfec4fb8e68c"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/parts/Ui.tsx",
+        "digest": "sha256:796c6ab8630509d673d882b2a8ed222b848dc8ec85abaec76a1a4ee4fc38b326"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/scenes/Guilty.tsx",
+        "digest": "sha256:40f986d435f34da220471a474d893a960798c6e8920cf5bf3ac7aff6883cdfe1"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/scenes/Intro.tsx",
+        "digest": "sha256:5c76c0e9111695c5ef852e18ea2909dc7277387a49bf2247da5636b7e3ad9576"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/scenes/Outro.tsx",
+        "digest": "sha256:b4bdb89950399fac965f9b854feb1b23b2cbba09c02a4e61684d5b396dc4cd2b"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/scenes/Panels.tsx",
+        "digest": "sha256:a5af07d3e0f4263ddf13dc9a52509936ccc72d8681d5a459906c1ec721455ae9"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/scenes/Reveal.tsx",
+        "digest": "sha256:f5c6288f8e88454b1e9c0692967eb701b76cb83be127aa6d448a2abaa8c7a159"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/scenes/Sound.tsx",
+        "digest": "sha256:3e255776cd15223ffb8afe87579d211ce4f4fcd0212820af150be4f776325f56"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/scenes/Walls.tsx",
+        "digest": "sha256:144471fa3d9a9e1a2fe7c7505e05bbbd51c8c1ef3ec6c0f2873130ee45d7674a"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/theme.ts",
+        "digest": "sha256:1950c7bf0f49f3bd57edc3b9c3398da563967289378a68327e4cb5b7646e040d"
+      },
+      {
+        "ref": "remotion-studio:src/ParallelWorld/timeline.ts",
+        "digest": "sha256:2484190b38f7a6df2c53f4cf5d6973c30ed7db39d74cca28872aa474221ea963"
+      },
+      {
+        "ref": "remotion-studio:public/parallel-world/layers.json",
+        "digest": "sha256:a951f8a1e8202aa19a8a9871619d38e65d7701caadaf6758070761facd7404f5"
+      }
+    ]
+  },
+  "timeline": {
+    "timebase": {
+      "numerator": 1,
+      "denominator": 30
+    },
+    "durationTicks": 1035,
+    "width": 1920,
+    "height": 1080,
+    "scenes": [
+      {
+        "id": "scene:0",
+        "label": "premise"
+      },
+      {
+        "id": "scene:1",
+        "label": "panels"
+      },
+      {
+        "id": "scene:2",
+        "label": "merge"
+      },
+      {
+        "id": "scene:3",
+        "label": "reveal"
+      },
+      {
+        "id": "scene:4",
+        "label": "freeze"
+      },
+      {
+        "id": "scene:5",
+        "label": "guilty"
+      },
+      {
+        "id": "scene:6",
+        "label": "receipts"
+      },
+      {
+        "id": "scene:7",
+        "label": "outro"
+      }
+    ],
+    "segments": [
+      {
+        "id": "beat:0",
+        "kind": "beat",
+        "sceneId": "scene:0",
+        "label": "premise",
+        "startTick": 0,
+        "durationTicks": 120,
+        "visuals": []
+      },
+      {
+        "id": "beat:1",
+        "kind": "beat",
+        "sceneId": "scene:1",
+        "label": "panels",
+        "startTick": 120,
+        "durationTicks": 240,
+        "visuals": []
+      },
+      {
+        "id": "beat:2",
+        "kind": "beat",
+        "sceneId": "scene:2",
+        "label": "merge",
+        "startTick": 360,
+        "durationTicks": 120,
+        "visuals": []
+      },
+      {
+        "id": "beat:3",
+        "kind": "beat",
+        "sceneId": "scene:3",
+        "label": "reveal",
+        "startTick": 480,
+        "durationTicks": 60,
+        "visuals": []
+      },
+      {
+        "id": "beat:4",
+        "kind": "beat",
+        "sceneId": "scene:4",
+        "label": "freeze",
+        "startTick": 540,
+        "durationTicks": 60,
+        "visuals": []
+      },
+      {
+        "id": "beat:5",
+        "kind": "beat",
+        "sceneId": "scene:5",
+        "label": "guilty",
+        "startTick": 600,
+        "durationTicks": 120,
+        "visuals": []
+      },
+      {
+        "id": "beat:6",
+        "kind": "beat",
+        "sceneId": "scene:6",
+        "label": "receipts",
+        "startTick": 720,
+        "durationTicks": 120,
+        "visuals": []
+      },
+      {
+        "id": "beat:7",
+        "kind": "beat",
+        "sceneId": "scene:7",
+        "label": "outro",
+        "startTick": 840,
+        "durationTicks": 195,
+        "visuals": []
+      }
+    ],
+    "events": [
+      {
+        "id": "T:premise:0",
+        "kind": "marker",
+        "text": "premise",
+        "startTick": 4,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "premise",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:bubbleIn:0",
+        "kind": "marker",
+        "text": "bubbleIn",
+        "startTick": 14,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "bubbleIn",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:plan:0",
+        "kind": "marker",
+        "text": "plan",
+        "startTick": 50,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "plan",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:split:0",
+        "kind": "marker",
+        "text": "split",
+        "startTick": 96,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "split",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:fly:0",
+        "kind": "marker",
+        "text": "fly",
+        "startTick": 100,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "fly",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:dividersDrop:0",
+        "kind": "marker",
+        "text": "dividersDrop",
+        "startTick": 104,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "dividersDrop",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:panels:0",
+        "kind": "marker",
+        "text": "panels",
+        "startTick": 120,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "panels",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:syncBounce:0",
+        "kind": "marker",
+        "text": "syncBounce",
+        "startTick": 130,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "syncBounce",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:explain:0",
+        "kind": "marker",
+        "text": "explain",
+        "startTick": 136,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "explain",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:explainOut:0",
+        "kind": "marker",
+        "text": "explainOut",
+        "startTick": 220,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "explainOut",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:choreFrom:0",
+        "kind": "marker",
+        "text": "choreFrom",
+        "startTick": 150,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "choreFrom",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:choreTo:0",
+        "kind": "marker",
+        "text": "choreTo",
+        "startTick": 360,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "choreTo",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:lurch:0",
+        "kind": "marker",
+        "text": "lurch",
+        "startTick": 240,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "lurch",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:ballOut:0",
+        "kind": "marker",
+        "text": "ballOut",
+        "startTick": 242,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "ballOut",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:ballLand:0",
+        "kind": "marker",
+        "text": "ballLand",
+        "startTick": 258,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "ballLand",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:ballHit:0",
+        "kind": "marker",
+        "text": "ballHit",
+        "startTick": 282,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "ballHit",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:towerBump:0",
+        "kind": "marker",
+        "text": "towerBump",
+        "startTick": 292,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "towerBump",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:jarWobble:0",
+        "kind": "marker",
+        "text": "jarWobble",
+        "startTick": 294,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "jarWobble",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:hopC:0",
+        "kind": "marker",
+        "text": "hopC",
+        "startTick": 296,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "hopC",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:lean:0",
+        "kind": "marker",
+        "text": "lean",
+        "startTick": 300,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "lean",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:done:0",
+        "kind": "marker",
+        "text": "done",
+        "startTick": 360,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "done",
+              "array": true,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:done:1",
+        "kind": "marker",
+        "text": "done",
+        "startTick": 375,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "done",
+              "array": true,
+              "index": 1
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:done:2",
+        "kind": "marker",
+        "text": "done",
+        "startTick": 390,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "done",
+              "array": true,
+              "index": 2
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:mergeCall:0",
+        "kind": "marker",
+        "text": "mergeCall",
+        "startTick": 422,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "mergeCall",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:merge:0",
+        "kind": "marker",
+        "text": "merge",
+        "startTick": 450,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "merge",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:wallsOpen:0",
+        "kind": "marker",
+        "text": "wallsOpen",
+        "startTick": 466,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "wallsOpen",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:mainChip:0",
+        "kind": "marker",
+        "text": "mainChip",
+        "startTick": 468,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "mainChip",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:reveal:0",
+        "kind": "marker",
+        "text": "reveal",
+        "startTick": 480,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "reveal",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:fixCaption:0",
+        "kind": "marker",
+        "text": "fixCaption",
+        "startTick": 516,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "fixCaption",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:freeze:0",
+        "kind": "marker",
+        "text": "freeze",
+        "startTick": 540,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "freeze",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:shout:0",
+        "kind": "marker",
+        "text": "shout",
+        "startTick": 542,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "shout",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:rule:0",
+        "kind": "marker",
+        "text": "rule",
+        "startTick": 560,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "rule",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:guilty:0",
+        "kind": "marker",
+        "text": "guilty",
+        "startTick": 600,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "guilty",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:tilt:0",
+        "kind": "marker",
+        "text": "tilt",
+        "startTick": 612,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "tilt",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:ask:0",
+        "kind": "marker",
+        "text": "ask",
+        "startTick": 626,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "ask",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:notMe:0",
+        "kind": "marker",
+        "text": "notMe",
+        "startTick": 660,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "notMe",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:honest:0",
+        "kind": "marker",
+        "text": "honest",
+        "startTick": 684,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "honest",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:dim:0",
+        "kind": "marker",
+        "text": "dim",
+        "startTick": 720,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "dim",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:chips:0",
+        "kind": "marker",
+        "text": "chips",
+        "startTick": 724,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "chips",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:merged:0",
+        "kind": "marker",
+        "text": "merged",
+        "startTick": 735,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "merged",
+              "array": true,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:merged:1",
+        "kind": "marker",
+        "text": "merged",
+        "startTick": 750,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "merged",
+              "array": true,
+              "index": 1
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:merged:2",
+        "kind": "marker",
+        "text": "merged",
+        "startTick": 765,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "merged",
+              "array": true,
+              "index": 2
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:gone:0",
+        "kind": "marker",
+        "text": "gone",
+        "startTick": 780,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "gone",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:fiction:0",
+        "kind": "marker",
+        "text": "fiction",
+        "startTick": 846,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "fiction",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:butReal:0",
+        "kind": "marker",
+        "text": "butReal",
+        "startTick": 870,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "butReal",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:terminal:0",
+        "kind": "marker",
+        "text": "terminal",
+        "startTick": 900,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "terminal",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "T:credit:0",
+        "kind": "marker",
+        "text": "credit",
+        "startTick": 990,
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "tableKey": "credit",
+              "array": false,
+              "index": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:0",
+        "kind": "audio",
+        "startTick": 4,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:92ebdca24757872cd465:e0fd5eaf3d3424f2b0563db14834ccdc71d307340661c13ab74bdd4e710008ee",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.4,
+              "atBinding": {
+                "key": "premise"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:1",
+        "kind": "audio",
+        "startTick": 14,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:865c17f8191abece3434:70d5f2eed2fd110908e09d9193185f727df2f44b7554d773e1c5942726889a57",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.6,
+              "atBinding": {
+                "key": "bubbleIn"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:2",
+        "kind": "audio",
+        "startTick": 50,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:865c17f8191abece3434:70d5f2eed2fd110908e09d9193185f727df2f44b7554d773e1c5942726889a57",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.6,
+              "atBinding": {
+                "key": "plan"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:3",
+        "kind": "audio",
+        "startTick": 100,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:865c17f8191abece3434:70d5f2eed2fd110908e09d9193185f727df2f44b7554d773e1c5942726889a57",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.6,
+              "atBinding": {
+                "key": "fly"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:4",
+        "kind": "audio",
+        "startTick": 102,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:42f292f9fc97822d163b:c8f1b08fb9be792c67b0027216590c6df0bfd0a6741ac712520429e0281550ca",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.45,
+              "atBinding": {
+                "key": "fly",
+                "offset": 2
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:5",
+        "kind": "audio",
+        "startTick": 108,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:42f292f9fc97822d163b:c8f1b08fb9be792c67b0027216590c6df0bfd0a6741ac712520429e0281550ca",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.5,
+              "atBinding": {
+                "key": "dividersDrop",
+                "offset": 4
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:6",
+        "kind": "audio",
+        "startTick": 120,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:b83430973bda414746fb:e73c7a4cd0e033c3e612e77b2802e6fb39df9de35c6ccc5f908229b503a4d2f3",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.85,
+              "atBinding": {
+                "key": "panels"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:7",
+        "kind": "audio",
+        "startTick": 130,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:41ee09a2136290d9aa45:2edceae3c84754dba86588cae8e8e5db51b2c12a95e228738f54c93df6ebae1d",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.7,
+              "atBinding": {
+                "key": "syncBounce"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:8",
+        "kind": "audio",
+        "startTick": 136,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:92ebdca24757872cd465:e0fd5eaf3d3424f2b0563db14834ccdc71d307340661c13ab74bdd4e710008ee",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.4,
+              "atBinding": {
+                "key": "explain"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:9",
+        "kind": "audio",
+        "startTick": 240,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:42f292f9fc97822d163b:c8f1b08fb9be792c67b0027216590c6df0bfd0a6741ac712520429e0281550ca",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.45,
+              "atBinding": {
+                "key": "lurch"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:10",
+        "kind": "audio",
+        "startTick": 242,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:865c17f8191abece3434:70d5f2eed2fd110908e09d9193185f727df2f44b7554d773e1c5942726889a57",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.55,
+              "atBinding": {
+                "key": "ballOut"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:11",
+        "kind": "audio",
+        "startTick": 258,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:41ee09a2136290d9aa45:2edceae3c84754dba86588cae8e8e5db51b2c12a95e228738f54c93df6ebae1d",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.5,
+              "atBinding": {
+                "key": "ballLand"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:12",
+        "kind": "audio",
+        "startTick": 282,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:b83430973bda414746fb:e73c7a4cd0e033c3e612e77b2802e6fb39df9de35c6ccc5f908229b503a4d2f3",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.7,
+              "atBinding": {
+                "key": "ballHit"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:13",
+        "kind": "audio",
+        "startTick": 292,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:b83430973bda414746fb:e73c7a4cd0e033c3e612e77b2802e6fb39df9de35c6ccc5f908229b503a4d2f3",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.85,
+              "atBinding": {
+                "key": "towerBump"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:14",
+        "kind": "audio",
+        "startTick": 294,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:b855b1cf026362aa7c98:37d221ceb147936e4d348a01ad6767f8e8f08309a090d4ec3fbe8ec3f7d6dce0",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.5,
+              "atBinding": {
+                "key": "jarWobble"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:15",
+        "kind": "audio",
+        "startTick": 296,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:41ee09a2136290d9aa45:2edceae3c84754dba86588cae8e8e5db51b2c12a95e228738f54c93df6ebae1d",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.55,
+              "atBinding": {
+                "key": "hopC"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:16",
+        "kind": "audio",
+        "startTick": 360,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:8b94762047d51c107675:7b7e4f23e01765874017aa6d754c6c7b25b7ffe9311d909cb1039549360e931c",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.6,
+              "atBinding": {
+                "key": "done",
+                "index": 0
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:17",
+        "kind": "audio",
+        "startTick": 375,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:8b94762047d51c107675:7b7e4f23e01765874017aa6d754c6c7b25b7ffe9311d909cb1039549360e931c",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.6,
+              "atBinding": {
+                "key": "done",
+                "index": 1
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:18",
+        "kind": "audio",
+        "startTick": 390,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:8b94762047d51c107675:7b7e4f23e01765874017aa6d754c6c7b25b7ffe9311d909cb1039549360e931c",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.6,
+              "atBinding": {
+                "key": "done",
+                "index": 2
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:19",
+        "kind": "audio",
+        "startTick": 422,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:865c17f8191abece3434:70d5f2eed2fd110908e09d9193185f727df2f44b7554d773e1c5942726889a57",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.6,
+              "atBinding": {
+                "key": "mergeCall"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:20",
+        "kind": "audio",
+        "startTick": 450,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:42f292f9fc97822d163b:c8f1b08fb9be792c67b0027216590c6df0bfd0a6741ac712520429e0281550ca",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.6,
+              "atBinding": {
+                "key": "merge"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:21",
+        "kind": "audio",
+        "startTick": 468,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:865c17f8191abece3434:70d5f2eed2fd110908e09d9193185f727df2f44b7554d773e1c5942726889a57",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.7,
+              "atBinding": {
+                "key": "mainChip"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:22",
+        "kind": "audio",
+        "startTick": 480,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:b83430973bda414746fb:e73c7a4cd0e033c3e612e77b2802e6fb39df9de35c6ccc5f908229b503a4d2f3",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.9,
+              "atBinding": {
+                "key": "reveal"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:23",
+        "kind": "audio",
+        "startTick": 516,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:92ebdca24757872cd465:e0fd5eaf3d3424f2b0563db14834ccdc71d307340661c13ab74bdd4e710008ee",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.4,
+              "atBinding": {
+                "key": "fixCaption"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:24",
+        "kind": "audio",
+        "startTick": 542,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:1c9d03754f1964a04e74:0b4a75df5abfab172822e978f824455acf0f98d8b65841dade60a15fc6e5cd41",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.8,
+              "atBinding": {
+                "key": "shout"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:25",
+        "kind": "audio",
+        "startTick": 543,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:b83430973bda414746fb:e73c7a4cd0e033c3e612e77b2802e6fb39df9de35c6ccc5f908229b503a4d2f3",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 1,
+              "atBinding": {
+                "key": "shout",
+                "offset": 1
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:26",
+        "kind": "audio",
+        "startTick": 560,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:92ebdca24757872cd465:e0fd5eaf3d3424f2b0563db14834ccdc71d307340661c13ab74bdd4e710008ee",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.4,
+              "atBinding": {
+                "key": "rule"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:27",
+        "kind": "audio",
+        "startTick": 626,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:865c17f8191abece3434:70d5f2eed2fd110908e09d9193185f727df2f44b7554d773e1c5942726889a57",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.5,
+              "atBinding": {
+                "key": "ask"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:28",
+        "kind": "audio",
+        "startTick": 660,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:865c17f8191abece3434:70d5f2eed2fd110908e09d9193185f727df2f44b7554d773e1c5942726889a57",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.8,
+              "atBinding": {
+                "key": "notMe"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:29",
+        "kind": "audio",
+        "startTick": 684,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:92ebdca24757872cd465:e0fd5eaf3d3424f2b0563db14834ccdc71d307340661c13ab74bdd4e710008ee",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.4,
+              "atBinding": {
+                "key": "honest"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:30",
+        "kind": "audio",
+        "startTick": 720,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:42f292f9fc97822d163b:c8f1b08fb9be792c67b0027216590c6df0bfd0a6741ac712520429e0281550ca",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.3,
+              "atBinding": {
+                "key": "dim"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:31",
+        "kind": "audio",
+        "startTick": 724,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:865c17f8191abece3434:70d5f2eed2fd110908e09d9193185f727df2f44b7554d773e1c5942726889a57",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.4,
+              "atBinding": {
+                "key": "chips"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:32",
+        "kind": "audio",
+        "startTick": 735,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:8b94762047d51c107675:7b7e4f23e01765874017aa6d754c6c7b25b7ffe9311d909cb1039549360e931c",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.6,
+              "atBinding": {
+                "key": "merged",
+                "index": 0
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:33",
+        "kind": "audio",
+        "startTick": 750,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:8b94762047d51c107675:7b7e4f23e01765874017aa6d754c6c7b25b7ffe9311d909cb1039549360e931c",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.6,
+              "atBinding": {
+                "key": "merged",
+                "index": 1
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:34",
+        "kind": "audio",
+        "startTick": 765,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:8b94762047d51c107675:7b7e4f23e01765874017aa6d754c6c7b25b7ffe9311d909cb1039549360e931c",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.6,
+              "atBinding": {
+                "key": "merged",
+                "index": 2
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:35",
+        "kind": "audio",
+        "startTick": 780,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:b83430973bda414746fb:e73c7a4cd0e033c3e612e77b2802e6fb39df9de35c6ccc5f908229b503a4d2f3",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.9,
+              "atBinding": {
+                "key": "gone"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:36",
+        "kind": "audio",
+        "startTick": 846,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:92ebdca24757872cd465:e0fd5eaf3d3424f2b0563db14834ccdc71d307340661c13ab74bdd4e710008ee",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.4,
+              "atBinding": {
+                "key": "fiction"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:37",
+        "kind": "audio",
+        "startTick": 870,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:92ebdca24757872cd465:e0fd5eaf3d3424f2b0563db14834ccdc71d307340661c13ab74bdd4e710008ee",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.4,
+              "atBinding": {
+                "key": "butReal"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:38",
+        "kind": "audio",
+        "startTick": 918,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:aa27d8d002b64c0fa233:882f0184c3fa4235709ee72cd58bd2b821050d35eca60144621a39ee0aadd445",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.5,
+              "atBinding": {
+                "key": "terminal",
+                "offset": 18
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "sfx:39",
+        "kind": "audio",
+        "startTick": 990,
+        "durationTicks": 60,
+        "assetVersionRef": "asset:92ebdca24757872cd465:e0fd5eaf3d3424f2b0563db14834ccdc71d307340661c13ab74bdd4e710008ee",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "source": "sfx",
+              "volumePresent": true,
+              "volume": 0.3,
+              "atBinding": {
+                "key": "credit"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "score",
+        "kind": "audio",
+        "startTick": 0,
+        "assetVersionRef": "asset:ede22e8792738389e4de:16e865cc0f416b22262119f215cc6a851ab97e4cae4b206e0a415eb189520dd2",
+        "extensions": [
+          {
+            "namespace": "remotion.parallel-world",
+            "schemaVersion": 1,
+            "payload": {
+              "volume": 0.45
+            }
+          }
+        ]
+      }
+    ],
+    "extensions": [
+      {
+        "namespace": "remotion.parallel-world",
+        "schemaVersion": 1,
+        "payload": {
+          "parameters": {
+            "pullOut": 32,
+            "beat": 15
+          },
+          "branches": ["feat/move-bed", "fix/book-tower", "chore/dust"],
+          "layerGeometry": {
+            "ball": {
+              "assetVersionRef": "asset:cb479a655060c51650fd:ce9010597c7389de040e3ab4d25075c878db8f7ec5e5ae0aa626423c7f6a11dc",
+              "x": 161,
+              "y": 620,
+              "w": 58,
+              "h": 57,
+              "px": 0,
+              "py": 0
+            },
+            "K2a": {
+              "plate": {
+                "assetVersionRef": "asset:68060d3d5c4c1e3bd38f:866cc63909f95b929bc5e3eb7fb409197a4cf3ec822670ec2e83c5cc9d7f237d",
+                "w": 864,
+                "h": 1536
+              },
+              "cat": {
+                "assetVersionRef": "asset:033a6d631e5da5382405:12c6ac8ce2f62a78c1549dfe38abd851f500991463caed84d400e39a3353dc21",
+                "x": 166,
+                "y": 491,
+                "w": 599,
+                "h": 488,
+                "px": 673,
+                "py": 974
+              }
+            },
+            "K2b": {
+              "plate": {
+                "assetVersionRef": "asset:3c51b0cbd626f89aef88:60ddd0bfc2785c8293210a81ad6106a897eef2e48620db896bebf3c3f6cb76b6",
+                "w": 864,
+                "h": 1536
+              },
+              "tower": {
+                "assetVersionRef": "asset:b28db0487dc049a5a7e1:617c7af70e0e798f62c65090ee64705f1aa9950d7edbe6e42a7f1221ba1a2f94",
+                "x": 475,
+                "y": 484,
+                "w": 363,
+                "h": 704,
+                "px": 712,
+                "py": 1185
+              },
+              "cat": {
+                "assetVersionRef": "asset:d38b213d41e8dd79bd10:2d90cb29ca1b40d3dffe29ed49d63132f3ba3faca56c5ee4e68d697966d893a4",
+                "x": 30,
+                "y": 440,
+                "w": 538,
+                "h": 698,
+                "px": 317,
+                "py": 1133
+              }
+            },
+            "K2c": {
+              "plate": {
+                "assetVersionRef": "asset:2f8cd8d461d1a2308cd6:38290f0460a097e738800adfdb47436ada7605cdadcf38045f8c961be59b97b3",
+                "w": 864,
+                "h": 1536
+              },
+              "jar": {
+                "assetVersionRef": "asset:35827bea250e241ae572:2b4e89be0118ce8cc24979eda59815cf7a1086bf69465e4274f522df70c60056",
+                "x": 728,
+                "y": 104,
+                "w": 121,
+                "h": 204,
+                "px": 745,
+                "py": 306
+              },
+              "cat": {
+                "assetVersionRef": "asset:c56d711d7a65d83749ad:d9a4cc5b85bb18170a74d0cd5fbfb9049a23a19716667f16dd29728f3faa10d7",
+                "x": 63,
+                "y": 434,
+                "w": 765,
+                "h": 578,
+                "px": 463,
+                "py": 1007
+              }
+            },
+            "K3": {
+              "plate": {
+                "assetVersionRef": "asset:c00ad34df02ec23a5e68:ae9e72068c87d64502a98bafe3e352ed2dd9fa6198b9d07eccded1a54b7756d3",
+                "w": 1536,
+                "h": 864
+              },
+              "tower": {
+                "assetVersionRef": "asset:cb3843072a5c0a4b294b:fb54d40245880408c0d90d66bf874b3b914c18edc87a2b26c869ea786a13a21a",
+                "x": 761,
+                "y": 4,
+                "w": 476,
+                "h": 807,
+                "px": 974,
+                "py": 807
+              },
+              "jar": {
+                "assetVersionRef": "asset:bb00fd91dd47ae399555:2210eea74db83e5c8b8b86ca579dea4eb608f52457b4f9babe8254a7236711ae",
+                "x": 1262,
+                "y": 60,
+                "w": 180,
+                "h": 155,
+                "px": 1314,
+                "py": 214
+              }
+            },
+            "K5": {
+              "plate": {
+                "assetVersionRef": "asset:b3d27f747c59e9141fab:b054a126afb5b5af7fcecc722dc03f4d695af829201b892f4389aba75d949463",
+                "w": 1536,
+                "h": 864
+              },
+              "cats": [
+                {
+                  "assetVersionRef": "asset:6659e84ce1bb73701f0a:1a758ee22e44151b369e03186a30ccf439a4aabed853a3e1c2599e28abea2f69",
+                  "x": 203,
+                  "y": 268,
+                  "w": 377,
+                  "h": 465,
+                  "px": 443,
+                  "py": 730
+                },
+                {
+                  "assetVersionRef": "asset:4d304a4f553530900220:7ca2e3f3eb70f338a4b975b1f4633c434ea516e9bacdce97b33a1d5418f6e7a2",
+                  "x": 580,
+                  "y": 279,
+                  "w": 309,
+                  "h": 452,
+                  "px": 756,
+                  "py": 728
+                },
+                {
+                  "assetVersionRef": "asset:639ef66ca15478c308eb:02d5f5e109a05a6f20a127d76051a87d14880dd6f0467615733b7b954bfa6f3a",
+                  "x": 889,
+                  "y": 286,
+                  "w": 315,
+                  "h": 445,
+                  "px": 1070,
+                  "py": 728
+                }
+              ],
+              "cuts": [580, 889]
+            }
+          },
+          "soundGain": 0.55,
+          "soundDefaultVolume": 0.7,
+          "componentBindings": [
+            {
+              "component": "Intro",
+              "start": {
+                "constant": 0
+              },
+              "end": {
+                "key": "panels"
+              }
+            },
+            {
+              "component": "Panels",
+              "start": {
+                "key": "panels"
+              },
+              "end": {
+                "key": "reveal"
+              }
+            },
+            {
+              "component": "Walls",
+              "start": {
+                "key": "dividersDrop"
+              },
+              "end": {
+                "key": "reveal"
+              }
+            },
+            {
+              "component": "Ball",
+              "start": {
+                "key": "ballOut"
+              },
+              "end": {
+                "key": "reveal"
+              }
+            },
+            {
+              "component": "PanelOverlays",
+              "start": {
+                "key": "panels"
+              },
+              "end": {
+                "key": "reveal"
+              }
+            },
+            {
+              "component": "Reveal",
+              "start": {
+                "key": "reveal"
+              },
+              "end": {
+                "key": "guilty"
+              }
+            },
+            {
+              "component": "Guilty",
+              "start": {
+                "key": "guilty"
+              },
+              "end": {
+                "key": "fiction",
+                "offset": -6
+              }
+            },
+            {
+              "component": "Outro",
+              "start": {
+                "key": "fiction",
+                "offset": -6
+              },
+              "end": {
+                "projectDuration": true
+              }
+            },
+            {
+              "component": "Chips",
+              "start": {
+                "constant": 0
+              },
+              "end": {
+                "projectDuration": true
+              }
+            },
+            {
+              "component": "MainChip",
+              "start": {
+                "constant": 0
+              },
+              "end": {
+                "projectDuration": true
+              }
+            },
+            {
+              "component": "Sound",
+              "start": {
+                "constant": 0
+              },
+              "end": {
+                "projectDuration": true
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "assets": [
+    {
+      "id": "asset:92ebdca24757872cd465",
+      "name": "marker.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:92ebdca24757872cd465:e0fd5eaf3d3424f2b0563db14834ccdc71d307340661c13ab74bdd4e710008ee",
+          "mediaType": "audio/x-wav",
+          "byteLength": 88244,
+          "sha256": "sha256:e0fd5eaf3d3424f2b0563db14834ccdc71d307340661c13ab74bdd4e710008ee",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio/sfx/marker.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio/sfx/marker.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:865c17f8191abece3434",
+      "name": "pop.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:865c17f8191abece3434:70d5f2eed2fd110908e09d9193185f727df2f44b7554d773e1c5942726889a57",
+          "mediaType": "audio/x-wav",
+          "byteLength": 12392,
+          "sha256": "sha256:70d5f2eed2fd110908e09d9193185f727df2f44b7554d773e1c5942726889a57",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio/sfx/pop.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio/sfx/pop.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:42f292f9fc97822d163b",
+      "name": "whoosh.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:42f292f9fc97822d163b:c8f1b08fb9be792c67b0027216590c6df0bfd0a6741ac712520429e0281550ca",
+          "mediaType": "audio/x-wav",
+          "byteLength": 61780,
+          "sha256": "sha256:c8f1b08fb9be792c67b0027216590c6df0bfd0a6741ac712520429e0281550ca",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio/sfx/whoosh.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio/sfx/whoosh.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:b83430973bda414746fb",
+      "name": "thud.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:b83430973bda414746fb:e73c7a4cd0e033c3e612e77b2802e6fb39df9de35c6ccc5f908229b503a4d2f3",
+          "mediaType": "audio/x-wav",
+          "byteLength": 61780,
+          "sha256": "sha256:e73c7a4cd0e033c3e612e77b2802e6fb39df9de35c6ccc5f908229b503a4d2f3",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio/sfx/thud.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio/sfx/thud.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:41ee09a2136290d9aa45",
+      "name": "boing.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:41ee09a2136290d9aa45:2edceae3c84754dba86588cae8e8e5db51b2c12a95e228738f54c93df6ebae1d",
+          "mediaType": "audio/x-wav",
+          "byteLength": 70604,
+          "sha256": "sha256:2edceae3c84754dba86588cae8e8e5db51b2c12a95e228738f54c93df6ebae1d",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio/sfx/boing.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio/sfx/boing.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:b855b1cf026362aa7c98",
+      "name": "chime.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:b855b1cf026362aa7c98:37d221ceb147936e4d348a01ad6767f8e8f08309a090d4ec3fbe8ec3f7d6dce0",
+          "mediaType": "audio/x-wav",
+          "byteLength": 282284,
+          "sha256": "sha256:37d221ceb147936e4d348a01ad6767f8e8f08309a090d4ec3fbe8ec3f7d6dce0",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio/sfx/chime.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio/sfx/chime.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:8b94762047d51c107675",
+      "name": "ding.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:8b94762047d51c107675:7b7e4f23e01765874017aa6d754c6c7b25b7ffe9311d909cb1039549360e931c",
+          "mediaType": "audio/x-wav",
+          "byteLength": 141164,
+          "sha256": "sha256:7b7e4f23e01765874017aa6d754c6c7b25b7ffe9311d909cb1039549360e931c",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio/sfx/ding.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio/sfx/ding.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:1c9d03754f1964a04e74",
+      "name": "shock.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:1c9d03754f1964a04e74:0b4a75df5abfab172822e978f824455acf0f98d8b65841dade60a15fc6e5cd41",
+          "mediaType": "audio/x-wav",
+          "byteLength": 88244,
+          "sha256": "sha256:0b4a75df5abfab172822e978f824455acf0f98d8b65841dade60a15fc6e5cd41",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio/sfx/shock.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio/sfx/shock.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:aa27d8d002b64c0fa233",
+      "name": "scratch.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:aa27d8d002b64c0fa233:882f0184c3fa4235709ee72cd58bd2b821050d35eca60144621a39ee0aadd445",
+          "mediaType": "audio/x-wav",
+          "byteLength": 79424,
+          "sha256": "sha256:882f0184c3fa4235709ee72cd58bd2b821050d35eca60144621a39ee0aadd445",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio/sfx/scratch.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio/sfx/scratch.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:ede22e8792738389e4de",
+      "name": "score.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:ede22e8792738389e4de:16e865cc0f416b22262119f215cc6a851ab97e4cae4b206e0a415eb189520dd2",
+          "mediaType": "audio/x-wav",
+          "byteLength": 6350444,
+          "sha256": "sha256:16e865cc0f416b22262119f215cc6a851ab97e4cae4b206e0a415eb189520dd2",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio/score.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio/score.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:cb479a655060c51650fd",
+      "name": "ball.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:cb479a655060c51650fd:ce9010597c7389de040e3ab4d25075c878db8f7ec5e5ae0aa626423c7f6a11dc",
+          "mediaType": "image/png",
+          "byteLength": 7601,
+          "sha256": "sha256:ce9010597c7389de040e3ab4d25075c878db8f7ec5e5ae0aa626423c7f6a11dc",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/ball.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/ball.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 58,
+          "height": 57
+        }
+      ]
+    },
+    {
+      "id": "asset:68060d3d5c4c1e3bd38f",
+      "name": "K2a_plate.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:68060d3d5c4c1e3bd38f:866cc63909f95b929bc5e3eb7fb409197a4cf3ec822670ec2e83c5cc9d7f237d",
+          "mediaType": "image/png",
+          "byteLength": 1763762,
+          "sha256": "sha256:866cc63909f95b929bc5e3eb7fb409197a4cf3ec822670ec2e83c5cc9d7f237d",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K2a_plate.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K2a_plate.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 864,
+          "height": 1536
+        }
+      ]
+    },
+    {
+      "id": "asset:033a6d631e5da5382405",
+      "name": "K2a_cat.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:033a6d631e5da5382405:12c6ac8ce2f62a78c1549dfe38abd851f500991463caed84d400e39a3353dc21",
+          "mediaType": "image/png",
+          "byteLength": 547927,
+          "sha256": "sha256:12c6ac8ce2f62a78c1549dfe38abd851f500991463caed84d400e39a3353dc21",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K2a_cat.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K2a_cat.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 599,
+          "height": 488
+        }
+      ]
+    },
+    {
+      "id": "asset:3c51b0cbd626f89aef88",
+      "name": "K2b_plate.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:3c51b0cbd626f89aef88:60ddd0bfc2785c8293210a81ad6106a897eef2e48620db896bebf3c3f6cb76b6",
+          "mediaType": "image/png",
+          "byteLength": 1696440,
+          "sha256": "sha256:60ddd0bfc2785c8293210a81ad6106a897eef2e48620db896bebf3c3f6cb76b6",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K2b_plate.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K2b_plate.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 864,
+          "height": 1536
+        }
+      ]
+    },
+    {
+      "id": "asset:b28db0487dc049a5a7e1",
+      "name": "K2b_tower.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:b28db0487dc049a5a7e1:617c7af70e0e798f62c65090ee64705f1aa9950d7edbe6e42a7f1221ba1a2f94",
+          "mediaType": "image/png",
+          "byteLength": 475770,
+          "sha256": "sha256:617c7af70e0e798f62c65090ee64705f1aa9950d7edbe6e42a7f1221ba1a2f94",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K2b_tower.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K2b_tower.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 363,
+          "height": 704
+        }
+      ]
+    },
+    {
+      "id": "asset:d38b213d41e8dd79bd10",
+      "name": "K2b_cat.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:d38b213d41e8dd79bd10:2d90cb29ca1b40d3dffe29ed49d63132f3ba3faca56c5ee4e68d697966d893a4",
+          "mediaType": "image/png",
+          "byteLength": 737775,
+          "sha256": "sha256:2d90cb29ca1b40d3dffe29ed49d63132f3ba3faca56c5ee4e68d697966d893a4",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K2b_cat.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K2b_cat.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 538,
+          "height": 698
+        }
+      ]
+    },
+    {
+      "id": "asset:2f8cd8d461d1a2308cd6",
+      "name": "K2c_plate.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:2f8cd8d461d1a2308cd6:38290f0460a097e738800adfdb47436ada7605cdadcf38045f8c961be59b97b3",
+          "mediaType": "image/png",
+          "byteLength": 1559474,
+          "sha256": "sha256:38290f0460a097e738800adfdb47436ada7605cdadcf38045f8c961be59b97b3",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K2c_plate.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K2c_plate.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 864,
+          "height": 1536
+        }
+      ]
+    },
+    {
+      "id": "asset:35827bea250e241ae572",
+      "name": "K2c_jar.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:35827bea250e241ae572:2b4e89be0118ce8cc24979eda59815cf7a1086bf69465e4274f522df70c60056",
+          "mediaType": "image/png",
+          "byteLength": 53263,
+          "sha256": "sha256:2b4e89be0118ce8cc24979eda59815cf7a1086bf69465e4274f522df70c60056",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K2c_jar.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K2c_jar.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 121,
+          "height": 204
+        }
+      ]
+    },
+    {
+      "id": "asset:c56d711d7a65d83749ad",
+      "name": "K2c_cat.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:c56d711d7a65d83749ad:d9a4cc5b85bb18170a74d0cd5fbfb9049a23a19716667f16dd29728f3faa10d7",
+          "mediaType": "image/png",
+          "byteLength": 761226,
+          "sha256": "sha256:d9a4cc5b85bb18170a74d0cd5fbfb9049a23a19716667f16dd29728f3faa10d7",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K2c_cat.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K2c_cat.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 765,
+          "height": 578
+        }
+      ]
+    },
+    {
+      "id": "asset:c00ad34df02ec23a5e68",
+      "name": "K3_plate.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:c00ad34df02ec23a5e68:ae9e72068c87d64502a98bafe3e352ed2dd9fa6198b9d07eccded1a54b7756d3",
+          "mediaType": "image/png",
+          "byteLength": 1912793,
+          "sha256": "sha256:ae9e72068c87d64502a98bafe3e352ed2dd9fa6198b9d07eccded1a54b7756d3",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K3_plate.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K3_plate.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 1536,
+          "height": 864
+        }
+      ]
+    },
+    {
+      "id": "asset:cb3843072a5c0a4b294b",
+      "name": "K3_tower.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:cb3843072a5c0a4b294b:fb54d40245880408c0d90d66bf874b3b914c18edc87a2b26c869ea786a13a21a",
+          "mediaType": "image/png",
+          "byteLength": 741345,
+          "sha256": "sha256:fb54d40245880408c0d90d66bf874b3b914c18edc87a2b26c869ea786a13a21a",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K3_tower.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K3_tower.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 476,
+          "height": 807
+        }
+      ]
+    },
+    {
+      "id": "asset:bb00fd91dd47ae399555",
+      "name": "K3_jar.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:bb00fd91dd47ae399555:2210eea74db83e5c8b8b86ca579dea4eb608f52457b4f9babe8254a7236711ae",
+          "mediaType": "image/png",
+          "byteLength": 63439,
+          "sha256": "sha256:2210eea74db83e5c8b8b86ca579dea4eb608f52457b4f9babe8254a7236711ae",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K3_jar.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K3_jar.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 180,
+          "height": 155
+        }
+      ]
+    },
+    {
+      "id": "asset:b3d27f747c59e9141fab",
+      "name": "K5_plate.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:b3d27f747c59e9141fab:b054a126afb5b5af7fcecc722dc03f4d695af829201b892f4389aba75d949463",
+          "mediaType": "image/png",
+          "byteLength": 1802579,
+          "sha256": "sha256:b054a126afb5b5af7fcecc722dc03f4d695af829201b892f4389aba75d949463",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K5_plate.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K5_plate.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 1536,
+          "height": 864
+        }
+      ]
+    },
+    {
+      "id": "asset:6659e84ce1bb73701f0a",
+      "name": "K5_cat0.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:6659e84ce1bb73701f0a:1a758ee22e44151b369e03186a30ccf439a4aabed853a3e1c2599e28abea2f69",
+          "mediaType": "image/png",
+          "byteLength": 356638,
+          "sha256": "sha256:1a758ee22e44151b369e03186a30ccf439a4aabed853a3e1c2599e28abea2f69",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K5_cat0.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K5_cat0.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 377,
+          "height": 465
+        }
+      ]
+    },
+    {
+      "id": "asset:4d304a4f553530900220",
+      "name": "K5_cat1.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:4d304a4f553530900220:7ca2e3f3eb70f338a4b975b1f4633c434ea516e9bacdce97b33a1d5418f6e7a2",
+          "mediaType": "image/png",
+          "byteLength": 288184,
+          "sha256": "sha256:7ca2e3f3eb70f338a4b975b1f4633c434ea516e9bacdce97b33a1d5418f6e7a2",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K5_cat1.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K5_cat1.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 309,
+          "height": 452
+        }
+      ]
+    },
+    {
+      "id": "asset:639ef66ca15478c308eb",
+      "name": "K5_cat2.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:639ef66ca15478c308eb:02d5f5e109a05a6f20a127d76051a87d14880dd6f0467615733b7b954bfa6f3a",
+          "mediaType": "image/png",
+          "byteLength": 291644,
+          "sha256": "sha256:02d5f5e109a05a6f20a127d76051a87d14880dd6f0467615733b7b954bfa6f3a",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K5_cat2.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K5_cat2.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 315,
+          "height": 445
+        }
+      ]
+    },
+    {
+      "id": "asset:0ba2c93caaed478533df",
+      "name": "G1.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:0ba2c93caaed478533df:e86bb5ef6922bc2fba151f589f33faa2b6e6bbb4d933edaa78916b91016f81fa",
+          "mediaType": "image/png",
+          "byteLength": 1834065,
+          "sha256": "sha256:e86bb5ef6922bc2fba151f589f33faa2b6e6bbb4d933edaa78916b91016f81fa",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/G1.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/G1.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 1536,
+          "height": 864
+        }
+      ]
+    },
+    {
+      "id": "asset:35b93a221b3d525e9fd9",
+      "name": "K1.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:35b93a221b3d525e9fd9:0fd0306715d264168f7629b073e8adbd5e6a7218aa05492180314012bc9ad056",
+          "mediaType": "image/png",
+          "byteLength": 2072468,
+          "sha256": "sha256:0fd0306715d264168f7629b073e8adbd5e6a7218aa05492180314012bc9ad056",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/K1.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/K1.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 1536,
+          "height": 864
+        }
+      ]
+    },
+    {
+      "id": "asset:1f47972eafdf647cbeed",
+      "name": "blip.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:1f47972eafdf647cbeed:d5ee189806e45c023192f914eceae4018d288122d564e9e778558e2d5e645a42",
+          "mediaType": "audio/x-wav",
+          "byteLength": 7100,
+          "sha256": "sha256:d5ee189806e45c023192f914eceae4018d288122d564e9e778558e2d5e645a42",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio/sfx/blip.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio/sfx/blip.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:b8dad72494e57657d24d",
+      "name": "heart.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:b8dad72494e57657d24d:2f981f272ce303cdfd3c3d64ef901fa749a1c1389dbf659d7eba22d59664012b",
+          "mediaType": "audio/x-wav",
+          "byteLength": 19448,
+          "sha256": "sha256:2f981f272ce303cdfd3c3d64ef901fa749a1c1389dbf659d7eba22d59664012b",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio/sfx/heart.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio/sfx/heart.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:47bf48b0b46e4beab5aa",
+      "name": "sparkle.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:47bf48b0b46e4beab5aa:338849d04238fa5be18e004462154afa1c8f7e788fbf29a52b0c207c454be516",
+          "mediaType": "audio/x-wav",
+          "byteLength": 105884,
+          "sha256": "sha256:338849d04238fa5be18e004462154afa1c8f7e788fbf29a52b0c207c454be516",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio/sfx/sparkle.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio/sfx/sparkle.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:c8e8ed76e900eb4083e0",
+      "name": "tape.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:c8e8ed76e900eb4083e0:0e5a4cf712fb19f4f8db2c08360d424c17af06d1dcffde5424dadebfce517967",
+          "mediaType": "audio/x-wav",
+          "byteLength": 15920,
+          "sha256": "sha256:0e5a4cf712fb19f4f8db2c08360d424c17af06d1dcffde5424dadebfce517967",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio/sfx/tape.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio/sfx/tape.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:2b412498a2ea4fdd304b",
+      "name": "score.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:2b412498a2ea4fdd304b:d7b244c30668354c5036b689a87e30443885a21b286d70ff17f413e35270ec3f",
+          "mediaType": "audio/x-wav",
+          "byteLength": 4233644,
+          "sha256": "sha256:d7b244c30668354c5036b689a87e30443885a21b286d70ff17f413e35270ec3f",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio-ghost/score.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio-ghost/score.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:81244156c12bfddf4f87",
+      "name": "blip.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:81244156c12bfddf4f87:d5ee189806e45c023192f914eceae4018d288122d564e9e778558e2d5e645a42",
+          "mediaType": "audio/x-wav",
+          "byteLength": 7100,
+          "sha256": "sha256:d5ee189806e45c023192f914eceae4018d288122d564e9e778558e2d5e645a42",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio-ghost/sfx/blip.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio-ghost/sfx/blip.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:b784dca3313926bf5660",
+      "name": "boing.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:b784dca3313926bf5660:2edceae3c84754dba86588cae8e8e5db51b2c12a95e228738f54c93df6ebae1d",
+          "mediaType": "audio/x-wav",
+          "byteLength": 70604,
+          "sha256": "sha256:2edceae3c84754dba86588cae8e8e5db51b2c12a95e228738f54c93df6ebae1d",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio-ghost/sfx/boing.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio-ghost/sfx/boing.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:56767cae4bc62e7787e4",
+      "name": "chime.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:56767cae4bc62e7787e4:37d221ceb147936e4d348a01ad6767f8e8f08309a090d4ec3fbe8ec3f7d6dce0",
+          "mediaType": "audio/x-wav",
+          "byteLength": 282284,
+          "sha256": "sha256:37d221ceb147936e4d348a01ad6767f8e8f08309a090d4ec3fbe8ec3f7d6dce0",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio-ghost/sfx/chime.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio-ghost/sfx/chime.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:c82957e6c810c026643e",
+      "name": "ding.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:c82957e6c810c026643e:7b7e4f23e01765874017aa6d754c6c7b25b7ffe9311d909cb1039549360e931c",
+          "mediaType": "audio/x-wav",
+          "byteLength": 141164,
+          "sha256": "sha256:7b7e4f23e01765874017aa6d754c6c7b25b7ffe9311d909cb1039549360e931c",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio-ghost/sfx/ding.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio-ghost/sfx/ding.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:ce4bbd8b50b37f6d743c",
+      "name": "heart.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:ce4bbd8b50b37f6d743c:2f981f272ce303cdfd3c3d64ef901fa749a1c1389dbf659d7eba22d59664012b",
+          "mediaType": "audio/x-wav",
+          "byteLength": 19448,
+          "sha256": "sha256:2f981f272ce303cdfd3c3d64ef901fa749a1c1389dbf659d7eba22d59664012b",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio-ghost/sfx/heart.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio-ghost/sfx/heart.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:c9f7c4c7c6fb0bda6112",
+      "name": "marker.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:c9f7c4c7c6fb0bda6112:ebd94ff6c18315bc72fcc893d6081f85e6882bd753d8533712053d0895b6ea68",
+          "mediaType": "audio/x-wav",
+          "byteLength": 88244,
+          "sha256": "sha256:ebd94ff6c18315bc72fcc893d6081f85e6882bd753d8533712053d0895b6ea68",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio-ghost/sfx/marker.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio-ghost/sfx/marker.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:aabaace497aa731d3f36",
+      "name": "pop.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:aabaace497aa731d3f36:70d5f2eed2fd110908e09d9193185f727df2f44b7554d773e1c5942726889a57",
+          "mediaType": "audio/x-wav",
+          "byteLength": 12392,
+          "sha256": "sha256:70d5f2eed2fd110908e09d9193185f727df2f44b7554d773e1c5942726889a57",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio-ghost/sfx/pop.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio-ghost/sfx/pop.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:0fb7a3e588f5893d995b",
+      "name": "scratch.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:0fb7a3e588f5893d995b:95a215c0571f514df14a69d097400a3986a5b63810ff05d5de389c4f73292b30",
+          "mediaType": "audio/x-wav",
+          "byteLength": 79424,
+          "sha256": "sha256:95a215c0571f514df14a69d097400a3986a5b63810ff05d5de389c4f73292b30",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio-ghost/sfx/scratch.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio-ghost/sfx/scratch.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:b29fa28253416bb0f388",
+      "name": "shock.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:b29fa28253416bb0f388:0b4a75df5abfab172822e978f824455acf0f98d8b65841dade60a15fc6e5cd41",
+          "mediaType": "audio/x-wav",
+          "byteLength": 88244,
+          "sha256": "sha256:0b4a75df5abfab172822e978f824455acf0f98d8b65841dade60a15fc6e5cd41",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio-ghost/sfx/shock.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio-ghost/sfx/shock.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:5fd6cc462cf8099cacb3",
+      "name": "sparkle.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:5fd6cc462cf8099cacb3:338849d04238fa5be18e004462154afa1c8f7e788fbf29a52b0c207c454be516",
+          "mediaType": "audio/x-wav",
+          "byteLength": 105884,
+          "sha256": "sha256:338849d04238fa5be18e004462154afa1c8f7e788fbf29a52b0c207c454be516",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio-ghost/sfx/sparkle.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio-ghost/sfx/sparkle.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:4e8fcfa454ee5914fba3",
+      "name": "tape.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:4e8fcfa454ee5914fba3:55fbf767f55d56d5bbe6139158194ed8d9d18a9082be8c9da6702ef79c6062c4",
+          "mediaType": "audio/x-wav",
+          "byteLength": 15920,
+          "sha256": "sha256:55fbf767f55d56d5bbe6139158194ed8d9d18a9082be8c9da6702ef79c6062c4",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio-ghost/sfx/tape.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio-ghost/sfx/tape.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:e4a47a4c9bbba889cbc1",
+      "name": "thud.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:e4a47a4c9bbba889cbc1:e0cea99c0cdc934463eda6e9ea62f8f3bc21c2da9eba3bf5aa1a8f6ddc9bef43",
+          "mediaType": "audio/x-wav",
+          "byteLength": 61780,
+          "sha256": "sha256:e0cea99c0cdc934463eda6e9ea62f8f3bc21c2da9eba3bf5aa1a8f6ddc9bef43",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio-ghost/sfx/thud.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio-ghost/sfx/thud.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:6fb3e174edd27993d965",
+      "name": "whoosh.wav",
+      "kind": "audio",
+      "versions": [
+        {
+          "id": "asset:6fb3e174edd27993d965:d25f76b4f6b0fa79263f44ee15813bd667c20ea96331efe6e63dc65d176235e9",
+          "mediaType": "audio/x-wav",
+          "byteLength": 61780,
+          "sha256": "sha256:d25f76b4f6b0fa79263f44ee15813bd667c20ea96331efe6e63dc65d176235e9",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/audio-ghost/sfx/whoosh.wav"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/audio-ghost/sfx/whoosh.wav"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "asset:14c02ab7325bacf92b63",
+      "name": "ball_amber.png",
+      "kind": "image",
+      "versions": [
+        {
+          "id": "asset:14c02ab7325bacf92b63:98b5164dc506828b7cd0983d1974d96f3dabeb5f324cc7a44e791e34d6ce105b",
+          "mediaType": "image/png",
+          "byteLength": 7793,
+          "sha256": "sha256:98b5164dc506828b7cd0983d1974d96f3dabeb5f324cc7a44e791e34d6ce105b",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/ball_amber.png"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/ball_amber.png"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          },
+          "width": 58,
+          "height": 57
+        }
+      ]
+    },
+    {
+      "id": "asset:8779dfdd73b639c0cb6b",
+      "name": "layers.json",
+      "kind": "data",
+      "versions": [
+        {
+          "id": "asset:8779dfdd73b639c0cb6b:a951f8a1e8202aa19a8a9871619d38e65d7701caadaf6758070761facd7404f5",
+          "mediaType": "application/json",
+          "byteLength": 2180,
+          "sha256": "sha256:a951f8a1e8202aa19a8a9871619d38e65d7701caadaf6758070761facd7404f5",
+          "locator": {
+            "kind": "workspace",
+            "rootId": "remotion-studio",
+            "path": "public/parallel-world/layers.json"
+          },
+          "recordedAt": "2026-10-08T07:54:33Z",
+          "origin": {
+            "kind": "imported",
+            "actor": null,
+            "at": "2026-10-08T07:54:33Z",
+            "refs": ["remotion-studio:public/parallel-world/layers.json"],
+            "converter": {
+              "id": "editing-desk-sample-adapter",
+              "version": "1.0.3"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "checkPages": [],
+  "checkResults": [],
+  "decisions": []
+}

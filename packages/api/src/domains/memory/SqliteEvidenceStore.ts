@@ -1,17 +1,100 @@
 // F102: SQLite implementation of IEvidenceStore
 
+import { basename, isAbsolute, relative, resolve } from 'node:path';
+import type { EntityConflictContext, EntityConflictResolutionRequest } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
+import { computeConsumptionPrior } from './consumption-prior.js';
+import { type EntityMentionPassageHit, EntityRegistryStore, normalizeEntityAlias } from './EntityRegistry.js';
+import { EvidenceWriteQueue } from './evidence-write-queue.js';
+import { ContradictionDetector } from './f163-contradiction-detector.js';
+import { type F163Authority, freezeFlags, pathToAuthority } from './f163-types.js';
+import { freezeF200Flags } from './f200-types.js';
+import { buildProgressiveFtsQueries } from './fts-query-builder.js';
 import type {
   Edge,
+  EntityMatch,
+  EntityMutationContext,
+  EntityRecord,
   EvidenceItem,
   EvidenceKind,
+  EvidenceSearchExecution,
   IEmbeddingService,
   IEvidenceStore,
+  QueryEntityMatch,
+  SearchExecutionMeta,
   SearchOptions,
 } from './interfaces.js';
-import { SemanticReranker } from './SemanticReranker.js';
+import {
+  compareEvidenceItemsByLexicalBackfill,
+  rankLexicalBackfillRows,
+  splitLexicalBackfillWords,
+} from './lexical-backfill.js';
+import { runMemoryRead, runMemoryVectorRepack } from './MemoryProcess.js';
+import type { EmbeddingSnapshot, MemoryProcessJob } from './memory-process-protocol.js';
+import { searchMessagePassages } from './message-passage-search.js';
+import type { MessagePassageSearchExecution, MessagePassageSearchOptions } from './message-passage-search-types.js';
+import { readMessagePassageState } from './message-passage-state.js';
+import { normalizeMessageSearchDates } from './message-search-dates.js';
+import { applyMMR } from './mmr.js';
+import { type PassageVectorStore, parsePassageVectorKey, passageVectorKey } from './PassageVectorStore.js';
+import { withProjectionCheckpoints } from './projection-checkpoints.js';
+import { publishEntityMentions, recoverEntityMentionProjections } from './publish-entity-mentions.js';
+import { applyPullOnlyDownrank } from './pull-only-ranking.js';
+import { computeRecencyDecay } from './recency-decay.js';
+import { repackPassageVectors, type VectorRepackResult } from './repack-passage-vectors.js';
 import { applyMigrations } from './schema.js';
+import { createSearchEmbeddingCapability, type SearchEmbeddingCapability } from './search-embedding-capability.js';
 import type { VectorStore } from './VectorStore.js';
+import { createVectorInvalidator } from './vector-invalidation.js';
+import { writeEvidenceItems } from './write-evidence-items.js';
+
+// DF-8: asymmetric RRF weight for CJK queries — BM25/FTS5 has poor recall
+// for Chinese text, so boost NN contributions to prevent suppression.
+export const CJK_NN_WEIGHT = 1.5;
+export function hasCJKCharacters(text: string): boolean {
+  return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(text);
+}
+
+const TEMPORAL_DEMOTION_STATUSES = new Set(['superseded', 'drifted', 'stale', 'historical', 'retired', 'invalidated']);
+const TEMPORAL_DEMOTION_STATUS_SQL = [...TEMPORAL_DEMOTION_STATUSES].map((status) => `'${status}'`).join(', ');
+
+function temporalPenaltySql(alias?: string): string {
+  const prefix = alias ? `${alias}.` : '';
+  return `(CASE WHEN ${prefix}authority = 'constitutional' THEN 0 WHEN ${prefix}superseded_by IS NOT NULL OR ${prefix}status IN (${TEMPORAL_DEMOTION_STATUS_SQL}) THEN 1 ELSE 0 END)`;
+}
+
+function hasTemporalPenalty(item: EvidenceItem): boolean {
+  if (item.authority === 'constitutional') return false;
+  return Boolean(item.supersededBy) || TEMPORAL_DEMOTION_STATUSES.has(item.status);
+}
+
+function applyTemporalStatusPenalty(results: EvidenceItem[]): void {
+  if (results.length < 2) return;
+  results.sort((a, b) => Number(hasTemporalPenalty(a)) - Number(hasTemporalPenalty(b)));
+}
+
+function throwIfSearchCancelled(options?: SearchOptions): void {
+  options?.signal?.throwIfAborted();
+  if (options?.deadlineAt != null && Date.now() >= options.deadlineAt) {
+    throw new DOMException('Evidence search deadline exceeded', 'TimeoutError');
+  }
+}
+
+async function coverageSearchCheckpoint(options?: SearchOptions): Promise<void> {
+  if (!options?.signal && options?.deadlineAt == null) return;
+  throwIfSearchCancelled(options);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  throwIfSearchCancelled(options);
+}
+
+function rethrowIfSearchCancelled(options: SearchOptions | undefined, error: unknown): void {
+  if (options?.signal?.aborted) {
+    throw options.signal.reason ?? error;
+  }
+  if (options?.deadlineAt != null && Date.now() >= options.deadlineAt) {
+    throw error;
+  }
+}
 
 export interface PassageResult {
   docAnchor: string;
@@ -19,52 +102,455 @@ export interface PassageResult {
   content: string;
   speaker?: string;
   position?: number;
+  /** BM25 relevance score from passage_fts (lower = more relevant) */
+  rank?: number;
+  /** AC-I7: ISO8601 timestamp of when the passage was created */
+  createdAt?: string;
+  /** AC-I8: surrounding passages within the context window */
+  context?: PassageResult[];
+  /**
+   * @internal Whether this passage was found via semantic NN or entity registry
+   * (not cross-post lexical FTS). Used by BUG-UX-14 scope guard to allow
+   * semantically-relevant new items while blocking lexical cross-post contamination.
+   */
+  _semanticHit?: boolean;
+  /**
+   * @internal Whether this NN-tagged passage was ALSO found via lexical FTS
+   * (set during hybrid RRF merge). Cross-posts share literal query terms and
+   * appear in both lexical and NN results. Purely semantic discoveries appear
+   * only in NN results. The scope guard uses this to distinguish them.
+   */
+  _alsoLexical?: boolean;
 }
 
 export interface EmbedDeps {
   embedding: IEmbeddingService;
   vectorStore: VectorStore;
+  passageVectorStore?: PassageVectorStore;
   mode: 'off' | 'shadow' | 'on';
+}
+
+export interface SqliteEvidenceStoreOptions {
+  sourceRoot?: string;
+  sourceRef?: string;
+  /** @internal A child opens an existing schema without migrating or recursively dispatching. */
+  workerMode?: 'read';
+  /** Optional API-owned observation. Standalone and worker stores have no implicit logger dependency. */
+  readDiagnostics?: (db: Database.Database) => () => void;
+}
+
+interface SearchFilterContext {
+  effectiveKind?: EvidenceKind;
+  excludeSessionAndThread: boolean;
+  excludePackKnowledge: boolean;
+  threadAnchor?: string;
+  suppressBackstop: boolean;
+  excludePullOnly: boolean;
+}
+
+type PassageVectorDeleteRow = {
+  docAnchor: string;
+  passageId: string;
+};
+
+function deletePassageVectors(db: Database.Database, rows: PassageVectorDeleteRow[]): void {
+  if (rows.length === 0) return;
+  const deleteVector = createVectorInvalidator(db, 'passage_vectors');
+  for (const row of rows) {
+    deleteVector(passageVectorKey(row.docAnchor, row.passageId));
+  }
 }
 
 export class SqliteEvidenceStore implements IEvidenceStore {
   private db: Database.Database | null = null;
   private readonly dbPath: string;
   private embedDeps?: EmbedDeps;
+  // Standalone stores may own an already prepared corpus. IndexBuilder claims
+  // responsibility by invalidating this process-local capability before use.
+  private vectorProjection = { ready: true };
+  private readonly workerMode?: 'read';
+  private readonly readDiagnostics?: SqliteEvidenceStoreOptions['readDiagnostics'];
+  private detachReadDiagnostics?: () => void;
+  private initialization?: Promise<void>;
+  private sourceRoot?: string;
+  private sourceRef?: string;
+  private entityRegistry?: EntityRegistryStore;
+  /** F163: single-writer queue serializes all evidence.sqlite mutations */
+  private readonly writeQueue = new EvidenceWriteQueue();
 
-  constructor(dbPath: string, embedDeps?: EmbedDeps) {
-    this.dbPath = dbPath;
+  constructor(dbPath: string, embedDeps?: EmbedDeps, options?: SqliteEvidenceStoreOptions) {
+    this.dbPath = dbPath === ':memory:' ? dbPath : resolve(dbPath);
+    this.workerMode = options?.workerMode;
+    this.readDiagnostics = options?.readDiagnostics;
     this.embedDeps = embedDeps;
+    this.sourceRoot = options?.sourceRoot ? resolve(options.sourceRoot) : undefined;
+    this.sourceRef = options?.sourceRoot ? options.sourceRef : undefined;
   }
 
   /** @internal Allow late-binding of embed deps (factory sets after construction) */
-  setEmbedDeps(deps: EmbedDeps): void {
+  setEmbedDeps(deps: EmbedDeps | undefined): void {
     this.embedDeps = deps;
   }
 
-  async initialize(): Promise<void> {
-    this.db = new Database(this.dbPath);
-    this.db.pragma('journal_mode = WAL');
+  /** @internal Only the successful preparation transaction may publish its generation. */
+  invalidateVectorProjection(): () => void {
+    const projection = { ready: false };
+    this.vectorProjection = projection;
+    return () => {
+      if (this.vectorProjection === projection) projection.ready = true;
+    };
+  }
+
+  private searchEmbedding(): SearchEmbeddingCapability | undefined {
+    const deps = this.embedDeps;
+    const projection = this.vectorProjection;
+    return deps
+      ? createSearchEmbeddingCapability(
+          deps.embedding,
+          () => this.embedDeps === deps && this.vectorProjection === projection && projection.ready,
+        )
+      : undefined;
+  }
+
+  /** @internal Bind relative sourcePath values to the scanner/collection root that produced them. */
+  setSourceRoot(sourceRoot?: string, sourceRef?: string): void {
+    this.sourceRoot = sourceRoot ? resolve(sourceRoot) : undefined;
+    this.sourceRef = sourceRoot ? sourceRef : undefined;
+  }
+
+  initialize(): Promise<void> {
+    if (!this.initialization) {
+      const attempt = this.initializeDatabase().catch((error: unknown) => {
+        if (this.initialization === attempt) this.initialization = undefined;
+        throw error;
+      });
+      this.initialization = attempt;
+    }
+    return this.initialization;
+  }
+
+  private async initializeDatabase(): Promise<void> {
+    this.db = new Database(this.dbPath, {
+      readonly: this.workerMode === 'read',
+      fileMustExist: Boolean(this.workerMode),
+    });
+    if (!this.workerMode) this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.pragma('busy_timeout = 5000');
 
-    applyMigrations(this.db);
+    if (!this.workerMode) {
+      applyMigrations(this.db);
+      try {
+        this.detachReadDiagnostics = this.readDiagnostics?.(this.db);
+      } catch {
+        /* An optional observer failure cannot prevent memory initialization. */
+      }
+    }
+    this.entityRegistry = new EntityRegistryStore(this.db);
+    if (!this.workerMode) {
+      await recoverEntityMentionProjections(this.db);
+      const pending = this.db.prepare('SELECT doc_anchor FROM entity_mention_pending_docs').all() as {
+        doc_anchor: string;
+      }[];
+      if (pending.length) await this.refreshEntityMentions(pending.map((row) => row.doc_anchor));
+    }
+  }
+
+  async upsertEntities(entities: EntityRecord[], context: EntityMutationContext = { source: 'system' }): Promise<void> {
+    return this.writeQueue.enqueue(async () => {
+      this.ensureOpen();
+      if (this.usesIsolatedProcesses())
+        return publishEntityMentions(this.getDb(), this.dbPath, { operation: 'entities', entities, context }, () => {
+          this.entityRegistry!.upsert(entities, context);
+        });
+      const tx = this.db?.transaction(() => {
+        const changed = this.entityRegistry?.upsert(entities, context) ?? false;
+        if (changed) this.entityRegistry?.refreshMentionsForEntities(entities.map(({ entityId }) => entityId));
+      });
+      tx?.();
+    });
+  }
+
+  async getEntityProposalEffectProof(
+    entityId: string,
+    proposalId: string,
+    ownerUserId: string,
+  ): Promise<string | null> {
+    this.ensureOpen();
+    return this.entityRegistry?.proposalEffectProof(entityId, proposalId, ownerUserId) ?? null;
+  }
+
+  async getEntity(entityId: string): Promise<EntityRecord | null> {
+    this.ensureOpen();
+    return this.entityRegistry?.get(entityId) ?? null;
+  }
+
+  async inspectEntityConflict(incoming: EntityRecord, viewerUserId?: string): Promise<EntityConflictContext | null> {
+    this.ensureOpen();
+    return this.entityRegistry?.inspectConflict(incoming, viewerUserId) ?? null;
+  }
+
+  async resolveEntityConflict(
+    incoming: EntityRecord,
+    resolution: EntityConflictResolutionRequest,
+    context: EntityMutationContext,
+  ): Promise<void> {
+    return this.writeQueue.enqueue(async () => {
+      this.ensureOpen();
+      if (this.usesIsolatedProcesses())
+        return publishEntityMentions(
+          this.getDb(),
+          this.dbPath,
+          { operation: 'resolve-entity', incoming, resolution, context },
+          () => {
+            this.entityRegistry!.resolveConflict(incoming, resolution, context);
+          },
+        );
+      const tx = this.db?.transaction(() => {
+        const result = this.entityRegistry?.resolveConflict(incoming, resolution, context);
+        if (result?.changed) this.entityRegistry?.refreshMentionsForEntities(result.affectedEntityIds);
+      });
+      tx?.();
+    });
+  }
+
+  async resolveEntityAliases(query: string): Promise<QueryEntityMatch[]> {
+    this.ensureOpen();
+    return this.entityRegistry?.resolveQuery(query) ?? [];
+  }
+
+  async refreshEntityMentions(docAnchors?: string[]): Promise<void> {
+    return this.writeQueue.enqueue(async () => {
+      this.ensureOpen();
+      if (this.usesIsolatedProcesses())
+        return publishEntityMentions(this.getDb(), this.dbPath, { operation: 'mentions', docAnchors }, () => {});
+      this.entityRegistry?.refreshMentions(docAnchors);
+    });
   }
 
   async search(query: string, options?: SearchOptions): Promise<EvidenceItem[]> {
-    this.ensureOpen();
-    const limit = options?.limit ?? 10;
-    const trimmed = query.trim();
-    if (!trimmed) return [];
+    return (await this.searchWithMeta(query, options)).items;
+  }
 
-    // Phase D: resolve scope → kind filter
-    // scope='threads'/'sessions' → only search kind='session'
-    // scope='docs'/'memory' → exclude sessions (feature/decision/plan/lesson + future memory entries)
-    // scope='all' → no filter
+  readMessagePassageState(candidate: import('./message-passage-search-types.js').MessagePassageCandidate) {
+    this.ensureOpen();
+    return readMessagePassageState(this.getDb(), candidate);
+  }
+
+  async searchMessagePassages(
+    query: string,
+    options: MessagePassageSearchOptions,
+  ): Promise<MessagePassageSearchExecution> {
+    this.ensureOpen();
+    const normalized = normalizeMessageSearchDates(options);
+    if (this.usesIsolatedProcesses()) {
+      const { signal, onReadSnapshot, onCjkRead: _onCjkRead, ...serialized } = normalized;
+      serialized.deadlineAt ??= Date.now() + 15_000;
+      return this.runProjectionRead<MessagePassageSearchExecution>(
+        {
+          kind: 'message-search',
+          dbPath: this.dbPath,
+          query,
+          options: serialized,
+          flags: memorySearchFlags(),
+        },
+        { signal, deadlineAt: serialized.deadlineAt, onReadSnapshot },
+        (value) => value,
+      );
+    }
+    return searchMessagePassages(query, normalized, {
+      db: this.getDb(),
+      isEmbeddingAvailable: () => this.isPassageEmbeddingAvailable(normalized),
+      semanticSearch: (limit) => this.semanticPassageNNSearch(query, limit, normalized),
+      hybridSearch: (lexical, limit, accept, compare) =>
+        this.hybridPassageRRFSearch(query, lexical, limit, normalized, accept, compare),
+    });
+  }
+
+  /** The parent owns projection lifetime through final worker publication, not just RPC. */
+  private async runProjectionRead<T>(
+    job: Extract<MemoryProcessJob, { kind: 'search' | 'message-search' }>,
+    options: Pick<SearchOptions, 'signal' | 'deadlineAt'> & Pick<MessagePassageSearchOptions, 'onReadSnapshot'>,
+    executionOf: (value: T) => { meta: SearchExecutionMeta },
+  ): Promise<T> {
+    const snapshot = this.processEmbeddingSnapshot();
+    const embedding = snapshot ? this.searchEmbedding() : undefined;
+    const value = await runMemoryRead<T>({ ...job, embedding: snapshot }, { ...options, embedding });
+    const mode = job.options?.mode ?? (job.kind === 'message-search' ? 'hybrid' : 'lexical');
+    if (mode === 'lexical' || !embedding || embedding.isCurrent()) return value;
+
+    // A retired worker result may contain old geometry with newly hydrated
+    // source bodies. Discard it and use the existing lexical consumer once,
+    // preserving the original absolute deadline, grants, filters and signal.
+    throwIfSearchCancelled(options);
+    const lexicalJob: typeof job =
+      job.kind === 'message-search'
+        ? { ...job, options: { ...job.options, mode: 'lexical' }, embedding: undefined }
+        : { ...job, options: { ...job.options, mode: 'lexical' }, embedding: undefined };
+    const fallback = await runMemoryRead<T>(lexicalJob, options);
+    throwIfSearchCancelled(options);
+    const execution = executionOf(fallback);
+    execution.meta = {
+      ...execution.meta,
+      degraded: true,
+      effectiveMode: 'lexical',
+      degradeReason: 'passage_embedding_unavailable',
+    };
+    return fallback;
+  }
+
+  private buildSearchFilters(options: SearchOptions | undefined, suppressBackstop = false): SearchFilterContext {
     const effectiveKind =
       options?.kind ??
-      (options?.scope === 'threads' || options?.scope === 'sessions' ? ('session' as EvidenceKind) : undefined);
-    const excludeSession = options?.scope === 'docs' || options?.scope === 'memory';
+      (options?.scope === 'threads'
+        ? ('thread' as EvidenceKind)
+        : options?.scope === 'sessions'
+          ? ('session' as EvidenceKind)
+          : undefined);
+    return {
+      effectiveKind,
+      excludeSessionAndThread: options?.scope === 'docs' || options?.scope === 'memory',
+      excludePackKnowledge: effectiveKind !== 'pack-knowledge',
+      threadAnchor: options?.threadId ? `thread-${options.threadId}` : undefined,
+      suppressBackstop,
+      excludePullOnly: options?.includePullOnly !== true,
+    };
+  }
+
+  private appendEvidenceDocFilters(
+    sql: string,
+    params: unknown[],
+    options: SearchOptions | undefined,
+    filters: SearchFilterContext,
+    columnPrefix = '',
+  ): string {
+    const col = (name: string) => `${columnPrefix}${name}`;
+    if (filters.effectiveKind) {
+      sql += ` AND ${col('kind')} = ?`;
+      params.push(filters.effectiveKind);
+    }
+    if (filters.excludeSessionAndThread) {
+      sql += ` AND ${col('kind')} != 'session' AND ${col('kind')} != 'thread'`;
+    }
+    if (filters.excludePackKnowledge) {
+      sql += ` AND ${col('kind')} != 'pack-knowledge'`;
+    }
+    if (options?.status) {
+      sql += ` AND ${col('status')} = ?`;
+      params.push(options.status);
+    }
+    if (options?.keywords?.length) {
+      sql += ` AND (${options.keywords.map(() => `${col('keywords')} LIKE ?`).join(' OR ')})`;
+      params.push(...options.keywords.map((kw) => `%"${kw}"%`));
+    }
+    if (filters.threadAnchor) {
+      sql += ` AND ${col('anchor')} = ?`;
+      params.push(filters.threadAnchor);
+    }
+    if (options?.dateFrom) {
+      sql += ` AND ${col('updated_at')} >= ?`;
+      params.push(options.dateFrom);
+    }
+    if (options?.dateTo) {
+      sql += ` AND ${col('updated_at')} <= ?`;
+      params.push(options.dateTo.length === 10 ? `${options.dateTo}T23:59:59` : options.dateTo);
+    }
+    if (options?.worldId) {
+      sql += ` AND ${col('world_id')} = ?`;
+      params.push(options.worldId);
+    }
+    if (options?.sceneId) {
+      sql += ` AND ${col('scene_id')} = ?`;
+      params.push(options.sceneId);
+    }
+    if (options?.provenanceTier) {
+      sql += ` AND ${col('provenance_tier')} = ?`;
+      params.push(options.provenanceTier);
+    }
+    if (filters.suppressBackstop) {
+      sql += ` AND ${col('activation')} != 'backstop'`;
+    }
+    if (filters.excludePullOnly) {
+      sql += ` AND ${col('activation')} != 'pull_only'`;
+    }
+    return sql;
+  }
+
+  private selectEvidenceDocRowsByAnchor(
+    anchors: string[],
+    options: SearchOptions | undefined,
+    filters: SearchFilterContext,
+  ): Map<string, RowShape> {
+    if (!this.db || anchors.length === 0) return new Map();
+    const placeholders = anchors.map(() => '?').join(',');
+    const params: unknown[] = [...anchors];
+    const sql = this.appendEvidenceDocFilters(
+      `SELECT * FROM evidence_docs WHERE anchor IN (${placeholders})`,
+      params,
+      options,
+      filters,
+    );
+    const rows = this.db.prepare(sql).all(...params) as RowShape[];
+    return new Map(rows.map((row) => [row.anchor, row]));
+  }
+
+  async searchWithMeta(query: string, options?: SearchOptions): Promise<EvidenceSearchExecution> {
+    this.ensureOpen();
+    if (this.usesIsolatedProcesses()) {
+      throwIfSearchCancelled(options);
+      const { signal, ...serialized } = options ?? {};
+      const flags = memorySearchFlags();
+      const execution = await this.runProjectionRead<{
+        result: EvidenceSearchExecution;
+        shadow: Array<{ anchor: string; shadowRank: number }> | null;
+      }>(
+        {
+          kind: 'search',
+          dbPath: this.dbPath,
+          query,
+          options: serialized,
+          sourceRoot: this.sourceRoot,
+          sourceRef: this.sourceRef,
+          flags,
+        },
+        { signal, deadlineAt: options?.deadlineAt },
+        (value) => value.result,
+      );
+      if (execution.shadow)
+        storeShadowRanking(
+          execution.result.items.map((item) => item.anchor),
+          execution.shadow,
+        );
+      return execution.result;
+    }
+
+    const limit = options?.limit ?? 10;
+    // P2 fix (砚砚): hybrid needs a wider BM25 candidate pool for meaningful RRF
+    const bm25Pool = options?.mode === 'hybrid' ? Math.min(Math.max(limit * 4, 20), 100) : limit;
+    const trimmed = query.trim();
+    if (!trimmed) return { items: [], meta: { degraded: false } };
+    await coverageSearchCheckpoint(options);
+    const lexicalBackfillWords = splitLexicalBackfillWords(trimmed);
+    const queryEntityMatches = this.entityRegistry?.resolveQuery(trimmed) ?? [];
+    const residualEntityTerms = entityResidualQueryTerms(trimmed, queryEntityMatches);
+
+    // Phase D: resolve scope → kind filter
+    // scope='threads' → kind='thread' (P1 fix: was incorrectly mapped to 'session')
+    // scope='sessions' → kind='session'
+    // scope='docs'/'memory' → exclude session/thread digests, keep doc-backed discussions
+    // scope='all' → no filter
+    // F163 Phase B (AC-B3): suppress backstop docs when compression is active
+    let suppressBackstop = false;
+    if (!options?.includeBackstop) {
+      try {
+        const { freezeFlags } = await import('./f163-types.js');
+        suppressBackstop = freezeFlags().compression !== 'off';
+      } catch {
+        // f163-types not available — no suppression
+      }
+    }
+    const filters = this.buildSearchFilters(options, suppressBackstop);
+    const { effectiveKind, excludeSessionAndThread, excludePackKnowledge, threadAnchor, excludePullOnly } = filters;
     // ── Exact-anchor bypass ──────────────────────────────────────────
     // FTS5 unicode61 tokenizer splits "F042" → "F"+"042" and "ADR-005" → "ADR"+"005".
     // For anchor-shaped queries, do a direct lookup so precision isn't lost.
@@ -77,8 +563,11 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       anchorSql += ' AND kind = ?';
       anchorParams.push(effectiveKind);
     }
-    if (excludeSession) {
-      anchorSql += " AND kind != 'session'";
+    if (excludeSessionAndThread) {
+      anchorSql += " AND kind != 'session' AND kind != 'thread'";
+    }
+    if (excludePackKnowledge) {
+      anchorSql += " AND kind != 'pack-knowledge'";
     }
     if (options?.status) {
       anchorSql += ' AND status = ?';
@@ -88,23 +577,45 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       anchorSql += ` AND (${options.keywords.map(() => 'keywords LIKE ?').join(' OR ')})`;
       anchorParams.push(...options.keywords.map((kw) => `%"${kw}"%`));
     }
+    if (threadAnchor) {
+      anchorSql += ' AND anchor = ?';
+      anchorParams.push(threadAnchor);
+    }
+    // F152 AC-A6: provenance tier filter
+    if (options?.provenanceTier) {
+      anchorSql += ' AND provenance_tier = ?';
+      anchorParams.push(options.provenanceTier);
+    }
+    if (suppressBackstop) {
+      anchorSql += " AND activation != 'backstop'";
+    }
+    if (excludePullOnly) {
+      anchorSql += " AND activation != 'pull_only'";
+    }
+    // F093 Phase A (KD-16): world scope filter
+    if (options?.worldId) {
+      anchorSql += ' AND world_id = ?';
+      anchorParams.push(options.worldId);
+    }
+    if (options?.sceneId) {
+      anchorSql += ' AND scene_id = ?';
+      anchorParams.push(options.sceneId);
+    }
     const exactRow = this.db?.prepare(anchorSql).get(...anchorParams) as RowShape | undefined;
     if (exactRow) {
       results.push(rowToItem(exactRow));
       seenAnchors.add(exactRow.anchor);
     }
+    await coverageSearchCheckpoint(options);
 
     // ── FTS5 full-text search ────────────────────────────────────────
-    const ftsQuery = trimmed
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((w) => `"${w.replace(/"/g, '""')}"`)
-      .join(' ');
+    // HW-6: Progressive relaxation — try AND-all first, then relax to OR
+    const ftsQueries = buildProgressiveFtsQueries(trimmed);
 
-    if (ftsQuery) {
+    for (const ftsQuery of ftsQueries) {
       try {
         let sql = `
-				SELECT d.*, bm25(evidence_fts, 5.0, 1.0) AS rank
+					SELECT d.*, bm25(evidence_fts, 5.0, 1.0, 2.0) AS rank
 				FROM evidence_fts f
 				JOIN evidence_docs d ON d.rowid = f.rowid
 				WHERE evidence_fts MATCH ?
@@ -115,8 +626,11 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           sql += ' AND d.kind = ?';
           params.push(effectiveKind);
         }
-        if (excludeSession) {
-          sql += " AND d.kind != 'session'";
+        if (excludeSessionAndThread) {
+          sql += " AND d.kind != 'session' AND d.kind != 'thread'";
+        }
+        if (excludePackKnowledge) {
+          sql += " AND d.kind != 'pack-knowledge'";
         }
         if (options?.status) {
           sql += ' AND d.status = ?';
@@ -126,11 +640,44 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           sql += ` AND (${options.keywords.map(() => 'd.keywords LIKE ?').join(' OR ')})`;
           params.push(...options.keywords.map((kw) => `%"${kw}"%`));
         }
+        if (threadAnchor) {
+          sql += ' AND d.anchor = ?';
+          params.push(threadAnchor);
+        }
+        if (options?.dateFrom) {
+          sql += ' AND d.updated_at >= ?';
+          params.push(options.dateFrom);
+        }
+        if (options?.dateTo) {
+          sql += ' AND d.updated_at <= ?';
+          params.push(options.dateTo.length === 10 ? `${options.dateTo}T23:59:59` : options.dateTo);
+        }
+        // F152 AC-A6: provenance tier filter
+        if (options?.provenanceTier) {
+          sql += ' AND d.provenance_tier = ?';
+          params.push(options.provenanceTier);
+        }
+        // F163 Phase B (AC-B3): backstop suppression
+        if (suppressBackstop) {
+          sql += " AND d.activation != 'backstop'";
+        }
+        if (excludePullOnly) {
+          sql += " AND d.activation != 'pull_only'";
+        }
+        // F093 Phase A (KD-16): world scope filter
+        if (options?.worldId) {
+          sql += ' AND d.world_id = ?';
+          params.push(options.worldId);
+        }
+        if (options?.sceneId) {
+          sql += ' AND d.scene_id = ?';
+          params.push(options.sceneId);
+        }
 
-        // Superseded items sort last (KD-16), archive results deprioritized (P2 fix)
-        sql += " ORDER BY (d.superseded_by IS NOT NULL), (d.source_path LIKE 'archive/%'), rank";
+        // Superseded items sort last (KD-16), archive results deprioritized (P2 fix), authoritative first (F152 AC-A6, P1-2 NULL-safe)
+        sql += ` ORDER BY ${temporalPenaltySql('d')}, (d.source_path LIKE 'archive/%'), (CASE WHEN d.provenance_tier = 'authoritative' THEN 0 WHEN d.provenance_tier IS NOT NULL THEN 1 ELSE 2 END), rank`;
         sql += ' LIMIT ?';
-        params.push(limit);
+        params.push(bm25Pool);
 
         const rows = this.db?.prepare(sql).all(...params) as RowShape[];
         for (const row of rows) {
@@ -139,131 +686,1144 @@ export class SqliteEvidenceStore implements IEvidenceStore {
             seenAnchors.add(row.anchor);
           }
         }
-      } catch {
-        // FTS5 syntax error (malformed query) — degrade to anchor-only results
-      }
+        // HW-6: if this relaxation level found results, stop trying looser levels
+        if (rows.length > 0) break;
+      } catch {}
+      await coverageSearchCheckpoint(options);
     }
 
-    // ── Keyword fallback: search keywords/topics JSON when FTS5 misses ──
-    if (results.length <= 1) {
-      const words = trimmed.split(/\s+/).filter(Boolean);
-      if (words.length > 0) {
-        const kwConditions = words.map(() => 'keywords LIKE ?');
-        let kwSql = `SELECT * FROM evidence_docs WHERE (${kwConditions.join(' OR ')})`;
-        const kwParams: unknown[] = words.map((w) => `%${w.toLowerCase()}%`);
-        if (effectiveKind) {
-          kwSql += ' AND kind = ?';
-          kwParams.push(effectiveKind);
-        }
-        if (excludeSession) {
-          kwSql += " AND kind != 'session'";
-        }
-        if (options?.status) {
-          kwSql += ' AND status = ?';
-          kwParams.push(options.status);
-        }
-        if (options?.keywords?.length) {
-          kwSql += ` AND (${options.keywords.map(() => 'keywords LIKE ?').join(' OR ')})`;
-          kwParams.push(...options.keywords.map((kw) => `%"${kw}"%`));
-        }
-        kwSql += " ORDER BY (superseded_by IS NOT NULL), (source_path LIKE 'archive/%'), updated_at DESC LIMIT ?";
-        kwParams.push(limit);
-        try {
-          const kwRows = this.db?.prepare(kwSql).all(...kwParams) as RowShape[];
-          for (const row of kwRows) {
-            if (!seenAnchors.has(row.anchor)) {
-              results.push(rowToItem(row));
-              seenAnchors.add(row.anchor);
-            }
-          }
-        } catch {
-          // keyword search failed — continue with existing results
-        }
+    // ── Lexical contains backfill: recover substring hits that unicode61 FTS misses ──
+    if (lexicalBackfillWords.length > 0) {
+      const containsConditions = lexicalBackfillWords.map(
+        () => "(LOWER(title) LIKE ? OR LOWER(COALESCE(summary, '')) LIKE ? OR LOWER(COALESCE(keywords, '')) LIKE ?)",
+      );
+      let containsSql = `SELECT * FROM evidence_docs WHERE (${containsConditions.join(' OR ')})`;
+      const containsParams: unknown[] = lexicalBackfillWords.flatMap((word) => {
+        const pattern = `%${word}%`;
+        return [pattern, pattern, pattern];
+      });
+      if (effectiveKind) {
+        containsSql += ' AND kind = ?';
+        containsParams.push(effectiveKind);
       }
-    }
-
-    // Phase E: passage search when depth=raw and scope includes threads
-    if (options?.depth === 'raw' && (!options?.scope || options.scope === 'all' || options.scope === 'threads')) {
-      const passages = this.searchPassages(trimmed, limit);
-      for (const p of passages) {
-        if (!seenAnchors.has(p.docAnchor)) {
-          // Synthesize an EvidenceItem from the passage's parent doc anchor
-          const parentDoc = this.db?.prepare('SELECT * FROM evidence_docs WHERE anchor = ?').get(p.docAnchor) as
-            | RowShape
-            | undefined;
-          if (parentDoc) {
-            const item = rowToItem(parentDoc);
-            // Enrich summary with passage match context
-            item.summary = `[passage match] ${p.speaker ? `${p.speaker}: ` : ''}${p.content.slice(0, 200)}`;
-            results.push(item);
-            seenAnchors.add(p.docAnchor);
-          }
-        }
+      if (excludeSessionAndThread) {
+        containsSql += " AND kind != 'session' AND kind != 'thread'";
       }
-    }
-
-    let lexicalResults = results.slice(0, limit);
-
-    // Phase C: semantic rerank
-    if (this.embedDeps && this.embedDeps.embedding.isReady()) {
+      if (excludePackKnowledge) {
+        containsSql += " AND kind != 'pack-knowledge'";
+      }
+      if (options?.status) {
+        containsSql += ' AND status = ?';
+        containsParams.push(options.status);
+      }
+      if (options?.keywords?.length) {
+        containsSql += ` AND (${options.keywords.map(() => 'keywords LIKE ?').join(' OR ')})`;
+        containsParams.push(...options.keywords.map((kw) => `%"${kw}"%`));
+      }
+      if (threadAnchor) {
+        containsSql += ' AND anchor = ?';
+        containsParams.push(threadAnchor);
+      }
+      if (options?.worldId) {
+        containsSql += ' AND world_id = ?';
+        containsParams.push(options.worldId);
+      }
+      if (options?.sceneId) {
+        containsSql += ' AND scene_id = ?';
+        containsParams.push(options.sceneId);
+      }
+      if (options?.dateFrom) {
+        containsSql += ' AND updated_at >= ?';
+        containsParams.push(options.dateFrom);
+      }
+      if (options?.dateTo) {
+        containsSql += ' AND updated_at <= ?';
+        containsParams.push(options.dateTo.length === 10 ? `${options.dateTo}T23:59:59` : options.dateTo);
+      }
+      if (options?.provenanceTier) {
+        containsSql += ' AND provenance_tier = ?';
+        containsParams.push(options.provenanceTier);
+      }
+      // F163 Phase B (AC-B3): backstop suppression
+      if (suppressBackstop) {
+        containsSql += " AND activation != 'backstop'";
+      }
+      if (excludePullOnly) {
+        containsSql += " AND activation != 'pull_only'";
+      }
       try {
-        const queryVec = await this.embedDeps.embedding.embed([query]);
-        const vecResults = this.embedDeps.vectorStore.search(queryVec[0], limit * 2);
-        const reranker = new SemanticReranker();
-
-        if (this.embedDeps.mode === 'on') {
-          lexicalResults = reranker.rerankWithDistances(lexicalResults, vecResults);
-        } else if (this.embedDeps.mode === 'shadow') {
-          // Shadow: compute rerank but return lexical order (log comparison)
-          const _reranked = reranker.rerankWithDistances(lexicalResults, vecResults);
-          // Silent comparison — actual logging added in eval phase
+        const containsRows = (this.db?.prepare(containsSql).all(...containsParams) as RowShape[]).filter((row) =>
+          evidenceRowMatchesAllTerms(row, residualEntityTerms),
+        );
+        const { rows: rankedRows, signals } = rankLexicalBackfillRows(containsRows, lexicalBackfillWords);
+        for (const row of rankedRows) {
+          if (!seenAnchors.has(row.anchor)) {
+            results.push(rowToItem(row));
+            seenAnchors.add(row.anchor);
+          }
+        }
+        if (signals.size > 0) {
+          results.sort((a, b) => compareEvidenceItemsByLexicalBackfill(a, b, signals, exactRow?.anchor));
         }
       } catch {
-        // AC-C4 fail-open: rerank failed → return lexical order
+        // substring backfill failed — continue with existing results
+      }
+    }
+    await coverageSearchCheckpoint(options);
+
+    const entityMentionDocs = this.hydrateEntityMentionDocs(
+      queryEntityMatches,
+      options,
+      bm25Pool,
+      filters,
+      residualEntityTerms,
+    );
+    for (const item of entityMentionDocs.items) {
+      if (!seenAnchors.has(item.anchor)) {
+        results.push(item);
+        seenAnchors.add(item.anchor);
+      }
+    }
+    await coverageSearchCheckpoint(options);
+
+    if (options?.depth === 'raw') {
+      const rawResult = await this.rawPassageSearch(
+        query,
+        results,
+        limit,
+        options,
+        filters,
+        queryEntityMatches,
+        entityMentionDocs.matchesByAnchor,
+        residualEntityTerms,
+      );
+      return {
+        items: this.enrichWithDrillDown(rawResult.items, undefined, options, trimmed),
+        meta: rawResult.meta,
+      };
+    }
+
+    // ── F163: Post-retrieval authority boost (fail-open: Task 11) ──
+    try {
+      applyAuthorityBoost(results, trimmed);
+    } catch {
+      // Kill-switch: boost failure → continue with original ranking
+    }
+    applyTemporalStatusPenalty(results);
+
+    // P2 R2 fix (砚砚): keep full BM25 candidate pool for hybrid RRF,
+    // only slice to limit for lexical/fallback returns
+    const lexicalCandidates = results.slice(0, bm25Pool);
+    const lexicalResults = results.slice(0, limit);
+
+    // ── Mode-based retrieval (KD-44: three independent paths) ──────
+    const searchMode = options?.mode ?? 'lexical';
+
+    // G-4: all paths go through enrichWithDrillDown before returning
+    if (searchMode === 'lexical') {
+      return {
+        items: this.enrichWithDrillDown(
+          this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
+          undefined,
+          options,
+          trimmed,
+        ),
+        meta: { degraded: false },
+      };
+    }
+
+    if (searchMode === 'semantic') {
+      const embeddingAvailable = await this.isEmbeddingAvailable(options);
+      await coverageSearchCheckpoint(options);
+      if (!embeddingAvailable) {
+        return {
+          items: this.enrichWithDrillDown(
+            this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
+            undefined,
+            options,
+            trimmed,
+          ),
+          meta: { degraded: true, degradeReason: 'passage_embedding_unavailable', effectiveMode: 'lexical' },
+        };
+      }
+      try {
+        const semanticItems = await this.semanticNNSearch(query, limit, options, suppressBackstop);
+        return {
+          items: this.enrichWithDrillDown(
+            this.attachEntityMatches(
+              this.mergeEntityResults(entityMentionDocs.items, semanticItems, limit),
+              entityMentionDocs.matchesByAnchor,
+            ),
+            undefined,
+            options,
+            trimmed,
+          ),
+          meta: { degraded: false },
+        };
+      } catch (error) {
+        rethrowIfSearchCancelled(options, error);
+        return {
+          items: this.enrichWithDrillDown(
+            this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
+            undefined,
+            options,
+            trimmed,
+          ),
+          meta: { degraded: true, degradeReason: 'passage_vector_search_error', effectiveMode: 'lexical' },
+        };
       }
     }
 
-    return lexicalResults;
+    if (searchMode === 'hybrid') {
+      const embeddingAvailable = await this.isEmbeddingAvailable(options);
+      await coverageSearchCheckpoint(options);
+      if (!embeddingAvailable) {
+        return {
+          items: this.enrichWithDrillDown(
+            this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
+            undefined,
+            options,
+            trimmed,
+          ),
+          meta: { degraded: true, degradeReason: 'passage_embedding_unavailable', effectiveMode: 'lexical' },
+        };
+      }
+      try {
+        const f200Pool = freezeF200Flags().consumptionRerank !== 'off' ? limit * 3 : limit;
+        const hybridItems = await this.hybridRRFSearch(query, lexicalCandidates, f200Pool, options, suppressBackstop);
+        return {
+          items: this.enrichWithDrillDown(
+            this.attachEntityMatches(
+              this.mergeEntityResults(entityMentionDocs.items, hybridItems, f200Pool),
+              entityMentionDocs.matchesByAnchor,
+            ),
+            limit,
+            options,
+            trimmed,
+          ),
+          meta: { degraded: false },
+        };
+      } catch (error) {
+        rethrowIfSearchCancelled(options, error);
+        return {
+          items: this.enrichWithDrillDown(
+            this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
+            undefined,
+            options,
+            trimmed,
+          ),
+          meta: { degraded: true, degradeReason: 'passage_vector_search_error', effectiveMode: 'lexical' },
+        };
+      }
+    }
+
+    return {
+      items: this.enrichWithDrillDown(
+        this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
+        undefined,
+        options,
+        trimmed,
+      ),
+      meta: { degraded: false },
+    };
   }
 
-  async upsert(items: EvidenceItem[]): Promise<void> {
-    this.ensureOpen();
-    const db = this.db;
-    if (!db) {
-      throw new Error('Evidence store is closed');
+  private async rawPassageSearch(
+    query: string,
+    baseResults: EvidenceItem[],
+    limit: number,
+    options: SearchOptions,
+    filters: SearchFilterContext,
+    queryEntityMatches: QueryEntityMatch[],
+    entityMatchesByAnchor: Map<string, EntityMatch[]>,
+    residualEntityTerms: string[],
+  ): Promise<EvidenceSearchExecution> {
+    if (options.scope && !['all', 'threads', 'docs', 'memory', 'sessions'].includes(options.scope)) {
+      return {
+        items: this.attachEntityMatches(this.rankRawResults(baseResults, limit), entityMatchesByAnchor),
+        meta: { degraded: false },
+      };
     }
 
-    const stmt = db.prepare(`
-				INSERT OR REPLACE INTO evidence_docs
-				(anchor, kind, status, title, summary, keywords, source_path, source_hash,
-				 superseded_by, materialized_from, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`);
+    const mode = options.mode ?? 'lexical';
+    const pool = Math.min(Math.max(limit * 4, 20), 100);
+    const timeFilter = { dateFrom: options.dateFrom, dateTo: options.dateTo };
+    const lexical = (): PassageResult[] => this.searchPassages(query, pool, timeFilter);
 
-    const tx = db.transaction((items: EvidenceItem[]) => {
-      for (const item of items) {
-        stmt.run(
-          item.anchor,
-          item.kind,
-          item.status,
-          item.title,
-          item.summary ?? null,
-          item.keywords ? JSON.stringify(item.keywords) : null,
-          item.sourcePath ?? null,
-          item.sourceHash ?? null,
-          item.supersededBy ?? null,
-          item.materializedFrom ?? null,
-          item.updatedAt,
+    let passages: PassageResult[];
+    let meta: SearchExecutionMeta = { degraded: false };
+    if (mode === 'semantic') {
+      if (!(await this.isPassageEmbeddingAvailable(options))) {
+        passages = lexical();
+        meta = {
+          degraded: true,
+          degradeReason: 'passage_embedding_unavailable',
+          effectiveMode: 'lexical',
+        };
+      } else {
+        try {
+          passages = await this.semanticPassageNNSearch(query, pool, options);
+        } catch (error) {
+          rethrowIfSearchCancelled(options, error);
+          passages = lexical();
+          meta = {
+            degraded: true,
+            degradeReason: 'passage_vector_search_error',
+            effectiveMode: 'lexical',
+          };
+        }
+      }
+    } else if (mode === 'hybrid') {
+      if (!(await this.isPassageEmbeddingAvailable(options))) {
+        passages = lexical();
+        meta = {
+          degraded: true,
+          degradeReason: 'passage_embedding_unavailable',
+          effectiveMode: 'lexical',
+        };
+      } else {
+        try {
+          passages = await this.hybridPassageRRFSearch(query, lexical(), pool, options);
+        } catch (error) {
+          rethrowIfSearchCancelled(options, error);
+          passages = lexical();
+          meta = {
+            degraded: true,
+            degradeReason: 'passage_vector_search_error',
+            effectiveMode: 'lexical',
+          };
+        }
+      }
+    } else {
+      passages = lexical();
+    }
+
+    const entityPassageHits = this.entityRegistry?.findMentionPassages(queryEntityMatches, pool, {
+      threadId: options.threadId,
+      dateFrom: options.dateFrom,
+      dateTo: options.dateTo,
+      residualTerms: residualEntityTerms,
+    });
+    const eligibleEntityPassages =
+      entityPassageHits?.passages.filter((passage) => textMatchesAllTerms(passage.content, residualEntityTerms)) ?? [];
+    const entityPassages = eligibleEntityPassages.map((passage) => this.entityHitToPassageResult(passage));
+    const eligibleEntityAnchors = new Set(eligibleEntityPassages.map((passage) => passage.docAnchor));
+    const mergedEntityMatches = mergeEntityMatchMaps(
+      entityMatchesByAnchor,
+      filterEntityMatchMap(entityPassageHits?.matchesByAnchor, eligibleEntityAnchors),
+    );
+    const mergedPassages = mergePassageResults(entityPassages, passages);
+    return {
+      items: this.attachEntityMatches(
+        this.hydratePassageResults(baseResults, mergedPassages, limit, options, filters),
+        mergedEntityMatches,
+      ),
+      meta,
+    };
+  }
+
+  private hydrateEntityMentionDocs(
+    queryEntityMatches: QueryEntityMatch[],
+    options: SearchOptions | undefined,
+    limit: number,
+    filters: SearchFilterContext,
+    residualEntityTerms: string[],
+  ): { items: EvidenceItem[]; matchesByAnchor: Map<string, EntityMatch[]> } {
+    const mentionHits = this.entityRegistry?.findMentionAnchors(queryEntityMatches, limit, {
+      kind: filters.effectiveKind,
+      excludeSessionAndThread: filters.excludeSessionAndThread,
+      excludePackKnowledge: filters.excludePackKnowledge,
+      status: options?.status,
+      keywords: options?.keywords,
+      anchor: filters.threadAnchor,
+      dateFrom: options?.dateFrom,
+      dateTo: options?.dateTo,
+      worldId: options?.worldId,
+      sceneId: options?.sceneId,
+      provenanceTier: options?.provenanceTier,
+      suppressBackstop: filters.suppressBackstop,
+      residualTerms: residualEntityTerms,
+    });
+    if (!mentionHits || mentionHits.anchors.length === 0 || !this.db) {
+      return { items: [], matchesByAnchor: new Map() };
+    }
+
+    const placeholders = mentionHits.anchors.map(() => '?').join(',');
+    let sql = `SELECT * FROM evidence_docs WHERE anchor IN (${placeholders})`;
+    const params: unknown[] = [...mentionHits.anchors];
+
+    if (filters.effectiveKind) {
+      sql += ' AND kind = ?';
+      params.push(filters.effectiveKind);
+    }
+    if (filters.excludeSessionAndThread) {
+      sql += " AND kind != 'session' AND kind != 'thread'";
+    }
+    if (filters.excludePackKnowledge) {
+      sql += " AND kind != 'pack-knowledge'";
+    }
+    if (options?.status) {
+      sql += ' AND status = ?';
+      params.push(options.status);
+    }
+    if (options?.keywords?.length) {
+      sql += ` AND (${options.keywords.map(() => 'keywords LIKE ?').join(' OR ')})`;
+      params.push(...options.keywords.map((kw) => `%"${kw}"%`));
+    }
+    if (filters.threadAnchor) {
+      sql += ' AND anchor = ?';
+      params.push(filters.threadAnchor);
+    }
+    if (options?.dateFrom) {
+      sql += ' AND updated_at >= ?';
+      params.push(options.dateFrom);
+    }
+    if (options?.dateTo) {
+      sql += ' AND updated_at <= ?';
+      params.push(options.dateTo.length === 10 ? `${options.dateTo}T23:59:59` : options.dateTo);
+    }
+    if (options?.worldId) {
+      sql += ' AND world_id = ?';
+      params.push(options.worldId);
+    }
+    if (options?.sceneId) {
+      sql += ' AND scene_id = ?';
+      params.push(options.sceneId);
+    }
+    if (options?.provenanceTier) {
+      sql += ' AND provenance_tier = ?';
+      params.push(options.provenanceTier);
+    }
+    if (filters.suppressBackstop) {
+      sql += " AND activation != 'backstop'";
+    }
+    if (filters.excludePullOnly) {
+      sql += " AND activation != 'pull_only'";
+    }
+
+    const rows = this.db.prepare(sql).all(...params) as RowShape[];
+    const rowMap = new Map(rows.map((row) => [row.anchor, row]));
+    const items = mentionHits.anchors
+      .map((anchor) => rowMap.get(anchor))
+      .filter((row): row is RowShape => Boolean(row))
+      .map((row) => rowToItem(row));
+    return {
+      items,
+      matchesByAnchor: filterEntityMatchMap(mentionHits.matchesByAnchor, new Set(items.map((item) => item.anchor))),
+    };
+  }
+
+  private attachEntityMatches(items: EvidenceItem[], matchesByAnchor: Map<string, EntityMatch[]>): EvidenceItem[] {
+    if (matchesByAnchor.size === 0) return items;
+    for (const item of items) {
+      const matches = dedupeEntityMatches(matchesByAnchor.get(item.anchor) ?? []);
+      if (matches.length > 0) item.entityMatches = matches;
+    }
+    return items;
+  }
+
+  private mergeEntityResults(entityItems: EvidenceItem[], items: EvidenceItem[], limit: number): EvidenceItem[] {
+    if (entityItems.length === 0) return items.slice(0, limit);
+    const out: EvidenceItem[] = [];
+    const seen = new Set<string>();
+    const entityCap = items.length > 0 ? Math.max(1, Math.ceil(limit / 2)) : limit;
+    const rankedEntityItems = entityItems.slice();
+    applyTemporalStatusPenalty(rankedEntityItems);
+    for (const item of rankedEntityItems.slice(0, entityCap)) {
+      if (seen.has(item.anchor)) continue;
+      seen.add(item.anchor);
+      out.push(item);
+    }
+    for (const item of items) {
+      if (seen.has(item.anchor)) continue;
+      seen.add(item.anchor);
+      out.push(item);
+    }
+    applyTemporalStatusPenalty(out);
+    return out.slice(0, limit);
+  }
+
+  private entityHitToPassageResult(hit: EntityMentionPassageHit): PassageResult {
+    return {
+      docAnchor: hit.docAnchor,
+      passageId: hit.passageId,
+      content: hit.content,
+      speaker: hit.speaker,
+      position: hit.position,
+      createdAt: hit.createdAt,
+      _semanticHit: true, // entity registry is a strong signal, not cross-post contamination
+    };
+  }
+
+  private async isEmbeddingAvailable(options?: SearchOptions): Promise<boolean> {
+    const deps = this.embedDeps;
+    if (!deps || deps.mode !== 'on') return false;
+    const embedding = this.searchEmbedding()!;
+    try {
+      await embedding.reprobeIfNeeded(options?.signal);
+    } catch (error) {
+      rethrowIfSearchCancelled(options, error);
+      return false;
+    }
+    return embedding.isReady();
+  }
+
+  private async isPassageEmbeddingAvailable(options?: SearchOptions): Promise<boolean> {
+    const deps = this.embedDeps;
+    if (!deps?.passageVectorStore || deps.mode !== 'on') return false;
+    const embedding = this.searchEmbedding()!;
+    try {
+      await embedding.reprobeIfNeeded(options?.signal);
+    } catch (error) {
+      rethrowIfSearchCancelled(options, error);
+      return false;
+    }
+    return embedding.isReady();
+  }
+
+  private async semanticPassageNNSearch(
+    query: string,
+    limit: number,
+    options?: SearchOptions,
+  ): Promise<PassageResult[]> {
+    const deps = this.embedDeps!;
+    const embedding = this.searchEmbedding()!;
+    await coverageSearchCheckpoint(options);
+    const queryVec = await embedding.embed([query], options?.signal);
+    await coverageSearchCheckpoint(options);
+    embedding.assertCurrent();
+    const nnResults = deps.passageVectorStore!.search(queryVec[0], limit);
+    await coverageSearchCheckpoint(options);
+    embedding.assertCurrent();
+    return this.hydratePassageVectorHits(nnResults, options);
+  }
+
+  private async hybridPassageRRFSearch(
+    query: string,
+    lexicalPassages: PassageResult[],
+    limit: number,
+    options?: SearchOptions,
+    accept?: (passage: PassageResult) => boolean,
+    compare?: (a: PassageResult, b: PassageResult) => number,
+  ): Promise<PassageResult[]> {
+    const semanticPassages = (await this.semanticPassageNNSearch(query, limit, options)).filter(
+      (passage) => !accept || accept(passage),
+    );
+    const rrfK = 60;
+    const nnWeight = hasCJKCharacters(query) ? CJK_NN_WEIGHT : 1.0;
+    const scores = new Map<string, number>();
+    const passageMap = new Map<string, PassageResult>();
+
+    for (let i = 0; i < lexicalPassages.length; i++) {
+      const passage = lexicalPassages[i];
+      const key = passageVectorKey(passage.docAnchor, passage.passageId);
+      scores.set(key, (scores.get(key) ?? 0) + 1 / (rrfK + i));
+      passageMap.set(key, passage);
+    }
+
+    for (let i = 0; i < semanticPassages.length; i++) {
+      const passage = semanticPassages[i];
+      const key = passageVectorKey(passage.docAnchor, passage.passageId);
+      scores.set(key, (scores.get(key) ?? 0) + nnWeight / (rrfK + i));
+      // BUG-UX-14 R4: if this passage was already found by lexical FTS,
+      // mark it _alsoLexical so the scope guard can distinguish cross-posts
+      // (found by both lexical+NN) from pure NN discoveries (NN only).
+      const existing = passageMap.get(key);
+      if (existing && !existing._semanticHit) {
+        passage._alsoLexical = true;
+      }
+      passageMap.set(key, passage);
+    }
+
+    return [...passageMap]
+      .sort(([a, left], [b, right]) => (compare?.(left, right) ?? 0) || (scores.get(b) ?? 0) - (scores.get(a) ?? 0))
+      .map(([, passage]) => passage)
+      .slice(0, limit);
+  }
+
+  private hydratePassageVectorHits(
+    hits: Array<{ passageKey: string; distance: number }>,
+    options?: SearchOptions,
+  ): PassageResult[] {
+    if (!this.db || hits.length === 0) return [];
+
+    const parsed = hits
+      .map((hit) => {
+        try {
+          return { ...parsePassageVectorKey(hit.passageKey), passageKey: hit.passageKey, distance: hit.distance };
+        } catch {
+          return null;
+        }
+      })
+      .filter((hit): hit is { docAnchor: string; passageId: string; passageKey: string; distance: number } =>
+        Boolean(hit),
+      );
+    if (parsed.length === 0) return [];
+
+    // The message pool can contain 2000 hits, exceeding SQLite's OR depth.
+    // Bind exact pairs as rows so hydration still uses the composite index.
+    const coordinates = parsed.map(() => '(?, ?)').join(', ');
+    const params: unknown[] = parsed.flatMap((p) => [p.docAnchor, p.passageId]);
+    let sql = `WITH passage_hits(doc_anchor, passage_id) AS (VALUES ${coordinates})
+      SELECT p.doc_anchor, p.passage_id, p.content, p.speaker, p.position, p.created_at
+      FROM passage_hits h JOIN evidence_passages p
+      ON p.doc_anchor = h.doc_anchor AND p.passage_id = h.passage_id`;
+    const filters: string[] = [];
+
+    if (options?.threadId) {
+      filters.push('p.doc_anchor = ?');
+      params.push(`thread-${options.threadId}`);
+    }
+    if (options?.dateFrom) {
+      filters.push('p.created_at >= ?');
+      params.push(options.dateFrom);
+    }
+    if (options?.dateTo) {
+      filters.push('p.created_at <= ?');
+      params.push(options.dateTo.length === 10 ? `${options.dateTo}T23:59:59` : options.dateTo);
+    }
+    if (filters.length > 0) sql += ` WHERE ${filters.join(' AND ')}`;
+
+    const rows = this.db.prepare(sql).all(...params) as Array<{
+      doc_anchor: string;
+      passage_id: string;
+      content: string;
+      speaker: string | null;
+      position: number | null;
+      created_at: string | null;
+    }>;
+    const rowMap = new Map(rows.map((r) => [passageVectorKey(r.doc_anchor, r.passage_id), r]));
+
+    const passages: PassageResult[] = [];
+    for (let index = 0; index < parsed.length; index++) {
+      const hit = parsed[index];
+      const row = rowMap.get(hit.passageKey);
+      if (!row) continue;
+      passages.push({
+        docAnchor: row.doc_anchor,
+        passageId: row.passage_id,
+        content: row.content,
+        speaker: row.speaker ?? undefined,
+        position: row.position ?? undefined,
+        rank: hit.distance ?? index,
+        createdAt: row.created_at ?? undefined,
+        _semanticHit: true,
+      });
+    }
+    return passages;
+  }
+
+  private hydratePassageResults(
+    baseResults: EvidenceItem[],
+    passages: PassageResult[],
+    limit: number,
+    options?: SearchOptions,
+    filters?: SearchFilterContext,
+  ): EvidenceItem[] {
+    const results = [...baseResults];
+    const threadAnchor = options?.threadId ? `thread-${options.threadId}` : undefined;
+    const passageOrder = new Map<string, number>();
+    const passagesByAnchor = new Map<string, PassageResult[]>();
+    const withContext = this.attachPassageContext(passages, options?.contextWindow);
+
+    for (let index = 0; index < withContext.length; index++) {
+      const passage = withContext[index];
+      if (threadAnchor && passage.docAnchor !== threadAnchor) continue;
+      const arr = passagesByAnchor.get(passage.docAnchor) ?? [];
+      arr.push(passage);
+      passagesByAnchor.set(passage.docAnchor, arr);
+      if (!passageOrder.has(passage.docAnchor)) passageOrder.set(passage.docAnchor, index);
+    }
+    const parentFilters = filters ?? this.buildSearchFilters(options, false);
+    const parentDocs = this.selectEvidenceDocRowsByAnchor([...passagesByAnchor.keys()], options, parentFilters);
+
+    // BUG-UX-14 fix: when a scope filter is active (scope != 'all'), guard against
+    // cross-post contamination from passage matches (both lexical AND semantic).
+    //
+    // Passage FTS/NN searches ALL passages without scope filter. A cross-posted
+    // passage in thread B that references topic X causes thread B to leak into
+    // results, leading to teleport buttons that navigate to the wrong thread.
+    //
+    // Guard strategy:
+    //  When doc-level FTS already found primary matches (hasDocLevelResults=true),
+    //  block passage-only new items UNLESS they have at least one purely-semantic
+    //  passage (found by NN only, not by lexical FTS). Cross-posts share literal
+    //  query terms and appear in BOTH lexical and NN results (_alsoLexical=true).
+    //  Pure NN discoveries don't share literal terms — they're semantically
+    //  related via embedding similarity but not lexical cross-posts.
+    //
+    //  When doc-level FTS found nothing (hasDocLevelResults=false), passage search
+    //  is the sole discovery channel — allow through, but verify parent doc kind
+    //  matches scope (R3 kind-scope check below).
+    //
+    // When threadId is specified, passages already passed the threadAnchor filter
+    // (line 887), so they belong to the explicitly requested thread — always allowed.
+    const scopeActive = options?.scope && options.scope !== 'all';
+    const docsScope = options?.scope != null && ['docs', 'memory'].includes(options.scope);
+    const hasExplicitThreadTarget = !!threadAnchor;
+    const hasDocLevelResults = results.length > 0;
+
+    for (const [anchor, pList] of passagesByAnchor) {
+      let item = results.find((r) => r.anchor === anchor);
+      if (!item) {
+        // When scope is active, no explicit thread target, AND doc-level FTS
+        // already found primary matches — block passage-only new items unless
+        // at least one passage is a pure NN discovery (semantic but NOT also
+        // found by lexical FTS). Cross-posts are found by lexical FTS because
+        // they share literal query terms; pure NN discoveries only match via
+        // embedding similarity (BUG-UX-14 R4, cloud P1 on hybrid cross-posts).
+        if (scopeActive && !docsScope && !hasExplicitThreadTarget && hasDocLevelResults) {
+          const hasPurelySemanticDiscovery = pList.some((p) => p._semanticHit && !p._alsoLexical);
+          if (!hasPurelySemanticDiscovery) continue;
+        }
+        const parentDoc = parentDocs.get(anchor);
+        if (parentDoc) {
+          // BUG-UX-14 R3 (cloud P1): verify parent doc kind matches scope filter.
+          // Even when the lexical guard above is skipped (hasDocLevelResults=false),
+          // a doc of the wrong kind must not leak into scoped results.
+          // e.g. a session doc passage must not appear in scope='threads' results.
+          if (scopeActive && !hasExplicitThreadTarget) {
+            const effectiveKind =
+              options?.scope === 'threads' ? 'thread' : options?.scope === 'sessions' ? 'session' : undefined;
+            const excludeSessionAndThread = options?.scope === 'docs' || options?.scope === 'memory';
+            if (effectiveKind && parentDoc.kind !== effectiveKind) continue;
+            if (excludeSessionAndThread && (parentDoc.kind === 'session' || parentDoc.kind === 'thread')) continue;
+          }
+          item = rowToItem(parentDoc);
+          item.summary = `[passage match] ${pList[0].speaker ? `${pList[0].speaker}: ` : ''}${pList[0].content.slice(0, 200)}`;
+          results.push(item);
+        }
+      }
+      if (item) item.passages = pList.map((p) => this.toEvidencePassage(p));
+    }
+
+    return this.rankRawResults(results, limit, passageOrder);
+  }
+
+  private attachPassageContext(passages: PassageResult[], contextWindow?: number): PassageResult[] {
+    if (!contextWindow || contextWindow <= 0 || !this.db) return passages;
+    const ctxStmt = this.db.prepare(
+      `SELECT doc_anchor, passage_id, content, speaker, position, created_at
+       FROM evidence_passages
+       WHERE doc_anchor = ? AND position BETWEEN ? AND ? AND passage_id != ?
+       ORDER BY position`,
+    );
+
+    return passages.map((passage) => {
+      if (passage.position == null) return passage;
+      const ctxRows = ctxStmt.all(
+        passage.docAnchor,
+        passage.position - contextWindow,
+        passage.position + contextWindow,
+        passage.passageId,
+      ) as Array<{
+        doc_anchor: string;
+        passage_id: string;
+        content: string;
+        speaker: string | null;
+        position: number | null;
+        created_at: string | null;
+      }>;
+      return {
+        ...passage,
+        context: ctxRows.map((c) => ({
+          docAnchor: c.doc_anchor,
+          passageId: c.passage_id,
+          content: c.content,
+          speaker: c.speaker ?? undefined,
+          position: c.position ?? undefined,
+          createdAt: c.created_at ?? undefined,
+        })),
+      };
+    });
+  }
+
+  private toEvidencePassage(passage: PassageResult): NonNullable<EvidenceItem['passages']>[number] {
+    const threadId = passage.docAnchor.startsWith('thread-') ? passage.docAnchor.slice('thread-'.length) : undefined;
+    const messageId = passage.passageId.startsWith('msg-') ? passage.passageId.slice('msg-'.length) : undefined;
+    return {
+      docAnchor: passage.docAnchor,
+      passageId: passage.passageId,
+      content: passage.content,
+      speaker: passage.speaker,
+      createdAt: passage.createdAt,
+      threadId,
+      messageId,
+      ...(passage.context
+        ? {
+            context: passage.context.map((c) => {
+              const ctxThreadId = c.docAnchor.startsWith('thread-') ? c.docAnchor.slice('thread-'.length) : undefined;
+              const ctxMessageId = c.passageId.startsWith('msg-') ? c.passageId.slice('msg-'.length) : undefined;
+              return {
+                docAnchor: c.docAnchor,
+                passageId: c.passageId,
+                content: c.content,
+                speaker: c.speaker,
+                createdAt: c.createdAt,
+                threadId: ctxThreadId,
+                messageId: ctxMessageId,
+              };
+            }),
+          }
+        : {}),
+    };
+  }
+
+  private rankRawResults(
+    results: EvidenceItem[],
+    limit: number,
+    passageOrder: Map<string, number> = new Map(),
+  ): EvidenceItem[] {
+    const originalOrder = new Map(results.map((item, index) => [item.anchor, index]));
+    results.sort((a, b) => {
+      const aHas = a.passages?.length ? 1 : 0;
+      const bHas = b.passages?.length ? 1 : 0;
+      if (aHas !== bHas) return bHas - aHas;
+      const temporalDiff = Number(hasTemporalPenalty(a)) - Number(hasTemporalPenalty(b));
+      if (temporalDiff !== 0) return temporalDiff;
+      if (aHas && bHas) {
+        return (
+          (passageOrder.get(a.anchor) ?? Number.MAX_SAFE_INTEGER) -
+          (passageOrder.get(b.anchor) ?? Number.MAX_SAFE_INTEGER)
         );
       }
+      return (
+        (originalOrder.get(a.anchor) ?? Number.MAX_SAFE_INTEGER) -
+        (originalOrder.get(b.anchor) ?? Number.MAX_SAFE_INTEGER)
+      );
     });
+    return results.slice(0, limit);
+  }
 
-    tx(items);
+  /**
+   * G-4: Enrich search results with drill-down hints for thread/session items.
+   * Tells the cat what MCP tool to use to see full details.
+   */
+  private enrichWithDrillDown(
+    results: EvidenceItem[],
+    targetLimit?: number,
+    options?: SearchOptions,
+    query = '',
+  ): EvidenceItem[] {
+    try {
+      if (this.db) applyConsumptionRerank(results, this.db, targetLimit, query);
+    } catch {
+      // F200 kill-switch: rerank failure → continue with existing ranking
+    }
+    if (options?.depth !== 'raw') applyTemporalStatusPenalty(results);
+    applyPullOnlyDownrank(results);
+    if (targetLimit && results.length > targetLimit) results.length = targetLimit;
+    annotateMatchReasons(results, query, options?.explain);
+    for (const item of results) {
+      if (item.drillDown) continue;
+      const primaryPassage = item.passages?.find((p) => p.threadId && p.messageId);
+      if (primaryPassage?.threadId && primaryPassage.messageId) {
+        item.drillDown = {
+          tool: 'cat_cafe_get_thread_context',
+          params: {
+            threadId: primaryPassage.threadId,
+            messageId: primaryPassage.messageId,
+            before: '3',
+            after: '3',
+          },
+          hint: `打开原文窗口：get_thread_context(threadId="${primaryPassage.threadId}", messageId="${primaryPassage.messageId}", before=3, after=3)`,
+        };
+      } else if (item.kind === 'thread' && item.anchor.startsWith('thread-')) {
+        const threadId = item.anchor.replace('thread-', '');
+        item.drillDown = {
+          tool: 'cat_cafe_get_thread_context',
+          params: { threadId },
+          hint: `查看完整对话：get_thread_context(threadId="${threadId}")`,
+        };
+      } else if (item.kind === 'session' && item.anchor.startsWith('session-')) {
+        const sessionId = item.anchor.replace('session-', '');
+        item.drillDown = {
+          tool: 'cat_cafe_read_session_digest',
+          params: { sessionId },
+          hint: `查看 session 摘要：read_session_digest(sessionId="${sessionId}")`,
+        };
+      } else if (item.kind === 'diary' && item.anchor.startsWith('diary:')) {
+        const diaryId = item.anchor.slice('diary:'.length);
+        item.drillDown = {
+          tool: 'cat_cafe_read_diary',
+          params: { diaryId },
+          hint: '读取这篇第一人称日记原文与 provenance',
+        };
+      } else if (item.sourcePath) {
+        const filePath = this.resolveSourcePathForDrillDown(item.sourcePath);
+        if (filePath) {
+          item.drillDown = {
+            tool: 'cat_cafe_read_file_slice',
+            params: { path: filePath, startLine: '1', endLine: '120' },
+            hint: `打开文件切片：read_file_slice(path="${filePath}", startLine=1, endLine=120)`,
+          };
+        }
+      }
+    }
+    return results;
+  }
+
+  private resolveSourcePathForDrillDown(sourcePath: string): string | null {
+    if (!this.sourceRoot) return null;
+    const resolved = isAbsolute(sourcePath) ? resolve(sourcePath) : resolve(this.sourceRoot, sourcePath);
+    const rel = relative(this.sourceRoot, resolved);
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) return null;
+    const publicRel = rel
+      .split(/[\\/]+/)
+      .filter(Boolean)
+      .join('/');
+    if (!this.sourceRef) {
+      return basename(this.sourceRoot) === 'docs' && !publicRel.startsWith('docs/') ? `docs/${publicRel}` : publicRel;
+    }
+    const encodedPath = publicRel.split('/').map(encodeURIComponent).join('/');
+    return `cat-cafe://collection/${encodeURIComponent(this.sourceRef)}/${encodedPath}`;
+  }
+
+  /**
+   * KD-44: Pure vector nearest-neighbor search (mode=semantic).
+   * Skips BM25 entirely — queries evidence_vectors directly.
+   * Hydrates results from evidence_docs in a single IN(...) query (砚砚: no N+1).
+   */
+  private async semanticNNSearch(
+    query: string,
+    limit: number,
+    options?: SearchOptions,
+    suppressBackstop?: boolean,
+  ): Promise<EvidenceItem[]> {
+    const pool = Math.min(Math.max(limit * 4, 20), 100); // 砚砚: generous pool, cap 100
+    const deps = this.embedDeps!;
+    const embedding = this.searchEmbedding()!;
+    await coverageSearchCheckpoint(options);
+    const queryVec = await embedding.embed([query], options?.signal);
+    await coverageSearchCheckpoint(options);
+    embedding.assertCurrent();
+    const nnResults = deps.vectorStore.search(queryVec[0], pool);
+    await coverageSearchCheckpoint(options);
+    embedding.assertCurrent();
+    if (nnResults.length === 0) return [];
+
+    const anchors = nnResults.map((r) => r.anchor);
+    const rowsByAnchor = this.selectEvidenceDocRowsByAnchor(
+      anchors,
+      options,
+      this.buildSearchFilters(options, suppressBackstop),
+    );
+    const docMap = new Map([...rowsByAnchor].map(([anchor, row]) => [anchor, rowToItem(row)]));
+
+    // Return in NN distance order, filtered by what passed scope/kind
+    const items = nnResults
+      .filter((r) => docMap.has(r.anchor))
+      .flatMap((r) => {
+        const item = docMap.get(r.anchor);
+        return item ? [item] : [];
+      });
+    applyTemporalStatusPenalty(items);
+    return items.slice(0, limit);
+  }
+
+  /**
+   * KD-44: Hybrid search — BM25 + vector NN dual-path recall → RRF fusion.
+   * 砚砚 R5: pool = max(limit*4, 20) cap 100, RRF k=60.
+   */
+  private async hybridRRFSearch(
+    query: string,
+    lexicalResults: EvidenceItem[],
+    limit: number,
+    options?: SearchOptions,
+    suppressBackstop?: boolean,
+  ): Promise<EvidenceItem[]> {
+    const pool = Math.min(Math.max(limit * 4, 20), 100);
+    const deps = this.embedDeps!;
+    const embedding = this.searchEmbedding()!;
+    await coverageSearchCheckpoint(options);
+    const queryVec = await embedding.embed([query], options?.signal);
+    await coverageSearchCheckpoint(options);
+    embedding.assertCurrent();
+    const nnResults = deps.vectorStore.search(queryVec[0], pool);
+    await coverageSearchCheckpoint(options);
+    embedding.assertCurrent();
+
+    // RRF fusion: score = Σ 1/(k + rank_i), k=60
+    const RRF_K = 60;
+    const scores = new Map<string, number>();
+    // DF-8: boost NN weight for CJK queries (BM25 has poor CJK recall)
+    const nnWeight = hasCJKCharacters(query) ? CJK_NN_WEIGHT : 1.0;
+
+    // BM25 ranks
+    for (let i = 0; i < lexicalResults.length; i++) {
+      const anchor = lexicalResults[i].anchor;
+      scores.set(anchor, (scores.get(anchor) ?? 0) + 1 / (RRF_K + i));
+    }
+
+    // NN ranks (weighted for CJK)
+    for (let i = 0; i < nnResults.length; i++) {
+      const anchor = nnResults[i].anchor;
+      scores.set(anchor, (scores.get(anchor) ?? 0) + nnWeight / (RRF_K + i));
+    }
+
+    // Collect all unique anchors, hydrate missing ones from DB
+    const allAnchors = [...scores.keys()];
+    const lexicalMap = new Map(lexicalResults.map((r) => [r.anchor, r]));
+
+    // P1 fix: hydrate missing NN anchors WITH filters (status/kind/keywords)
+    const missingAnchors = allAnchors.filter((a) => !lexicalMap.has(a));
+    if (missingAnchors.length > 0) {
+      const rows = this.selectEvidenceDocRowsByAnchor(
+        missingAnchors,
+        options,
+        this.buildSearchFilters(options, suppressBackstop),
+      );
+      for (const row of rows.values()) {
+        lexicalMap.set(row.anchor, rowToItem(row));
+      }
+    }
+
+    // Sort by RRF score descending, then apply temporal demotion before the final top-k cut.
+    const items = allAnchors
+      .filter((a) => lexicalMap.has(a))
+      .sort((a, b) => (scores.get(b) ?? 0) - (scores.get(a) ?? 0))
+      .map((a) => lexicalMap.get(a)!);
+    applyTemporalStatusPenalty(items);
+    return items.slice(0, limit);
+  }
+
+  upsert(items: EvidenceItem[], canWrite?: () => boolean): Promise<void> {
+    return this.upsertWithMentionPolicy(items, true, canWrite);
+  }
+
+  /** IndexBuilder batches its derived mention publication after doc/passages writes. */
+  upsertForDocumentIndex(item: EvidenceItem): Promise<void> {
+    return this.upsertWithMentionPolicy([item], false);
+  }
+
+  private async upsertWithMentionPolicy(
+    items: EvidenceItem[],
+    refreshMentions: boolean,
+    canWrite?: () => boolean,
+  ): Promise<void> {
+    return this.writeQueue.enqueue(async () => {
+      this.ensureOpen();
+      const db = this.db;
+      if (!db) {
+        throw new Error('Evidence store is closed');
+      }
+
+      // F163 Phase C (AC-C1): write-time contradiction detection
+      const flags = freezeFlags();
+      if (flags.contradictionDetection !== 'off') {
+        const detector = new ContradictionDetector(this);
+        for (const item of items) {
+          if (!item.contradicts) {
+            const hits = await detector.check({
+              title: item.title,
+              summary: item.summary,
+              kind: item.kind,
+            });
+            const filtered = hits.filter((h) => h.anchor !== item.anchor);
+            if (filtered.length > 0) {
+              item.contradicts = filtered.map((h) => h.anchor);
+            }
+          }
+        }
+      }
+
+      // F163 Phase B (AC-B5): cascade compression guard
+      // If any item is a summary (summaryOfAnchor set), verify none of its
+      // sourceIds reference docs that are themselves summaries.
+      for (const item of items) {
+        if (item.summaryOfAnchor && item.sourceIds?.length) {
+          const placeholders = item.sourceIds.map(() => '?').join(',');
+          const cascadeHits = db
+            .prepare(
+              `SELECT anchor FROM evidence_docs
+               WHERE anchor IN (${placeholders}) AND summary_of_anchor IS NOT NULL`,
+            )
+            .all(...item.sourceIds) as { anchor: string }[];
+          if (cascadeHits.length > 0) {
+            const hitAnchors = cascadeHits.map((r) => r.anchor).join(', ');
+            throw new Error(`cascade compression prohibited: source(s) [${hitAnchors}] are already summaries`);
+          }
+        }
+      }
+
+      // Recheck projections after asynchronous detection, inside the writer queue.
+      if (canWrite && !canWrite()) return;
+      writeEvidenceItems(db, items);
+      if (!refreshMentions) return;
+      const docAnchors = items.map((item) => item.anchor);
+      if (this.usesIsolatedProcesses())
+        await publishEntityMentions(db, this.dbPath, { operation: 'mentions', docAnchors }, () => {});
+      else this.entityRegistry?.refreshMentions(docAnchors);
+    });
   }
 
   async deleteByAnchor(anchor: string): Promise<void> {
+    return this.writeQueue.enqueue(() => {
+      this.ensureOpen();
+      const db = this.getDb();
+      const invalidateDocument = createVectorInvalidator(db, 'evidence_vectors');
+      db.transaction(() => {
+        if (!anchor.startsWith('thread-')) {
+          const passages = db
+            .prepare('SELECT passage_id AS passageId FROM evidence_passages WHERE doc_anchor = ?')
+            .all(anchor) as Array<{ passageId: string }>;
+          deletePassageVectors(
+            db,
+            passages.map((passage) => ({ docAnchor: anchor, passageId: passage.passageId })),
+          );
+          db.prepare('DELETE FROM evidence_passages WHERE doc_anchor = ?').run(anchor);
+        }
+        invalidateDocument(anchor);
+        db.prepare('DELETE FROM evidence_docs WHERE anchor = ?').run(anchor);
+      })();
+    });
+  }
+
+  /** F129: Delete all evidence entries for a given pack_id */
+  async deleteByPackId(packId: string): Promise<number> {
+    return this.writeQueue.enqueue(() => {
+      this.ensureOpen();
+      const result = this.db?.prepare('DELETE FROM evidence_docs WHERE pack_id = ?').run(packId);
+      return result?.changes ?? 0;
+    });
+  }
+
+  removeBySourcePrefix(prefix: string): number {
     this.ensureOpen();
-    this.db?.prepare('DELETE FROM evidence_docs WHERE anchor = ?').run(anchor);
+    const db = this.getDb();
+    return db.transaction(() => {
+      const escaped = prefix.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+      const likePattern = escaped + '%';
+      const anchors = (
+        db.prepare("SELECT anchor FROM evidence_docs WHERE source_path LIKE ? ESCAPE '\\'").all(likePattern) as Array<{
+          anchor: string;
+        }>
+      ).map((r) => r.anchor);
+      const result = db.prepare("DELETE FROM evidence_docs WHERE source_path LIKE ? ESCAPE '\\'").run(likePattern);
+      if (anchors.length) {
+        const invalidateDocument = createVectorInvalidator(db, 'evidence_vectors');
+        const CHUNK = 400;
+        for (let i = 0; i < anchors.length; i += CHUNK) {
+          const batch = anchors.slice(i, i + CHUNK);
+          const ph = batch.map(() => '?').join(',');
+          db.prepare(`DELETE FROM edges WHERE from_anchor IN (${ph}) OR to_anchor IN (${ph})`).run(...batch, ...batch);
+          const passageRows = db
+            .prepare(
+              `SELECT doc_anchor AS docAnchor, passage_id AS passageId FROM evidence_passages WHERE doc_anchor IN (${ph})`,
+            )
+            .all(...batch) as Array<{ docAnchor: string; passageId: string }>;
+          deletePassageVectors(
+            db,
+            passageRows.filter((row) => !row.docAnchor.startsWith('thread-')),
+          );
+          db.prepare(
+            `DELETE FROM evidence_passages WHERE doc_anchor IN (${ph}) AND doc_anchor NOT LIKE 'thread-%'`,
+          ).run(...batch);
+          for (const anchor of batch) invalidateDocument(anchor);
+        }
+      }
+      return result.changes;
+    })();
   }
 
   async getByAnchor(anchor: string): Promise<EvidenceItem | null> {
@@ -272,6 +1832,18 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       | RowShape
       | undefined;
     return row ? rowToItem(row) : null;
+  }
+
+  async getIndexedSourceRevision(
+    anchor: string,
+  ): Promise<{ sourceHash: string; vectorSourceHash: string | null } | null> {
+    this.ensureOpen();
+    const row = this.db
+      ?.prepare(`SELECT d.source_hash AS sourceHash, v.source_hash AS vectorSourceHash
+      FROM evidence_docs d LEFT JOIN document_vector_sources v ON v.anchor=d.anchor
+      WHERE d.anchor=? COLLATE NOCASE`)
+      .get(anchor) as { sourceHash: string | null; vectorSourceHash: string | null } | undefined;
+    return row?.sourceHash ? { sourceHash: row.sourceHash, vectorSourceHash: row.vectorSourceHash } : null;
   }
 
   async health(): Promise<boolean> {
@@ -284,90 +1856,359 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     }
   }
 
+  private processEmbeddingSnapshot(): EmbeddingSnapshot | undefined {
+    const deps = this.embedDeps;
+    return deps && this.vectorProjection.ready
+      ? {
+          ready: deps.embedding.isReady(),
+          model: deps.embedding.getModelInfo(),
+          mode: deps.mode,
+          passages: Boolean(deps.passageVectorStore),
+        }
+      : undefined;
+  }
+
+  /** File-backed runtime stores isolate native work; :memory: retains the same algorithm locally. */
+  usesIsolatedProcesses(): boolean {
+    return this.dbPath !== ':memory:' && !this.workerMode;
+  }
+
   /** Expose db for IndexBuilder and other internal consumers */
   getDb(): Database.Database {
     this.ensureOpen();
     return this.db!;
   }
 
+  /** Serialize an arbitrary write through the single-writer queue (F163 AC-A5). */
+  runExclusive<T>(fn: () => T | Promise<T>): Promise<T> {
+    return this.writeQueue.enqueue(fn);
+  }
+
+  /** A bounded indexing transaction must not run bulk WAL backfill on the API
+   * thread. Retain its queue slot until the existing maintenance process drains
+   * the batch, then restore the connection policy before the next writer. */
+  runCheckpointedBatch<T>(fn: () => T | Promise<T>): Promise<T> {
+    return this.runExclusive(async () => {
+      if (!this.usesIsolatedProcesses()) return fn();
+      let result!: T;
+      await withProjectionCheckpoints(this.getDb(), this.dbPath, async () => {
+        result = await fn();
+      });
+      return result;
+    });
+  }
+
+  /** Retain the canonical writer queue until maintenance commits or its child closes. */
+  repackPassageVectors(options?: { signal?: AbortSignal; deadlineAt?: number }): Promise<VectorRepackResult> {
+    return this.runExclusive(() => {
+      if (this.workerMode === 'read') throw new Error('Read-only memory worker cannot repack vectors');
+      options?.signal?.throwIfAborted();
+      return this.usesIsolatedProcesses()
+        ? runMemoryVectorRepack(this.dbPath, options)
+        : repackPassageVectors(this.getDb());
+    });
+  }
+
+  /**
+   * F163 Phase B (AC-B2): Create a canonical summary and demote originals to backstop.
+   * Validates: all source anchors exist, no cascade (source is not itself a summary).
+   * Returns the generated summary anchor.
+   */
+  async createSummary(params: {
+    sourceAnchors: string[];
+    title: string;
+    summary: string;
+    rationale: string;
+    kind?: EvidenceItem['kind'];
+  }): Promise<string> {
+    return this.writeQueue.enqueue(() => {
+      this.ensureOpen();
+      const db = this.db;
+      if (!db) throw new Error('Evidence store is closed');
+
+      // Validate all source anchors exist
+      const placeholders = params.sourceAnchors.map(() => '?').join(',');
+      const existing = db
+        .prepare(`SELECT anchor, kind, summary_of_anchor FROM evidence_docs WHERE anchor IN (${placeholders})`)
+        .all(...params.sourceAnchors) as { anchor: string; kind: string; summary_of_anchor: string | null }[];
+
+      const foundAnchors = new Set(existing.map((r) => r.anchor));
+      const missing = params.sourceAnchors.filter((a) => !foundAnchors.has(a));
+      if (missing.length > 0) {
+        throw new Error(`Source anchors not found: ${missing.join(', ')}`);
+      }
+
+      // Cascade guard: none of the sources can be summaries
+      const cascadeHits = existing.filter((r) => r.summary_of_anchor != null);
+      if (cascadeHits.length > 0) {
+        throw new Error(
+          `cascade compression prohibited: source(s) [${cascadeHits.map((r) => r.anchor).join(', ')}] are already summaries`,
+        );
+      }
+
+      // Determine kind: use param override, or majority kind from sources, default 'lesson'
+      const kind = params.kind ?? this.majorityKind(existing.map((r) => r.kind));
+
+      // Generate summary anchor
+      const summaryAnchor = `CS-${Date.now().toString(36)}`;
+      const groupId = `sg-${Date.now().toString(36)}`;
+      const now = new Date().toISOString();
+
+      const tx = db.transaction(() => {
+        // Insert summary doc
+        db.prepare(`
+          INSERT INTO evidence_docs
+          (anchor, kind, status, title, summary, updated_at, authority, activation,
+           source_ids, summary_of_anchor, compression_rationale)
+          VALUES (?, ?, 'active', ?, ?, ?, 'validated', 'query', ?, ?, ?)
+        `).run(
+          summaryAnchor,
+          kind,
+          params.title,
+          params.summary,
+          now,
+          JSON.stringify(params.sourceAnchors),
+          groupId,
+          params.rationale,
+        );
+
+        // Demote originals to backstop
+        db.prepare(`UPDATE evidence_docs SET activation = 'backstop' WHERE anchor IN (${placeholders})`).run(
+          ...params.sourceAnchors,
+        );
+      });
+
+      tx();
+      return summaryAnchor;
+    });
+  }
+
+  /** Pick the most common kind from a list, defaulting to 'lesson' */
+  private majorityKind(kinds: string[]): EvidenceItem['kind'] {
+    const counts = new Map<string, number>();
+    for (const k of kinds) counts.set(k, (counts.get(k) ?? 0) + 1);
+    let best = 'lesson';
+    let bestCount = 0;
+    for (const [k, c] of counts) {
+      if (c > bestCount) {
+        best = k;
+        bestCount = c;
+      }
+    }
+    return best as EvidenceItem['kind'];
+  }
+
+  /**
+   * F163 AC-A3: Query always_on + constitutional docs for physical injection.
+   * Guard: activation=always_on AND authority=constitutional AND status=active.
+   * Synchronous — used at prompt build time, not in search pipeline.
+   */
+  queryAlwaysOn(): Array<{ anchor: string; title: string; summary: string }> {
+    this.ensureOpen();
+    return (
+      (this.db
+        ?.prepare(
+          `SELECT anchor, title, summary
+         FROM evidence_docs
+         WHERE activation = 'always_on'
+           AND authority = 'constitutional'
+           AND status = 'active'`,
+        )
+        .all() as Array<{ anchor: string; title: string; summary: string }>) ?? []
+    );
+  }
+
   // ── Edge operations ─────────────────────────────────────────────────
 
   async addEdge(edge: Edge): Promise<void> {
-    this.ensureOpen();
-    this.db
-      ?.prepare('INSERT OR IGNORE INTO edges (from_anchor, to_anchor, relation) VALUES (?, ?, ?)')
-      .run(edge.fromAnchor, edge.toAnchor, edge.relation);
+    return this.writeQueue.enqueue(() => {
+      this.ensureOpen();
+      this.db
+        ?.prepare(
+          `INSERT OR IGNORE INTO edges
+           (from_anchor, to_anchor, relation, from_collection_id, to_collection_id, edge_sensitivity, provenance, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          edge.fromAnchor,
+          edge.toAnchor,
+          edge.relation,
+          edge.fromCollectionId ?? null,
+          edge.toCollectionId ?? null,
+          edge.edgeSensitivity ?? null,
+          edge.provenance ?? null,
+          edge.createdAt ?? new Date().toISOString(),
+        );
+    });
   }
 
-  async getRelated(anchor: string): Promise<Array<{ anchor: string; relation: string }>> {
+  async getRelated(anchor: string): Promise<
+    Array<{
+      anchor: string;
+      relation: string;
+      fromCollectionId: string | null;
+      toCollectionId: string | null;
+      edgeSensitivity: string | null;
+      provenance: string | null;
+      traversalCount: number;
+      lastTraversedAt: string | null;
+    }>
+  > {
     this.ensureOpen();
     const rows = this.db
       ?.prepare(
-        `SELECT to_anchor AS anchor, relation FROM edges WHERE from_anchor = ?
-			 UNION
-			 SELECT from_anchor AS anchor, relation FROM edges WHERE to_anchor = ?`,
+        `SELECT to_anchor AS anchor,
+                CASE WHEN relation = 'related' THEN 'related_to' ELSE relation END AS relation,
+                from_collection_id AS fromCollectionId,
+                to_collection_id AS toCollectionId,
+                edge_sensitivity AS edgeSensitivity,
+                provenance,
+                COALESCE(traversal_count, 0) AS traversalCount,
+                last_traversed_at AS lastTraversedAt
+         FROM edges WHERE from_anchor = ?
+         UNION
+         SELECT from_anchor AS anchor,
+                CASE WHEN relation = 'related' THEN 'related_to' ELSE relation END AS relation,
+                from_collection_id AS fromCollectionId,
+                to_collection_id AS toCollectionId,
+                edge_sensitivity AS edgeSensitivity,
+                provenance,
+                COALESCE(traversal_count, 0) AS traversalCount,
+                last_traversed_at AS lastTraversedAt
+         FROM edges WHERE to_anchor = ?`,
       )
-      .all(anchor, anchor) as Array<{ anchor: string; relation: string }>;
+      .all(anchor, anchor) as Array<{
+      anchor: string;
+      relation: string;
+      fromCollectionId: string | null;
+      toCollectionId: string | null;
+      edgeSensitivity: string | null;
+      provenance: string | null;
+      traversalCount: number;
+      lastTraversedAt: string | null;
+    }>;
     return rows;
   }
 
   async removeEdge(edge: Edge): Promise<void> {
-    this.ensureOpen();
-    this.db
-      ?.prepare('DELETE FROM edges WHERE from_anchor = ? AND to_anchor = ? AND relation = ?')
-      .run(edge.fromAnchor, edge.toAnchor, edge.relation);
+    return this.writeQueue.enqueue(() => {
+      this.ensureOpen();
+      this.db
+        ?.prepare('DELETE FROM edges WHERE from_anchor = ? AND to_anchor = ? AND relation = ?')
+        .run(edge.fromAnchor, edge.toAnchor, edge.relation);
+    });
   }
 
   // ── Passage operations ─────────────────────────────────────────────
 
   /** Search passage_fts and return matching passages with doc context. */
-  searchPassages(query: string, limit = 10): PassageResult[] {
+  searchPassages(
+    query: string,
+    limit = 10,
+    timeFilter?: { dateFrom?: string; dateTo?: string },
+    options?: { contextWindow?: number },
+  ): PassageResult[] {
     this.ensureOpen();
     const trimmed = query.trim();
     if (!trimmed) return [];
 
-    const ftsQuery = trimmed
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((w) => `"${w.replace(/"/g, '""')}"`)
-      .join(' ');
+    // HW-6: Progressive relaxation for passage search (same fix as doc search)
+    const passageFtsQueries = buildProgressiveFtsQueries(trimmed);
+    if (passageFtsQueries.length === 0) return [];
 
-    if (!ftsQuery) return [];
+    for (const ftsQuery of passageFtsQueries) {
+      try {
+        // Ask FTS5 for its ordered rowids first. Hydrate large passage bodies only
+        // after LIMIT; its hidden rank column enables FTS5's optimized BM25 order.
+        let candidates = `SELECT f.rowid, f.rank FROM passage_fts f WHERE passage_fts MATCH ?`;
+        const params: unknown[] = [ftsQuery];
+        const dates: string[] = [];
+        if (timeFilter?.dateFrom) {
+          dates.push('dated.created_at >= ?');
+          params.push(timeFilter.dateFrom);
+        }
+        if (timeFilter?.dateTo) {
+          dates.push('dated.created_at <= ?');
+          params.push(timeFilter.dateTo.length === 10 ? `${timeFilter.dateTo}T23:59:59` : timeFilter.dateTo);
+        }
+        if (dates.length)
+          candidates += ` AND EXISTS (SELECT 1 FROM evidence_passages dated WHERE dated.rowid = f.rowid AND ${dates.join(' AND ')})`;
+        candidates += ' ORDER BY f.rank LIMIT ?';
+        params.push(limit);
+        const sql = `WITH hits AS MATERIALIZED (${candidates})
+          SELECT p.doc_anchor, p.passage_id, p.content, p.speaker, p.position, p.created_at, hits.rank
+          FROM hits JOIN evidence_passages p ON p.rowid = hits.rowid ORDER BY hits.rank`;
 
-    try {
-      const rows = this.db
-        ?.prepare(
-          `SELECT p.doc_anchor, p.passage_id, p.content, p.speaker, p.position,
-                  bm25(passage_fts) AS rank
-           FROM passage_fts f
-           JOIN evidence_passages p ON p.rowid = f.rowid
-           WHERE passage_fts MATCH ?
-           ORDER BY rank
-           LIMIT ?`,
-        )
-        .all(ftsQuery, limit) as Array<{
-        doc_anchor: string;
-        passage_id: string;
-        content: string;
-        speaker: string | null;
-        position: number | null;
-        rank: number;
-      }>;
+        const rows = this.db?.prepare(sql).all(...params) as Array<{
+          doc_anchor: string;
+          passage_id: string;
+          content: string;
+          speaker: string | null;
+          position: number | null;
+          created_at: string | null;
+          rank: number;
+        }>;
 
-      return (rows ?? []).map((r) => ({
-        docAnchor: r.doc_anchor,
-        passageId: r.passage_id,
-        content: r.content,
-        speaker: r.speaker ?? undefined,
-        position: r.position ?? undefined,
-      }));
-    } catch {
-      // FTS5 syntax error — degrade gracefully
-      return [];
+        // HW-6: if this relaxation level found results, process and return
+        if ((rows ?? []).length > 0) {
+          const results: PassageResult[] = (rows ?? []).map((r) => ({
+            docAnchor: r.doc_anchor,
+            passageId: r.passage_id,
+            content: r.content,
+            speaker: r.speaker ?? undefined,
+            position: r.position ?? undefined,
+            rank: r.rank,
+            createdAt: r.created_at ?? undefined,
+          }));
+
+          // AC-I8: fetch surrounding passages within the context window
+          const cw = options?.contextWindow;
+          if (cw && cw > 0 && this.db) {
+            const ctxStmt = this.db.prepare(
+              `SELECT doc_anchor, passage_id, content, speaker, position, created_at
+               FROM evidence_passages
+               WHERE doc_anchor = ? AND position BETWEEN ? AND ? AND passage_id != ?
+               ORDER BY position`,
+            );
+            for (const r of results) {
+              if (r.position != null) {
+                const ctxRows = ctxStmt.all(r.docAnchor, r.position - cw, r.position + cw, r.passageId) as Array<{
+                  doc_anchor: string;
+                  passage_id: string;
+                  content: string;
+                  speaker: string | null;
+                  position: number | null;
+                  created_at: string | null;
+                }>;
+                r.context = ctxRows.map((c) => ({
+                  docAnchor: c.doc_anchor,
+                  passageId: c.passage_id,
+                  content: c.content,
+                  speaker: c.speaker ?? undefined,
+                  position: c.position ?? undefined,
+                  createdAt: c.created_at ?? undefined,
+                }));
+              }
+            }
+          }
+
+          return results;
+        }
+        // 0 rows → try next relaxation level
+      } catch {}
     }
+    // All relaxation levels exhausted — return empty
+    return [];
   }
 
   close(): void {
+    try {
+      this.detachReadDiagnostics?.();
+    } catch {
+      /* An optional observer cannot prevent closing the canonical connection. */
+    }
+    this.detachReadDiagnostics = undefined;
+    this.initialization = undefined;
     if (this.db?.open) {
       this.db.close();
     }
@@ -379,6 +2220,82 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       throw new Error('SqliteEvidenceStore not initialized — call initialize() first');
     }
   }
+}
+
+function entityResidualQueryTerms(query: string, matches: QueryEntityMatch[]): string[] {
+  if (matches.length === 0) return [];
+  const residualQuery = matches
+    .flatMap((match) => [match.matchedAlias, match.canonicalName])
+    .reduce(removeEntitySurface, normalizeEntityAlias(query));
+  return splitLexicalBackfillWords(residualQuery)
+    .map((term) => term.replace(/^[^\p{L}\p{N}_@-]+|[^\p{L}\p{N}_@-]+$/gu, ''))
+    .filter(Boolean);
+}
+
+function removeEntitySurface(query: string, surface: string): string {
+  const normalizedSurface = normalizeEntityAlias(surface);
+  if (!normalizedSurface) return query;
+  if (hasCJKCharacters(normalizedSurface)) return query.split(normalizedSurface).join(' ');
+  const escaped = normalizedSurface.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return query.replace(new RegExp(`(^|[^\\p{L}\\p{N}_@-])${escaped}(?=$|[^\\p{L}\\p{N}_@-])`, 'gu'), '$1 ');
+}
+
+function textMatchesAllTerms(text: string, terms: string[]): boolean {
+  if (terms.length === 0) return true;
+  const normalized = normalizeEntityAlias(text);
+  return terms.every((term) => normalized.includes(term));
+}
+
+function evidenceRowMatchesAllTerms(row: RowShape, terms: string[]): boolean {
+  return textMatchesAllTerms([row.anchor, row.title, row.summary ?? '', row.keywords ?? ''].join('\n'), terms);
+}
+
+function filterEntityMatchMap(
+  matchesByAnchor: Map<string, EntityMatch[]> | undefined,
+  allowedAnchors: Set<string>,
+): Map<string, EntityMatch[]> {
+  if (!matchesByAnchor || matchesByAnchor.size === 0) return new Map();
+  return new Map([...matchesByAnchor].filter(([anchor]) => allowedAnchors.has(anchor)));
+}
+
+function mergeEntityMatchMaps(
+  left: Map<string, EntityMatch[]>,
+  right?: Map<string, EntityMatch[]>,
+): Map<string, EntityMatch[]> {
+  if (!right || right.size === 0) return left;
+  const merged = new Map<string, EntityMatch[]>();
+  for (const [anchor, matches] of left) merged.set(anchor, [...matches]);
+  for (const [anchor, matches] of right) {
+    const arr = merged.get(anchor) ?? [];
+    arr.push(...matches);
+    merged.set(anchor, arr);
+  }
+  return merged;
+}
+
+function mergePassageResults(entityPassages: PassageResult[], passages: PassageResult[]): PassageResult[] {
+  if (entityPassages.length === 0) return passages;
+  const out: PassageResult[] = [];
+  const seen = new Set<string>();
+  for (const passage of [...entityPassages, ...passages]) {
+    const key = passageVectorKey(passage.docAnchor, passage.passageId);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(passage);
+  }
+  return out;
+}
+
+function dedupeEntityMatches(matches: EntityMatch[]): EntityMatch[] {
+  const seen = new Set<string>();
+  const out: EntityMatch[] = [];
+  for (const match of matches) {
+    const key = `${match.entityId}\u0000${match.docAnchor}\u0000${match.passageId ?? ''}\u0000${match.surface}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(match);
+  }
+  return out;
 }
 
 // ── Row mapping ──────────────────────────────────────────────────────
@@ -395,6 +2312,25 @@ interface RowShape {
   superseded_by: string | null;
   materialized_from: string | null;
   updated_at: string;
+  pack_id: string | null;
+  provenance_tier: string | null;
+  provenance_source: string | null;
+  generalizable: number | null;
+  authority: string | null;
+  activation: string | null;
+  verified_at: string | null;
+  source_ids: string | null;
+  summary_of_anchor: string | null;
+  compression_rationale: string | null;
+  contradicts: string | null;
+  invalid_at: string | null;
+  review_cycle_days: number | null;
+  world_id: string | null;
+  scene_id: string | null;
+  collection_id: string | null;
+  review_status: string | null;
+  first_indexed_at: number | null;
+  drill_down_json: string | null;
 }
 
 function rowToItem(row: RowShape): EvidenceItem {
@@ -411,5 +2347,293 @@ function rowToItem(row: RowShape): EvidenceItem {
   if (row.source_hash != null) item.sourceHash = row.source_hash;
   if (row.superseded_by != null) item.supersededBy = row.superseded_by;
   if (row.materialized_from != null) item.materializedFrom = row.materialized_from;
+  if (row.pack_id != null) item.packId = row.pack_id;
+  if (row.provenance_tier != null) {
+    item.provenance = {
+      tier: row.provenance_tier as 'authoritative' | 'derived' | 'soft_clue',
+      source: row.provenance_source ?? '',
+    };
+  }
+  if (row.generalizable != null) item.generalizable = row.generalizable === 1;
+  if (row.authority != null) item.authority = row.authority as EvidenceItem['authority'];
+  if (row.activation != null) item.activation = row.activation as EvidenceItem['activation'];
+  if (row.verified_at != null) item.verifiedAt = row.verified_at;
+  if (row.source_ids != null) item.sourceIds = JSON.parse(row.source_ids);
+  if (row.summary_of_anchor != null) item.summaryOfAnchor = row.summary_of_anchor;
+  if (row.compression_rationale != null) item.compressionRationale = row.compression_rationale;
+  if (row.contradicts != null) item.contradicts = JSON.parse(row.contradicts);
+  if (row.invalid_at != null) item.invalidAt = row.invalid_at;
+  if (row.review_cycle_days != null) item.reviewCycleDays = row.review_cycle_days;
+  if (row.world_id != null) item.worldId = row.world_id;
+  if (row.scene_id != null) item.sceneId = row.scene_id;
+  if (row.review_status != null) item.reviewStatus = row.review_status as EvidenceItem['reviewStatus'];
+  if (row.first_indexed_at != null) item.firstIndexedAt = row.first_indexed_at;
+  if (row.drill_down_json != null) item.drillDown = JSON.parse(row.drill_down_json) as EvidenceItem['drillDown'];
   return item;
+}
+
+// ── F163: Authority boost weights (1.0–1.3 range, spec constraint) ──
+
+const AUTHORITY_WEIGHTS: Record<F163Authority, number> = {
+  constitutional: 1.3,
+  validated: 1.2,
+  candidate: 1.1,
+  observed: 1.0,
+};
+
+/**
+ * F163: Post-retrieval authority boost. Reranks results in-place when
+ * F163_AUTHORITY_BOOST is 'on'. In 'shadow' mode, the boost is computed
+ * but the original order is preserved. In 'off' mode, this is a no-op.
+ */
+function applyAuthorityBoost(results: EvidenceItem[], query = ''): void {
+  const flags = freezeFlags();
+  if (flags.authorityBoost === 'off' || results.length < 2) return;
+  if (findExactLexicalProtectedAnchors(results, query).size > 0) return;
+
+  // RRF-style positional score: 1/(rank+k) keeps adjacent positions close
+  // so the 1.0–1.3 authority weight can meaningfully reorder near-tied items.
+  const K = 60;
+  const scored = results.map((item, i) => ({
+    item,
+    score: (1 / (i + K)) * AUTHORITY_WEIGHTS[(item.authority as F163Authority) ?? 'observed'],
+  }));
+
+  scored.sort((a, b) => b.score - a.score);
+
+  if (flags.authorityBoost === 'on') {
+    // Rewrite results array in-place
+    for (let i = 0; i < results.length; i++) {
+      results[i] = scored[i].item;
+    }
+  }
+  // shadow: order unchanged, but boost was computed (logging in Task 7)
+}
+
+// ── F200 Phase C: Consumption-weighted rerank ──
+
+interface AnchorMetricRow {
+  anchor: string;
+  consumed_count_30d: number;
+  exposure_count_30d: number;
+  dormancy_days: number | null;
+}
+
+function loadAnchorMetrics(db: Database.Database, anchors: string[]): Map<string, AnchorMetricRow> {
+  if (anchors.length === 0) return new Map();
+  const placeholders = anchors.map(() => '?').join(',');
+  const rows = db
+    .prepare(`SELECT * FROM anchor_recall_metrics WHERE anchor IN (${placeholders})`)
+    .all(...anchors) as AnchorMetricRow[];
+  return new Map(rows.map((r) => [r.anchor, r]));
+}
+
+function loadGlobalCtrBaseline(db: Database.Database): Record<string, number> {
+  const rows = db.prepare('SELECT doc_kind, mean_ctr FROM global_ctr_baseline').all() as Array<{
+    doc_kind: string;
+    mean_ctr: number;
+  }>;
+  const result: Record<string, number> = {};
+  for (const r of rows) result[r.doc_kind] = r.mean_ctr;
+  return result;
+}
+
+const _shadowRankingMap = new Map<string, Array<Array<{ anchor: string; shadowRank: number }>>>();
+const MAX_SHADOW_ENTRIES = 32;
+
+function shadowKey(anchors: string[]): string {
+  return anchors.slice(0, 8).join('|');
+}
+
+function storeShadowRanking(resultAnchors: string[], ranking: Array<{ anchor: string; shadowRank: number }>): void {
+  const key = shadowKey(resultAnchors);
+  const existing = _shadowRankingMap.get(key);
+  if (existing) {
+    existing.push(ranking);
+  } else {
+    if (_shadowRankingMap.size >= MAX_SHADOW_ENTRIES) {
+      const oldest = _shadowRankingMap.keys().next().value;
+      if (oldest != null) _shadowRankingMap.delete(oldest);
+    }
+    _shadowRankingMap.set(key, [ranking]);
+  }
+}
+
+export function lookupShadowRanking(candidateAnchors: string[]): Array<{ anchor: string; shadowRank: number }> | null {
+  const key = shadowKey(candidateAnchors);
+  const stack = _shadowRankingMap.get(key);
+  if (!stack || stack.length === 0) return null;
+  const ranking = stack.shift()!;
+  if (stack.length === 0) _shadowRankingMap.delete(key);
+  return ranking;
+}
+
+export function applyConsumptionRerank(
+  results: EvidenceItem[],
+  db: Database.Database,
+  targetLimit?: number,
+  query = '',
+): void {
+  const f200Flags = freezeF200Flags();
+  if (f200Flags.consumptionRerank === 'off' || results.length < 2) return;
+
+  const exactProtectedAnchors = findExactLexicalProtectedAnchors(results, query);
+  const protectedResults = exactProtectedAnchors.size
+    ? results.filter((item) => exactProtectedAnchors.has(item.anchor))
+    : [];
+  const rerankPool = exactProtectedAnchors.size
+    ? results.filter((item) => !exactProtectedAnchors.has(item.anchor))
+    : results;
+  if (rerankPool.length < 2) {
+    if (f200Flags.consumptionRerank === 'on' && protectedResults.length > 0) {
+      for (let i = 0; i < protectedResults.length; i++) results[i] = protectedResults[i];
+      results.length = protectedResults.length;
+    }
+    storeShadowRanking(
+      results.map((r) => r.anchor),
+      results.map((item, i) => ({ anchor: item.anchor, shadowRank: i })),
+    );
+    return;
+  }
+
+  // HW-7: Snapshot pre-rerank BM25 order for shadow comparison.
+  // Previously shadow was stored from `final` (post-rerank), making shadow ≡ live
+  // by construction in 'on' mode — shadowConsumedMRR / liveOnShadowSubsetMRR ≈ 1 always.
+  // Cloud-P2: Must use original `results` array (before partition), not
+  // [protectedResults, rerankPool] which bakes in lexical protection bias.
+  const preRerankOrder: Array<{ anchor: string; shadowRank: number }> = results.map((item, i) => ({
+    anchor: item.anchor,
+    shadowRank: i,
+  }));
+
+  const anchorMetrics = loadAnchorMetrics(
+    db,
+    rerankPool.map((r) => r.anchor),
+  );
+  const globalMeanCtr = loadGlobalCtrBaseline(db);
+
+  const K = 60;
+  const BETA = 0.15;
+  const GAMMA = 0.1;
+
+  const scored = rerankPool.map((item, i) => {
+    const metrics = anchorMetrics.get(item.anchor);
+    const prior = computeConsumptionPrior(
+      {
+        consumedCount30d: metrics?.consumed_count_30d ?? 0,
+        exposureCount30d: metrics?.exposure_count_30d ?? 0,
+        daysSinceLastConsumed: metrics?.dormancy_days ?? null,
+        docKind: item.kind ?? 'unknown',
+        authority: (item.authority as F163Authority) ?? 'observed',
+        firstIndexedAt: item.firstIndexedAt ?? 0,
+      },
+      globalMeanCtr,
+    );
+
+    const ageDays = item.updatedAt ? (Date.now() - new Date(item.updatedAt).getTime()) / 86_400_000 : 365;
+    const decay = computeRecencyDecay(ageDays, item.kind ?? 'unknown');
+
+    const positionalScore = 1 / (i + K);
+    const newScore = positionalScore + BETA * prior.prior + GAMMA * (decay.factor - 0.5);
+
+    const isConstitutional = prior.branch === 'constitutional';
+    return { item, newScore, originalIndex: i, isConstitutional };
+  });
+
+  const pinned = new Map<number, EvidenceItem>();
+  let movable: Array<{ item: EvidenceItem; newScore: number }> = [];
+  for (const s of scored) {
+    if (s.isConstitutional) pinned.set(s.originalIndex, s.item);
+    else movable.push(s);
+  }
+  movable.sort((a, b) => b.newScore - a.newScore);
+
+  if (targetLimit && movable.length >= 3 * targetLimit) {
+    const mmrItems = movable.map((m) => ({ item: m.item, score: m.newScore }));
+    const mmrResults = applyMMR(mmrItems, targetLimit, 0.7);
+    movable = mmrResults.map((item, i) => ({ item, newScore: targetLimit - i }));
+  }
+
+  const reranked: EvidenceItem[] = [];
+  let mi = 0;
+  for (let i = 0; i < rerankPool.length; i++) {
+    if (pinned.has(i)) {
+      reranked.push(pinned.get(i)!);
+    } else if (mi < movable.length) {
+      reranked.push(movable[mi++].item);
+    }
+  }
+
+  const final = protectedResults.length > 0 ? [...protectedResults, ...reranked] : reranked;
+  if (f200Flags.consumptionRerank === 'on') {
+    for (let i = 0; i < final.length; i++) results[i] = final[i];
+    results.length = final.length;
+  }
+  // HW-7 + Cloud-P1-3: Shadow semantics differ by mode.
+  // 'on' mode:     live = reranked,  shadow = original BM25 → compare rerank vs BM25.
+  // 'shadow' mode:  live = BM25,      shadow = would-be reranked → compare BM25 vs rerank.
+  // Using the same order for both would make shadow ≡ live → zero signal.
+  const shadowOrder =
+    f200Flags.consumptionRerank === 'shadow'
+      ? final.map((item, i) => ({ anchor: item.anchor, shadowRank: i }))
+      : preRerankOrder;
+  const keyAnchors =
+    targetLimit != null && results.length > targetLimit
+      ? results.slice(0, targetLimit).map((r) => r.anchor)
+      : results.map((r) => r.anchor);
+  storeShadowRanking(keyAnchors, shadowOrder);
+}
+
+function findExactLexicalProtectedAnchors(results: EvidenceItem[], query: string): Set<string> {
+  const trimmed = query.trim();
+  if (!trimmed) return new Set();
+  const words = splitLexicalBackfillWords(trimmed);
+  if (words.length === 0) return new Set();
+  if (words.length < 2 && !hasCJKCharacters(trimmed)) return new Set();
+
+  const protectedAnchors = new Set<string>();
+  for (const item of results) {
+    if (isExactLexicalMatch(item, words)) protectedAnchors.add(item.anchor);
+  }
+  return protectedAnchors;
+}
+
+function isExactLexicalMatch(item: EvidenceItem, words: string[]): boolean {
+  const title = item.title.toLowerCase();
+  const summary = (item.summary ?? '').toLowerCase();
+  const keywords = (item.keywords ?? []).join(' ').toLowerCase();
+  const haystack = `${title} ${summary} ${keywords}`;
+  if (!words.every((word) => haystack.includes(word))) return false;
+  return words.some((word) => title.includes(word) || keywords.includes(word));
+}
+
+function annotateMatchReasons(results: EvidenceItem[], query: string, explain?: boolean): void {
+  if (!query) return;
+  const q = query.toLowerCase();
+  for (const item of results) {
+    if (item.entityMatches?.length) {
+      item.matchReason = `entity:${item.entityMatches[0].entityId}`;
+    } else if (item.anchor.toLowerCase().includes(q)) {
+      item.matchReason = 'anchor';
+    } else if (item.title.toLowerCase().includes(q)) {
+      item.matchReason = 'title';
+    } else if (item.summary?.toLowerCase().includes(q)) {
+      item.matchReason = 'summary';
+    } else if (item.keywords?.some((k) => k.toLowerCase().includes(q))) {
+      item.matchReason = 'keyword';
+    } else {
+      item.matchReason = 'content';
+    }
+    if (explain) {
+      item.rankingFactors = { bm25Score: results.indexOf(item) + 1 };
+    }
+  }
+}
+
+function memorySearchFlags(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key, value]) => value != null && (key.startsWith('F163_') || key.startsWith('F200_')),
+    ),
+  ) as Record<string, string>;
 }

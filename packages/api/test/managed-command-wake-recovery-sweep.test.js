@@ -1,0 +1,1529 @@
+/**
+ * F167 S.1-c — managed-command completion recovery.
+ *
+ * The dynamic hold task is the durable completion receipt. A thread message is
+ * visibility, an in-memory queue entry is only a delivery attempt, and the
+ * InvocationRecord identity is durable, but only its execution lifecycle can
+ * prove completion. queued/failed must replay, running must remain pending,
+ * and only succeeded may retire the fallback.
+ */
+
+import assert from 'node:assert/strict';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { describe, test } from 'node:test';
+import { isolateManagedJobData } from './helpers/isolated-managed-job-data.js';
+
+isolateManagedJobData();
+
+function makeTask(overrides = {}) {
+  return {
+    id: 'hold-ball-task-1',
+    templateId: 'reminder',
+    trigger: { type: 'once', fireAt: 99_000 },
+    params: {
+      message: 'fallback',
+      targetCatId: 'codex-sol',
+      triggerUserId: 'user-1',
+      holdLifecycle: {
+        mode: 'wake_when',
+        status: 'active',
+        wakeAt: 99_000,
+        createdBy: 'hold-ball:codex-sol',
+        managedCommand: {
+          state: 'command_running',
+          command: 'pnpm gate',
+          startedAt: 1_000,
+        },
+      },
+    },
+    display: { label: 'hold', category: 'system', description: 'hold' },
+    deliveryThreadId: 'thread-1',
+    enabled: true,
+    createdBy: 'hold-ball:codex-sol',
+    createdAt: new Date(1_000).toISOString(),
+    ...overrides,
+  };
+}
+
+test('not_started receipt recovers visibility once, with no wake or active execution', async () => {
+  const { ManagedCommandWakeRecoverySweep } = await import(
+    '../dist/domains/ball-custody/ManagedCommandWakeRecoverySweep.js'
+  );
+  const { listManagedCommandExecutions } = await import(
+    '../dist/domains/cats/services/agents/invocation/active-execution-service.js'
+  );
+  const task = makeTask({ enabled: false });
+  task.params.holdLifecycle.status = 'not_started';
+  task.params.holdLifecycle.managedCommand = {
+    state: 'not_started',
+    command: 'echo never-ran',
+    startedAt: 1000,
+    pid: null,
+    notStartedReason: 'admission_rejected',
+    notStartedDetail: 'provider_execution_refused:effect_closed_or_consumed',
+    admissionFact: '命令未启动（provider_execution_refused:effect_closed_or_consumed）',
+    admissionFactAppended: false,
+  };
+  const h = makeHarness({ task });
+  const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+  await sweep.runOnce();
+  await sweep.runOnce();
+  assert.equal(h.appended.length, 1);
+  assert.equal(h.triggerCalls.length, 0);
+  assert.deepEqual(listManagedCommandExecutions([task]), []);
+  assert.equal(task.params.holdLifecycle.managedCommand.state, 'not_started');
+});
+
+test('enabled no-spawn crash window is repaired before redelivering admission visibility', async () => {
+  const { ManagedCommandWakeRecoverySweep } = await import(
+    '../dist/domains/ball-custody/ManagedCommandWakeRecoverySweep.js'
+  );
+  const { parseNotStartedManagedCommandTask } = await import(
+    '../dist/domains/ball-custody/managed-command-wake-task-projection.js'
+  );
+  const task = makeTask({ enabled: true });
+  task.params.holdLifecycle.status = 'not_started';
+  task.params.holdLifecycle.managedCommand = {
+    state: 'not_started',
+    command: 'echo never-ran',
+    startedAt: 1000,
+    pid: null,
+    notStartedReason: 'admission_rejected',
+    notStartedDetail: 'explicit_refusal',
+    admissionFact: 'command not started',
+    admissionFactAppended: false,
+  };
+  assert.equal(parseNotStartedManagedCommandTask(task)?.command.state, 'not_started');
+  const h = makeHarness({ task });
+  const disable = h.deps.dynamicTaskStore.setEnabled;
+  h.deps.dynamicTaskStore.setEnabled = () => false;
+  const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+  assert.equal((await sweep.runOnce()).pending, 1);
+  assert.equal(h.appended.length, 0, 'partial terminal cannot publish durable success');
+  h.deps.dynamicTaskStore.setEnabled = disable;
+  await sweep.runOnce();
+  await sweep.runOnce();
+  assert.equal(h.tasks.get(task.id).enabled, false);
+  assert.equal(h.appended.length, 1);
+  assert.equal(h.triggerCalls.length, 0);
+});
+
+for (const invalid of ['origin', 'path', 'recovery-config']) {
+  test(`not_started recovery rejects invalid ${invalid} with no gate write or visibility`, async () => {
+    const { createDurableManagedGateJob, validateDurableManagedGateJob } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-job.js'
+    );
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const root = mkdtempSync(path.join(os.tmpdir(), 'f306-recovery-validation-'));
+    const outside = mkdtempSync(path.join(os.tmpdir(), 'f306-recovery-outside-'));
+    const previous = process.env.CAT_CAFE_DATA_DIR;
+    process.env.CAT_CAFE_DATA_DIR = root;
+    try {
+      const task = makeTask();
+      const job = createDurableManagedGateJob(task.id, 60_000, {
+        threadId: 'thread-1',
+        catId: 'codex-sol',
+        userId: 'user-1',
+      });
+      if (invalid === 'origin') job.originTaskId = 'forged-task';
+      if (invalid === 'path') {
+        job.recordPath = path.join(outside, 'forged.json');
+        job.gateReceiptPath = path.join(outside, 'forged.gate.json');
+        job.logPath = path.join(outside, 'forged.log');
+      }
+      if (invalid === 'recovery-config') {
+        job.kind = 'resumable_full_gate_v2';
+        job.recovery = {
+          protocolVersion: 2,
+          eventLoopGapMs: 100,
+          reconciliationBudgetMs: 100,
+          pollMs: 10,
+          powerEvidenceSource: { kind: 'json_file', path: path.join(outside, 'power.json') },
+        };
+      }
+      assert.equal(validateDurableManagedGateJob(job, task.id), false);
+      task.params.holdLifecycle.status = 'not_started';
+      task.params.holdLifecycle.managedCommand = {
+        state: 'not_started',
+        command: 'pnpm gate',
+        startedAt: 1000,
+        pid: null,
+        durableJob: job,
+        admissionFact: 'command not started',
+        admissionFactAppended: false,
+        notStartedReason: 'admission_rejected',
+        notStartedDetail: 'refused',
+      };
+      const h = makeHarness({ task });
+      const result = await new ManagedCommandWakeRecoverySweep(h.deps).runOnce();
+      assert.equal(h.appended.length, 0);
+      assert.equal(result.pending, 1);
+      assert.equal(h.triggerCalls.length, 0);
+      assert.deepEqual(readdirSync(root), []);
+      assert.deepEqual(readdirSync(outside), []);
+    } finally {
+      if (previous === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previous;
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+}
+
+test('SQLite restart repairs enabled not_started and the existing queued gate owner without completion wake', async () => {
+  const { default: Database } = await import('better-sqlite3');
+  const { applyMigrations } = await import('../dist/domains/memory/schema.js');
+  const { DynamicTaskStore } = await import('../dist/infrastructure/scheduler/DynamicTaskStore.js');
+  const { createDurableManagedGateJob, initializeDurableManagedGateJob } = await import(
+    '../dist/domains/ball-custody/durable-managed-gate-job.js'
+  );
+  const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+  const root = mkdtempSync(path.join(os.tmpdir(), 'f306-no-spawn-restart-'));
+  const previousDataRoot = process.env.CAT_CAFE_DATA_DIR;
+  process.env.CAT_CAFE_DATA_DIR = root;
+  const dbPath = path.join(root, 'fixture.sqlite');
+  let db = new Database(dbPath);
+  try {
+    applyMigrations(db);
+    const task = makeTask();
+    const job = createDurableManagedGateJob(
+      task.id,
+      60_000,
+      { threadId: 'thread-1', catId: 'codex-sol', userId: 'user-1' },
+      root,
+    );
+    initializeDurableManagedGateJob(job);
+    task.params.holdLifecycle.status = 'not_started';
+    task.params.holdLifecycle.managedCommand = {
+      state: 'not_started',
+      command: 'pnpm gate',
+      startedAt: 1000,
+      pid: null,
+      durableJob: job,
+      notStartedReason: 'admission_rejected',
+      notStartedDetail: 'explicit_refusal',
+      admissionFact: 'command not started',
+      admissionFactAppended: false,
+    };
+    new DynamicTaskStore(db).insert(task);
+    db.close();
+    db = new Database(dbPath);
+    const store = new DynamicTaskStore(db);
+    assert.equal(store.listManagedCommandCandidates()[0].enabled, true);
+    const h = makeHarness({ task });
+    h.deps.dynamicTaskStore = store;
+    await new ManagedCommandWakeRecoverySweep(h.deps).runOnce();
+    db.close();
+    db = new Database(dbPath);
+    h.deps.dynamicTaskStore = new DynamicTaskStore(db);
+    await new ManagedCommandWakeRecoverySweep(h.deps).runOnce();
+    assert.equal(h.deps.dynamicTaskStore.getById(task.id).enabled, false);
+    assert.equal(
+      h.deps.dynamicTaskStore.getById(task.id).params.holdLifecycle.managedCommand.admissionFactAppended,
+      true,
+    );
+    assert.equal(JSON.parse(readFileSync(job.recordPath, 'utf8')).state, 'terminal');
+    assert.equal(h.appended.length, 1);
+    assert.equal(h.triggerCalls.length, 0);
+  } finally {
+    db.close();
+    if (previousDataRoot === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+    else process.env.CAT_CAFE_DATA_DIR = previousDataRoot;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function makeHarness(options = {}) {
+  let now = 10_000;
+  const tasks = new Map([[options.task?.id ?? 'hold-ball-task-1', options.task ?? makeTask()]]);
+  const messages = new Map();
+  const messagesById = new Map((options.messages ?? []).map((message) => [message.id, message]));
+  const appended = [];
+  const triggerOutcomes = [...(options.triggerOutcomes ?? ['enqueued'])];
+  const triggerCalls = [];
+  const retryEventCarrierCalls = [];
+  const retryEventCarrierOutcomes = [...(options.retryEventCarrierOutcomes ?? ['retried'])];
+  const invocationRecords = new Map();
+  const unregistered = [];
+  let eventCarrier = options.eventCarrier;
+  let appendError = options.appendError;
+
+  const deps = {
+    dynamicTaskStore: {
+      getAll: () => [...tasks.values()],
+      getById: (id) => tasks.get(id) ?? null,
+      ...(Object.hasOwn(options, 'ownerAuthProvenance')
+        ? { getPrivateOwnerAuthProvenance: () => options.ownerAuthProvenance }
+        : {}),
+      updateParams(id, params) {
+        const task = tasks.get(id);
+        if (!task) return false;
+        tasks.set(id, { ...task, params });
+        return true;
+      },
+      updateParamsIfCurrent(id, expected, params) {
+        const task = tasks.get(id);
+        if (!task || task.params !== expected) return false;
+        tasks.set(id, { ...task, params });
+        return true;
+      },
+      setEnabled(id, enabled) {
+        const task = tasks.get(id);
+        if (!task) return false;
+        tasks.set(id, { ...task, enabled });
+        return true;
+      },
+    },
+    messageStore: {
+      getById(messageId) {
+        return messagesById.get(messageId) ?? null;
+      },
+      getByIdempotencyKey(_userId, _threadId, key) {
+        return messages.get(key) ?? null;
+      },
+      async append(input) {
+        if (appendError) throw appendError;
+        const existing = messages.get(input.idempotencyKey);
+        if (existing) return existing;
+        const stored = { ...input, id: `message-${messages.size + 1}`, threadId: input.threadId };
+        messages.set(input.idempotencyKey, stored);
+        messagesById.set(stored.id, stored);
+        appended.push(stored);
+        return stored;
+      },
+      async markCanceled(messageId) {
+        const message = messagesById.get(messageId);
+        if (!message) return null;
+        const canceled = { ...message, deliveryStatus: 'canceled' };
+        messagesById.set(messageId, canceled);
+        return canceled;
+      },
+    },
+    socketManager: { broadcastToRoom() {} },
+    taskRunner: { unregister: (id) => unregistered.push(id) },
+    invocationRecordStore: {
+      getByIdempotencyKey(_threadId, _userId, key) {
+        return invocationRecords.get(key) ?? null;
+      },
+    },
+    // F117 Phase I: the wake commits Message and Queue row in one transaction, so the harness
+    // observes that admission instead of a second trigger call. `triggerOutcomes` keeps its old
+    // vocabulary — 'enqueued' admits, anything else refuses without writing.
+    async admitWake(input) {
+      triggerCalls.push(input);
+      const outcome = triggerOutcomes.shift() ?? 'full';
+      if (outcome instanceof Error) throw outcome;
+      if (outcome !== 'enqueued' && outcome !== 'dispatched') return {};
+      if (appendError) throw appendError;
+      const existing = messages.get(input.message.idempotencyKey);
+      if (existing) return { messageId: existing.id };
+      const stored = { ...input.message, id: `message-${messages.size + 1}` };
+      messages.set(input.message.idempotencyKey, stored);
+      messagesById.set(stored.id, stored);
+      appended.push(stored);
+      return { messageId: stored.id };
+    },
+    ...(options.eventCarrier ? { getEventCarrier: () => eventCarrier } : {}),
+    ...(options.retryEventCarrierOutcomes
+      ? {
+          retryEventCarrier: async (input) => {
+            retryEventCarrierCalls.push(input);
+            return retryEventCarrierOutcomes.shift() ?? 'unavailable';
+          },
+        }
+      : {}),
+    now: () => now,
+    dispatchedCarrierGraceMs: 1_000,
+    ...(options.isCommandRunnerActive ? { isCommandRunnerActive: options.isCommandRunnerActive } : {}),
+  };
+
+  return {
+    deps,
+    tasks,
+    appended,
+    triggerCalls,
+    retryEventCarrierCalls,
+    invocationRecords,
+    unregistered,
+    setNow: (value) => {
+      now = value;
+    },
+    setEventCarrier: (value) => {
+      eventCarrier = value;
+    },
+    setAppendError: (value) => {
+      appendError = value;
+    },
+  };
+}
+
+async function loadSweep() {
+  return import('../dist/domains/ball-custody/ManagedCommandWakeRecoverySweep.js');
+}
+
+test('malformed persisted cwd is rejected before recovery projection', async () => {
+  const { parseManagedCommandWakeTask, readManagedCommandWakeProjection } = await import(
+    '../dist/domains/ball-custody/managed-command-wake-task-projection.js'
+  );
+  const task = makeTask();
+  task.params.holdLifecycle.managedCommand.cwd = ['/tmp/frozen-candidate'];
+  assert.equal(readManagedCommandWakeProjection(task), null);
+  assert.equal(parseManagedCommandWakeTask(task), null);
+});
+
+describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
+  test('startup recovery consumes a resumable gate terminal with its executable continuation', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const { createResumableDurableManagedGateJob } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-consumer.js'
+    );
+    const { initializeDurableManagedGateJob, settleDurableManagedGateJobFromRunner } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-job.js'
+    );
+    const { initializeDurableGateRecovery, synchronizeDurableGateFrozenIdentity } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-recovery.js'
+    );
+    const root = mkdtempSync(path.join(os.tmpdir(), 'managed-command-resumable-sweep-'));
+    const runId = '11111111-2222-4333-8444-555555555555';
+    const frozenIdentity = {
+      headSha: '1'.repeat(40),
+      treeSha: '2'.repeat(40),
+      baseSha: '3'.repeat(40),
+      route: 'full',
+      risk: 'contract',
+      mode: 'full',
+      fingerprint: '4'.repeat(64),
+      runnerFingerprint: '5'.repeat(64),
+      toolchainFingerprint: '6'.repeat(64),
+    };
+    const previousDataRoot = process.env.CAT_CAFE_DATA_DIR;
+    process.env.CAT_CAFE_DATA_DIR = root;
+    try {
+      const job = createResumableDurableManagedGateJob(
+        'hold-ball-task-1',
+        60_000,
+        { threadId: 'thread-1', catId: 'codex-sol', userId: 'user-1' },
+        root,
+      );
+      initializeDurableManagedGateJob(job, 1_000);
+      initializeDurableGateRecovery(job, { pid: 41, ppid: 1, pgid: 41, startedAt: 'birth-41' }, 1_000);
+      writeFileSync(
+        job.gateReceiptPath,
+        `${JSON.stringify({
+          version: 1,
+          jobId: job.jobId,
+          runId,
+          state: 'terminal',
+          terminalStatus: 'failed',
+          result: { exitCode: 1, timedOut: false, durationMs: 500 },
+          recovery: { protocolVersion: 2, frozenIdentity },
+        })}\n`,
+      );
+      synchronizeDurableGateFrozenIdentity(job, 1_001);
+      settleDurableManagedGateJobFromRunner(job, { exitCode: 1, timedOut: false, durationMs: 500 }, 1_500);
+      const task = makeTask({
+        params: {
+          message: 'fallback',
+          targetCatId: 'codex-sol',
+          triggerUserId: 'user-1',
+          holdLifecycle: {
+            mode: 'wake_when',
+            status: 'active',
+            wakeAt: 99_000,
+            createdBy: 'hold-ball:codex-sol',
+            managedCommand: {
+              state: 'command_running',
+              command: 'pnpm gate --risk contract',
+              startedAt: 1_000,
+              durableJob: job,
+            },
+          },
+        },
+      });
+      const h = makeHarness({ task });
+      const stats = await new ManagedCommandWakeRecoverySweep(h.deps).runOnce();
+      assert.equal(stats.scanned, 1);
+      assert.equal(stats.pending, 1, 'an enqueued invocation remains pending until its managed disposition');
+      assert.equal(
+        h.appended.some((message) => message.content.includes(`pnpm gate --risk contract --resume ${runId}`)),
+        true,
+        'restart delivery must preserve one executable continuation instead of a generic lost-gate message',
+      );
+      assert.equal(
+        h.appended.some((message) => message.content.includes(`pnpm gate --risk contract -- --resume ${runId}`)),
+        false,
+        'restart delivery must not invent a pnpm separator that changes the frozen invocation identity',
+      );
+    } finally {
+      if (previousDataRoot === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previousDataRoot;
+      console.info(`Retained isolated managed-command evidence: ${root}`);
+    }
+  });
+
+  test('startup recovery preserves candidate cwd while routing cancelled timeout through the runtime controller', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const { createResumableDurableManagedGateJob } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-consumer.js'
+    );
+    const { initializeDurableManagedGateJob, settleDurableManagedGateJobFromRunner } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-job.js'
+    );
+    const { evaluateDurableGateMutation, initializeDurableGateRecovery, synchronizeDurableGateFrozenIdentity } =
+      await import('../dist/domains/ball-custody/durable-managed-gate-recovery.js');
+    const root = mkdtempSync(path.join(os.tmpdir(), 'managed-command-cancelled-timeout-sweep-'));
+    const runId = '11111111-2222-4333-8444-555555555555';
+    const frozenIdentity = {
+      headSha: '1'.repeat(40),
+      treeSha: '2'.repeat(40),
+      baseSha: '3'.repeat(40),
+      route: 'full',
+      risk: 'security',
+      mode: 'full',
+      fingerprint: '4'.repeat(64),
+      runnerFingerprint: '5'.repeat(64),
+      toolchainFingerprint: '6'.repeat(64),
+    };
+    const previousDataRoot = process.env.CAT_CAFE_DATA_DIR;
+    const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    process.env.CAT_CAFE_DATA_DIR = root;
+    process.env.CAT_CAFE_RUNTIME_ROOT = '/tmp/trusted-runtime';
+    try {
+      const created = createResumableDurableManagedGateJob(
+        'hold-ball-task-1',
+        60_000,
+        { threadId: 'thread-1', catId: 'codex-sol', userId: 'user-1' },
+        root,
+      );
+      const job = { ...created, wallSlaMs: 25 };
+      const owner = { pid: 41, ppid: 1, pgid: 41, startedAt: 'birth-41' };
+      initializeDurableManagedGateJob(job, 1_000);
+      initializeDurableGateRecovery(job, owner, 1_000);
+      writeFileSync(
+        job.gateReceiptPath,
+        `${JSON.stringify({
+          version: 1,
+          jobId: job.jobId,
+          runId,
+          state: 'terminal',
+          terminalStatus: 'cancelled',
+          recovery: { protocolVersion: 2, frozenIdentity },
+        })}\n`,
+      );
+      synchronizeDurableGateFrozenIdentity(job, 1_001);
+      assert.deepEqual(
+        evaluateDurableGateMutation(job, {
+          ownerIdentity: owner,
+          mutation: 'heartbeat',
+          now: 1_026,
+          readPowerEvidence: () => ({ status: 'unavailable', reason: 'offline' }),
+        }),
+        { action: 'terminal_intent', pauseEpoch: 0, intent: 'timed_out' },
+      );
+      settleDurableManagedGateJobFromRunner(
+        job,
+        { exitCode: null, timedOut: true, cancelled: false, durationMs: 60_000 },
+        1_500,
+      );
+      const task = makeTask({
+        params: {
+          message: 'fallback',
+          targetCatId: 'codex-sol',
+          triggerUserId: 'user-1',
+          holdLifecycle: {
+            mode: 'wake_when',
+            status: 'active',
+            wakeAt: 99_000,
+            createdBy: 'hold-ball:codex-sol',
+            managedCommand: {
+              state: 'command_running',
+              command: 'pnpm gate --risk security',
+              cwd: '/tmp/missing-historical-candidate',
+              startedAt: 1_000,
+              durableJob: job,
+            },
+          },
+        },
+      });
+      const h = makeHarness({ task });
+      await new ManagedCommandWakeRecoverySweep(h.deps).runOnce();
+      const content = h.appended.map((message) => message.content).join('\n');
+      assert.match(content, /cwd=\/tmp\/trusted-runtime/);
+      assert.match(
+        content,
+        new RegExp(
+          `pnpm gate --resume-controller ${runId} --candidate-root /tmp/missing-historical-candidate -- --risk security`,
+        ),
+      );
+    } finally {
+      if (previousDataRoot === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previousDataRoot;
+      if (previousRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('dispatches strict-owner holds through canonical urgent Queue ingress', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const h = makeHarness({ ownerAuthProvenance: 'strict' });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    await sweep.recordCompletion({
+      taskId: 'hold-ball-task-1',
+      wakeContent: 'strict owner command completed',
+      result: { exitCode: 0, timedOut: false, durationMs: 9_000 },
+    });
+
+    assert.equal(h.triggerCalls.length, 1);
+    assert.equal(h.triggerCalls[0].ownerAuthProvenance, 'strict');
+    assert.equal(h.triggerCalls[0].sourceCategory, 'scheduled');
+    assert.equal(h.triggerCalls[0].priority, 'urgent');
+  });
+
+  test('dispatches legacy holds through the same canonical urgent Queue ingress', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const h = makeHarness();
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    await sweep.recordCompletion({
+      taskId: 'hold-ball-task-1',
+      wakeContent: 'legacy command completed',
+      result: { exitCode: 0, timedOut: false, durationMs: 9_000 },
+    });
+
+    assert.equal(h.triggerCalls.length, 1);
+    assert.equal(h.triggerCalls[0].ownerAuthProvenance, 'unknown');
+    assert.equal(h.triggerCalls[0].sourceCategory, 'scheduled');
+    assert.equal(h.triggerCalls[0].priority, 'urgent');
+  });
+
+  test('preserves compatibility owner provenance without upgrading it at Queue ingress', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const h = makeHarness({ ownerAuthProvenance: 'compatibility_fallback' });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    await sweep.recordCompletion({
+      taskId: 'hold-ball-task-1',
+      wakeContent: 'compatibility owner command completed',
+      result: { exitCode: 0, timedOut: false, durationMs: 9_000 },
+    });
+
+    assert.equal(h.triggerCalls.length, 1);
+    assert.equal(h.triggerCalls[0].ownerAuthProvenance, 'compatibility_fallback');
+    assert.equal(h.triggerCalls[0].sourceCategory, 'scheduled');
+    assert.equal(h.triggerCalls[0].priority, 'urgent');
+  });
+
+  test('persists the terminal result before attempting thread delivery', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const h = makeHarness({ appendError: new Error('message plane unavailable') });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    const result = await sweep.recordCompletion({
+      taskId: 'hold-ball-task-1',
+      wakeContent: 'gate finished',
+      result: { exitCode: 0, timedOut: false, durationMs: 9_000, tailOutput: 'ok' },
+    });
+
+    assert.equal(result, 'pending');
+    const lifecycle = h.tasks.get('hold-ball-task-1').params.holdLifecycle;
+    assert.equal(lifecycle.managedCommand.state, 'condition_met');
+    assert.deepEqual(lifecycle.managedCommand.result, {
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 9_000,
+      tailOutput: 'ok',
+    });
+    assert.equal(lifecycle.managedCommand.wakeContent, 'gate finished');
+    assert.equal(h.appended.length, 0);
+  });
+
+  test('records a cancelled runner into its user-cancelled tombstone without publishing or dispatching a wake', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const task = makeTask();
+    task.enabled = false;
+    task.params.holdLifecycle.status = 'cancelled_by_user';
+    const h = makeHarness({ task });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    const result = await sweep.recordCancelledCompletion({
+      taskId: task.id,
+      wakeContent: 'must stay suppressed',
+      result: {
+        exitCode: null,
+        timedOut: false,
+        cancelled: true,
+        durationMs: 9_000,
+        tailOutput: 'progress-before-cancel',
+      },
+    });
+
+    assert.equal(result, 'recovered');
+    const lifecycle = h.tasks.get(task.id).params.holdLifecycle;
+    assert.equal(lifecycle.status, 'cancelled_by_user');
+    assert.equal(lifecycle.managedCommand.state, 'cancelled');
+    assert.deepEqual(lifecycle.managedCommand.result, {
+      exitCode: null,
+      timedOut: false,
+      cancelled: true,
+      durationMs: 9_000,
+      tailOutput: 'progress-before-cancel',
+    });
+    assert.equal(h.appended.length, 0);
+    assert.equal(h.triggerCalls.length, 0);
+    assert.deepEqual(await sweep.runOnce(), { scanned: 0, recovered: 0, pending: 0 });
+  });
+
+  test('publishes a naturally completed retired command exactly once without dispatching an invocation', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const task = makeTask();
+    task.enabled = false;
+    task.params.holdLifecycle.status = 'cancelled_by_user';
+    const h = makeHarness({ task });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+    const completion = {
+      taskId: task.id,
+      wakeContent: 'gate finished\nexitCode=0\nok',
+      result: { exitCode: 0, timedOut: false, cancelled: false, durationMs: 9_000, tailOutput: 'ok' },
+    };
+
+    assert.equal(await sweep.recordRetiredCompletion(completion), 'recovered');
+    assert.equal(await sweep.recordRetiredCompletion(completion), 'recovered');
+
+    const lifecycle = h.tasks.get(task.id).params.holdLifecycle;
+    assert.equal(lifecycle.status, 'cancelled_by_user', 'publishing a receipt must not resurrect obsolete custody');
+    assert.equal(lifecycle.managedCommand.state, 'consumed');
+    assert.equal(h.appended.length, 1);
+    assert.equal(h.appended[0].deliveryStatus, undefined, 'the terminal receipt is immediately timeline-visible');
+    assert.equal(h.appended[0].idempotencyKey, `hold-ball-completion:${task.id}`);
+    assert.equal(h.appended[0].source.meta.taskId, task.id);
+    assert.match(h.appended[0].content, /exitCode=0/);
+    assert.equal(h.triggerCalls.length, 0, 'retired carrier completion must not wake the cat again');
+  });
+
+  test('publishes a nonzero retired result but keeps an explicitly cancelled command silent', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const failedTask = makeTask({ id: 'hold-ball-failed' });
+    failedTask.enabled = false;
+    failedTask.params.holdLifecycle.status = 'cancelled_by_user';
+    const failedHarness = makeHarness({ task: failedTask });
+    const failedSweep = new ManagedCommandWakeRecoverySweep(failedHarness.deps);
+
+    assert.equal(
+      await failedSweep.recordRetiredCompletion({
+        taskId: failedTask.id,
+        wakeContent: 'gate failed\nexitCode=2\nfailed',
+        result: { exitCode: 2, timedOut: false, cancelled: false, durationMs: 7_000, tailOutput: 'failed' },
+      }),
+      'recovered',
+    );
+    assert.equal(failedHarness.appended.length, 1);
+    assert.match(failedHarness.appended[0].content, /exitCode=2/);
+    assert.equal(failedHarness.triggerCalls.length, 0);
+
+    const cancelledTask = makeTask({ id: 'hold-ball-cancelled' });
+    cancelledTask.enabled = false;
+    cancelledTask.params.holdLifecycle.status = 'cancelled_by_user';
+    const cancelledHarness = makeHarness({ task: cancelledTask });
+    const cancelledSweep = new ManagedCommandWakeRecoverySweep(cancelledHarness.deps);
+
+    assert.equal(
+      await cancelledSweep.recordRetiredCompletion({
+        taskId: cancelledTask.id,
+        wakeContent: 'must stay suppressed',
+        result: { exitCode: null, timedOut: false, cancelled: true, durationMs: 1_000 },
+      }),
+      'recovered',
+    );
+    assert.equal(cancelledHarness.appended.length, 0);
+    assert.equal(cancelledHarness.triggerCalls.length, 0);
+    assert.equal(cancelledHarness.tasks.get(cancelledTask.id).params.holdLifecycle.managedCommand.state, 'cancelled');
+  });
+
+  test('recovers a retired terminal receipt after the message plane becomes available', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const task = makeTask();
+    task.enabled = false;
+    task.params.holdLifecycle.status = 'cancelled_by_user';
+    const h = makeHarness({ task, appendError: new Error('message plane unavailable') });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    assert.equal(
+      await sweep.recordRetiredCompletion({
+        taskId: task.id,
+        wakeContent: 'gate finished after carrier retirement',
+        result: { exitCode: 0, timedOut: false, cancelled: false, durationMs: 9_000 },
+      }),
+      'pending',
+    );
+    assert.equal(h.tasks.get(task.id).params.holdLifecycle.managedCommand.state, 'condition_met');
+    assert.equal(h.appended.length, 0);
+
+    h.setAppendError(undefined);
+    assert.deepEqual(await sweep.runOnce(), { scanned: 1, recovered: 1, pending: 0 });
+    assert.equal(h.tasks.get(task.id).params.holdLifecycle.managedCommand.state, 'consumed');
+    assert.equal(h.appended.length, 1);
+    assert.equal(h.triggerCalls.length, 0);
+    assert.deepEqual(await sweep.runOnce(), { scanned: 0, recovered: 0, pending: 0 });
+  });
+
+  for (const legacyState of ['message_written', 'dispatch_pending']) {
+    test(`a legacy ${legacyState} reference never reconstructs a Queue owner`, async () => {
+      const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+      const task = makeTask();
+      task.params.holdLifecycle.managedCommand = {
+        state: legacyState,
+        command: 'pnpm gate',
+        startedAt: 1_000,
+        conditionMetAt: 2_000,
+        wakeContent: 'gate finished',
+        messageId: 'legacy-message-1',
+        messageWrittenAt: 2_500,
+      };
+      const h = makeHarness({
+        task,
+        messages: [{ id: 'legacy-message-1', threadId: 'thread-1', deliveryStatus: 'queued' }],
+      });
+      let adoptions = 0;
+      h.deps.adoptLegacyWake = async () => {
+        adoptions += 1;
+        return { adopted: true };
+      };
+      const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+      assert.equal(await sweep.recoverTask('hold-ball-task-1'), 'pending');
+      assert.equal(adoptions, 0, 'old message-only references confer no new admission authority');
+      assert.equal(h.triggerCalls.length, 0);
+      assert.equal(h.appended.length, 0);
+      assert.equal(h.tasks.get('hold-ball-task-1').params.holdLifecycle.managedCommand.state, legacyState);
+      assert.equal(h.tasks.get('hold-ball-task-1').enabled, task.enabled);
+    });
+  }
+
+  test('a refused admission writes nothing, and the retry is the first thing that persists', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const h = makeHarness({ triggerOutcomes: ['full', 'enqueued', 'enqueued'] });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    assert.equal(
+      await sweep.recordCompletion({
+        taskId: 'hold-ball-task-1',
+        wakeContent: 'gate finished',
+        result: { exitCode: 0, timedOut: false, durationMs: 9_000, tailOutput: 'ok' },
+      }),
+      'pending',
+    );
+
+    // This case used to assert the opposite: a queued Message persisted with no Queue row behind
+    // it, and a re-dispatch loop that existed to close that gap. One transaction removes the gap,
+    // so a refused admission leaves the task exactly where it was, with nothing to reconcile.
+    assert.equal(h.appended.length, 0, 'a refused admission must not leave a queued message behind');
+    assert.equal(h.tasks.get('hold-ball-task-1').params.holdLifecycle.managedCommand.state, 'condition_met');
+    assert.equal(h.triggerCalls[0].sourceCategory, 'scheduled');
+    assert.equal(h.triggerCalls[0].priority, 'urgent');
+
+    // The next sweep retries the same wake, and that attempt is the one that becomes durable.
+    const retried = await sweep.runOnce();
+    assert.deepEqual(retried, { scanned: 1, recovered: 0, pending: 1 });
+    const task = h.tasks.get('hold-ball-task-1');
+    assert.equal(task.params.holdLifecycle.managedCommand.state, 'enqueued', 'admitted in one step');
+    assert.equal(h.appended.length, 1, 'exactly one message, and it has its Queue row');
+    assert.equal(h.appended[0].deliveryStatus, 'queued', 'managed wake stays under F264 receipt custody');
+    assert.equal(task.params.holdLifecycle.managedCommand.messageId, h.appended[0].id);
+  });
+
+  test('does not retire an enqueued wake until its InvocationRecord completed successfully', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const h = makeHarness({ triggerOutcomes: ['enqueued'] });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    assert.equal(
+      await sweep.recordCompletion({
+        taskId: 'hold-ball-task-1',
+        wakeContent: 'gate finished',
+        result: { exitCode: 0, timedOut: false, durationMs: 9_000 },
+      }),
+      'pending',
+    );
+    const first = h.tasks.get('hold-ball-task-1');
+    assert.equal(first.enabled, true);
+    assert.equal(first.params.holdLifecycle.managedCommand.state, 'enqueued');
+
+    const messageId = first.params.holdLifecycle.managedCommand.messageId;
+    const invocation = {
+      id: 'invocation-1',
+      userMessageId: messageId,
+      status: 'running',
+    };
+    h.invocationRecords.set(`connector-${messageId}`, invocation);
+    assert.deepEqual(await sweep.runOnce(), { scanned: 1, recovered: 0, pending: 1 });
+    assert.equal(h.tasks.get('hold-ball-task-1').enabled, true);
+
+    invocation.status = 'succeeded';
+    const stats = await sweep.runOnce();
+    assert.deepEqual(stats, { scanned: 1, recovered: 1, pending: 0 });
+    assert.equal(h.triggerCalls.length, 1, 'carrier reconciliation must not dispatch a duplicate wake');
+    assert.equal(h.tasks.get('hold-ball-task-1').params.holdLifecycle.managedCommand.invocationId, 'invocation-1');
+  });
+
+  test('event carrier is not duplicated and retires only from exact F264 handled truth', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const h = makeHarness({ triggerOutcomes: ['enqueued', 'enqueued'], eventCarrier: { state: 'missing' } });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    assert.equal(
+      await sweep.recordCompletion({
+        taskId: 'hold-ball-task-1',
+        wakeContent: 'gate finished',
+        result: { exitCode: 0, timedOut: false, durationMs: 9_000 },
+      }),
+      'pending',
+    );
+    h.setEventCarrier({ state: 'pending' });
+    h.setNow(12_000);
+    assert.deepEqual(await sweep.runOnce(), { scanned: 1, recovered: 0, pending: 1 });
+    assert.equal(h.triggerCalls.length, 1, 'seen/pending Queue truth keeps the single event carrier');
+
+    h.setEventCarrier({ state: 'handled', invocationId: 'child-exact-1' });
+    assert.deepEqual(await sweep.runOnce(), { scanned: 1, recovered: 1, pending: 0 });
+    assert.equal(h.triggerCalls.length, 1);
+    assert.equal(h.tasks.get('hold-ball-task-1').params.holdLifecycle.managedCommand.invocationId, 'child-exact-1');
+  });
+
+  test('consumes a failed wake from its canonical response terminal without manual disposition', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const task = makeTask();
+    task.params.holdLifecycle.managedCommand = {
+      state: 'enqueued',
+      command: 'pnpm gate',
+      startedAt: 1_000,
+      conditionMetAt: 8_000,
+      wakeContent: 'gate finished',
+      result: { exitCode: 0, timedOut: false, durationMs: 7_000 },
+      messageId: 'message-managed',
+      messageWrittenAt: 8_100,
+      dispatchAttemptCount: 1,
+      lastDispatchAt: 8_200,
+      lastDispatchOutcome: 'enqueued',
+    };
+    const h = makeHarness({
+      task,
+      eventCarrier: {
+        state: 'failed',
+        attemptId: 'entry-managed:codex-sol:1',
+        attemptSequence: 1,
+        invocationId: 'invocation-missing-1',
+        errorCode: 'provider_execution_failed',
+      },
+      retryEventCarrierOutcomes: ['retried'],
+    });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    assert.deepEqual(await sweep.runOnce(), { scanned: 1, recovered: 1, pending: 0 });
+    const consumed = h.tasks.get(task.id);
+    const managed = consumed.params.holdLifecycle.managedCommand;
+    assert.equal(consumed.enabled, false);
+    assert.equal(consumed.params.holdLifecycle.status, 'fired');
+    assert.equal(managed.state, 'consumed');
+    assert.equal(managed.invocationId, 'invocation-missing-1');
+    assert.equal(managed.carrierTerminalReason, 'failed');
+    assert.deepEqual(h.unregistered, [task.id]);
+    assert.equal(h.retryEventCarrierCalls.length, 0, 'a terminal ledger row is never retried in place');
+  });
+
+  test('uses durable Queue attempt sequence when restart loses the task-side retry audit', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const task = makeTask();
+    task.params.holdLifecycle.managedCommand = {
+      state: 'enqueued',
+      command: 'pnpm gate',
+      startedAt: 1_000,
+      conditionMetAt: 8_000,
+      wakeContent: 'gate finished',
+      messageId: 'message-managed',
+    };
+    const h = makeHarness({
+      task,
+      eventCarrier: {
+        state: 'failed',
+        attemptId: 'entry-managed:codex-sol:2',
+        attemptSequence: 2,
+        invocationId: 'invocation-missing-2',
+        errorCode: 'provider_execution_failed',
+      },
+      retryEventCarrierOutcomes: ['retried'],
+    });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    assert.deepEqual(await sweep.runOnce(), { scanned: 1, recovered: 1, pending: 0 });
+    assert.equal(h.retryEventCarrierCalls.length, 0, 'a durable successor attempt consumes the bounded retry');
+    assert.equal(h.tasks.get(task.id).params.holdLifecycle.status, 'fired');
+  });
+
+  test('consumes every failed managed carrier regardless of provider error code', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const task = makeTask();
+    task.params.holdLifecycle.managedCommand = {
+      state: 'enqueued',
+      command: 'pnpm gate',
+      startedAt: 1_000,
+      conditionMetAt: 8_000,
+      wakeContent: 'gate finished',
+      messageId: 'message-provider-failed',
+    };
+    const h = makeHarness({
+      task,
+      eventCarrier: {
+        state: 'failed',
+        attemptId: 'entry-provider:codex-sol:1',
+        attemptSequence: 1,
+        invocationId: 'invocation-provider-failed',
+        errorCode: 'provider_failure',
+      },
+      retryEventCarrierOutcomes: ['retried'],
+    });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    assert.deepEqual(await sweep.runOnce(), { scanned: 1, recovered: 1, pending: 0 });
+    assert.equal(h.retryEventCarrierCalls.length, 0);
+    assert.equal(h.tasks.get(task.id).enabled, false);
+    assert.equal(h.tasks.get(task.id).params.holdLifecycle.status, 'fired');
+    assert.equal(h.tasks.get(task.id).params.holdLifecycle.managedCommand.carrierTerminalReason, 'failed');
+  });
+
+  test('terminal F264 carrier retires the managed producer and cannot revive after restart', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const task = makeTask();
+    task.params.holdLifecycle.managedCommand = {
+      state: 'enqueued',
+      command: 'pnpm gate',
+      startedAt: 1_000,
+      conditionMetAt: 8_000,
+      wakeContent: 'gate finished',
+      result: { exitCode: 0, timedOut: false, durationMs: 7_000 },
+      messageId: 'message-withdrawn',
+      messageWrittenAt: 8_100,
+      dispatchAttemptCount: 1,
+      lastDispatchAt: 8_200,
+      lastDispatchOutcome: 'enqueued',
+    };
+    const h = makeHarness({
+      task,
+      triggerOutcomes: ['enqueued'],
+      eventCarrier: { state: 'terminal', reason: 'withdrawn' },
+    });
+    h.setNow(10_000);
+
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+    assert.deepEqual(await sweep.runOnce(), { scanned: 1, recovered: 1, pending: 0 });
+
+    const retired = h.tasks.get(task.id);
+    assert.equal(retired.enabled, false);
+    assert.equal(retired.params.holdLifecycle.status, 'fired');
+    assert.equal(retired.params.holdLifecycle.managedCommand.state, 'consumed');
+    assert.equal(retired.params.holdLifecycle.managedCommand.carrierTerminalReason, 'withdrawn');
+    assert.equal(h.triggerCalls.length, 0, 'terminal custody must fence every successor dispatch');
+
+    const restartedSweep = new ManagedCommandWakeRecoverySweep(h.deps);
+    assert.deepEqual(await restartedSweep.runOnce(), { scanned: 0, recovered: 0, pending: 0 });
+    assert.equal(h.triggerCalls.length, 0, 'restart must not revive the retired producer');
+  });
+
+  test('projects canceled and terminal response bubbles without crossing source scope', async () => {
+    const { resolveManagedCommandWakeEventCarrier } = await loadSweep();
+    const expected = { threadId: 'thread-1', userId: 'user-1', catId: 'codex-sol' };
+    const source = (overrides = {}) => ({
+      id: 'message-managed',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      deliveryStatus: 'delivered',
+      lifecycle: {
+        kind: 'input',
+        orderKey: 'message-managed',
+        dispatchRefs: [
+          {
+            targetId: 'codex-sol',
+            phase: 'settled',
+            statusMessageId: 'response-managed',
+            dispatchedAt: 1_500,
+          },
+        ],
+      },
+      ...overrides,
+    });
+    const response = (status, overrides = {}) => ({
+      id: 'response-managed',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      lifecycle: {
+        kind: 'response',
+        orderKey: 'response-managed',
+        invocationId: 'invocation-managed',
+        targetId: 'codex-sol',
+        inputEntryIds: ['entry-managed'],
+        inputMessageIds: ['message-managed'],
+        status,
+        startedAt: 1_500,
+        ...(status === 'processing' ? {} : { completedAt: 2_000 }),
+      },
+      ...overrides,
+    });
+
+    assert.deepEqual(
+      resolveManagedCommandWakeEventCarrier(
+        source({ deliveryStatus: 'canceled', lifecycle: undefined }),
+        null,
+        false,
+        expected,
+      ),
+      { state: 'terminal', reason: 'canceled' },
+    );
+    assert.deepEqual(resolveManagedCommandWakeEventCarrier(source(), response('completed'), false, expected), {
+      state: 'handled',
+      invocationId: 'invocation-managed',
+    });
+    assert.deepEqual(resolveManagedCommandWakeEventCarrier(source(), response('interrupted'), false, expected), {
+      state: 'terminal',
+      reason: 'terminal',
+    });
+    assert.deepEqual(
+      resolveManagedCommandWakeEventCarrier(
+        source({ threadId: 'thread-foreign' }),
+        response('completed'),
+        false,
+        expected,
+      ),
+      { state: 'missing' },
+    );
+    assert.deepEqual(
+      resolveManagedCommandWakeEventCarrier(
+        source({
+          deliveryStatus: 'queued',
+          lifecycle: { kind: 'input', orderKey: 'message-managed', dispatchRefs: [] },
+        }),
+        null,
+        true,
+        expected,
+      ),
+      { state: 'pending' },
+    );
+    assert.deepEqual(
+      resolveManagedCommandWakeEventCarrier(
+        source(),
+        response('failed', {
+          lifecycle: {
+            ...response('failed').lifecycle,
+            invocationId: 'invocation-missing-disposition',
+          },
+        }),
+        false,
+        expected,
+      ),
+      {
+        state: 'failed',
+        attemptId: 'message-managed:codex-sol:invocation-missing-disposition',
+        attemptSequence: 1,
+        invocationId: 'invocation-missing-disposition',
+      },
+    );
+  });
+
+  test('carrier retirement is fenced to the exact current source message', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const task = makeTask();
+    task.params.holdLifecycle.managedCommand = {
+      state: 'enqueued',
+      command: 'pnpm gate',
+      startedAt: 1_000,
+      conditionMetAt: 8_000,
+      wakeContent: 'new result',
+      messageId: 'message-current',
+      messageWrittenAt: 8_100,
+      dispatchAttemptCount: 1,
+      lastDispatchAt: 8_200,
+      lastDispatchOutcome: 'enqueued',
+    };
+    const staleMessage = {
+      id: 'message-stale',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      source: { connector: 'hold-ball', meta: { wakeWhen: true, taskId: task.id } },
+    };
+    const h = makeHarness({ task, messages: [staleMessage] });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    assert.equal(await sweep.retireCarrier([staleMessage.id], 'withdrawn'), 0);
+    assert.equal(h.tasks.get(task.id).enabled, true);
+    assert.equal(h.tasks.get(task.id).params.holdLifecycle.status, 'active');
+    assert.equal(h.tasks.get(task.id).params.holdLifecycle.managedCommand.messageId, 'message-current');
+  });
+
+  test('thread retirement is owner-scoped and returns only exact managed carrier ids', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const owned = makeTask();
+    owned.params.holdLifecycle.managedCommand = {
+      state: 'enqueued',
+      command: 'pnpm gate',
+      startedAt: 1_000,
+      messageId: 'message-owned',
+    };
+    const h = makeHarness({ task: owned });
+    const foreign = makeTask({ id: 'hold-ball-task-foreign' });
+    foreign.params.triggerUserId = 'user-foreign';
+    foreign.params.holdLifecycle.managedCommand = {
+      state: 'enqueued',
+      command: 'pnpm gate',
+      startedAt: 1_000,
+      messageId: 'message-foreign',
+    };
+    h.tasks.set(foreign.id, foreign);
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    assert.deepEqual(await sweep.retireThread('thread-1', 'user-1', 'force_reset'), {
+      retired: 1,
+      messageIds: ['message-owned'],
+    });
+    assert.equal(h.tasks.get(owned.id).enabled, false);
+    assert.equal(h.tasks.get(foreign.id).enabled, true);
+  });
+
+  test('boot recovery resumes a persisted condition without publishing a second completion message', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const task = makeTask();
+    task.params.holdLifecycle.managedCommand = {
+      state: 'condition_met',
+      command: 'pnpm gate',
+      startedAt: 1_000,
+      conditionMetAt: 8_000,
+      wakeContent: 'gate finished',
+      result: { exitCode: 0, timedOut: false, durationMs: 7_000 },
+    };
+    const h = makeHarness({ task, triggerOutcomes: ['enqueued'] });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    const first = await sweep.runOnce();
+    assert.deepEqual(first, { scanned: 1, recovered: 0, pending: 1 });
+    assert.equal(h.appended.length, 1);
+
+    const messageId = h.tasks.get(task.id).params.holdLifecycle.managedCommand.messageId;
+    const invocation = {
+      id: 'invocation-boot-recovery',
+      userMessageId: messageId,
+      status: 'running',
+    };
+    h.invocationRecords.set(`connector-${messageId}`, invocation);
+    assert.deepEqual(await sweep.runOnce(), { scanned: 1, recovered: 0, pending: 1 });
+
+    invocation.status = 'succeeded';
+    const second = await sweep.runOnce();
+    assert.deepEqual(second, { scanned: 1, recovered: 1, pending: 0 });
+    assert.equal(h.tasks.get(task.id).params.holdLifecycle.managedCommand.state, 'consumed');
+  });
+
+  test('readonly completion recovery preserves policy and re-delivers only its wake, never the command', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await import(
+      '../dist/domains/ball-custody/ManagedCommandWakeRecoverySweep.js'
+    );
+    const task = makeTask();
+    task.params.holdLifecycle.managedCommand = {
+      state: 'condition_met',
+      command: 'python3 -c "print(10)"',
+      executionPolicy: 'read_only',
+      startedAt: 1000,
+      conditionMetAt: 8000,
+      wakeContent: 'readonly statistics finished',
+      result: { exitCode: 0, timedOut: false, durationMs: 7, tailOutput: '10' },
+    };
+    const h = makeHarness({ task, triggerOutcomes: ['enqueued', 'enqueued'] });
+    await new ManagedCommandWakeRecoverySweep(h.deps).runOnce();
+    const messageId = h.tasks.get(task.id).params.holdLifecycle.managedCommand.messageId;
+    const invocation = { id: 'readonly-wake-after-restart', userMessageId: messageId, status: 'running' };
+    h.invocationRecords.set(`connector-${messageId}`, invocation);
+    await new ManagedCommandWakeRecoverySweep(h.deps).runOnce();
+    assert.equal(h.appended.length, 1);
+    assert.equal(h.tasks.get(task.id).params.holdLifecycle.managedCommand.executionPolicy, 'read_only');
+    invocation.status = 'succeeded';
+    assert.equal((await new ManagedCommandWakeRecoverySweep(h.deps).runOnce()).recovered, 1);
+    const settled = h.tasks.get(task.id).params.holdLifecycle.managedCommand;
+    assert.equal(settled.state, 'consumed');
+    assert.equal(settled.executionPolicy, 'read_only');
+    assert.equal(settled.result.tailOutput, '10');
+    assert.equal(h.appended.length, 1);
+    assert.equal((await new ManagedCommandWakeRecoverySweep(h.deps).runOnce()).scanned, 0);
+  });
+
+  test('API restart consumes one durable full-gate terminal receipt exactly once', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'managed-gate-restart-'));
+    const jobId = 'managed-gate-job-1';
+    const supervisorEpoch = 'epoch-1';
+    const recordPath = path.join(tempDir, 'managed-gate-jobs', `${jobId}.json`);
+    mkdirSync(path.dirname(recordPath), { recursive: true });
+    const previousDataDir = process.env.CAT_CAFE_DATA_DIR;
+    process.env.CAT_CAFE_DATA_DIR = tempDir;
+    const task = makeTask();
+    task.params.holdLifecycle.managedCommand.durableJob = {
+      kind: 'full_gate',
+      jobId,
+      originTaskId: task.id,
+      supervisorEpoch,
+      recordPath,
+      gateReceiptPath: path.join(tempDir, 'managed-gate-jobs', `${jobId}.gate.json`),
+      logPath: path.join(tempDir, 'managed-gate-jobs', `${jobId}.log`),
+      executionSlaMs: 3_600_000,
+      wallSlaMs: 10_800_000,
+      wakeTarget: { threadId: 'thread-1', catId: 'codex', userId: 'user-1' },
+    };
+    writeFileSync(
+      recordPath,
+      JSON.stringify({
+        version: 1,
+        jobId,
+        originTaskId: task.id,
+        supervisorEpoch,
+        runId: 'run-terminal',
+        state: 'terminal',
+        terminalStatus: 'green',
+        createdAt: 8_000,
+        updatedAt: 9_000,
+      }),
+    );
+    const h = makeHarness({ task, triggerOutcomes: ['enqueued', 'enqueued'] });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    try {
+      await sweep.runOnce();
+      await sweep.runOnce();
+      const command = h.tasks.get(task.id).params.holdLifecycle.managedCommand;
+      assert.equal(command.result.exitCode, 0);
+      assert.equal(command.result.timedOut, false);
+      assert.equal(h.appended.length, 1, 'terminal visibility is idempotent across repeated startup sweeps');
+      assert.equal(h.appended[0].idempotencyKey, `hold-ball-completion:${task.id}`);
+    } finally {
+      if (previousDataDir === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previousDataDir;
+      console.info(`Retained isolated managed-command evidence: ${tempDir}`);
+    }
+  });
+
+  test('API restart recovers a corrupt cancellation artifact until the exact worker is proven dead', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const { initializeDurableManagedGateJob, recordDurableManagedGateProcess } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-job.js'
+    );
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'managed-gate-cancel-recovery-'));
+    const previousDataDir = process.env.CAT_CAFE_DATA_DIR;
+    process.env.CAT_CAFE_DATA_DIR = tempDir;
+    const task = makeTask();
+    const jobId = 'managed-gate-cancel-recovery';
+    const managedRoot = path.join(tempDir, 'managed-gate-jobs');
+    const durableJob = {
+      kind: 'full_gate',
+      jobId,
+      originTaskId: task.id,
+      supervisorEpoch: 'pre-restart-owner-epoch',
+      recordPath: path.join(managedRoot, `${jobId}.json`),
+      gateReceiptPath: path.join(managedRoot, `${jobId}.gate.json`),
+      logPath: path.join(managedRoot, `${jobId}.log`),
+      executionSlaMs: 3_600_000,
+      wallSlaMs: 10_800_000,
+      wakeTarget: { threadId: 'thread-1', catId: 'codex-sol', userId: 'user-1' },
+    };
+    task.enabled = false;
+    task.params.holdLifecycle.status = 'cancel_requested';
+    task.params.holdLifecycle.cancelledBy = 'operator:test-user';
+    task.params.holdLifecycle.managedCommand.durableJob = durableJob;
+    initializeDurableManagedGateJob(durableJob);
+    const deadWorkerIdentity = { pid: 99_998, ppid: 1, pgid: 99_998, startedAt: 'dead-worker-birth' };
+    assert.equal(recordDurableManagedGateProcess(durableJob, deadWorkerIdentity), true);
+    writeFileSync(`${durableJob.recordPath}.cancel-request`, '{corrupt\n');
+    const h = makeHarness({ task });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    try {
+      const blockedByOldFence = await sweep.runOnce();
+      assert.deepEqual(blockedByOldFence, { scanned: 1, recovered: 0, pending: 1 });
+      assert.equal(h.tasks.get(task.id).params.holdLifecycle.status, 'cancel_requested');
+      assert.equal(JSON.parse(readFileSync(durableJob.recordPath, 'utf8')).state, 'running');
+      assert.equal(existsSync(`${durableJob.recordPath}.terminal`), false);
+
+      h.setNow(Date.now() + 120_000);
+      const recovered = await sweep.runOnce();
+      assert.equal(h.tasks.get(task.id).params.holdLifecycle.status, 'cancelled_by_user');
+      assert.equal(JSON.parse(readFileSync(`${durableJob.recordPath}.terminal`, 'utf8')).terminalStatus, 'cancelled');
+      assert.deepEqual(recovered, { scanned: 1, recovered: 1, pending: 0 });
+    } finally {
+      if (previousDataDir === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previousDataDir;
+      console.info(`Retained isolated managed-command evidence: ${tempDir}`);
+    }
+  });
+
+  test('a removed replacement/cancel task cannot be resurrected by stale completion', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const h = makeHarness();
+    h.tasks.delete('hold-ball-task-1');
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    assert.equal(
+      await sweep.recordCompletion({
+        taskId: 'hold-ball-task-1',
+        wakeContent: 'stale completion',
+        result: { exitCode: 0, timedOut: false, durationMs: 1 },
+      }),
+      'missing',
+    );
+    assert.equal(h.appended.length, 0);
+    assert.equal(h.triggerCalls.length, 0);
+  });
+
+  test('persists a single SLA-breach observation for an overdue unconsumed completion', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const task = makeTask();
+    task.params.holdLifecycle.managedCommand = {
+      state: 'dispatch_pending',
+      command: 'pnpm gate',
+      startedAt: 1_000,
+      conditionMetAt: 2_000,
+      wakeContent: 'gate finished',
+      result: { exitCode: 0, timedOut: false, durationMs: 1_000 },
+      messageId: 'message-existing',
+      messageWrittenAt: 2_100,
+    };
+    const h = makeHarness({ task, triggerOutcomes: ['full', 'full'] });
+    h.deps.wakeSlaMs = 1_000;
+    h.setNow(10_000);
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    await sweep.runOnce();
+    const firstObservedAt = h.tasks.get(task.id).params.holdLifecycle.managedCommand.slaBreachObservedAt;
+    await sweep.runOnce();
+
+    assert.equal(firstObservedAt, 10_000);
+    assert.equal(h.tasks.get(task.id).params.holdLifecycle.managedCommand.slaBreachObservedAt, firstObservedAt);
+  });
+
+  test('startup sweep terminalizes a non-durable command whose process-local runner was lost', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const h = makeHarness({ isCommandRunnerActive: () => false });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    const result = await sweep.runOnce();
+
+    assert.deepEqual(result, { scanned: 1, recovered: 1, pending: 0 });
+    const task = h.tasks.get('hold-ball-task-1');
+    assert.equal(task.enabled, false);
+    assert.equal(task.params.holdLifecycle.status, 'fired');
+    assert.equal(task.params.holdLifecycle.managedCommand.state, 'consumed');
+    assert.equal(task.params.holdLifecycle.managedCommand.carrierTerminalReason, 'failed');
+    assert.equal(h.appended.length, 1);
+    assert.equal(h.appended[0].idempotencyKey, 'hold-ball-lost:hold-ball-task-1');
+    assert.equal(h.appended[0].source.meta.phase, 'status');
+    // Runner loss is terminal, and `phase:'status'` cannot say so. The card the
+    // engine really emits states it, so a failed status probe cannot leave live
+    // cancel controls on a hold whose runner is already gone.
+    assert.equal(h.appended[0].source.meta.cancelable, false);
+    assert.match(h.appended[0].content, /服务重启/);
+  });
+
+  test('startup sweep retains terminal evidence for a retired non-durable command whose runner was lost', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const task = makeTask();
+    task.enabled = false;
+    task.params.holdLifecycle.status = 'retired_by_replacement';
+    const h = makeHarness({ task, isCommandRunnerActive: () => false });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    const result = await sweep.runOnce();
+
+    assert.deepEqual(result, { scanned: 1, recovered: 1, pending: 0 });
+    const retired = h.tasks.get(task.id);
+    assert.equal(retired.enabled, false);
+    assert.equal(retired.params.holdLifecycle.status, 'retired_by_replacement');
+    assert.equal(retired.params.holdLifecycle.managedCommand.state, 'consumed');
+    assert.equal(h.appended.length, 1);
+    assert.equal(h.appended[0].idempotencyKey, `hold-ball-completion:${task.id}`);
+    assert.match(h.appended[0].content, /执行归属已丢失/);
+    assert.equal(h.triggerCalls.length, 0, 'retired custody must publish terminal evidence without waking the cat');
+  });
+
+  test('periodic sweep leaves a live process-local command runner alone', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const h = makeHarness({ isCommandRunnerActive: () => true });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    assert.deepEqual(await sweep.runOnce(), { scanned: 0, recovered: 0, pending: 0 });
+    assert.equal(h.tasks.get('hold-ball-task-1').enabled, true);
+    assert.equal(h.appended.length, 0);
+  });
+
+  test('lost-command status append retries from durable lost state without duplicating History', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const h = makeHarness({
+      appendError: new Error('message plane unavailable'),
+      isCommandRunnerActive: () => false,
+    });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    assert.deepEqual(await sweep.runOnce(), { scanned: 1, recovered: 0, pending: 1 });
+    assert.equal(h.tasks.get('hold-ball-task-1').params.holdLifecycle.managedCommand.state, 'lost');
+    assert.equal(h.tasks.get('hold-ball-task-1').enabled, true);
+
+    h.setAppendError(null);
+    assert.deepEqual(await sweep.runOnce(), { scanned: 1, recovered: 1, pending: 0 });
+    assert.equal(h.appended.length, 1);
+    assert.equal(h.appended[0].idempotencyKey, 'hold-ball-lost:hold-ball-task-1');
+  });
+});
+
+test('API recovery atomically admits the exact managed wake before publishing its completion', async () => {
+  const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+  const h = makeHarness();
+  const admit = h.deps.admitWake;
+  const admissions = [];
+  h.deps.admitWake = async (input) => {
+    assert.equal(h.appended.length, 0, 'no completion History before the atomic admission');
+    assert.deepEqual(input.message.from, { kind: 'system', service: 'managed-command-wake' });
+    assert.equal(input.catId, 'codex-sol');
+    assert.equal(input.priority, 'urgent');
+    assert.equal(input.message.idempotencyKey, 'hold-ball-completion:hold-ball-task-1');
+    const result = await admit(input);
+    admissions.push(result.messageId);
+    return result;
+  };
+  await new ManagedCommandWakeRecoverySweep(h.deps).recordCompletion({
+    taskId: 'hold-ball-task-1',
+    wakeContent: 'actual command failed',
+    result: { exitCode: 1, timedOut: false, durationMs: 5000 },
+  });
+  assert.equal(admissions.length, 1);
+  assert.equal(h.appended.length, 1);
+  await new ManagedCommandWakeRecoverySweep(h.deps).recoverTask('hold-ball-task-1');
+  assert.equal(admissions.length, 1, 'restart preserves the same committed wake');
+  assert.equal(h.appended.length, 1);
+});
+
+test('failed atomic wake admission leaves completion retryable without a stray message', async () => {
+  const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+  const h = makeHarness();
+  const admit = h.deps.admitWake;
+  h.deps.admitWake = async () => {
+    throw new Error('atomic storage unavailable');
+  };
+  const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+  assert.equal(
+    await sweep.recordCompletion({
+      taskId: 'hold-ball-task-1',
+      wakeContent: 'done',
+      result: { exitCode: 0, timedOut: false, durationMs: 5000 },
+    }),
+    'pending',
+  );
+  assert.equal(h.appended.length, 0);
+  assert.equal(h.triggerCalls.length, 0);
+  h.deps.admitWake = admit;
+  await sweep.recoverTask('hold-ball-task-1');
+  assert.equal(h.appended.length, 1, 'restored storage admits the original pending wake');
+});

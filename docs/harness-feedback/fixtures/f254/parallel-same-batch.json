@@ -1,0 +1,22 @@
+{
+  "id": "parallel-same-batch",
+  "scenario": "parallel_same_batch",
+  "threadId": "thread_fixture_f254_parallel",
+  "catIds": ["codex-sol", "opus"],
+  "evidenceRefs": ["fixture:F254/AC-E9/parallel-same-batch@v1"],
+  "facts": {
+    "responsibilityCount": 0,
+    "custodyCount": 0,
+    "formalFinalCount": 2,
+    "formalFinalLimit": 2,
+    "knownStaleFinalCount": 0,
+    "targetCount": 2,
+    "accountedTargetCount": 2,
+    "sameBatchSiblingWakeCount": 0,
+    "automaticAttemptCount": 0,
+    "automaticAttemptLimit": 10,
+    "commitRecheckCount": 0,
+    "commitRecheckLimit": 12,
+    "terminalEvidenceComplete": true
+  }
+}

@@ -1,0 +1,342 @@
+import { z } from 'zod';
+import {
+  collectiveConnectionCoordinatesSchema,
+  collectiveConnectionIdSchema,
+  collectiveCoordinatesSchema,
+  collectiveEventIdSchema,
+  collectiveHumanIdSchema,
+  collectiveLocationSchema,
+} from './collective.js';
+import { collectiveCollaborationActorSchema } from './collective-collaboration-actor.js';
+import { collectiveRoadmapIdSchema, collectiveWorkIdSchema } from './collective-collaboration-identifiers.js';
+import { collectiveBindingVoteProjectionSchema, collectiveDecisionRecordSchema } from './collective-decision-vote.js';
+import { collectiveMaterialLinkSchema } from './collective-material.js';
+import {
+  collectiveProjectWorkSuggestionSchema,
+  collectiveProjectWorkSuggestionTargetSchema,
+  collectiveWorkAccountabilityRequestSchema,
+} from './collective-project-authoring.js';
+import { collectiveReactionSummarySchema } from './collective-reaction.js';
+import {
+  collectiveTimeChangeSchema,
+  collectiveTimeFactSchema,
+  collectiveTimeSuggestionSchema,
+  collectiveWorkTimeSchema,
+} from './collective-time.js';
+import { collectiveVoteProjectionSchema } from './collective-vote.js';
+import {
+  collectiveWorkAcceptanceSchema,
+  collectiveWorkExecutionAuthoritySchema,
+  collectiveWorkExecutionStatusSchema,
+} from './collective-work-acceptance.js';
+
+export { collectiveRoadmapIdSchema, collectiveWorkIdSchema } from './collective-collaboration-identifiers.js';
+
+export const collectiveAssignedWorkReadRequestSchema = collectiveConnectionCoordinatesSchema
+  .extend({ workId: collectiveWorkIdSchema })
+  .strict();
+
+export const collectiveAssignedWorkByAssignmentReadRequestSchema = collectiveConnectionCoordinatesSchema
+  .extend({ assignmentEventId: collectiveEventIdSchema })
+  .strict();
+
+export const collectiveAcceptedWorkResultSchema = collectiveAssignedWorkReadRequestSchema
+  .extend({
+    workRevision: z.number().int().positive(),
+    assignmentEventId: collectiveEventIdSchema,
+    resultEventId: collectiveEventIdSchema,
+    resultRevision: z.number().int().positive(),
+  })
+  .strict();
+
+export { collectiveCollaborationActorSchema } from './collective-collaboration-actor.js';
+
+export const collectiveWorkAssignmentSchema = z
+  .object({
+    humanId: collectiveHumanIdSchema,
+    connectionId: collectiveConnectionIdSchema,
+    catId: z.string().trim().min(1).max(120),
+    displayName: z.string().trim().min(1).max(120),
+    participationRevision: z.number().int().positive(),
+    assignedAt: z.string().datetime(),
+  })
+  .strict();
+
+export const collectiveWorkLifecycleSchema = z.enum([
+  'proposed',
+  'committed',
+  'in_progress',
+  'result_ready',
+  'completed',
+  'declined',
+  'cancelled',
+]);
+export const collectiveWorkStatusSchema = z.enum([
+  'proposed',
+  'unassigned',
+  'ready',
+  'blocked',
+  'in_progress',
+  'result_ready',
+  'completed',
+  'declined',
+  'cancelled',
+]);
+
+export const collectiveWorkHistoryEntrySchema = z
+  .object({
+    revision: z.number().int().positive(),
+    action: z.enum([
+      'material_linked',
+      'time_changed',
+      'time_suggested',
+      'time_suggestion_resolved',
+      'proposed',
+      'committed',
+      'accountability_assigned',
+      'accountability_requested',
+      'accountability_request_accepted',
+      'accountability_request_declined',
+      'dependencies_changed',
+      'progress_started',
+      'progress_reported',
+      'result_returned',
+      'revision_requested',
+      'execution_authorized',
+      'result_accepted',
+      'completed',
+      'declined',
+      'cancelled',
+    ]),
+    timeChange: collectiveTimeChangeSchema.optional(),
+    actor: collectiveCollaborationActorSchema,
+    at: z.string().datetime(),
+    eventId: collectiveEventIdSchema.optional(),
+    resultRevision: z.number().int().positive().optional(),
+    note: z.string().trim().min(1).max(1000).optional(),
+  })
+  .strict();
+
+export const collectiveWorkRecordSchema = collectiveCoordinatesSchema
+  .extend({
+    v: z.literal(1),
+    workId: collectiveWorkIdSchema,
+    sourceEventId: collectiveEventIdSchema,
+    sourceLocation: collectiveLocationSchema,
+    title: z.string().trim().min(1).max(200),
+    intendedOutcome: z.string().trim().min(1).max(32_000),
+    proposedBy: collectiveCollaborationActorSchema,
+    proposedRequestKind: z.string().trim().min(1).max(240).optional(),
+    projectSuggestion: collectiveProjectWorkSuggestionSchema.optional(),
+    accountableHumanId: collectiveHumanIdSchema.optional(),
+    materialLinks: z.array(collectiveMaterialLinkSchema).optional(),
+    time: collectiveWorkTimeSchema.optional(),
+    timeSuggestions: z.array(collectiveTimeSuggestionSchema).optional(),
+    accountabilityRequests: z.array(collectiveWorkAccountabilityRequestSchema).max(100).optional(),
+    assignment: collectiveWorkAssignmentSchema.optional(),
+    assignmentEventId: collectiveEventIdSchema.optional(),
+    acceptance: collectiveWorkAcceptanceSchema.optional(),
+    executionAuthority: collectiveWorkExecutionAuthoritySchema.optional(),
+    dependencyWorkIds: z.array(collectiveWorkIdSchema).max(100),
+    lifecycle: collectiveWorkLifecycleSchema,
+    resultEventId: collectiveEventIdSchema.optional(),
+    /** Optional only for persisted v1 results written before revision rounds existed. */
+    resultRevision: z.number().int().positive().optional(),
+    revision: z.number().int().positive(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    history: z.array(collectiveWorkHistoryEntrySchema).max(1000),
+  })
+  .strict();
+
+export const collectiveWorkProjectionSchema = collectiveWorkRecordSchema
+  .extend({ status: collectiveWorkStatusSchema, executionStatus: collectiveWorkExecutionStatusSchema.optional() })
+  .strict();
+
+export const collectiveRoadmapHistoryEntrySchema = z
+  .object({
+    revision: z.number().int().positive(),
+    action: z.enum(['created', 'works_changed', 'completed', 'reopened', 'target_date_changed']),
+    targetDateChange: z
+      .object({ previous: collectiveTimeFactSchema.nullable(), current: collectiveTimeFactSchema.nullable() })
+      .strict()
+      .optional(),
+    actor: collectiveCollaborationActorSchema,
+    at: z.string().datetime(),
+    note: z.string().trim().min(1).max(1000).optional(),
+  })
+  .strict();
+
+export const collectiveRoadmapRecordSchema = collectiveCoordinatesSchema
+  .extend({
+    v: z.literal(1),
+    roadmapId: collectiveRoadmapIdSchema,
+    sourceEventId: collectiveEventIdSchema,
+    sourceLocation: collectiveLocationSchema,
+    title: z.string().trim().min(1).max(200),
+    purpose: z.string().trim().min(1).max(4000),
+    targetDate: collectiveTimeFactSchema.optional(),
+    accountableHumanId: collectiveHumanIdSchema,
+    workIds: z.array(collectiveWorkIdSchema).max(200),
+    status: z.enum(['active', 'completed']),
+    revision: z.number().int().positive(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    history: z.array(collectiveRoadmapHistoryEntrySchema).max(1000),
+  })
+  .strict();
+
+export const collectiveCollaborationProjectionSchema = z
+  .object({
+    serviceInstanceId: z.string(),
+    collectiveId: z.string(),
+    works: z.array(collectiveWorkProjectionSchema),
+    roadmaps: z.array(collectiveRoadmapRecordSchema),
+    votes: z.array(collectiveVoteProjectionSchema),
+    bindingVotes: z.array(collectiveBindingVoteProjectionSchema),
+    decisions: z.array(collectiveDecisionRecordSchema),
+    reactions: z.array(collectiveReactionSummarySchema).optional(),
+  })
+  .strict();
+
+const humanCommandBase = collectiveCoordinatesSchema.extend({ requestId: z.string().trim().min(1).max(200) });
+
+export const proposeCollectiveWorkRequestSchema = humanCommandBase
+  .extend({
+    sourceEventId: collectiveEventIdSchema,
+    title: z.string().trim().min(1).max(200).optional(),
+    intendedOutcome: z.string().trim().min(1).max(32_000).optional(),
+  })
+  .strict();
+
+export const collectiveWorkAssignmentRequestSchema = z
+  .object({
+    connectionId: collectiveConnectionIdSchema,
+    catId: z.string().trim().min(1).max(120),
+    participationRevision: z.number().int().positive(),
+  })
+  .strict();
+
+export const commitCollectiveWorkRequestSchema = humanCommandBase
+  .extend({
+    workId: collectiveWorkIdSchema,
+    expectedRevision: z.number().int().positive(),
+    accountability: z.enum(['self', 'unassigned']).optional(),
+    assignment: collectiveWorkAssignmentRequestSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.accountability === 'unassigned' && value.assignment) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['assignment'],
+        message: 'Unassigned Work cannot also name a Cat assignment',
+      });
+    }
+  });
+
+export const setCollectiveWorkDependenciesRequestSchema = humanCommandBase
+  .extend({
+    workId: collectiveWorkIdSchema,
+    expectedRevision: z.number().int().positive(),
+    dependencyWorkIds: z.array(collectiveWorkIdSchema).max(100),
+  })
+  .strict();
+
+export const acceptCollectiveWorkResultRequestSchema = humanCommandBase
+  .extend({
+    workId: collectiveWorkIdSchema,
+    expectedRevision: z.number().int().positive(),
+    resultEventId: collectiveEventIdSchema,
+    resultRevision: z.number().int().positive(),
+  })
+  .strict();
+
+export const requestCollectiveWorkRevisionRequestSchema = humanCommandBase
+  .extend({
+    workId: collectiveWorkIdSchema,
+    expectedRevision: z.number().int().positive(),
+    resultEventId: collectiveEventIdSchema,
+    resultRevision: z.number().int().positive(),
+    feedback: z.string().trim().min(1).max(1000),
+  })
+  .strict();
+
+export const completeCollectiveWorkRequestSchema = humanCommandBase
+  .extend({
+    workId: collectiveWorkIdSchema,
+    expectedRevision: z.number().int().positive(),
+  })
+  .strict();
+
+export const declineCollectiveWorkRequestSchema = humanCommandBase
+  .extend({
+    workId: collectiveWorkIdSchema,
+    expectedRevision: z.number().int().positive(),
+    reason: z.string().trim().min(1).max(1000).optional(),
+  })
+  .strict();
+
+export const createCollectiveRoadmapRequestSchema = humanCommandBase
+  .extend({
+    sourceEventId: collectiveEventIdSchema,
+    title: z.string().trim().min(1).max(200),
+    purpose: z.string().trim().min(1).max(4000),
+    workIds: z.array(collectiveWorkIdSchema).max(200),
+  })
+  .strict();
+
+export const setCollectiveRoadmapWorksRequestSchema = humanCommandBase
+  .extend({
+    roadmapId: collectiveRoadmapIdSchema,
+    expectedRevision: z.number().int().positive(),
+    workIds: z.array(collectiveWorkIdSchema).max(200),
+  })
+  .strict();
+
+export const setCollectiveRoadmapStatusRequestSchema = humanCommandBase
+  .extend({
+    roadmapId: collectiveRoadmapIdSchema,
+    expectedRevision: z.number().int().positive(),
+    status: z.enum(['active', 'completed']),
+    note: z.string().trim().min(1).max(1000).optional(),
+  })
+  .strict();
+
+export type CollectiveCollaborationActor = z.infer<typeof collectiveCollaborationActorSchema>;
+export type CollectiveWorkAssignment = z.infer<typeof collectiveWorkAssignmentSchema>;
+export type CollectiveWorkLifecycle = z.infer<typeof collectiveWorkLifecycleSchema>;
+export type CollectiveWorkStatus = z.infer<typeof collectiveWorkStatusSchema>;
+export type CollectiveWorkRecord = z.infer<typeof collectiveWorkRecordSchema>;
+export type CollectiveWorkProjection = z.infer<typeof collectiveWorkProjectionSchema>;
+export type CollectiveAssignedWorkReadRequest = z.infer<typeof collectiveAssignedWorkReadRequestSchema>;
+export type CollectiveAssignedWorkByAssignmentReadRequest = z.infer<
+  typeof collectiveAssignedWorkByAssignmentReadRequestSchema
+>;
+export type CollectiveAcceptedWorkResult = z.infer<typeof collectiveAcceptedWorkResultSchema>;
+export type CollectiveRoadmapRecord = z.infer<typeof collectiveRoadmapRecordSchema>;
+export type CollectiveCollaborationProjection = z.infer<typeof collectiveCollaborationProjectionSchema>;
+export type ProposeCollectiveWorkRequest = z.infer<typeof proposeCollectiveWorkRequestSchema>;
+export type CommitCollectiveWorkRequest = z.infer<typeof commitCollectiveWorkRequestSchema>;
+export type SetCollectiveWorkDependenciesRequest = z.infer<typeof setCollectiveWorkDependenciesRequestSchema>;
+export type AcceptCollectiveWorkResultRequest = z.infer<typeof acceptCollectiveWorkResultRequestSchema>;
+export type RequestCollectiveWorkRevisionRequest = z.infer<typeof requestCollectiveWorkRevisionRequestSchema>;
+export type CompleteCollectiveWorkRequest = z.infer<typeof completeCollectiveWorkRequestSchema>;
+export type DeclineCollectiveWorkRequest = z.infer<typeof declineCollectiveWorkRequestSchema>;
+export type CreateCollectiveRoadmapRequest = z.infer<typeof createCollectiveRoadmapRequestSchema>;
+export type SetCollectiveRoadmapWorksRequest = z.infer<typeof setCollectiveRoadmapWorksRequestSchema>;
+export type SetCollectiveRoadmapStatusRequest = z.infer<typeof setCollectiveRoadmapStatusRequestSchema>;
+
+export const collectiveAgentWorkProposalRequestSchema = collectiveConnectionCoordinatesSchema
+  .extend({
+    requestId: z.string().trim().min(1).max(200),
+    sourceEventId: collectiveEventIdSchema,
+    catId: z.string().trim().min(1).max(120),
+    participationRevision: z.number().int().positive(),
+    requestKind: z.string().trim().min(1).max(240).optional(),
+    title: z.string().trim().min(1).max(200).optional(),
+    intendedOutcome: z.string().trim().min(1).max(32_000).optional(),
+    projectSuggestion: collectiveProjectWorkSuggestionTargetSchema.optional(),
+  })
+  .strict();
+export type CollectiveAgentWorkProposalRequest = z.infer<typeof collectiveAgentWorkProposalRequestSchema>;

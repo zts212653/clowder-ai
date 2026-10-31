@@ -13,6 +13,7 @@ const {
   parseWorktreeHealth,
   parseRuntimeDrift,
   parseDriftCommits,
+  STALE_BRANCH_FORMAT,
 } = await import('../dist/routes/workspace-git.js');
 
 describe('parseGitLog', () => {
@@ -70,6 +71,29 @@ describe('parseGitStatus', () => {
     assert.equal(result.staged.length, 1);
     assert.equal(result.staged[0].status, 'D');
   });
+
+  // F322 Task608: a single unstaged row on the FIRST line must keep its X-column
+  // space — trimming the whole stdout eats it and misclassifies category + path.
+  test('keeps category and full path for an unstaged modification on the first line', () => {
+    const result = parseGitStatus(' M docs/plans/example.md\n');
+    assert.deepEqual(result.staged, []);
+    assert.deepEqual(result.unstaged, [{ status: 'M', path: 'docs/plans/example.md' }]);
+    assert.deepEqual(result.untracked, []);
+  });
+
+  test('first-line unstaged row after other rows stays correct', () => {
+    const result = parseGitStatus('?? first.txt\n M docs/plans/example.md\n');
+    assert.deepEqual(result.staged, []);
+    assert.deepEqual(result.unstaged, [{ status: 'M', path: 'docs/plans/example.md' }]);
+    assert.deepEqual(result.untracked, [{ status: '??', path: 'first.txt' }]);
+  });
+
+  test('staged modification on the first line keeps working', () => {
+    const result = parseGitStatus('M  docs/plans/example.md\n');
+    assert.deepEqual(result.staged, [{ status: 'M', path: 'docs/plans/example.md' }]);
+    assert.deepEqual(result.unstaged, []);
+    assert.deepEqual(result.untracked, []);
+  });
 });
 
 describe('parseGitShow', () => {
@@ -123,16 +147,46 @@ describe('parseStaleBranches', () => {
     assert.equal(result.length, 1);
     assert.equal(result[0].name, 'feat/old');
   });
+
+  // F322 Task608: the producer must use the ref-filter %00 separator — git-log's
+  // %x00 is not ref-filter syntax and comes back as literal text, fusing name,
+  // date and author into one bogus branch (even main landed in the stale list).
+  test('STALE_BRANCH_FORMAT uses ref-filter %00, not git-log %x00', () => {
+    assert.ok(STALE_BRANCH_FORMAT, 'format constant is exported');
+    assert.ok(STALE_BRANCH_FORMAT.includes('%00'), 'uses %00 ref-filter separator');
+    assert.ok(!STALE_BRANCH_FORMAT.includes('%x00'), 'must not use %x00');
+  });
+
+  test('git branch with STALE_BRANCH_FORMAT emits real NUL separators and parses main out', async () => {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    const { stdout } = await execFileAsync('git', ['branch', '--list', `--format=${STALE_BRANCH_FORMAT}`], {
+      timeout: 5000,
+    });
+    assert.ok(stdout.length > 0, 'repo has at least one local branch');
+    assert.ok(stdout.includes('\x00'), 'output is NUL-separated');
+    assert.ok(!stdout.includes('%x00'), 'output contains no literal %x00');
+    const parsed = parseStaleBranches(stdout);
+    assert.ok(
+      parsed.every((b) => !['main', 'master', 'develop'].includes(b.name)),
+      'protected branches are excluded',
+    );
+    for (const b of parsed) {
+      assert.ok(b.lastCommitDate, `branch ${b.name} has a commit date`);
+      assert.ok(b.author, `branch ${b.name} has an author`);
+    }
+  });
 });
 
 describe('parseWorktreeHealth', () => {
   test('marks worktrees with merged branches as orphan', () => {
     const worktreeListOutput = [
-      'worktree /path/to/project',
+      'worktree /home/user/cat-cafe',
       'HEAD abc1234567890123456789012345678901234567',
       'branch refs/heads/main',
       '',
-      'worktree /path/to/project-f079',
+      'worktree /home/user/cat-cafe-f079',
       'HEAD def1234567890123456789012345678901234567',
       'branch refs/heads/feat/f079-voting',
       '',

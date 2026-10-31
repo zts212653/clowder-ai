@@ -1,6 +1,9 @@
+import type { CodexStartupRecovery } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ThreadChatHistoryAdmissionProvider } from '@/components/thread-chat/ThreadChatRuntimeProvider';
+import type { ThreadState } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { useChatHistory } from '../useChatHistory';
@@ -9,19 +12,23 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(),
 }));
 
-function HookHost({ threadId }: { threadId: string }) {
+function HookProbe({ threadId }: { threadId: string }) {
   useChatHistory(threadId);
   return null;
 }
 
-function makeThreadBState(cachedAssistantTs: number, overrides?: Partial<ReturnType<typeof buildThreadBState>>) {
+function HookHost({ threadId }: { threadId: string }) {
+  return React.createElement(ThreadChatHistoryAdmissionProvider, null, React.createElement(HookProbe, { threadId }));
+}
+
+function makeThreadBState(cachedAssistantTs: number, overrides?: Partial<ThreadState>): ThreadState {
   return {
     ...buildThreadBState(cachedAssistantTs),
     ...overrides,
   };
 }
 
-function buildThreadBState(cachedAssistantTs: number) {
+function buildThreadBState(cachedAssistantTs: number): ThreadState {
   return {
     messages: [
       {
@@ -36,20 +43,23 @@ function buildThreadBState(cachedAssistantTs: number) {
     isLoadingHistory: false,
     hasMore: true,
     hasActiveInvocation: true,
+    activeInvocations: {},
     intentMode: 'execute' as const,
     targetCats: ['opus'],
     catStatuses: { opus: 'streaming' as const },
+    catStatusDetails: {},
     catInvocations: {},
-    currentGame: null,
 
     unreadCount: 0,
     hasUserMention: false,
     lastActivity: cachedAssistantTs,
     queue: [],
-    queuePaused: false,
-    queuePauseReason: undefined,
     queueFull: false,
     queueFullSource: undefined,
+    workspaceWorktreeId: null,
+    workspaceOpenTabs: [],
+    workspaceOpenFilePath: null,
+    workspaceOpenFileLine: null,
   };
 }
 
@@ -91,7 +101,6 @@ describe('useChatHistory replace hydration', () => {
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
-      currentGame: null,
 
       threadStates: {},
       currentThreadId: 'thread-a',
@@ -113,7 +122,7 @@ describe('useChatHistory replace hydration', () => {
     apiFetchMock.mockReset();
   });
 
-  function mountReplaceHydrationThread(threadState: ReturnType<typeof buildThreadBState>) {
+  function mountReplaceHydrationThread(threadState: ThreadState) {
     useChatStore.setState({
       messages: [{ id: 'a1', type: 'user', content: 'thread-a message', timestamp: Date.now() - 2000 }],
       currentThreadId: 'thread-a',
@@ -154,6 +163,359 @@ describe('useChatHistory replace hydration', () => {
     };
   }
 
+  for (const stage of ['ready', 'failed', 'cancelled'] as const)
+    it(`restores newer startup ${stage} from history even when the local body is preferred`, async () => {
+      const history = installDeferredHistoryResponse();
+      const cached: CodexStartupRecovery = {
+        invocationId: 'startup-current',
+        stage: 'retry_wait',
+        sequence: 2,
+        attempt: 1,
+        maxAttempts: 6,
+        startedAt: 1,
+        deadlineAt: 120_001,
+        updatedAt: 2,
+      };
+      const state = makeThreadBState(10);
+      state.messages[0] = {
+        ...state.messages[0],
+        content: 'cached answer with additional local reasoning',
+        extra: { startupRecovery: cached },
+      };
+      mountReplaceHydrationThread(state);
+      await history.waitUntilPending();
+      const terminal = { ...cached, stage, sequence: 5, attempt: 3, updatedAt: 20 };
+      await history.resolve({
+        messages: [
+          {
+            id: 'b1',
+            type: 'assistant',
+            catId: 'opus',
+            content: 'final answer',
+            timestamp: 20,
+            extra: { startupRecovery: terminal },
+          },
+        ],
+        hasMore: false,
+      });
+      expect(useChatStore.getState().messages.find((m) => m.id === 'b1')?.extra?.startupRecovery).toEqual(terminal);
+    });
+
+  for (const [stage, sequence, historySequence] of [
+    ['retry_wait', 7, 3],
+    ['ready', 5, 8],
+  ] as const)
+    it(`retains local startup ${stage} independently of the richer history body`, async () => {
+      const history = installDeferredHistoryResponse();
+      const current: CodexStartupRecovery = {
+        invocationId: 'startup-current',
+        stage,
+        sequence,
+        attempt: 2,
+        maxAttempts: 6,
+        startedAt: 1,
+        deadlineAt: 120_001,
+        updatedAt: 2,
+      };
+      const state = makeThreadBState(10);
+      state.messages[0] = { ...state.messages[0], content: 'cached', extra: { startupRecovery: current } };
+      mountReplaceHydrationThread(state);
+      await history.waitUntilPending();
+      await history.resolve({
+        messages: [
+          {
+            id: 'b1',
+            type: 'assistant',
+            catId: 'opus',
+            content: 'history answer with more detail',
+            timestamp: 20,
+            extra: { startupRecovery: { ...current, stage: 'checking', sequence: historySequence } },
+          },
+        ],
+        hasMore: false,
+      });
+      expect(useChatStore.getState().messages.find((m) => m.id === 'b1')?.extra?.startupRecovery).toEqual(current);
+    });
+
+  it('rehydrates the saved companion identity instead of replacing it with current selection', async () => {
+    const history = installDeferredHistoryResponse();
+    mountReplaceHydrationThread(makeThreadBState(Date.now() - 1000));
+    await history.waitUntilPending();
+    const identity = {
+      v: 1,
+      name: '猫猫球',
+      partner: { catId: 'fable-5', displayName: '宪宪', skin: 'xianxian-codex' },
+      live: { catId: 'codex6-sol', displayName: '砚砚', transport: 'gpt_live_v3', verifiedModel: null },
+      deep: { catId: 'fable-5', displayName: '宪宪', verifiedModel: null },
+    };
+    await history.resolve({
+      messages: [
+        {
+          id: 'saved-live',
+          type: 'assistant',
+          catId: 'codex6-sol',
+          content: '那天的回答',
+          timestamp: Date.now(),
+          extra: { liveCompanion: { modality: 'voice', identity } },
+        },
+      ],
+      tasks: [],
+      hasMore: false,
+    });
+    expect(
+      useChatStore.getState().messages.find((message) => message.id === 'saved-live')?.extra?.liveCompanion?.identity,
+    ).toEqual(identity);
+  });
+
+  it('hydrates semantic messages through the shared projector without exposing stored raw copy', async () => {
+    const history = installDeferredHistoryResponse();
+    const cachedAssistantTs = Date.now() - 1000;
+    mountReplaceHydrationThread(makeThreadBState(cachedAssistantTs));
+    await history.waitUntilPending();
+
+    await history.resolve({
+      messages: [
+        {
+          id: 'semantic-history-1',
+          type: 'system',
+          catId: 'system',
+          content: '{"method":"raw/provider/warning"}',
+          timestamp: 1_788_000_000_000,
+          extra: {
+            semanticEvent: {
+              v: 1,
+              id: 'semantic-history-event-1',
+              kind: 'warning',
+              occurredAt: 1_788_000_000_000,
+              category: 'safety',
+              severity: 'warning',
+              message: '受保护操作已拒绝。',
+              provenance: { provider: 'codex', carrier: 'app_server' },
+            },
+          },
+        },
+      ],
+      hasMore: false,
+    });
+
+    const hydrated = useChatStore.getState().messages.find((message) => message.id === 'semantic-history-1');
+    expect(hydrated?.type).toBe('system');
+    expect(hydrated?.content).toBe('警告：受保护操作已拒绝。');
+    expect(JSON.stringify(hydrated)).not.toContain('raw/provider');
+  });
+
+  it('cold hydration keeps the exact cloud retry and pending custody source, but drops retired Queue receipts', async () => {
+    const history = installDeferredHistoryResponse();
+    const retry = {
+      v: 1,
+      sourceMessageId: 'failed-source',
+      targetCatId: 'gpt-pro',
+      priorDispatchInvocationId: 'failed-dispatch',
+    };
+    const offer = {
+      offerId: 'custody-offer:retry-source',
+      sourceMessageRevision: `sha256:${'a'.repeat(64)}`,
+      policyVersion: 'custody-recognition-v1',
+      reasonCode: 'future_deliverable',
+      disposition: 'pending',
+    };
+    mountReplaceHydrationThread(makeThreadBState(Date.now() - 1000));
+    await history.waitUntilPending();
+    await history.resolve({
+      messages: [
+        {
+          id: 'retry-source',
+          type: 'user',
+          content: '继续这个委托',
+          timestamp: Date.now(),
+          extra: { cloudBridgeRetry: retry, custodyOfferV1: offer, queueReceipt: { status: 'queued' } },
+        },
+      ],
+      hasMore: false,
+    });
+    const hydrated = useChatStore.getState().messages.find((message) => message.id === 'retry-source');
+    expect(hydrated?.extra?.cloudBridgeRetry).toEqual(retry);
+    expect(hydrated?.extra?.custodyOfferV1).toEqual(offer);
+    expect(hydrated?.extra).not.toHaveProperty('queueReceipt');
+  });
+
+  it('restores exact cloud reply proof from cold history without using the stream invocation as its attempt', async () => {
+    const history = installDeferredHistoryResponse();
+    const proof = {
+      v: 1 as const,
+      threadId: 'thread-b',
+      sourceMessageId: 'source119',
+      targetCatId: 'gpt-pro',
+      dispatchInvocationId: 'actual-dispatch',
+    };
+    mountReplaceHydrationThread(makeThreadBState(Date.now() - 1000));
+    await history.waitUntilPending();
+    await history.resolve({
+      messages: [
+        {
+          id: 'reply122',
+          type: 'assistant',
+          catId: 'gpt-pro',
+          content: 'nonempty reply',
+          timestamp: Date.now(),
+          replyTo: 'source119',
+          origin: 'callback',
+          extra: { cloudBridgeReturn: proof, isExplicitPost: true, stream: { invocationId: 'reply122' } },
+        },
+      ],
+      hasMore: false,
+    });
+    const answer = useChatStore.getState().messages.find((message) => message.id === 'reply122');
+    expect(answer?.extra?.cloudBridgeReturn).toEqual(proof);
+    expect(answer?.extra?.stream?.invocationId).not.toBe(proof.dispatchInvocationId);
+  });
+
+  it('hydrates a modification source from persisted history when no live metadata copy exists', async () => {
+    const history = installDeferredHistoryResponse();
+    const metadata = {
+      v: 1,
+      requestId: 'f309-modification-' + 'a'.repeat(64),
+      requestFingerprint: 'sha256:' + 'b'.repeat(64),
+      contentTitle: '晨光封面',
+      targetCatId: 'codex-astra',
+      targetName: '小星星',
+      executionThreadTitle: '封面共创',
+      completionRule: 'file-writeback-applied',
+    };
+    mountReplaceHydrationThread(makeThreadBState(Date.now() - 1000));
+    await history.waitUntilPending();
+    await history.resolve({
+      messages: [
+        {
+          id: 'modification-source',
+          catId: null,
+          content: '移除画面标志',
+          timestamp: Date.now(),
+          extra: { contentModificationRequestV1: metadata },
+        },
+      ],
+      hasMore: false,
+    });
+    expect(
+      useChatStore.getState().messages.find((item) => item.id === 'modification-source')?.extra
+        ?.contentModificationRequestV1,
+    ).toEqual(metadata);
+  });
+
+  it('preserves the source-owned custody offer when a stale hydration copy omits message extra', async () => {
+    const history = installDeferredHistoryResponse();
+    const timestamp = Date.now() - 1_000;
+    const sourceMessageRevision = `sha256:${'a'.repeat(64)}`;
+    mountReplaceHydrationThread(
+      makeThreadBState(timestamp, {
+        messages: [
+          {
+            id: 'custody-source-1',
+            type: 'user',
+            content: '下周把演示稿整理好',
+            timestamp,
+            extra: {
+              custodyOfferV1: {
+                offerId: 'custody-offer:custody-source-1',
+                sourceMessageRevision,
+                policyVersion: 'custody-recognition-v1',
+                reasonCode: 'future_deliverable',
+                disposition: 'pending',
+              },
+            },
+          },
+        ],
+      }),
+    );
+    await history.waitUntilPending();
+
+    await history.resolve({
+      messages: [
+        {
+          id: 'custody-source-1',
+          type: 'user',
+          content: '下周把演示稿整理好',
+          timestamp,
+        },
+      ],
+      hasMore: false,
+    });
+
+    expect(useChatStore.getState().messages[0]?.extra?.custodyOfferV1).toEqual(
+      expect.objectContaining({
+        offerId: 'custody-offer:custody-source-1',
+        sourceMessageRevision,
+        disposition: 'pending',
+      }),
+    );
+  });
+
+  it('suppresses entity and invalid semantic records instead of hydrating empty timeline bubbles', async () => {
+    const history = installDeferredHistoryResponse();
+    mountReplaceHydrationThread(makeThreadBState(Date.now() - 1000));
+    await history.waitUntilPending();
+
+    await history.resolve({
+      messages: [
+        {
+          id: 'semantic-entity-goal',
+          type: 'system',
+          catId: 'system',
+          content: 'raw goal copy',
+          timestamp: 100,
+          extra: {
+            semanticEvent: {
+              v: 1,
+              id: 'goal-history-1',
+              kind: 'goal',
+              occurredAt: 100,
+              state: 'updated',
+              revision: 1,
+              objective: 'Ship',
+              source: 'codex_app_server',
+              observedAt: 100,
+            },
+          },
+        },
+        {
+          id: 'semantic-workspace-plan',
+          type: 'system',
+          catId: 'system',
+          content: 'raw plan copy',
+          timestamp: 101,
+          extra: {
+            semanticEvent: {
+              v: 1,
+              id: 'plan-history-1',
+              kind: 'plan',
+              occurredAt: 101,
+              stage: 'updated',
+              text: 'Locate the contract, then fix it.',
+            },
+          },
+        },
+        {
+          id: 'semantic-invalid-wire',
+          type: 'system',
+          catId: 'system',
+          content: '{"method":"provider/raw"}',
+          timestamp: 102,
+          extra: { semanticEvent: { method: 'provider/raw' } },
+        },
+      ],
+      hasMore: false,
+    });
+
+    const ids = useChatStore.getState().messages.map((message) => message.id);
+    expect(ids).not.toContain('semantic-entity-goal');
+    expect(ids).toContain('semantic-workspace-plan');
+    expect(useChatStore.getState().messages.find((message) => message.id === 'semantic-workspace-plan')).toMatchObject({
+      type: 'system',
+      content: 'Locate the contract, then fix it.',
+    });
+    expect(ids).not.toContain('semantic-invalid-wire');
+  });
+
   it('preserves a newer live bubble that arrived after thread switch', async () => {
     const history = installDeferredHistoryResponse();
     const cachedAssistantTs = Date.now() - 1000;
@@ -185,186 +547,83 @@ describe('useChatHistory replace hydration', () => {
     expect(useChatStore.getState().messages.map((m) => m.id)).toEqual(['b1', 'live-1']);
   });
 
-  it('keeps a richer local stream bubble instead of a stale draft duplicate', async () => {
+  it('preserves server timeline order when a published seed is delivered later', async () => {
     const history = installDeferredHistoryResponse();
-    const cachedAssistantTs = Date.now() - 1000;
-    mountReplaceHydrationThread(
-      makeThreadBState(cachedAssistantTs, {
-        catInvocations: { opus: { invocationId: 'inv-1', startedAt: cachedAssistantTs } },
-      }),
-    );
-
-    act(() => {
-      useChatStore.getState().addMessage({
-        id: 'live-1',
-        type: 'assistant',
-        catId: 'opus',
-        content: 'local stream bubble is richer than stale draft',
-        timestamp: Date.now(),
-        isStreaming: true,
-        origin: 'stream',
-        extra: { stream: { invocationId: 'inv-1' } },
-      });
-    });
+    const seedPublishedAt = Date.now() - 4_000;
+    const replyPublishedAt = seedPublishedAt + 1_000;
+    mountReplaceHydrationThread(makeThreadBState(seedPublishedAt));
 
     await history.waitUntilPending();
     history.expectPending();
 
     await history.resolve({
       messages: [
-        { id: 'b1', catId: 'opus', content: 'cached assistant', timestamp: cachedAssistantTs },
         {
-          id: 'draft-inv-1',
+          id: 'b1',
+          catId: 'codex-sol',
+          content: 'source-cat seed',
+          timestamp: seedPublishedAt,
+          deliveredAt: seedPublishedAt + 3_000,
+          timelineOrderAt: seedPublishedAt,
+        },
+        {
+          id: 'reply-1',
           catId: 'opus',
-          content: 'stale draft',
-          origin: 'stream',
-          timestamp: Date.now(),
-          isDraft: true,
+          content: 'reply after seed',
+          timestamp: replyPublishedAt,
         },
       ],
       hasMore: false,
     });
 
-    expect(useChatStore.getState().messages.map((m) => m.id)).toEqual(['b1', 'live-1']);
-    expect(useChatStore.getState().messages.find((m) => m.id === 'draft-inv-1')).toBeUndefined();
-  });
-
-  it('prefers a richer server stream message over a local placeholder for the same invocation', async () => {
-    const history = installDeferredHistoryResponse();
-    const cachedAssistantTs = Date.now() - 1000;
-    mountReplaceHydrationThread(
-      makeThreadBState(cachedAssistantTs, {
-        catInvocations: { opus: { invocationId: 'inv-1', startedAt: cachedAssistantTs } },
-      }),
-    );
-
-    act(() => {
-      useChatStore.getState().addMessage({
-        id: 'live-1',
-        type: 'assistant',
-        catId: 'opus',
-        content: 'partial local bubble',
-        timestamp: Date.now(),
-        isStreaming: true,
-        origin: 'stream',
-        extra: { stream: { invocationId: 'inv-1' } },
-      });
-    });
-
-    await history.waitUntilPending();
-    history.expectPending();
-
-    await history.resolve({
-      messages: [
-        { id: 'b1', catId: 'opus', content: 'cached assistant', timestamp: cachedAssistantTs },
-        {
-          id: 'server-1',
-          catId: 'opus',
-          content: 'server caught up with a richer persisted bubble',
-          origin: 'stream',
-          timestamp: Date.now(),
-          extra: { stream: { invocationId: 'inv-1' } },
-        },
-      ],
-      hasMore: false,
-    });
-
-    expect(useChatStore.getState().messages.map((m) => m.id)).toEqual(['b1', 'server-1']);
-    expect(useChatStore.getState().messages.find((m) => m.id === 'live-1')).toBeUndefined();
-  });
-
-  it('prefers a formal server callback bubble over a richer local stream bubble for the same invocation', async () => {
-    const history = installDeferredHistoryResponse();
-    const cachedAssistantTs = Date.now() - 1000;
-    mountReplaceHydrationThread(
-      makeThreadBState(cachedAssistantTs, {
-        catInvocations: { opus: { invocationId: 'inv-1', startedAt: cachedAssistantTs } },
-      }),
-    );
-
-    act(() => {
-      useChatStore.getState().addMessage({
-        id: 'live-stream-1',
-        type: 'assistant',
-        catId: 'opus',
-        content: 'local stream bubble is richer than the final callback but should still lose during hydration',
-        timestamp: Date.now(),
-        isStreaming: true,
-        origin: 'stream',
-        extra: { stream: { invocationId: 'inv-1' } },
-      });
-    });
-
-    await history.waitUntilPending();
-    history.expectPending();
-
-    await history.resolve({
-      messages: [
-        { id: 'b1', catId: 'opus', content: 'cached assistant', timestamp: cachedAssistantTs },
-        {
-          id: 'server-callback-1',
-          catId: 'opus',
-          content: 'final callback answer',
-          origin: 'callback',
-          timestamp: Date.now(),
-          extra: { stream: { invocationId: 'inv-1' } },
-        },
-      ],
-      hasMore: false,
-    });
-
-    expect(useChatStore.getState().messages.map((m) => m.id)).toEqual(['b1', 'server-callback-1']);
-    expect(useChatStore.getState().messages.find((m) => m.id === 'live-stream-1')).toBeUndefined();
-    expect(useChatStore.getState().messages.find((m) => m.id === 'server-callback-1')).toEqual(
+    expect(useChatStore.getState().messages.map((message) => message.id)).toEqual(['b1', 'reply-1']);
+    expect(useChatStore.getState().messages[0]).toEqual(
       expect.objectContaining({
-        origin: 'callback',
-        content: 'final callback answer',
-        extra: { stream: { invocationId: 'inv-1' } },
+        deliveredAt: seedPublishedAt + 3_000,
+        timelineOrderAt: seedPublishedAt,
       }),
     );
   });
 
-  it('thread switch rehydrates a cached duplicate invocation pair down to one formal callback bubble', async () => {
+  it('preserves local CLI payload when hydration returns the same callback id without tool metadata', async () => {
     const history = installDeferredHistoryResponse();
+    const cachedAssistantTs = Date.now() - 1_000;
     const now = Date.now();
     mountReplaceHydrationThread({
       messages: [
         {
-          id: 'stream-e-1',
+          id: 'server-callback-tools-1',
           type: 'assistant',
           catId: 'opus',
-          content: 'partial stream bubble',
-          origin: 'stream',
-          timestamp: now - 2_000,
-          extra: { stream: { invocationId: 'inv-e-1' } },
-        },
-        {
-          id: 'callback-e-1',
-          type: 'assistant',
-          catId: 'opus',
-          content: 'stale callback bubble from cached snapshot',
+          content: 'final callback answer',
           origin: 'callback',
-          timestamp: now - 1_000,
-          extra: { stream: { invocationId: 'inv-e-1' } },
+          timestamp: now - 2_000,
+          isStreaming: false,
+          thinking: 'local thinking that should not disappear',
+          toolEvents: [{ id: 'te-local-1', type: 'tool_use', label: 'Read file', timestamp: now - 1_800 }],
+          extra: { stream: { invocationId: 'inv-tools-1' } },
         },
       ],
       isLoading: false,
       isLoadingHistory: false,
       hasMore: true,
       hasActiveInvocation: false,
+      activeInvocations: {},
       intentMode: null,
       targetCats: [],
       catStatuses: {},
+      catStatusDetails: {},
       catInvocations: {},
-      currentGame: null,
-      unreadCount: 0,
+      unreadCount: 1,
       hasUserMention: false,
-      lastActivity: now,
+      lastActivity: cachedAssistantTs,
       queue: [],
-      queuePaused: false,
-      queuePauseReason: undefined,
       queueFull: false,
       queueFullSource: undefined,
+      workspaceWorktreeId: null,
+      workspaceOpenTabs: [],
+      workspaceOpenFilePath: null,
+      workspaceOpenFileLine: null,
     });
 
     await history.waitUntilPending();
@@ -373,156 +632,26 @@ describe('useChatHistory replace hydration', () => {
     await history.resolve({
       messages: [
         {
-          id: 'server-callback-e-1',
+          id: 'server-callback-tools-1',
           catId: 'opus',
-          content: 'authoritative callback bubble',
+          content: 'final callback answer',
           origin: 'callback',
           timestamp: now,
-          extra: { stream: { invocationId: 'inv-e-1' } },
         },
       ],
       hasMore: false,
     });
 
-    expect(useChatStore.getState().messages.map((m) => m.id)).toEqual(['server-callback-e-1']);
-    expect(useChatStore.getState().messages.find((m) => m.id === 'server-callback-e-1')).toEqual(
+    expect(useChatStore.getState().messages).toEqual([
       expect.objectContaining({
+        id: 'server-callback-tools-1',
         origin: 'callback',
-        content: 'authoritative callback bubble',
-        extra: { stream: { invocationId: 'inv-e-1' } },
+        content: 'final callback answer',
+        thinking: 'local thinking that should not disappear',
+        extra: { stream: { invocationId: 'inv-tools-1' } },
+        toolEvents: [expect.objectContaining({ id: 'te-local-1', type: 'tool_use', label: 'Read file' })],
       }),
-    );
-  });
-
-  it('reconciles a completed draft bubble with its formal message (Bug B: no duplicate)', async () => {
-    const history = installDeferredHistoryResponse();
-    const cachedAssistantTs = Date.now() - 1000;
-    // No catInvocations — simulates post-done state where invocationId is cleared
-    mountReplaceHydrationThread(makeThreadBState(cachedAssistantTs));
-
-    // Simulate: draft bubble loaded on previous F5, now completed (isStreaming=false)
-    act(() => {
-      useChatStore.getState().addMessage({
-        id: 'draft-inv-1',
-        type: 'assistant',
-        catId: 'codex',
-        content: '',
-        toolEvents: [{ id: 'te-1', type: 'tool_use' as const, label: 'Read file', timestamp: Date.now() }],
-        timestamp: Date.now() - 500,
-        isStreaming: false,
-        // Note: NO origin, NO extra.stream — matches real draft behavior
-      });
-    });
-
-    await history.waitUntilPending();
-    history.expectPending();
-
-    // Server returns the formal message for the same invocation
-    await history.resolve({
-      messages: [
-        { id: 'b1', catId: 'opus', content: 'cached assistant', timestamp: cachedAssistantTs },
-        {
-          id: 'server-msg-1',
-          catId: 'codex',
-          content: 'Full completed response',
-          thinking: 'My reasoning...',
-          origin: 'stream',
-          timestamp: Date.now(),
-          extra: { stream: { invocationId: 'inv-1' } },
-          toolEvents: [{ id: 'te-1', type: 'tool_use', label: 'Read file', timestamp: Date.now() }],
-        },
-      ],
-      hasMore: false,
-    });
-
-    // Bug B fix: only the formal message should survive, draft should be reconciled away
-    const msgIds = useChatStore.getState().messages.map((m) => m.id);
-    expect(msgIds).not.toContain('draft-inv-1');
-    expect(msgIds).toContain('server-msg-1');
-  });
-
-  it('reconciles a server-hydrated draft payload with its richer formal message', async () => {
-    const history = installDeferredHistoryResponse();
-    const cachedAssistantTs = Date.now() - 1000;
-    const now = Date.now();
-    mountReplaceHydrationThread(makeThreadBState(cachedAssistantTs));
-    const seededMessages = [
-      {
-        id: 'b1',
-        type: 'assistant' as const,
-        catId: 'opus',
-        content: 'cached assistant',
-        timestamp: cachedAssistantTs,
-      },
-      {
-        id: 'draft-inv-2',
-        type: 'assistant' as const,
-        catId: 'codex',
-        content: 'partial draft content',
-        thinking: 'draft thinking',
-        toolEvents: [{ id: 'te-draft-1', type: 'tool_use' as const, label: 'Read file', timestamp: now - 10 }],
-        origin: 'stream' as const,
-        extra: { stream: { invocationId: 'inv-2' } },
-        timestamp: now - 20,
-        isStreaming: true,
-      },
-    ];
-
-    act(() => {
-      useChatStore.setState((state) => ({
-        messages: seededMessages,
-        threadStates: {
-          ...state.threadStates,
-          'thread-b': {
-            ...makeThreadBState(cachedAssistantTs),
-            messages: seededMessages,
-            hasActiveInvocation: true,
-            catStatuses: { codex: 'streaming' },
-            catInvocations: { codex: { invocationId: 'inv-2', startedAt: now - 200 } },
-          },
-        },
-      }));
-    });
-
-    expect(useChatStore.getState().messages.map((m) => m.id)).toContain('draft-inv-2');
-
-    await history.waitUntilPending();
-    history.expectPending();
-
-    await history.resolve({
-      messages: [
-        { id: 'b1', catId: 'opus', content: 'cached assistant', timestamp: cachedAssistantTs },
-        {
-          id: 'server-msg-2',
-          catId: 'codex',
-          content: 'full completed response',
-          thinking: 'draft thinking\n\n---\n\nfinal reasoning',
-          origin: 'stream',
-          timestamp: now,
-          extra: { stream: { invocationId: 'inv-2' } },
-          toolEvents: [
-            { id: 'te-draft-1', type: 'tool_use', label: 'Read file', timestamp: now - 10 },
-            { id: 'te-draft-2', type: 'tool_use', label: 'Write file', timestamp: now },
-          ],
-        },
-      ],
-      hasMore: false,
-    });
-
-    expect(useChatStore.getState().messages.map((m) => m.id)).toEqual(['b1', 'server-msg-2']);
-    expect(useChatStore.getState().messages.find((m) => m.id === 'draft-inv-2')).toBeUndefined();
-    expect(useChatStore.getState().messages.find((m) => m.id === 'server-msg-2')).toEqual(
-      expect.objectContaining({
-        content: 'full completed response',
-        thinking: 'draft thinking\n\n---\n\nfinal reasoning',
-        origin: 'stream',
-        extra: { stream: { invocationId: 'inv-2' } },
-        toolEvents: [
-          expect.objectContaining({ id: 'te-draft-1', type: 'tool_use', label: 'Read file' }),
-          expect.objectContaining({ id: 'te-draft-2', type: 'tool_use', label: 'Write file' }),
-        ],
-      }),
-    );
+    ]);
   });
 
   it('preserves local blob URLs when a kept stream bubble survives replace hydration', async () => {

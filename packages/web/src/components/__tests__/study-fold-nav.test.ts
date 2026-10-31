@@ -79,7 +79,9 @@ describe('StudyFoldArea navigation', () => {
 
     const discussLink = container.querySelector('a[href*="signal="]') as HTMLAnchorElement;
     expect(discussLink).toBeTruthy();
-    expect(discussLink.getAttribute('href')).toContain('/thread/default');
+    const href = discussLink.getAttribute('href')!;
+    expect(href.startsWith('/')).toBe(true);
+    expect(href).not.toContain('/thread/');
   });
 
   it('skips stale threads when resolving discuss thread', () => {

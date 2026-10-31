@@ -2,62 +2,62 @@
 @tailwind components;
 @tailwind utilities;
 
-/* === Cat Cafe Design System Variables (from 暹罗猫) === */
-:root {
-  /* Base Colors */
-  --color-base-white: #fdf8f3;
-  --color-base-black: #1e1e24;
-
-  /* Opus (The Architect) - Purple */
-  --color-opus-primary: #9b7ebd;
-  --color-opus-light: #d4c1ec;
-  --color-opus-dark: #6d5a8c;
-  --color-opus-bg: #f3eaf8;
-
-  /* Codex (The Engineer) - Green */
-  --color-codex-primary: #5b8c5a;
-  --color-codex-light: #8fb98e;
-  --color-codex-dark: #3a5f39;
-  --color-codex-bg: #eaf6ea;
-
-  /* Gemini (The Creative) - Blue */
-  --color-gemini-primary: #5b9bd5;
-  --color-gemini-light: #9cc0e7;
-  --color-gemini-dark: #3a6fa5;
-  --color-gemini-bg: #eaf4fb;
-
-  /* DARE / 狸花猫 (Dragon Li) - Amber */
-  --color-dare-primary: #d4a76a;
-  --color-dare-light: #e8c99b;
-  --color-dare-dark: #8b6f47;
-  --color-dare-bg: #fbf5ec;
-
-  /* Co-Creator (铲屎官) - Coffee/Latte */
-  --color-cocreator-primary: #e29578;
-  --color-cocreator-light: #ffddd2;
-  --color-cocreator-dark: #815b5b;
-  --color-cocreator-bg: #fff5f2;
-
-  /* UI Tokens */
-  --bg-app: var(--color-base-white);
-  --text-primary: var(--color-base-black);
-  --text-secondary: #666666;
-  --border-radius-base: 16px;
-  --spacing-unit: 8px;
+/* Derived action paint cannot override its message owner's unavailable/pending state. */
+[data-message-action-unavailable],
+[data-message-action-unavailable] * {
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
-[data-theme="dark"] {
-  --bg-app: var(--color-base-black);
-  --text-primary: var(--color-base-white);
-  --text-secondary: #aaaaaa;
-  --color-opus-bg: rgba(155, 126, 189, 0.15);
-  --color-codex-bg: rgba(91, 140, 90, 0.15);
-  --color-gemini-bg: rgba(91, 155, 213, 0.15);
-  --color-dare-bg: rgba(212, 167, 106, 0.15);
+/* The file's own width decides which secondary actions move into More. */
+.content-file-toolbar {
+  container-type: inline-size;
+}
+.file-toolbar-menu-listen,
+.file-toolbar-menu-view {
+  display: none;
+}
+@container (max-width: 520px) {
+  .file-toolbar-listen {
+    display: none;
+  }
+  .file-toolbar-menu-listen {
+    display: block;
+  }
+}
+@container (max-width: 420px) {
+  .file-toolbar-view {
+    display: none;
+  }
+  .file-toolbar-menu-view {
+    display: block;
+  }
+}
+
+[data-message-jump-focus="true"] {
+  position: relative;
+}
+
+[data-message-jump-focus="true"]::after {
+  position: absolute;
+  z-index: 20;
+  inset: -3px;
+  border: 2px solid var(--semantic-info);
+  border-radius: 0.75rem;
+  pointer-events: none;
+  content: "";
+}
+
+/* Design tokens live in theme-tokens.css (imported via layout.tsx) */
+
+:root {
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei",
+    "Noto Sans CJK SC", "Noto Sans SC", Roboto, sans-serif;
 }
 
 body {
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
   color: var(--text-primary);
   background: var(--bg-app);
 }
@@ -75,112 +75,255 @@ body {
   }
 }
 
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
+/* Quest input highlight: gentle amber glow on input area */
+@keyframes quest-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 4px rgba(245, 158, 11, 0.3);
   }
-  to {
-    transform: rotate(360deg);
+  50% {
+    box-shadow:
+      0 0 12px rgba(245, 158, 11, 0.5),
+      0 0 4px rgba(245, 158, 11, 0.2);
   }
 }
 
-@keyframes pulse-subtle {
+/* F277: arrange-mode feedback; motion-safe utility disables it for reduced motion. */
+@keyframes f277-jiggle {
+  from {
+    transform: rotate(-0.35deg) translateY(0);
+  }
+  to {
+    transform: rotate(0.35deg) translateY(-0.5px);
+  }
+}
+.quest-input-highlight {
+  animation: quest-glow 2.5s ease-in-out infinite;
+  border-color: rgb(245, 158, 11) !important;
+}
+
+/* F155: Guide Engine Animations — wrapped for reduced-motion (A-3) */
+@keyframes guide-breathe {
   0%,
   100% {
+    transform: scale(1);
     opacity: 1;
   }
   50% {
-    opacity: 0.75;
-    box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
+    transform: scale(1.03);
+    opacity: 0.85;
   }
 }
-.animate-pulse-subtle {
-  animation: pulse-subtle 2s ease-in-out infinite;
+
+@keyframes guide-hud-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-/* === F101 AC-D5: Werewolf Cute Theme (狼人猫猫风) === */
-/* Token-only layer: components consume these vars, no hardcoded colors */
-[data-theme="werewolf-cute"] {
-  /* Backgrounds */
-  --ww-bg-base: #0b1020; /* Moon Indigo — shell background */
-  --ww-bg-card: #2a2340; /* Grape Mist — card/panel surfaces */
-  --ww-bg-surface: #1a1835; /* Deep Grape — chat bubbles, input fields */
-  --ww-bg-topbar: #0d1428; /* Darker Indigo — top bar */
-
-  /* Text */
-  --ww-text-main: #e2e8f0; /* Soft white */
-  --ww-text-muted: #94a3b8; /* Slate gray */
-  --ww-text-dim: #64748b; /* Dim slate */
-
-  /* Accents */
-  --ww-accent-danger: #d45a6a; /* Claw Red — kill/vote/key actions */
-  --ww-accent-cute: #f2b7a8; /* Cat Peach — hover/avatar border/secondary */
-  --ww-accent-success: #8bd7c8; /* Moon Mint — guard/success */
-  --ww-accent-info: #e6c36a; /* Lantern Gold — divine/tips */
-
-  /* State indicators */
-  --ww-state-alive: var(--ww-accent-cute);
-  --ww-state-dead: #475569;
-  --ww-state-speaking: var(--ww-accent-info);
-  --ww-state-active: var(--ww-accent-cute);
-
-  /* Role colors (God View event flow) */
-  --ww-role-wolf: var(--ww-accent-danger);
-  --ww-role-seer: var(--ww-accent-info);
-  --ww-role-witch: #c084fc; /* Soft purple */
-  --ww-role-guard: var(--ww-accent-success);
-  --ww-role-villager: var(--ww-text-muted);
-
-  /* Faction colors (result screen) */
-  --ww-faction-wolf: var(--ww-accent-danger);
-  --ww-faction-village: var(--ww-accent-success);
-
-  /* Translucent variants (explicit, no /opacity modifier) */
-  --ww-danger-soft: rgba(212, 90, 106, 0.1); /* Claw Red 10% — wolf row bg */
-  --ww-info-soft: rgba(230, 195, 106, 0.3); /* Lantern Gold 30% — MVP border */
-  --ww-subtle-soft: rgba(242, 183, 168, 0.08); /* Cat Peach 8% — table dividers */
-  --ww-cute-soft: rgba(242, 183, 168, 0.1); /* Cat Peach 10% — selected preset */
-  --ww-base-overlay: rgba(11, 16, 32, 0.9); /* Moon Indigo 90% — modal backdrop */
-
-  /* Borders & shadows */
-  --ww-border-subtle: rgba(242, 183, 168, 0.15); /* Cat Peach 15% */
-  --ww-border-active: rgba(242, 183, 168, 0.4); /* Cat Peach 40% */
-  --ww-shadow-glow: rgba(212, 90, 106, 0.25); /* Claw Red glow */
+/* F226: presentation float tear-off enter animation (烁烁 UX — 让"撕下来"有视觉反馈) */
+@keyframes f226-float-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
-/* Day phase: same hues, brightness +10%, saturation -8% */
-[data-theme="werewolf-cute"][data-phase="day"] {
-  --ww-bg-base: #111828;
-  --ww-bg-card: #302a4a;
-  --ww-bg-surface: #201e40;
-  --ww-bg-topbar: #141a30;
-  --ww-text-main: #f1f5f9;
-  --ww-border-subtle: rgba(242, 183, 168, 0.2);
+.f226-float-in {
+  animation: f226-float-in 280ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Night phase: slightly deeper, cooler */
-[data-theme="werewolf-cute"][data-phase="night"] {
-  --ww-bg-base: #080c18;
-  --ww-bg-card: #221d38;
-  --ww-bg-surface: #151230;
-  --ww-bg-topbar: #0a0e1e;
-  --ww-accent-cute: #e8a99a; /* Slightly muted peach at night */
-  --ww-shadow-glow: rgba(212, 90, 106, 0.35); /* Stronger red glow */
+/* 砚砚: respect reduced-motion — disable the tear-off animation for sensitive users */
+@media (prefers-reduced-motion: reduce) {
+  .f226-float-in {
+    animation: none;
+  }
 }
 
-/* F097: Dark-theme table overrides for CLI output + Thinking bubbles */
+/* F244: Tip-as-thinking-bubble — breathing border glow while cat is thinking */
+@keyframes tip-thinking-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    border-color: var(--color-cafe-border, rgba(128, 128, 128, 0.2));
+  }
+  50% {
+    box-shadow: 0 0 10px 0 rgba(155, 126, 189, 0.12);
+    border-color: rgba(155, 126, 189, 0.35);
+  }
+}
+.tip-thinking {
+  animation: tip-thinking-glow 3s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tip-thinking {
+    animation: none;
+  }
+}
+
+@keyframes guide-success-flash {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.9);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes guide-error-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-3px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .animate-guide-hud-enter {
+    animation: guide-hud-enter 160ms ease-out;
+  }
+
+  .animate-guide-success {
+    animation: guide-success-flash 0.4s ease-out;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-guide-hud-enter {
+    animation: none;
+  }
+
+  .animate-guide-success {
+    animation: none;
+  }
+
+  /* Disable breathe ring and transitions on guide overlay elements */
+  [style*="guide-breathe"] {
+    animation: none !important;
+  }
+}
+
+.animate-guide-error {
+  animation: guide-error-shake 0.3s ease-out;
+}
+
+/* Tier 3 System Notice — tone binding + entrance animation */
+[data-notice-tone="info"] {
+  --notice-label: var(--notice-info-label);
+  --notice-icon: var(--notice-info-icon);
+  --notice-border: var(--notice-info-border);
+  --notice-surface: var(--cafe-surface);
+}
+[data-notice-tone="warning"] {
+  --notice-label: var(--notice-warning-label);
+  --notice-icon: var(--notice-warning-icon);
+  --notice-border: var(--notice-warning-border);
+  --notice-surface: var(--cafe-surface);
+}
+[data-notice-tone="error"] {
+  --notice-label: var(--notice-error-label);
+  --notice-icon: var(--notice-error-icon);
+  --notice-border: var(--notice-error-border);
+  --notice-surface: var(--notice-error-surface);
+}
+.system-notice-bar__label {
+  color: var(--notice-label);
+}
+.system-notice-bar__icon {
+  color: var(--notice-icon);
+}
+.system-notice-bar {
+  border: 1px solid var(--notice-border);
+  background: color-mix(in srgb, var(--notice-surface) 90%, transparent);
+}
+@keyframes system-notice-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .system-notice-bar {
+    animation: system-notice-enter var(--notice-enter-duration) var(--notice-enter-easing);
+  }
+}
+
+/* #738: Voice message sound bar animation */
+@keyframes sound-bar {
+  0%,
+  100% {
+    height: 4px;
+  }
+  50% {
+    height: 14px;
+  }
+}
+.animate-sound-bar {
+  animation: sound-bar 0.6s ease-in-out infinite;
+}
+
+/* #738: Slow ping for speaker icon waves */
+@keyframes ping-slow {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+.animate-ping-slow {
+  animation: ping-slow 1.2s ease-in-out infinite;
+}
+.animation-delay-200 {
+  animation-delay: 200ms;
+}
+
+/* F097/F056: CLI/Thinking table overrides — inherit cat-msg-inset-text
+ * so light-mode dark-inset and dark-mode dark-inset both get readable text.
+ * Falls back to cafe neutrals when --cat-msg-inset-text is unset. */
 .cli-output-md thead {
   background: rgba(255, 255, 255, 0.06);
 }
 .cli-output-md th {
   border-color: rgba(255, 255, 255, 0.12);
-  color: #cbd5e1;
+  color: var(--cat-msg-inset-text, var(--cafe-text-secondary));
 }
 .cli-output-md td {
   border-color: rgba(255, 255, 255, 0.08);
-  color: #94a3b8;
+  color: var(--cat-msg-inset-text, var(--cafe-text-muted));
 }
 .cli-output-md code {
   background: rgba(255, 255, 255, 0.08);
-  color: #e2e8f0;
+  color: var(--cat-msg-inset-text, var(--cafe-text-secondary));
+}
+
+/* KaTeX display math: long formulas must scroll horizontally inside the
+ * message bubble instead of being clipped by the container. */
+.markdown-content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
 }

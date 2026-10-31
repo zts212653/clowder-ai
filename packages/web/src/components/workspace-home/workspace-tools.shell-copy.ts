@@ -1,0 +1,38 @@
+import { defineShellCopy } from '@/components/shell/shell-copy';
+
+export const workspaceToolsCopy = defineShellCopy({
+  zh: {
+    recent: '最近的工作页',
+    beforeTodo: '可直接打开',
+    calendar: '日程',
+    openCalendar: '打开日程',
+    inTodo: '；审批和需要我处理在',
+    afterTodo: '；',
+    and: '、',
+    inHeader: '在对话顶栏；',
+    beforeSettings: '成员、账户和配置在',
+    end: '。',
+    otherEntries: '原入口去处',
+    tasks: '毛线球',
+    works: '作品',
+    todo: '待办',
+    settings: '设置与管理',
+  },
+  en: {
+    recent: 'Recent work pages',
+    beforeTodo: 'Open ',
+    calendar: 'Schedule',
+    openCalendar: 'Open Schedule',
+    inTodo: '; approvals and items needing you are in ',
+    afterTodo: '; ',
+    and: ' and ',
+    inHeader: ' are in the conversation header; ',
+    beforeSettings: 'members, accounts and configuration are in ',
+    end: '. ',
+    otherEntries: 'More destinations',
+    tasks: 'Tasks',
+    works: 'Works',
+    todo: 'To-do',
+    settings: 'Settings',
+  },
+});

@@ -1,6 +1,20 @@
 import type { SignalArticle, SignalArticleStatus } from '@cat-cafe/shared';
 import { SignalTierBadge } from './SignalTierBadge';
 
+const statusLabelMap: Record<SignalArticleStatus, string> = {
+  inbox: '收件箱',
+  read: '已读',
+  archived: '归档',
+  starred: '收藏',
+};
+
+const statusClassMap: Record<SignalArticleStatus, string> = {
+  inbox: 'text-cafe-black bg-[var(--console-field-bg)]',
+  read: 'text-cafe-secondary bg-[var(--console-field-bg)]',
+  archived: 'text-cafe-secondary bg-[var(--console-field-bg)]',
+  starred: 'text-conn-amber-text bg-conn-amber-bg',
+};
+
 interface SignalArticleListProps {
   readonly items: readonly SignalArticle[];
   readonly selectedArticleId: string | null;
@@ -9,13 +23,6 @@ interface SignalArticleListProps {
   readonly selectedIds?: ReadonlySet<string>;
   readonly onToggleSelect?: (articleId: string) => void;
 }
-
-const statusClassMap: Record<SignalArticleStatus, string> = {
-  inbox: 'text-cocreator-dark bg-cocreator-bg',
-  read: 'text-gray-600 bg-gray-100',
-  archived: 'text-gray-600 bg-gray-100',
-  starred: 'text-amber-800 bg-amber-100',
-};
 
 function formatDate(input: string): string {
   const value = Date.parse(input);
@@ -40,8 +47,24 @@ export function SignalArticleList({
 }: SignalArticleListProps) {
   if (items.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
-        当前筛选条件下没有文章。
+      <div className="flex flex-col items-center justify-center rounded-2xl bg-[var(--console-card-bg)] px-8 py-16 text-center">
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          className="mb-3 h-10 w-10 text-cafe-muted opacity-40"
+        >
+          <path
+            d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <line x1="4" y1="22" x2="4" y2="15" strokeLinecap="round" />
+        </svg>
+        <p className="text-sm font-semibold text-cafe">当前筛选条件下没有文章</p>
+        <p className="mt-1 text-xs text-cafe-muted">尝试调整筛选条件或等待新信号</p>
       </div>
     );
   }
@@ -50,6 +73,7 @@ export function SignalArticleList({
     <ul className="space-y-2">
       {items.map((article) => {
         const selected = selectedArticleId === article.id;
+        const initial = (article.source?.[0] ?? '?').toUpperCase();
         return (
           <li key={article.id}>
             <div
@@ -64,74 +88,80 @@ export function SignalArticleList({
                 }
               }}
               className={[
-                'w-full rounded-xl border bg-white p-4 text-left shadow-sm transition-colors',
+                'flex items-center gap-3 rounded-[14px] px-3 py-2.5 cursor-pointer transition-all',
                 selected
-                  ? 'border-cocreator-primary ring-1 ring-cocreator-primary/40'
-                  : 'border-gray-200 hover:border-cocreator-light',
+                  ? 'bg-[var(--console-active-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.10)]'
+                  : 'hover:bg-[var(--console-hover-bg)]',
               ].join(' ')}
+              style={{ minHeight: 76 }}
             >
-              <div className="flex items-start gap-3">
-                {onToggleSelect && (
-                  <input
-                    type="checkbox"
-                    checked={selectedIds?.has(article.id) ?? false}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      onToggleSelect(article.id);
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="mt-1.5 shrink-0"
-                  />
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="line-clamp-2 min-h-[2.5rem] text-sm font-semibold leading-5 text-cafe-black">
-                    {article.title}
-                  </p>
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <SignalTierBadge tier={article.tier} />
-                    <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${statusClassMap[article.status]}`}>
-                      {article.status}
+              {onToggleSelect && (
+                <input
+                  type="checkbox"
+                  checked={selectedIds?.has(article.id) ?? false}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    onToggleSelect(article.id);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="shrink-0"
+                />
+              )}
+              <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[9px] bg-[var(--console-card-bg)] text-xs font-semibold text-cafe-secondary">
+                {initial}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="line-clamp-2 text-sm font-semibold leading-[1.35] text-cafe">{article.title}</p>
+                <p className="mt-1 flex items-center gap-1.5 text-xs text-cafe-secondary">
+                  <span>{article.source}</span>
+                  <span>·</span>
+                  <span>{formatDate(article.fetchedAt)}</span>
+                  {article.note && (
+                    <span
+                      title={article.note.length > 80 ? `${article.note.slice(0, 80)}...` : article.note}
+                      className="cursor-help text-opus-dark"
+                    >
+                      ✎
                     </span>
-                    <span className="text-xs text-gray-400">·</span>
-                    <span className="text-xs text-gray-500">{article.source}</span>
-                    <span className="text-xs text-gray-500">{formatDate(article.fetchedAt)}</span>
-                    {article.note && (
-                      <span title="有备注" className="text-opus-dark">
-                        ✎
-                      </span>
-                    )}
-                    {(article.studyCount ?? 0) > 0 && (
-                      <span
-                        title={`学习 ${article.studyCount} 次`}
-                        className="rounded bg-opus-bg px-1 text-[10px] text-opus-dark"
-                      >
-                        学{article.studyCount}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex shrink-0 gap-1 pt-0.5">
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onStatusChange(article.id, 'read');
-                    }}
-                    className="rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:border-codex-light hover:text-codex-dark"
+                  )}
+                  {(article.studyCount ?? 0) > 0 && (
+                    <span
+                      title={`学习 ${article.studyCount} 次`}
+                      className="rounded bg-opus-bg px-1 text-micro text-opus-dark"
+                    >
+                      学{article.studyCount}
+                    </span>
+                  )}
+                  <span
+                    data-testid="signal-status-badge"
+                    className={`rounded px-1 text-micro font-medium ${statusClassMap[article.status]}`}
                   >
-                    已读
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onStatusChange(article.id, 'starred');
-                    }}
-                    className="rounded-md border border-amber-200 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
-                  >
-                    收藏
-                  </button>
-                </div>
+                    {statusLabelMap[article.status]}
+                  </span>
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <SignalTierBadge tier={article.tier} />
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void onStatusChange(article.id, 'read');
+                  }}
+                  className="rounded-md bg-[var(--console-card-bg)] px-2 py-1 text-micro font-semibold text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition hover:text-cafe"
+                >
+                  已读
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void onStatusChange(article.id, 'starred');
+                  }}
+                  className="rounded-md bg-conn-amber-bg px-2 py-1 text-micro font-semibold text-conn-amber-text transition hover:opacity-80"
+                >
+                  收藏
+                </button>
               </div>
             </div>
           </li>

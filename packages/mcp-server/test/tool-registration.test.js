@@ -2,119 +2,47 @@
  * MCP Tool Registration Tests
  * 回归测试: 确认所有预期工具都注册到 MCP server
  *
- * 背景: request_permission / check_permission_status 的 handler 和 schema
- * 早就存在，但 createServer() 漏了 server.tool() 注册。
- * 本测试守住"注册层"，修复前会 Red，修复后 Green。
+ * 本测试守住 canonical registry 与 SDK 注册层的一致性。
  */
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, test } from 'node:test';
+import { useInvocationAuth } from './helpers/invocation-auth.js';
 
-const EXPECTED_TOOLS = [
-  // Callback tools (chat + task + ack)
-  'cat_cafe_post_message',
-  'cat_cafe_get_pending_mentions',
-  'cat_cafe_ack_mentions',
-  'cat_cafe_get_thread_context',
-  'cat_cafe_list_threads',
-  'cat_cafe_feat_index',
-  'cat_cafe_cross_post_message',
-  'cat_cafe_list_tasks',
-  'cat_cafe_update_task',
-  'cat_cafe_create_rich_block',
-  'cat_cafe_get_rich_block_rules',
-  'cat_cafe_register_pr_tracking',
-  // Workflow SOP tools (F073 P1)
-  'cat_cafe_update_workflow',
-  // Multi-mention orchestration (F086 M1)
-  'cat_cafe_multi_mention',
-  // F079 Gap 4: Cat-initiated voting
-  'cat_cafe_start_vote',
-  // Permission tools (this is the regression guard)
-  'cat_cafe_request_permission',
-  'cat_cafe_check_permission_status',
-  // Bootcamp tools (F087)
-  'cat_cafe_update_bootcamp_state',
-  'cat_cafe_bootcamp_env_check',
-  // Callback-scoped memory tools
-  'cat_cafe_retain_memory_callback',
-  // Direct evidence/reflect tools
-  'cat_cafe_search_evidence',
-  'cat_cafe_reflect',
-  // Signal Hunter tools (F21 S5) + F091 Study tools
-  'signal_list_inbox',
-  'signal_get_article',
-  'signal_search',
-  'signal_mark_read',
-  'signal_summarize',
-  'signal_start_study',
-  'signal_save_notes',
-  'signal_list_studies',
-  'signal_generate_podcast',
-  'signal_update_article',
-  'signal_delete_article',
-  'signal_link_thread',
-  // Session chain tools
-  'cat_cafe_list_session_chain',
-  'cat_cafe_read_session_events',
-  'cat_cafe_read_session_digest',
-  'cat_cafe_read_invocation_detail',
-  // Limb tools
-  'limb_list_available',
-  'limb_invoke',
-  'limb_pair_list',
-  'limb_pair_approve',
-];
+const { CANONICAL_TOOL_REGISTRY } = await import('../dist/server-toolsets.js');
 
-const EXPECTED_COLLAB_TOOLS = [
-  'cat_cafe_post_message',
-  'cat_cafe_get_pending_mentions',
-  'cat_cafe_ack_mentions',
-  'cat_cafe_get_thread_context',
-  'cat_cafe_list_threads',
-  'cat_cafe_feat_index',
-  'cat_cafe_cross_post_message',
-  'cat_cafe_list_tasks',
-  'cat_cafe_update_task',
-  'cat_cafe_create_rich_block',
-  'cat_cafe_get_rich_block_rules',
-  'cat_cafe_request_permission',
-  'cat_cafe_check_permission_status',
-  'cat_cafe_register_pr_tracking',
-  'cat_cafe_update_workflow',
-  'cat_cafe_multi_mention',
-  'cat_cafe_start_vote',
-  'cat_cafe_update_bootcamp_state',
-  'cat_cafe_bootcamp_env_check',
-];
+const expectedNames = (serverFamily) =>
+  CANONICAL_TOOL_REGISTRY.filter((definition) => definition.serverFamily === serverFamily).map(
+    (definition) => definition.name,
+  );
 
-const EXPECTED_MEMORY_TOOLS = [
-  'cat_cafe_retain_memory_callback',
-  'cat_cafe_search_evidence',
-  'cat_cafe_reflect',
-  'cat_cafe_list_session_chain',
-  'cat_cafe_read_session_events',
-  'cat_cafe_read_session_digest',
-  'cat_cafe_read_invocation_detail',
-];
+const EXPECTED_TOOLS = CANONICAL_TOOL_REGISTRY.map((definition) => definition.name);
+const EXPECTED_COLLAB_TOOLS = expectedNames('collab');
+const EXPECTED_MEMORY_TOOLS = expectedNames('memory');
+const EXPECTED_SIGNAL_TOOLS = expectedNames('signals');
+const EXPECTED_LIMB_TOOLS = expectedNames('limb');
+const EXPECTED_AUDIO_TOOLS = expectedNames('audio');
+const EXPECTED_FINANCE_TOOLS = expectedNames('finance');
 
-const EXPECTED_SIGNAL_TOOLS = [
-  'signal_list_inbox',
-  'signal_get_article',
-  'signal_search',
-  'signal_mark_read',
-  'signal_summarize',
-  'signal_start_study',
-  'signal_save_notes',
-  'signal_list_studies',
-  'signal_generate_podcast',
-  'signal_update_article',
-  'signal_delete_article',
-  'signal_link_thread',
-];
+function assertUnique(values, label) {
+  assert.equal(new Set(values).size, values.length, `${label} must not contain duplicate tool names`);
+}
 
 describe('MCP Server Tool Registration', () => {
+  test('expected tool lists stay duplicate-free', () => {
+    assertUnique(EXPECTED_TOOLS, 'EXPECTED_TOOLS');
+    assertUnique(EXPECTED_COLLAB_TOOLS, 'EXPECTED_COLLAB_TOOLS');
+    assertUnique(EXPECTED_MEMORY_TOOLS, 'EXPECTED_MEMORY_TOOLS');
+    assertUnique(EXPECTED_SIGNAL_TOOLS, 'EXPECTED_SIGNAL_TOOLS');
+    assertUnique(EXPECTED_LIMB_TOOLS, 'EXPECTED_LIMB_TOOLS');
+    assertUnique(EXPECTED_AUDIO_TOOLS, 'EXPECTED_AUDIO_TOOLS');
+    assertUnique(EXPECTED_FINANCE_TOOLS, 'EXPECTED_FINANCE_TOOLS');
+  });
+
   test('all expected tools are registered via createServer()', async () => {
     const { createServer } = await import('../dist/index.js');
     const server = createServer();
@@ -141,15 +69,351 @@ describe('MCP Server Tool Registration', () => {
     }
   });
 
-  test('permission tools have correct input schemas', async () => {
+  test('omitting one family registration breaks canonical registry parity', async () => {
+    const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
+    const {
+      registerAudioToolset,
+      registerCollabToolset,
+      registerLimbToolset,
+      registerMemoryToolset,
+      registerSignalToolset,
+    } = await import('../dist/server-toolsets.js');
+    const server = new McpServer({ name: 'f286-registration-mutation', version: '0.1.0' });
+    registerCollabToolset(server);
+    registerMemoryToolset(server);
+    registerSignalToolset(server);
+    registerLimbToolset(server);
+    registerAudioToolset(server);
+
+    const registeredNames = Object.keys(server._registeredTools).sort();
+    assert.notDeepEqual(registeredNames, [...EXPECTED_TOOLS].sort());
+    assert.deepEqual(
+      EXPECTED_FINANCE_TOOLS.filter((name) => registeredNames.includes(name)),
+      [],
+      'the omitted finance family must remain absent from actual SDK registration',
+    );
+  });
+
+  test('legacy generic permission family is absent', () => {
+    assert.deepEqual(
+      CANONICAL_TOOL_REGISTRY.filter((definition) => definition.resourceFamily === 'permission'),
+      [],
+    );
+  });
+
+  test('get_thread_context description exposes bounded keyword completeness contract', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const server = createServer();
+    const threadContextTool = server._registeredTools.cat_cafe_get_thread_context;
+
+    assert.ok(threadContextTool, 'get_thread_context tool should exist');
+    assert.match(threadContextTool.description, /Use when:/);
+    assert.match(threadContextTool.description, /NOT for:/);
+    assert.match(threadContextTool.description, /Output:/);
+    assert.match(threadContextTool.description, /GOTCHA:/);
+    assert.match(threadContextTool.description, /best-effort over a bounded recent scan/);
+    assert.match(threadContextTool.description, /scanCapped=true/);
+    assert.match(threadContextTool.description, /older history may contain additional matches/);
+    assert.match(threadContextTool.description, /bounded aggregate envelope/);
+    assert.match(threadContextTool.description, /hasMore/);
+    assert.match(threadContextTool.description, /nextCursor/);
+    assert.match(threadContextTool.description, /single item larger/);
+    assert.match(threadContextTool.description, /oversized workflow SOP/);
+    assert.match(threadContextTool.description, /cat_cafe_get_workflow_sop/);
+  });
+
+  // F167 Phase P fix: hold_ball description must steer "等人" to @co-creator/@cat, NOT hold_ball,
+  // and scope wakeWhen to local commands (concept-boundary hardening — primary root cause).
+  test('hold_ball description excludes "等人" waits and scopes wakeWhen (F167 Phase P)', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const server = createServer();
+    const holdTool = server._registeredTools.cat_cafe_hold_ball;
+    assert.ok(holdTool, 'hold_ball tool should exist');
+    const { renderCoCreatorText } = await import('../dist/co-creator-presentation.js');
+    const desc = renderCoCreatorText(holdTool.description, {
+      name: 'Nora',
+      nickname: 'operator',
+      role: 'operator',
+      mention: '@nora',
+    });
+    assert.ok(typeof desc === 'string' && desc.length > 0, 'hold_ball must have a description string');
+    // #1-misuse exclusion: waiting on a person's reply is @co-creator/@cat, never a hold.
+    assert.match(desc, /waiting for operator\/user OR another cat to reply/);
+    assert.match(desc, /redundant 2nd trigger/);
+    // an inbound co-creator/cat message counts as a callback (Phase M clarifier extension)
+    assert.match(desc, /sending a message into this thread IS such a callback/);
+    // wakeWhen scoped to local commands, not a universal "smart wait"
+    assert.match(desc, /LOCAL COMMANDS ONLY/);
+  });
+
+  test('cross_post_message schema must REQUIRE threadId', async () => {
     const { createServer } = await import('../dist/index.js');
     const server = createServer();
 
-    const reqTool = server._registeredTools.cat_cafe_request_permission;
-    assert.ok(reqTool, 'request_permission tool should exist');
+    const crossTool = server._registeredTools.cat_cafe_cross_post_message;
+    assert.ok(crossTool, 'cross_post_message tool should exist');
+    const shapeKeys = Object.keys(crossTool.inputSchema.shape);
+    assert.ok(shapeKeys.includes('threadId'), 'cross_post_message must have threadId in schema');
+    assert.ok(
+      crossTool.inputSchema._def.shape().threadId.isOptional() === false,
+      'cross_post_message threadId must be required (not optional)',
+    );
+    assert.ok(
+      shapeKeys.includes('agentKeyCatId'),
+      'cross_post_message must expose agentKeyCatId for shared persistent MCP variant identity',
+    );
+  });
 
-    const checkTool = server._registeredTools.cat_cafe_check_permission_status;
-    assert.ok(checkTool, 'check_permission_status tool should exist');
+  test('invocation action descriptions expose the supported Task identity (F167 dispatch guidance)', async (t) => {
+    useInvocationAuth(t);
+    const { createServer } = await import('../dist/index.js');
+    const server = createServer();
+
+    for (const toolName of ['cat_cafe_post_message', 'cat_cafe_cross_post_message', 'cat_cafe_multi_mention']) {
+      const tool = server._registeredTools[toolName];
+      assert.ok(tool, `${toolName} tool should exist`);
+      const actionDescription = tool.inputSchema._def.shape().action.description;
+      assert.match(actionDescription, /subject:task:<taskId>/, toolName);
+      assert.match(actionDescription, /existing Task\.id/, toolName);
+      assert.match(actionDescription, /changing their prefix does not create Task authority/, toolName);
+    }
+  });
+
+  test('thread-context and list-threads expose agentKeyCatId for shared persistent MCP identity', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const server = createServer();
+
+    const contextTool = server._registeredTools.cat_cafe_get_thread_context;
+    const listTool = server._registeredTools.cat_cafe_list_threads;
+    assert.ok(contextTool, 'get_thread_context tool should exist');
+    assert.ok(listTool, 'list_threads tool should exist');
+    assert.ok(Object.keys(contextTool.inputSchema.shape).includes('agentKeyCatId'));
+    assert.ok(contextTool.inputSchema._def.shape().agentKeyCatId.isOptional());
+    assert.ok(Object.keys(listTool.inputSchema.shape).includes('agentKeyCatId'));
+    assert.ok(listTool.inputSchema._def.shape().agentKeyCatId.isOptional());
+  });
+
+  test('workflow-SOP drill is callable with callback or agent-key thread identity', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const tool = createServer()._registeredTools.cat_cafe_get_workflow_sop;
+    assert.ok(tool, 'get_workflow_sop tool should exist');
+    const shape = tool.inputSchema._def.shape();
+    assert.equal(shape.threadId.isOptional(), true);
+    assert.equal(shape.agentKeyCatId.isOptional(), true);
+    assert.match(tool.description, /cat_cafe_get_thread_context/);
+    assert.match(tool.description, /resume capsule/i);
+  });
+
+  test('thread-context description documents the explicit full catch-up path without freshness prompting', async () => {
+    const { callbackTools } = await import('../dist/tools/callback-tools.js');
+    const tool = callbackTools.find((candidate) => candidate.name === 'cat_cafe_get_thread_context');
+    assert.ok(tool);
+    assert.doesNotMatch(tool.description, /freshness notice/i);
+    assert.match(tool.description, /readIntent="unread"/);
+    assert.equal(tool.inputSchema.readIntent.parse(undefined), 'history');
+    assert.match(tool.description, /same-target queued bodies/i);
+    assert.match(tool.description, /complete catch-up/i);
+    assert.match(tool.description, /contextScope="unread_delta"/);
+    assert.match(tool.description, /hasMore=false.*not all thread history/i);
+    assert.match(tool.inputSchema.responseMode.description, /contextScope="unread_delta"/);
+    assert.match(tool.inputSchema.responseMode.description, /hasMore=false.*all thread history/i);
+    assert.match(tool.description, /GOTCHA:/);
+    assert.match(tool.description, /cursor.*limit/i);
+    assert.match(tool.inputSchema.cursor.description, /same.*limit/i);
+    assert.doesNotMatch(tool.description, /full" ONLY.*bulk analysis, export/i);
+  });
+
+  test('Hub action tools expose agentKeyCatId for shared persistent MCP identity', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const server = createServer();
+
+    const workspaceTool = server._registeredTools.cat_cafe_workspace_navigate;
+    const previewTool = server._registeredTools.cat_cafe_preview_open;
+    assert.ok(workspaceTool, 'workspace_navigate tool should exist');
+    assert.ok(previewTool, 'preview_open tool should exist');
+    assert.ok(Object.keys(workspaceTool.inputSchema.shape).includes('agentKeyCatId'));
+    assert.ok(workspaceTool.inputSchema._def.shape().agentKeyCatId.isOptional());
+    assert.ok(Object.keys(previewTool.inputSchema.shape).includes('agentKeyCatId'));
+    assert.ok(previewTool.inputSchema._def.shape().agentKeyCatId.isOptional());
+  });
+
+  test('Schedule setup tools expose agentKeyCatId for shared persistent MCP identity', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const server = createServer();
+
+    const setupToolNames = [
+      'cat_cafe_list_schedule_templates',
+      'cat_cafe_preview_scheduled_task',
+      'cat_cafe_register_scheduled_task',
+    ];
+
+    for (const name of setupToolNames) {
+      const tool = server._registeredTools[name];
+      assert.ok(tool, `${name} should exist`);
+      assert.ok(
+        Object.keys(tool.inputSchema.shape).includes('agentKeyCatId'),
+        `${name} must expose agentKeyCatId for shared persistent MCP variant identity`,
+      );
+      assert.ok(tool.inputSchema._def.shape().agentKeyCatId.isOptional(), `${name} agentKeyCatId must be optional`);
+    }
+  });
+
+  test('agent-key collab allowlist exposes agentKeyCatId on callback-backed tools', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const { AGENT_KEY_TOOLS } = await import('../dist/server-toolsets.js');
+    const server = createServer();
+    const missing = [];
+
+    for (const name of AGENT_KEY_TOOLS) {
+      const tool = server._registeredTools[name];
+      assert.ok(tool, `${name} should be registered before it is allowlisted`);
+      const shape = tool.inputSchema?._def?.shape?.() ?? tool.inputSchema?.shape ?? tool.inputSchema;
+      if (!shape?.agentKeyCatId) {
+        missing.push(name);
+        continue;
+      }
+      assert.equal(shape.agentKeyCatId.isOptional(), true, `${name} agentKeyCatId must be optional`);
+    }
+
+    assert.deepEqual(missing, []);
+  });
+
+  test('agent-key collab allowlist excludes invocation-record-only and non-principal tools', async () => {
+    const { AGENT_KEY_TOOLS } = await import('../dist/server-toolsets.js');
+    const agentKeyUnsafeTools = [
+      'cat_cafe_get_pending_mentions',
+      'cat_cafe_ack_mentions',
+      'cat_cafe_feat_index',
+      'cat_cafe_list_tasks',
+      'cat_cafe_update_task',
+      'cat_cafe_create_task',
+      'cat_cafe_create_rich_block',
+      'cat_cafe_generate_document',
+      'cat_cafe_register_deployment_wait',
+      'cat_cafe_register_pr_tracking', // mcp-cutover-negative-reference: absence
+      'cat_cafe_register_issue_tracking', // mcp-cutover-negative-reference: absence
+      'cat_cafe_community_await_external', // mcp-cutover-negative-reference: absence
+      'cat_cafe_validate_community_route', // mcp-cutover-negative-reference: absence
+      'cat_cafe_update_workflow',
+      'cat_cafe_multi_mention',
+      'cat_cafe_start_vote',
+      'cat_cafe_propose_thread',
+      'cat_cafe_continue_approved_task',
+      'cat_cafe_propose_session_handoff',
+      'cat_cafe_propose_profile_update',
+      'cat_cafe_propose_taste',
+      'cat_cafe_propose_eval_repair',
+      'cat_cafe_update_bootcamp_state',
+      'cat_cafe_bootcamp_env_check',
+      'cat_cafe_update_guide_state',
+      'cat_cafe_get_available_guides',
+      'cat_cafe_start_guide',
+      'cat_cafe_guide_control',
+      'cat_cafe_hold_ball',
+      'cat_cafe_get_thread_metadata',
+      'cat_cafe_set_thread_metadata',
+      'cat_cafe_set_read_mode',
+      // Retired game tools must never reappear in agent-key profiles.
+      'cat_cafe_submit_game_action', // mcp-cutover-negative-reference: absence
+    ];
+
+    const exposed = agentKeyUnsafeTools.filter((name) => AGENT_KEY_TOOLS.has(name));
+    assert.deepEqual(exposed, []);
+  });
+
+  test('agent-key collab allowlist is the route-principal-backed surface', async () => {
+    const { AGENT_KEY_TOOLS } = await import('../dist/server-toolsets.js');
+    const expected = [
+      'cat_cafe_advance_evolution_program_change',
+      'cat_cafe_backfill_events',
+      'cat_cafe_census_legacy_paw_feel_blockers',
+      'cat_cafe_cross_post_message',
+      'cat_cafe_get_evolution_program',
+      'cat_cafe_get_message',
+      'cat_cafe_get_thread_cats',
+      'cat_cafe_get_thread_context',
+      'cat_cafe_get_workflow_sop',
+      'cat_cafe_link_evolution_program_observation',
+      'cat_cafe_link_paw_feel_repair_outcome',
+      'cat_cafe_list_events',
+      'cat_cafe_list_labels',
+      'cat_cafe_list_paw_feel_inbox',
+      'cat_cafe_scan_paw_feel_inbox',
+      'cat_cafe_list_schedule_templates',
+      'cat_cafe_list_threads',
+      'cat_cafe_post_message',
+      'cat_cafe_prepare_message_search_answer',
+      'cat_cafe_preview_open',
+      'cat_cafe_offer_custody',
+      'cat_cafe_preview_scheduled_task',
+      'cat_cafe_publish_verdict',
+      'cat_cafe_record_eval_lifecycle',
+      'cat_cafe_read_diary',
+      'cat_cafe_read_profile',
+      'cat_cafe_read_entrusted_work',
+      'cat_cafe_list_diaries',
+      'cat_cafe_get_person_memory_proposal_status',
+      'cat_cafe_issue_capability_evolution_measurement',
+      'cat_cafe_recall_person_relationship',
+      'cat_cafe_drill_person_memory',
+      'cat_cafe_register_external_runtime_session',
+      'cat_cafe_constitute_evolution_program',
+      'cat_cafe_rebind_evolution_program_measurement',
+      'cat_cafe_open_evolution_round',
+      'cat_cafe_record_evolution_evaluation',
+      'cat_cafe_register_scheduled_task',
+      'cat_cafe_remove_scheduled_task',
+      'cat_cafe_retry_custody_admission',
+      'cat_cafe_start_evolution_program',
+      'cat_cafe_teleport',
+      'cat_cafe_triage_paw_feel',
+      'cat_cafe_update_evolution_program',
+      'cat_cafe_workspace_navigate',
+      'cat_cafe_inspect_office_document',
+      'cat_cafe_read_artifact_review',
+      'cat_cafe_prepare_artifact_review',
+      'cat_cafe_act_artifact_review',
+      'cat_cafe_respond_artifact_review',
+      'cat_cafe_take_over_content_modification',
+      'cat_cafe_read_content_modification',
+      'cat_cafe_respond_content_modification',
+      'cat_cafe_edit_office_document',
+    ];
+
+    assert.deepEqual([...AGENT_KEY_TOOLS].sort(), expected.sort());
+  });
+
+  test('non-agent-key collab tools do not expose dead agentKeyCatId schema', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const { AGENT_KEY_TOOLS, buildCollabTools } = await import('../dist/server-toolsets.js');
+    const server = createServer();
+    const collabNames = buildCollabTools({ readonly: false }).map((tool) => tool.name);
+    const offenders = [];
+
+    for (const name of collabNames) {
+      if (AGENT_KEY_TOOLS.has(name)) continue;
+      const tool = server._registeredTools[name];
+      assert.ok(tool, `${name} should be registered before schema inspection`);
+      const shape = tool.inputSchema?._def?.shape?.() ?? tool.inputSchema?.shape ?? tool.inputSchema;
+      if (shape?.agentKeyCatId) offenders.push(name);
+    }
+
+    assert.deepEqual(offenders, []);
+  });
+
+  test('eval repair proposal is a canonical callback-only resource entry', async () => {
+    const { CANONICAL_TOOL_REGISTRY, AGENT_KEY_TOOLS } = await import('../dist/server-toolsets.js');
+    const definition = CANONICAL_TOOL_REGISTRY.find((candidate) => candidate.name === 'cat_cafe_propose_eval_repair');
+
+    assert.ok(definition);
+    assert.equal(definition.policy.activeState, 'canonical');
+    assert.deepEqual(definition.policy.runtimeProfiles, ['full']);
+    assert.deepEqual(definition.policy.standaloneReason, {
+      disposition: 'accepted-boundary',
+      kind: 'resource-entry',
+      admissionRef: 'file:docs/features/F313-analysis-to-outcome-closure-command.md',
+    });
+    assert.equal(AGENT_KEY_TOOLS.has(definition.name), false);
   });
 
   test('deprecated file tools are not registered', async () => {
@@ -177,6 +441,14 @@ describe('MCP Server Tool Registration', () => {
     assert.deepEqual([...registered].sort(), [...EXPECTED_COLLAB_TOOLS].sort());
   });
 
+  test('cat_cafe_update_workflow exposes optional taskId for deterministic backlog import', async () => {
+    const { createCollabServer } = await import('../dist/collab.js');
+    const tool = createCollabServer()._registeredTools.cat_cafe_update_workflow;
+    assert.ok(tool);
+    const shape = tool.inputSchema._def.shape();
+    assert.equal(shape.taskId.isOptional(), true);
+  });
+
   test('createMemoryServer registers only memory tool surface', async () => {
     const { createMemoryServer } = await import('../dist/memory.js');
     const server = createMemoryServer();
@@ -191,5 +463,249 @@ describe('MCP Server Tool Registration', () => {
     const registered = Object.keys(server._registeredTools);
 
     assert.deepEqual([...registered].sort(), [...EXPECTED_SIGNAL_TOOLS].sort());
+  });
+
+  test('F193 AC-C1: createLimbServer registers only limb tool surface', async () => {
+    const { createLimbServer } = await import('../dist/limb.js');
+    const server = createLimbServer();
+    const registered = Object.keys(server._registeredTools);
+
+    assert.deepEqual([...registered].sort(), [...EXPECTED_LIMB_TOOLS].sort());
+  });
+
+  test('F195: createAudioServer registers only audio tool surface', async () => {
+    const { createAudioServer } = await import('../dist/audio.js');
+    const server = createAudioServer();
+    const registered = Object.keys(server._registeredTools);
+
+    assert.deepEqual([...registered].sort(), [...EXPECTED_AUDIO_TOOLS].sort());
+  });
+
+  test('F207 AC-B5: createFinanceServer registers only finance fact tool surface', async () => {
+    const { createFinanceServer } = await import('../dist/finance.js');
+    const server = createFinanceServer();
+    const registered = Object.keys(server._registeredTools);
+
+    assert.deepEqual([...registered].sort(), [...EXPECTED_FINANCE_TOOLS].sort());
+  });
+});
+
+// --- F061 Phase 2: READONLY_ALLOWED_TOOLS whitelist ---
+
+describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
+  test('readonly profile projection matches every canonical certificate', async () => {
+    const { CANONICAL_TOOL_REGISTRY, READONLY_ALLOWED_TOOLS } = await import('../dist/server-toolsets.js');
+    for (const definition of CANONICAL_TOOL_REGISTRY) {
+      assert.equal(
+        READONLY_ALLOWED_TOOLS.has(definition.name),
+        definition.policy.runtimeProfiles.includes('readonly'),
+        `${definition.name} readonly exposure must come from its canonical certificate`,
+      );
+    }
+  });
+
+  test('whitelist is a subset of all registered tools', async () => {
+    const { READONLY_ALLOWED_TOOLS } = await import('../dist/server-toolsets.js');
+    const { createServer } = await import('../dist/index.js');
+    const server = createServer();
+    const allRegistered = new Set(Object.keys(server._registeredTools));
+    for (const name of READONLY_ALLOWED_TOOLS) {
+      assert.ok(allRegistered.has(name), `Whitelist tool "${name}" does not exist in registered tools`);
+    }
+  });
+
+  test('readonly + agent-key exposes only readonly, principal-capable, or non-callback-safe collab tools', async () => {
+    const { buildCollabTools } = await import('../dist/server-toolsets.js');
+    const agentKeyNames = new Set(
+      buildCollabTools({ readonly: true, hasAgentKey: true, agentKeyUnion: true }).map((tool) => tool.name),
+    );
+    const expected = CANONICAL_TOOL_REGISTRY.filter(
+      (definition) =>
+        definition.serverFamily === 'collab' &&
+        (definition.policy.runtimeProfiles.includes('readonly') ||
+          definition.policy.runtimeProfiles.includes('agent-key')),
+    )
+      .map((definition) => definition.name)
+      .filter((name) => name.startsWith('cat_cafe_'))
+      .sort();
+
+    assert.deepEqual([...agentKeyNames].filter((name) => name.startsWith('cat_cafe_')).sort(), expected);
+  });
+
+  test('readonly mode with only CAT_CAFE_AGENT_KEY_FILES configured is STRICT (no write leak)', () => {
+    const distIndexUrl = new URL('../dist/index.js', import.meta.url).href;
+    const script = `
+      process.env.CAT_CAFE_READONLY = 'true';
+      delete process.env.CAT_CAFE_INVOCATION_ID;
+      delete process.env.CAT_CAFE_CALLBACK_TOKEN;
+      delete process.env.CAT_CAFE_CREDENTIAL_FILE;
+      delete process.env.CAT_CAFE_DESKTOP_MODE;
+      delete process.env.CAT_CAFE_AGENT_KEY_SECRET;
+      delete process.env.CAT_CAFE_AGENT_KEY_FILE;
+      process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({
+        antigravity: '/tmp/antigravity.secret',
+        'antig-opus': '/tmp/antig-opus.secret',
+      });
+      const { createServer } = await import(${JSON.stringify(distIndexUrl)});
+      const server = createServer();
+      const names = Object.keys(server._registeredTools);
+      if (
+        // agent-key write tools must not leak into a strict readonly mount
+        names.includes('cat_cafe_post_message') ||
+        names.includes('cat_cafe_cross_post_message') ||
+        names.includes('cat_cafe_workspace_navigate') ||
+        names.includes('cat_cafe_preview_open') ||
+        names.includes('cat_cafe_teleport') ||
+        names.includes('cat_cafe_register_scheduled_task') ||
+        names.includes('cat_cafe_remove_scheduled_task') ||
+        names.includes('cat_cafe_publish_verdict') ||
+        names.includes('cat_cafe_backfill_events') ||
+        // agent-key-only read tools are also outside the strict readonly allowlist
+        names.includes('cat_cafe_get_thread_context') ||
+        names.includes('cat_cafe_list_schedule_templates') ||
+        names.includes('cat_cafe_preview_scheduled_task') ||
+        // strict readonly core must remain
+        !names.includes('cat_cafe_get_rich_block_rules') ||
+        !names.includes('cat_cafe_search_evidence') ||
+        !names.includes('cat_cafe_shell_exec') ||
+        !names.includes('cat_cafe_graph_resolve')
+      ) {
+        console.error(JSON.stringify(names.sort()));
+        process.exit(1);
+      }
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: process.cwd(),
+      encoding: 'utf-8',
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  });
+
+  test('readonly mode exposes agent-key tools with explicit CAT_CAFE_READONLY_AGENT_KEY_UNION opt-in', () => {
+    const distIndexUrl = new URL('../dist/index.js', import.meta.url).href;
+    // #1494: the union needs USABLE credentials — fake /tmp paths no longer
+    // count, so hand the subprocess real sidecar files.
+    const keyDir = mkdtempSync(join(tmpdir(), 'tool-registration-agent-key-'));
+    const antigravityKey = join(keyDir, 'antigravity.secret');
+    const opusKey = join(keyDir, 'antig-opus.secret');
+    writeFileSync(antigravityKey, 'agent-key-material\n', 'utf-8');
+    writeFileSync(opusKey, 'agent-key-material\n', 'utf-8');
+    const script = `
+      process.env.CAT_CAFE_READONLY = 'true';
+      process.env.CAT_CAFE_READONLY_AGENT_KEY_UNION = 'true';
+      delete process.env.CAT_CAFE_AGENT_KEY_SECRET;
+      delete process.env.CAT_CAFE_AGENT_KEY_FILE;
+      process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({
+        antigravity: ${JSON.stringify(antigravityKey)},
+        'antig-opus': ${JSON.stringify(opusKey)},
+      });
+      const { createServer } = await import(${JSON.stringify(distIndexUrl)});
+      const server = createServer();
+      const names = Object.keys(server._registeredTools);
+      if (
+        !names.includes('cat_cafe_post_message') ||
+        !names.includes('cat_cafe_get_thread_cats') ||
+        !names.includes('cat_cafe_get_thread_context') ||
+        !names.includes('cat_cafe_workspace_navigate') ||
+        !names.includes('cat_cafe_preview_open') ||
+        // F227: teleport is agent-key gated — must be visible in readonly+agent-key
+        !names.includes('cat_cafe_teleport') ||
+        !names.includes('cat_cafe_list_schedule_templates') ||
+        !names.includes('cat_cafe_preview_scheduled_task') ||
+        !names.includes('cat_cafe_register_scheduled_task') ||
+        !names.includes('cat_cafe_remove_scheduled_task') ||
+        names.includes('cat_cafe_create_rich_block') ||
+        names.includes('cat_cafe_list_tasks') ||
+        names.includes('cat_cafe_multi_mention') ||
+        names.includes('cat_cafe_hold_ball') ||
+        names.includes('cat_cafe_propose_thread') ||
+        names.includes('cat_cafe_unregister_tracking') || // mcp-cutover-negative-reference: absence
+        names.includes('cat_cafe_submit_game_action') || // mcp-cutover-negative-reference: absence
+        // 砚砚 R9 P1: shared-MCP cats must see publish-verdict
+        !names.includes('cat_cafe_publish_verdict')
+      ) {
+        console.error(JSON.stringify(names.sort()));
+        process.exit(1);
+      }
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: process.cwd(),
+      encoding: 'utf-8',
+    });
+    rmSync(keyDir, { recursive: true, force: true });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  });
+
+  test('readonly + opt-in + unusable BOUND identity stays strict (real stdio entry surface)', () => {
+    const distIndexUrl = new URL('../dist/index.js', import.meta.url).href;
+    // #1494 round 2: the bound identity's map entry is missing, so the union
+    // must not fire even with an explicit opt-in and an unrelated readable
+    // sidecar in the variant map.
+    const keyDir = mkdtempSync(join(tmpdir(), 'tool-registration-agent-key-'));
+    const antigravityKey = join(keyDir, 'antigravity.secret');
+    writeFileSync(antigravityKey, 'agent-key-material\n', 'utf-8');
+    const script = `
+      process.env.CAT_CAFE_READONLY = 'true';
+      process.env.CAT_CAFE_READONLY_AGENT_KEY_UNION = 'true';
+      process.env.CAT_CAFE_AGENT_KEY_BOUND_CAT_ID = 'gpt-pro';
+      delete process.env.CAT_CAFE_AGENT_KEY_SECRET;
+      delete process.env.CAT_CAFE_AGENT_KEY_FILE;
+      process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({ antigravity: ${JSON.stringify(antigravityKey)} });
+      const { createServer } = await import(${JSON.stringify(distIndexUrl)});
+      const server = createServer();
+      const names = Object.keys(server._registeredTools);
+      if (
+        !names.includes('cat_cafe_search_evidence') ||
+        names.includes('cat_cafe_post_message') ||
+        names.includes('cat_cafe_cross_post_message') ||
+        names.includes('cat_cafe_teleport') ||
+        names.includes('cat_cafe_register_scheduled_task') ||
+        names.includes('cat_cafe_remove_scheduled_task') ||
+        names.includes('cat_cafe_publish_verdict')
+      ) {
+        console.error(JSON.stringify(names.sort()));
+        process.exit(1);
+      }
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: process.cwd(),
+      encoding: 'utf-8',
+    });
+    rmSync(keyDir, { recursive: true, force: true });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  });
+
+  test('readonly + opt-in + blank SECRET stays strict (real stdio entry surface)', () => {
+    const distIndexUrl = new URL('../dist/index.js', import.meta.url).href;
+    // #1494 round 3: a whitespace-only secret is no material — the union must
+    // not fire even with an explicit opt-in, so the entry stays strict.
+    const script = `
+      process.env.CAT_CAFE_READONLY = 'true';
+      process.env.CAT_CAFE_READONLY_AGENT_KEY_UNION = 'true';
+      process.env.CAT_CAFE_AGENT_KEY_SECRET = '   ';
+      delete process.env.CAT_CAFE_AGENT_KEY_FILE;
+      delete process.env.CAT_CAFE_AGENT_KEY_FILES;
+      delete process.env.CAT_CAFE_AGENT_KEY_BOUND_CAT_ID;
+      const { createServer } = await import(${JSON.stringify(distIndexUrl)});
+      const server = createServer();
+      const names = Object.keys(server._registeredTools);
+      if (
+        !names.includes('cat_cafe_search_evidence') ||
+        names.includes('cat_cafe_post_message') ||
+        names.includes('cat_cafe_cross_post_message') ||
+        names.includes('cat_cafe_teleport') ||
+        names.includes('cat_cafe_register_scheduled_task') ||
+        names.includes('cat_cafe_remove_scheduled_task') ||
+        names.includes('cat_cafe_publish_verdict')
+      ) {
+        console.error(JSON.stringify(names.sort()));
+        process.exit(1);
+      }
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: process.cwd(),
+      encoding: 'utf-8',
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
   });
 });

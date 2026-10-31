@@ -3,7 +3,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
 import { extractTasks, toCreateTaskInputs } from '../dist/domains/cats/services/orchestration/TaskExtractor.js';
 
 // Mock AgentService that returns valid JSON
@@ -139,6 +140,12 @@ describe('sourceIndex normalization (#33)', () => {
     { id: 'msg-ccc', content: 'Third message', catId: 'opus' },
   ];
 
+  beforeEach(() => {
+    catRegistry.reset();
+    catRegistry.register('opus', { id: 'opus', name: 'Opus', client: 'anthropic' });
+  });
+  afterEach(() => catRegistry.reset());
+
   it('parses sourceIndex as number', async () => {
     const mockService = {
       async *invoke() {
@@ -245,5 +252,47 @@ describe('Pattern extraction fallback', () => {
     });
 
     assert.ok(result.tasks.some((t) => t.title.includes('review the code')));
+  });
+});
+
+describe('Empty catRegistry rejects template-only cats as owners (F171)', () => {
+  beforeEach(() => catRegistry.reset());
+  afterEach(() => catRegistry.reset());
+
+  it('ownerCatId from config-only cat is rejected when registry is empty', async () => {
+    const mockService = {
+      async *invoke() {
+        yield {
+          type: 'text',
+          content: '[{"title": "Task", "why": "Test", "ownerCatId": "opus"}]',
+        };
+        yield { type: 'done', catId: 'opus' };
+      },
+    };
+    const msgs = [{ id: 'msg-1', content: 'test', catId: null }];
+    const result = await extractTasks(msgs, mockService, {
+      threadId: 't1',
+      userId: 'u1',
+    });
+    assert.equal(result.tasks[0].ownerCatId, undefined);
+  });
+
+  it('ownerCatId is accepted when cat is in runtime registry', async () => {
+    catRegistry.register('opus', { id: 'opus', name: 'Opus', client: 'anthropic' });
+    const mockService = {
+      async *invoke() {
+        yield {
+          type: 'text',
+          content: '[{"title": "Task", "why": "Test", "ownerCatId": "opus"}]',
+        };
+        yield { type: 'done', catId: 'opus' };
+      },
+    };
+    const msgs = [{ id: 'msg-1', content: 'test', catId: null }];
+    const result = await extractTasks(msgs, mockService, {
+      threadId: 't1',
+      userId: 'u1',
+    });
+    assert.equal(result.tasks[0].ownerCatId, 'opus');
   });
 });

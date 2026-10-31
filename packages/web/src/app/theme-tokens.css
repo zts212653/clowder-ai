@@ -1,0 +1,290 @@
+/*
+ * F056 Phase E — OKLCH 系统化升级 · Design System Primitives
+ *
+ * 本文件持有"非身份性"七类色 token + Brand alias + Surface/Elevation/Scrim + cafe 兼容 alias。
+ *
+ * 拆分（每文件 ≤350 行硬限制 + design system 关注点分离）：
+ *   theme-tokens.css       — primitives：Brand + Neutral + Accent + Semantic + Code + Chart + Avatar Fallback + Scrim + cafe alias
+ *   cat-persona-tokens.css — Cat Persona 单 hue 派生（每只猫 4 档 × 2 mode）
+ *   connector-tokens.css   — IM connector 品牌色（独立体系，不随主题派生）
+ *   theme-extras.css       — F155 Guide tokens + warm-pastel Notice tokens
+ *
+ * 哲学：HSL 是给程序员算颜色方便的，OKLCH 是给用户感知一致的。
+ *       统一 token 派生公式让"换主题色 = 改一个 hue 值，全应用自动适配"。
+ */
+
+:root {
+  /* ============================================================
+   * Layer 0: Brand + Hue/Chroma anchors
+   *
+   * --accent-hue 控制品牌/交互色（按钮、链接、accent scale）。
+   * --surface-hue 控制页面底色色调（独立于 accent，KD-34）。
+   * 原始 #fdf8f3 ≈ oklch(0.98 0.008 ~80)，warm-beige/vanilla。
+   * ============================================================ */
+  --accent-hue: 50; /* warm gold — 品牌主色旋钮（aligned with INIT_LIGHT） */
+  --accent-chroma: 0.14;
+  --surface-hue: 80; /* warm beige — 页面底色旋钮，独立于 accent（KD-34） */
+  --surface-chroma: 0.01; /* surface 四档共享色度 — Tuner 调一个全变 */
+  --brand-cat-cafe-pink: oklch(0.62 var(--accent-chroma) var(--accent-hue)); /* 派生 — logo / splash */
+  /* Text over illustrations keeps its contrast when the surrounding page changes mode. */
+  --cafe-image-foreground: oklch(0.985 0.005 30);
+}
+
+/* ============================================================
+ * LIGHT MODE (default :root)
+ * ============================================================ */
+:root {
+  /* --- 1. Neutral 11档（warm neutral, hue ~30, low chroma） --- */
+  --neutral-50: oklch(0.985 0.005 30);
+  --neutral-100: oklch(0.965 0.005 30);
+  --neutral-200: oklch(0.915 0.005 30);
+  --neutral-300: oklch(0.84 0.005 30);
+  --neutral-400: oklch(0.71 0.005 30);
+  --neutral-500: oklch(0.56 0.005 30);
+  --neutral-600: oklch(0.45 0.005 30);
+  --neutral-700: oklch(0.36 0.005 30);
+  --neutral-800: oklch(0.27 0.005 30);
+  --neutral-900: oklch(0.2 0.005 30);
+  --neutral-950: oklch(0.13 0.005 30);
+
+  /* --- 2. App Accent 9档（单 hue 派生）— L=0.55 base 保证 vs neutral-50 ≥4.5:1 (WCAG normal text) --- */
+  --accent-50: oklch(0.97 calc(var(--accent-chroma) * 0.2) var(--accent-hue));
+  --accent-100: oklch(0.94 calc(var(--accent-chroma) * 0.3) var(--accent-hue));
+  --accent-200: oklch(0.88 calc(var(--accent-chroma) * 0.5) var(--accent-hue));
+  --accent-300: oklch(0.78 calc(var(--accent-chroma) * 0.7) var(--accent-hue));
+  --accent-400: oklch(0.65 calc(var(--accent-chroma) * 0.9) var(--accent-hue));
+  --accent-500: oklch(0.55 var(--accent-chroma) var(--accent-hue)); /* base — 按钮文字 ≥4.5:1 */
+  --accent-600: oklch(0.45 var(--accent-chroma) var(--accent-hue)); /* hover */
+  --accent-700: oklch(0.35 calc(var(--accent-chroma) * 0.9) var(--accent-hue)); /* active */
+  --accent-900: oklch(0.2 calc(var(--accent-chroma) * 0.5) var(--accent-hue));
+
+  /* --- 4. Semantic 5色（固定，不派生）— L 选定保证 vs cafe-surface 对比度 ≥3:1（WCAG icon） --- */
+  --semantic-critical: oklch(0.55 0.12 35); /* unread + error + delete + critical 合并 */
+  --semantic-success: oklch(0.55 0.12 135);
+  --semantic-warning: oklch(0.55 0.12 45); /* 暖橙：对比度 ≥3:1 (icon) */
+  --semantic-info: oklch(0.55 0.12 210); /* 跨线程气泡蓝亦用 */
+  --semantic-spotlight: oklch(0.65 0.12 45); /* F155 guide + quest input glow 合并 */
+  --semantic-critical-surface: oklch(0.96 0.03 35);
+  --semantic-success-surface: oklch(0.96 0.03 135);
+  --semantic-warning-surface: oklch(0.96 0.04 45);
+  --semantic-info-surface: oklch(0.96 0.03 210);
+  --semantic-spotlight-surface: oklch(0.96 0.04 45);
+
+  /* --- Content category 4色（F311 operator B：类别 ≠ 主动作 ≠ 状态） --- */
+  --content-category-object: oklch(0.5 0.1 180);
+  --content-category-rubric: oklch(0.52 0.12 280);
+  --content-category-measurement: oklch(0.52 0.12 330);
+  --content-category-diagnosis: oklch(0.5 0.1 105);
+
+  /* --- 5. Code Block（github-light 风格固定 palette） --- */
+  --code-bg: oklch(0.9 0.005 30);
+  --code-text: oklch(0.19 0.02 30);
+  --code-keyword: oklch(0.5 0.18 320);
+  --code-string: oklch(0.5 0.15 140);
+  --code-comment: oklch(0.55 0.05 100);
+  --code-function: oklch(0.5 0.18 250);
+  --code-number: oklch(0.5 0.18 30);
+  --code-border: oklch(0.9 0.005 30);
+
+  /* --- 6. Chart palette 12色（OKLCH H 均匀分布 30°/60°） --- */
+  --chart-1: oklch(0.55 0.15 30);
+  --chart-2: oklch(0.55 0.15 90);
+  --chart-3: oklch(0.55 0.15 150);
+  --chart-4: oklch(0.55 0.15 210);
+  --chart-5: oklch(0.55 0.15 270);
+  --chart-6: oklch(0.55 0.15 330);
+  --chart-7: oklch(0.45 0.18 30);
+  --chart-8: oklch(0.45 0.18 90);
+  --chart-9: oklch(0.45 0.18 150);
+  --chart-10: oklch(0.45 0.18 210);
+  --chart-11: oklch(0.45 0.18 270);
+  --chart-12: oklch(0.45 0.18 330);
+
+  /* --- 7. Avatar Fallback 8色（hash-based 固定） --- */
+  --avatar-fallback-1: oklch(0.65 0.12 30);
+  --avatar-fallback-2: oklch(0.65 0.12 75);
+  --avatar-fallback-3: oklch(0.65 0.12 120);
+  --avatar-fallback-4: oklch(0.65 0.12 165);
+  --avatar-fallback-5: oklch(0.65 0.12 210);
+  --avatar-fallback-6: oklch(0.65 0.12 255);
+  --avatar-fallback-7: oklch(0.65 0.12 300);
+  --avatar-fallback-8: oklch(0.65 0.12 345);
+
+  /* --- Surface 四档（light: 基于 develop_base 实测 hex 反推 OKLCH） ---
+   * 四档共享 --surface-hue，chroma = --surface-chroma × 层级系数：
+   *   sunken   L=0.92  ×1.5  ActivityBar / code / field
+   *   surface  L=0.95  ×1.2  ThreadSidebar / RightPanel
+   *   elevated L=0.99  ×0.5  Chat 主区（高 L 需低 C 趋白）
+   *   canvas   L=0.995 ×0.3  Card 浮起（最浅最白） */
+  --cafe-surface-sunken: oklch(0.92 calc(var(--surface-chroma) * 1.5) var(--surface-hue));
+  --cafe-surface: oklch(0.95 calc(var(--surface-chroma) * 1.2) var(--surface-hue));
+  --cafe-surface-elevated: oklch(0.99 calc(var(--surface-chroma) * 0.5) var(--surface-hue));
+  --cafe-surface-canvas: oklch(0.995 calc(var(--surface-chroma) * 0.3) var(--surface-hue));
+
+  /* --- Cafe semantic shortcuts（映射到 Neutral / App Accent / Semantic） --- */
+  --cafe-text: var(--neutral-900);
+  --cafe-text-secondary: var(--neutral-600);
+  --cafe-text-muted: var(--neutral-500);
+  --cafe-border: var(--neutral-300);
+  --cafe-border-subtle: var(--neutral-200);
+  --cafe-accent: var(--accent-500);
+  --cafe-accent-hover: var(--accent-600);
+  --cafe-accent-foreground: var(--neutral-50);
+  --cafe-crosspost: var(--semantic-info);
+  --cafe-interactive: var(--neutral-700);
+
+  /* --- Elevation 阴影（light: 单层黑阴影） --- */
+  --shadow-elevation-1: 0 1px 2px oklch(0 0 0 / 0.06);
+  --shadow-elevation-2: 0 4px 10px oklch(0 0 0 / 0.1);
+  --shadow-elevation-3: 0 14px 28px oklch(0 0 0 / 0.15);
+
+  /* --- Scrim 三档（modal / drawer / lightbox 后的 dim layer） --- */
+  --scrim-light: oklch(0 0 0 / 0.2);
+  --scrim-dim: oklch(0 0 0 / 0.4);
+  --scrim-heavy: oklch(0 0 0 / 0.65);
+
+  /* --- Overlay content text（always-light on dark scrim — lightbox / modal / tooltip） --- */
+  --overlay-fg: oklch(0.98 0 0);
+  --overlay-fg-muted: oklch(0.98 0 0 / 0.8);
+
+  /* F311 accepted warm Workspace focus; scoped consumers do not change the shell accent. */
+  --evolution-focus: #b05f45;
+  --evolution-focus-text: #8f4730;
+  --evolution-focus-soft: #f7ebe5;
+  --evolution-title-font: Georgia, "Noto Serif SC", "Songti SC", serif;
+
+  /* --- 兼容旧通用 alias --- */
+  --color-cafe-accent: var(--cafe-accent);
+  --color-base-white: var(--cafe-surface);
+  --color-base-black: var(--cafe-text);
+  --bg-app: var(--cafe-surface);
+  --text-primary: var(--cafe-text);
+  --text-secondary: var(--cafe-text-secondary);
+}
+
+/* ============================================================
+ * DARK MODE
+ * ============================================================ */
+[data-theme="dark"] {
+  --evolution-focus: var(--accent-500);
+  --evolution-focus-text: var(--accent-600);
+  --evolution-focus-soft: var(--accent-100);
+  /* Dark accent/surface hue/chroma — aligned with INIT_DARK */
+  --accent-hue: 35;
+  --accent-chroma: 0.08;
+  --surface-hue: 30;
+
+  /* --- 1. Neutral 11档（dark: L 反转） --- */
+  --neutral-50: oklch(0.13 0.005 30);
+  --neutral-100: oklch(0.18 0.005 30);
+  --neutral-200: oklch(0.24 0.005 30);
+  --neutral-300: oklch(0.35 0.005 30);
+  --neutral-400: oklch(0.4 0.005 30);
+  --neutral-500: oklch(0.66 0.005 30);
+  --neutral-600: oklch(0.75 0.005 30);
+  --neutral-700: oklch(0.84 0.005 30);
+  --neutral-800: oklch(0.88 0.005 30);
+  --neutral-900: oklch(0.95 0.005 30);
+  --neutral-950: oklch(0.98 0.005 30);
+
+  /* --- 2. App Accent 9档（dark: 略亮 + 降饱和） --- */
+  --accent-50: oklch(0.22 calc(var(--accent-chroma) * 0.3) var(--accent-hue));
+  --accent-100: oklch(0.28 calc(var(--accent-chroma) * 0.4) var(--accent-hue));
+  --accent-200: oklch(0.34 calc(var(--accent-chroma) * 0.5) var(--accent-hue));
+  --accent-300: oklch(0.44 calc(var(--accent-chroma) * 0.7) var(--accent-hue));
+  --accent-400: oklch(0.55 calc(var(--accent-chroma) * 0.8) var(--accent-hue));
+  --accent-500: oklch(0.68 calc(var(--accent-chroma) * 0.9) var(--accent-hue));
+  --accent-600: oklch(0.78 var(--accent-chroma) var(--accent-hue));
+  --accent-700: oklch(0.85 calc(var(--accent-chroma) * 0.9) var(--accent-hue));
+  --accent-900: oklch(0.95 calc(var(--accent-chroma) * 0.4) var(--accent-hue));
+
+  /* --- 4. Semantic 5色（dark: 略亮 + 微调） --- */
+  --semantic-critical: oklch(0.7 0.17 25);
+  --semantic-success: oklch(0.7 0.17 145);
+  --semantic-warning: oklch(0.7 0.17 70);
+  --semantic-info: oklch(0.7 0.17 230);
+  --semantic-spotlight: oklch(0.8 0.17 70);
+  --semantic-critical-surface: oklch(0.25 0.05 25);
+  --semantic-success-surface: oklch(0.25 0.05 145);
+  --semantic-warning-surface: oklch(0.25 0.05 70);
+  --semantic-info-surface: oklch(0.25 0.05 230);
+  --semantic-spotlight-surface: oklch(0.25 0.06 70);
+
+  /* --- Content category（dark: 同语义、提高 L，不借 semantic palette） --- */
+  --content-category-object: oklch(0.72 0.1 180);
+  --content-category-rubric: oklch(0.72 0.12 280);
+  --content-category-measurement: oklch(0.72 0.12 330);
+  --content-category-diagnosis: oklch(0.72 0.1 105);
+
+  /* --- 5. Code Block（vscode-dark+ 风格固定 palette） --- */
+  --code-bg: oklch(0.25 0.005 30);
+  --code-text: oklch(0.9 0.02 30);
+  --code-keyword: oklch(0.72 0.16 280);
+  --code-string: oklch(0.72 0.14 140);
+  --code-comment: oklch(0.5 0.04 100);
+  --code-function: oklch(0.78 0.14 210);
+  --code-number: oklch(0.72 0.16 30);
+  --code-border: oklch(0.35 0.005 30);
+
+  /* --- 6. Chart palette（dark: L 略提到 0.68/0.78） --- */
+  --chart-1: oklch(0.68 0.14 30);
+  --chart-2: oklch(0.68 0.14 90);
+  --chart-3: oklch(0.68 0.14 150);
+  --chart-4: oklch(0.68 0.14 210);
+  --chart-5: oklch(0.68 0.14 270);
+  --chart-6: oklch(0.68 0.14 330);
+  --chart-7: oklch(0.78 0.12 30);
+  --chart-8: oklch(0.78 0.12 90);
+  --chart-9: oklch(0.78 0.12 150);
+  --chart-10: oklch(0.78 0.12 210);
+  --chart-11: oklch(0.78 0.12 270);
+  --chart-12: oklch(0.78 0.12 330);
+
+  /* --- 7. Avatar Fallback（dark: L 略降） --- */
+  --avatar-fallback-1: oklch(0.55 0.13 30);
+  --avatar-fallback-2: oklch(0.55 0.13 75);
+  --avatar-fallback-3: oklch(0.55 0.13 120);
+  --avatar-fallback-4: oklch(0.55 0.13 165);
+  --avatar-fallback-5: oklch(0.55 0.13 210);
+  --avatar-fallback-6: oklch(0.55 0.13 255);
+  --avatar-fallback-7: oklch(0.55 0.13 300);
+  --avatar-fallback-8: oklch(0.55 0.13 345);
+
+  /* --- Surface 四档（dark — co-creator 2026-06-10 调优）---
+   * sunken=0.36 / surface=0.28 / elevated=0.21 / canvas=0.24
+   * Chroma = base chroma × 0.15 (0.0022/0.0018/0.0008/0.0004).
+   * 空间映射见 console-tokens.css（light/dark 统一，不再镜像） */
+  --cafe-surface-sunken: oklch(0.36 0.0022 var(--surface-hue));
+  --cafe-surface: oklch(0.28 0.0018 var(--surface-hue));
+  --cafe-surface-elevated: oklch(0.21 0.0008 var(--surface-hue));
+  --cafe-surface-canvas: oklch(0.24 0.0004 var(--surface-hue));
+
+  /* --- Cafe semantic shortcuts dark（重新映射 Neutral） --- */
+  --cafe-text: var(--neutral-900);
+  --cafe-text-secondary: var(--neutral-600);
+  --cafe-text-muted: var(--neutral-500);
+  --cafe-border: var(--neutral-300);
+  --cafe-border-subtle: var(--neutral-400);
+  --cafe-accent: var(--accent-500);
+  --cafe-accent-hover: var(--accent-600);
+  --cafe-accent-foreground: var(--neutral-50);
+  --cafe-crosspost: var(--semantic-info);
+  --cafe-interactive: var(--neutral-700);
+
+  /* --- Elevation 阴影（dark: inset 高光 + 深外阴影） --- */
+  --shadow-elevation-1: 0 1px 2px oklch(0 0 0 / 0.5), inset 0 1px 0 oklch(1 0 0 / 0.1);
+  --shadow-elevation-2: 0 6px 14px oklch(0 0 0 / 0.55), inset 0 1px 0 oklch(1 0 0 / 0.14);
+  --shadow-elevation-3: 0 16px 32px oklch(0 0 0 / 0.65), inset 0 1px 0 oklch(1 0 0 / 0.18);
+
+  /* --- Scrim（dark: 加深） --- */
+  --scrim-light: oklch(0 0 0 / 0.4);
+  --scrim-dim: oklch(0 0 0 / 0.6);
+  --scrim-heavy: oklch(0 0 0 / 0.8);
+
+  /* --- 兼容旧 alias --- */
+  --color-base-white: var(--cafe-surface);
+  --color-base-black: var(--cafe-text);
+  --bg-app: var(--cafe-surface);
+  --text-primary: var(--cafe-text);
+  --text-secondary: var(--cafe-text-secondary);
+}

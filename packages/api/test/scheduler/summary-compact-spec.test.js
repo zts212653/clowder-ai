@@ -1,0 +1,179 @@
+import assert from 'node:assert/strict';
+import { beforeEach, describe, it } from 'node:test';
+import Database from 'better-sqlite3';
+
+describe('SummaryCompactionTaskSpec', () => {
+  let db;
+
+  beforeEach(async () => {
+    db = new Database(':memory:');
+    const { applyMigrations } = await import('../../dist/domains/memory/schema.js');
+    applyMigrations(db);
+  });
+
+  it('gate returns run:false when no eligible threads', async () => {
+    const { createSummaryCompactionTaskSpec } = await import('../../dist/domains/memory/SummaryCompactionTaskSpec.js');
+    const spec = createSummaryCompactionTaskSpec({
+      db,
+      enabled: () => true,
+      getThreadLastActivity: async () => null,
+      getMessagesAfterWatermark: async () => [],
+      generateAbstractive: async () => null,
+      logger: { info: () => {}, error: () => {} },
+    });
+
+    const result = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+    assert.equal(result.run, false);
+  });
+
+  it('an eligible thread remains protected against the summary task own emission', async () => {
+    const { createSummaryCompactionTaskSpec } = await import('../../dist/domains/memory/SummaryCompactionTaskSpec.js');
+    const { executeTaskPipeline } = await import('../../dist/infrastructure/scheduler/execute-pipeline.js');
+    const { RunLedger } = await import('../../dist/infrastructure/scheduler/RunLedger.js');
+    const { EmissionStore } = await import('../../dist/infrastructure/scheduler/EmissionStore.js');
+    db.prepare(
+      `INSERT INTO summary_state (thread_id, pending_message_count, pending_token_count, pending_signal_flags, summary_type)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run('test-thread', 25, 2000, 0, 'concat');
+    let executions = 0;
+    const logger = { info() {}, error() {} };
+    const task = createSummaryCompactionTaskSpec({
+      db,
+      enabled: () => true,
+      getThreadLastActivity: async () => ({ threadId: 'test-thread', lastMessageAt: Date.now() - 20 * 60_000 }),
+      getMessagesAfterWatermark: async () => {
+        executions++;
+        return [];
+      },
+      generateAbstractive: async () => null,
+      logger,
+    });
+    const admitted = await task.admission.gate({ taskId: task.id, lastRunAt: null, tickCount: 1 });
+    assert.equal(admitted.run, true, 'real thread activity makes this gate eligible');
+    const emissionStore = new EmissionStore(db);
+    emissionStore.record({
+      originTaskId: task.id,
+      threadId: 'test-thread',
+      messageId: 'own-message',
+      suppressionMs: 60_000,
+    });
+    const ledger = new RunLedger(db);
+    await executeTaskPipeline({
+      task,
+      ledger,
+      emissionStore,
+      logger,
+      running: new Map(),
+      tickCounts: new Map(),
+      lastRunAt: new Map(),
+    });
+    assert.equal(executions, 0);
+    assert.equal(ledger.query(task.id, 1)[0].outcome, 'SKIP_SELF_ECHO');
+  });
+
+  it('finishes candidate derivation after the canonical summary commit boundary', async () => {
+    const { createSummaryCompactionTaskSpec } = await import('../../dist/domains/memory/SummaryCompactionTaskSpec.js');
+    db.prepare(
+      `INSERT INTO summary_state (thread_id, pending_message_count, pending_token_count, pending_signal_flags, summary_type)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run('test-thread', 25, 2000, 0, 'concat');
+    db.prepare(
+      `INSERT INTO evidence_docs (anchor, kind, status, title, summary, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run('thread-test-thread', 'thread', 'active', 'Test', 'old', new Date().toISOString());
+    const controller = new AbortController();
+    const candidates = [];
+    const spec = createSummaryCompactionTaskSpec({
+      db,
+      enabled: () => true,
+      getThreadLastActivity: async () => ({ threadId: 'test-thread', lastMessageAt: Date.now() - 20 * 60 * 1000 }),
+      getMessagesAfterWatermark: async (_threadId, watermark) =>
+        watermark ? [] : [{ id: 'm1', content: 'hello', timestamp: Date.now() }],
+      generateAbstractive: async () => ({
+        segments: [
+          {
+            summary: 'committed summary',
+            topicKey: 'general',
+            topicLabel: 'General',
+            boundaryReason: 'test',
+            boundaryConfidence: 'high',
+            fromMessageId: 'm1',
+            toMessageId: 'm1',
+            messageCount: 1,
+            candidates: [{ kind: 'lesson', title: 'Keep obligations atomic', claim: 'finish committed effects' }],
+          },
+        ],
+      }),
+      reEmbed: async () => {
+        controller.abort(new Error('scheduler timeout'));
+      },
+      submitCandidate: async (candidate) => candidates.push(candidate),
+      logger: { info() {}, error() {} },
+    });
+    const gate = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+
+    await spec.run
+      .execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {
+        assignedCatId: null,
+        signal: controller.signal,
+      })
+      .catch(() => {});
+
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].title, 'Keep obligations atomic');
+  });
+
+  it('gate returns run:true with per-thread workItems when eligible threads exist', async () => {
+    const { createSummaryCompactionTaskSpec } = await import('../../dist/domains/memory/SummaryCompactionTaskSpec.js');
+
+    // Seed a thread with enough pending work
+    db.prepare(
+      `INSERT INTO summary_state (thread_id, pending_message_count, pending_token_count, pending_signal_flags, summary_type)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run('test-thread', 25, 2000, 0, 'concat');
+
+    const spec = createSummaryCompactionTaskSpec({
+      db,
+      enabled: () => true,
+      // Thread has been quiet for > 10 minutes
+      getThreadLastActivity: async () => ({ threadId: 'test-thread', lastMessageAt: Date.now() - 20 * 60 * 1000 }),
+      getMessagesAfterWatermark: async () => [{ id: 'm1', content: 'hello', timestamp: Date.now() }],
+      generateAbstractive: async () => ({
+        segments: [
+          {
+            summary: 'test summary',
+            topicKey: 'general',
+            topicLabel: 'General',
+            boundaryReason: 'test',
+            boundaryConfidence: 'high',
+            fromMessageId: 'm1',
+            toMessageId: 'm1',
+            messageCount: 1,
+          },
+        ],
+      }),
+      logger: { info: () => {}, error: () => {} },
+    });
+
+    const result = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+    assert.equal(result.run, true);
+    assert.ok(result.workItems.length > 0);
+    assert.match(result.workItems[0].subjectKey, /^thread-/);
+  });
+
+  it('has correct id and profile', async () => {
+    const { createSummaryCompactionTaskSpec } = await import('../../dist/domains/memory/SummaryCompactionTaskSpec.js');
+    const spec = createSummaryCompactionTaskSpec({
+      db: new Database(':memory:'),
+      enabled: () => true,
+      getThreadLastActivity: async () => null,
+      getMessagesAfterWatermark: async () => [],
+      generateAbstractive: async () => null,
+      logger: { info: () => {}, error: () => {} },
+    });
+
+    assert.equal(spec.id, 'summary-compact');
+    assert.equal(spec.profile, 'awareness');
+    assert.equal(spec.trigger.ms, 30 * 60 * 1000);
+  });
+});

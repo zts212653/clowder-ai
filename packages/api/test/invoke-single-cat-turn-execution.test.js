@@ -1,0 +1,598 @@
+import './helpers/setup-cat-registry.js';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, before, describe, test } from 'node:test';
+
+const { InMemoryTurnExecutionStore } = await import(
+  '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js'
+);
+const { invokeSingleCat } = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
+
+let auditDir;
+let originalAuditDir;
+let originalPreflightDisable;
+
+before(async () => {
+  auditDir = await mkdtemp(join(tmpdir(), 'turn-execution-audit-'));
+  originalAuditDir = process.env.AUDIT_LOG_DIR;
+  originalPreflightDisable = process.env.CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT;
+  process.env.AUDIT_LOG_DIR = auditDir;
+  process.env.CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT = '1';
+});
+
+after(async () => {
+  if (originalAuditDir === undefined) delete process.env.AUDIT_LOG_DIR;
+  else process.env.AUDIT_LOG_DIR = originalAuditDir;
+  if (originalPreflightDisable === undefined) delete process.env.CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT;
+  else process.env.CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT = originalPreflightDisable;
+  await rm(auditDir, { recursive: true, force: true });
+});
+
+function makeDeps(store, invocationId) {
+  return {
+    registry: {
+      create: async () => ({ invocationId, callbackToken: `token-${invocationId}` }),
+      verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
+    },
+    sessionManager: {
+      get: async () => undefined,
+      getOrCreate: async () => ({}),
+      store: async () => {},
+      delete: async () => {},
+      resolveWorkingDirectory: () => '/tmp/test',
+    },
+    threadStore: null,
+    apiUrl: 'http://127.0.0.1:3004',
+    turnExecutionStore: store,
+  };
+}
+
+function routingDecision(catId = 'codex') {
+  return {
+    v: 1,
+    ownerId: 'user-1',
+    observedAt: 1,
+    resolverState: 'fresh',
+    snapshotRef: 'routing-snapshot:1',
+    targets: [{ targetCatId: catId, disposition: 'allowed', reasons: [], alternatives: [] }],
+  };
+}
+
+async function collect(iterable) {
+  const messages = [];
+  for await (const message of iterable) messages.push(message);
+  return messages;
+}
+
+describe('invokeSingleCat durable child execution lifecycle', () => {
+  test('a fallback child cannot inherit the admission observation of a mixed fan-out sibling', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    await collect(
+      invokeSingleCat(makeDeps(store, 'child-without-B'), {
+        catId: 'codex',
+        prompt: 'fallback after exact continuation',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        isLastCat: true,
+        service: {
+          async *invoke() {
+            yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+          },
+        },
+        routingDispatchPreflightDecision: routingDecision(),
+        routingAdmission: {
+          stage: 'queue_admitted',
+          observedAt: 0,
+          snapshotRef: 'B:other-target',
+          targets: [{ targetCatId: 'opus', factsRef: 'facts:opus' }],
+        },
+      }),
+    );
+    const child = await store.get('child-without-B');
+    assert.equal(child.causal.routingPreflight.snapshotRef, 'routing-snapshot:1');
+    assert.equal(
+      child.causal.routingPreflight.admission,
+      undefined,
+      'B.targets is an explicit subset, not a fan-out verdict',
+    );
+  });
+
+  test('a cancellation-only terminal never succeeds or schedules a freshness invocation', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    let reinvokes = 0;
+    await collect(
+      invokeSingleCat(
+        {
+          ...makeDeps(store, 'child-cancelled'),
+          freshnessReinvokeCheck: async () => {
+            reinvokes++;
+            return null;
+          },
+        },
+        {
+          catId: 'codex',
+          service: {
+            async *invoke() {
+              yield { type: 'done', catId: 'codex', errorCode: 'INVOCATION_CANCELLED', timestamp: Date.now() };
+            },
+          },
+          prompt: 'cancelled request',
+          userId: 'user-1',
+          threadId: 'thread-1',
+          isLastCat: true,
+        },
+      ),
+    );
+    assert.equal((await store.get('child-cancelled')).status, 'canceled');
+    assert.equal(reinvokes, 0);
+  });
+
+  test('creates running before prompt exposure/provider and terminalizes success', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    const exposureCalls = [];
+    const lifecycleCalls = [];
+    let providerObservedStatus;
+    let providerRecoveryAnchor;
+    const service = {
+      async *invoke(_prompt, options) {
+        providerObservedStatus = (await store.get('child-success'))?.status;
+        providerRecoveryAnchor = options.recoveryAnchor;
+        assert.equal(lifecycleCalls.length, 1, 'processing response must exist before provider starts');
+        assert.equal(exposureCalls.length, 1, 'body exposure must be durable before provider starts');
+        yield { type: 'text', catId: 'codex', content: 'ok', timestamp: Date.now() };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    const messages = await collect(
+      invokeSingleCat(makeDeps(store, 'child-success'), {
+        catId: 'codex',
+        service,
+        prompt: 'test',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        parentInvocationId: 'parent-1',
+        executionKind: 'routing_guard',
+        executionCausal: {
+          triggerMessageId: 'msg-trigger',
+          routingGuardReason: 'missing_routing_exit',
+        },
+        promptMessageIds: ['msg-queued'],
+        onLifecycleInvocationStarted: async (input) => {
+          lifecycleCalls.push(input);
+          return { responseMessageId: 'response-child-success', priorFrontierMessageId: 'message-before-response' };
+        },
+        onPromptMessagesExposed: async (input) => exposureCalls.push(input),
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(providerObservedStatus, 'running');
+    assert.deepEqual(lifecycleCalls, [
+      {
+        threadId: 'thread-1',
+        userId: 'user-1',
+        catId: 'codex',
+        invocationId: 'child-success',
+        parentInvocationId: 'parent-1',
+        startedAt: lifecycleCalls[0].startedAt,
+      },
+    ]);
+    assert.deepEqual(providerRecoveryAnchor, {
+      threadId: 'thread-1',
+      invocationId: 'child-success',
+      promptMessageIds: ['msg-queued'],
+    });
+    assert.equal(exposureCalls.length, 1);
+    assert.equal(exposureCalls[0].invocationId, 'child-success');
+    assert.deepEqual(exposureCalls[0].messageIds, ['msg-queued']);
+    assert.equal(Number.isFinite(exposureCalls[0].seenAt), true);
+    const created = messages.find((message) => {
+      if (message.type !== 'system_info' || !message.content) return false;
+      return JSON.parse(message.content).type === 'invocation_created';
+    });
+    const createdBody = JSON.parse(created.content);
+    assert.deepEqual(createdBody, {
+      type: 'invocation_created',
+      invocationId: 'child-success',
+      parentInvocationId: 'parent-1',
+      executionKind: 'routing_guard',
+      startedAt: createdBody.startedAt,
+      freshnessCarrierCapability: {
+        provider: 'other',
+        carrier: 'other',
+        activeInvocationGuidance: 'undeclared',
+        deliverySemantics: 'undeclared',
+      },
+      effectiveStrategy: {
+        config: {
+          strategy: 'handoff',
+          thresholds: { warn: 0.75, action: 0.85 },
+          turnBudget: 12_000,
+          safetyMargin: 4_000,
+        },
+        source: 'provider_default',
+        revision: createdBody.effectiveStrategy.revision,
+        changedAt: 0,
+        execution: {
+          status: 'unavailable',
+          missingCapabilities: [
+            'effective_input_ceiling',
+            'carrier_binding',
+            'authoritative_usage',
+            'session_rotation',
+            'continuity_bootstrap',
+          ],
+        },
+      },
+    });
+    assert.match(createdBody.effectiveStrategy.revision, /^provider_default:[a-f0-9]{64}$/);
+    assert.equal(created.turnInvocationId, 'child-success');
+    assert.equal(created.lifecycleResponseMessageId, 'response-child-success');
+    assert.equal(created.lifecyclePriorFrontierMessageId, 'message-before-response');
+    assert.equal(created.turnExecutionStartedAt, createdBody.startedAt);
+    assert.deepEqual(created.extra?.turnExecution, {
+      invocationId: 'child-success',
+      parentInvocationId: 'parent-1',
+      executionKind: 'routing_guard',
+    });
+
+    const terminal = await store.get('child-success');
+    assert.equal(terminal.status, 'succeeded');
+    assert.equal(terminal.executionKind, 'routing_guard');
+    assert.deepEqual(terminal.causal, {
+      triggerMessageId: 'msg-trigger',
+      routingGuardReason: 'missing_routing_exit',
+      coveredMessageIds: ['msg-queued'],
+    });
+    assert.equal(terminal.endedAt >= terminal.startedAt, true);
+    assert.equal(terminal.terminalReason, undefined);
+  });
+
+  test('binds the exact context-factory prompt ids before provider execution', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    let providerCoverage;
+    const contextCapability = {
+      provider: 'anthropic',
+      carrier: 'print_sdk',
+      reportsRuntimeWindow: true,
+      authoritativeUsage: true,
+      usageTelemetry: 'available',
+      nativeWindowControl: false,
+      nativeCompressionControl: false,
+      observesCompression: true,
+      reason: 'fixture',
+    };
+    const service = {
+      contextCapability: () => contextCapability,
+      async *invoke() {
+        providerCoverage = (await store.get('child-context-factory'))?.causal?.coveredMessageIds;
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const contextEpochOwner = {
+      async resolve(input) {
+        return {
+          scopeKey: 'user-1::opus::thread-1',
+          contextEpoch: 1,
+          contextMode: 'cold',
+          lastTransitionRef: input.disposition.evidenceRef,
+          consumedCompactionEventIds: [],
+          transition: 'scope_first_seen',
+          normalizedDisposition: input.disposition,
+          healthSignals: [],
+        };
+      },
+      async observeCompaction() {
+        throw new Error('unexpected compaction');
+      },
+    };
+
+    await collect(
+      invokeSingleCat(
+        { ...makeDeps(store, 'child-context-factory'), contextEpochOwner },
+        {
+          catId: 'opus',
+          service,
+          prompt: 'placeholder',
+          contextPromptFactory: async () => ({
+            prompt: 'exact prompt',
+            promptMessageIds: ['msg-trigger', 'msg-context'],
+          }),
+          userId: 'user-1',
+          threadId: 'thread-1',
+          invocationOrigin: 'interactive',
+          routeTopology: 'serial',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    assert.deepEqual(providerCoverage, ['msg-trigger', 'msg-context']);
+    assert.deepEqual((await store.get('child-context-factory')).causal.coveredMessageIds, [
+      'msg-trigger',
+      'msg-context',
+    ]);
+  });
+
+  test('provider terminal error becomes failed with a canonical reason and no durable error detail copy', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'error',
+          catId: 'codex',
+          error: 'provider_boom secret-token-should-not-persist',
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(makeDeps(store, 'child-failed'), {
+        catId: 'codex',
+        service,
+        prompt: 'test',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        parentInvocationId: 'parent-1',
+        executionKind: 'routing_guard',
+        executionCausal: { routingGuardReason: 'missing_routing_exit' },
+        isLastCat: true,
+      }),
+    );
+
+    const terminal = await store.get('child-failed');
+    assert.equal(terminal.status, 'failed');
+    assert.equal(terminal.terminalReason, 'provider_execution_failed');
+    assert.doesNotMatch(JSON.stringify(terminal), /secret-token-should-not-persist/);
+  });
+
+  test('observes success only after the canonical durable terminal and carries the exact preflight decision', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    const observed = [];
+    const exactDecision = routingDecision();
+    const service = {
+      async *invoke() {
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+    const deps = {
+      ...makeDeps(store, 'child-routing-success'),
+      routingDispatchSignalObserver: {
+        async observeTerminal(evidence) {
+          assert.equal((await store.get('child-routing-success')).status, 'succeeded');
+          observed.push(evidence);
+        },
+      },
+    };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'codex',
+        service,
+        prompt: 'test',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        parentInvocationId: 'parent-1',
+        routingDispatchPreflightDecision: exactDecision,
+        routingAdmission: {
+          stage: 'queue_admitted',
+          observedAt: 0,
+          snapshotRef: 'snapshot:B',
+          targets: [{ targetCatId: 'codex', factsRef: 'facts:codex' }],
+        },
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(observed.length, 1);
+    assert.equal(observed[0].status, 'succeeded');
+    assert.equal(observed[0].observationId, 'child-routing-success');
+    assert.equal(observed[0].evidenceRef, 'turn-execution:child-routing-success');
+    assert.equal(observed[0].preflightDecision, exactDecision);
+    assert.deepEqual((await store.get('child-routing-success')).causal.routingPreflight, {
+      stage: 'execution_preflight',
+      observedAt: exactDecision.observedAt,
+      snapshotRef: exactDecision.snapshotRef,
+      admission: { stage: 'queue_admitted', observedAt: 0, snapshotRef: 'snapshot:B' },
+    });
+    assert.equal(observed[0].observedAt, (await store.get('child-routing-success')).endedAt);
+  });
+
+  test('maps structured provider failures after persistence and keeps observer failure advisory', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    const observed = [];
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'error',
+          catId: 'codex',
+          error: 'bounded provider failure',
+          metadata: {
+            provider: 'openai',
+            model: 'test',
+            cliDiagnostics: { reasonCode: 'quota_exceeded' },
+          },
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+    const deps = {
+      ...makeDeps(store, 'child-routing-failure'),
+      routingDispatchSignalObserver: {
+        async observeTerminal(evidence) {
+          assert.equal((await store.get('child-routing-failure')).status, 'failed');
+          observed.push(evidence);
+          throw new Error('routing observer unavailable');
+        },
+      },
+    };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'codex',
+        service,
+        prompt: 'test',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        parentInvocationId: 'parent-1',
+        routingDispatchPreflightDecision: routingDecision(),
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal((await store.get('child-routing-failure')).status, 'failed');
+    assert.equal(observed.length, 1);
+    assert.equal(observed[0].status, 'failed');
+    assert.equal(observed[0].failureClass, 'quota_exhausted');
+  });
+
+  test('provider iterator ending without terminal done is interrupted, never succeeded', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    const service = {
+      async *invoke() {
+        yield { type: 'text', catId: 'codex', content: 'partial', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(makeDeps(store, 'child-missing-done'), {
+        catId: 'codex',
+        service,
+        prompt: 'test',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        parentInvocationId: 'parent-1',
+        isLastCat: true,
+      }),
+    );
+
+    const terminal = await store.get('child-missing-done');
+    assert.equal(terminal.status, 'interrupted');
+    assert.equal(terminal.terminalReason, 'provider_ended_without_terminal_done');
+  });
+
+  test('consumer stopping immediately after terminal done still records succeeded', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    const service = {
+      async *invoke() {
+        yield { type: 'text', catId: 'codex', content: 'complete', timestamp: Date.now() };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+    const iterator = invokeSingleCat(makeDeps(store, 'child-stop-after-done'), {
+      catId: 'codex',
+      service,
+      prompt: 'test',
+      userId: 'user-1',
+      threadId: 'thread-1',
+      parentInvocationId: 'parent-1',
+      isLastCat: true,
+    })[Symbol.asyncIterator]();
+
+    let terminalDone;
+    for (;;) {
+      const next = await iterator.next();
+      assert.equal(next.done, false, 'provider done must be yielded before generator completion');
+      if (next.value.type === 'done') {
+        terminalDone = next.value;
+        break;
+      }
+    }
+    assert.equal(terminalDone.type, 'done');
+    await iterator.return(undefined);
+
+    const terminal = await store.get('child-stop-after-done');
+    assert.equal(terminal.status, 'succeeded');
+    assert.equal(terminal.terminalReason, undefined);
+  });
+
+  test('force-return after invocation_created terminalizes interrupted instead of leaving an auth-only child', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    let providerCalled = false;
+    const service = {
+      async *invoke() {
+        providerCalled = true;
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+    const iterator = invokeSingleCat(makeDeps(store, 'child-returned'), {
+      catId: 'codex',
+      service,
+      prompt: 'test',
+      userId: 'user-1',
+      threadId: 'thread-1',
+      parentInvocationId: 'parent-1',
+      isLastCat: true,
+    })[Symbol.asyncIterator]();
+
+    const first = await iterator.next();
+    assert.equal(JSON.parse(first.value.content).type, 'invocation_created');
+    await iterator.return(undefined);
+
+    assert.equal(providerCalled, false);
+    assert.deepEqual(await store.get('child-returned'), {
+      providerLifecycleTracked: true,
+      providerTeardownAt: (await store.get('child-returned')).endedAt,
+      invocationId: 'child-returned',
+      parentInvocationId: 'parent-1',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      catId: 'codex',
+      executionKind: 'ordinary',
+      startedAt: (await store.get('child-returned')).startedAt,
+      status: 'interrupted',
+      endedAt: (await store.get('child-returned')).endedAt,
+      terminalReason: 'generator_returned_without_completion',
+      outputFence: 'open',
+    });
+  });
+
+  test('a replayed child create never starts a second provider or steals terminal ownership', async () => {
+    const canonicalStore = new InMemoryTurnExecutionStore();
+    let createCalls = 0;
+    const replayingStore = {
+      createRunning(input) {
+        createCalls += 1;
+        if (createCalls === 1) return canonicalStore.createRunning(input);
+        return { outcome: 'replayed', record: canonicalStore.get(input.invocationId) };
+      },
+      get: (invocationId) => canonicalStore.get(invocationId),
+      listByParent: (parentInvocationId) => canonicalStore.listByParent(parentInvocationId),
+      transitionTerminal: (invocationId, input) => canonicalStore.transitionTerminal(invocationId, input),
+      interruptRunningBefore: (cutoff, input) => canonicalStore.interruptRunningBefore(cutoff, input),
+    };
+    let providerCalls = 0;
+    const service = {
+      async *invoke() {
+        providerCalls += 1;
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+    const params = {
+      catId: 'codex',
+      service,
+      prompt: 'test',
+      userId: 'user-1',
+      threadId: 'thread-1',
+      parentInvocationId: 'parent-1',
+      isLastCat: true,
+    };
+
+    await collect(invokeSingleCat(makeDeps(replayingStore, 'child-replayed'), params));
+    const firstTerminal = canonicalStore.get('child-replayed');
+    const replayMessages = await collect(invokeSingleCat(makeDeps(replayingStore, 'child-replayed'), params));
+
+    assert.equal(providerCalls, 1);
+    assert.deepEqual(canonicalStore.get('child-replayed'), firstTerminal);
+    assert.match(
+      replayMessages.find((message) => message.type === 'error')?.error ?? '',
+      /turn_execution_not_created:replayed/,
+    );
+  });
+});

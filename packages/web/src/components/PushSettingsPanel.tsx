@@ -1,32 +1,125 @@
 'use client';
 
-/**
- * Push Notification Settings Panel
- * 推送通知设置 — CatCafeHub "通知" tab
- */
-
-import { useState } from 'react';
+import { deploymentDefaults } from '@cat-cafe/shared';
+import { useCallback, useEffect, useState } from 'react';
+import { PushServiceConfig } from '@/components/settings/PushServiceConfig';
 import { usePushNotify } from '@/hooks/usePushNotify';
 import { useToastStore } from '@/stores/toastStore';
+import {
+  SettingsResourceToggleSwitch,
+  settingsResourceCardClass,
+  settingsResourceRowClass,
+} from './SettingsResourceCard';
+import { PushDiagnosticsSection } from './settings/PushDiagnosticsSection';
+
+const STORAGE_KEY = 'cat-cafe-notify-prefs';
+
+type NotifyTypeId = 'reply' | 'permission' | 'mention' | 'schedule' | 'signal';
+
+const NOTIFY_TYPES: { id: NotifyTypeId; label: string; desc: string; defaultOn: boolean }[] = [
+  { id: 'reply', label: '猫猫消息', desc: 'AI 回复和主动消息', defaultOn: true },
+  { id: 'permission', label: '权限请求', desc: '猫猫需要授权时通知', defaultOn: true },
+  { id: 'mention', label: '@提及', desc: '协作成员提及你时', defaultOn: true },
+  { id: 'schedule', label: '定时任务', desc: '定时任务执行结果', defaultOn: true },
+  { id: 'signal', label: '信号更新', desc: '新信号入站提醒', defaultOn: false },
+];
+
+function loadPrefs(): Record<NotifyTypeId, boolean> {
+  const defaults = Object.fromEntries(NOTIFY_TYPES.map((t) => [t.id, t.defaultOn])) as Record<NotifyTypeId, boolean>;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return defaults;
+    return { ...defaults, ...JSON.parse(raw) };
+  } catch {
+    return defaults;
+  }
+}
 
 const REPAIR_HINTS: Record<string, string> = {
   push_vapid_key_missing: '服务端未配置 VAPID 公钥，请先补齐推送密钥环境变量。',
   push_not_configured: 'Push 服务未启用，请确认后端已加载推送服务配置。',
-  push_subscription_missing: '当前设备未订阅，点击“开启”并允许系统通知。',
+  push_subscription_missing: '当前设备未订阅，点击"开启"并允许系统通知。',
   push_last_delivery_failed: '最近一次系统通知投递失败，请查看网络/代理后重试。',
 };
 
-function describePermission(permission: NotificationPermission | 'unsupported'): string {
-  if (permission === 'granted') return '已授权';
-  if (permission === 'denied') return '已拒绝';
-  if (permission === 'default') return '未选择';
-  return '不支持';
-}
+function BrowserPushCard({
+  isSubscribed,
+  isLoading,
+  pushConfigured,
+  isTesting,
+  onToggle,
+  onSendTest,
+}: {
+  isSubscribed: boolean;
+  isLoading: boolean;
+  pushConfigured: boolean | undefined | null;
+  isTesting: boolean;
+  onToggle: () => void;
+  onSendTest: () => void;
+}) {
+  return (
+    <div className={`${settingsResourceCardClass} overflow-hidden`}>
+      <div className={settingsResourceRowClass}>
+        <span className="flex h-11 w-11 items-center justify-center rounded-xl shrink-0 bg-[var(--cafe-accent,#c96442)]">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="var(--overlay-fg)"
+            strokeWidth="1.5"
+            className="h-5 w-5"
+            aria-hidden="true"
+          >
+            <path
+              d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-base font-extrabold text-cafe">浏览器推送</p>
+          <p className="text-xs text-cafe-muted">
+            {isSubscribed ? '已订阅 · 通知栏接收' : pushConfigured ? '未订阅' : '推送服务未配置'}
+          </p>
+        </div>
+        {(isSubscribed || pushConfigured) && (
+          <SettingsResourceToggleSwitch
+            enabled={isSubscribed}
+            busy={isLoading}
+            onClick={onToggle}
+            title={isSubscribed ? '取消订阅' : '订阅推送'}
+            disabled={!isSubscribed && !pushConfigured}
+          />
+        )}
+      </div>
 
-function describeDelivery(status: 'ok' | 'error' | 'not_attempted', lastError: string | null): string {
-  if (status === 'ok') return '正常';
-  if (status === 'error') return `失败${lastError ? ` (${lastError})` : ''}`;
-  return '未测试';
+      {isSubscribed && (
+        <div className="flex items-center gap-2 px-5 py-3">
+          <button
+            type="button"
+            onClick={onSendTest}
+            disabled={isTesting || isLoading}
+            className="text-xs text-cafe-secondary hover:text-cafe disabled:opacity-50 transition-colors"
+          >
+            {isTesting ? '发送中...' : '发送测试通知'}
+          </button>
+        </div>
+      )}
+
+      {!pushConfigured && (
+        <div className="px-4 pb-4 pt-3">
+          <p className="mb-3 text-xs text-cafe-muted leading-relaxed">
+            浏览器推送需要配置服务端密钥对来标识推送身份。终端运行{' '}
+            <code className="text-micro bg-[var(--console-field-bg)] px-1 py-0.5 rounded">
+              npx web-push generate-vapid-keys
+            </code>{' '}
+            生成后填入下方。
+          </p>
+          <PushServiceConfig embedded />
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function PushSettingsPanel() {
@@ -51,6 +144,23 @@ export function PushSettingsPanel() {
     removed: number;
   } | null>(null);
   const [lastTestMessage, setLastTestMessage] = useState<string | null>(null);
+  const [prefs, setPrefs] = useState<Record<NotifyTypeId, boolean>>(loadPrefs);
+  const [prefsSaved, setPrefsSaved] = useState(false);
+
+  useEffect(() => {
+    setPrefs(loadPrefs());
+  }, []);
+
+  const togglePref = useCallback((id: NotifyTypeId) => {
+    setPrefs((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+    setPrefsSaved(true);
+    const timer = setTimeout(() => setPrefsSaved(false), 1500);
+    return () => clearTimeout(timer);
+  }, []);
 
   const handleSendTest = async () => {
     if (isTesting) return;
@@ -73,14 +183,17 @@ export function PushSettingsPanel() {
     }
   };
 
+  const pushConfigured = status?.capability.vapidPublicKeyConfigured && status?.capability.pushServiceConfigured;
+
   if (!isSupported) {
     return (
       <div className="space-y-3">
-        <h3 className="text-base font-semibold text-gray-800">推送通知</h3>
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 space-y-2">
-          <p className="text-sm text-amber-900 font-medium">{environmentHint ?? '当前浏览器不支持推送通知。'}</p>
-          <p className="text-xs text-amber-700">
-            On iPhone, add Clowder AI to your home screen before enabling push (Safari tabs do not support Web Push).
+        <h3 className="text-sm font-semibold text-cafe">通知渠道</h3>
+        <div className="rounded-2xl border border-conn-amber-ring bg-conn-amber-bg px-5 py-4 space-y-2">
+          <p className="text-sm text-conn-amber-text font-medium">{environmentHint ?? '当前浏览器不支持推送通知。'}</p>
+          <p className="text-xs text-conn-amber-text">
+            iPhone 用户请将 {deploymentDefaults.brand.displayName} 添加到主屏幕后再开启推送（Safari 普通标签页不支持 Web
+            Push）。
           </p>
         </div>
       </div>
@@ -92,66 +205,89 @@ export function PushSettingsPanel() {
     .filter((hint): hint is string => Boolean(hint));
 
   return (
-    <div className="space-y-5">
-      <div className="space-y-1">
-        <h3 className="text-base font-semibold text-gray-800">推送通知</h3>
-        <p className="text-sm text-gray-600">
-          When enabled, replies and permission requests push to system notifications (even when not on the Clowder AI
-          page).
-        </p>
-      </div>
+    <div className="space-y-6">
+      {/* Section 1: Channels */}
+      <section className="space-y-3">
+        <h3 className="text-sm font-semibold text-cafe">通知渠道</h3>
 
-      <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
-        <div className="text-sm font-medium text-gray-800">通知能力矩阵</div>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
-          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-            <div className="text-gray-500">浏览器支持</div>
-            <div className="font-semibold text-emerald-700">已支持</div>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-            <div className="text-gray-500">权限状态</div>
-            <div
-              className={`font-semibold ${permission === 'granted' ? 'text-emerald-700' : permission === 'denied' ? 'text-rose-700' : 'text-amber-700'}`}
-            >
-              {describePermission(permission)}
+        <BrowserPushCard
+          isSubscribed={isSubscribed}
+          isLoading={isLoading}
+          pushConfigured={pushConfigured}
+          isTesting={isTesting}
+          onToggle={isSubscribed ? unsubscribe : subscribe}
+          onSendTest={() => {
+            void handleSendTest();
+          }}
+        />
+
+        <div className={`${settingsResourceCardClass} overflow-hidden`}>
+          <div className={settingsResourceRowClass}>
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl shrink-0 bg-conn-emerald-text">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--overlay-fg)"
+                strokeWidth="1.5"
+                className="h-5 w-5"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v4l2 2" strokeLinecap="round" />
+              </svg>
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-base font-extrabold text-cafe">应用内通知</p>
+              <p className="text-xs text-cafe-muted">页面内消息提示，始终开启</p>
             </div>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-            <div className="text-gray-500">推送服务</div>
-            <div className={`font-semibold ${status?.capability.enabled ? 'text-emerald-700' : 'text-amber-700'}`}>
-              {status?.capability.enabled ? '已启用' : '未启用'}
-            </div>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-            <div className="text-gray-500">设备订阅</div>
-            <div className={`font-semibold ${status?.subscription.count ? 'text-emerald-700' : 'text-amber-700'}`}>
-              {status?.subscription.count ?? 0} 台
-            </div>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-            <div className="text-gray-500">最近投递</div>
-            <div
-              className={`font-semibold ${status?.delivery.lastResult === 'ok' ? 'text-emerald-700' : status?.delivery.lastResult === 'error' ? 'text-rose-700' : 'text-gray-700'}`}
-            >
-              {describeDelivery(status?.delivery.lastResult ?? 'not_attempted', status?.delivery.lastError ?? null)}
-            </div>
+            <span className="shrink-0 rounded-xl px-2.5 py-1 text-xs font-semibold bg-conn-emerald-bg text-conn-emerald-text">
+              已开启
+            </span>
           </div>
         </div>
-        {status && (
-          <p className="text-xs text-gray-500">
-            服务状态：{status.capability.enabled ? '已启用' : '未启用'}
-            {' · '}VAPID：{status.capability.vapidPublicKeyConfigured ? '已配置' : '未配置'}
-            {' · '}PushService：{status.capability.pushServiceConfigured ? '可用' : '不可用'}
-            {' · '}设备订阅：{status.subscription.count} 台{' · '}最近投递：
-            {status.delivery.lastResult === 'ok' ? '成功' : status.delivery.lastResult === 'error' ? '失败' : '未测试'}
-          </p>
-        )}
-      </div>
+      </section>
 
+      {/* Section 2: Preferences */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-cafe">通知偏好</h3>
+          {prefsSaved && <span className="text-xs text-conn-emerald-text">已保存</span>}
+        </div>
+        <p className="text-xs text-cafe-muted">选择哪些事件触发通知</p>
+        <div className={`${settingsResourceCardClass} overflow-hidden divide-y divide-[var(--console-border-soft)]`}>
+          {NOTIFY_TYPES.map((type) => (
+            <label
+              key={type.id}
+              className="flex items-center gap-3 px-5 py-3.5 cursor-pointer hover:bg-[var(--console-hover-bg)] transition-colors"
+            >
+              <input
+                type="checkbox"
+                checked={prefs[type.id]}
+                onChange={() => togglePref(type.id)}
+                className="h-3.5 w-3.5 rounded accent-[var(--color-cafe-accent)]"
+              />
+              <span className="text-sm font-medium text-cafe">{type.label}</span>
+              <span className="text-xs text-cafe-muted">{type.desc}</span>
+            </label>
+          ))}
+        </div>
+      </section>
+
+      {/* Errors and hints */}
+      {environmentHint && (
+        <div className="rounded-2xl bg-conn-amber-bg border border-conn-amber-ring px-5 py-3">
+          <p className="text-xs text-conn-amber-text">{environmentHint}</p>
+        </div>
+      )}
+      {lastError && (
+        <div className="rounded-2xl bg-conn-red-bg border border-conn-red-ring px-5 py-3">
+          <p className="text-xs text-conn-red-text">{lastError}</p>
+        </div>
+      )}
       {mappedHints.length > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <div className="text-sm font-medium text-amber-900">修复建议</div>
-          <ul className="mt-2 space-y-1 text-xs text-amber-800 list-disc pl-4">
+        <div className="rounded-2xl border border-conn-amber-ring bg-conn-amber-bg px-5 py-3">
+          <div className="text-sm font-medium text-conn-amber-text">修复建议</div>
+          <ul className="mt-2 space-y-1 text-xs text-conn-amber-text list-disc pl-4">
             {mappedHints.map((hint) => (
               <li key={hint}>{hint}</li>
             ))}
@@ -159,71 +295,19 @@ export function PushSettingsPanel() {
         </div>
       )}
 
-      {status?.subscription.targets && status.subscription.targets.length > 0 && (
-        <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-          <div className="text-sm font-medium text-gray-800">已绑定设备</div>
-          <ul className="mt-2 space-y-1 text-xs text-gray-600">
-            {status.subscription.targets.slice(0, 3).map((target) => (
-              <li key={`${target.endpoint}-${target.createdAt}`} className="flex items-center justify-between gap-2">
-                <span>{target.uaFamily.toUpperCase()}</span>
-                <span className="truncate">{target.endpoint}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
       {lastTestSummary && (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-700 space-y-1">
-          <div className="text-sm font-medium text-slate-900">最近测试</div>
-          {lastTestMessage && <p>{lastTestMessage}</p>}
-          <p>
+        <div className={`${settingsResourceCardClass} p-4 text-xs space-y-1`}>
+          <div className="text-sm font-medium text-cafe">最近测试</div>
+          {lastTestMessage && <p className="text-cafe-secondary">{lastTestMessage}</p>}
+          <p className="text-cafe-secondary">
             尝试 {lastTestSummary.attempted} · 成功 {lastTestSummary.delivered} · 失败 {lastTestSummary.failed} · 清理{' '}
             {lastTestSummary.removed}
           </p>
         </div>
       )}
 
-      {environmentHint && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
-          <p className="text-xs text-amber-700">{environmentHint}</p>
-        </div>
-      )}
-      {lastError && (
-        <div className="bg-rose-50 border border-rose-200 rounded-lg px-4 py-3">
-          <p className="text-xs text-rose-700">{lastError}</p>
-        </div>
-      )}
-
-      <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
-        <div>
-          <p className="text-sm font-medium text-gray-700">{isSubscribed ? '已开启推送' : '推送已关闭'}</p>
-          <p className="text-xs text-gray-500">{isSubscribed ? '猫猫消息会推送到通知栏' : '点击开启接收猫猫推送'}</p>
-        </div>
-        <button
-          onClick={isSubscribed ? unsubscribe : subscribe}
-          disabled={isLoading}
-          className={`px-4 py-1.5 text-sm rounded-lg font-medium transition-colors ${
-            isSubscribed ? 'bg-gray-200 text-gray-700 hover:bg-gray-300' : 'bg-blue-600 text-white hover:bg-blue-700'
-          } disabled:opacity-50`}
-        >
-          {isLoading ? '处理中...' : isSubscribed ? '关闭' : '开启'}
-        </button>
-      </div>
-
-      {isSubscribed && (
-        <button
-          type="button"
-          onClick={() => {
-            void handleSendTest();
-          }}
-          disabled={isTesting || isLoading}
-          className="text-xs text-blue-600 hover:text-blue-800 underline"
-        >
-          {isTesting ? '发送中...' : '发送测试通知'}
-        </button>
-      )}
-      <p className="text-[11px] text-gray-500">iPhone 路线（Phase 3）：PWA Web Push。请先“添加到主屏幕”再开启通知。</p>
+      {/* Section 3: Diagnostics (collapsed) */}
+      <PushDiagnosticsSection permission={permission} status={status} pushConfigured={pushConfigured} />
     </div>
   );
 }

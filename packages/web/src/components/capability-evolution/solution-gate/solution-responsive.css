@@ -1,0 +1,46 @@
+@container solution (max-width: 600px) {
+  .solution-content {
+    padding: 20px 18px 48px;
+  }
+  .solution-header h1 {
+    font-size: var(--console-font-3xl);
+  }
+  .solution-branch-layout {
+    gap: 10px 24px;
+    grid-template-columns: 0.8fr 1.2fr;
+  }
+  .solution-branch-layout button {
+    padding: 10px;
+  }
+  .solution-node-top {
+    flex-wrap: wrap;
+    gap: 2px;
+  }
+  .solution-node-title {
+    font-size: var(--console-font-xs);
+  }
+  .solution-reason {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .solution-case-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .solution-experiment {
+    padding: 16px;
+  }
+  .solution-run-context dl {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .solution-run-context dd {
+    margin-bottom: 10px;
+  }
+  .solution-member {
+    grid-template-columns: minmax(0, 1fr) 85px;
+    gap: 6px;
+  }
+  .solution-header {
+    margin-top: 20px;
+  }
+}

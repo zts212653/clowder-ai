@@ -12,13 +12,13 @@ created: 2026-03-15
 
 ## Why
 
-team lead希望有一套长期可用的、和 runtime 完全隔离的测试环境，用于验收已合入 `main` 的改动，避免在 runtime（3003/3004/6399）上测试导致不稳定。F125 将临时 `main-test` 工具升级为正式 alpha 通道，并把 alpha 的使用边界同步到 SOP / quality-gate / 三份提示词。
+operator希望有一套长期可用的、和 runtime 完全隔离的测试环境，用于验收已合入 `main` 的改动，避免在 runtime（3003/3004/6399）上测试导致不稳定。F125 将临时 `main-test` 工具升级为正式 alpha 通道，并把 alpha 的使用边界同步到 SOP / quality-gate / 三份提示词。
 
 1. 从 `main-test` 改名为 `alpha`，成为正式基础设施
 2. 更新 SOP / quality-gate / 提示词，让所有猫知道 `alpha = origin/main` 镜像，只用于已合入 `main` 的验收
 3. 明确 runtime 不能冒充 alpha；未合入改动仍在 feature worktree 上自测
 
-team experience：
+operator experience：
 > "我要！给他搞个一键启动脚本！然后和 runtime 那样每次启动自动同步 main！"
 > "我希望这个变成一个 alpha 测试的分支"
 > "不止 claude md 还有 agents 和 gemini md 你别只顾你自己"

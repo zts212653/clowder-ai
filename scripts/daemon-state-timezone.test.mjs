@@ -1,0 +1,345 @@
+import assert from 'node:assert/strict';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test } from 'node:test';
+
+import { daemonStatePaths, inspectDaemonState, writeDaemonState } from './lib/daemon-state.mjs';
+import { frozenIdentity, identityUnchanged } from './lib/daemon-stop-record.mjs';
+
+const daemonStateModule = join(import.meta.dirname, 'lib', 'daemon-state.mjs');
+
+// The reported production failure moved `ps lstart` by ~6h47m after the host
+// resumed from suspend and the wall clock jumped forward.
+const WALL_CLOCK_JUMP_MS = 6 * 60 * 60 * 1000 + 47 * 60 * 1000;
+
+async function withFakeDaemon(run) {
+  const root = mkdtempSync(join(tmpdir(), 'cat-cafe-daemon-timezone-'));
+  const homeDir = join(root, 'home');
+  const runtimeRoot = join(root, 'cat-cafe-runtime');
+  const launchToken = 'daemon-timezone-token';
+  mkdirSync(homeDir, { recursive: true });
+  mkdirSync(runtimeRoot, { recursive: true });
+  const child = spawn(
+    process.execPath,
+    ['-e', 'process.send("ready"); setInterval(() => {}, 1000)', '--', `--cat-cafe-daemon-token=${launchToken}`],
+    { cwd: runtimeRoot, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] },
+  );
+  try {
+    const [ready] = await once(child, 'message', { signal: AbortSignal.timeout(10_000) });
+    assert.equal(ready, 'ready');
+    await run({ child, homeDir, runtimeRoot, launchToken });
+  } finally {
+    if (child.pid && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+      await new Promise((resolve) => child.once('exit', resolve));
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function captureIdentityInEnvironment(pid, { timezone, locale }) {
+  const source = `
+    const [modulePath, pid] = process.argv.slice(1);
+    const { captureReadableIdentity } = await import(modulePath);
+    const identity = captureReadableIdentity(Number(pid));
+    if (identity.argvAvailable !== true) throw new Error('fixture argv remains unavailable: ' + JSON.stringify(identity));
+    console.log(JSON.stringify(identity));
+  `;
+  const result = spawnSync(
+    process.execPath,
+    ['--input-type=module', '-e', source, join(import.meta.dirname, 'lib/process-identity.mjs'), String(pid)],
+    { encoding: 'utf8', env: { ...process.env, TZ: timezone, LANG: locale, LC_ALL: locale }, timeout: 10_000 },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout);
+}
+
+function localProcessStart(pid, timezone) {
+  const result = spawnSync('ps', ['-p', String(pid), '-o', 'lstart='], {
+    encoding: 'utf8',
+    env: { ...process.env, TZ: timezone, LANG: 'C', LC_ALL: 'C' },
+    timeout: 10_000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim().replace(/\s+/g, ' ');
+}
+
+function writeLegacyV1State({ homeDir, runtimeRoot, launchToken, child }) {
+  const paths = daemonStatePaths({ homeDir, projectRoot: runtimeRoot, deploymentId: 'runtime' });
+  writeDaemonState({
+    paths,
+    pid: child.pid,
+    projectRoot: runtimeRoot,
+    deploymentId: 'runtime',
+    launchToken,
+    logFile: join(runtimeRoot, 'cat-cafe-daemon.log'),
+    ports: { frontend: 3001, api: 3002, redis: 6398 },
+  });
+  const state = JSON.parse(readFileSync(paths.stateFile, 'utf8'));
+  state.process.startedAt = localProcessStart(child.pid, 'America/Los_Angeles');
+  delete state.process.startedAtFormat;
+  delete state.process.startedAtEpochMs;
+  writeFileSync(paths.stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  return { paths, state };
+}
+
+function writeTokenBoundState({ homeDir, runtimeRoot, launchToken, child }) {
+  const paths = daemonStatePaths({ homeDir, projectRoot: runtimeRoot, deploymentId: 'runtime' });
+  writeDaemonState({
+    paths,
+    pid: child.pid,
+    projectRoot: runtimeRoot,
+    deploymentId: 'runtime',
+    launchToken,
+    logFile: join(runtimeRoot, 'cat-cafe-daemon.log'),
+    ports: { frontend: 3001, api: 3002, redis: 6398 },
+  });
+  return { paths, state: JSON.parse(readFileSync(paths.stateFile, 'utf8')) };
+}
+
+function psLstartUtc(epochMs) {
+  const date = new Date(epochMs);
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${days[date.getUTCDay()]} ${months[date.getUTCMonth()]} ${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} ${date.getUTCFullYear()}`;
+}
+
+function shiftStoredWallClock(state, epochMs) {
+  state.process.startedAt = psLstartUtc(epochMs);
+  state.process.startedAtEpochMs = epochMs;
+}
+
+test('process birth identity is stable across caller timezone and locale', () =>
+  withFakeDaemon(async ({ child, launchToken }) => {
+    const losAngeles = captureIdentityInEnvironment(child.pid, {
+      timezone: 'America/Los_Angeles',
+      locale: 'en_US.UTF-8',
+    });
+    const tokyo = captureIdentityInEnvironment(child.pid, {
+      timezone: 'Asia/Tokyo',
+      locale: 'ja_JP.UTF-8',
+    });
+
+    assert.equal(losAngeles.argvAvailable, true);
+    assert.equal(tokyo.argvAvailable, true);
+    assert.ok(losAngeles.command.includes(`--cat-cafe-daemon-token=${launchToken}`));
+    assert.ok(tokyo.command.includes(`--cat-cafe-daemon-token=${launchToken}`));
+    assert.equal(losAngeles.startedAt, tokyo.startedAt);
+    assert.equal(losAngeles.startedAtEpochMs, tokyo.startedAtEpochMs);
+    assert.ok(Number.isSafeInteger(losAngeles.startedAtEpochMs));
+    assert.equal(losAngeles.startedAtFormat, 'ps-lstart-utc-c-v1');
+    assert.equal(tokyo.startedAtFormat, 'ps-lstart-utc-c-v1');
+    if (process.platform === 'linux') {
+      assert.ok(Number.isSafeInteger(losAngeles.procStartTicks));
+      assert.ok(Number.isSafeInteger(tokyo.procStartTicks));
+      assert.equal(losAngeles.procStartTicks, tokyo.procStartTicks);
+      assert.equal(losAngeles.bootId, tokyo.bootId);
+    }
+    assert.equal(losAngeles.command, tokyo.command);
+    assert.equal(losAngeles.cwd, tokyo.cwd);
+  }));
+
+test('a wall-clock jump does not invalidate a token-bound daemon state', () =>
+  withFakeDaemon(async (fixture) => {
+    const { paths, state } = writeTokenBoundState(fixture);
+    const identity = captureIdentityInEnvironment(fixture.child.pid, { timezone: 'UTC', locale: 'C' });
+    shiftStoredWallClock(state, identity.startedAtEpochMs + WALL_CLOCK_JUMP_MS);
+    writeFileSync(paths.stateFile, `${JSON.stringify(state, null, 2)}\n`);
+
+    const inspection = inspectDaemonState({
+      stateFile: paths.stateFile,
+      expectedProjectRoot: fixture.runtimeRoot,
+      expectedDeploymentId: 'runtime',
+    });
+
+    assert.equal(inspection.kind, 'running');
+  }));
+
+test('a pre-marker token-bound state survives a wall-clock jump', () =>
+  withFakeDaemon(async (fixture) => {
+    const { paths, state } = writeTokenBoundState(fixture);
+    const identity = captureIdentityInEnvironment(fixture.child.pid, { timezone: 'UTC', locale: 'C' });
+    delete state.process.procStartTicks;
+    delete state.process.bootId;
+    shiftStoredWallClock(state, identity.startedAtEpochMs + WALL_CLOCK_JUMP_MS);
+    writeFileSync(paths.stateFile, `${JSON.stringify(state, null, 2)}\n`);
+
+    const inspection = inspectDaemonState({
+      stateFile: paths.stateFile,
+      expectedProjectRoot: fixture.runtimeRoot,
+      expectedDeploymentId: 'runtime',
+    });
+
+    assert.equal(inspection.kind, 'running');
+  }));
+
+test('a frozen stop identity compares the stable marker, not a shifted lstart', () => {
+  const state = { pid: 4242 };
+  const captured = {
+    startedAt: 'Tue Oct 20 16:01:27 2026',
+    startedAtEpochMs: 1792512087000,
+    command: 'node daemon.js',
+    procStartTicks: 123456,
+    bootId: 'boot-a',
+  };
+  const frozen = frozenIdentity(state, captured);
+  assert.equal(frozen.procStartTicks, 123456);
+  assert.equal(frozen.bootId, 'boot-a');
+  assert.equal(
+    identityUnchanged(frozen, state, {
+      ...captured,
+      startedAt: 'Tue Oct 20 00:36:57 2026',
+      startedAtEpochMs: 1792456617000,
+    }),
+    true,
+  );
+  assert.equal(identityUnchanged(frozen, state, { ...captured, procStartTicks: 123457 }), false);
+});
+
+test('a tokenless migrated v1 state uses process-before-migration ordering across timezone', () =>
+  withFakeDaemon(async (fixture) => {
+    const identity = captureIdentityInEnvironment(fixture.child.pid, {
+      timezone: 'UTC',
+      locale: 'C',
+    });
+    const waitMs = identity.startedAtEpochMs + 1_000 - Date.now();
+    if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs + 10));
+    const { paths, state } = writeLegacyV1State(fixture);
+    state.process.launchToken = null;
+    state.legacyMigrated = true;
+    writeFileSync(paths.stateFile, `${JSON.stringify(state, null, 2)}\n`);
+
+    const inspection = inspectDaemonState({
+      stateFile: paths.stateFile,
+      expectedProjectRoot: fixture.runtimeRoot,
+      expectedDeploymentId: 'runtime',
+    });
+
+    assert.equal(inspection.kind, 'running');
+  }));
+
+test('a tokenless migrated v1 state rejects a process born after the state was written', () =>
+  withFakeDaemon(async (fixture) => {
+    const { paths, state } = writeLegacyV1State(fixture);
+    const identity = captureIdentityInEnvironment(fixture.child.pid, {
+      timezone: 'UTC',
+      locale: 'C',
+    });
+    state.process.launchToken = null;
+    state.legacyMigrated = true;
+    state.launchedAt = new Date(identity.startedAtEpochMs - 5_000).toISOString();
+    writeFileSync(paths.stateFile, `${JSON.stringify(state, null, 2)}\n`);
+
+    const inspection = inspectDaemonState({
+      stateFile: paths.stateFile,
+      expectedProjectRoot: fixture.runtimeRoot,
+      expectedDeploymentId: 'runtime',
+    });
+
+    assert.equal(inspection.kind, 'mismatch');
+    assert.equal(inspection.reason, 'process-identity-mismatch');
+  }));
+
+test('a current-format tokenless migration also rejects an ambiguous same-second incarnation', () =>
+  withFakeDaemon(async (fixture) => {
+    const paths = daemonStatePaths({
+      homeDir: fixture.homeDir,
+      projectRoot: fixture.runtimeRoot,
+      deploymentId: 'runtime',
+    });
+    writeDaemonState({
+      paths,
+      pid: fixture.child.pid,
+      projectRoot: fixture.runtimeRoot,
+      deploymentId: 'runtime',
+      launchToken: fixture.launchToken,
+      logFile: join(fixture.runtimeRoot, 'cat-cafe-daemon.log'),
+      ports: { frontend: 3001, api: 3002, redis: 6398 },
+    });
+    const state = JSON.parse(readFileSync(paths.stateFile, 'utf8'));
+    state.process.launchToken = null;
+    state.legacyMigrated = true;
+    state.launchedAt = new Date(state.process.startedAtEpochMs + 500).toISOString();
+    writeFileSync(paths.stateFile, `${JSON.stringify(state, null, 2)}\n`);
+
+    const inspection = inspectDaemonState({
+      stateFile: paths.stateFile,
+      expectedProjectRoot: fixture.runtimeRoot,
+      expectedDeploymentId: 'runtime',
+    });
+
+    assert.equal(inspection.kind, 'mismatch');
+    assert.equal(inspection.reason, 'process-identity-mismatch');
+  }));
+
+test('a tokenless migrated v1 state rejects an ambiguous same-second process incarnation', () =>
+  withFakeDaemon(async (fixture) => {
+    const { paths, state } = writeLegacyV1State(fixture);
+    const identity = captureIdentityInEnvironment(fixture.child.pid, {
+      timezone: 'UTC',
+      locale: 'C',
+    });
+    state.process.launchToken = null;
+    state.legacyMigrated = true;
+    state.launchedAt = new Date(identity.startedAtEpochMs + 500).toISOString();
+    writeFileSync(paths.stateFile, `${JSON.stringify(state, null, 2)}\n`);
+
+    const inspection = inspectDaemonState({
+      stateFile: paths.stateFile,
+      expectedProjectRoot: fixture.runtimeRoot,
+      expectedDeploymentId: 'runtime',
+    });
+
+    assert.equal(inspection.kind, 'mismatch');
+    assert.equal(inspection.reason, 'process-identity-mismatch');
+  }));
+
+test('a token-bound legacy v1 local-time state remains valid across caller timezone', () =>
+  withFakeDaemon(async (fixture) => {
+    const { paths, state } = writeLegacyV1State(fixture);
+    const source = `
+      const [modulePath, stateFile, projectRoot] = process.argv.slice(1);
+      const { inspectDaemonState } = await import(modulePath);
+      const result = inspectDaemonState({
+        stateFile,
+        expectedProjectRoot: projectRoot,
+        expectedDeploymentId: 'runtime',
+      });
+      console.log(JSON.stringify({ kind: result.kind, reason: result.reason }));
+    `;
+    const inspection = spawnSync(
+      process.execPath,
+      ['--input-type=module', '-e', source, daemonStateModule, paths.stateFile, fixture.runtimeRoot],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, TZ: 'UTC', LANG: 'fr_FR.UTF-8', LC_ALL: 'fr_FR.UTF-8' },
+        timeout: 10_000,
+      },
+    );
+
+    assert.equal(inspection.status, 0, inspection.stderr);
+    assert.equal(state.process.startedAtFormat, undefined);
+    assert.deepEqual(JSON.parse(inspection.stdout), { kind: 'running' });
+  }));
+
+test('legacy v1 timezone compatibility still rejects a different launch token', () =>
+  withFakeDaemon(async (fixture) => {
+    const { paths, state } = writeLegacyV1State(fixture);
+    state.process.launchToken = 'stale-reused-pid-token';
+    writeFileSync(paths.stateFile, `${JSON.stringify(state, null, 2)}\n`);
+
+    const inspection = inspectDaemonState({
+      stateFile: paths.stateFile,
+      expectedProjectRoot: fixture.runtimeRoot,
+      expectedDeploymentId: 'runtime',
+    });
+
+    assert.equal(inspection.kind, 'mismatch');
+    assert.equal(inspection.reason, 'process-identity-mismatch');
+    assert.equal(fixture.child.exitCode, null);
+    assert.equal(fixture.child.signalCode, null);
+  }));

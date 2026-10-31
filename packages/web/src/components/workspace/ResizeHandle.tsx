@@ -1,24 +1,90 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 
 interface ResizeHandleProps {
   direction: 'horizontal' | 'vertical';
   onResize: (delta: number) => void;
+  onCollapse?: () => void;
   onDoubleClick?: () => void;
+  label?: string;
+  showLine?: boolean;
 }
 
-export function ResizeHandle({ direction, onResize, onDoubleClick }: ResizeHandleProps) {
+const COLLAPSE_KEYS = new Set(['Enter', ' ']);
+const KEYBOARD_DELTAS: Record<ResizeHandleProps['direction'], Record<string, number>> = {
+  horizontal: { ArrowLeft: -16, ArrowRight: 16 },
+  vertical: { ArrowUp: -16, ArrowDown: 16 },
+};
+
+export function ResizeHandle({
+  direction,
+  onResize,
+  onCollapse,
+  onDoubleClick,
+  label = '面板',
+  showLine = true,
+}: ResizeHandleProps) {
   const [dragging, setDragging] = useState(false);
   const startPos = useRef(0);
+  const movedDuringDrag = useRef(false);
+  const suppressNextClick = useRef(false);
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
+    (e: ReactMouseEvent) => {
       e.preventDefault();
       setDragging(true);
+      movedDuringDrag.current = false;
       startPos.current = direction === 'horizontal' ? e.clientX : e.clientY;
     },
     [direction],
+  );
+
+  const handleClick = useCallback(() => {
+    if (suppressNextClick.current) {
+      suppressNextClick.current = false;
+      return;
+    }
+    if (!onCollapse) return;
+    clickTimer.current = setTimeout(() => {
+      onCollapse();
+      clickTimer.current = null;
+    }, 180);
+  }, [onCollapse]);
+
+  const handleDoubleClick = useCallback(() => {
+    if (clickTimer.current) {
+      clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+    }
+    onDoubleClick?.();
+  }, [onDoubleClick]);
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (COLLAPSE_KEYS.has(e.key) && onCollapse) {
+        e.preventDefault();
+        e.stopPropagation();
+        onCollapse();
+        return;
+      }
+
+      const delta = KEYBOARD_DELTAS[direction][e.key];
+      if (delta !== undefined) {
+        e.preventDefault();
+        e.stopPropagation();
+        onResize(delta);
+      }
+    },
+    [direction, onCollapse, onResize],
   );
 
   useEffect(() => {
@@ -28,12 +94,16 @@ export function ResizeHandle({ direction, onResize, onDoubleClick }: ResizeHandl
       const currentPos = direction === 'horizontal' ? e.clientX : e.clientY;
       const delta = currentPos - startPos.current;
       if (delta !== 0) {
+        movedDuringDrag.current = true;
         onResize(delta);
         startPos.current = currentPos;
       }
     };
 
-    const handleMouseUp = () => setDragging(false);
+    const handleMouseUp = () => {
+      suppressNextClick.current = movedDuringDrag.current;
+      setDragging(false);
+    };
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
@@ -43,26 +113,35 @@ export function ResizeHandle({ direction, onResize, onDoubleClick }: ResizeHandl
     };
   }, [dragging, direction, onResize]);
 
+  useEffect(() => {
+    return () => {
+      if (clickTimer.current) clearTimeout(clickTimer.current);
+    };
+  }, []);
+
   const isH = direction === 'horizontal';
+  const orientation = isH ? 'vertical' : 'horizontal';
 
   return (
     <div
       role="separator"
-      aria-orientation={isH ? 'vertical' : 'horizontal'}
+      aria-orientation={orientation}
+      aria-label={`${label}分隔条`}
+      tabIndex={0}
       onMouseDown={handleMouseDown}
-      onDoubleClick={onDoubleClick}
-      className={`flex-shrink-0 group relative ${
-        isH
-          ? 'w-1 cursor-col-resize hover:bg-cocreator-primary/20 active:bg-cocreator-primary/30'
-          : 'h-1 cursor-row-resize hover:bg-cocreator-primary/20 active:bg-cocreator-primary/30'
-      } ${dragging ? 'bg-cocreator-primary/30' : ''} transition-colors`}
+      onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
+      onKeyDown={handleKeyDown}
+      className={`group flex-shrink-0 relative ${
+        isH ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize'
+      } transition-colors`}
     >
       <div
         className={`absolute ${
-          isH
-            ? 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-0.5 h-8 rounded-full'
-            : 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-0.5 w-8 rounded-full'
-        } bg-cocreator-dark/20 group-hover:bg-cocreator-primary/50 transition-colors ${dragging ? 'bg-cocreator-primary/50' : ''}`}
+          isH ? 'inset-y-0 left-1/2 -translate-x-1/2 w-px' : 'inset-x-0 top-1/2 -translate-y-1/2 h-px'
+        } ${
+          showLine ? 'bg-[var(--console-border-soft)]' : 'bg-transparent'
+        } group-hover:bg-cafe-accent/60 transition-colors ${dragging ? 'bg-cafe-accent/60' : ''}`}
       />
     </div>
   );

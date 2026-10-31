@@ -12,6 +12,7 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { deploymentDefaults } from '@cat-cafe/shared';
 
 const execFileAsync = promisify(execFile);
 
@@ -49,6 +50,7 @@ async function ensureFetched(cwd: string): Promise<boolean> {
   try {
     await execFileAsync('git', ['fetch', 'origin', 'main', '--quiet'], {
       cwd,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
       timeout: 10_000,
     });
     lastFetchSucceeded = true;
@@ -133,9 +135,12 @@ export async function readFeatureDocContent(
 }
 
 /**
- * Read BACKLOG.md from origin/main, with local fallback.
+ * Read the configured roadmap from origin/main, with local fallback.
  */
-export async function readBacklogContent(backlogRelPath = 'docs/ROADMAP.md', cwd?: string): Promise<string> {
+export async function readBacklogContent(
+  backlogRelPath = deploymentDefaults.roadmapPath,
+  cwd?: string,
+): Promise<string> {
   const content = await gitShowFile(backlogRelPath, cwd);
   if (content !== null) return content;
   // Fallback: local

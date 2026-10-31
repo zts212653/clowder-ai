@@ -3,8 +3,9 @@
  * CLI 子进程解析器的共享类型定义
  */
 
-import type { Readable } from 'node:stream';
+import type { Readable, Writable } from 'node:stream';
 import type { CatId } from '@cat-cafe/shared';
+import type { Span } from '@opentelemetry/api';
 import type { AgentMessage } from '../domains/cats/services/types.js';
 
 /**
@@ -15,14 +16,29 @@ export interface CliSpawnOptions {
   command: string;
   /** Arguments to pass to the CLI */
   args: readonly string[];
+  /**
+   * Exact flag names injected by the harness itself for this invocation.
+   * Never populate this from operator cliConfigArgs: diagnostics use it as
+   * provenance before attributing an argv rejection to harness/CLI drift.
+   */
+  managedArgvFlags?: readonly string[];
+  /** stdout parser mode. Defaults to NDJSON for existing CLI providers. */
+  outputMode?: 'ndjson' | 'plainText';
   /** Working directory for the process */
   cwd?: string;
-  /** Timeout in milliseconds before auto-kill (default: 300_000 = 5 min) */
+  /**
+   * Opt-in response timeout in milliseconds for probes and other one-off commands (default: 0 =
+   * none). A dispatched member never sets it: its one timeout is its invocation's (F117 KD-22).
+   */
   timeoutMs?: number;
   /** AbortSignal to cancel the process externally */
   signal?: AbortSignal;
   /** Environment overrides. `null` means delete inherited var from child env. */
   env?: Record<string, string | null>;
+  /** Start from only env overrides, never the API process environment. Defaults to inheritance for existing providers. */
+  inheritParentEnv?: boolean;
+  /** False for probes/non-invocation commands that must never create an execution-owner manifest. */
+  bindExecutionOwner?: boolean;
   /** F118: Invocation context for diagnostic enrichment of __cliTimeout */
   invocationId?: string;
   /** F118: CLI session ID for diagnostic enrichment of __cliTimeout */
@@ -33,6 +49,11 @@ export interface CliSpawnOptions {
     softWarningMs?: number;
     stallWarningMs?: number;
     boundedExtensionFactor?: number;
+    minCpuGrowthMs?: number;
+    /** #774: Auto-kill on idle-silent suspected_stall instead of waiting for full timeout */
+    stallAutoKill?: boolean;
+    /** F118/F212: Codex opts into a bounded SIGINT-first stall shutdown; default stays SIGTERM-first. */
+    stallTerminationMode?: 'interrupt-first' | 'terminate-first';
   };
   /** F118 Phase B: Provider-scoped raw archive path for diagnostic enrichment */
   rawArchivePath?: string;
@@ -41,6 +62,42 @@ export interface CliSpawnOptions {
    * When aborted, spawnCli skips `await exitPromise` — decouples done from process exit.
    */
   semanticCompletionSignal?: AbortSignal;
+  /** F153 Phase B: Parent OTel span for creating CLI session child span */
+  parentSpan?: Span;
+  /**
+   * Incident 2026-05-29 (cross-thread-context-contamination): prompt 正文经 stdin
+   * 传入子进程，而非 argv 位置参数。防止 `ps -o command=` / /proc/<pid>/cmdline
+   * 跨进程泄露完整对话历史（含跨 thread/猫/用户内容）。设置后 spawnCli 把
+   * stdio[0] 设为 'pipe' 并将此内容写入 child.stdin。
+   */
+  stdinInput?: string;
+  /** Register a prompt writer for carriers that confirm their runtime before receiving input. */
+  onStdinReady?: (write: (input: string) => void) => void;
+  /** Duplex NDJSON drivers close input after their terminal frame, not after writing the prompt. */
+  stdinCloseSignal?: AbortSignal;
+  /**
+   * F212 Phase F (AC-F1/F3 testability per 砚砚 R1 P1-1): test injection point for the
+   * structured-log writes (`'CLI abnormal exit'` + `'CLI stderr (LOG_CLI_STDERR=1)'`).
+   * Production passes nothing → falls back to the module logger. Tests pass a stub so they
+   * can assert the actual log payload (invocationId presence, stderrEmpty flag, etc.) —
+   * without this the AC-F6 assertions only cover `cliDiagnostics.publicHint`, leaving the
+   * core backend-log contract untestable.
+   */
+  diagnosticLogger?: { error: (payload: object, msg: string) => void };
+  /**
+   * F212 Phase G: NDJSON providers need successful-exit stderr evidence for
+   * silent_completion diagnostics. This callback reports sanitized stderr
+   * summary without yielding an extra stream event that would perturb provider
+   * event counts.
+   */
+  onSuccessfulExitStderr?: (summary: { stderrPresent: boolean; stderrExcerpt?: string }) => void;
+  /**
+   * F319: observe child stderr one complete line at a time (trailing partial
+   * line is flushed at stream end). Consumers must not retain lines: providers
+   * running trace-level logging emit megabytes per turn. Never resets the
+   * timeout or the liveness probe — stderr stays transport noise for those.
+   */
+  onStderrLine?: (line: string) => void;
 }
 
 /**
@@ -55,6 +112,8 @@ export type CliTransformer = (event: unknown, catId: CatId) => AgentMessage | Ag
  * Interface for child process (for dependency injection in tests)
  */
 export interface ChildProcessLike {
+  /** Incident 2026-05-29: stdin pipe for passing prompt off the command line. */
+  readonly stdin: Writable | null;
   readonly stdout: Readable | null;
   readonly stderr: Readable | null;
   readonly pid?: number | undefined;
@@ -76,6 +135,7 @@ export type SpawnFn = (
   options: {
     cwd?: string | undefined;
     env?: NodeJS.ProcessEnv | undefined;
-    stdio: ['ignore', 'pipe', 'pipe'];
+    stdio: ['ignore' | 'pipe', 'pipe', 'pipe'];
+    bindExecutionOwner?: boolean | undefined;
   },
 ) => ChildProcessLike;

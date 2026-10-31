@@ -1,0 +1,133 @@
+/**
+ * F231 Phase C: Profile update proposal types.
+ *
+ * Cats propose a capsule/primer update via `cat_cafe_propose_profile_update`;
+ * the operator sees a card and approves/rejects. Only on approve does the backend
+ * write the authenticated relationship-persona primer + provenance (KD-12/KD-18:
+ * low-cost persona-primer writes go here; high-cost shared-capsule promotion is C2 / KD-15).
+ *
+ * State machine mirrors F128 ThreadProposal (review-proven edges):
+ *   pending → approving → approved   (claim then finalize, atomic against reject)
+ *   pending → rejected               (one-shot)
+ *   approving → pending              (rollback on write failure)
+ *
+ * AC-C1 differences from ThreadProposal: approve writes a file (not a thread),
+ * with a P1-1 two-path crash checkpoint and a P1-2 optimistic lock on the
+ * target primer's content hash (per-target lock guards the approve critical
+ * section against concurrent same-primer approves — see decision route, KD-15).
+ */
+
+import type { ApprovalPublication } from './approval-hub.js';
+import type { CatId } from './ids.js';
+
+/**
+ * Phase E: target layer enum — the canonical source of truth for where a profile update lands.
+ * 'primer' = per-persona relationship file (AC-C1, existing).
+ * 'corpus' = owner-wide shared facts (AC-E1, Phase E).
+ * F332 KD-8: 'capsule' = owner-wide opening portrait, drafted by cats and confirmed by its owner.
+ */
+export const PROFILE_UPDATE_TARGET_LAYERS = ['primer', 'corpus', 'capsule'] as const;
+export type ProfileUpdateTargetLayer = (typeof PROFILE_UPDATE_TARGET_LAYERS)[number];
+
+export type ProfileUpdateProposalStatus = 'pending' | 'approving' | 'approved' | 'rejected';
+
+/**
+ * AC-C3 / KD-9: Collection signal whitelist — CLOSED enum.
+ *
+ * Only deterministic, explainable event types are allowed as collection sources.
+ * Forbidden: classifier-inferred, regex-scan, llm-annotation, or any automated labeling.
+ *
+ * Allowed kinds (KD-9 contract):
+ *   cvo-instructed   — operator explicitly told the cat to record something
+ *   cat-declared     — cat proactively observed and declared a signal
+ *   magic-word       — operator used a magic word (shared-rules.md)
+ *   message-coordinate — signal anchored to a specific message coordinate
+ *   sign-off         — operator signed off / rejected something (explicit decision)
+ *   reaction         — operator reaction (emoji, quick feedback)
+ */
+export const COLLECTION_SIGNAL_KINDS = Object.freeze([
+  'cvo-instructed',
+  'cat-declared',
+  'magic-word',
+  'message-coordinate',
+  'sign-off',
+  'reaction',
+] as const);
+
+export type CollectionSignalKind = (typeof COLLECTION_SIGNAL_KINDS)[number];
+
+/**
+ * KD-9 type guard: returns true only for whitelisted collection signal kinds.
+ * Rejects undefined, null, empty string, and any non-whitelisted string.
+ */
+export function isAllowedCollectionSignal(kind: unknown): kind is CollectionSignalKind {
+  if (typeof kind !== 'string' || kind === '') return false;
+  return (COLLECTION_SIGNAL_KINDS as readonly string[]).includes(kind);
+}
+
+/**
+ * KD-9 whitelist source — where the relationship signal came from.
+ * AC-C3: extended to full KD-9 whitelist. NO classifier-inferred kinds.
+ */
+export interface ProfileUpdateSignalProvenance {
+  kind: CollectionSignalKind;
+  sourceThreadId: string;
+  sourceMessageId?: string;
+}
+
+/**
+ * A profile-update proposal created by a cat, awaiting operator decision.
+ */
+export interface ProfileUpdateProposal {
+  proposalId: string;
+  status: ProfileUpdateProposalStatus;
+
+  // Source / lineage
+  sourceThreadId: string;
+  sourceInvocationId: string;
+  sourceCatId: CatId; // proposing/routing cat; the repository derives the stable relationship persona
+
+  // Target
+  targetLayer: ProfileUpdateTargetLayer;
+  targetPath: string; // relationshipKey-relative primer target, pinned at propose time
+
+  // Payload
+  beforeContent: string; // current primer content at propose time (diff + audit)
+  baseContentHash: string; // P1-2 optimistic lock: hash of current primer at propose; approve re-reads & compares
+  afterContent: string; // proposed new content
+  rationale: string; // why this update (shown on the card)
+  signalProvenance: ProfileUpdateSignalProvenance;
+
+  // Audit — creation
+  createdBy: string;
+  createdAt: number;
+
+  /** Phase-I publication state; absent only on pre-Phase-I records. */
+  publication?: ApprovalPublication;
+
+  /** Visibility commit marker (same role as ThreadProposal.cardMessageId). */
+  cardMessageId?: string;
+
+  // Audit — approval lifecycle
+  approvedBy?: string;
+  approvedAt?: number;
+  /** Unix ms of claimForApproval (pending → approving); enables stale-claim recovery. */
+  claimedAt?: number;
+
+  /**
+   * P1-1 partial-commit checkpoint: BOTH recorded BEFORE finalize via recordCheckpoint().
+   * Deterministic (proposalId-based) paths → writes are overwrite-idempotent on retry.
+   */
+  writtenPath?: string; // primer written (checkpointed before finalize)
+  provenancePath?: string; // provenance written (checkpointed before finalize)
+
+  // Audit — rejection
+  rejectedBy?: string;
+  rejectedAt?: number;
+  rejectionReason?: string;
+}
+
+/** Fields the operator may override at approve time (AC-C1: afterContent edit only). */
+export interface ProfileUpdateApproveOverrides {
+  afterContent?: string;
+}

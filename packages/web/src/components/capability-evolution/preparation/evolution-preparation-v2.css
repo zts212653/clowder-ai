@@ -1,0 +1,58 @@
+/* The complete canonical preparation body stays on the main reading surface. */
+[data-evolution-presentation="v2"] .evolution-v2-reading-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+[data-evolution-presentation="v2"] .evolution-v2-reading-heading .evolution-title {
+  margin-top: 4px;
+  font-size: var(--console-font-2xl);
+}
+[data-evolution-presentation="v2"] .evolution-v2-reading-origin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+}
+[data-evolution-presentation="v2"] .evolution-v2-reading-heading .evolution-journey {
+  margin-block: 14px 8px;
+}
+[data-evolution-presentation="v2"] .evolution-v2-project-progress {
+  margin-top: 8px;
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-compact);
+}
+[data-evolution-presentation="v2"] .evolution-v2-project-progress > summary {
+  cursor: pointer;
+}
+[data-evolution-presentation="v2"] .evolution-preparation-heading {
+  margin-bottom: 0;
+}
+[data-evolution-presentation="v2"] .evolution-preparation-tabs button {
+  min-height: 80px;
+  padding: 12px;
+  border-color: var(--cafe-border);
+  background: var(--console-card-bg);
+}
+[data-evolution-presentation="v2"] .evolution-preparation-tabs button:hover {
+  background: var(--cafe-surface);
+}
+[data-evolution-presentation="v2"] .evolution-preparation-tabs button[aria-selected="true"] {
+  border-color: var(--cafe-text-secondary);
+  box-shadow: 0 0 0 1px var(--cafe-text-secondary);
+}
+[data-evolution-presentation="v2"] .evolution-preparation-submission {
+  border-radius: 12px;
+  background: var(--console-card-bg);
+}
+[data-evolution-presentation="v2"] .evolution-preparation-item > summary {
+  padding-block: 18px;
+}
+@container evolution (min-width: 660px) {
+  [data-evolution-presentation="v2"] .evolution-preparation-tabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+}

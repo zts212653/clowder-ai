@@ -7,12 +7,14 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import {
+  cleanStaleClaudeProjectOverrides,
+  readAntigravityMcpConfig,
   readClaudeMcpConfig,
   readCodexMcpConfig,
   readGeminiMcpConfig,
-  writeClaudeMcpConfig,
-  writeCodexMcpConfig,
-  writeGeminiMcpConfig,
+  readKimiMcpConfig,
+  writeKimiMcpConfig,
+  writeOpenCodeMcpConfig,
 } from '../dist/config/capabilities/mcp-config-adapters.js';
 
 /** @param {string} prefix */
@@ -228,371 +230,361 @@ describe('readGeminiMcpConfig', () => {
   });
 });
 
-// ────────── Writers ──────────
-
-describe('writeClaudeMcpConfig', () => {
+describe('readKimiMcpConfig', () => {
   /** @type {string} */ let dir;
 
   beforeEach(async () => {
-    dir = await makeTmpDir('claude-write');
+    dir = await makeTmpDir('kimi-read');
   });
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('writes enabled servers to .mcp.json', async () => {
-    const file = join(dir, '.mcp.json');
-    await writeClaudeMcpConfig(file, [
-      { name: 'cat-cafe', command: 'node', args: ['index.js'], enabled: true, source: 'cat-cafe' },
-      { name: 'disabled', command: 'echo', args: [], enabled: false, source: 'external' },
-    ]);
+  it('parses ~/.kimi/mcp.json compatible config', async () => {
+    const file = join(dir, 'mcp.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        mcpServers: {
+          context7: {
+            url: 'https://mcp.context7.com/mcp',
+            headers: { CONTEXT7_API_KEY: 'test-key' },
+          },
+          filesystem: {
+            command: 'npx',
+            args: ['-y', '@mcp/fs'],
+            env: { DEBUG: '1' },
+          },
+        },
+      }),
+    );
 
-    const raw = await readFile(file, 'utf-8');
-    const data = JSON.parse(raw);
-    // Only enabled servers are written (Claude has no enabled field)
-    assert.ok(data.mcpServers['cat-cafe']);
-    assert.equal(data.mcpServers.disabled, undefined);
+    const result = await readKimiMcpConfig(file);
+    assert.equal(result.length, 2);
+    const remote = result.find((server) => server.name === 'context7');
+    assert.equal(remote?.transport, 'streamableHttp');
+    assert.equal(remote?.url, 'https://mcp.context7.com/mcp');
+    assert.deepEqual(remote?.headers, { CONTEXT7_API_KEY: 'test-key' });
+  });
+});
+
+describe('readAntigravityMcpConfig', () => {
+  /** @type {string} */ let dir;
+
+  beforeEach(async () => {
+    dir = await makeTmpDir('antigravity-read');
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
   });
 
-  it('writes env and cwd when present', async () => {
-    const file = join(dir, '.mcp.json');
-    await writeClaudeMcpConfig(file, [
+  it('parses serverUrl remote entries as streamableHttp transport', async () => {
+    const file = join(dir, 'mcp_config.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        mcpServers: {
+          remote_docs: {
+            serverUrl: 'https://mcp.example.com/remote',
+            headers: { Authorization: 'Bearer token' },
+          },
+        },
+      }),
+    );
+
+    const result = await readAntigravityMcpConfig(file);
+    assert.equal(result.length, 1);
+    assert.equal(result[0]?.name, 'remote_docs');
+    assert.equal(result[0]?.transport, 'streamableHttp');
+    assert.equal(result[0]?.url, 'https://mcp.example.com/remote');
+    assert.deepEqual(result[0]?.headers, { Authorization: 'Bearer token' });
+  });
+});
+
+// readOpenCodeMcpConfig removed — had zero production callers (OpenCode
+// config is built at invoke time via opencode-config-template.ts, not read
+// back via this adapter). See commit for cleanup rationale.
+
+// ────────── Writers ──────────
+// NOTE: writeClaudeMcpConfig and writeCodexMcpConfig were removed — Claude and
+// Codex use invoke-time CLI injection, so persistent file writers were dead code.
+
+describe('writeKimiMcpConfig', () => {
+  /** @type {string} */ let dir;
+
+  beforeEach(async () => {
+    dir = await makeTmpDir('kimi-write');
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('writes stdio and http MCP servers in kimi format', async () => {
+    const file = join(dir, 'mcp.json');
+    await writeKimiMcpConfig(file, [
       {
-        name: 'test',
-        command: 'node',
+        name: 'context7',
+        command: '',
         args: [],
         enabled: true,
         source: 'external',
-        env: { KEY: 'val' },
-        workingDir: '/tmp',
+        transport: 'streamableHttp',
+        url: 'https://mcp.context7.com/mcp',
+        headers: { CONTEXT7_API_KEY: 'test-key' },
+      },
+      {
+        name: 'filesystem',
+        command: 'npx',
+        args: ['-y', '@mcp/fs'],
+        enabled: true,
+        source: 'external',
+        env: { DEBUG: '1' },
       },
     ]);
 
-    const data = JSON.parse(await readFile(file, 'utf-8'));
-    assert.deepEqual(data.mcpServers.test.env, { KEY: 'val' });
-    assert.equal(data.mcpServers.test.cwd, '/tmp');
+    const raw = JSON.parse(await readFile(file, 'utf-8'));
+    assert.deepEqual(raw.mcpServers.context7, {
+      url: 'https://mcp.context7.com/mcp',
+      headers: { CONTEXT7_API_KEY: 'test-key' },
+    });
+    assert.deepEqual(raw.mcpServers.filesystem, {
+      command: 'npx',
+      args: ['-y', '@mcp/fs'],
+      env: { DEBUG: '1' },
+    });
   });
 
-  it('creates parent directories', async () => {
-    const file = join(dir, 'sub', 'dir', '.mcp.json');
-    await writeClaudeMcpConfig(file, []);
-    const raw = await readFile(file, 'utf-8');
-    assert.ok(raw.includes('mcpServers'));
-  });
-});
-
-describe('writeCodexMcpConfig', () => {
-  /** @type {string} */ let dir;
-
-  beforeEach(async () => {
-    dir = await makeTmpDir('codex-write');
-  });
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
-
-  it('writes MCP servers to TOML', async () => {
-    const file = join(dir, 'config.toml');
-    await writeCodexMcpConfig(file, [
-      { name: 'cat_cafe', command: 'node', args: ['index.js'], enabled: true, source: 'cat-cafe' },
-      { name: 'disabled', command: 'echo', args: [], enabled: false, source: 'external' },
+  it('injects cat-cafe callback env placeholders for kimi cat-cafe servers', async () => {
+    const file = join(dir, 'mcp.json');
+    await writeKimiMcpConfig(file, [
+      {
+        name: 'cat-cafe',
+        command: 'node',
+        args: ['index.js'],
+        enabled: true,
+        source: 'cat-cafe',
+      },
     ]);
 
-    const raw = await readFile(file, 'utf-8');
-    // Both servers written (Codex has enabled field)
-    assert.ok(raw.includes('[mcp_servers.cat_cafe]'));
-    assert.ok(raw.includes('[mcp_servers.disabled]'));
-    assert.ok(raw.includes('enabled = true'));
-    assert.ok(raw.includes('enabled = false'));
+    const raw = JSON.parse(await readFile(file, 'utf-8'));
+    const kimiEnv = raw.mcpServers['cat-cafe'].env;
+    assert.equal(kimiEnv.CAT_CAFE_API_URL, '${CAT_CAFE_API_URL}');
+    assert.equal(kimiEnv.CAT_CAFE_INVOCATION_ID, '${CAT_CAFE_INVOCATION_ID}');
+    assert.equal(kimiEnv.CAT_CAFE_CALLBACK_TOKEN, '${CAT_CAFE_CALLBACK_TOKEN}');
+    assert.equal(kimiEnv.CAT_CAFE_USER_ID, '${CAT_CAFE_USER_ID}');
+    assert.equal(kimiEnv.CAT_CAFE_CAT_ID, '${CAT_CAFE_CAT_ID}');
+    assert.equal(kimiEnv.CAT_CAFE_THREAD_ID, '${CAT_CAFE_THREAD_ID}');
+    assert.equal(kimiEnv.CAT_CAFE_SIGNAL_USER, '${CAT_CAFE_SIGNAL_USER}');
   });
 
-  it('preserves existing non-MCP config', async () => {
-    const file = join(dir, 'config.toml');
-    await writeFile(file, '[model]\nname = "gpt-4"\n');
+  // F213 Phase B: L5 cleanup applied to Kimi writer (.kimi/mcp.json).
 
-    await writeCodexMcpConfig(file, [{ name: 'test', command: 'echo', args: [], enabled: true, source: 'external' }]);
-
-    const raw = await readFile(file, 'utf-8');
-    assert.ok(raw.includes('[model]'));
-    assert.ok(raw.includes('name = "gpt-4"'));
-    assert.ok(raw.includes('[mcp_servers.test]'));
-  });
-});
-
-describe('writeGeminiMcpConfig', () => {
-  /** @type {string} */ let dir;
-
-  beforeEach(async () => {
-    dir = await makeTmpDir('gemini-write');
-  });
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
-
-  it('writes enabled servers to settings.json', async () => {
-    const file = join(dir, 'settings.json');
-    await writeGeminiMcpConfig(file, [
-      { name: 'cat-cafe', command: 'node', args: ['index.js'], enabled: true, source: 'cat-cafe' },
-      { name: 'disabled', command: 'echo', args: [], enabled: false, source: 'external' },
-    ]);
-
+  it('F213: removes echoLegacyShim cat-cafe entry from kimi config', async () => {
+    const file = join(dir, 'mcp.json');
+    await writeFile(file, JSON.stringify({ mcpServers: { 'cat-cafe': { command: 'echo', args: ['legacy-shim'] } } }));
+    await writeKimiMcpConfig(file, []);
     const data = JSON.parse(await readFile(file, 'utf-8'));
-    // Only enabled servers (Gemini has no enabled field)
+    assert.equal(data.mcpServers['cat-cafe'], undefined);
+  });
+
+  it('F213: preserves fork-like cat-cafe entry in kimi config (砚砚 P1 regression guard)', async () => {
+    const file = join(dir, 'mcp.json');
+    const forkPath = '/home/user/cat-cafe/packages/mcp-server/dist/index.js';
+    await writeFile(file, JSON.stringify({ mcpServers: { 'cat-cafe': { command: 'node', args: [forkPath] } } }));
+    await writeKimiMcpConfig(file, []);
+    const data = JSON.parse(await readFile(file, 'utf-8'));
     assert.ok(data.mcpServers['cat-cafe']);
-    assert.equal(data.mcpServers.disabled, undefined);
+    assert.equal(data.mcpServers['cat-cafe'].args[0], forkPath);
   });
 
-  it('preserves existing non-MCP settings', async () => {
-    const file = join(dir, 'settings.json');
-    await writeFile(file, JSON.stringify({ theme: 'dark', mcpServers: {} }));
-
-    await writeGeminiMcpConfig(file, [{ name: 'test', command: 'echo', args: [], enabled: true, source: 'external' }]);
-
-    const data = JSON.parse(await readFile(file, 'utf-8'));
-    assert.equal(data.theme, 'dark');
-    assert.ok(data.mcpServers.test);
-  });
-
-  it('injects callback env placeholders for managed cat-cafe servers', async () => {
-    const file = join(dir, 'settings.json');
-    await writeGeminiMcpConfig(file, [
-      { name: 'cat-cafe-collab', command: 'node', args: ['collab.js'], enabled: true, source: 'cat-cafe' },
-    ]);
-
-    const data = JSON.parse(await readFile(file, 'utf-8'));
-    assert.deepEqual(data.mcpServers['cat-cafe-collab'].env, {
-      CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
-      CAT_CAFE_INVOCATION_ID: '${CAT_CAFE_INVOCATION_ID}',
-      CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
-      CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
-      CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
-    });
-  });
-
-  it('injects callback env placeholders for preserved legacy cat-cafe server', async () => {
-    const file = join(dir, 'settings.json');
+  it('F213: preserves third-party cat-cafe entry in kimi config', async () => {
+    const file = join(dir, 'mcp.json');
     await writeFile(
       file,
       JSON.stringify({
-        mcpServers: {
-          'cat-cafe': { command: 'node', args: ['legacy-index.js'] },
-        },
+        mcpServers: { 'cat-cafe': { command: '/opt/third-party/cat-cafe-server', args: ['main.js'] } },
       }),
     );
-
-    await writeGeminiMcpConfig(file, [
-      { name: 'cat-cafe-collab', command: 'node', args: ['collab.js'], enabled: true, source: 'cat-cafe' },
-    ]);
-
+    await writeKimiMcpConfig(file, []);
     const data = JSON.parse(await readFile(file, 'utf-8'));
-    assert.deepEqual(data.mcpServers['cat-cafe'].env, {
-      CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
-      CAT_CAFE_INVOCATION_ID: '${CAT_CAFE_INVOCATION_ID}',
-      CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
-      CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
-      CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
-    });
+    assert.ok(data.mcpServers['cat-cafe']);
+    assert.equal(data.mcpServers['cat-cafe'].command, '/opt/third-party/cat-cafe-server');
   });
 
-  it('drops project-level pencil entry so Gemini only relies on shared home pencil server', async () => {
-    const file = join(dir, '.gemini', 'settings.json');
-    await mkdir(join(dir, '.gemini'), { recursive: true });
+  it('F213: is no-op when no legacy cat-cafe entry in kimi config', async () => {
+    const file = join(dir, 'mcp.json');
     await writeFile(
       file,
-      JSON.stringify({
-        mcpServers: {
-          pencil: { command: '/old/pencil', args: ['--app', 'antigravity'] },
-        },
-      }),
+      JSON.stringify({ mcpServers: { 'unrelated-tool': { command: 'node', args: ['other.js'] } } }),
     );
-
-    await writeGeminiMcpConfig(file, [
-      { name: 'pencil', command: '/new/pencil', args: ['--app', 'antigravity'], enabled: true, source: 'external' },
-      { name: 'cat-cafe', command: 'node', args: ['index.js'], enabled: true, source: 'cat-cafe' },
-    ]);
-
+    await writeKimiMcpConfig(file, []);
     const data = JSON.parse(await readFile(file, 'utf-8'));
-    assert.equal(data.mcpServers.pencil, undefined, 'project Gemini config should not contain pencil');
-    assert.ok(data.mcpServers['cat-cafe'], 'cat-cafe server should still be written');
+    assert.ok(data.mcpServers['unrelated-tool']);
+    assert.equal(data.mcpServers['cat-cafe'], undefined);
   });
 });
 
-// ────────── P1-2 Regression: Preserve user's non-managed MCP servers ──────────
-
-describe('P1-2: writers preserve non-managed MCP servers', () => {
+describe('writeOpenCodeMcpConfig', () => {
   /** @type {string} */ let dir;
 
   beforeEach(async () => {
-    dir = await makeTmpDir('preserve');
+    dir = await makeTmpDir('opencode-write');
   });
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('writeClaudeMcpConfig preserves user MCP servers not in managed list', async () => {
-    const file = join(dir, '.mcp.json');
-    // User already has their own MCP servers
+  it('writes stdio and remote MCP servers in OpenCode format', async () => {
+    const file = join(dir, 'opencode.json');
+    await writeOpenCodeMcpConfig(file, [
+      {
+        name: 'context7',
+        command: '',
+        args: [],
+        enabled: true,
+        source: 'external',
+        transport: 'streamableHttp',
+        url: 'https://mcp.context7.com/mcp',
+        headers: { Authorization: 'Bearer test-token' },
+      },
+      {
+        name: 'filesystem',
+        command: 'npx',
+        args: ['-y', '@mcp/fs'],
+        enabled: true,
+        source: 'external',
+        env: { DEBUG: '1' },
+      },
+    ]);
+
+    const raw = JSON.parse(await readFile(file, 'utf-8'));
+    assert.deepEqual(raw.mcp.context7, {
+      type: 'remote',
+      url: 'https://mcp.context7.com/mcp',
+      enabled: true,
+      headers: { Authorization: 'Bearer test-token' },
+    });
+    assert.deepEqual(raw.mcp.filesystem, {
+      type: 'local',
+      command: ['npx', '-y', '@mcp/fs'],
+      environment: { DEBUG: '1' },
+    });
+  });
+});
+
+describe('cleanStaleClaudeProjectOverrides', () => {
+  /** @type {string} */ let dir;
+
+  beforeEach(async () => {
+    dir = await makeTmpDir('stale-override');
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('removes resolver-managed server from per-project mcpServers', async () => {
+    const file = join(dir, '.claude.json');
     await writeFile(
       file,
       JSON.stringify({
-        mcpServers: {
-          'user-custom': { command: 'my-server', args: ['--port', '9999'] },
-          'cat-cafe': { command: 'node', args: ['old-server.js'] },
+        projects: {
+          '/home/user/my-project': {
+            mcpServers: {
+              pencil: { command: '/old/pencil', args: ['--app', 'antigravity'] },
+              xiaohongshu: { command: 'npx', args: ['mcp-remote'] },
+            },
+          },
         },
       }),
     );
 
-    // Cat Cafe orchestrator writes only managed servers
-    await writeClaudeMcpConfig(file, [
-      { name: 'cat-cafe', command: 'node', args: ['new-server.js'], enabled: true, source: 'cat-cafe' },
-    ]);
+    const cleaned = await cleanStaleClaudeProjectOverrides(file, '/home/user/my-project', ['pencil']);
 
     const data = JSON.parse(await readFile(file, 'utf-8'));
-    // cat-cafe should be updated
-    assert.deepEqual(data.mcpServers['cat-cafe'].args, ['new-server.js']);
-    // user-custom should still be there!
-    assert.ok(data.mcpServers['user-custom'], 'User MCP server should be preserved');
-    assert.equal(data.mcpServers['user-custom'].command, 'my-server');
+    assert.equal(data.projects['/home/user/my-project'].mcpServers.pencil, undefined);
+    assert.ok(data.projects['/home/user/my-project'].mcpServers.xiaohongshu);
+    assert.deepEqual(cleaned, ['pencil']);
   });
 
-  it('writeCodexMcpConfig preserves user MCP servers not in managed list', async () => {
-    const file = join(dir, 'config.toml');
+  it('leaves global mcpServers untouched', async () => {
+    const file = join(dir, '.claude.json');
     await writeFile(
       file,
-      `[model]
-name = "gpt-4"
-
-[mcp_servers.user_tool]
-command = "my-tool"
-args = ["--mode", "dev"]
-enabled = true
-
-[mcp_servers.cat_cafe]
-command = "node"
-args = ["old-server.js"]
-enabled = true
-`,
+      JSON.stringify({
+        projects: {
+          '/my/project': {
+            mcpServers: { pencil: { command: '/proj/pencil' } },
+          },
+        },
+        mcpServers: {
+          pencil: { command: '/global/pencil' },
+        },
+      }),
     );
 
-    await writeCodexMcpConfig(file, [
-      { name: 'cat_cafe', command: 'node', args: ['new-server.js'], enabled: true, source: 'cat-cafe' },
-    ]);
+    const cleaned = await cleanStaleClaudeProjectOverrides(file, '/my/project', ['pencil']);
 
+    const data = JSON.parse(await readFile(file, 'utf-8'));
+    // Per-project cleaned
+    assert.equal(data.projects['/my/project'].mcpServers.pencil, undefined);
+    // Global preserved — lower priority than .mcp.json, may serve other projects
+    assert.ok(data.mcpServers.pencil, 'global mcpServers should be preserved');
+    assert.equal(data.mcpServers.pencil.command, '/global/pencil');
+    assert.deepEqual(cleaned, ['pencil']);
+  });
+
+  it('returns empty array when no matching entries found', async () => {
+    const file = join(dir, '.claude.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        mcpServers: { jetbrains: { type: 'sse' } },
+      }),
+    );
+
+    const cleaned = await cleanStaleClaudeProjectOverrides(file, '/any', ['pencil']);
+    assert.deepEqual(cleaned, []);
+
+    // File should not be rewritten
     const raw = await readFile(file, 'utf-8');
-    // cat_cafe updated
-    assert.ok(raw.includes('new-server.js'));
-    // user_tool preserved
-    assert.ok(raw.includes('[mcp_servers.user_tool]'), 'User MCP server should be preserved');
-    assert.ok(raw.includes('my-tool'));
-    // model section preserved
-    assert.ok(raw.includes('[model]'));
+    assert.ok(!raw.includes('\n'), 'file should remain compact (not rewritten)');
   });
 
-  it('writeGeminiMcpConfig preserves user MCP servers not in managed list', async () => {
-    const file = join(dir, 'settings.json');
+  it('does not modify non-resolver-backed servers', async () => {
+    const file = join(dir, '.claude.json');
     await writeFile(
       file,
       JSON.stringify({
-        theme: 'dark',
-        mcpServers: {
-          'user-tool': { command: 'my-tool', args: [] },
-          'cat-cafe': { command: 'node', args: ['old-server.js'] },
+        projects: {
+          '/my/project': {
+            mcpServers: {
+              pencil: { command: '/old/pencil' },
+              xiaohongshu: { command: 'npx', args: ['mcp-remote'] },
+              jetbrains: { type: 'sse', url: 'http://localhost:64342/sse' },
+            },
+          },
         },
       }),
     );
 
-    await writeGeminiMcpConfig(file, [
-      { name: 'cat-cafe', command: 'node', args: ['new-server.js'], enabled: true, source: 'cat-cafe' },
-    ]);
+    await cleanStaleClaudeProjectOverrides(file, '/my/project', ['pencil']);
 
     const data = JSON.parse(await readFile(file, 'utf-8'));
-    // cat-cafe updated
-    assert.deepEqual(data.mcpServers['cat-cafe'].args, ['new-server.js']);
-    // user-tool preserved
-    assert.ok(data.mcpServers['user-tool'], 'User MCP server should be preserved');
-    assert.equal(data.mcpServers['user-tool'].command, 'my-tool');
-    // theme preserved
-    assert.equal(data.theme, 'dark');
+    assert.ok(data.projects['/my/project'].mcpServers.xiaohongshu);
+    assert.ok(data.projects['/my/project'].mcpServers.jetbrains);
+  });
+
+  it('handles missing file gracefully', async () => {
+    const cleaned = await cleanStaleClaudeProjectOverrides(join(dir, 'nonexistent.json'), '/any', ['pencil']);
+    assert.deepEqual(cleaned, []);
+  });
+
+  it('handles malformed JSON gracefully', async () => {
+    const file = join(dir, '.claude.json');
+    await writeFile(file, 'not valid json');
+    const cleaned = await cleanStaleClaudeProjectOverrides(file, '/any', ['pencil']);
+    assert.deepEqual(cleaned, []);
   });
 });
 
 // ────────── Round-trip tests ──────────
-
-describe('round-trip: read → write → read', () => {
-  /** @type {string} */ let dir;
-
-  beforeEach(async () => {
-    dir = await makeTmpDir('roundtrip');
-  });
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
-
-  it('Claude .mcp.json round-trips correctly', async () => {
-    const servers = [
-      {
-        name: 'cat-cafe',
-        command: 'node',
-        args: ['./mcp/index.js'],
-        env: { PORT: '3000' },
-        enabled: true,
-        source: /** @type {const} */ ('cat-cafe'),
-      },
-      { name: 'fs', command: 'npx', args: ['-y', '@mcp/fs'], enabled: true, source: /** @type {const} */ ('external') },
-    ];
-
-    const file = join(dir, '.mcp.json');
-    await writeClaudeMcpConfig(file, servers);
-    const roundTripped = await readClaudeMcpConfig(file);
-
-    assert.equal(roundTripped.length, 2);
-    assert.equal(roundTripped[0].name, 'cat-cafe');
-    assert.equal(roundTripped[0].command, 'node');
-    assert.deepEqual(roundTripped[0].env, { PORT: '3000' });
-  });
-
-  it('Codex config.toml round-trips correctly', async () => {
-    const servers = [
-      {
-        name: 'cat_cafe',
-        command: 'node',
-        args: ['index.js'],
-        enabled: true,
-        source: /** @type {const} */ ('cat-cafe'),
-      },
-      { name: 'disabled', command: 'echo', args: [], enabled: false, source: /** @type {const} */ ('external') },
-    ];
-
-    const file = join(dir, 'config.toml');
-    await writeCodexMcpConfig(file, servers);
-    const roundTripped = await readCodexMcpConfig(file);
-
-    assert.equal(roundTripped.length, 2);
-    const cafe = roundTripped.find((s) => s.name === 'cat_cafe');
-    assert.ok(cafe);
-    assert.equal(cafe.enabled, true);
-    const dis = roundTripped.find((s) => s.name === 'disabled');
-    assert.ok(dis);
-    assert.equal(dis.enabled, false);
-  });
-
-  it('Gemini settings.json round-trips correctly', async () => {
-    const servers = [
-      {
-        name: 'cat-cafe',
-        command: 'node',
-        args: ['index.js'],
-        enabled: true,
-        source: /** @type {const} */ ('cat-cafe'),
-        workingDir: '/tmp',
-      },
-    ];
-
-    const file = join(dir, 'settings.json');
-    await writeGeminiMcpConfig(file, servers);
-    const roundTripped = await readGeminiMcpConfig(file);
-
-    assert.equal(roundTripped.length, 1);
-    assert.equal(roundTripped[0].workingDir, '/tmp');
-  });
-});

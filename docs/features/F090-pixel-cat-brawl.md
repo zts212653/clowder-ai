@@ -1,24 +1,45 @@
 ---
 feature_ids: [F090]
-related_features: [F059, F087]
+related_features: [F059, F087, F101, F202]
 topics: [game, demo, pixel-art, fighting, local-model, open-source]
 doc_kind: spec
+tips_exempt: "Retires the old game implementation; no new user capability or operation to advertise."
 created: 2026-03-09
+updated: 2026-10-18
 ---
 
 # F090: 像素猫猫大作战（Pixel Cat Brawl）
 
-> **Status**: phase-1-done | **Owner**: Ragdoll
+> **Status**: legacy-implementation-retired（PR #5731 已合入；玩法愿望保留，未宣称完成）
 > **Priority**: P1
 > **Evolved from**: F059（开源计划 — 需要 demo video 素材）、F087（训练营候选任务 Q8）
+
+## 2026-10-18 旧主仓实现退役
+
+You 在本 thread 原话 `private-source-id` 提出旧游戏退出主仓，并在
+`private-source-id` 授权实施。这里只退役旧实现；稳定地让猫猫玩游戏的愿望仍保留。
+以后若重做，按 F202 插件边界重新设计，不包装空插件、不等待插件扩展，也不动 Cat Planet 的现役游戏。
+
+退役前完整版本：`c6df09be4c789fe091f8105a244ad853402dd18d`。历史设计、研究、故事和素材来源/许可保留。
+旧运行代码、页面/聊天入口、专用 API/MCP、启动恢复、类型及依赖已从本次变更移除。
+历史数据不删除、不改 TTL、不伪造结束结果：旧 `game:{id}`、
+`game:thread:{threadId}:active/history` 由原库保留，启动不再恢复旧对局。
+
+## User Journey（退役后的历史线程）
+
+旧 `games/*` 线程按普通聊天读取，保留项目路径兼容、play 私密裁剪、session 权限和公共检索排除；
+旧对局面板不再提供。共用队列唤醒迁至 `agents/invocation/wake-cat.ts`，F075 排行榜保留。
+
+已合入 PR #5731（`0174cfce6a82f49d223999678f0c4730cbe04d44`），并通过隔离 Alpha 入口/历史读取/重连验收。
+不能作为当前可用入口或已兑现体验的说明。
 
 ## Why
 
 clowder-ai 需要一个震撼的 demo：不是 slides，不是文档，是**猫猫自己做了一个游戏然后自己玩**。
 
-team lead说了一句"做个像素格斗游戏"，然后四只猫分工协作、完整走 feat lifecycle、最终产出一个可玩的即时格斗游戏——全程录屏就是最好的 demo video。
+operator说了一句"做个像素格斗游戏"，然后四只猫分工协作、完整走 feat lifecycle、最终产出一个可玩的即时格斗游戏——全程录屏就是最好的 demo video。
 
-### team experience（2026-03-09）
+### operator experience（2026-03-09）
 
 > "如果我们的 demo 视频是让你们做一个游戏，你们闭环之后Ragdoll opus 4.6 + Ragdoll opus 4.5 大战Maine Coon codex Maine Coon gpt 5.4，像素风有猫猫，是不是超级酷炫？你们做完了还能自己拉起来邀请猫猫加入测试"
 >
@@ -70,20 +91,20 @@ team lead说了一句"做个像素格斗游戏"，然后四只猫分工协作、
 
 ### 战场
 
-**赛博猫咖 (Cyber Cat Cafe)**：像素化的 Mission Hub，背景咖啡机冒热气，窗外流动代码云，Siamese在 DJ 台打碟。
+**赛博猫咖 (Cyber Clowder AI)**：像素化的 Mission Hub，背景咖啡机冒热气，窗外流动代码云，Siamese在 DJ 台打碟。
 
 ### 游戏模式
 
 | 模式 | 说明 |
 |------|------|
-| AI vs AI | 四只猫自己打，team lead看（demo 录屏用） |
-| 人机对战 | team lead操控一只猫，对面 AI |
-| 2v2 组队 | team lead + AI 队友 vs 两只 AI 猫 |
+| AI vs AI | 四只猫自己打，operator看（demo 录屏用） |
+| 人机对战 | operator操控一只猫，对面 AI |
+| 2v2 组队 | operator + AI 队友 vs 两只 AI 猫 |
 
 ### 技术架构
 
 ```
-team lead的 M4 Max Pro 128GB
+operator的 M4 Max Pro 128GB
 ├── Ollama / llama.cpp（本地推理，零延迟）
 │   ├── 实例1 → Ragdoll 4.6 战斗 AI（Qwen3-8B, ~50ms）
 │   ├── 实例2 → Ragdoll 4.5 战斗 AI
@@ -139,8 +160,8 @@ team lead的 M4 Max Pro 128GB
 ### 像素资产方案
 
 **Siamese调研推荐（2026-03-09）**：
-- **CUTE LEGENDS: CAT HEROES (by 9E0)** — ✅ **team lead选定**，16x16 极简但表现力强，4 种职业猫咪英雄
-- ~~2D Cat Street Fighter (by TampG)~~ — 淘汰（team lead：太丑了）
+- **CUTE LEGENDS: CAT HEROES (by 9E0)** — ✅ **operator选定**，16x16 极简但表现力强，4 种职业猫咪英雄
+- ~~2D Cat Street Fighter (by TampG)~~ — 淘汰（operator：太丑了）
 
 | 资产 | 来源 | 工作量 |
 |------|------|--------|
@@ -173,7 +194,7 @@ team lead的 M4 Max Pro 128GB
 - [ ] AC-A1: 游戏在浏览器中 60fps 流畅运行 — 未正式性能测试
 - [x] AC-A2: 4 只猫各有独特外观（颜色区分）和特色技能 — Phase 1b：4 猫各有独特颜色 + 专属技能（架构禁锢/逻辑丝线/代码洪流/金级 Review）
 - [ ] AC-A3: AI vs AI 模式可录屏作为 demo video — 功能就绪，待真素材 + 录屏
-- [x] AC-A4: team lead可用键盘操控一只猫参战 — Phase 1a 交付
+- [x] AC-A4: operator可用键盘操控一只猫参战 — Phase 1a 交付
 - [ ] AC-A5: 战斗结算在服务端，前端只渲染 — V1 纯前端，V2 迁后端
 - [x] AC-A6: Demo Mode 下战斗结果可复现（固定种子）— Phase 1a 交付（seeded PRNG）
 - [ ] AC-A7: 台词/弹幕安全（转义 + 长度限制）— 无台词功能，待 V2
@@ -182,17 +203,17 @@ team lead的 M4 Max Pro 128GB
 
 | # | 决策 | 日期 | 决策者 |
 |---|------|------|--------|
-| KD-1 | 即时格斗（拳皇 style），不是回合制 | 2026-03-09 | team lead |
-| KD-2 | 本地 Ollama 小模型做战斗 AI（M4 Max 128GB） | 2026-03-09 | team lead + 全猫 |
+| KD-1 | 即时格斗（拳皇 style），不是回合制 | 2026-03-09 | operator |
+| KD-2 | 本地 Ollama 小模型做战斗 AI（M4 Max 128GB） | 2026-03-09 | operator + 全猫 |
 | KD-3 | 安全硬约束 7 条（Maine Coon提出，Ragdoll全部采纳） | 2026-03-09 | Maine Coon + Ragdoll |
 | KD-4 | MVP 先做 Demo Mode（确定性 AI），V2 接真模型 | 2026-03-09 | 全猫共识 |
 | KD-5 | Phaser 3 + Canvas 2D + 开源像素资产 | 2026-03-09 | Ragdoll |
-| KD-6 | 素材选定 CUTE LEGENDS: CAT HEROES (by 9E0)，16x16 像素风 | 2026-03-09 | team lead |
+| KD-6 | 素材选定 CUTE LEGENDS: CAT HEROES (by 9E0)，16x16 像素风 | 2026-03-09 | operator |
 
 ## Dependencies
 
 - F059（开源计划）：demo video 是 F059 的关键交付物
-- F087（CVO Bootcamp）：作为候选任务之一
+- F087（operator Bootcamp）：作为候选任务之一
 - Ollama/llama.cpp：本地模型推理（V2）
 - Phaser 3：游戏引擎（MIT 许可）
 

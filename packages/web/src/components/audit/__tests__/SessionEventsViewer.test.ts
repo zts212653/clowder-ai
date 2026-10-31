@@ -4,14 +4,28 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 beforeAll(() => {
   (globalThis as { React?: typeof React }).React = React;
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 afterAll(() => {
   delete (globalThis as { React?: typeof React }).React;
+  delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
 });
 
 const mocks = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mocks.apiFetch(...args),
+}));
+
+vi.mock('@/hooks/useCatData', () => ({
+  useCatData: () => ({
+    getCatById: (id: string) => {
+      const cats: Record<string, { id: string; displayName: string }> = {
+        kimi: { id: 'kimi', displayName: '梵花猫' },
+        opus: { id: 'opus', displayName: '布偶猫' },
+      };
+      return cats[id];
+    },
+  }),
 }));
 
 const chatMessages = [
@@ -26,7 +40,7 @@ const handoffInvocations = [
     toolCalls: ['Read', 'Edit'],
     errors: 0,
     durationMs: 1200,
-    keyMessages: ['read file'],
+    keyMessages: [`read file · ${'完整交接诊断'.repeat(30)} · handoff-tail`],
   },
   { invocationId: 'inv-2', eventCount: 3, toolCalls: ['Bash'], errors: 1, durationMs: 800, keyMessages: ['ran test'] },
 ];
@@ -71,6 +85,136 @@ describe('SessionEventsViewer', () => {
     expect(container.textContent).toContain('hi there');
   });
 
+  it('renders external runtime metadata and digest noise diagnostics when available', async () => {
+    mocks.apiFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/sessions/s1/events')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ messages: chatMessages, nextCursor: null, total: 2 }),
+        });
+      }
+      if (url === '/api/external-runtime-sessions/s1') {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              sessionId: 's1',
+              threadId: 'external-runtime:antigravity-desktop:user-1',
+              runtime: 'antigravity-desktop',
+              runtimeSessionId: 'cascade-0123456789abcdef',
+              runtimeConversationId: 'conversation-1',
+              catId: 'antigravity',
+              model: 'gemini-3.1-pro',
+              lastObservedAt: 1000,
+              lifecycle: {
+                state: 'sealed',
+                startedAt: 900,
+                lastObservedAt: 1000,
+                sealReason: 'runtime_disconnected',
+                drainResult: 'complete',
+              },
+              binding: { mode: 'thread', threadId: 'thread-1', requestedBy: 'agent_key' },
+              identityHistory: [
+                {
+                  catId: 'antigravity',
+                  model: 'gemini-3.1-pro',
+                  from: 900,
+                  source: 'external_registration',
+                },
+              ],
+              drilldown: {
+                sessionRecord: '/api/sessions/s1',
+                events: '/api/sessions/s1/events',
+                digest: '/api/sessions/s1/digest',
+              },
+            }),
+        });
+      }
+      if (url === '/api/sessions/s1/digest') {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              diagnostics: {
+                noise: [
+                  {
+                    kind: 'context_canceled',
+                    count: 2,
+                    sample: 'context canceled',
+                    invocationIds: ['inv-1'],
+                    firstAt: 900,
+                    lastAt: 950,
+                    outcome: 'recovered',
+                  },
+                ],
+              },
+            }),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+    });
+
+    await renderViewer();
+
+    expect(container.textContent).toContain('cascade-012');
+    expect(container.textContent).toContain('conversation-1');
+    expect(container.textContent).toContain('已封存');
+    expect(container.textContent).toContain('Runtime 断开');
+    expect(container.textContent).toContain('Thread 绑定');
+    expect(container.textContent).toContain('gemini-3.1-pro');
+    expect(container.textContent).toContain('context_canceled × 2');
+    expect(container.textContent).toContain('recovered');
+    expect(container.textContent).toContain('hello');
+  });
+
+  it('keeps normal session rendering when external runtime metadata returns 404', async () => {
+    mocks.apiFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/sessions/s1/events')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ messages: chatMessages, nextCursor: null, total: 2 }),
+        });
+      }
+      if (url === '/api/external-runtime-sessions/s1') {
+        return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+      }
+      return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+    });
+
+    await renderViewer();
+
+    expect(container.textContent).toContain('hello');
+    expect(container.textContent).not.toContain('加载失败');
+  });
+
+  it('uses kimi theme colors for assistant chat rows when catId is kimi', async () => {
+    mocks.apiFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ messages: chatMessages, nextCursor: null, total: 2 }),
+    });
+
+    await renderViewer({ catId: 'kimi' });
+
+    expect(container.innerHTML).toContain('bg-kimi-light');
+    expect(container.innerHTML).toContain('text-kimi-dark');
+    expect(container.textContent).toContain('梵花猫');
+    expect(container.innerHTML).not.toContain('bg-purple-50');
+    expect(container.innerHTML).not.toContain('text-purple-800');
+  });
+
+  it('falls back to neutral colors when session catId is unknown', async () => {
+    mocks.apiFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ messages: chatMessages, nextCursor: null, total: 2 }),
+    });
+
+    await renderViewer({ catId: 'unknown-cat' });
+
+    expect(container.innerHTML).toContain('bg-cafe-surface-elevated');
+    expect(container.innerHTML).toContain('text-cafe-secondary');
+    expect(container.innerHTML).not.toContain('bg-purple-50');
+  });
+
   it('switches to handoff view and renders invocation summaries', async () => {
     // First fetch: chat view
     mocks.apiFetch.mockResolvedValueOnce({
@@ -99,6 +243,10 @@ describe('SessionEventsViewer', () => {
     expect(container.textContent).toContain('inv-1');
     expect(container.textContent).toContain('Read');
     expect(container.textContent).toContain('Edit');
+    const keyMessage = container.querySelector<HTMLElement>('[data-testid="handoff-key-message"]');
+    await act(async () => keyMessage?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
+    expect(keyMessage?.querySelector('pre')?.className).toContain('overflow-auto');
+    expect(keyMessage?.textContent).toContain('handoff-tail');
   });
 
   it('paginates with next/prev buttons', async () => {

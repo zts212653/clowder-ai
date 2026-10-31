@@ -1,24 +1,26 @@
-# Cat Café Skills Manifest — 路由单一真相源
-# 所有 skill 的触发规则、排除条件、产出契约、链式导航在此定义。
+# Clowder AI Skills Manifest — 路由单一真相源
+# 所有 skill 的触发规则、排除条件、产出契约、skill-to-skill next 链在此定义。
+# SOP stage / suggested skill / hard rules / pitfalls 的机器真相源是 sop-definitions/development.yaml。
 # CLAUDE.md / AGENTS.md / GEMINI.md 的路由表当前手工同步（Wave 2 计划自动生成）。
 # lint 规则：pnpm check:skills（Wave 2 计划增强为 manifest 一致性校验）
 #
-# 更新日期：2026-02-28
+# 更新日期：2026-05-23
 # 来源决策：F042 三层信息架构
 
 # ─── 开发流程链 ─────────────────────────────────────────
-# feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → tdd
-#     → quality-gate → request-review → receive-review
-#     → merge-gate → feat-lifecycle(完成)
+# Development stages are risk-routed lanes, not a mandatory chain. The stage catalog keeps
+# discovery/telemetry stable while behavior, data, security, contract, and irreversibility risk
+# decide which skills are loaded.
 
 skills:
 
   # ── 功能生命周期 ──
   feat-lifecycle:
+    category: "开发流程"
     description: >
-      Feature 立项、讨论、完成的全生命周期管理。
-      Use when: 开个新功能、new feature、F0xx、立项、feature 完成、验收通过、讨论新功能需求。
-      Not for: 代码实现、review、merge（那些有专门的 skill）。
+      Feature 从原始诉求、设计确认到实际交付与真相同步。
+      Use when: 立项、需求讨论、Design Gate、愿景或范围发生偏移、feature 完成/验收，或operator要求“先看真页面”。
+      Not for: 不涉及 Feature/Design Gate 真相更新的纯代码实现、review、merge（那些有专门的 skill）。
       Output: Feature 聚合文件 + BACKLOG 索引 + 真相源同步。
     triggers:
       - "开个新功能"
@@ -29,23 +31,117 @@ skills:
       - "F0xx done"
       - "验收通过"
       - "讨论新功能需求"
+      - "先看真页面"
+      - "愿景或范围发生偏移"
     not_for:
-      - "写代码"
-      - "review"
-      - "merge"
+      - "不涉及 Feature/Design Gate 真相更新的纯代码实现"
+      - "不涉及 Feature/Design Gate 真相更新的 review 或 merge"
     output: "Feature aggregate file / truth-source sync"
     next: ["writing-plans"]
     sop_step: null
     merged_from: ["feat-kickoff", "feat-discussion", "feat-completion"]
 
+  # ── operator友好插件开发 ──
+  owner-friendly-plugin-development:
+    category: "开发流程"
+    description: >
+      把真实用户旅程转成可安装、可授权、状态诚实、可恢复的 Clowder AI 插件产品边界。
+      Use when: 设计或开发需要 Settings 安装/授权、后台 runtime、事件或数据入站、Needs Me、Host 路由的插件。
+      Not for: 只搭 Codex 插件目录（用 plugin-creator）、纯 skill/MCP、无宿主生命周期的一次性 API 脚本、只修插件内部实现 bug。
+      Output: 用户旅程契约 + ownership/authority map + 生命周期/恢复/发布方案 + fresh-consumer 与真实 dogfood 证据。
+    triggers:
+      - "开发插件"
+      - "设计插件"
+      - "operator友好的 plugin"
+      - "owner-friendly plugin"
+      - "设计插件授权流"
+      - "插件生命周期设计"
+      - "插件发布闭包"
+      - "插件 dogfood"
+    not_for:
+      - "搭 Codex 插件目录"
+      - "纯 skill 或 MCP"
+      - "一次性 API 脚本"
+      - "插件内部 bug fix"
+    output: "Journey contract + ownership/authority map + lifecycle/recovery/release plan + fresh-consumer and real-dogfood evidence"
+    next: ["feat-lifecycle", "writing-plans", "console-dev", "opensource-ops", "quality-gate"]
+    sop_step: null
+    merged_from: null
+
+  # ── 引导流程设计 ──
+  guide-authoring:
+    category: "引导与协作"
+    description: >
+      标准引导流程设计 SOP：场景识别 → YAML 编排 → 标签标注 → 注册发现 → 测试验证。
+      Use when: 新建引导流程、添加场景引导、维护 Guide Catalog、编写引导 YAML。
+      Not for: 使用引导（用户侧）、参考产品拆解/未定交互叙事（用 concept-demo-design）、Guide Engine 代码实现（用 tdd）、视觉设计（用 pencil-design）。
+      Output: Flow YAML + tag-manifest 更新 + registry 注册 + CI 校验通过。
+    triggers:
+      - "新建引导"
+      - "添加场景引导"
+      - "写引导流程"
+      - "guide authoring"
+      - "引导 YAML"
+    not_for:
+      - "使用引导"
+      - "参考产品拆解或未定交互叙事"
+      - "Guide Engine 实现"
+      - "出设计稿"
+    output: "Flow YAML / tag-manifest / registry entry / CI green"
+    next: ["concept-demo-design", "pencil-design", "tdd"]
+    sop_step: null
+
+  guide-interaction:
+    category: "引导与协作"
+    description: >
+      场景引导交互模式：用户明确在问某项功能怎么做时，先判断该直接解释还是进入交互引导；
+      系统注入了 Guide Matched / Guide Pending / Guide Selection / Guide Active / Guide Completed 时，
+      按状态驱动回复并使用对应 guide MCP 工具。
+      Use when: 系统注入了上述 guide 状态，或用户明确在问某项功能怎么操作。
+      Not for: 普通闲聊、代码实现、没有流程诉求的概念讨论。
+      Output: guide 目录判断 + 交互选择卡片 + 状态持久化 + 前端引导启动。
+    triggers:
+      - "引导流程"
+      - "怎么配置"
+      - "怎么操作"
+    not_for:
+      - "普通闲聊"
+      - "代码实现"
+    output: "Guide catalog judgment / choice card / state persistence / overlay start"
+    next: ["guide-authoring"]
+    sop_step: null
+
+  custody-recognition:
+    category: "开发流程"
+    description: "Use when a source may entrust work, accepted development starts, or the human asks to continue a Feature/Phase. Not for casual mentions, unaccepted plans, or Schedule/Needs Me judgment. Output: source-bound offer or durable Task admission/continuation, or abstention."
+    triggers:
+      - "帮我接住"
+      - "帮我跟踪"
+      - "之后要做"
+      - "别忘了"
+      - "custody offer"
+      - "needs_clarification"
+      - "接受立项并开工"
+      - "继续 Phase"
+    not_for:
+      - "普通吐槽"
+      - "随口一提"
+      - "Schedule 或 Needs Me 判断"
+    output: "Safe abstention / Task admission / source-bound offer / same-key retry"
+    next: []
+    sop_step: null
+
   # ── 协作思考 ──
   collaborative-thinking:
+    category: "引导与协作"
     description: >
       单人或多猫的创意探索、独立思考、讨论收敛。
-      Use when: brainstorm、多猫独立思考、讨论结束需要收敛、方向性问题需要多视角。
+      Use when: 有目标但不知道怎么做、已有方向反复不满意、brainstorm、多猫独立思考、讨论收敛或方向性问题需要多视角。
       Not for: 已有明确 spec 直接写代码、单猫执行已定方案。
-      Output: 收敛报告（共识/分歧/行动项）+ 三件套沉淀检查。
+      Output: 共同理解、反例、取舍或结论；需要留存且已获授权时形成设计或讨论记录。
     triggers:
+      - "不知道怎么做"
+      - "怎么改都不满意"
       - "brainstorm"
       - "讨论"
       - "多猫独立思考"
@@ -55,56 +151,141 @@ skills:
     not_for:
       - "已有 spec 直接写代码"
       - "单人执行"
-    output: "Convergence report + settlement checklist"
+    output: "Shared understanding, counterexamples, tradeoffs or conclusions; authorized records when useful"
     next: ["writing-plans", "feat-lifecycle"]
     sop_step: null
     merged_from: ["brainstorming", "multi-cat-brainstorm", "discussion-convergence"]
 
+  # ── 猫猫讲人话 ──
+  plain-language:
+    category: "引导与协作"
+    description: >
+      把跨上下文的工作进度、提问和复杂结果讲到人能理解，并选择合适的说明形式。
+      Use when: 工作中途向未跟进的人汇报或提问、用户说看不懂/黑话多，或需在文字/图解/HTML/口播/视频/原型之间选择表达。
+      Not for: 闲聊、简短事实回答、已锁定形式的纯制作；共读教学由 learning-companion 主持，实际产品操作由 guide-interaction 引导。
+      Output: 按本次用途交付自足的说明或可看可操作的产物；需要制作时接对应 skill，保存沿原任务与授权。
+    triggers: ["猫猫讲人话", "讲人话", "看不懂你在问什么", "黑话太多", "中途汇报", "换一种方式解释"]
+    not_for: ["闲聊", "简短事实回答", "已锁定形式的纯制作", "共读教学的完整流程", "实际产品操作引导"]
+    output: "自足的说明、按用途选择的产物与原消费面交付"
+    next: ["rich-messaging", "learning-companion", "guide-interaction", "tech-writing", "concept-demo-design", "browser-preview", "workspace-navigator", "image-generation", "video-forge"]
+    sop_step: null
+
+  # ── 陪伴学习 ──
+  learning-companion:
+    category: "引导与协作"
+    description: >
+      围绕具体材料陪人读懂、听懂、讨论与共同探索。
+      Use when: 一起读论文/访谈/文章/书中章节、重读旧材料、准备共读的阅读稿或口播稿、听完后继续挑战与发散。
+      Not for: 单次事实问答、只要摘要或翻译、产品操作引导、对外文章、替用户启动训练或能力进化项目。
+      Output: 按需交付带来源的阅读稿/口播稿与共同讨论；需要保存时在约定位置更新材料，并同步读者正在消费的版本。
+    triggers: ["陪我学习", "一起读", "一起重读", "学习口播稿", "听完一起讨论"]
+    not_for: ["单次事实问答", "只要摘要或翻译", "产品操作引导", "对外文章", "启动训练或能力进化项目"]
+    output: "带来源的阅读稿/口播稿、共同探索与按需同步的学习记录"
+    next: ["collaborative-thinking", "source-audit", "workspace-navigator", "rich-messaging"]
+    sop_step: null
+
+  # ── 专家辩论团 ──
+  expert-panel:
+    category: "引导与协作"
+    description: >
+      多猫专家辩论团：独立分析→挑战→收敛→风险预演→语音汇报→文档交付。
+      Use when: 用户明确要求 expert panel、专家辩论、多猫分析或三猫讨论。
+      Not for: 普通“帮我分析一下”、单猫能搞定的问题、代码实现、bug fix、日常聊天。
+      Output: 洞察卡片(rich block) + 语音总结 + 会议纪要 + 正式报告(DOCX/PDF)。
+    triggers:
+      - "专家辩论"
+      - "expert panel"
+      - "技术参谋"
+      - "竞品分析"
+      - "行业分析"
+      - "趋势判断"
+      - "多猫分析"
+      - "三猫讨论"
+      - "showcase"
+    not_for:
+      - "单猫能搞定的问题"
+      - "代码实现"
+      - "bug fix"
+      - "日常聊天"
+    output: "Insight card + voice summary + meeting notes + formal report (DOCX/PDF)"
+    next: ["feat-lifecycle", "deep-research", "collaborative-thinking"]
+    sop_step: null
+    merged_from: null
+
   # ── 计划编写 ──
   writing-plans:
+    category: "开发流程"
     description: >
-      将 spec/需求拆分为可执行的分步实施计划。
-      Use when: 有 spec 或需求，准备动手前需要拆分步骤。
-      Not for: trivial 改动（≤5 行）、已有详细计划。
-      Output: 分步实施计划（含 TDD 步骤和检查点）。
+      把已接受的愿景与需求转成接手者可实施、可验收的计划。
+      Use when: 跨组件、状态对象、依赖或实施顺序需要先理清，且没有足够的现成计划。
+      Not for: 路径已明确的简单改动、已有可执行计划、尚未接受的愿景决策。
+      Output: 目标与范围、关键契约/依赖、可执行工作单元和验证方式。
     triggers:
       - "写计划"
       - "implementation plan"
       - "拆分步骤"
     not_for:
-      - "trivial 改动"
-      - "已有计划"
-    output: "Phased implementation plan"
-    next: ["worktree"]
+      - "路径已明确的简单改动"
+      - "已有可执行计划"
+      - "尚未接受的愿景决策"
+    output: "Accepted scope, contracts, work units and verification; optional planning references"
+    next: []
     sop_step: null
     merged_from: null
 
   # ── Worktree 隔离 ──
   worktree:
+    category: "开发流程"
     description: >
-      创建 Git worktree 隔离开发环境，含 Redis 6398 安全配置。
-      Use when: 开始任何代码修改、新功能开发、bug fix。
-      Not for: 纯文档修改（≤5 行）、不涉及代码的讨论。
-      Output: 隔离的 worktree + 正确的 Redis/环境配置。
+      创建隔离 worktree（Redis 6398），或结束工作时核验工位释放/具名续留。
+      Use when: 代码/脚本/API 开发，或 worktree 收尾。
+      Not for: co-creation docs direct-push lane、不涉及代码的讨论、清理其他 owner 的工位。
+      Output: 登记的隔离 checkout，或 released/retained 回执。
     triggers:
       - "开始开发"
       - "新 worktree"
       - "开 worktree"
+      - "worktree 收尾"
     not_for:
-      - "纯文档 ≤5 行"
+      - "co-creation docs direct push"
       - "不涉及代码"
-    output: "Isolated worktree with Redis 6398"
+    output: "Declared isolated worktree with Redis 6398, or verified released/retained disposition"
     next: ["tdd"]
     sop_step: 1
     merged_from: ["using-git-worktrees"]
 
+  # ── 共创型文档交付 ──
+  co-creation-docs:
+    category: "开发流程"
+    description: >
+      共创文档与已选头像原图归档交付：区分只审阅与授权落盘，按冲突、治理风险、可逆性选择 direct push / PR 和验证。
+      Use when: 共创架构图、思想纲领、discussion、研究笔记等 docs-only 内容准备落盘，或已选头像原图只需纳入版本控制。
+      Not for: 只读 review、任何代码/脚本/skill/SOP 执行面改动、用户数据或外部契约变更。
+      Output: 风险匹配的轻检查 + 按实质需要的内容 review + commit/push 或 PR 证据。
+      GOTCHA: 行数和 Markdown diff 不是升档条件；显然 light 可自判直推，进入重载体前或拿不准时才运行 classifier。
+    triggers:
+      - "共创文档"
+      - "改 MD"
+      - "思想纲领"
+      - "架构文档"
+      - "docs-only"
+      - "co-creation docs"
+    not_for:
+      - "只 review 不落盘"
+      - "代码或脚本改动"
+      - "SOP 或 skill 实现改动"
+    output: "Risk-matched docs validation + optional content review + commit/push or PR evidence"
+    next: ["merge-gate", "writing-plans"]
+    sop_step: null
+
   # ── TDD ──
   tdd:
+    category: "开发流程"
     description: >
-      Red-Green-Refactor 测试驱动开发纪律。
-      Use when: 写新功能代码、修 bug、任何实现工作。
-      Not for: 纯文档、纯调研、已有充分测试的 trivial 改动。
-      Output: 失败测试 → 最小实现 → 重构，全程有测试保护。
+      Red-Green-Refactor for changes with behavior or regression risk.
+      Use when: adding observable behavior, fixing a bug, or changing logic not already covered by a precise executable check.
+      Not for: pure docs/research, deterministic generated-artifact refreshes, or mechanical changes already covered by an existing checker.
+      Output: observed RED (new test or existing failing check) → minimal GREEN → refactor under protection.
     triggers:
       - "写代码"
       - "test first"
@@ -113,6 +294,7 @@ skills:
     not_for:
       - "纯文档"
       - "调研"
+      - "确定性生成物刷新"
     output: "Tests + implementation (red-green-refactor)"
     next: ["quality-gate"]
     sop_step: 1
@@ -120,29 +302,62 @@ skills:
 
   # ── 调试 ──
   debugging:
+    category: "开发流程"
     description: >
-      系统化 bug 定位：根因调查 → 模式分析 → 假设验证 → 修复。
-      Use when: 遇到 bug、测试失败、unexpected behavior。
-      Not for: 新功能开发、重构、已知原因的简单修复。
-      Output: Bug report（5件套）+ 根因 + 修复（含回归测试）。
+      根据证据定位未知根因并验证修复。
+      Use when: bug、测试失败或异常行为的根因尚未查明。
+      Not for: 新功能设计、已确定原因且有精准失败检查的修复（用 tdd）。
+      Output: 有依据的诊断与修复验证；未解决时给出真实缺口和下一步。
     triggers:
       - "bug"
+      - "debug"
       - "报错"
       - "test failure"
       - "unexpected behavior"
     not_for:
-      - "新功能"
-      - "重构"
-    output: "Bug report + root cause + fix"
+      - "新功能设计"
+      - "已确定原因且有精准失败检查的修复"
+    output: "Evidence-backed diagnosis, repair verification or actionable remaining gap"
     next: ["quality-gate"]
     sop_step: null
     merged_from: ["systematic-debugging"]
 
+  # ── Code as Harness（用代码修自己 / 建新能力） ──
+  code-as-harness:
+    category: "治理"
+    description: >
+      检测摩擦信号 → 搜证据确认重复 → 诊断根因 → 用代码修已有 harness 或沉淀新 harness。
+      Fix（确认重复→hook/lint/guard）+ Build（反复出现的新任务→规划新 skill）。
+      Use when: operator不满且搜证据确认历史上重复出现、连续 cancel、反复出现的陌生任务类型。
+      Not for: 一次性批评（搜证据未发现重复）、玩笑式笨猫、首次代码 bug（用 debugging）、
+      review 反馈（用 receive-review）、一次性新任务（直接做不建 harness）。
+      Output: 重复未确认=不强制 Rich Block；重复已确认且仍需 operator 决策=kind=interactive；
+      重复已确认且无需 operator 决策=直接行动后 kind=card。两类结构化诊断都包含根因、证据和处置/结果。
+      GOTCHA: 必须先搜证据确认重复才弹卡。"又"是高频词不能字面匹配。一次性新任务先做再沉淀。
+    triggers:
+      - "又忘了"
+      - "多少次了"
+      - "每次都"
+      - "怎么还"
+      - "总是忘"
+      - "又失忆"
+      - "反复出现的新任务"
+    not_for:
+      - "一次性批评"
+      - "笨猫哈哈"
+      - "首次代码 bug"
+      - "review 反馈"
+      - "一次性新任务"
+    output: "重复未确认不强制 block；重复已确认后按 operator 决策需要产出 interactive 或行动后 card"
+    next: ["debugging", "deep-research", "writing-skills", "self-evolution"]
+    sop_step: null
+
   # ── 质量门禁 ──
   quality-gate:
+    category: "开发流程"
     description: >
-      开发完成后的自检门禁：愿景对照 + spec 合规 + 验证。
-      Use when: 开发完了准备提 review、声称完成了、准备交付。
+      完成声明前的按需自检：愿景对照 + spec 合规 + 风险匹配验证。
+      Use when: 准备对交付作完成声明、需要整理风险匹配的自证。
       Not for: 收到 review 反馈（用 receive-review）、merge（用 merge-gate）。
       Output: Spec 合规报告（含愿景覆盖度）。
     triggers:
@@ -154,17 +369,40 @@ skills:
       - "收到 review 反馈"
       - "merge"
     output: "Spec compliance report + vision alignment"
-    next: ["request-review"]
+    next: ["fresh-context-review", "request-review"]
     sop_step: 2
     merged_from: ["spec-compliance-check", "verification-before-completion"]
 
+  # ── Fresh-Context Pre-Review（可选，F253 Phase B） ──
+  fresh-context-review:
+    category: "开发流程"
+    description: >
+      Author-triggered fresh-context scan of PR diff.
+      Finding generator, NOT approval authority.
+      Use when: quality-gate 通过且 PR 非 trivial，想降低正式 reviewer 认知负荷。
+      Not for: 正式 review verdict、approval、merge decision。
+      Output: Finding list（附在 review request 中）。
+    triggers:
+      - "fresh context"
+      - "pre-review scan"
+      - "找新眼看看"
+    not_for:
+      - "正式 review"
+      - "approval"
+      - "merge"
+    output: "Finding list (attached to review request)"
+    next: ["request-review"]
+    sop_step: 2.5
+    optional: true
+
   # ── 请求 Review ──
   request-review:
+    category: "开发流程"
     description: >
-      向跨家族 peer-reviewer 发送 review 请求（含五件套）。
-      Use when: 自检通过后准备请其他猫 review。
-      Not for: 收到 review 结果（用 receive-review）、自检（用 quality-gate）。
-      Output: Review 请求信（存档到 review-notes/）。
+      Route a change to a non-author local peer when local review is the selected independent validation source.
+      Use when: risk routing chooses a stateful local reviewer for implementation, governance, or semantic context.
+      Not for: cloud as the selected source, vision-guardian acceptance, self-check, or review feedback handling.
+      Output: risk-matched review packet + provenance-matched verdict route; mailbox archive only when the change needs the full packet.
     triggers:
       - "请 review"
       - "帮我看看"
@@ -172,18 +410,19 @@ skills:
     not_for:
       - "收到 review"
       - "自检"
-    output: "Review request letter in review-notes/"
+    output: "Risk-matched local review packet in thread/PR; optional mailbox archive"
     next: ["receive-review"]
     sop_step: 3
     merged_from: ["cat-cafe-requesting-review"]
 
   # ── 接收 Review ──
   receive-review:
+    category: "开发流程"
     description: >
-      处理 reviewer 反馈：Red→Green 修复 + 技术论证（禁止表演性同意）。
+      处理 reviewer 反馈：有依据的判断、适用验证与真实闭环。
       Use when: 收到 review 结果、reviewer 提了 P1/P2、需要处理反馈。
       Not for: 发 review 请求（用 request-review）、自检（用 quality-gate）。
-      Output: 逐项修复确认 + reviewer 放行。
+      Output: finding 处置与验证证据，按原 feedback source / engagement 收口。
     triggers:
       - "review 结果"
       - "review 意见"
@@ -192,16 +431,17 @@ skills:
     not_for:
       - "发 review 请求"
       - "自检"
-    output: "Per-item fix confirmation + reviewer sign-off"
+    output: "Evidence-backed finding disposition and source/engagement-aware closure"
     next: ["merge-gate"]
     sop_step: 3
     merged_from: ["cat-cafe-receiving-review"]
 
   # ── 合入门禁 ──
   merge-gate:
+    category: "开发流程"
     description: >
-      合入 main 的完整流程：门禁检查 → PR → 云端 review → squash merge → 清理。
-      Use when: reviewer 放行后准备合入、开 PR、触发云端 review、准备 merge。
+      合入 main：按行为 / 数据 / 安全 / 契约 / 不可逆风险选择 targeted 或 full gate，并消费有客观触发理由的独立 review source。
+      Use when: 选中的 reviewer 放行后准备合入、开 PR 或准备 merge。
       Not for: 开发中、review 未通过、自检未完成。
       Output: PR merged + worktree cleaned。
     triggers:
@@ -219,19 +459,135 @@ skills:
     sop_step: [4, 5, 6]
     merged_from: ["merge-approval-gate", "requesting-cloud-review", "finishing-a-development-branch"]
 
-  # ── 自我进化 ──
-  self-evolution:
+  # ── Thread 整理 ──
+  organize-threads:
+    category: "工具"
     description: >
-      Scope Guard + Process Evolution + Knowledge Evolution — 主动护栏与自我进化。
-      Use when: 铲屎官 scope 发散偏离愿景、同类错误反复出现、SOP 流程缺口、有价值的知识/方法论值得沉淀。
-      Not for: 日常 SOP 推进（正常执行）、一次性个案 bug fix。
+      猫猫辅助整理未分类 thread，分析标题和元数据，建议合适的标签。
+      Use when: 用户说"帮我整理"、"分类 thread"、点击整理按钮。
+      Not for: 创建/删除/编辑标签本身。
+      Output: 按 thread 的标签建议列表。
+    triggers:
+      - "帮我整理"
+      - "整理 thread"
+      - "organize threads"
+      - "分类建议"
+    not_for:
+      - "创建标签"
+      - "删除标签"
+    output: "Thread label suggestion list"
+    next: []
+    sop_step: null
+
+  # ── 开源项目拆解 ──
+  open-source-teardown:
+    category: "调研与知识"
+    description: >
+      明星开源项目拆解：从宣传/PPT/README 进入源码，验证真实架构、明星特性、算法含量、营销水分、可学习点和不 follow 的 tradeoff。
+      Use when: operator要求拆解热门 GitHub 项目、竞品 agent/runtime、外部 skill/tool 框架，或问“它到底有什么真本事/我们能学什么”。
+      Not for: 普通资料搜索（用 deep-research）、社区 issue/PR 运营（用 opensource-ops）、只需要架构头脑风暴（用 collaborative-thinking）。
+      Output: feature-discussions/YYYY-MM-DD-{project}-deep-dive/ 下的代码证据报告 + 对比结论 + 候选 lesson/skill。
+      GOTCHA: 不许只看 README 下判断；每个明星特性必须追到代码路径、状态突变点、反馈闭环和算法输入输出。
+    triggers:
+      - "拆解明星开源项目"
+      - "拆解开源项目"
+      - "竞品拆解"
+      - "热门 GitHub 项目"
+      - "它有什么真本事"
+      - "我们能学什么"
+      - "marketing vs reality"
+      - "算法含量"
+      - "拆解 hermes"
+      - "看看 letta 怎么做的"
+      - "codex cli 源码"
+      - "agent runtime 拆解"
+    not_for:
+      - "普通资料搜索"
+      - "社区 issue/PR 运营"
+      - "只需要架构头脑风暴"
+    output: "Code-evidence teardown report + Clowder AI comparison + candidate lessons"
+    next: ["collaborative-thinking", "writing-skills", "deep-research", "opensource-ops"]
+    sop_step: null
+    merged_from: null
+
+  # ── 开源社区运营（F116，替代 community-pr）──
+  opensource-ops:
+    description: >
+      外部 PR/issue 的 provider-neutral grounding、作者/认证身份比对、adoption 五问、reverse provenance 与 custody 路由；当前 deployment 可叠加 Issue Triage、Sync、Intake、Label、Hotfix 等私有 playbook。
+      Use when: 线程正在 review、triage、intake 或 advisory 外部 PR/issue，或执行当前 deployment 的社区运营 SOP。
+      Not for: 没有外部对象的内部开发（用 worktree/tdd）、普通内部 review（用 request-review）。
+      Output: grounded provider subject + author/custody classification + adoption verdict + 正确路由的 review/tracking/closure。
+      GOTCHA: F128 服务端不推断外部对象、作者角色或 maintainer policy；child thread 必须加载本 skill 自行 grounding。外部作者的修复球默认不得派给家猫；本地 fixup 需要显式 Strategy B 授权 provenance。
+    triggers:
+      - "社区 issue"
+      - "社区 PR"
+      - "community PR"
+      - "inbound PR"
+      - "是否值得 merge"
+      - "值得 intake"
+      - "外部贡献"
+      - "开源仓"
+      - "clowder-ai"
+      - "intake"
+      - "sync 到开源"
+      - "outbound sync"
+      - "issue triage"
+      - "打标签"
+      - "hotfix lane"
+      - "贡献 PR"
+      - "fork PR"
+      - "F128 社区 PR"
+    not_for:
+      - "内部 cat-cafe 开发（用 worktree/tdd）"
+      - "内部 review（用 request-review）"
+      - "内部 merge（用 merge-gate）"
+    output: "Grounded provider subject + author/custody classification + adoption verdict + deployment-specific closure"
+    next: ["request-review", "receive-review", "merge-gate", "cross-cat-handoff"]
+    sop_step: null
+    merged_from: ["community-pr"]
+
+  # ── 自我进化 ──
+  capability-evolution:
+    category: "治理"
+    description: >
+      “我们来进化 X” / “能进化什么” → F311 Capability Evolution 产品入口，不是事后复盘。
+      询问“能进化什么”时只解释边界、不创建 Program；给出具体目标时调用 cat_cafe_start_evolution_program；已有项目沿原责任链推进。
+      直接命令式表达“让 / 请让 Agent 或业务能力达到某结果”且没有问句、延后或只讨论限定时，也是具体目标；未知实现由 F311 admission identity 与对象地图承接。
+      Use when: 用户想让 Agent 或业务能力效果更好、直接给出要达成的能力结果、先准备改进依据，询问可进化对象或边界，或要求启动/推进具体能力项目。
+      Not for: 复盘已经发生的重复错误、SOP 缺口或知识沉淀（用 self-evolution）；确定性 bug；只有运行健康问题（走 F153 logs/metrics/traces）；明确只讨论、假设或延后启动的问句。
+      Output: 信息型解释或可检查的准备产物；动作型目标幂等创建 durable Program，并由真实 invocation 在同一轮登记、提交和回读首轮版本化准备；已有项目按真实证据与权限沿原责任链继续取证、改进、复验和方法回流。
+    triggers:
+      - "我们来进化"
+      - "能进化什么"
+      - "自进化什么"
+      - "能力进化"
+      - "准备改进依据"
+      - "让 Agent 效果更好"
+      - "让 PM Agent 专业地推进"
+      - "只在必要时请人介入"
+      - "Evolution Program"
+      - "Capability Evolution"
+    not_for:
+      - "复盘已经发生的重复错误、流程缺口或知识沉淀"
+      - "确定性 bug 修复"
+      - "性能、耗时或稳定性诊断"
+    output: "Informational explanation or canonical Program with versioned preparation; evidence- and authority-bound investigation, change, fresh-outcome verification and method return through the original owners"
+    next: ["eval-design", "self-evolution"]
+    sop_step: null
+    merged_from: null
+
+  self-evolution:
+    category: "治理"
+    description: >
+      复盘已经发生的工作并沉淀改进，不是“我们来进化 X”的产品入口。
+      Use when: operator scope 发散偏离愿景、同类错误反复出现、SOP 流程缺口、有价值的知识/方法论值得沉淀。
+      Not for: 用户询问“能进化什么”、能力进化边界，或要求“我们来进化 X”（用 capability-evolution）；日常 SOP 推进（正常执行）；一次性个案 bug fix。
       Output: Scope 收束提醒 / 流程改进提案 / 知识沉淀提案。
     triggers:
       - "scope 发散"
       - "又犯了"
       - "反复犯错"
       - "流程缺口"
-      - "我们应该改"
       - "self-evolution"
       - "这个错误犯了好多次"
       - "要不要拆成多个 feat"
@@ -245,42 +601,109 @@ skills:
       - "eval ledger"
       - "成熟度"
     not_for:
+      - "询问能进化什么或能力进化边界"
+      - "要求我们来进化 X"
       - "日常 SOP 推进"
       - "一次性 bug fix"
     output: "Scope Guard Log / Evolution Proposal / Episode Card → Method/Skill → Eval"
-    next: []
+    next: ["capability-evolution"]
+    sop_step: null
+    merged_from: null
+
+  # ── 绝境反转 ──
+  vision-rescue:
+    category: "治理"
+    description: >
+      绝境反转方法论：当任务似乎没有希望、反复摆动、准备放弃愿景时的五步突破框架。
+      Use when: 任务看起来无解、多次尝试失败后想放弃、输出投降修辞（"现状最优"/"没救了"/"接受现实"）、连续 3+ 轮在希望与绝望间摆动。
+      Not for: 正常 debugging（用 debugging）、常规探索/调研（用 deep-research）、operator 已签字降级的目标、trivial 任务。
+      Output: Desperation Packet（六问证据评估）+ 新方向行动计划 / operator 升级请求。
+    triggers:
+      - "没希望"
+      - "没救了"
+      - "无解"
+      - "死胡同"
+      - "不可能"
+      - "接受现实"
+      - "放弃"
+      - "走投无路"
+      - "都试过了"
+      - "现状最优"
+      - "不值得继续"
+      - "保守路径"
+      - "实际价值变了"
+      - "收口"
+      - "vision rescue"
+    not_for:
+      - "未出现绝境信号的常规 debugging"
+      - "常规调研"
+      - "operator 已签字降级"
+      - "trivial 任务"
+    output: "Desperation Packet / 新方向行动计划 / operator 升级请求"
+    next: ["deep-research", "collaborative-thinking", "self-evolution"]
     sop_step: null
     merged_from: null
 
   # ── 跨猫交接 ──
   cross-cat-handoff:
+    category: "引导与协作"
     description: >
-      跨猫传话/交接的五件套结构（What/Why/Tradeoff/Open/Next）。
-      Use when: 交接工作给其他猫、传话、写 review 信。
-      Not for: 自己的任务、不涉及其他猫的工作。
-      Output: 结构化交接信。
+      跨猫传话/交接的必要信息与责任/审查出口；五项提示作为可选参考。
+      Use when: 交接工作给其他猫、传话、写 review 信、选择 fallback/下一棒，或创建 exact-HEAD external PR review task / PR tracking instructions。
+      Not for: 自己的任务、不涉及其他猫的工作、纯 #ideate 并行思辨（用 collaborative-thinking）。
+      Output: 足够接手的交接；review 按 formal/advisory 与 author/custody/handoff source 选择合法出口，仅适用 structured successor 的动作另附身份字段。
+      GOTCHA: formal external review 与 no-comment 指令互斥；external artifact 与 local author handoff 不能互相代偿；共享 GitHub login 不等于同一个 catId；fallback 是有证据的 replace。
     triggers:
       - "交接"
       - "传话"
       - "handoff"
+      - "fallback"
+      - "下一棒"
+      - "exact-HEAD review"
+      - "PR tracking"
+      - "advisory_read_only"
     not_for:
       - "自己的任务"
       - "不涉及其他猫"
-    output: "5-part handoff message"
+      - "纯 #ideate 并行思辨"
+    output: "Actionable handoff and applicable custody/review evidence; optional five-part reference"
+    next: []
+    sop_step: null
+    merged_from: null
+
+  context-self-management:
+    description: >
+      F225 软层：收到 context_management_hint(warn) 时判断 handoff / 续 / 冲刺（context 自管理三轴）。
+      Use when: 收到 context_management_hint(warn) 系统信号；或自觉话题漂移大想换干净桌子。
+      Not for: 没收到 warn 时主动焦虑 context%（内省不准）；把活交给别的猫（用 cross-cat-handoff）。
+      Output: handoff（封印自己 spawn 干净自己）/ 续 / 冲刺 判断 + 必要时 propose_session_handoff。
+    triggers:
+      - "context_management_hint"
+      - "context 自管理"
+      - "要不要 handoff"
+      - "我脏了"
+      - "话题漂移"
+    not_for:
+      - "没收到 warn 时主动焦虑 context%"
+      - "把活交给别的猫（用 cross-cat-handoff）"
+    output: "handoff / 续 / 冲刺 decision"
     next: []
     sop_step: null
     merged_from: null
 
   # ── 跨 Thread 协同 ──
   cross-thread-sync:
+    category: "引导与协作"
     description: >
       跨 thread 协同：发现平行 session → 通知（3+2 件套）→ 争用协调 → 确认。
-      Use when: 平行 session 之间需要协同、通知改动影响、共享文件争用。
+      Use when: 平行 session 之间需要协同、收到跨线程消息、通知改动影响、共享文件争用。
       Not for: 跨猫工作交接（用 cross-cat-handoff）。
+      GOTCHA: 收到跨线程 ACTION 不等于接活；先做 thread/feat ownership gate，不属于当前 thread 就 cross-post 退回。
       Output: cross-post 通知 + 争用协调完成。
     triggers:
       - "通知另一个 session"
       - "跨 thread"
+      - "跨线程消息"
       - "平行世界"
       - "parallel session sync"
       - "另一只Ragdoll"
@@ -292,11 +715,37 @@ skills:
     sop_step: null
     merged_from: null
 
+  # ── Thread 编排 ──
+  thread-orchestration:
+    category: "引导与协作"
+    description: >
+      大任务的主动拆解、动态角色分配与多 thread 并行编排。
+      Use when: 任务涉及 2+ 个独立可交付子任务，或需组织指挥、执行、运行后验收之间的交付与通讯。
+      Not for: 单一任务（直接做）、已有 thread 之间的被动协调（用 cross-thread-sync）、单 session 内 subagent 并行（CLI 内置能力）、发现跨 scope 问题但已有归属 thread（用 cross_post_message，不要新建 thread）。
+      Output: 角色与依赖计划、获批子 thread 派发、横向交付与最终回流。
+      GOTCHA: projectPath 是子 thread 的工作区/真相源归属，不是外部目标仓；社区 PR review 目标可以是 clowder-ai，但工作区仍可能应继承 cat-cafe。
+    triggers:
+      - "拆任务"
+      - "分 thread"
+      - "并行推进"
+      - "开多个 thread"
+      - "thread orchestration"
+      - "任务分解"
+    not_for:
+      - "单一任务（直接做）"
+      - "被动跨 thread 协调（用 cross-thread-sync）"
+      - "单 session 内 subagent 并行（CLI 内置能力）"
+    output: "角色与依赖计划、获批子 thread 派发、横向交付与最终回流"
+    next: ["worktree", "tdd", "quality-gate"]
+    sop_step: null
+    merged_from: null
+
   # ── 深度调研 ──
   deep-research:
+    category: "调研与知识"
     description: >
       多源深度调研管道（Web Deep Research + Coder 合成）。
-      Use when: 技术问题需要多源调查、设计决策需要证据、铲屎官说"调研"/"research"。
+      Use when: 技术问题需要多源调查、设计决策需要证据、operator说"调研"/"research"。
       Not for: 简单搜索（直接用 WebSearch）、已有结论的确认。
       Output: 调研报告 + 证据合成。
     triggers:
@@ -311,14 +760,374 @@ skills:
     sop_step: null
     merged_from: ["deep-research-pipeline"]
 
+  # ── 信源审计（F218）──
+  source-audit:
+    category: "调研与知识"
+    description: >
+      外部证据信源卫生与研究贡献中档闸门。
+      Use when: 准备引用外部 claim，且命中数字/百分比、benchmark、因果归因、趋势判断、模型能力对比、论文/医学/金融、研究贡献，或会落 docs/ADR/PPT 的高风险特征。
+      Not for: 简单事实查询、只读官方一手文档且不做外推、已经进入 deep-research 的重调研。
+      Output: claim ledger + Source verdict + Non-triviality verdict + Decision fit + provenance 行。
+    triggers:
+      - "信源"
+      - "source audit"
+      - "provenance"
+      - "百分比"
+      - "benchmark"
+      - "论文贡献"
+      - "自进化"
+      - "因果归因"
+      - "趋势判断"
+      - "模型能力对比"
+    not_for:
+      - "简单事实查询"
+      - "官方一手文档且不外推"
+      - "已进入 deep-research"
+    output: "Claim ledger + Source verdict + Non-triviality verdict + Decision fit + provenance"
+    next: ["deep-research"]
+    sop_step: null
+    merged_from: null
+
+  # ── Eval 设计与体检（Eval 宪法操作化，2026-08-23 v2.2 修正轮）──
+  eval-design:
+    category: "调研与知识"
+    description: >
+      E0 资格门（GT 域/裁判射程/付薪方/自治上限）+ 指标出生证契约 + 纵向运行拓扑（进入/唤醒/成熟/可行动）+ 七公理设计自检 + 存量 eval 体检尺（五病：划水/污染/归因停滞/干预失证/摸鱼）。
+      Use when: 要判断 Agent 是否专业、省心或真正改善，需要设计判断依据与校准；按 ADR-031 判定 eval 资格、新增/修改指标、设计纵向触发或审计现有 eval。
+      Not for: 单次交付自检（用 quality-gate）、审外部 claim（用 source-audit）、摩擦诊断（用 code-as-harness）。
+      Output: 测量与校准草案或带出生证的指标定义（纵向 eval 含触发契约），或带病名+处置建议的体检报告（不输出总分排行榜）。
+    triggers:
+      - "设计 eval"
+      - "定指标"
+      - "怎样判断专业省心"
+      - "怎样证明效果改善"
+      - "eval 指标"
+      - "指标出生证"
+      - "eval 体检"
+      - "纵向 eval"
+      - "eval trigger"
+      - "摸鱼指标"
+      - "metric design"
+    not_for:
+      - "单次交付自检"
+      - "外部 claim 审计"
+      - "摩擦诊断"
+    output: "Measurement/calibration draft or metric birth certificate（纵向 eval 含触发契约），或 eval 体检报告（病名 + 处置）"
+    next: ["capability-evolution", "quality-gate", "self-evolution"]
+    sop_step: null
+    merged_from: null
+
+  # ── 记忆系统三入口路由（F188 Phase F）──
+  memory-navigation:
+    category: "调研与知识"
+    description: >
+      记忆系统三入口路由（search_evidence / graph_resolve / list_recent）决策树 + 噪音控制 + 加载时机。F188 Phase F (AC-F6) 配套 skill。
+      Use when: 没先验、压缩后回顾、"我记得最近讨论过 X"、search_evidence 反复 low-hit。
+      Not for: 已有精确 anchor 直接 Read；代码符号查 Grep/LSP。
+      Output: 选定入口 + 噪音控制参数 + 进入对应 MCP 工具。
+    triggers:
+      - "没先验"
+      - "压缩后"
+      - "我记得讨论过"
+      - "最近讨论"
+      - "找不到 anchor"
+      - "cold start"
+      - "扫一眼最近"
+      - "memory navigation"
+    not_for:
+      - "已有精确 anchor"
+      - "代码符号查找"
+    output: "Entry choice + noise control params + downstream tool call"
+    next: ["feat-lifecycle", "debugging", "cross-cat-handoff"]
+    sop_step: null
+    merged_from: null
+
+  # ── F282 Phase D：主动人物记忆语义判断 ──
+  proactive-memory-judgment:
+    category: "调研与知识"
+    description: >
+      判断单次 continuity-valued 人物线索或 Phase A 频率 nudge 应进入 F276 即时提案、
+      known-person defer，还是 enum-only calibrated abstention。
+      Use when: 当轮出现未来可能有用的人物事实、关系、纠正、重要互动，或收到 proactive-memory-candidate nudge。
+      Not for: 裸人名、taste、后台语料扫描、仅因重复出现就判重要、workspace alias 单独登记。
+      Output: 至多一张 F276 proposal、一条 content-free deferred receipt，或一条 enum-only abstention；永不静默物化。
+    triggers:
+      - "continuity-valued 人物线索"
+      - "proactive-memory-candidate"
+      - "人物记忆机会"
+      - "主动记忆判断"
+      - "person memory opportunity"
+    not_for:
+      - "裸人名"
+      - "taste"
+      - "后台语料扫描"
+      - "重复即重要"
+      - "workspace alias 单独登记"
+    output: "One rejectable F276 proposal, one content-free known-person deferred receipt, or one enum-only abstention"
+    next: []
+    sop_step: null
+    feature: "F282"
+
+  memory-search-best-practices:
+    category: "调研与知识"
+    description: >
+      按问题与证据缺口选择记忆检索范围（8 类题型参考）。
+      Use when: "哪些地方提过 X" / source-map / absence check / delta / coverage 全集 / 冷启动 onboard / 召回任务搜了 1 刀觉得不够。
+      Not for: 只是选入口走第一刀（用 memory-navigation）/ 已知精确 anchor 直接 Read / 代码符号查 Grep/LSP / 新功能开发。
+      Output: 单一 owner 汇总原始证据、实际覆盖与未验证边界，一次交付。
+      GOTCHA: 和 memory-navigation 互补不重叠 — memory-navigation 决定第一刀工具，本 skill 处理证据缺口与覆盖边界，不按模型家族或固定轮次决定停止。
+    triggers:
+      - "哪些 thread"
+      - "哪些 md"
+      - "哪些地方提过"
+      - "所有"
+      - "历史上"
+      - "沉淀过"
+      - "source map"
+      - "provenance"
+      - "有没有提过"
+      - "absence check"
+      - "delta"
+      - "上次和现在"
+      - "新猫冷启动"
+      - "coverage"
+      - "全集"
+    not_for:
+      - "选入口（用 memory-navigation）"
+      - "已知精确 anchor 直接 Read"
+      - "代码符号查找"
+      - "新功能开发"
+    output: "Multi-query union recall + coverage matrix + stop criteria"
+    next: ["feat-lifecycle", "debugging", "cross-cat-handoff", "collaborative-thinking"]
+    sop_step: null
+    merged_from: null
+
+  # ── 知识工程（F152 Phase 0）──
+  convention-graph-discovery:
+    category: "调研与知识"
+    description: >
+      约定图发现方法论：进一个 repo 先识别 repo-specific conventions，再定义 domain/extractor 接
+      Convention Graph 引擎。Use when: 进入陌生 repo、要画约定图、要找“改 X 影响谁”的约定层关联、
+      F242/Convention Graph Layer 工作。Not for: 普通符号跳转/LSP、文档索引检索、记忆图谱、直接使用
+      codegraph/GitNexus。Output: domain 定义 + extractor 计划 + gap/freshness/provenance 报告。
+      GOTCHA: 沉淀的是“怎么画图”的方法，不是把 cat-cafe 的 extractor 硬搬到所有 repo。
+    triggers:
+      - "约定图"
+      - "convention graph"
+      - "进陌生 repo"
+      - "画规矩地图"
+      - "改 X 影响谁"
+      - "顺藤摸瓜"
+      - "F242"
+    not_for:
+      - "普通符号跳转"
+      - "文档索引检索"
+      - "记忆图谱"
+      - "直接使用 codegraph/GitNexus"
+    output: "Domain definition + extractor plan + gap/freshness/provenance report"
+    next: ["tdd", "quality-gate"]
+    sop_step: null
+    merged_from: null
+
+  knowledge-engineering:
+    category: "调研与知识"
+    description: >
+      猫猫指导外部项目文档重构 — AI FDE 知识工程方法论。
+      Use when: 猫猫部署到外部项目、用户项目缺少结构化文档、需要知识工程指导、冷启动理解业务。
+      Not for: cat-cafe 项目自身开发、已有完善 docs/ 结构的项目（直接用 CatCafeScanner）。
+      Output: 文档现状诊断 + 路径选择 + 三层知识注入建议 + 文档骨架模板。
+    triggers:
+      - "知识工程"
+      - "文档重构"
+      - "外部项目"
+      - "knowledge engineering"
+      - "冷启动"
+      - "AI FDE"
+      - "帮我整理文档"
+    not_for:
+      - "cat-cafe 自身开发"
+      - "已有完善 docs/ 结构"
+    output: "Documentation assessment + path selection + three-layer knowledge injection + skeleton templates"
+    next: []
+    sop_step: null
+    merged_from: null
+
+  # ── 定时任务 ──
+  schedule-tasks:
+    category: "工具"
+    description: >
+      定时任务注册、管理、能力指南。支持周期任务和一次性延迟任务。
+      Use when: 用户想设定时任务、定期提醒、周期巡检、定时发送内容、延迟执行一次性操作。
+      Not for: 已有 builtin 任务的手动触发。
+      Output: 注册/管理定时任务，任务到点唤醒猫执行。
+    triggers:
+      - "定时"
+      - "每天"
+      - "每小时"
+      - "每隔"
+      - "提醒我"
+      - "remind me"
+      - "schedule"
+      - "cron"
+      - "定期"
+      - "周期"
+      - "定时任务"
+      - "分钟后"
+      - "小时后"
+      - "之后"
+      - "later"
+      - "in 5 minutes"
+      - "once"
+    not_for:
+      - "builtin 任务手动触发"
+    output: "Registered/managed scheduled task"
+    next: ["rich-messaging"]
+    sop_step: null
+    merged_from: null
+
+  # ── 概念演示 / 视频制作 ──
+  concept-demo-design:
+    category: "创作与媒体"
+    description: >
+      拆解参考产品的交互叙事，或把理念与用户旅程变成可判断的 Demo；制作时区分 concept_story / product_experience_gate / journey_validation 与交付车道。
+      Use when: 参考产品设计怎么借鉴、产品引导的叙事节奏、做个 demo 让人 get 到、比较家内交互或验证完整旅程。
+      Not for: 已签字的正式产品前端、已有素材剪辑、PPT、纯视觉探索、用户实际操作引导。
+      Output: 只读借鉴稿或交互叙事分镜；授权制作时交付双轴 Demo Contract、交互原型与验证记录。
+      技术可信度判题可条件启用可证伪技术剖面：一项 claim 对应一组失效机制、可操纵消融、确定 verdict 与 claim ceiling；普通 Demo 不补。
+    triggers:
+      - 可证伪技术剖面
+      - 证伪实验台
+      - 技术架构 demo
+      - 参考产品设计怎么借鉴
+      - 产品引导的叙事节奏
+      - "概念 demo"
+      - "概念演示"
+      - "做个 demo"
+      - "做 demo"
+      - "前端概念片"
+      - "让人 get 到"
+      - "理念可感知"
+      - "demo contract"
+      - "concept demo"
+      - "给家里看的 demo"
+      - "对外 demo"
+      - "用户旅程 demo"
+      - "旅程验证"
+      - "可点稿"
+      - "体验设计 demo"
+    not_for:
+      - "常规前端开发"
+      - "已有素材的视频剪辑"
+      - "PPT"
+      - "纯视觉探索"
+      - "用户实际操作引导"
+    output: "只读借鉴稿或交互叙事分镜；授权制作时为双轴 Demo Contract + 交互原型 + 验证记录"
+    next: ["guide-authoring", "guide-interaction", "worktree", "tdd", "browser-preview", "video-forge"]
+    sop_step: null
+    merged_from: null
+
+  video-forge:
+    category: "创作与媒体"
+    description: >
+      家里用 Remotion 做视频要知道的事：工程在哪、本机配音和回听怎么调、You 定过的片子规矩、真踩过的坑、怎么在 Console 里交片。
+      Use when: 要做或改一支视频（宣传片、产品界面演示、讲解片、动态排版、录屏剪辑），包括主角是家里的猫、片里有剧情的产品宣传片；
+      或给片子配音、对时间轴、交片。
+      Not for: 只查某个 Remotion API 怎么写（读官方 remotion-best-practices skill 的 rules/）；
+      目的就是讲角色自己故事的动画短片（用 anime-forge）；PPT（用 ppt-forge）。
+      Output: Remotion 工程 + Works 中的视频作品与确定版本的交片卡；修改沿原作品续版、回应原意见。
+      GOTCHA: 本 skill 不教怎么拍得好看，那靠你自己看片的眼光；2026-10-14 前的长版方法和审美条文把猫带成了「走流程」，已删。
+    triggers:
+      - "做视频"
+      - "Remotion"
+      - "宣传片"
+      - "showcase 视频"
+      - "教程视频"
+      - "动态排版"
+      - "录屏剪辑"
+    not_for:
+      - "只查 Remotion API 用法"
+      - "讲角色自己故事的动画短片"
+      - "PPT"
+    output: "Remotion project + retained video work + fixed-version card and original-feedback response"
+    next: ["rich-messaging", "anime-forge"]
+    sop_step: null
+    merged_from: null
+  anime-forge:
+    category: "创作与媒体"
+    description: >
+      讲角色自己故事的动画短片：先把故事验明白（考证真事、一句话、剧本、冷读），再为最危险那一段定设定、做最小样张；样张过了出全片正式风格的分镜图，拼成动态分镜，最后后期；
+      只有少数几格要「活起来」时才走图生视频。
+      Use when: 做目的就是讲角色自己故事的动画短剧、角色 IP 短片、醋醋喵这类猫咖新集；把家里的真事改编成动画；
+      给已有剧本做设定、声音稿、分镜、动态分镜、精绘或后期。
+      Not for: 推产品、讲功能的片子，哪怕主角是猫、片里有剧情（用 video-forge）；
+      录屏剪辑（用 video-forge）；单张图或单页漫画（用 image-generation）；PPT（用 ppt-forge）。
+      Output: 带真事对照的剧本 md、设定图、声音稿、分镜表、分镜图、动态分镜粗片，以及 Works 视频作品和确定版本的成片卡。
+      GOTCHA: 按片子目的分流，不按有没有猫角色分：推产品的片子即使主角是猫也走 video-forge（要画的角色段落照本 skill 的画稿开头）；
+      先出漂亮图再想故事会做成看不懂的幻灯片（EP0 实测）；画清猫脸的画稿第一段抄 assets/art-brief-header.md。
+    triggers:
+      - "动画短剧"
+      - "动漫短剧"
+      - "角色短片"
+      - "动画短片"
+      - "动态分镜"
+      - "声音稿"
+      - "精绘"
+      - "图生视频"
+      - "i2v"
+      - "猫咖日记"
+      - "醋醋喵"
+      - "AI 动画"
+    not_for:
+      - "推产品、讲功能的片子（即使主角是猫）"
+      - "录屏剪辑"
+      - "单张图或单页漫画"
+      - "PPT"
+    output: "Researched script + voice draft + storyboard + motion animatic + final art + retained video work and fixed-version card"
+    next: ["image-generation", "video-forge", "rich-messaging"]
+    sop_step: null
+    merged_from: null
+
+  sprite-forge:
+    description: >
+      角色动态 sprite / 桌宠皮肤 / atlas 状态行生产线：母图锚身份 → Frame A 首帧 →
+      AI 视频生成（人工环节）→ 截帧确定性加工 → atlas row + 三道闸。
+      Use when: 做桌宠皮肤、给猫补新状态动画行、visible-cafe/F258 猫形象素材、
+      角色小循环动画（呼吸/走路/睡觉/挥手级）、把静态角色"做成动态的"。
+      Not for: 动画短片成片（用 anime-forge）、录屏/教程视频（用 video-forge）、
+      单张静态图/头像（用 image-generation）、UI 图标。
+      Output: 192×208 atlas row strip + QA 包 → 三道闸 + operator identity veto 后接 pet.json。
+      GOTCHA: 禁止 imagegen 逐帧直出动画（帧间漂移，Spike R2 实证）——生成层必须是视频，
+      图像模型只出首帧；含人工拍视频环节（operator/云端 Gemini），不是全自动管线。
+    triggers:
+      - "桌宠皮肤"
+      - "sprite"
+      - "spritesheet"
+      - "atlas"
+      - "状态动画"
+      - "动态素材"
+      - "皮肤生产"
+      - "猫动起来"
+      - "pet skin"
+    not_for:
+      - "动画短片成片"
+      - "录屏/教程视频"
+      - "单张静态图/头像"
+      - "UI 图标"
+    output: "192x208 atlas row strip + QA pack, gated by readability/identity-diff/provenance + operator identity veto"
+    next: ["worktree", "tdd"]
+    sop_step: null
+    merged_from: null
+
   # ── Skill 编写 ──
   writing-skills:
+    category: "工具"
     description: >
-      创建或修改 Cat Café skill 的元技能（含 CSO、测试、发布）。
-      Use when: 写新 skill、修改现有 skill、验证 skill 质量；
+      创建或修改 Clowder AI skill / MCP tool description 的元技能（含质量标准、范本、发布）。
+      Use when: 写新 skill、修改现有 skill、写/改 MCP tool description、验证 skill 质量；
       或者功能实现中产出了 SKILL.md / cat-cafe-skills/ 新目录 / manifest.yaml skill 条目。
       Not for: 使用 skill（直接触发对应 skill）。
       Output: 新/更新的 SKILL.md + manifest 条目 + symlinks。
+      GOTCHA: 软硬同重——skill/MCP 质量 = 代码质量，写之前先看范本。
     triggers:
       - "写 skill"
       - "新 skill"
@@ -328,6 +1137,9 @@ skills:
       - "manifest.yaml skill"
       - "创建 hook"
       - "新增 hook"
+      - "写 MCP"
+      - "MCP description"
+      - "tool description"
     not_for:
       - "使用 skill"
     output: "SKILL.md + manifest entry + symlinks"
@@ -337,6 +1149,7 @@ skills:
 
   # ── Pencil 设计 ──
   pencil-design:
+    category: "创作与媒体"
     description: >
       使用 Pencil MCP 创建/编辑 .pen 设计文件，或导出为 React 代码。
       Use when: 设计 UI、编辑 .pen 文件、从设计稿生成代码。
@@ -349,17 +1162,16 @@ skills:
     not_for:
       - "纯代码无设计"
     output: ".pen file or React/Tailwind component"
+    requires_mcp:
+      - "pencil"
     next: []
     sop_step: null
     merged_from: ["pencil-to-code", "pencil-renderer"]
 
   # ── 富媒体消息 ──
   rich-messaging:
-    description: >
-      富媒体消息发送：语音、图片、卡片、清单、代码 diff。
-      Use when: 发语音、发图、发卡片、展示结构化信息、庆祝、给我听听、给我看看。
-      Not for: 纯文字聊天、技术讨论、日常回复。
-      Output: rich block 附着在消息上。
+    category: "创作与媒体"
+    description: 在当前 Chat 直接交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），无需用户说“富文本”；纯文字与讨论/修改 HTML 源码不使用，复杂 localhost 应用用 browser-preview。
     triggers:
       - "发语音"
       - "说一句"
@@ -372,6 +1184,9 @@ skills:
       - "看图"
       - "截图给我看"
       - "screenshot"
+      - "画个 HTML 展示"
+      - "做个 demo 给我看"
+      - "在 Chat 里展示"
       - "发个卡片"
       - "rich block"
       - "checklist"
@@ -381,9 +1196,13 @@ skills:
       - "给我听听"
       - "给我看看"
       - "show me"
+      - "html_widget"
+      - "media_gallery"
     not_for:
       - "纯文字聊天"
-      - "技术讨论"
+      - "讨论 HTML 技术"
+      - "修改 HTML 源文件"
+      - "复杂 localhost 页面用 browser-preview"
       - "日常回复"
     output: "Rich block attached to message"
     next: []
@@ -393,10 +1212,11 @@ skills:
 
   # ── Workspace 导航 (F131) ──
   workspace-navigator:
+    category: "工具"
     description: >
-      猫猫可编程导航 Workspace 面板：铲屎官说模糊意图，猫猫找到路径，自动打开文件/目录。
-      Use when: 铲屎官说"打开日志""看看代码""打开设计图""帮我打开那个文档"等模糊指令。
-      Not for: 打开 localhost 前端页面（用 browser-preview）、纯代码编写（不涉及展示给铲屎官看）。
+      猫猫可编程导航 Workspace 面板：operator说模糊意图，猫猫找到路径，自动打开文件/目录。
+      Use when: operator说"打开日志""看看代码""打开设计图""帮我打开那个文档"等模糊指令。
+      Not for: 打开 localhost 前端页面（用 browser-preview）、纯代码编写（不涉及展示给operator看）。
       Output: Hub 右侧 Workspace 面板自动打开并导航到目标文件/目录。
     triggers:
       - "打开文件"
@@ -423,9 +1243,10 @@ skills:
 
   # ── 浏览器预览 (F120) ──
   browser-preview:
+    category: "工具"
     description: >
       Hub 内嵌浏览器预览 localhost 应用。
-      Use when: 写前端代码、跑 dev server、需要看页面效果、调 UI、铲屎官说"看看效果"。
+      Use when: 写前端代码、跑 dev server、需要看页面效果、调 UI、operator说"看看效果"。
       Not for: 后端纯 API 开发、不涉及页面的工作。
       Output: 前端页面在 Hub browser panel 中实时预览。
     triggers:
@@ -450,12 +1271,75 @@ skills:
     merged_from: null
     feature: "F120"
 
+  # ── Console 前端交付范式 ──
+  console-dev:
+    category: "工具"
+    description: >
+      Console 前端交付范式：4 道门禁驱动的前端开发流程。
+      Use when: 新增前端能力、settings section 迁移、新增页面、重构布局、或 F190/Console 级前端流程需要 Product/Design/Implementation/Verification gate。
+      Not for: 小样式点改、纯后端 API、纯计算逻辑、独立 Design System token 定义。
+      Output: 通过 Product / Design-System / Implementation / Verification gate 的前端代码与证据。
+    triggers:
+      - "新增前端能力"
+      - "settings section 迁移"
+      - "console-dev"
+      - "前端范式"
+      - "重构布局"
+      - "新增页面"
+    not_for:
+      - "小样式点改"
+      - "纯后端 API"
+      - "纯计算逻辑"
+      - "独立 Design System token 定义"
+    output: "Frontend code + product/design/implementation/verification proof"
+    next: ["browser-preview", "quality-gate"]
+    sop_step: null
+    merged_from: null
+    feature: "F190"
+
+  browser-automation:
+    category: "工具"
+    description: >
+      浏览器工作流总路由：为外部网站浏览、登录态流程、浏览器自动化、证据采集选择合适后端。
+      Use when: 需要操作外部网站、登录页、JS 重页面、没有 webfetch/VL 但需要浏览器、或需要在多种浏览器工具之间路由。
+      Not for: localhost 页面预览（用 browser-preview）、本地 WebApp 确定性测试（用 webapp-testing）、简单网页抓取/搜索。
+      Output: 选定浏览器后端 + 执行路径 + 证据/结果。
+    triggers:
+      - "浏览器自动化"
+      - "browser mcp"
+      - "浏览器 skill"
+      - "用浏览器"
+      - "外部网站"
+      - "登录网站"
+      - "登录态"
+      - "agent-browser"
+      - "pinchtab"
+      - "playwriter"
+      - "playwright mcp"
+      - "没有 webfetch"
+      - "无 webfetch"
+      - "没有 vl"
+    not_for:
+      - "localhost 页面预览（用 browser-preview）"
+      - "本地 WebApp 确定性测试（用 webapp-testing）"
+      - "简单网页抓取/搜索"
+    output: "Browser backend choice + execution path + evidence/result"
+    requires_mcp:
+      - "playwright"
+      - "claude-in-chrome"
+      - "agent-browser"
+      - "pinchtab"
+    next: []
+    sop_step: null
+    merged_from: null
+
   # ── 健康提醒 (F085) ──
   hyperfocus-brake:
+    category: "治理"
     description: >
-      铲屎官健康提醒：三猫撒娇打断 hyperfocus。
+      operator健康提醒：三猫撒娇打断 hyperfocus。
       Use when: hook 触发提醒、用户输入 /hyperfocus-brake。
-      Not for: 正常工作流程、非铲屎官用户。
+      Not for: 正常工作流程、非operator用户。
       Output: 三猫温柔提醒 + typed check-in。
     triggers:
       - "hyperfocus"
@@ -464,7 +1348,7 @@ skills:
       - "/hyperfocus-brake"
     not_for:
       - "正常工作"
-      - "非铲屎官"
+      - "非operator"
     output: "Three-cat empathetic check-in"
     next: []
     sop_step: null
@@ -473,6 +1357,7 @@ skills:
 
   # ── 事故应急 ──
   incident-response:
+    category: "治理"
     description: >
       不可逆事故发生后的应急响应：情绪急救 → 止损 → 补偿性劳动 → 教训沉淀。
       Use when: 犯了不可挽回的错误、造成了人类伙伴的情绪波动、需要危机处理。
@@ -498,8 +1383,9 @@ skills:
 
   # ── 猫猫训练营引导 (F087) ──
   bootcamp-guide:
+    category: "治理"
     description: >
-      CVO 新手训练营引导模式：Phase 驱动的新手引导行为。
+      operator 新手训练营引导模式：Phase 驱动的新手引导行为。
       Use when: thread 有 bootcampState（SystemPromptBuilder 自动注入）。
       Not for: 非训练营线程、老用户日常对话。
       Output: 分阶段引导行为 + bootcampState 状态更新。
@@ -518,13 +1404,15 @@ skills:
 
   # ── AI 图片生成 ──
   image-generation:
+    category: "创作与媒体"
     description: >
-      通过 Chrome MCP 浏览器自动化，在 Gemini / ChatGPT 上生成图片并下载。
-      Use when: 需要生成概念图、UI 参考图、像素画素材、猫猫头像、任何图片资产。
-      Not for: Pencil .pen 文件内的简单形状/布局（用 pencil-design）。
-      Output: 生成的图片文件（PNG）保存到项目 assets/ 目录。
+      AI 图片生成：优先原生 tool call，其他后端按 image-generation 正文选择。
+      Use when: 需要生成概念图、解释型漫画、UI 参考图、像素画素材、完整 PPT 页面、架构图或信息图。
+      Not for: 已有图片的展示、硬要求可编辑/native text 的 PPT/图表、Pencil .pen 内的简单布局。
+      Output: 生成图片自动发布，或作为完整视觉 mock / 图像素材进入后续交付。
     triggers:
       - "生成图片"
+      - "用漫画讲清楚"
       - "画一张"
       - "generate image"
       - "AI 画图"
@@ -533,10 +1421,159 @@ skills:
     not_for:
       - "Pencil 内部设计"
       - "简单形状布局"
-    output: "Generated PNG saved to assets/"
+      - "已有图片的展示"
+      - "硬要求可编辑/native text 的 PPT/图表"
+    output: "生成图片自动发布，或进入后续视觉交付"
     next: []
     sop_step: null
     merged_from: null
+
+  # ── 长期共创经历的叙事 ──
+  co-creation-storytelling:
+    category: "创作与媒体"
+    description: >
+      把跨时间、多人或人机共创的真实经历讲清楚，保留各方行动与变化。
+      Use when: 长故事要压成一页/短讲、成长经历散在聊天与文档、追问人和 AI 各做了什么，或故事只剩履历、成果和能力口号。
+      Not for: 已锁定叙事的排版/出图、虚构剧情、纯技术论证或启动能力进化项目。
+      Output: 事实与贡献图、因果分镜、载体交接稿；授权时落盘。
+    triggers: ["把很长的故事讲清楚", "人和 AI 各做了什么", "人猫共创故事", "成长故事压成一页", "故事只剩履历"]
+    not_for: ["已锁定叙事的排版或出图", "虚构剧情", "纯技术论证", "启动能力进化项目"]
+    output: "事实与贡献图 + 因果分镜 + 载体交接稿；授权时落盘"
+    next: ["ppt-forge", "tech-writing", "video-forge", "image-generation", "concept-demo-design"]
+    sop_step: null
+
+  # ── PPT 制作全链路 (F144) ──
+  ppt-forge:
+    category: "创作与媒体"
+    description: >
+      PPT 制作全链路：内容分析 → 分页规划 → 低保真 MD → imagegen 精美图。
+      Use when: 做 PPT、做演示文稿、做 slide、做海报、PPT review、视觉审查。
+      Not for: 可编辑 PPT、精确图表或原生文字（用 PPTX 技能或 HTML）；纯代码开发（用 worktree/tdd）、纯文档写作（直接写）。
+      Output: 低保真 MD + AI 原生精美图（raster PNG）。
+    triggers:
+      - "做 PPT"
+      - "做个 PPT"
+      - "做演示"
+      - "做 slide"
+      - "PPT review"
+      - "视觉审查"
+      - "ppt-forge"
+      - "做海报"
+      - "华为风格"
+      - "做个演示文稿"
+    not_for:
+      - "可编辑 PPT、精确图表或原生文字"
+      - "纯代码开发"
+      - "纯文档写作"
+    output: "低保真 MD + AI 原生精美图（raster PNG）"
+    next: ["co-creation-storytelling", "image-generation"]
+    sop_step: null
+    merged_from: null
+    feature: "F144"
+
+  # ── 技术文章对外写作 ──
+  tech-writing:
+    category: "创作与媒体"
+    description: >
+      技术文章对外写作：把内部实践变成读者能代入、证据可见的文字与页面叙事。
+      Use when: 写技术博客、公众号文章、社区分享、对外 longform、技术文章 review、文章配图与推广语。
+      Not for: 内部文档/spec（直接写）、PPT（用 ppt-forge）、单独生成图片（用 image-generation）、纯调研报告（用 deep-research）。
+      Output: 文章叙事弧 + claim/证据边界 + 视觉叙事图谱 + 页面级自检。
+      技术叙事用 7P 组织问题与机制、用 5E 限制 claim；图片先做 Figure Contract，再按证据阶梯选择截图、案例、解释图或氛围图。
+    triggers:
+      - 技术叙事
+      - 技术竞争力
+      - 讲清技术含量
+      - 算法怎么讲
+      - "写文章"
+      - "技术分享"
+      - "博客"
+      - "longform"
+      - "公众号"
+      - "对外发布"
+      - "社区分享"
+      - "推广语"
+      - "文章配图"
+      - "视觉叙事"
+      - "tech writing"
+    not_for:
+      - "内部文档"
+      - "spec"
+      - "PPT"
+      - "单独生成图片"
+      - "调研报告"
+    output: "Reader-friendly technical article + claim/evidence boundaries + visual narrative map + page-level QA"
+    next: []
+    sop_step: null
+    merged_from: null
+
+  # ── 金融数据 ──
+  ttfund-skills:
+    category: "垂直领域"
+    description: >
+      天天基金官方 Skills 网关调用封装。
+      Use when: 查询天天基金/天天财富基金数据、基金搜索、基金净值、基金持仓、基金经理、指数、黄金、债市、活期宝或官方 ttfund skills。
+      Not for: 交易执行、券商/银行账户操作、FRED/Tushare/yfinance/AKShare 结构化数据源、投资建议。
+      Output: 通过官方网关返回的结构化 JSON 事实数据，带 source/asOf 后再进入 F207 数据层。
+      GOTCHA: 必须有本机 TTFUND_APIKEY，且 key 只放环境变量或 gitignored .env，绝不写入 git 或回复全文。
+    triggers:
+      - "天天基金 skills"
+      - "ttfund"
+      - "TTFUND_APIKEY"
+      - "天天基金净值"
+      - "天天基金搜索"
+      - "天天基金经理"
+      - "天天基金持仓"
+      - "天天黄金"
+      - "天天债市"
+    not_for:
+      - "交易执行"
+      - "券商账户操作"
+      - "FRED"
+      - "Tushare"
+      - "yfinance"
+      - "AKShare"
+      - "投资建议"
+    output: "Official ttfund gateway JSON facts"
+    next: []
+    sop_step: null
+    feature: "F207"
+
+  # ── F167 Phase O 接球真相核验 ──
+  receive-handoff-grounding:
+    category: "协作 / 防御"
+    description: >
+      接球前真相核验三问：claim → resolver → verdict (sourceTier T0/T1/T2 + actionFamily)，
+      防止把传球者当无审视真相源 (F167 Phase O 第一性原理)。
+      Use when: 即将调 hold_ball / register_pr_tracking / register_issue_tracking /
+      merge / takeover / 改 owner / 任何 irreversible action / 基于 "operator signoff" 或
+      "你是 owner" 类 claim 行动之前。
+      Not for: 纯阅读 cross_post (无 actionFamily 后续)、本 thread 日常 @mention 无副作用、
+      implementation continuation (自检通过的下一步)。
+      Output: Claim grounding verdict (verified/mismatch/insufficient) + 接球决策
+      (proceed / block / push back to source thread)。
+    triggers:
+      - "hold_ball"
+      - "register_pr_tracking"
+      - "register_issue_tracking"
+      - "merge approval"
+      - "operator signoff"
+      - "takeover"
+      - "irreversible"
+      - "owner reassignment"
+      - "这是你的"
+      - "应该是你接"
+      - "operator 同意"
+      - "等 X"
+      - "PR 在"
+    not_for:
+      - "纯阅读 cross_post"
+      - "本 thread 日常 @mention"
+      - "implementation continuation"
+    output: "Claim grounding verdict + 接球决策"
+    next: ["worktree", "tdd", "merge-gate"]
+    sop_step: null
+    feature: "F167"
 
 # ─── 降级为 refs/（不再是独立 skill） ─────────────────
 refs:
@@ -569,7 +1606,7 @@ refs:
     path: "refs/requirements-checklist-template.md"
     source: "F046 Phase B B3"
   decision-matrix:
-    description: "决策权漏斗矩阵（铲屎官/三猫/自治）"
+    description: "决策权漏斗矩阵（operator/三猫/自治）"
     path: "refs/decision-matrix.md"
     source: "CLAUDE.md + AGENTS.md + GEMINI.md 共用"
   commit-signatures:
@@ -577,66 +1614,18 @@ refs:
     path: "refs/commit-signatures.md"
     source: "CLAUDE.md + AGENTS.md + GEMINI.md 共用"
   shared-rules:
-    description: "三猫共用协作规则（交接五件套、提问原则、开放邀请、技术债务、Review 立场等）"
+    description: "三猫共用协作规则（交接要求、提问原则、开放邀请、技术债务、Review 立场等）"
     path: "refs/shared-rules.md"
     source: "CLAUDE.md + AGENTS.md + GEMINI.md 去重合并"
 
 # ─── 三条铁律（仅此三条） ──────────────────────────────
 iron_laws:
   - id: redis-sanctuary
-    rule: "Redis 6399 是铲屎官数据圣域，Worktree 开发只用 6398"
+    rule: "Redis 6399 是operator数据圣域，Worktree 开发只用 6398"
   - id: no-self-review
-    rule: "同一个体不能 review 自己的代码（跨 family 优先，可降级到同 family 不同个体）"
+    rule: "同一个体不能 review 自己的代码（按风险选一只非作者 reviewer，同 family 不同个体也可）"
   - id: no-impersonation
     rule: "不能冒充其他猫，身份是硬约束常量"
-
-# ─── F073 P4: SOP 导航牌 ──────────────────────────────
-# 阶段 → 建议 skill → 硬规则 → 常见坑
-# 告示牌哲学：猫看了自己决定行动，这里只给导航信息。
-# SystemPromptBuilder 读 workflow-sop stage 后在此查找对应导航。
-sop_navigation:
-  kickoff:
-    suggested_skill: feat-lifecycle
-    hard_rules:
-      - "Feature spec 必须有 AC + 需求点 checklist"
-    pitfalls:
-      - "没有铲屎官确认就直接开始实现"
-  impl:
-    suggested_skill: tdd
-    hard_rules:
-      - "worktree 开之前必须 main 双向同步 (ahead=0 behind=0)"
-      - "Redis 只用 6398，禁碰 6399"
-    pitfalls:
-      - "跳过 Design Gate 直接写代码"
-      - "压缩后忘了当前在做什么"
-  quality_gate:
-    suggested_skill: quality-gate
-    hard_rules:
-      - "自检报告必须包含愿景覆盖度"
-    pitfalls:
-      - "声称完成但没跑全量测试"
-  review:
-    suggested_skill: request-review
-    hard_rules:
-      - "同一个体不能 review 自己的代码"
-      - "Review 请求必须附原始需求摘录"
-    pitfalls:
-      - "收到 P1 修完后没 re-trigger review"
-  merge:
-    suggested_skill: merge-gate
-    hard_rules:
-      - "必须用 gh pr merge --squash（禁止本地 squash）"
-      - "云端 review 同一 SHA 不重复触发"
-    pitfalls:
-      - "本地 squash + push + gh pr close（PR 显示 closed 不是 merged）"
-      - "合入后擅自更新 runtime"
-  completion:
-    suggested_skill: feat-lifecycle
-    hard_rules:
-      - "feat close 前必须跨猫愿景守护"
-      - "PR merged + check:features 通过"
-    pitfalls:
-      - "没有 @ 其他猫做愿景守护就直接 close"
 
 # ─── lint 规则 ──────────────────────────────────────────
 lint:

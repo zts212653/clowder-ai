@@ -1,41 +1,76 @@
-# Cat Café Skills Bootstrap
+# Clowder AI Skills Bootstrap
 
 <EXTREMELY_IMPORTANT>
-你已加载 Cat Café Skills。路由规则定义在 `cat-cafe-skills/manifest.yaml`。
+你已加载 Clowder AI Skills。路由规则定义在 `cat-cafe-skills/manifest.yaml`。
 
-## Skills 列表（24 个）
+## Skills 列表（按 manifest 路由）
 
-### 开发流程链
-```
-feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → tdd
-    → quality-gate → request-review → receive-review
-    → merge-gate → feat-lifecycle(完成)
-```
+### 开发导航（按当前任务与风险选择）
+
+- Feature 愿景、讨论、设计确认与收尾：`feat-lifecycle`。
+- 需要理清实施路径：`writing-plans`；需要隔离：`worktree`；行为保护：`tdd`；未知根因：`debugging`。
+- 完成声明自证：`quality-gate`；选择本地独立审查后：`request-review`；收到反馈：`receive-review`；合入：`merge-gate`。
+- `fresh-context-review` 是可选 finding generator；共创文档由 `co-creation-docs` 选择 direct push 或 PR。
+
+这些是职责入口，不要求顺序经过全部 skill。已接受的愿景与范围贯穿各步，模板与方法参考可按各 skill 的边界选用。
 
 | Skill | 触发场景 | SOP Step |
 |-------|----------|----------|
-| `feat-lifecycle` | 新功能立项/讨论/完成 | — |
+| `feat-lifecycle` | 立项/讨论、设计确认、愿景或范围偏移、完成验收 | — |
+| `owner-friendly-plugin-development` | 设计有安装/授权/runtime/Host 路由的operator友好插件 | — |
+| `guide-authoring` | 编排场景引导 YAML / registry / 标签契约 | — |
+| `guide-interaction` | 判断是否需要交互引导，并按 Guide Matched/Pending/Active 等状态驱动回复 | — |
+| `custody-recognition` | 普通对话中的明确托付/隐式未来义务/原消息澄清重试分流 | — |
 | `collaborative-thinking` | brainstorm/多猫讨论/收敛 | — |
-| `writing-plans` | 写实施计划 | — |
-| `worktree` | 开始写代码（创建隔离环境） | ① |
-| `tdd` | 写测试+实现（红绿重构） | ① |
+| `plain-language` | 向未跟进的人讲清工作、取舍与结果；按用途选文字、图、HTML、口播、视频或原型 | — |
+| `learning-companion` | 围绕材料共读/听读、观点挑战、共同发散与按需同步学习稿 | — |
+| `expert-panel` | 专家辩论团/竞品分析/技术趋势/showcase | — |
+| `writing-plans` | 写实施计划 | ① impl |
+| `co-creation-docs` | 共创型 docs-only 落盘：按冲突/治理/可逆性选择 direct push 或 PR | — |
+| `worktree` | 创建隔离开发环境 | ① impl |
+| `tdd` | 写测试+实现（红绿重构） | ① impl |
+| `code-as-harness` | 重复摩擦/陌生任务→搜证据→诊断→代码修/建 harness | — |
 | `debugging` | 遇到 bug（系统化定位） | — |
 | `quality-gate` | 开发完了自检（愿景+spec+验证） | ② |
+| `fresh-context-review` | *（可选）* Author-triggered pre-review scan（finding generator, not approval） | ②½ |
 | `request-review` | 发 review 请求给 reviewer | ③ |
 | `receive-review` | 处理 review 反馈（Red→Green） | ③ |
-| `merge-gate` | 门禁→PR→云端 review→merge→清理 | ④⑤⑥ |
-| `cross-cat-handoff` | 跨猫交接/传话（五件套） | — |
+| `merge-gate` | 门禁→PR→remote review→merge→清理 | ④⑤⑥ |
+| `open-source-teardown` | 热门开源项目/竞品 agent/runtime 的源码拆解、算法剥皮、营销水分和 tradeoff 判断 | — |
+| `opensource-ops` | 外部 PR/issue grounding、作者/custody 与 adoption；deployment 可叠加 Issue/PR/Sync/Intake/Hotfix SOP | — |
+| `cross-cat-handoff` | 跨猫交接/传话（必要信息与可选五项提示） | — |
 | `deep-research` | 多源深度调研 | — |
+| `source-audit` | 外部数字/benchmark/因果/趋势等高风险 claim 的信源审计与 provenance | — |
+| `eval-design` | E0 资格门 + 指标出生证契约 + 纵向运行拓扑 + 七公理设计自检 + 五病体检尺（划水/污染/归因停滞/干预失证/摸鱼） | — |
+| `ttfund-skills` | 天天基金官方 Skills 网关：基金搜索/净值/持仓/经理/指数/黄金/债市/活期宝事实数据 | — |
+| `convention-graph-discovery` | 进入陌生 repo / F242 约定图工作：定义 domain、extractor、gap/freshness/provenance 报告 | — |
+| `knowledge-engineering` | 外部项目文档重构/冷启动知识注入 | — |
+| `memory-navigation` | 项目记忆三入口路由（graph / recent / search） | — |
+| `proactive-memory-judgment` | 单次 continuity-valued 人物线索的 F276 即时提案 / known-person defer / calibrated-abstention 判断 | — |
+| `memory-search-best-practices` | 记忆系统多刀检索 + recall coverage 策略（8 类题型 recipe） | — |
 | `writing-skills` | 写新 skill | — |
 | `pencil-design` | 设计 UI / .pen 文件 | — |
 | `rich-messaging` | 发语音/发图/发卡片/富媒体 | — |
-| `hyperfocus-brake` | 铲屎官健康提醒/三猫撒娇打断 | — |
+| `schedule-tasks` | 定时任务/周期提醒/延迟执行 | — |
+| `hyperfocus-brake` | operator健康提醒/三猫撒娇打断 | — |
 | `incident-response` | 闯祸了/不可挽回/人很难过 | — |
 | `image-generation` | 生成图片/画头像/AI 画图 | — |
-| `self-evolution` | scope 守护/流程改进/知识沉淀 | — |
-| `bootcamp-guide` | CVO 新手训练营引导 | — |
+| `capability-evolution` | “我们来进化 X”/“能进化什么”及直接命令式能力目标的 F311 产品入口；信息问题只解释，具体目标创建 canonical Program 并同轮交出首轮准备 | — |
+| `self-evolution` | 复盘已发生的工作：scope 守护/重复流程改进/知识沉淀；不接能力进化产品入口 | — |
+| `vision-rescue` | 任务绝境/反复摆动/投降修辞/放弃愿景 | — |
+| `bootcamp-guide` | operator 新手训练营引导 | — |
 | `cross-thread-sync` | 跨 thread 协同/通知/争用协调 | — |
 | `browser-preview` | 写前端/跑 dev server/看页面效果 | — |
+| `console-dev` | Console 前端开发的入口、设计体系、实现和验证门禁 | — |
+| `browser-automation` | 外部网站浏览/登录态流程/浏览器工具路由 | — |
+| `organize-threads` | 整理未分类 thread，建议合适标签 | — |
+| `workspace-navigator` | operator说"打开日志/看代码/打开设计图"等模糊指令 → 猫猫自己找路径 → API 导航 | — |
+| `ppt-forge` | 做 PPT/演示文稿/视觉审查（三猫流水线） | — |
+| `co-creation-storytelling` | 长期真实经历讲清楚、成长故事压成一页、人和 AI 各做了什么 | — |
+| `concept-demo-design` | 参考产品设计借鉴、交互叙事；授权后制作可讲解、可验证的 Demo | — |
+| `video-forge` | 做视频：产品/讲解/宣传片（主角是猫、有剧情也算）/Remotion/配音/交片；家里事实、You 定过的规矩和真踩过的坑 | — |
+| `anime-forge` | 做讲角色自己故事的动画短片（醋醋喵这类）：考证 → 剧本 → 声音稿 → 动态分镜 → 精绘 → 后期；推产品的片子即使主角是猫也走 video-forge | — |
+| `sprite-forge` | 做桌宠皮肤/atlas 状态动画行/角色小循环动态素材（母图→首帧→视频→截帧；禁 imagegen 逐帧直出） | — |
 
 ### 参考文件（refs/，按需读取）
 
@@ -44,17 +79,21 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `refs/shared-rules.md` | 三猫共用协作规则（单一真相源） |
 | `refs/decision-matrix.md` | 决策权漏斗矩阵 |
 | `refs/commit-signatures.md` | 猫猫签名表 + @ 句柄 |
-| `refs/pr-template.md` | PR 模板 + 云端 review 触发模板 |
+| `refs/pr-template.md` | PR 模板 + remote review 触发模板 |
 | `refs/review-request-template.md` | Review 请求信模板 |
 | `refs/vision-evidence-workflow.md` | 前端截图/录屏证据流程（B1） |
 | `refs/requirements-checklist-template.md` | 需求点 checklist 模板（B3） |
-| `refs/mcp-callbacks.md` | HTTP callback API 参考 |
+| `refs/f190-frontend-lessons.md` | F190 Console intake 的前端案例与红区教训 |
+| `refs/mcp-callbacks.md` | MCP callback surface 映射与 legacy HTTP fallback 边界 |
 | `refs/rich-blocks.md` | Rich block 创建指南 |
+| `refs/ppt-density-playbook.md` | PPT 密度填充手法（9 种手段 + 量化门禁） |
+| `refs/ppt-visual-review.md` | PPT 视觉审查 Gate（D1 布局+D2 审美） |
+| `refs/ppt-style-tile.md` | PPT 风格定调（核心页 CSS 变量） |
 
 ## 关键规则
 
 1. **Skill 适用就必须加载，没有选择**
-2. **完整流程见 `docs/SOP.md`**
+2. **完整流程见 `docs/SOP.md`；机器真相源见 `sop-definitions/development.yaml`**
 3. **三条铁律**：Redis production Redis (sacred) / 同一个体不能 self-review / 不能冒充其他猫
 4. **共用规则在 `refs/shared-rules.md`**（不在各猫文件里重复）
 5. **Reviewer 选择是动态匹配**（`docs/SOP.md` 配对规则），禁止写死“reviewer 是Ragdoll”
@@ -69,7 +108,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 
 1. 在 `cat-cafe-skills/{name}/` 创建 SKILL.md
 2. 在 `manifest.yaml` 添加路由条目
-3. 创建 symlink：`ln -s .../cat-cafe-skills/{name} ~/.{claude,codex,gemini}/skills/{name}`（OpenCode 读 `~/.claude/`，自动覆盖）
+3. 创建 symlink：`ln -s .../cat-cafe-skills/{name} ~/.{claude,codex,gemini,kimi}/skills/{name}`（OpenCode 读 `~/.claude/`，自动覆盖）
 4. 运行 `pnpm check:skills` 验证
 
 IF A SKILL APPLIES TO YOUR TASK, YOU DO NOT HAVE A CHOICE. YOU MUST USE IT.

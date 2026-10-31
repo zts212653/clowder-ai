@@ -1,8 +1,14 @@
 'use client';
 
+import { type ContextAttachment, deploymentDefaults } from '@cat-cafe/shared';
 import { useCallback, useMemo } from 'react';
-import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
-import type { DeliveryMode } from '@/stores/chat-types';
+import { useShallow } from 'zustand/react/shallow';
+import {
+  type SendMessageAdmissionOptions,
+  type UploadStatus,
+  useSendMessage,
+  type WhisperOptions,
+} from '@/hooks/useSendMessage';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { ChatInput } from './ChatInput';
 import { PawIcon } from './icons/PawIcon';
@@ -10,14 +16,17 @@ import { MiniThreadSidebar } from './MiniThreadSidebar';
 import { SplitPaneCell, SplitPanePlaceholder } from './SplitPaneCell';
 
 interface SplitPaneViewProps {
+  isReadonly?: boolean;
   onSend: (
     content: string,
     images?: File[],
     overrideThreadId?: string,
     whisper?: WhisperOptions,
-    deliveryMode?: DeliveryMode,
-  ) => void;
-  onStop: (overrideThreadId?: string) => void;
+    replyToId?: string,
+    contextAttachments?: ContextAttachment[],
+    explicitTargetCats?: string[],
+    options?: SendMessageAdmissionOptions,
+  ) => void | boolean | Promise<void | boolean>;
   uploadStatus?: UploadStatus;
   uploadError?: string | null;
   /** Switch from split to single mode, focusing the given thread */
@@ -30,9 +39,26 @@ const PANE_COUNT = 4;
  * Split-pane mode: 2x2 grid of mini chat views + mini sidebar + shared input.
  * The shared input bar sends to the currently selected pane (splitPaneTargetId).
  */
-export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoomToThread }: SplitPaneViewProps) {
+export function SplitPaneView({
+  isReadonly = false,
+  onSend,
+  uploadStatus,
+  uploadError,
+  onZoomToThread,
+}: SplitPaneViewProps) {
   const { threads, splitPaneThreadIds, splitPaneTargetId, setSplitPaneTarget, setSplitPaneThreadIds, getThreadState } =
-    useChatStore();
+    useChatStore(
+      useShallow((s) => ({
+        threads: s.threads,
+        splitPaneThreadIds: s.splitPaneThreadIds,
+        splitPaneTargetId: s.splitPaneTargetId,
+        setSplitPaneTarget: s.setSplitPaneTarget,
+        setSplitPaneThreadIds: s.setSplitPaneThreadIds,
+        getThreadState: s.getThreadState,
+      })),
+    );
+  // getThreadState is stable; its results are backed by threadStates.
+  useChatStore((s) => s.threadStates);
 
   const threadMap = new Map<string, Thread>();
   for (const t of threads) threadMap.set(t.id, t);
@@ -72,9 +98,6 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
     [splitPaneThreadIds, splitPaneTargetId, paneSlots, setSplitPaneThreadIds, setSplitPaneTarget],
   );
 
-  const targetThreadState = splitPaneTargetId ? getThreadState(splitPaneTargetId) : null;
-  const isTargetActiveInvocation = targetThreadState?.hasActiveInvocation ?? false;
-
   const handleBackToSingle = useCallback(() => {
     const target = splitPaneTargetId ?? splitPaneThreadIds[0];
     if (target) {
@@ -87,20 +110,20 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
   return (
     <div className="flex flex-col h-screen h-dvh">
       {/* Toolbar — matches single-mode header style */}
-      <header className="border-b border-cocreator-light px-5 py-3 bg-cocreator-bg flex items-center gap-2 flex-shrink-0">
-        <PawIcon className="w-6 h-6 text-cocreator-primary" />
+      <header className="border-b border-cafe-subtle px-5 py-3 bg-cafe-surface flex items-center gap-2 flex-shrink-0">
+        <PawIcon className="text-2xl" />
         <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-bold text-cafe-black">Clowder AI</h1>
-          <p className="text-xs text-gray-500">分屏模式</p>
+          <h1 className="text-lg font-bold text-cafe-black">{deploymentDefaults.brand.name}</h1>
+          <p className="text-xs text-cafe-secondary">分屏模式</p>
         </div>
-        <span className="text-[10px] text-gray-400 hidden sm:inline mr-1">⌘\ 切换</span>
+        <span className="text-micro text-cafe-muted hidden sm:inline mr-1">⌘\ 切换</span>
         <button
           onClick={handleBackToSingle}
-          className="p-1 rounded-lg hover:bg-cocreator-light transition-colors"
+          className="p-1 rounded-lg hover:bg-cafe-surface-sunken transition-colors"
           aria-label="切换单屏模式"
           title="返回单屏"
         >
-          <svg className="w-5 h-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+          <svg className="w-5 h-5 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
             <rect x="2" y="2" width="16" height="16" rx="2" />
           </svg>
         </button>
@@ -132,9 +155,9 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
           </div>
 
           {/* Shared input bar */}
-          <div className="border-t border-cocreator-light bg-white px-3 py-2">
+          <div data-concierge-action-zone className="border-t border-cafe-subtle bg-cafe-surface px-3 py-2">
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] text-gray-400">
+              <span className="text-micro text-cafe-muted">
                 {splitPaneTargetId
                   ? `发往: ${threadMap.get(splitPaneTargetId)?.title ?? splitPaneTargetId}`
                   : '请选择一个窗格'}
@@ -143,12 +166,47 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
             <ChatInput
               key={splitPaneTargetId ?? 'no-target'}
               threadId={splitPaneTargetId ?? undefined}
-              onSend={(content, images, whisper, deliveryMode) =>
-                onSend(content, images, splitPaneTargetId ?? undefined, whisper, deliveryMode)
+              onSend={(
+                content,
+                images,
+                whisper,
+                replyToId,
+                contextAttachments,
+                explicitTargetCats,
+                messageDisposition,
+              ) =>
+                messageDisposition
+                  ? onSend(
+                      content,
+                      images,
+                      splitPaneTargetId ?? undefined,
+                      whisper,
+                      replyToId,
+                      contextAttachments,
+                      explicitTargetCats,
+                      { messageDisposition },
+                    )
+                  : contextAttachments?.length
+                    ? onSend(
+                        content,
+                        images,
+                        splitPaneTargetId ?? undefined,
+                        whisper,
+                        replyToId,
+                        contextAttachments,
+                        explicitTargetCats,
+                      )
+                    : onSend(
+                        content,
+                        images,
+                        splitPaneTargetId ?? undefined,
+                        whisper,
+                        replyToId,
+                        undefined,
+                        explicitTargetCats,
+                      )
               }
-              onStop={() => onStop(splitPaneTargetId ?? undefined)}
-              disabled={!splitPaneTargetId}
-              hasActiveInvocation={isTargetActiveInvocation}
+              disabled={!splitPaneTargetId || isReadonly}
               uploadStatus={uploadStatus}
               uploadError={uploadError}
             />
@@ -157,4 +215,19 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
       </div>
     </div>
   );
+}
+
+type SplitPaneChatViewProps = Pick<SplitPaneViewProps, 'isReadonly' | 'onZoomToThread'>;
+
+/** Production split-preview adapter: one target-aware send lifecycle for its shared composer. */
+export function SplitPaneChatView(props: SplitPaneChatViewProps) {
+  const { handleSend, uploadStatus, uploadError } = useSendMessage();
+  const sendComposerDraft = useCallback<typeof handleSend>(
+    (...args) => {
+      args[7] = { ...args[7], consumeComposerDraft: true };
+      return handleSend(...args);
+    },
+    [handleSend],
+  );
+  return <SplitPaneView {...props} onSend={sendComposerDraft} uploadStatus={uploadStatus} uploadError={uploadError} />;
 }

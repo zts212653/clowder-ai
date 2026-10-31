@@ -1,0 +1,50 @@
+[
+  {
+    "name": "0.34-schema.ts.txt",
+    "commit": "f0614c53e59f7e1e257412063b059b9eb82764cf",
+    "path": "packages/agent-core-v2/src/mcpCore/config-schema.ts",
+    "blob": "d96f509e6b8f6aea8fdceb4e8ca065c5108d24f5",
+    "url": "https://github.com/MoonshotAI/kimi-code/blob/f0614c53e59f7e1e257412063b059b9eb82764cf/packages/agent-core-v2/src/mcpCore/config-schema.ts",
+    "sha256": "4e2cd60744157fc376110c03f1d8485d5f02d03969ed2b2e6707e86d29b58c3c"
+  },
+  {
+    "name": "2.2-schema.ts.txt",
+    "commit": "472192c34c1efad89a369870eff0da0b708ce9bb",
+    "path": "packages/agent-core-v2/src/mcpCore/config-schema.ts",
+    "blob": "a94699527f05d5ad30af958c6eb0fb4a4a232c00",
+    "url": "https://github.com/MoonshotAI/kimi-code/blob/472192c34c1efad89a369870eff0da0b708ce9bb/packages/agent-core-v2/src/mcpCore/config-schema.ts",
+    "sha256": "368dc291391ab105a89f53b62e063635a6a0ecfbbe00764eff35897eeda02666"
+  },
+  {
+    "name": "0.34-loader.ts.txt",
+    "commit": "f0614c53e59f7e1e257412063b059b9eb82764cf",
+    "path": "packages/agent-core/src/mcp/config-loader.ts",
+    "blob": "2500acfcdc5ab8aa37490c21eb67e19cee7db6a7",
+    "url": "https://github.com/MoonshotAI/kimi-code/blob/f0614c53e59f7e1e257412063b059b9eb82764cf/packages/agent-core/src/mcp/config-loader.ts",
+    "sha256": "3d10a928aa244a5187ff2f46618ac79accba864de6ccf1dc7b6f0d0084d797cd"
+  },
+  {
+    "name": "0.34-v2-loader.ts.txt",
+    "commit": "f0614c53e59f7e1e257412063b059b9eb82764cf",
+    "path": "packages/agent-core-v2/src/workspace/workspaceMcpConfig/internal/config-loader.ts",
+    "blob": "2e0106587a0b25e4ba90ddd7a77dfd53b4cb0a7e",
+    "url": "https://github.com/MoonshotAI/kimi-code/blob/f0614c53e59f7e1e257412063b059b9eb82764cf/packages/agent-core-v2/src/workspace/workspaceMcpConfig/internal/config-loader.ts",
+    "sha256": "858496ff76dd2e380ebc1f6a69be79ef11a6fd7c5924559da522dbb331e86ba9"
+  },
+  {
+    "name": "0.34-v2-git.ts.txt",
+    "commit": "f0614c53e59f7e1e257412063b059b9eb82764cf",
+    "path": "packages/agent-core-v2/src/app/git/workTree.ts",
+    "blob": "b34d7345bd59183808f75b316ae07af0a0d63da2",
+    "url": "https://github.com/MoonshotAI/kimi-code/blob/f0614c53e59f7e1e257412063b059b9eb82764cf/packages/agent-core-v2/src/app/git/workTree.ts",
+    "sha256": "f3fef130ca8959e20c71d4d392a7b7f33f916081c0f219d725407cd45a7855f3"
+  },
+  {
+    "name": "LICENSE",
+    "commit": "f0614c53e59f7e1e257412063b059b9eb82764cf",
+    "path": "LICENSE",
+    "blob": "6102a1bc7949a169f10d823a86d4ad161c26b960",
+    "url": "https://github.com/MoonshotAI/kimi-code/blob/f0614c53e59f7e1e257412063b059b9eb82764cf/LICENSE",
+    "sha256": "23cc68e17992e0b512ae2e80afc5787d7d8e0fbfbdb4fff54ec0245508fa400e"
+  }
+]

@@ -5,37 +5,28 @@
  *   draft:{userId}:{threadId}:{invocationId}  → Hash (draft details)
  *   drafts:idx:{userId}:{threadId}            → Set (invocationId members)
  *
- * TTL 默认 300s (5 分钟), 每次 upsert/touch 时重置。
+ * 不设过期（F117 KD-21/KD-23）：草稿活到它的 response R 终局；删除失败由 response-pending 账本在下次
+ * settlement 时重试。升级前写入的 key 带着旧的 EXPIRE，HSET / SADD 不会清除它；索引 key 按 thread 共用，
+ * 旧 EXPIRE 到期会连带删掉升级后新写入的草稿引用，所以 upsert 顺手 PERSIST 两个 key。
  */
 
-import type { CatId } from '@cat-cafe/shared';
+import { type CatId, readMessageOutputLayout } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { DraftRecord, IDraftStore } from '../ports/DraftStore.js';
 import { DraftKeys } from '../redis-keys/draft-keys.js';
-
-const DEFAULT_TTL = 300; // 5 minutes
+import { safeParseMetadata } from './redis-message-parsers.js';
 
 export class RedisDraftStore implements IDraftStore {
   private readonly redis: RedisClient;
-  private readonly ttlSeconds: number | null;
 
-  constructor(redis: RedisClient, options?: { ttlSeconds?: number }) {
+  constructor(redis: RedisClient) {
     this.redis = redis;
-    const ttl = options?.ttlSeconds;
-    if (ttl === undefined) {
-      this.ttlSeconds = DEFAULT_TTL;
-    } else if (!Number.isFinite(ttl)) {
-      this.ttlSeconds = DEFAULT_TTL;
-    } else if (ttl <= 0) {
-      this.ttlSeconds = null;
-    } else {
-      this.ttlSeconds = Math.floor(ttl);
-    }
   }
 
   async upsert(draft: DraftRecord): Promise<void> {
     const detailKey = DraftKeys.detail(draft.userId, draft.threadId, draft.invocationId);
     const indexKey = DraftKeys.index(draft.userId, draft.threadId);
+    const createdAtForMissing = await this.createdAtForMissing(detailKey, draft.createdAt ?? draft.updatedAt);
 
     const fields: Record<string, string> = {
       userId: draft.userId,
@@ -52,27 +43,22 @@ export class RedisDraftStore implements IDraftStore {
       fields.thinking = draft.thinking;
     }
 
+    if (draft.metadata) fields.metadata = JSON.stringify(draft.metadata);
+    if (draft.extra?.outputLayout) fields.extra = JSON.stringify({ outputLayout: draft.extra.outputLayout });
     const pipeline = this.redis.multi();
+    if (!fields.extra) pipeline.hdel(detailKey, 'extra');
+    if (!fields.metadata) pipeline.hdel(detailKey, 'metadata');
+    pipeline.hsetnx(detailKey, 'createdAt', createdAtForMissing);
     pipeline.hset(detailKey, fields);
     pipeline.sadd(indexKey, draft.invocationId);
-    if (this.ttlSeconds !== null) {
-      pipeline.expire(detailKey, this.ttlSeconds);
-      pipeline.expire(indexKey, this.ttlSeconds);
-    }
+    pipeline.persist(detailKey);
+    pipeline.persist(indexKey);
     await pipeline.exec();
   }
 
-  async touch(userId: string, threadId: string, invocationId: string): Promise<void> {
-    if (this.ttlSeconds === null) return;
-    const detailKey = DraftKeys.detail(userId, threadId, invocationId);
-    const indexKey = DraftKeys.index(userId, threadId);
-
-    const pipeline = this.redis.multi();
-    // Update updatedAt so draft sort order stays fresh during tool-only phases
-    pipeline.hset(detailKey, 'updatedAt', String(Date.now()));
-    pipeline.expire(detailKey, this.ttlSeconds);
-    pipeline.expire(indexKey, this.ttlSeconds);
-    await pipeline.exec();
+  private async createdAtForMissing(detailKey: string, fallback: number): Promise<string> {
+    const existingUpdatedAt = await this.redis.hget(detailKey, 'updatedAt');
+    return existingUpdatedAt ?? String(fallback);
   }
 
   async getByThread(userId: string, threadId: string): Promise<DraftRecord[]> {
@@ -92,7 +78,7 @@ export class RedisDraftStore implements IDraftStore {
     for (let i = 0; i < results.length; i++) {
       const [err, data] = results[i]!;
       if (err || !data || typeof data !== 'object') {
-        // Hash expired but index entry remains — mark for cleanup
+        // Hash gone (deleted, or a pre-KD-21 key that expired) but index entry remains — mark for cleanup
         staleIds.push(invocationIds[i]!);
         continue;
       }
@@ -149,15 +135,29 @@ export class RedisDraftStore implements IDraftStore {
         /* ignore parse errors */
       }
     }
+    const outputLayout = this.parseOutputLayout(d.extra);
+    const metadata = safeParseMetadata(d.metadata);
     return {
       userId: d.userId ?? '',
       threadId: d.threadId ?? '',
       invocationId: d.invocationId ?? '',
       catId: (d.catId ?? 'opus') as CatId,
       content: d.content ?? '',
+      createdAt: parseInt(d.createdAt ?? d.updatedAt ?? '0', 10),
       updatedAt: parseInt(d.updatedAt ?? '0', 10),
       ...(toolEvents ? { toolEvents } : {}),
       ...(d.thinking ? { thinking: d.thinking } : {}),
+      ...(metadata ? { metadata } : {}),
+      ...(outputLayout ? { extra: { outputLayout } } : {}),
     };
+  }
+
+  private parseOutputLayout(raw: string | undefined) {
+    if (!raw) return undefined;
+    try {
+      return readMessageOutputLayout(JSON.parse(raw)?.outputLayout);
+    } catch {
+      return undefined;
+    }
   }
 }

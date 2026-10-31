@@ -1,0 +1,44 @@
+# F155 Guide Flow: 添加账户认证 / API Key
+# 引导用户在系统配置中添加新的 API Key 认证账号
+# Schema: OrchestrationFlow v2 (tag-based engine)
+
+schemaVersion: 1
+id: add-account-auth
+name: 添加账户认证
+description: 引导你完成 API Key 认证账号的创建和配置
+
+steps:
+  - id: open-hub
+    target: hub.trigger
+    tips: 点击这里打开 Hub 控制台
+    advance: click
+
+  - id: expand-settings
+    target: settings.group
+    tips: 展开系统配置分组
+    advance: click
+
+  - id: go-to-accounts
+    target: settings.accounts
+    tips: 进入账号配置页面
+    advance: click
+
+  - id: open-create-form
+    target: accounts.create-form
+    tips: 点击展开新增 API Key 认证表单
+    advance: click
+
+  - id: fill-api-key
+    target: accounts.create-details
+    tips: 填写账号显示名、API 服务地址、API Key 和至少一个模型
+    advance: confirm
+
+  - id: submit-account
+    target: accounts.create-submit
+    tips: 填写完成后，点击创建账号
+    advance: click
+
+  - id: done-hint
+    target: accounts.account-list
+    tips: 账号创建成功。接下来可以去成员管理，为成员配置认证与模型
+    advance: confirm

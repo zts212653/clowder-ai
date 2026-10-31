@@ -2,7 +2,7 @@
  * Reviewer Matcher
  * F032: Dynamic reviewer selection based on roster, availability, and thread activity.
  *
- * Rules (铲屎官 confirmed):
+ * Rules (co-creator confirmed):
  * 1. Must be different from author
  * 2. Must have 'peer-reviewer' role
  * 3. Must be available (有猫粮！40 美刀教训)
@@ -80,7 +80,7 @@ export async function resolveReviewer(options: ReviewerMatchOptions): Promise<Re
     ([id, entry]) => id !== authorId && entry.roles.includes('peer-reviewer'),
   );
 
-  // 2. Filter by availability (铲屎官 40 美刀教训！)
+  // 2. Filter by availability (co-creator 40 美刀教训！)
   const availableReviewers = policy.excludeUnavailable
     ? allReviewers.filter(([_, entry]) => entry.available !== false)
     : allReviewers;

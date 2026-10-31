@@ -1,6 +1,7 @@
 export function DownloadIcon({ className = 'w-5 h-5' }: { className?: string }) {
   return (
     <svg
+      aria-hidden="true"
       viewBox="0 0 24 24"
       fill="none"
       className={className}

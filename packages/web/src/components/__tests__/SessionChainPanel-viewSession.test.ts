@@ -18,12 +18,30 @@ vi.mock('@/utils/api-client', () => ({
 vi.mock('../BindNewSessionSection', () => ({
   BindNewSessionSection: () => null,
 }));
+vi.mock('../CloudConversationLink', () => ({
+  CloudConversationLink: () => null,
+}));
 vi.mock('../ContextHealthBar', () => ({
   ContextHealthBar: () => null,
+}));
+vi.mock('../CloudConversationLink', () => ({
+  CloudConversationLink: () => null,
 }));
 vi.mock('../SessionChainInputs', () => ({
   BindSessionInput: () => null,
   SessionIdTag: ({ id }: { id: string }) => React.createElement('span', null, id),
+}));
+vi.mock('@/hooks/useCatData', () => ({
+  formatCatName: (cat: { displayName: string; variantLabel?: string }) =>
+    cat.variantLabel ? `${cat.displayName}（${cat.variantLabel}）` : cat.displayName,
+  useCatData: () => ({
+    getCatById: (id: string) => {
+      const cats: Record<string, { id: string; displayName: string }> = {
+        opus: { id: 'opus', displayName: '布偶猫' },
+      };
+      return cats[id];
+    },
+  }),
 }));
 
 const sealedSession = {
@@ -80,8 +98,50 @@ describe('SessionChainPanel onViewSession', () => {
     return defaultProps;
   }
 
+  /** Sealed section is default-collapsed — expand it first. */
+  async function expandSealedSection() {
+    const sealedBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('已封存'));
+    expect(sealedBtn).toBeTruthy();
+    await act(async () => {
+      sealedBtn?.click();
+    });
+  }
+
+  it('keeps scoped transcript viewing available without offering home resume', async () => {
+    mocks.apiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        sessions: [
+          {
+            ...sealedSession,
+            scopedInvocation: {
+              invocationId: 'actual-child',
+              executionScope: 'collective-participation',
+              originMessageId: 'source',
+            },
+          },
+        ],
+      }),
+    });
+    const { SessionChainPanel } = await import('../SessionChainPanel');
+    await act(async () =>
+      root.render(
+        React.createElement(SessionChainPanel, {
+          threadId: 'scoped-thread',
+          catInvocations: {},
+          onViewSession: vi.fn(),
+        }),
+      ),
+    );
+    await expandSealedSection();
+    expect(container.textContent).toContain('独立执行');
+    expect(container.querySelector('[data-testid="restore-session-sess-abc"]')).toBeNull();
+    expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === '查看')).toBe(true);
+  });
+
   it('renders a "查看" button on sealed sessions when onViewSession is provided', async () => {
     await renderPanel();
+    await expandSealedSection();
 
     const viewBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '查看');
     expect(viewBtn).toBeTruthy();
@@ -89,6 +149,7 @@ describe('SessionChainPanel onViewSession', () => {
 
   it('calls onViewSession with sessionId when "查看" is clicked', async () => {
     const props = await renderPanel();
+    await expandSealedSection();
 
     const viewBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '查看');
     expect(viewBtn).toBeTruthy();
@@ -97,6 +158,6 @@ describe('SessionChainPanel onViewSession', () => {
       viewBtn?.click();
     });
 
-    expect(props.onViewSession).toHaveBeenCalledWith('sess-abc');
+    expect(props.onViewSession).toHaveBeenCalledWith('sess-abc', 'opus');
   });
 });

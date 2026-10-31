@@ -2,7 +2,7 @@ import { stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { SignalSourceConfig } from '@cat-cafe/shared';
 import { SignalSourceConfigSchema } from '@cat-cafe/shared';
-import { Redis } from 'ioredis';
+import { createRedisClient } from '@cat-cafe/shared/utils';
 import { resolveSignalPaths } from '../../domains/signals/config/signal-paths.js';
 import { saveSignalSources } from '../../domains/signals/config/sources-loader.js';
 import { ArticleStoreService, type SignalRedisIndexClient } from '../../domains/signals/services/article-store.js';
@@ -199,7 +199,7 @@ export async function runMigrateSignalsCli(
     let skippedArticles = parserSkippedArticles;
     let migratedArticles = 0;
 
-    const redis = args.redisUrl ? new Redis(args.redisUrl) : undefined;
+    const redis = args.redisUrl ? createRedisClient({ url: args.redisUrl }) : undefined;
     const store = args.dryRun
       ? undefined
       : new ArticleStoreService({

@@ -1,7 +1,12 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { apiFetch } from '@/utils/api-client';
 import { useVoiceInput } from '../useVoiceInput';
+
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: vi.fn(),
+}));
 
 vi.mock('@/utils/transcription-corrector', () => ({
   correctTranscription: (t: string) => `[corrected] ${t}`,
@@ -79,6 +84,7 @@ function HookHost() {
 let root: Root;
 let container: HTMLDivElement;
 let mockStream: ReturnType<typeof createMockStream>;
+const mockApiFetch = vi.mocked(apiFetch);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -101,6 +107,10 @@ beforeEach(() => {
     configurable: true,
   });
   globalThis.fetch = vi.fn();
+  mockApiFetch.mockResolvedValue({
+    ok: true,
+    json: () => Promise.resolve({ endpoints: {} }),
+  } as Response);
 
   act(() => {
     root.render(React.createElement(HookHost));
@@ -330,11 +340,48 @@ describe('useVoiceInput', () => {
     });
 
     const [url, opts] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(url).toContain('/v1/audio/transcriptions');
+    expect(url).toBe('http://127.0.0.1:9876/v1/audio/transcriptions');
     expect(opts.method).toBe('POST');
     expect(opts.body).toBeInstanceOf(FormData);
     expect((opts.body as FormData).get('language')).toBe('zh');
     expect((opts.body as FormData).get('initial_prompt')).toBeTruthy();
+  });
+
+  it('uses runtime service endpoints for custom voice service ports', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          endpoints: {
+            'whisper-stt': 'http://127.0.0.1:19976',
+            'llm-postprocess': 'http://localhost:19978',
+          },
+        }),
+    } as Response);
+    (globalThis.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ text: 'raw transcript' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ text: 'refined transcript' }) });
+    const now = Date.now();
+    vi.setSystemTime(now);
+
+    await act(async () => {
+      await hook().startRecording();
+    });
+    vi.setSystemTime(now + 1000);
+    await act(async () => {
+      hook().stopRecording();
+    });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(
+      'http://127.0.0.1:19976/v1/audio/transcriptions',
+    );
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1][0]).toBe(
+      'http://127.0.0.1:19978/v1/text/refine',
+    );
+    expect(hook().transcript).toBe('[corrected] refined transcript');
   });
 
   it('clears previous error on new recording', async () => {

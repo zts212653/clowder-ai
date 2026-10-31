@@ -1,0 +1,185 @@
+/**
+ * F246: Approval Hub aggregation routes.
+ *
+ * GET /api/approval-hub/pending — query all registered adapters for pending
+ * proposals, merge + sort by createdAt desc, return unified ApprovalItem[].
+ *
+ * GET /api/approval-hub/settled — query all adapters that implement listSettled,
+ * merge + sort by decidedAt desc, return SettledApprovalItem[].
+ * F246 Phase F: Approval history view (AC-F5).
+ *
+ * Fresh owner read-through. Legacy history may prepare bounded derived indexes;
+ * this endpoint never changes a canonical user decision or its payload.
+ */
+
+import { performance } from 'node:perf_hooks';
+import type { ApprovalHistoryPageRequest, ApprovalProducerId } from '@cat-cafe/shared';
+import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
+import type { ApprovalProducerRegistry } from '../domains/approval-hub/ApprovalProducerRegistry.js';
+import { readApprovalHistoryPage } from '../domains/approval-hub/approval-history-page.js';
+import { resolveUserId } from '../utils/request-identity.js';
+
+const MAX_SETTLED_LIMIT = 200;
+const DEFAULT_SETTLED_LIMIT = 50;
+
+export interface ApprovalHubRoutesOptions {
+  registry: ApprovalProducerRegistry;
+}
+
+type ApprovalHubQuery = 'pending' | 'settled';
+
+interface MeasuredAdapterCall<T> {
+  producerId: ApprovalProducerId;
+  run: () => T[] | Promise<T[]>;
+}
+
+function elapsedMs(startedAt: number): number {
+  return Math.round((performance.now() - startedAt) * 1_000) / 1_000;
+}
+
+async function measuredFanOut<T>(
+  log: FastifyBaseLogger,
+  query: ApprovalHubQuery,
+  calls: Array<MeasuredAdapterCall<T>>,
+): Promise<T[]> {
+  const totalStartedAt = performance.now();
+  const outcomes = await Promise.all(
+    calls.map(async ({ producerId, run }) => {
+      const adapterStartedAt = performance.now();
+      try {
+        const items = await run();
+        log.info(
+          {
+            feature: 'F246',
+            measurement: 'approval_hub_fanout',
+            query,
+            scope: 'adapter',
+            producerId,
+            durationMs: elapsedMs(adapterStartedAt),
+            itemCount: items.length,
+            outcome: 'success',
+          },
+          '[F246] approval hub adapter query completed',
+        );
+        return { ok: true as const, items };
+      } catch (err) {
+        log.error(
+          {
+            err,
+            feature: 'F246',
+            measurement: 'approval_hub_fanout',
+            query,
+            scope: 'adapter',
+            producerId,
+            durationMs: elapsedMs(adapterStartedAt),
+            itemCount: 0,
+            outcome: 'error',
+          },
+          '[F246] approval hub adapter query failed',
+        );
+        return { ok: false as const, error: err };
+      }
+    }),
+  );
+
+  const items = outcomes.flatMap((outcome) => (outcome.ok ? outcome.items : []));
+  const failure = outcomes.find((outcome) => !outcome.ok);
+  log[failure ? 'error' : 'info'](
+    {
+      ...(failure && !failure.ok ? { err: failure.error } : {}),
+      feature: 'F246',
+      measurement: 'approval_hub_fanout',
+      query,
+      scope: 'total',
+      producerId: 'all',
+      durationMs: elapsedMs(totalStartedAt),
+      itemCount: items.length,
+      outcome: failure ? 'error' : 'success',
+    },
+    failure ? '[F246] approval hub fan-out failed closed' : '[F246] approval hub fan-out completed',
+  );
+  if (failure && !failure.ok) throw failure.error;
+  return items;
+}
+
+export const approvalHubRoutes: FastifyPluginAsync<ApprovalHubRoutesOptions> = async (app, opts) => {
+  const { registry } = opts;
+
+  app.get('/api/approval-hub/settled/page', async (request, reply) => {
+    const owner = resolveUserId(request);
+    if (!owner) return reply.status(401).send({ error: 'Identity required' });
+    const query = request.query as Record<string, unknown>;
+    if (
+      Object.keys(query).some((key) => !['limit', 'cursor', 'producer', 'resolution'].includes(key)) ||
+      Object.values(query).some((value) => typeof value !== 'string')
+    )
+      return reply.status(400).send({ error: 'Invalid approval history query' });
+    return readApprovalHistoryPage(registry, owner, {
+      ...(query.limit === undefined ? {} : { limit: Number(query.limit) }),
+      ...(query.cursor === undefined ? {} : { cursor: query.cursor as string }),
+      ...(query.producer === undefined ? {} : { producer: query.producer as ApprovalHistoryPageRequest['producer'] }),
+      ...(query.resolution === undefined
+        ? {}
+        : { resolution: query.resolution as ApprovalHistoryPageRequest['resolution'] }),
+    });
+  });
+
+  app.get('/api/approval-hub/pending', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+
+    const items = (
+      await measuredFanOut(
+        request.log,
+        'pending',
+        registry.manifest().map(({ id }) => ({
+          producerId: id,
+          run: () => registry.listPendingFor(id, userId),
+        })),
+      )
+    ).sort((a, b) => b.createdAt - a.createdAt);
+
+    return {
+      items,
+      count: items.length,
+      identity: { ownerUserId: userId },
+      manifest: registry.manifest(),
+      coverage: { state: 'complete' as const },
+    };
+  });
+
+  // F246 Phase F: approval history
+  app.get('/api/approval-hub/settled', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+
+    const query = request.query as Record<string, string>;
+    // Cloud P2 fix: floor() before fan-out — non-integer limits sent to Redis ZREVRANGE fail with 500.
+    const parsedLimit = Math.floor(Number(query.limit ?? DEFAULT_SETTLED_LIMIT));
+    const limit =
+      Number.isFinite(parsedLimit) && parsedLimit > 0
+        ? Math.min(parsedLimit, MAX_SETTLED_LIMIT)
+        : DEFAULT_SETTLED_LIMIT;
+
+    const items = (
+      await measuredFanOut(
+        request.log,
+        'settled',
+        registry.manifest().map(({ id }) => ({
+          producerId: id,
+          run: () => registry.listSettledFor(id, userId, limit),
+        })),
+      )
+    )
+      .sort((a, b) => b.decidedAt - a.decidedAt)
+      .slice(0, limit);
+
+    return { items, count: items.length, manifest: registry.manifest() };
+  });
+};

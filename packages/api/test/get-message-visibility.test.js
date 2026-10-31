@@ -1,0 +1,769 @@
+/**
+ * #699 P1-1: get-message route must enforce visibility/permission checks
+ * RED → GREEN: tests that the target message returned by GET /api/callbacks/get-message
+ * is filtered by canViewMessage, userId scope, and delivery status.
+ */
+
+import assert from 'node:assert/strict';
+import { beforeEach, describe, test } from 'node:test';
+import Fastify from 'fastify';
+import './helpers/setup-cat-registry.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
+
+function createMockSocketManager() {
+  return {
+    broadcastAgentMessage() {},
+    getMessages() {
+      return [];
+    },
+  };
+}
+
+describe('GET /api/callbacks/get-message visibility', () => {
+  let registry;
+  let messageStore;
+  let threadStore;
+  let invocationQueue;
+
+  beforeEach(async () => {
+    const { InvocationRegistry } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+
+    registry = new InvocationRegistry();
+    messageStore = new MessageStore();
+    threadStore = new ThreadStore();
+    invocationQueue = new InvocationQueue();
+  });
+
+  async function createApp() {
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const app = Fastify();
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      socketManager: createMockSocketManager(),
+      threadStore,
+      invocationQueue,
+      evidenceStore: {
+        search: async () => [],
+        health: async () => true,
+        initialize: async () => {},
+        upsert: async () => {},
+        deleteByAnchor: async () => {},
+        getByAnchor: async () => null,
+      },
+      reflectionService: { reflect: async () => '' },
+      markerQueue: {
+        submit: async (m) => ({ id: 'mk-1', createdAt: new Date().toISOString(), ...m }),
+        list: async () => [],
+        transition: async () => {},
+      },
+    });
+    return app;
+  }
+
+  test('retired game callback is absent from the full callback registration', async () => {
+    const app = await createApp();
+    try {
+      const response = await app.inject({ method: 'POST', url: '/api/callbacks/submit-game-action', payload: {} });
+      assert.equal(response.statusCode, 404, response.body);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test('returns 404 for whisper message not visible to calling cat (play mode)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    // Play mode thread — whisper filtering enforced for cats
+    const thread = threadStore.create('user-1', 'whisper test');
+    threadStore.updateThinkingMode(thread.id, 'play');
+
+    // Create a whisper visible only to 'codex', not 'opus'
+    const whisperMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'secret whisper',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        visibility: 'whisper',
+        whisperTo: ['codex'],
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${whisperMsg.id}`,
+      headers: {
+        'x-invocation-id': invocationId,
+        'x-callback-token': callbackToken,
+      },
+    });
+
+    assert.equal(res.statusCode, 404, 'whisper not addressed to caller should be 404 in play mode');
+  });
+
+  // #699 P1 (gpt52 intake review #2111): system/briefing are internal, non-routable —
+  test('message and thread drills preserve external from in anchor and full projections', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const thread = threadStore.create('user-1', 'external identity');
+    const from = { kind: 'external', connectorId: 'github-wait', sender: { id: 'actor', name: 'Alice' } };
+    const message = messageStore.append({
+      userId: 'user-1',
+      threadId: thread.id,
+      from,
+      content: 'CI finished',
+      mentions: [],
+      timestamp: 1,
+      source: { connector: 'github-wait', label: 'GitHub Wait', icon: 'github' },
+    });
+    try {
+      for (const url of [
+        `/api/callbacks/get-message?messageId=${message.id}`,
+        `/api/callbacks/get-message?messageId=${message.id}&mode=full`,
+        `/api/callbacks/thread-context?threadId=${thread.id}`,
+        `/api/callbacks/thread-context?threadId=${thread.id}&responseMode=full`,
+      ]) {
+        const response = await app.inject({
+          method: 'GET',
+          url,
+          headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        });
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        const projected = body.message ?? body.messages.find((item) => item.id === message.id);
+        assert.deepEqual(projected.from, from, url);
+        assert.equal(projected.speaker, 'Alice via GitHub Wait', url);
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
+  // get-message must align with isEligibleReplyParent and never return their raw content.
+  test('returns 404 for system message (internal, non-routable)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const thread = threadStore.create('user-1', 'system test');
+    const sysMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: 'SYSTEM BADGE — internal',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${sysMsg.id}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(res.statusCode, 404, 'system message must not be retrievable via get-message');
+  });
+
+  test('returns 404 for briefing message (internal, non-routable)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const thread = threadStore.create('user-1', 'briefing test');
+    const briefingMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'TOP SECRET BRIEFING',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        origin: 'briefing',
+      }),
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${briefingMsg.id}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(res.statusCode, 404, 'briefing message must not be retrievable via get-message');
+  });
+
+  test('excludes system/briefing neighbors from get-message context', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const thread = threadStore.create('user-1', 'context test');
+    const target = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'normal target',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: 'SYSTEM BADGE neighbor',
+        mentions: [],
+        timestamp: 1001,
+        threadId: thread.id,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'TOP SECRET BRIEFING neighbor',
+        mentions: [],
+        timestamp: 1002,
+        threadId: thread.id,
+        origin: 'briefing',
+      }),
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${target.id}&contextCount=5`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(res.statusCode, 200);
+    const ctxContents = (JSON.parse(res.body).context ?? []).map((m) => m.content);
+    assert.ok(!ctxContents.includes('SYSTEM BADGE neighbor'), 'system must not appear in context');
+    assert.ok(!ctxContents.includes('TOP SECRET BRIEFING neighbor'), 'briefing must not appear in context');
+  });
+
+  test('returns whisper in debug mode (full transparency)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    // Debug mode (default) — cats see everything like the user
+    const whisperMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'whisper for codex',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-debug',
+        visibility: 'whisper',
+        whisperTo: ['codex'],
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${whisperMsg.id}`,
+      headers: {
+        'x-invocation-id': invocationId,
+        'x-callback-token': callbackToken,
+      },
+    });
+
+    assert.equal(res.statusCode, 200, 'whisper should be visible in debug mode (full transparency)');
+  });
+
+  test('returns 404 for message belonging to different userId', async () => {
+    const app = await createApp();
+    // Invocation for user-1
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    // Message belongs to user-2
+    const otherUserMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-2',
+        catId: null,
+        content: 'other user message',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-other',
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${otherUserMsg.id}`,
+      headers: {
+        'x-invocation-id': invocationId,
+        'x-callback-token': callbackToken,
+      },
+    });
+
+    assert.equal(res.statusCode, 404, 'message from different user scope should be 404');
+  });
+
+  test('returns message when caller has permission', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const msg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'hello opus',
+        mentions: ['opus'],
+        timestamp: 1000,
+        threadId: 'thread-1',
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${msg.id}`,
+      headers: {
+        'x-invocation-id': invocationId,
+        'x-callback-token': callbackToken,
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.message.id, msg.id);
+    assert.equal(body.message.content, 'hello opus');
+  });
+
+  test('returns queued cat speech already published to the timeline', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const published = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: 'published source-cat seed',
+        mentions: ['opus'],
+        timestamp: 1000,
+        threadId: 'thread-published',
+        deliveryStatus: 'queued',
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${published.id}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(JSON.parse(res.body).message.content, 'published source-cat seed');
+  });
+
+  test('does not expose undelivered queued user work through cat get-message cognition', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const queued = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'not published to History and not generally delivered to cats',
+        mentions: ['opus'],
+        timestamp: 1100,
+        threadId: 'thread-browser-only-queued-user',
+        deliveryStatus: 'queued',
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${queued.id}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(res.statusCode, 404);
+  });
+
+  test('never treats a queued receipt field as History publication authority', async () => {
+    const app = await createApp();
+    const exposedCaller = await registry.create('user-1', 'opus');
+    const unexposedCaller = await registry.create('user-1', 'codex');
+    const queued = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'survives the child session that first read it',
+        mentions: ['opus'],
+        timestamp: 1200,
+        threadId: 'thread-exposed-queued-user',
+        deliveryStatus: 'queued',
+      }),
+    );
+    const admission = invocationQueue.enqueueDurableNow({
+      from: { kind: 'user', userId: 'user-1' },
+      threadId: queued.threadId,
+      userId: 'user-1',
+      kind: 'conversation_input',
+      ownerAuthProvenance: 'strict',
+      content: queued.content,
+      messageId: queued.id,
+      targetCats: ['opus', 'codex'],
+      intent: 'execute',
+    });
+    const opusEntry = admission.entry;
+    assert.ok(opusEntry);
+
+    const exposed = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${queued.id}&mode=full`,
+      headers: {
+        'x-invocation-id': exposedCaller.invocationId,
+        'x-callback-token': exposedCaller.callbackToken,
+      },
+    });
+    assert.equal(exposed.statusCode, 404, exposed.body);
+
+    const unexposed = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${queued.id}&mode=full`,
+      headers: {
+        'x-invocation-id': unexposedCaller.invocationId,
+        'x-callback-token': unexposedCaller.callbackToken,
+      },
+    });
+    assert.equal(unexposed.statusCode, 404);
+  });
+
+  test('managed-hold exact reads preserve owner and hidden-trigger boundaries after exposure', async () => {
+    const app = await createApp();
+    const owner = await registry.create('user-1', 'opus', 'thread-managed-owner');
+    const visible = messageStore.append({
+      userId: 'user-1',
+      from: { kind: 'system', service: 'managed-command-wake' },
+      content: 'owner-visible managed wake',
+      mentions: ['opus'],
+      timestamp: 1300,
+      threadId: 'thread-managed-owner',
+      deliveryStatus: 'queued',
+      source: {
+        connector: 'hold-ball',
+        label: '持球通知',
+        meta: {
+          managedHold: true,
+          phase: 'wake',
+          taskId: 'task-owner-visible',
+          threadId: 'thread-managed-owner',
+          catId: 'opus',
+        },
+      },
+    });
+    messageStore.markDelivered(visible.id, 1350);
+    const hidden = messageStore.append({
+      userId: 'user-1',
+      from: { kind: 'system', service: 'managed-command-wake' },
+      content: 'hidden managed trigger',
+      mentions: ['opus'],
+      timestamp: 1400,
+      threadId: 'thread-managed-owner',
+      deliveryStatus: 'queued',
+      extra: { scheduler: { hiddenTrigger: true } },
+      source: {
+        connector: 'hold-ball',
+        label: '持球通知',
+        meta: {
+          managedHold: true,
+          phase: 'wake',
+          taskId: 'task-hidden',
+          threadId: 'thread-managed-owner',
+          catId: 'opus',
+        },
+      },
+    });
+    messageStore.markDelivered(hidden.id, 1450);
+
+    const ownerRead = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${visible.id}&mode=full`,
+      headers: { 'x-invocation-id': owner.invocationId, 'x-callback-token': owner.callbackToken },
+    });
+    assert.equal(ownerRead.statusCode, 200, ownerRead.body);
+
+    const hiddenRead = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${hidden.id}&mode=full`,
+      headers: { 'x-invocation-id': owner.invocationId, 'x-callback-token': owner.callbackToken },
+    });
+    assert.equal(hiddenRead.statusCode, 404, 'hidden managed triggers stay unreadable after an exposure witness');
+
+    const foreignOwner = await registry.create('user-2', 'opus', 'thread-managed-owner');
+    const foreignRead = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${visible.id}&mode=full`,
+      headers: {
+        'x-invocation-id': foreignOwner.invocationId,
+        'x-callback-token': foreignOwner.callbackToken,
+      },
+    });
+    assert.equal(foreignRead.statusCode, 404, 'scheduler provenance must not bypass the durable owner boundary');
+  });
+
+  test('get-message defaults to preview (bounded); mode=full returns complete content (F236 AC-B1/B2)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const longContent = 'X'.repeat(500);
+    const msg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: longContent,
+        mentions: ['opus'],
+        timestamp: 1000,
+        threadId: 'thread-1',
+      }),
+    );
+
+    // default = preview: bounded excerpt + honest flags
+    const previewRes = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${msg.id}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(previewRes.statusCode, 200);
+    const previewBody = JSON.parse(previewRes.body);
+    assert.equal(previewBody.message.truncated, true);
+    assert.equal(previewBody.message.content.length, 280);
+    assert.equal(previewBody.message.contentLength, 500);
+    // F236 R1 / 云端 Codex P2: preview truncation carries a one-hop drill pointer to full content
+    assert.deepEqual(previewBody.message.drillDown, {
+      tool: 'cat_cafe_get_message',
+      args: { messageId: msg.id, mode: 'full' },
+    });
+
+    // mode=full = complete original content (drill terminal)
+    const fullRes = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${msg.id}&mode=full`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(fullRes.statusCode, 200);
+    const fullBody = JSON.parse(fullRes.body);
+    assert.equal(fullBody.message.content, longContent);
+    assert.equal(fullBody.message.truncated, false);
+  });
+
+  test('returns whisper when caller is in whisperTo', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const whisperMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'whisper for opus',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-1',
+        visibility: 'whisper',
+        whisperTo: ['opus'],
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${whisperMsg.id}`,
+      headers: {
+        'x-invocation-id': invocationId,
+        'x-callback-token': callbackToken,
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.message.id, whisperMsg.id);
+  });
+
+  test('context excludes whispers not visible to calling cat (play mode)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    // Play mode thread — whisper filtering enforced
+    const thread = threadStore.create('user-1', 'ctx whisper test');
+    threadStore.updateThinkingMode(thread.id, 'play');
+
+    // Public message (the target)
+    const target = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'public target',
+        mentions: [],
+        timestamp: 2000,
+        threadId: thread.id,
+      }),
+    );
+
+    // Whisper before target — addressed to codex, NOT opus
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'secret for codex only',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        visibility: 'whisper',
+        whisperTo: ['codex'],
+      }),
+    );
+
+    // Public message after target — should appear in context
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'public after',
+        mentions: [],
+        timestamp: 3000,
+        threadId: thread.id,
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${target.id}&contextCount=5`,
+      headers: {
+        'x-invocation-id': invocationId,
+        'x-callback-token': callbackToken,
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.ok(body.context, 'context should be present');
+    const contextContents = body.context.map((m) => m.content);
+    assert.ok(!contextContents.includes('secret for codex only'), 'whisper for other cat must not appear in context');
+    assert.ok(contextContents.includes('public after'), 'public messages should appear in context');
+  });
+
+  test('returns other-cat persisted stream-origin speech in play-mode thread', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    // Create a play-mode thread
+    const thread = threadStore.create('user-1', 'play thread');
+    threadStore.updateThinkingMode(thread.id, 'play');
+
+    // codex's stream message in that thread
+    const streamMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: 'codex persisted answer',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        origin: 'stream',
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${streamMsg.id}`,
+      headers: {
+        'x-invocation-id': invocationId,
+        'x-callback-token': callbackToken,
+      },
+    });
+
+    assert.equal(res.statusCode, 200, 'transport origin must not make persisted speech private');
+    assert.equal(JSON.parse(res.body).message.content, 'codex persisted answer');
+  });
+
+  test('returns own stream message in play-mode thread', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const thread = threadStore.create('user-1', 'play thread');
+    threadStore.updateThinkingMode(thread.id, 'play');
+
+    // opus's own stream message
+    const ownStream = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'opus stream thinking',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        origin: 'stream',
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${ownStream.id}`,
+      headers: {
+        'x-invocation-id': invocationId,
+        'x-callback-token': callbackToken,
+      },
+    });
+
+    assert.equal(res.statusCode, 200, 'own stream message should be visible');
+  });
+
+  test('context includes other-cat persisted stream-origin speech in play-mode thread', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const thread = threadStore.create('user-1', 'play thread');
+    threadStore.updateThinkingMode(thread.id, 'play');
+
+    // Target: user message (visible)
+    const target = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'user question',
+        mentions: [],
+        timestamp: 2000,
+        threadId: thread.id,
+      }),
+    );
+
+    // codex persisted answer in the same thread — visible to opus
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: 'codex persisted answer',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        origin: 'stream',
+      }),
+    );
+
+    // opus's own stream — should be visible
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'opus own stream',
+        mentions: [],
+        timestamp: 3000,
+        threadId: thread.id,
+        origin: 'stream',
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${target.id}&contextCount=5`,
+      headers: {
+        'x-invocation-id': invocationId,
+        'x-callback-token': callbackToken,
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.ok(body.context, 'context should be present');
+    const contextContents = body.context.map((m) => m.content);
+    assert.ok(contextContents.includes('codex persisted answer'), 'other-cat persisted speech must be visible');
+    assert.ok(contextContents.includes('opus own stream'), 'own stream should be visible');
+  });
+});

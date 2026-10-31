@@ -1,0 +1,123 @@
+/**
+ * F229 Phase E0: PetSkinContract v0 projection.
+ *
+ * Pure function — conciergeState → petState. Zero storage, zero sync (KD-18).
+ * Full contract: docs/features/F229-petskin-contract.md
+ */
+
+import type { ConciergeBallState } from '../types/concierge.js';
+
+/**
+ * Codex Pet animation state — E1 full nine-state set.
+ * Atlas-based skins use all 9; individual-sprite skins (ragdoll-v1) map
+ * new states to their existing sprite subset via the resolver.
+ */
+export type CodexPetState =
+  | 'idle'
+  | 'running-right'
+  | 'running-left'
+  | 'waving'
+  | 'jumping'
+  | 'failed'
+  | 'waiting'
+  | 'running'
+  | 'review';
+
+/** Projection mapping — concierge ball state → codex pet state. */
+export interface PetStateProjection {
+  readonly version: 1;
+  readonly fallback: 'idle';
+  readonly map: Readonly<Partial<Record<ConciergeBallState, CodexPetState>>>;
+}
+
+/**
+ * V0 default projection (aligned with F229-petskin-contract.md).
+ *
+ * | ConciergeBallState    | CodexPetState | Why                                    |
+ * |-----------------------|---------------|----------------------------------------|
+ * | idle                  | idle          | Quiet baseline                         |
+ * | sleeping              | idle          | Quiet state, no dedicated animation    |
+ * | listening             | idle          | Passive input, visually quiet           |
+ * | thinking              | running       | Duty cat is working                    |
+ * | found                 | review        | Result ready                           |
+ * | needs-confirmation    | idle          | v0 defers 'waiting'; status dot enough |
+ * | handoff               | running       | Transitioning / relay                  |
+ * | error                 | failed        | Blocked or stuck                       |
+ */
+export const PET_STATE_PROJECTION_V0: PetStateProjection = {
+  version: 1,
+  fallback: 'idle',
+  map: {
+    idle: 'idle',
+    sleeping: 'idle',
+    listening: 'idle',
+    thinking: 'running',
+    found: 'review',
+    'needs-confirmation': 'idle',
+    handoff: 'running',
+    error: 'failed',
+  },
+} as const;
+
+/**
+ * V1 projection — nine-state atlas mapping (E1: yanyan-codex + future atlas skins).
+ *
+ * Key differences from V0:
+ * - listening → waiting (V0: idle) — now has dedicated waiting animation
+ * - needs-confirmation → waiting (V0: idle) — pending user action
+ * - handoff → running-right (V0: running) — directional relay animation
+ *
+ * | ConciergeBallState    | CodexPetState  | Why                                    |
+ * |-----------------------|----------------|----------------------------------------|
+ * | idle                  | idle           | Quiet baseline                         |
+ * | sleeping              | idle           | Quiet state                            |
+ * | listening             | waiting        | Passive input → waiting animation      |
+ * | thinking              | running        | Duty cat is working                    |
+ * | found                 | review         | Result ready for inspection            |
+ * | needs-confirmation    | waiting        | Pending user action                    |
+ * | handoff               | running-right  | Relay in progress, directional         |
+ * | error                 | failed         | Blocked or stuck                       |
+ */
+export const PET_STATE_PROJECTION_V1: PetStateProjection = {
+  version: 1,
+  fallback: 'idle',
+  map: {
+    idle: 'idle',
+    sleeping: 'idle',
+    listening: 'waiting',
+    thinking: 'running',
+    found: 'review',
+    'needs-confirmation': 'waiting',
+    handoff: 'running-right',
+    error: 'failed',
+  },
+} as const;
+
+/**
+ * Pure projection: ConciergeBallState → CodexPetState.
+ *
+ * - Deterministic, no side effects, no storage.
+ * - Unknown/unmapped values fall back to `projection.fallback` ('idle').
+ */
+export function projectToPetState(ballState: string, projection: PetStateProjection): CodexPetState {
+  return projection.map[ballState as ConciergeBallState] ?? projection.fallback;
+}
+
+// ---------------------------------------------------------------------------
+// E4: Autonomous Behavior Engine types
+// ---------------------------------------------------------------------------
+
+/** Subset of CodexPetState used by autonomous behaviors (OQ-9 v0 existing sprites). */
+export type AutonomousPetState = 'idle' | 'jumping' | 'waving' | 'running' | 'running-left' | 'running-right';
+
+/** Output of usePetBehavior() — visual overlay that composes with business pet state. */
+export interface PetBehaviorOutput {
+  /** Visual pet state when autonomous is active, null when business takes priority. */
+  visualState: CodexPetState | null;
+  /** Micro-bubble overlay emoji (null = no overlay). */
+  overlay: string | null;
+  /** Position intent — delta from current position in px (null = stay put). */
+  positionDelta: { dx: number; dy: number } | null;
+  /** Whether autonomous layer is currently active (for debugging / settings UI). */
+  isAutonomousActive: boolean;
+}

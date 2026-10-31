@@ -1,0 +1,174 @@
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ExpandableProse } from '@/components/content-overflow';
+import { type CatData, formatCatName } from '@/hooks/useCatData';
+import { resolveAvatarUrl } from '@/lib/avatar-url';
+import { catColorVar } from '@/lib/cat-slug';
+import { isRowPrimaryActionTarget } from '@/utils/row-primary-action';
+
+interface WhisperCatSelectorProps {
+  cats: CatData[];
+  selected: Set<string>;
+  activeCatIds: Set<string>;
+  onToggle: (catId: string) => void;
+}
+
+/** F108 Scene 2 v2: Mention-like floating popup for whisper target selection.
+ *  Mirrors the @ mention experience: compact, avatar+label+desc, positioned above input. */
+export function WhisperCatSelector({ cats, selected, activeCatIds, onToggle }: WhisperCatSelectorProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollDown, setCanScrollDown] = useState(false);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const check = () => setCanScrollDown(el.scrollHeight > el.clientHeight + el.scrollTop + 4);
+    check();
+    el.addEventListener('scroll', check);
+    return () => el.removeEventListener('scroll', check);
+  }, []);
+
+  return (
+    <div className="absolute bottom-full left-4 mb-2 bg-cafe-surface-canvas rounded-xl shadow-lg border border-cafe overflow-hidden w-64 z-10 max-h-80 flex flex-col">
+      <div className="px-4 py-1.5 text-xs text-semantic-warning font-medium border-b border-cafe-subtle shrink-0">
+        悄悄话目标 · 可多选
+      </div>
+      <div ref={scrollRef} className="overflow-y-auto flex-1">
+        {cats.map((cat) => (
+          <CatRow
+            key={cat.id}
+            cat={cat}
+            isActive={activeCatIds.has(cat.id)}
+            isSelected={selected.has(cat.id)}
+            onToggle={onToggle}
+          />
+        ))}
+      </div>
+      {canScrollDown && (
+        <div className="px-4 py-1 text-micro text-cafe-muted text-center border-t border-cafe-subtle bg-gradient-to-t from-[var(--cafe-surface)] shrink-0">
+          ↓ 还有更多猫猫
+        </div>
+      )}
+      {selected.size === 0 && (
+        <div className="px-4 py-1.5 text-xs text-semantic-critical border-t border-cafe-subtle shrink-0">
+          请至少选一只猫猫
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Compact chip showing selected whisper targets below the input area. */
+export function WhisperTargetChips({
+  cats,
+  selected,
+  onToggle,
+}: {
+  cats: CatData[];
+  selected: Set<string>;
+  onToggle: (catId: string) => void;
+}) {
+  if (selected.size === 0) return null;
+  const selectedCats = cats.filter((c) => selected.has(c.id));
+  return (
+    <div className="px-4 pt-1 flex items-center gap-1.5 flex-wrap">
+      <span className="text-xs text-semantic-warning shrink-0">悄悄话:</span>
+      {selectedCats.map((cat) => (
+        <button
+          key={cat.id}
+          type="button"
+          onClick={() => onToggle(cat.id)}
+          className="text-xs px-2 py-0.5 rounded-full border border-current bg-semantic-warning-surface font-medium transition-colors hover:opacity-70"
+          style={{ color: catColorVar(cat.id, 'primary') }}
+        >
+          {formatCatName(cat)} ×
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function CatRow({
+  cat,
+  isActive,
+  isSelected,
+  onToggle,
+}: {
+  cat: CatData;
+  isActive: boolean;
+  isSelected: boolean;
+  onToggle: (catId: string) => void;
+}) {
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      if (!isActive) onToggle(cat.id);
+    },
+    [isActive, cat.id, onToggle],
+  );
+
+  return (
+    // biome-ignore lint/a11y: the nested native button owns keyboard/screen-reader semantics; the wrapper restores the surrounding pointer hit area
+    <div
+      onMouseDown={(event) => {
+        if (isRowPrimaryActionTarget(event.target, event.currentTarget)) handleClick(event);
+      }}
+      className={`w-full px-4 py-2.5 transition-colors ${
+        isActive
+          ? 'cursor-not-allowed opacity-40'
+          : isSelected
+            ? 'cursor-pointer bg-cafe-surface-elevated'
+            : 'cursor-pointer hover:bg-cafe-surface-elevated'
+      }`}
+    >
+      <button
+        type="button"
+        onMouseDown={handleClick}
+        disabled={isActive}
+        className={`flex w-full items-center gap-3 text-left ${isActive ? 'cursor-not-allowed' : ''} ${
+          isSelected ? 'bg-cafe-surface-elevated' : ''
+        }`}
+        aria-pressed={isSelected}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={resolveAvatarUrl(cat.avatar)}
+          alt={formatCatName(cat)}
+          className="w-7 h-7 rounded-full shrink-0"
+          onError={(e) => {
+            (e.target as HTMLImageElement).style.display = 'none';
+          }}
+        />
+        <div className="min-w-0 flex-1">
+          <div
+            className="text-sm font-semibold flex items-center gap-1.5"
+            style={{ color: catColorVar(cat.id, 'primary') }}
+          >
+            {formatCatName(cat)}
+            {isSelected && (
+              <svg className="w-3.5 h-3.5 text-semantic-warning shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <path
+                  fillRule="evenodd"
+                  d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            )}
+          </div>
+        </div>
+        {isActive && (
+          <span className="text-micro px-1.5 py-0.5 rounded bg-cafe-surface-elevated text-cafe-muted shrink-0">
+            执行中
+          </span>
+        )}
+      </button>
+      <ExpandableProse
+        text={cat.roleDescription}
+        lines={2}
+        className="ml-10 mt-0.5"
+        contentClassName="text-xs leading-4 text-cafe-muted"
+      />
+    </div>
+  );
+}

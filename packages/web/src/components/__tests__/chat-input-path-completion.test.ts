@@ -23,6 +23,7 @@ vi.mock('@/components/icons/AttachIcon', () => ({
   AttachIcon: () => React.createElement('span', null, 'attach'),
 }));
 vi.mock('@/components/ImagePreview', () => ({ ImagePreview: () => null }));
+vi.mock('@/components/AttachmentPreview', () => ({ AttachmentPreview: () => null }));
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({
@@ -32,7 +33,7 @@ vi.mock('@/hooks/useCatData', () => ({
         displayName: '布偶猫',
         color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
         mentionPatterns: ['布偶猫'],
-        provider: 'anthropic',
+        clientId: 'anthropic',
         defaultModel: 'opus',
         avatar: '/a.png',
         roleDescription: 'dev',

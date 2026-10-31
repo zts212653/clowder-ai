@@ -1,57 +1,477 @@
+import type { RoutingPreflightDecisionV1 } from '@cat-cafe/shared';
+import { InvocationServiceScope } from '../invocation/invocation-service-scope.js';
+import { isRoutingOwnerAttempt } from './routing-owner-attempt.js';
+import { routingPreflightNotice } from './routing-preflight-notice.js';
+import { persistStartupRecovery } from './startup-recovery-projection.js';
 /**
  * Serial Route Strategy
  * Cats respond one by one, each seeing previous responses.
  *
- * A2A support: after each cat completes, its response is checked for @mentions.
- * If a mention is detected and depth allows, the mentioned cat is appended to the
- * worklist — extending the chain within the SAME function call. This preserves
- * previousResponses continuity and correct isFinal semantics (缅因猫 P1-1, P1-2).
- *
- * A2A only triggers here in routeSerial; routeParallel never chains (MVP safety boundary).
+ * A2A successors are admitted only after the current response is durably
+ * completed. Each admitted successor becomes an independent message_wake Queue
+ * entry; this function never extends its own execution worklist.
  */
 
-import type { CatConfig, CatId } from '@cat-cafe/shared';
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
-import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
-import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
+import {
+  type CatConfig,
+  type CatId,
+  catRegistry,
+  createCatId,
+  type OutputCommitDecision,
+  type QueueTerminalConsumptionWitness,
+  resolveWorkflowSopSkill,
+} from '@cat-cafe/shared';
+import type { Span } from '@opentelemetry/api';
+import { context, trace } from '@opentelemetry/api';
 import { getCatVoice } from '../../../../../config/cat-voices.js';
+import {
+  deriveHistoryContextTokenCeiling,
+  resolvePromptInputCeilingTokens,
+} from '../../../../../config/context-capacity.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import {
+  AGENT_ID,
+  ROUTE_TOTAL_CATS_INVOKED,
+  ROUTE_TOTAL_TOKENS,
+  ROUTING_EVENT_WAIT_REASON,
+  THREAD_SYSTEM_KIND,
+  TRIGGER,
+} from '../../../../../infrastructure/telemetry/genai-semconv.js';
+import {
+  c2ExitChecked,
+  c2VerdictHintEmitted,
+  c2VerdictWithoutPassCount,
+  c2VoidHoldChecked,
+  c2VoidHoldHintEmitted,
+  conciergeVerifiedToolActions,
+  conciergeVerifiedToolTargetsPerReply,
+  inlineActionChecked,
+  inlineActionDetected,
+  inlineActionFeedbackWriteFailed,
+  inlineActionFeedbackWritten,
+  inlineActionHintEmitted,
+  inlineActionRoutedSetSkip,
+  inlineActionShadowMiss,
+  legacyGuardWithoutActiveCustodyTotal,
+  lineStartDetected,
+  routingEventWaitBypassTotal,
+  routingEventWaitRedundantHoldPreventedTotal,
+  routingEventWaitRejectedTotal,
+  routingSyntaxCorrectionDetected,
+  routingTerminalReleaseCleanStopTotal,
+  turnCustodyProjectionTotal,
+  turnCustodyShadowComparisonTotal,
+  turnCustodyShadowNewBlockTotal,
+  turnCustodyShadowOldBlockTotal,
+} from '../../../../../infrastructure/telemetry/instruments.js';
+import {
+  boundedTurnCustodySourceCategory,
+  boundedTurnCustodySourceSemantic,
+  classifyTurnCustodyNewOnlyBlock,
+  observesLegacyRoutingBlock,
+  TURN_CUSTODY_CLOSE_CHECKPOINT_ATTR,
+  TURN_CUSTODY_METRIC_CLASSIFICATION_ATTR,
+  TURN_CUSTODY_METRIC_COMPARISON_ATTR,
+  TURN_CUSTODY_METRIC_STATE_ATTR,
+  TURN_CUSTODY_PROJECTION_REASON_ATTR,
+  TURN_CUSTODY_PROJECTION_STATE_ATTR,
+  TURN_CUSTODY_SHADOW_DISAGREEMENT_EVENT_NAME,
+  TURN_CUSTODY_SHADOW_SAMPLE_SPAN,
+  TURN_CUSTODY_SOURCE_CATEGORY_ATTR,
+  TURN_CUSTODY_SOURCE_SEMANTIC_ATTR,
+  TURN_CUSTODY_TRANSITION_OBSERVED_ATTR,
+  TURN_CUSTODY_UNKNOWN_AGREE_BLOCK_EVENT_NAME,
+  TURN_CUSTODY_WAKE_PROVENANCE_ATTR,
+  turnCustodyProjectionReason,
+  turnCustodySourceSemantic,
+} from '../../../../../infrastructure/telemetry/turn-custody-shadow-telemetry.js';
 import { detectUserMention } from '../../../../../routes/user-mention.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
+import type { IBallCustodyIngest } from '../../../../ball-custody/BallCustodyIngest.js';
+import {
+  buildHandedCvoEvent,
+  buildInvocationHeartbeatEvent,
+  buildInvocationStartedEvent,
+  buildVoidPassEvent,
+} from '../../../../ball-custody/ball-custody-events.js';
+import {
+  compareTurnCustodyShadow,
+  type TurnCustodyProjection,
+} from '../../../../ball-custody/TurnCustodyProjectionService.js';
+import {
+  buildA2ADispatchTurnCustodyWake,
+  buildCrossThreadNoObligationWake,
+  turnCustodyWakeSourceCategory,
+} from '../../../../ball-custody/turn-custody-wake-provenance.js';
+import { conciergeContextForCat, prepareConciergeContext } from '../../../../concierge/ConciergeRoutingInterceptor.js';
+import { createConciergeMessageSearch } from '../../../../concierge/concierge-message-search.js';
+import {
+  buildConciergeActions,
+  extractTriagePlanIdsFromActions,
+  projectConciergeStoredContent,
+  stripTriagePlanMarkers,
+  type TriagePlanExtractionDeps,
+} from '../../../../concierge/concierge-reply-validator.js';
+import { buildConciergeSearchContext, type HandleEntry } from '../../../../concierge/concierge-search-context.js';
+import {
+  resolveVerifiedConciergeToolAnchor,
+  VerifiedConciergeToolTargetCollector,
+} from '../../../../concierge/concierge-verified-tool-target.js';
+import {
+  ackGuideCompletion,
+  guideContextForCat,
+  prepareGuideContext,
+} from '../../../../guides/GuideRoutingInterceptor.js';
+import type { MemoryCueOpportunitySeed } from '../../../../memory/cue/MemoryCueInvocationPromptService.js';
+// F260 AC-B8: Entity nudge — scan human input for already-registered entity references.
+import { type EntityNudgeCandidateBatch, EntityNudgeService } from '../../../../memory/EntityNudgeService.js';
+import { sharedEventStore, sharedNudgeCooldown } from '../../../../memory/entity-nudge-state.js';
+import type { PushRecallPresentation } from '../../../../memory/f200-types.js';
+import type { PreparedProactiveMemoryNudge } from '../../../../memory/ProactiveMemoryNudgeService.js';
+import { mergePushRecallPresentations, triggerRecallCorrelation } from '../../../../memory/recall-correlation-hook.js';
+import {
+  preflightRoutingDispatch,
+  routingDispatchPreflightReceipt,
+} from '../../../../routing-context/RoutingDispatchPreflightPort.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import {
   buildInvocationContext,
   buildStaticIdentity,
+  buildStaticIdentityPackOnly,
   type InvocationContext,
 } from '../../context/SystemPromptBuilder.js';
+import { mayDeleteDraft } from '../../freshness/FreshnessDraftCustody.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
-import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
-import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
-import { hydrateReplyPreview, type StoredToolEvent } from '../../stores/ports/MessageStore.js';
-import type { ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
+import { mergePresentationCounts, type PresentationCounts } from '../../session/context/context-surface-projection.js';
+import { buildSessionBootstrap, MAX_SESSION_BOOTSTRAP_TOKENS } from '../../session/SessionBootstrap.js';
+import { createMessageDeliveryBoundary } from '../../stores/message-delivery-boundary.js';
+import {
+  type AppendMessageInput,
+  commitLifecycleResponseFromAppendInput,
+  hydrateCrossThreadReplyHint,
+  hydrateReplyPreview,
+  type StoredMessage,
+  type StoredToolEvent,
+} from '../../stores/ports/MessageStore.js';
+import type {
+  Thread,
+  ThreadMentionRoutingFeedbackItem,
+  ThreadRoutingPolicyV1,
+} from '../../stores/ports/ThreadStore.js';
+import {
+  projectTurnExecutionMessage,
+  type TurnExecutionKind,
+  type TurnExecutionMessageProjection,
+} from '../../stores/ports/TurnExecutionStore.js';
+import { isOwnerVisibleManagedHoldConnector } from '../../stores/visibility.js';
+import { classifyTool } from '../../tool-usage/classify.js';
+import { deriveResultSummary } from '../../tool-usage/derive-result-summary.js';
+import { normalizeMcpToolName } from '../../tool-usage/normalize-mcp-tool-name.js';
+import { RECALL_CORRELATION_EVENT_WINDOW } from '../../tool-usage/ToolEventLog.js';
 import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/StreamingTtsChunker.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
-import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
-import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
+import {
+  type AgentMessage,
+  type AgentMessageType,
+  type AgentService,
+  type MessageMetadata,
+  mergeMessageMetadataSnapshots,
+} from '../../types.js';
+import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
+import { resolveInvocationOrigin } from '../invocation/context-continuity.js';
+import {
+  applyActiveSessionCapacityPin,
+  resolveInvocationCapacitySnapshot,
+  sealBeforeInvocationIfNeeded,
+} from '../invocation/invocation-capacity-snapshot.js';
+import {
+  type InvocationParams,
+  invokeSingleCat,
+  prepareInvocationExecutionBinding,
+} from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
+import {
+  MEMBER_TIMEOUT_REASON,
+  type MemberTimeoutEvent,
+  memberTimeoutErrorText,
+} from '../invocation/member-output-timeout.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
+import { recordTurnOutputVerdict, requireTurnOutputAllowed } from '../invocation/response-draft-settlement.js';
+import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
+import { AgentServiceUnavailableError } from '../registry/AgentServiceUnavailableError.js';
+import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
 import { registerWorklist, unregisterWorklist } from '../routing/WorklistRegistry.js';
+import { accumulateTextAggregate } from '../text-aggregation.js';
+import { CallbackPostTracker, parseCallbackPostResult } from './callback-post-result.js';
+import { commitCompletedRouteResponse, isCollectiveBoundResponse } from './commit-completed-response.js';
+import { extractContextEvalSignals } from './context-eval.js';
+import { readDurableA2ALineage } from './durable-a2a-lineage.js';
+import { validateRoutingSyntax } from './final-routing-slot.js';
+import { buildBriefingMessage } from './format-briefing.js';
+import { resolveEventBackedRoutingExit } from './guards/event-backed-routing-exit.js';
+import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
+import { outputLayoutExtra, RoutingMessageOutputProjection } from './message-output-projection.js';
+import { persistUserFacingSystemInfoNotices } from './persist-system-info-warnings.js';
+import { appendRemoteCancellationNotice, createRemoteCancellationObserver } from './remote-cancellation.js';
+import { resolveResponseTerminal, stoppedByMemberTimeout } from './response-terminal.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
+  collectExactPromptMessageIds,
+  computeContextBudget,
+  contextProjectionFromEpochDecision,
+  createIdempotentPendingProjectionQueue,
+  createRoutingMessageTransform,
   detectContextDegradation,
+  explicitPromptForIncrementalContext,
   getService,
+  getThreadBootcampMemberCount,
+  hydrateVisibleA2ATriggerPromptMessage,
+  isFinalGenerationBriefingBoundary,
+  isUserFacingSystemInfoContent,
+  judgmentSurfaceCueSeeds,
+  mergePersistedPromptMessages,
+  operationalKnowledgeCueSeeds,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
+  shouldPersistContextBriefing,
+  storedMessageTimestamp,
+  subjectSeenCueSeeds,
   toStoredToolEvent,
   upsertMaxBoundary,
 } from './route-helpers.js';
+import { appendThinkingChunk, renderThinkingChunks } from './thinking-chunks.js';
+import { withTimeoutDiagnostics } from './timeout-diagnostics-metadata.js';
+import { detectMatchedVerdictKeyword, shouldWarnVerdictWithoutPass } from './verdict-detect.js';
+import { evaluateVoidHold } from './void-hold-detect.js';
 import { buildVoteTally, checkVoteCompletion, extractVoteFromText, VOTE_RESULT_SOURCE } from './vote-intercept.js';
 
 const log = createModuleLogger('route-serial');
+
+// F260 P1-2 R2 fix: Nudge singletons moved to entity-nudge-state.ts
+// (shared across serial + parallel strategies — see sharedCandidateTracker/sharedNudgeCooldown)
+
+const BALL_CUSTODY_INVOCATION_HEARTBEAT_MIN_INTERVAL_MS = 30_000;
+
+/**
+ * F233 Phase B (B2): fire-and-forget 旁路写 ball.void_pass（声明持球但无 hold_ball / 无行首 @ / 无 structured 路由）。
+ * 紧贴 void-hold internal signal 的 sample emit 调用（此时 storedMsgId 已绑定）。
+ */
+function emitBallVoidPass(
+  ballCustody: IBallCustodyIngest | undefined,
+  threadId: string,
+  messageId: string | undefined,
+  matchedPattern: string | null,
+): void {
+  if (!ballCustody || !messageId) return;
+  ballCustody
+    .record(buildVoidPassEvent({ threadId, messageId, matchedPattern: matchedPattern ?? undefined, at: Date.now() }))
+    .catch((err) => log.warn({ threadId, err }, 'ball.void_pass ingest failed'));
+}
+
+function emitBallHandedCvo(
+  ballCustody: IBallCustodyIngest | undefined,
+  threadId: string,
+  fromCatId: string,
+  messageId: string | undefined,
+): Promise<void> {
+  if (!ballCustody || !messageId) return Promise.resolve();
+  return ballCustody
+    .record(buildHandedCvoEvent({ fromCatId, threadId, messageId, intent: 'handoff', at: Date.now() }))
+    .catch((err) => log.warn({ threadId, fromCatId, err }, 'ball.handed_cvo ingest failed'));
+}
+
+function emitBallInvocationStarted(
+  ballCustody: IBallCustodyIngest | undefined,
+  threadId: string,
+  invocationId: string | undefined,
+  catId: string,
+): void {
+  if (!ballCustody || !invocationId) return;
+  ballCustody
+    .record(buildInvocationStartedEvent({ invocationId, threadId, catId, at: Date.now() }))
+    .catch((err) => log.warn({ threadId, invocationId, catId, err }, 'invocation.started ingest failed'));
+}
+
+function emitBallInvocationHeartbeat(
+  ballCustody: IBallCustodyIngest | undefined,
+  threadId: string,
+  invocationId: string | undefined,
+  catId: string,
+  draftUpdatedAt: number,
+): void {
+  if (!ballCustody || !invocationId) return;
+  ballCustody
+    .record(buildInvocationHeartbeatEvent({ invocationId, threadId, catId, draftUpdatedAt }))
+    .catch((err) => log.warn({ threadId, invocationId, catId, err }, 'invocation.heartbeat ingest failed'));
+}
+const routeSerialTracer = trace.getTracer('cat-cafe-api', '0.1.0');
+
+function collectStructuredTargetCatsFromInput(input: unknown): string[] {
+  if (!input || typeof input !== 'object') return [];
+
+  const parsed = input as { targetCats?: unknown; targets?: unknown };
+  const values = Array.isArray(parsed.targetCats)
+    ? parsed.targetCats
+    : Array.isArray(parsed.targets)
+      ? parsed.targets
+      : [];
+  return values.filter((value): value is string => typeof value === 'string' && value.length > 0);
+}
+
+function readToolInputContent(input: unknown): string | undefined {
+  if (!input) return undefined;
+  if (typeof input === 'object') {
+    const content = (input as { content?: unknown }).content;
+    return typeof content === 'string' && content.length > 0 ? content : undefined;
+  }
+  if (typeof input !== 'string') return undefined;
+
+  try {
+    const parsed = JSON.parse(input) as { content?: unknown };
+    return typeof parsed.content === 'string' && parsed.content.length > 0 ? parsed.content : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isPostMessageToolName(toolName: string | undefined): boolean {
+  if (!toolName) return false;
+  if (toolName.endsWith('cat_cafe_post_message')) return true;
+  return toolName === 'mcp:cat-cafe/post_message' || toolName === 'cat_cafe_post_message';
+}
+
+function isCrossPostMessageToolName(toolName: string | undefined): boolean {
+  if (!toolName) return false;
+  if (toolName.endsWith('cat_cafe_cross_post_message')) return true;
+  return toolName === 'mcp:cat-cafe/cross_post_message' || toolName === 'cat_cafe_cross_post_message';
+}
+
+function isCallbackContentRoutingToolName(toolName: string | undefined): boolean {
+  return isPostMessageToolName(toolName) || isCrossPostMessageToolName(toolName);
+}
+
+export type CallbackContentRoutingState = {
+  scope: 'local' | 'target';
+  guardLineStartMentions: CatId[];
+  hasGuardCoCreatorLineStartMention: boolean;
+  hasLocalCoCreatorLineStartMention: boolean;
+  hasTargetCoCreatorLineStartMention: boolean;
+};
+
+type CallbackContentRoutingExit = CallbackContentRoutingState & {
+  toolName: string;
+  toolUseId?: string;
+};
+
+export function classifyCallbackContentRoutingState(
+  toolName: string | undefined,
+  content: string | undefined,
+  currentCatId: CatId,
+): CallbackContentRoutingState | null {
+  if (!isCallbackContentRoutingToolName(toolName)) return null;
+  const scope = isCrossPostMessageToolName(toolName) ? 'target' : 'local';
+  if (!content) {
+    return {
+      scope,
+      guardLineStartMentions: [],
+      hasGuardCoCreatorLineStartMention: false,
+      hasLocalCoCreatorLineStartMention: false,
+      hasTargetCoCreatorLineStartMention: false,
+    };
+  }
+
+  // Cross-post content belongs to the target thread. It can satisfy the current turn's guard,
+  // but it must not become current-thread A2A routing state.
+  const parserCurrentCatId = scope === 'target' ? undefined : currentCatId;
+  const guardLineStartMentions = parseA2AMentions(content, parserCurrentCatId);
+  const hasCoCreatorLineStartMention = detectUserMention(content);
+  return {
+    scope,
+    guardLineStartMentions,
+    hasGuardCoCreatorLineStartMention: hasCoCreatorLineStartMention,
+    hasLocalCoCreatorLineStartMention: scope === 'local' && hasCoCreatorLineStartMention,
+    hasTargetCoCreatorLineStartMention: scope === 'target' && hasCoCreatorLineStartMention,
+  };
+}
+
+function collectCallbackContentRoutingExit(
+  toolName: string,
+  toolInput: unknown,
+  currentCatId: CatId,
+  toolUseId?: string,
+): CallbackContentRoutingExit | null {
+  const content = readToolInputContent(toolInput);
+  const state = classifyCallbackContentRoutingState(toolName, content, currentCatId);
+  if (!state) return null;
+  return {
+    toolName,
+    ...(toolUseId ? { toolUseId } : {}),
+    ...state,
+  };
+}
+
+function inferToolResultName(msg: AgentMessage): string | undefined {
+  if (msg.toolName) return msg.toolName;
+  const firstLine = msg.content?.trimStart().split('\n', 1)[0]?.trim();
+  if (!firstLine) return undefined;
+  const mcpLabel = firstLine.match(/^(mcp:[^\s]+)\s+\(/);
+  if (mcpLabel?.[1]) return mcpLabel[1];
+  if (firstLine.startsWith('command: ')) return 'command_execution';
+  return undefined;
+}
+
+function toolNamesMatch(a: string, b: string): boolean {
+  return (
+    a === b ||
+    (isPostMessageToolName(a) && isPostMessageToolName(b)) ||
+    (isCrossPostMessageToolName(a) && isCrossPostMessageToolName(b))
+  );
+}
+
+type PendingToolResult = {
+  toolName: string;
+  toolUseId?: string;
+};
+
+function consumePendingToolResult(
+  pendingToolResults: PendingToolResult[],
+  msg: AgentMessage,
+  hasConfirmingContent: boolean,
+  hasCallbackPostEvidence: boolean,
+): PendingToolResult | undefined {
+  if (msg.toolUseId) {
+    const pendingIndex = pendingToolResults.findIndex((entry) => entry.toolUseId === msg.toolUseId);
+    if (pendingIndex === -1) return undefined;
+    return pendingToolResults.splice(pendingIndex, 1)[0];
+  }
+
+  const resultToolName = inferToolResultName(msg);
+  if (resultToolName) {
+    const pendingIndex = pendingToolResults.findIndex((entry) => toolNamesMatch(entry.toolName, resultToolName));
+    if (pendingIndex === -1) return undefined;
+    return pendingToolResults.splice(pendingIndex, 1)[0];
+  }
+
+  const firstPending = pendingToolResults[0];
+  if (!firstPending) return undefined;
+
+  if (!isPostMessageToolName(firstPending.toolName)) {
+    return pendingToolResults.shift();
+  }
+
+  if (hasConfirmingContent && hasCallbackPostEvidence) {
+    return pendingToolResults.shift();
+  }
+
+  if (hasConfirmingContent && pendingToolResults.length === 1) {
+    return pendingToolResults.shift();
+  }
+
+  return undefined;
+}
 
 export async function* routeSerial(
   deps: RouteStrategyDeps,
@@ -61,38 +481,72 @@ export async function* routeSerial(
   threadId: string,
   options: RouteOptions = {},
 ): AsyncIterable<AgentMessage> {
+  const invocationServices = new InvocationServiceScope();
+  const preparationStartedAt = performance.now();
+  let memberPreparationStartedAt = preparationStartedAt;
+  let preparationCheckpointAt = preparationStartedAt;
+  const preparationTimings: Array<{ stage: string; durationMs: number }> = [];
+  const checkpointPreparation = (stage: string): void => {
+    const now = performance.now();
+    const durationMs = now - preparationCheckpointAt;
+    preparationTimings.push({ stage, durationMs });
+    log.debug(
+      {
+        threadId,
+        targetCats,
+        parentInvocationId: options.parentInvocationId,
+        stage,
+        durationMs,
+        elapsedMs: now - preparationStartedAt,
+      },
+      'Delivery route preparation checkpoint',
+    );
+    preparationCheckpointAt = now;
+  };
   const {
     contentBlocks,
     uploadDir,
     signal,
+    signalForCat,
     promptTags,
     contextHistory,
     history,
     currentUserMessageId,
+    a2aTriggerMessageId,
     modeSystemPrompt,
     modeSystemPromptByCat,
-    queueHasQueuedMessages,
-    hasQueuedOrActiveAgentForCat,
+    getQueuedFreshnessMessagesForCat,
+    commitCompletedA2AWake,
+    commitFailedA2AReport,
   } = options;
+  const ownerAuthProvenance = options.ownerAuthProvenance ?? 'unknown';
   const previousResponses: { catId: CatId; content: string }[] = [];
+  const sameRouteOutputMessageIds = new Set<string>();
   const thinkingMode = options.thinkingMode ?? 'play';
   // P2-3 fix: also consider default MCP server path (ClaudeAgentService has fallback resolution)
   const mcpServerPath = process.env.CAT_CAFE_MCP_SERVER_PATH || resolveDefaultClaudeMcpServerPath();
   const incrementalMode = Boolean(currentUserMessageId && deps.deliveryCursorStore);
 
-  // Worklist pattern: starts with targetCats, may grow via A2A mentions
-  // F27: Register worklist so callback A2A can push targets here
-  // F108: Key by parentInvocationId for concurrent isolation
+  // The route worklist contains only this admitted batch. Downstream A2A work is
+  // published through the durable message_wake path after the response completes.
   const worklist = [...targetCats];
   const maxDepth = options.maxA2ADepth ?? getMaxA2ADepth();
-  const worklistEntry = registerWorklist(threadId, worklist, maxDepth, options.parentInvocationId);
+  const durableA2ALineage =
+    a2aTriggerMessageId && options.a2aCallerCatId && targetCats.length === 1
+      ? await readDurableA2ALineage(deps.messageStore, a2aTriggerMessageId, targetCats[0])
+      : undefined;
+  const worklistEntry = registerWorklist(
+    threadId,
+    worklist,
+    maxDepth,
+    options.parentInvocationId,
+    durableA2ALineage ? { a2aCount: durableA2ALineage.depth, streakPair: durableA2ALineage.streakPair } : undefined,
+  );
 
   let index = 0;
   // done-guarantee: Track whether we yielded a done(isFinal=true) so the finally block can
   // synthesize one if the loop exits early (e.g. signal.aborted break at top of while).
   let yieldedFinalDone = false;
-  // F27: Track how many worklist entries have had a2a_handoff emitted
-  let handoffEmitted = targetCats.length; // Original targets don't get handoff events
   // F042 Wave 3: Fetch thread participant activity once before loop (threadId doesn't change).
   let activeParticipants: { catId: CatId; lastMessageAt: number; messageCount: number }[] = [];
   if (deps.invocationDeps.threadStore) {
@@ -103,27 +557,35 @@ export async function* routeSerial(
     }
   }
   // F042: Fetch thread routingPolicy once before loop (threadId doesn't change).
+  checkpointPreparation('lineage_and_participants');
   let routingPolicy: ThreadRoutingPolicyV1 | undefined;
   // F073 P4: SOP stage hint from workflow-sop (告示牌 — info only, cats decide actions)
-  let sopStageHint: { stage: string; suggestedSkill: string | null; featureId: string } | undefined;
+  let sopStageHint:
+    | { stage: string; suggestedSkill: string; suggestedSkillSource: string; featureId: string }
+    | undefined;
   // F092: Voice companion mode
   let voiceMode: boolean | undefined;
-  // F087: Bootcamp state for CVO onboarding
+  // F087: Bootcamp state for operator onboarding
   let bootcampState: InvocationContext['bootcampState'];
+  const targetCatIds = new Set<string>(targetCats);
+  // Thread read: shared across routingPolicy, voiceMode, bootcamp, SOP, and guide interceptor
+  let routeThread: Thread | null = null;
   if (deps.invocationDeps.threadStore) {
     try {
-      const thread = await deps.invocationDeps.threadStore.get(threadId);
-      routingPolicy = thread?.routingPolicy;
-      voiceMode = thread?.voiceMode;
-      bootcampState = thread?.bootcampState;
+      routeThread = (await deps.invocationDeps.threadStore.get(threadId)) ?? null;
+      routingPolicy = routeThread?.routingPolicy;
+      voiceMode = routeThread?.voiceMode;
+      bootcampState = routeThread?.bootcampState;
       // F073 P4: Read workflow-sop if thread is linked to a backlog item
-      if (thread?.backlogItemId && deps.invocationDeps.workflowSopStore) {
+      if (routeThread?.backlogItemId && deps.invocationDeps.workflowSopStore) {
         try {
-          const sop = await deps.invocationDeps.workflowSopStore.get(thread.backlogItemId);
+          const sop = await deps.invocationDeps.workflowSopStore.get(routeThread.backlogItemId);
           if (sop) {
+            const skill = resolveWorkflowSopSkill(sop);
             sopStageHint = {
               stage: sop.stage,
-              suggestedSkill: sop.nextSkill,
+              suggestedSkill: skill.skill,
+              suggestedSkillSource: skill.source,
               featureId: sop.featureId,
             };
           }
@@ -135,16 +597,312 @@ export async function* routeSerial(
       /* best-effort */
     }
   }
+  const bootcampMemberCount = getThreadBootcampMemberCount(routeThread);
+  checkpointPreparation('thread_and_workflow');
+
+  // F153: Trace propagation — track per-invocation spans and route-level token totals
+  let routeTotalTokens = 0;
+
+  // F155: Guide interceptor — resume existing guide state only
+  const guideCtx = await prepareGuideContext({
+    thread: routeThread,
+    guideSessionStore: deps.invocationDeps.guideSessionStore,
+    targetCats,
+    message,
+    userId,
+    threadId,
+    log,
+    dismissTracker: deps.invocationDeps.dismissTracker,
+  });
+
+  // F229: Concierge interceptor — load duty-cat 岗位 context for concierge threads
+  const conciergeCtx = await prepareConciergeContext(routeThread, userId, deps.invocationDeps.conciergeConfigStore);
+  checkpointPreparation('guide_and_concierge');
+
+  // F229 KD-23: Pre-fetch search context → per-invocation handle table + prompt context.
+  // Handle table flows from here to buildConciergeActions (same function scope).
+  // No shared storage — cross-turn overwrites impossible by construction.
+  let conciergeSearchContextString = '';
+  let conciergeHandles: HandleEntry[] = [];
+  if (!options.liveCompanion && 'conciergeConfig' in conciergeCtx) {
+    try {
+      const searchResult = await buildConciergeSearchContext({
+        userMessage: message,
+        threadId,
+        evidenceStore: deps.evidenceStore,
+        messageSearch: createConciergeMessageSearch({
+          evidenceStore: deps.evidenceStore,
+          threadStore: deps.invocationDeps.threadStore,
+          messageStore: deps.messageStore,
+          userId,
+          ...(currentUserMessageId ? { source: { threadId, messageId: currentUserMessageId } } : {}),
+        }),
+      });
+      conciergeSearchContextString = searchResult.contextString;
+      conciergeHandles = searchResult.handles;
+    } catch {
+      // Fail-open: search context failure → no context injection, no crash
+    }
+  }
+
+  // F260 AC-B8: Entity nudge — scan HUMAN input only.
+  checkpointPreparation('concierge_search');
+  // P1-1 R2 fix: Gate on frustrationAutoIssueEligible (typed user-origin flag plumbed
+  // through routeExecution). This excludes A2A, connector, callback multi-mention, and
+  // queue-replayed messages — not just those with a2aTriggerMessageId.
+  // P1-2 R2 fix: Use shared singletons from entity-nudge-state.ts (cross-strategy state).
+  const cueOccurredAt = Date.now();
+  const memoryCueOpportunitySeeds = [...(options.memoryCueOpportunitySeeds ?? [])];
+  const memoryCueLegacyFallbacks: Array<{
+    seed: MemoryCueOpportunitySeed;
+    promptContext: string;
+  }> = [];
+  let entityNudgePresentation:
+    | { service: EntityNudgeService; candidates: EntityNudgeCandidateBatch; sourceMessageId: string }
+    | undefined;
+  let entityNudgeCuePresentation:
+    | {
+        service: EntityNudgeService;
+        candidates: EntityNudgeCandidateBatch;
+        sourceMessageId: string;
+        seeds: readonly Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }>[];
+      }
+    | undefined;
+  let entityNudgePromptTokenEstimate = 0;
+  let routeOwnedNudgePromptContext = '';
+  let preparedProactiveMemoryNudge: PreparedProactiveMemoryNudge | null = null;
+  if (deps.evidenceStore && options.frustrationAutoIssueEligible !== false) {
+    try {
+      const evidenceDb = (deps.evidenceStore as { getDb?: () => import('better-sqlite3').Database }).getDb?.();
+      if (evidenceDb) {
+        const nudgeService = new EntityNudgeService(evidenceDb, sharedNudgeCooldown(), sharedEventStore(evidenceDb));
+        const nudgeResult = nudgeService.detectCandidates({
+          text: message,
+          threadId,
+          ownerUserId: userId,
+        });
+        const subjectCueSeeds = deps.invocationDeps.memoryCuePromptService
+          ? subjectSeenCueSeeds({
+              result: nudgeResult,
+              sourceMessageId: currentUserMessageId,
+              occurredAt: cueOccurredAt,
+            })
+          : [];
+        memoryCueOpportunitySeeds.push(...subjectCueSeeds);
+        const subjectCueEntityIds = new Set(subjectCueSeeds.map((seed) => seed.payload.entityId));
+        const subjectCueCandidates: EntityNudgeCandidateBatch = {
+          ...nudgeResult,
+          nudges: nudgeResult.nudges.filter((nudge) => nudge.entityId && subjectCueEntityIds.has(nudge.entityId)),
+        };
+        if (currentUserMessageId && subjectCueCandidates.nudges.length > 0) {
+          entityNudgeCuePresentation = {
+            service: nudgeService,
+            candidates: subjectCueCandidates,
+            sourceMessageId: currentUserMessageId,
+            seeds: subjectCueSeeds,
+          };
+        }
+        for (const seed of subjectCueSeeds) {
+          const nudge = nudgeResult.nudges.find(
+            (candidate) =>
+              candidate.entityId === seed.payload.entityId && candidate.matchedAlias === seed.payload.matchedAlias,
+          );
+          if (nudge) {
+            memoryCueLegacyFallbacks.push({
+              seed,
+              promptContext: EntityNudgeService.formatForPrompt({ ...nudgeResult, nudges: [nudge] }),
+            });
+          }
+        }
+        const cueEntityIds = new Set(subjectCueSeeds.map((seed) => seed.payload.entityId));
+        const presentationCandidates: EntityNudgeCandidateBatch = {
+          ...nudgeResult,
+          nudges: nudgeResult.nudges.filter((nudge) => !nudge.entityId || !cueEntityIds.has(nudge.entityId)),
+        };
+        if (currentUserMessageId && presentationCandidates.nudges.length > 0) {
+          entityNudgePresentation = {
+            service: nudgeService,
+            candidates: presentationCandidates,
+            sourceMessageId: currentUserMessageId,
+          };
+          entityNudgePromptTokenEstimate = estimateTokens(EntityNudgeService.formatForPrompt(presentationCandidates));
+        }
+      }
+    } catch (nudgeErr) {
+      log.warn({ err: nudgeErr, threadId }, '[F260] entity nudge hook failed — fail-open, no nudges this invocation');
+    }
+  }
+  checkpointPreparation('entity_nudge');
+  if (deps.proactiveMemoryNudgeService && currentUserMessageId && options.frustrationAutoIssueEligible !== false) {
+    preparedProactiveMemoryNudge = await deps.proactiveMemoryNudgeService.prepare({
+      ownerUserId: userId,
+      currentUserMessageId,
+    });
+    routeOwnedNudgePromptContext += preparedProactiveMemoryNudge.context;
+  }
+  checkpointPreparation('proactive_memory');
+  let humanDispositionFeedbackPromptContext = '';
+  if (
+    deps.humanDispositionFeedbackContextService &&
+    isDirectOwnerDispositionOrigin(options.humanDispositionInvocationOrigin)
+  ) {
+    try {
+      humanDispositionFeedbackPromptContext = await deps.humanDispositionFeedbackContextService.prepare({
+        ownerUserId: userId,
+        text: message,
+      });
+    } catch (feedbackErr) {
+      log.warn({ err: feedbackErr, threadId }, '[F281] exact-subject feedback context failed closed for serial route');
+    }
+  }
+  checkpointPreparation('disposition_feedback');
+  if (deps.invocationDeps.memoryCuePromptService) {
+    memoryCueOpportunitySeeds.push(
+      ...judgmentSurfaceCueSeeds({
+        sopStageHint,
+        promptTags: options.frustrationAutoIssueEligible !== false ? promptTags : undefined,
+        occurredAt: cueOccurredAt,
+      }),
+      ...operationalKnowledgeCueSeeds({
+        message,
+        sourceMessageId: currentUserMessageId,
+        ownerOriginEligible: options.frustrationAutoIssueEligible !== false,
+        sopStageHint,
+        occurredAt: cueOccurredAt,
+      }),
+    );
+  }
+  const routeLevelNudgePromptContext = routeOwnedNudgePromptContext + humanDispositionFeedbackPromptContext;
+  checkpointPreparation('memory_cues');
+
+  const completedCatInvocationIds: Array<[string, string]> = [];
+  const pushRecallPresentationsByInvocation = new Map<string, PushRecallPresentation[]>();
+  const pendingTurnCustodyShadowCloses: Array<(checkpoint: 'next_turn_boundary' | 'route_settled') => Promise<void>> =
+    [];
+
+  const flushTurnCustodyShadowCloses = async (checkpoint: 'next_turn_boundary' | 'route_settled'): Promise<void> => {
+    const closes = pendingTurnCustodyShadowCloses.splice(0);
+    for (const close of closes) {
+      try {
+        await close(checkpoint);
+      } catch (err) {
+        log.warn({ threadId, err }, 'Turn-custody observation failed');
+      }
+    }
+  };
 
   try {
     while (index < worklist.length) {
-      if (signal?.aborted) break;
       const catId = worklist[index]!;
+      if (index > 0) {
+        memberPreparationStartedAt = performance.now();
+        preparationCheckpointAt = memberPreparationStartedAt;
+        preparationTimings.length = 0;
+      }
+      let routingDispatchPreflightDecision: RoutingPreflightDecisionV1 | undefined;
+
+      // F-parallel-cancel: per-cat signal — canceling one cat skips ONLY that cat, not the
+      // whole worklist. force-reset/cancelAll aborts every cat's controller, so all entries
+      // skip = equivalent to stopping. Using the shared primaryController.signal made
+      // "cancel the first cat" break the entire worklist (并发取消误伤根因：serial 路径).
+      const catSignal = signalForCat?.(catId) ?? signal;
+      if (catSignal?.aborted) {
+        index++;
+        continue;
+      }
+      let pinnedService: AgentService | undefined;
+      let servicePreparationError: unknown;
+      try {
+        pinnedService = invocationServices.pin(getService(deps.services, catId, deps.unavailableServices));
+      } catch (error) {
+        servicePreparationError = error;
+      }
+      let executionBinding: Awaited<ReturnType<typeof prepareInvocationExecutionBinding>>;
+      try {
+        executionBinding = await prepareInvocationExecutionBinding(deps.invocationDeps, {
+          catId,
+          threadId,
+          userId,
+          service: pinnedService,
+          ...(catSignal ? { signal: catSignal } : {}),
+        });
+      } catch (error) {
+        yield {
+          type: 'error',
+          catId,
+          errorCode: 'execution_binding_unavailable',
+          error: error instanceof Error ? error.message : 'Execution binding is unavailable',
+          timestamp: Date.now(),
+        };
+        index++;
+        continue;
+      }
+
+      if (deps.routingDispatchPreflight) {
+        routingDispatchPreflightDecision = await preflightRoutingDispatch(deps.routingDispatchPreflight, {
+          ownerId: userId,
+          targetCatIds: [catId],
+          executionBindings: [
+            {
+              catId,
+              providerId: executionBinding.catConfig?.provider?.trim() || executionBinding.catConfig?.clientId,
+              ...(executionBinding.executionAccount
+                ? { accountRevision: executionBinding.executionAccount.accountRevision }
+                : {}),
+            },
+          ],
+          ...(index < targetCats.length && isRoutingOwnerAttempt(options, catId)
+            ? { ownerRequestedAttempt: true }
+            : {}),
+          ...(options.routingContextIntent ? { intent: options.routingContextIntent } : {}),
+        });
+        const receipt = routingDispatchPreflightReceipt(routingDispatchPreflightDecision, catId);
+        const notice = await routingPreflightNotice(
+          deps,
+          options,
+          routingDispatchPreflightDecision,
+          catId,
+          threadId,
+          index < targetCats.length,
+        );
+        if (notice) yield notice;
+        if (receipt.target.disposition === 'rejected') {
+          yield {
+            type: 'error',
+            catId,
+            errorCode: 'routing_preflight_rejected',
+            error: '本次未执行：成员当前不可用。恢复后可重试原消息。',
+            timestamp: Date.now(),
+          };
+          index++;
+          continue;
+        }
+      }
+      // Retained Queue records may name the retired Host-only Collective executor.
+      // Its scope must never silently become an ordinary, unrestricted invocation.
+      if (options.executionScope) {
+        yield {
+          type: 'error',
+          catId,
+          errorCode: 'legacy_execution_scope_retired',
+          error: '旧 Collective 执行入口已迁出，请从已安装插件重新发起。',
+          timestamp: Date.now(),
+        };
+        index++;
+        continue;
+      }
+      // F148 OQ-2: briefing→invocation link + context eval
+      let briefingMessageId: string | undefined;
+      let briefingCoverageMap: import('./context-transport.js').CoverageMap | undefined;
+      const currentPushRecallPresentations: PushRecallPresentation[] = [];
 
       // Only pass images/uploads for the first cat (user's original target)
       const isOriginalTarget = index < targetCats.length;
       const targetContentBlocks = isOriginalTarget ? routeContentBlocksForCat(catId, contentBlocks) : undefined;
       const targetUploadDir = targetContentBlocks ? uploadDir : undefined;
+      const catConciergeContext = conciergeContextForCat(conciergeCtx, catId as string);
+      const conciergeSearchContextForCat =
+        conciergeSearchContextString && 'conciergeConfig' in catConciergeContext ? conciergeSearchContextString : '';
 
       let prompt = message;
       if (!incrementalMode && previousResponses.length > 0) {
@@ -152,15 +910,78 @@ export async function* routeSerial(
         prompt = `${message}\n\n${contextParts.join('\n')}`;
       }
 
+      // F260 AC-B8 and F229 KD-24 inject their prompt additions only after
+      // incremental/legacy assembly reaches its final shape (see below).
       // Build identity: static goes in -p content (+ systemPrompt as defense-in-depth), dynamic in -p only
-      const catConfig: CatConfig | undefined =
-        catRegistry.tryGet(catId as string)?.config ?? CAT_CONFIGS[catId as string];
+      const catConfig: CatConfig | undefined = catRegistry.tryGet(catId as string)?.config;
       const teammates = [...new Set(worklist.filter((id) => id !== catId))];
-      const directMessageFrom = worklistEntry.a2aFrom.get(catId);
-      const streamReplyTo = worklistEntry.a2aTriggerMessageId.get(catId);
+      const directMessageFrom =
+        isOriginalTarget && options.a2aCallerCatId ? createCatId(options.a2aCallerCatId) : undefined;
+      // F167 L1: ping-pong warning — inject when this cat just received the ball
+      // in a same-pair streak >= 2 (streak=4 already blocked upstream, so max is 3 here).
+      const pingPongWarning =
+        worklistEntry.streakPair && worklistEntry.streakPair.to === catId && worklistEntry.streakPair.count >= 2
+          ? {
+              pairedWith: worklistEntry.streakPair.from,
+              count: worklistEntry.streakPair.count,
+            }
+          : undefined;
+      const queueTriggerReplyTo = isOriginalTarget ? a2aTriggerMessageId : undefined;
+      const activeA2ATriggerMessageId = isOriginalTarget ? a2aTriggerMessageId : undefined;
+      const streamReplyTo = activeA2ATriggerMessageId ?? queueTriggerReplyTo;
+      const turnTriggerMessageId = streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId;
+      const turnTriggerMessage = turnTriggerMessageId ? await deps.messageStore.getById(turnTriggerMessageId) : null;
+      const turnTriggerThreadId = turnTriggerMessage?.threadId === threadId ? threadId : undefined;
+      const collectiveBoundTurn = isCollectiveBoundResponse(options.executionScope, turnTriggerMessage);
       const streamReplyPreview = streamReplyTo
         ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
         : undefined;
+      const activeA2ATriggerMessage = activeA2ATriggerMessageId
+        ? await deps.messageStore.getById(activeA2ATriggerMessageId)
+        : null;
+      const activeA2ATriggerContent =
+        activeA2ATriggerMessage && !activeA2ATriggerMessage.deletedAt && !activeA2ATriggerMessage._tombstone
+          ? activeA2ATriggerMessage.content
+          : undefined;
+      // The original request's provenance belongs only to its original targets.
+      // A downstream cloud turn must carry the persisted cat handoff, not the
+      // human message that started this serial chain.
+      const initialCloudProvenance = isOriginalTarget ? options.cloudDispatchProvenance : undefined;
+      const cloudA2AContent =
+        activeA2ATriggerMessage?.threadId === threadId &&
+        activeA2ATriggerMessage.userId === userId &&
+        activeA2ATriggerMessage.catId === directMessageFrom
+          ? activeA2ATriggerContent
+          : undefined;
+      const exactA2ATriggerPromptMessage = incrementalMode
+        ? await hydrateVisibleA2ATriggerPromptMessage(deps, streamReplyTo, threadId, catId, thinkingMode)
+        : undefined;
+      const persistedPromptMessagesForCat = mergePersistedPromptMessages(
+        options.persistedPromptMessages,
+        exactA2ATriggerPromptMessage,
+      );
+      // F193 AC-B2: structured cross-thread reply hint hydrated from trigger message.
+      // Closes Codex review P1 (砚砚 2026-05-08): worklist `a2aTriggerMessageId` map
+      // only has entries for downstream A2A targets — initial target via the modern
+      // InvocationQueue path doesn't register in the map. Queue path's trigger id
+      // arrives via `routeOptions.currentUserMessageId` (QueueProcessor → routeExecution).
+      // Fallback chain ensures queue path also gets the hint without changing
+      // streamReplyTo/auto-replyTo behavior (those have different semantics).
+      // Same-thread triggers / agent-key path naturally return null inside the helper.
+      const crossThreadReplyHintTriggerId = activeA2ATriggerMessageId ?? currentUserMessageId;
+      const crossThreadReplyHintRaw = crossThreadReplyHintTriggerId
+        ? await hydrateCrossThreadReplyHint(deps.messageStore, crossThreadReplyHintTriggerId)
+        : null;
+      const crossThreadReplyHint = crossThreadReplyHintRaw
+        ? {
+            sourceThreadId: crossThreadReplyHintRaw.sourceThreadId,
+            senderCatId: createCatId(crossThreadReplyHintRaw.senderCatId),
+            // F246 Phase B: carry effectClass to SystemPromptBuilder for behavior constraints
+            ...(crossThreadReplyHintRaw.effectClass ? { effectClass: crossThreadReplyHintRaw.effectClass } : {}),
+            ...(crossThreadReplyHintRaw.coordination ? { coordination: crossThreadReplyHintRaw.coordination } : {}),
+          }
+        : undefined;
+      const hasTerminalCoordinationExit = crossThreadReplyHint?.coordination?.phase === 'terminal';
       let mentionRoutingFeedback = null;
       if (deps.invocationDeps.threadStore) {
         try {
@@ -169,79 +990,322 @@ export async function* routeSerial(
           log.warn({ catId: catId as string, err: feedbackErr }, 'consumeMentionRoutingFeedback failed');
         }
       }
-      // MCP documentation: Claude's MCP_TOOLS_SECTION → staticIdentity (in -p content).
-      // Non-Claude HTTP callback instructions → per-message (session history may be lost on compress).
+      // mcpAvailable still gates the per-message HTTP callback fallback below
+      // (needsMcpInjection). F203 Phase C: the non-pack identity/家规/MCP docs
+      // travel via the compression-immune native system role
+      // (--system-prompt-file / -c) ONLY for providers that inject L0 natively
+      // (ClaudeAgentService -p, ClaudeBgCarrierService, CodexAgent). Other
+      // providers (Gemini, Antigravity, CatAgent, A2A, OpenCode, Kimi…)
+      // have no native L0 channel, so they MUST still receive the full static
+      // identity via the user-message systemPrompt prepend — otherwise they
+      // lose identity/家规 entirely (云端 Codex P1-cloud-1, 2026-05-16).
       const mcpAvailable = (catConfig?.mcpSupport ?? false) && !!mcpServerPath;
-      const staticIdentity = buildStaticIdentity(catId, { mcpAvailable });
+      // F129: Load active pack blocks (best-effort, failure does not block invocation)
+      let packBlocks: import('@cat-cafe/shared').CompiledPackBlocks | null = null;
+      if (deps.packStore) {
+        const { getActivePackBlocks } = await import('../../../../packs/getActivePackBlocks.js');
+        packBlocks = await getActivePackBlocks(deps.packStore);
+      }
+      let service: AgentService;
+      checkpointPreparation('source_and_pack');
+      try {
+        if (servicePreparationError) throw servicePreparationError;
+        if (!pinnedService) throw new Error('No frozen provider service');
+        service = pinnedService;
+      } catch (error) {
+        if (!(error instanceof AgentServiceUnavailableError)) throw error;
+        yield { type: 'error', catId, content: error.message, error: error.message, timestamp: Date.now() };
+        const commitAllowed = options.beforeOutputCommit ? await options.beforeOutputCommit(catId) : true;
+        if (commitAllowed) {
+          try {
+            await deps.messageStore.append({
+              from: { kind: 'system', service: 'agent-error' },
+              userId: 'system',
+              content: `Error: ${error.message}`,
+              mentions: [],
+              origin: 'stream',
+              timestamp: Date.now(),
+              threadId,
+            });
+          } catch (persistError) {
+            log.error({ catId, err: persistError }, 'messageStore.append (unavailable member) failed');
+          }
+        } else if (options.persistenceContext) {
+          options.persistenceContext.actionOutputCommitRejected = true;
+        }
+        yield { type: 'done', catId, isFinal: false, timestamp: Date.now() };
+        index++;
+        continue;
+      }
+      const resolvedCapacitySnapshot = await resolveInvocationCapacitySnapshot({
+        catId,
+        service,
+      });
+      let capacitySnapshot = resolvedCapacitySnapshot;
+      capacitySnapshot = await applyActiveSessionCapacityPin({
+        snapshot: capacitySnapshot,
+        catId,
+        threadId,
+        userId,
+        sessionChainStore: deps.invocationDeps.sessionChainStore,
+      });
+      const sessionPolicySnapshot = resolveManagedSessionPolicySnapshot({
+        catId: catId as string,
+        evidence: {
+          capacitySnapshot,
+          // A carrier declaration is not this invocation's usage evidence.
+          authoritativeUsage: false,
+          sessionRotation: Boolean(deps.invocationDeps.sessionChainStore && deps.invocationDeps.sessionSealer),
+          continuityBootstrap: Boolean(deps.invocationDeps.sessionChainStore && deps.invocationDeps.transcriptReader),
+        },
+      });
+      const sealedForCapacity = await sealBeforeInvocationIfNeeded({
+        snapshot: capacitySnapshot,
+        catId,
+        threadId,
+        userId,
+        sessionChainStore: deps.invocationDeps.sessionChainStore,
+        sessionSealer: deps.invocationDeps.sessionSealer,
+        policySnapshot: sessionPolicySnapshot,
+        clearProviderSession: () => deps.invocationDeps.sessionManager.delete(userId, catId, threadId),
+      });
+      if (sealedForCapacity) capacitySnapshot = resolvedCapacitySnapshot;
+      checkpointPreparation('service_capacity_and_session');
+      const declaredTurnCustodyWake =
+        options.turnCustodyWakeForCat?.(catId) ??
+        options.turnCustodyWake ??
+        ({ kind: 'legacy', reason: 'source_missing' } as const);
+      const turnCustodyWake =
+        declaredTurnCustodyWake.kind === 'action_successor'
+          ? declaredTurnCustodyWake
+          : (buildCrossThreadNoObligationWake(crossThreadReplyHint) ??
+            (directMessageFrom
+              ? buildA2ADispatchTurnCustodyWake({
+                  threadId,
+                  targetCatId: catId as string,
+                  messageId: streamReplyTo,
+                  fromCatId: directMessageFrom,
+                })
+              : declaredTurnCustodyWake));
+      // Settle the preceding turn at the earliest boundary that can contain its
+      // receiver-side handoff. Closing here prevents a later ping-pong turn by
+      // the same cat from being misattributed to the earlier projection.
+      await flushTurnCustodyShadowCloses('next_turn_boundary');
+      let turnCustodyProjection: TurnCustodyProjection | undefined;
+      // Queue owns completion. These remaining projections only record transition
+      // telemetry and the silent coordination witness; none can invoke a model.
+      // Ordinary chat and managed continuations need no additional observation.
+      if (
+        deps.turnCustodyProjectionService &&
+        turnCustodyWake.kind !== 'structured' &&
+        turnCustodyWake.kind !== 'unstructured'
+      ) {
+        turnCustodyProjection = await deps.turnCustodyProjectionService.open(turnCustodyWake);
+      }
+      let turnCustodyShadowRecorded = false;
+      const turnCustodyTerminalWitnesses: QueueTerminalConsumptionWitness[] = [];
+      const recordTurnCustodyTerminalWitness = (witness: QueueTerminalConsumptionWitness): void => {
+        const witnessKey =
+          witness.kind === 'terminal_silent'
+            ? witness.kind
+            : witness.kind === 'source_response'
+              ? `${witness.kind}:${witness.outputMessageIds.join(',')}`
+              : `${witness.kind}:${witness.sourceMessageId}`;
+        const duplicate = turnCustodyTerminalWitnesses.some((candidate) => {
+          const candidateKey =
+            candidate.kind === 'terminal_silent'
+              ? candidate.kind
+              : candidate.kind === 'source_response'
+                ? `${candidate.kind}:${candidate.outputMessageIds.join(',')}`
+                : `${candidate.kind}:${candidate.sourceMessageId}`;
+          return candidateKey === witnessKey;
+        });
+        if (!duplicate) turnCustodyTerminalWitnesses.push(witness);
+      };
+      const hasNativeL0 = service.injectsL0Natively?.() ?? false;
+      const staticIdentity = hasNativeL0
+        ? buildStaticIdentityPackOnly(catId, { packBlocks })
+        : buildStaticIdentity(catId, { mcpAvailable, packBlocks });
+      // L0-budget-defense PR-B-impl (ADR-038 件套 ④): staging is NOT prepended
+      // to staticIdentity here. Cloud R2 P1 #2237 L1099: folding staging into
+      // staticIdentity breaks ADR-038 "每轮注入生效" contract on resumed
+      // session-chain turns, because invoke-single-cat skips systemPrompt
+      // injection on those resumes. Staging is now injected in invoke-single-cat
+      // independently (mirrors F225 contextHintPrefix pattern).
       // F041: inject HTTP callback only when MCP is NOT actually available (fallback)
-      const mcpInstructions = needsMcpInjection(mcpAvailable)
+      const mcpInstructions = needsMcpInjection(mcpAvailable, catConfig?.clientId)
         ? buildMcpCallbackInstructions({
             currentCatId: catId as string,
             teammates: teammates.map((id) => id as string),
           })
         : '';
-      // F091: Inject linked signal articles into context
-      let activeSignals:
-        | readonly {
-            id: string;
-            title: string;
-            source: string;
-            tier: number;
-            contentSnippet: string;
-            note?: string | undefined;
-            relatedDiscussions?: readonly { sessionId: string; snippet: string; score: number }[] | undefined;
-          }[]
-        | undefined;
-      if (deps.invocationDeps.signalArticleLookup) {
+      // Signal articles are retrieved through explicit signal tools, not ordinary delivery.
+
+      // F163 AC-A3: always_on constitutional docs injection (fail-open, flag-gated)
+      // shadow: query but do NOT inject into prompt (record-only for experiment diff)
+      // on: query AND inject into prompt
+      // off: skip entirely
+      let alwaysOnDocs: readonly { anchor: string; title: string; summary: string }[] | undefined;
+      let alwaysOnInjectionMode: 'off' | 'shadow' | 'on' = 'off';
+      if (deps.evidenceStore) {
         try {
-          const signals = await deps.invocationDeps.signalArticleLookup(threadId);
-          if (signals.length > 0) activeSignals = signals;
+          const { freezeFlags } = await import('../../../../../domains/memory/f163-types.js');
+          const f163Flags = freezeFlags();
+          alwaysOnInjectionMode = f163Flags.alwaysOnInjection;
+          if (alwaysOnInjectionMode !== 'off') {
+            const evStore = deps.evidenceStore as {
+              queryAlwaysOn?: () => Array<{ anchor: string; title: string; summary: string }>;
+            };
+            if (typeof evStore.queryAlwaysOn === 'function') {
+              const docs = evStore.queryAlwaysOn();
+              if (docs.length > 0) alwaysOnDocs = docs;
+            }
+          }
         } catch {
-          /* best-effort: signal lookup failure does not block invocation */
+          /* fail-open: always_on lookup failure does not block invocation */
         }
       }
 
-      const invocationContext = buildInvocationContext({
-        catId,
-        mode: worklist.length > 1 ? 'serial' : 'independent',
+      // F093: Resolve world context for thread (fail-open)
+      let worldContext: import('@cat-cafe/shared').WorldContextEnvelope | undefined;
+      if (deps.worldStore && deps.worldContextProvider) {
+        try {
+          const activeWorld = await deps.worldStore.getWorldForThread(threadId);
+          if (activeWorld) {
+            const scenes = await deps.worldStore.getScenesByWorld(activeWorld.worldId);
+            const activeScene = scenes.find((s) => s.status === 'active');
+            if (activeScene) {
+              const envelope = await deps.worldContextProvider.assemble(activeWorld.worldId, activeScene.sceneId);
+              if (envelope) worldContext = envelope;
+            }
+          }
+        } catch {
+          /* fail-open: world context lookup failure does not block invocation */
+        }
+      }
+
+      const invocationMode = worklist.length > 1 ? 'serial' : 'independent';
+      const a2aEnabled = worklistEntry.a2aCount < maxDepth;
+      const personMemoryProposalStatusRequest =
+        activeA2ATriggerContent && activeA2ATriggerContent !== message
+          ? `${activeA2ATriggerContent}\n\n${message}`
+          : message;
+      const personMemoryProposalStatusContext = deps.personMemoryProposalStatusContextResolver
+        ? await deps.personMemoryProposalStatusContextResolver.resolve(
+            userId,
+            threadId,
+            personMemoryProposalStatusRequest,
+          )
+        : '';
+      const invocationContext = [
+        // Budget and identity work is measured separately from History assembly.
+        buildInvocationContext({
+          catId,
+          mode: invocationMode,
+          chainIndex: index + 1,
+          chainTotal: worklist.length,
+          teammates,
+          mcpAvailable,
+          nativeL0Injected: hasNativeL0,
+          ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
+          a2aEnabled,
+          ...(directMessageFrom ? { directMessageFrom } : {}),
+          ...(pingPongWarning ? { pingPongWarning } : {}),
+          ...(crossThreadReplyHint ? { crossThreadReplyHint } : {}),
+          ...(mentionRoutingFeedback ? { mentionRoutingFeedback } : {}),
+          ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
+          ...(routingPolicy ? { routingPolicy } : {}),
+          ...(sopStageHint ? { sopStageHint } : {}),
+          ...(voiceMode ? { voiceMode } : {}),
+          ...(bootcampState ? { bootcampState, bootcampMemberCount } : {}),
+          ...(alwaysOnDocs && alwaysOnInjectionMode === 'on' ? { alwaysOnDocs } : {}),
+          ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
+          threadId,
+          ...(worldContext ? { worldContext } : {}),
+          ...catConciergeContext,
+          ...(options.liveCompanion && index === 0
+            ? {
+                liveCompanion: {
+                  householdToolsEnabled: options.liveCompanion.householdToolsEnabled === true,
+                  compositionInstructions: options.liveCompanion.compositionInstructions,
+                },
+              }
+            : {}),
+        }),
+        personMemoryProposalStatusContext,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+      const continuityCapsule = buildCapsuleFromRouteState({
+        threadId,
+        catId: catId as string,
+        ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
+        mode: invocationMode,
         chainIndex: index + 1,
         chainTotal: worklist.length,
-        teammates,
-        mcpAvailable,
-        ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
-        a2aEnabled: worklistEntry.a2aCount < maxDepth,
-        ...(directMessageFrom ? { directMessageFrom } : {}),
-        ...(mentionRoutingFeedback ? { mentionRoutingFeedback } : {}),
-        ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
-        ...(routingPolicy ? { routingPolicy } : {}),
-        ...(sopStageHint ? { sopStageHint } : {}),
-        ...(activeSignals ? { activeSignals } : {}),
-        ...(voiceMode ? { voiceMode } : {}),
-        ...(bootcampState ? { bootcampState, threadId } : {}),
+        ...(directMessageFrom ? { directMessageFrom: directMessageFrom as string } : {}),
+        ...(streamReplyTo ? { a2aTriggerMessageId: streamReplyTo } : {}),
+        a2aEnabled,
+        a2aDepth: worklistEntry.a2aCount,
+        maxA2ADepth: maxDepth,
       });
 
+      // F237 Phase 2: Pipeline trace capture is drained above (lines 698, 804)
+      // to prevent stale module-global buffer. Persistence is handled by the v0
+      // trace path below (after all route-level content is assembled), avoiding
+      // duplicate records. Phase 2 will take over persistence when migration completes.
+
       // F24 Phase E: Bootstrap context for Session #2+
+      checkpointPreparation('identity_and_linked_context');
+      // #836: Reborn cats skip bootstrap — every invocation starts with zero prior context.
+      // Uses store lookup (not thread field) — Redis memberSS:* fields aren't hydrated by get().
       let bootstrapContext = '';
-      if (
-        isSessionChainEnabled(catId) &&
-        deps.invocationDeps.sessionChainStore &&
-        deps.invocationDeps.transcriptReader
-      ) {
+      // #836: Reborn check is best-effort — transient Redis failure must not
+      // abort the invocation before bootstrap/routing. Default to non-reborn.
+      let isSerialReborn = false;
+      try {
+        isSerialReborn = deps.invocationDeps.threadStore?.isRebornSession
+          ? await Promise.resolve(deps.invocationDeps.threadStore.isRebornSession(threadId, catId as string))
+          : false;
+      } catch (rebornErr) {
+        log.warn(
+          { threadId, catId },
+          '[routeSerial] #836: isRebornSession lookup failed pre-bootstrap, defaulting to non-reborn',
+        );
+      }
+      const bootstrapSessionChainStore = deps.invocationDeps.sessionChainStore;
+      const bootstrapTranscriptReader = deps.invocationDeps.transcriptReader;
+      const defersProjection =
+        incrementalMode &&
+        Boolean(deps.invocationDeps.contextEpochOwner) &&
+        catConfig?.provider !== 'openai-chatgpt-pro';
+      const rebuildSessionBootstrap =
+        !isSerialReborn && bootstrapSessionChainStore && bootstrapTranscriptReader
+          ? async (contextProjection?: Parameters<typeof buildSessionBootstrap>[0]['contextProjection']) => {
+              const bootstrapDepth = sessionPolicySnapshot.config.handoff?.bootstrapDepth;
+              return buildSessionBootstrap(
+                {
+                  sessionChainStore: bootstrapSessionChainStore,
+                  transcriptReader: bootstrapTranscriptReader,
+                  ownerUserId: userId,
+                  ...(deps.invocationDeps.taskStore ? { taskStore: deps.invocationDeps.taskStore } : {}),
+                  ...(deps.invocationDeps.threadStore ? { threadStore: deps.invocationDeps.threadStore } : {}),
+                  ...(bootstrapDepth ? { bootstrapDepth } : {}),
+                  ...(contextProjection ? { contextProjection } : {}),
+                },
+                catId,
+                threadId,
+              );
+            }
+          : undefined;
+      if (rebuildSessionBootstrap && !defersProjection) {
         try {
-          const bootstrapDepth = getConfigSessionStrategy(catId)?.handoff?.bootstrapDepth;
-          const bootstrap = await buildSessionBootstrap(
-            {
-              sessionChainStore: deps.invocationDeps.sessionChainStore,
-              transcriptReader: deps.invocationDeps.transcriptReader,
-              ...(deps.invocationDeps.taskStore ? { taskStore: deps.invocationDeps.taskStore } : {}),
-              ...(deps.invocationDeps.threadStore ? { threadStore: deps.invocationDeps.threadStore } : {}),
-              ...(bootstrapDepth ? { bootstrapDepth } : {}),
-            },
-            catId,
-            threadId,
-          );
+          const bootstrap = await rebuildSessionBootstrap();
           if (bootstrap) {
             bootstrapContext = bootstrap.text;
+            if (bootstrap.pushRecallPresentations?.length) {
+              currentPushRecallPresentations.push(...bootstrap.pushRecallPresentations);
+            }
           }
         } catch {
           // Best-effort: bootstrap failure doesn't block invocation
@@ -249,46 +1313,233 @@ export async function* routeSerial(
       }
 
       let deliveryBoundaryId: string | undefined;
+      let incrementallyExposedMessageIds: string[] = [];
+      const invocationMessagePrompt = prompt;
+      let rebuildPromptWithBootstrap: ((bootstrap: string) => string) | undefined;
+      let explicitlyExposedMessageIds: string[] = [];
+      let contextPromptFactory: InvocationParams['contextPromptFactory'];
+      let exactPromptMessageIds: string[] = [];
+      const pendingContextProjectionMessages = createIdempotentPendingProjectionQueue<AgentMessage>();
+      let briefingProjectionMessage: AgentMessage | undefined;
+      let pendingBriefingInput: AppendMessageInput | undefined;
+      let bootstrapPresentationCounts: PresentationCounts | undefined;
+      let proactiveMemoryNudgeFinalized = false;
+      const appendRoutePromptAdditions = (basePrompt: string): string => {
+        let projectedPrompt = basePrompt;
+        if (conciergeSearchContextForCat) projectedPrompt = `${projectedPrompt}\n${conciergeSearchContextForCat}`;
+        if (routeLevelNudgePromptContext) {
+          projectedPrompt = `${projectedPrompt}\n${routeLevelNudgePromptContext}`;
+          if (preparedProactiveMemoryNudge && !proactiveMemoryNudgeFinalized) {
+            deps.proactiveMemoryNudgeService?.finalize(preparedProactiveMemoryNudge);
+            proactiveMemoryNudgeFinalized = true;
+          }
+        }
+        return projectedPrompt;
+      };
+      const materializeFinalGenerationBriefing = async (): Promise<void> => {
+        if (!pendingBriefingInput || briefingProjectionMessage) return;
+        try {
+          const stored = await deps.messageStore.append(pendingBriefingInput);
+          briefingMessageId = stored.id;
+          briefingProjectionMessage = {
+            type: 'system_info' as AgentMessageType,
+            catId,
+            content: JSON.stringify({
+              type: 'context_briefing',
+              messageId: stored.id,
+              storedMessage: {
+                id: stored.id,
+                content: stored.content,
+                origin: stored.origin,
+                timestamp: stored.timestamp,
+                extra: stored.extra,
+              },
+            }),
+            timestamp: stored.timestamp,
+          } as AgentMessage;
+          pendingContextProjectionMessages.enqueue(`briefing:${stored.id}`, briefingProjectionMessage);
+        } catch {
+          // fail-open: briefing is a non-critical UI projection
+        }
+      };
       if (incrementalMode) {
         // Serial incremental mode depends on AgentRouter having appended current user message first.
         // We still explicitly include `message` when that message is not present in unseen rows.
-        const inc = await assembleIncrementalContext(deps, userId, threadId, catId, currentUserMessageId, thinkingMode);
-        deliveryBoundaryId = inc.boundaryId;
-        if (inc.degradation) {
-          yield {
-            type: 'system_info' as AgentMessageType,
-            catId,
-            content: inc.degradation,
-            timestamp: Date.now(),
-          } as AgentMessage;
-        }
+
+        // Deduct fixed prompt parts from the invocation-owned input ceiling.
+        const catModePromptForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
+        const inputCeilingTokens = resolvePromptInputCeilingTokens(capacitySnapshot.capacity);
+        const incSystemTokens =
+          estimateTokens(
+            [staticIdentity, invocationContext, catModePromptForBudget, mcpInstructions].filter(Boolean).join('\n'),
+          ) + (rebuildSessionBootstrap ? MAX_SESSION_BOOTSTRAP_TOKENS : estimateTokens(bootstrapContext));
+        const incMessageTokens = estimateTokens([message, conciergeSearchContextForCat].filter(Boolean).join('\n'));
+        // P1 R7 fix: use shared budget helper (serial/parallel × incremental/legacy unified)
+        const incNudgeTokens =
+          (routeLevelNudgePromptContext ? estimateTokens(routeLevelNudgePromptContext) : 0) +
+          entityNudgePromptTokenEstimate;
+        const effectiveContextBudget = computeContextBudget({
+          inputCeilingTokens,
+          historyTokenCeiling: deriveHistoryContextTokenCeiling(inputCeilingTokens),
+          systemPartsTokens: incSystemTokens,
+          promptTokens: incMessageTokens,
+          nudgeTokens: incNudgeTokens,
+        });
+
         const catModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-        const parts = [invocationContext, catModePrompt, bootstrapContext, mcpInstructions].filter(Boolean);
-        if (inc.contextText) parts.push(inc.contextText);
-        // F35 fix: only inject raw message when it was genuinely absent from unseen rows.
-        // If it was present but filtered out (e.g. whisper), injecting would leak private content.
-        if (!inc.includesCurrentUserMessage && !inc.currentMessageFilteredOut) parts.push(message);
-        prompt = parts.join('\n\n---\n\n');
+        const buildIncrementalProjection = async (
+          epochInput?: Parameters<NonNullable<InvocationParams['contextPromptFactory']>>[0],
+        ) => {
+          // The factory may rerun after provider-generation replacement. Only
+          // the final run owns the pending UI projection; durable briefing
+          // creation is separately guarded below.
+          pendingContextProjectionMessages.reset();
+          const contextProjection = epochInput
+            ? contextProjectionFromEpochDecision(epochInput.decision, epochInput.handshake.coordinate)
+            : undefined;
+          if (contextProjection && rebuildSessionBootstrap) {
+            try {
+              const bootstrap = await rebuildSessionBootstrap(contextProjection);
+              bootstrapContext = bootstrap?.text ?? '';
+              bootstrapPresentationCounts = bootstrap?.presentationCounts;
+              if (bootstrap?.pushRecallPresentations?.length) {
+                currentPushRecallPresentations.push(...bootstrap.pushRecallPresentations);
+              }
+            } catch {
+              bootstrapContext = '';
+              bootstrapPresentationCounts = undefined;
+            }
+          }
+          const inc = await assembleIncrementalContext(
+            deps,
+            userId,
+            threadId,
+            catId,
+            currentUserMessageId,
+            thinkingMode,
+            {
+              effectiveMaxContextTokens: effectiveContextBudget,
+              canonicalFeatureId: sopStageHint?.featureId,
+              threadTitle: routeThread?.title ?? undefined,
+              projectPath: routeThread?.projectPath,
+              cursorOverlay: options.cursorBoundaries?.get(catId as string),
+              ...(options.resolvePendingWakeMessageIds
+                ? {
+                    resolvePendingWakeMessageIds: options.resolvePendingWakeMessageIds.bind(undefined, catId),
+                  }
+                : {}),
+              sameRouteOutputMessageIds,
+              exactA2ATriggerMessageId: streamReplyTo,
+              ...(contextProjection ? { contextProjection } : {}),
+            },
+          );
+          deliveryBoundaryId = inc.boundaryId;
+          incrementallyExposedMessageIds = inc.exposedMessageIds;
+          if (inc.pushRecallPresentations?.length) {
+            currentPushRecallPresentations.push(...inc.pushRecallPresentations);
+          }
+          if (deliveryBoundaryId && deps.deliveryCursorStore) {
+            try {
+              await deps.deliveryCursorStore.ackSeenCursor(userId, catId, threadId, deliveryBoundaryId);
+            } catch (err) {
+              log.warn({ catId: catId as string, err }, '[F254] seenCursor seed failed');
+            }
+          }
+          if (inc.degradation) {
+            pendingContextProjectionMessages.enqueue(`degradation:${inc.degradation}`, {
+              type: 'system_info' as AgentMessageType,
+              catId,
+              content: inc.degradation,
+              timestamp: Date.now(),
+            } as AgentMessage);
+          }
+          if (shouldPersistContextBriefing(inc)) {
+            briefingCoverageMap = inc.coverageMap;
+            const contextSurfaceProjection = inc.surfaceProjection
+              ? {
+                  ...inc.surfaceProjection,
+                  presentationCounts: mergePresentationCounts(
+                    inc.surfaceProjection.presentationCounts,
+                    ...(bootstrapPresentationCounts ? [bootstrapPresentationCounts] : []),
+                  ),
+                }
+              : undefined;
+            pendingBriefingInput = buildBriefingMessage(inc.coverageMap, threadId, {
+              ...inc.briefingContext,
+              ...(contextSurfaceProjection ? { contextSurfaceProjection } : {}),
+            });
+          } else {
+            pendingBriefingInput = undefined;
+          }
+          const explicitProjection = explicitPromptForIncrementalContext(
+            inc,
+            message,
+            currentUserMessageId,
+            persistedPromptMessagesForCat,
+          );
+          explicitlyExposedMessageIds = explicitProjection.exposedMessageIds;
+          rebuildPromptWithBootstrap = (bootstrap) => {
+            const parts = [invocationContext, catModePrompt, bootstrap, mcpInstructions].filter(Boolean);
+            if (inc.contextText) parts.push(inc.contextText);
+            if (explicitProjection.text) parts.push(explicitProjection.text);
+            return parts.join('\n\n---\n\n');
+          };
+          const projectedPrompt = appendRoutePromptAdditions(rebuildPromptWithBootstrap(bootstrapContext));
+          exactPromptMessageIds = collectExactPromptMessageIds(
+            incrementallyExposedMessageIds,
+            explicitlyExposedMessageIds,
+          );
+          return {
+            prompt: projectedPrompt,
+            promptMessageIds: exactPromptMessageIds,
+            ...(inc.surfaceProjection ? { deltaSize: inc.surfaceProjection.deltaSize } : {}),
+          };
+        };
+        // Once the epoch owner is composed, every local carrier crosses the
+        // same fail-closed pre-provider seam. Unsupported or undeclared
+        // carriers resolve to unknown+cold inside invocation. Cloud-only cats
+        // use a different bounded Host transport before that seam.
+        if (defersProjection) {
+          contextPromptFactory = async (epochInput) => buildIncrementalProjection(epochInput);
+          prompt = '[F296 context projection pending provider preflight]';
+        } else {
+          const projection = await buildIncrementalProjection();
+          prompt = projection.prompt;
+          exactPromptMessageIds = [...(projection.promptMessageIds ?? [])];
+        }
       } else {
         // Per-cat context budget (Phase 4.0): assemble context with cat-specific limits
         let catContextHistory = contextHistory; // fallback to legacy pre-assembled
         if (history && history.length > 0 && !contextHistory) {
-          const budget = getCatContextBudget(catId as string);
+          const inputCeilingTokens = resolvePromptInputCeilingTokens(capacitySnapshot.capacity);
           // F8: token-based budget — estimate non-context tokens, remainder goes to context
-          const systemPartsTokens = estimateTokens(
-            [staticIdentity, invocationContext, mcpInstructions].filter(Boolean).join('\n'),
-          );
-          const promptTokens = estimateTokens(prompt);
-          const budgetForContext = Math.max(0, budget.maxPromptTokens - systemPartsTokens - promptTokens - 200);
+          // A+ fix: include catModePrompt + bootstrapContext in system parts estimate (P2-1)
+          const catModePromptLegacyForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
+          const systemPartsTokens =
+            estimateTokens(
+              [staticIdentity, invocationContext, catModePromptLegacyForBudget, mcpInstructions]
+                .filter(Boolean)
+                .join('\n'),
+            ) + (rebuildSessionBootstrap ? MAX_SESSION_BOOTSTRAP_TOKENS : estimateTokens(bootstrapContext));
+          const promptTokens = estimateTokens([prompt, conciergeSearchContextForCat].filter(Boolean).join('\n'));
+          // P1 R7 fix: use shared budget helper (legacy path)
+          const legacyNudgeTokens =
+            (routeLevelNudgePromptContext ? estimateTokens(routeLevelNudgePromptContext) : 0) +
+            entityNudgePromptTokenEstimate;
+          const budgetForContext = computeContextBudget({
+            inputCeilingTokens,
+            historyTokenCeiling: deriveHistoryContextTokenCeiling(inputCeilingTokens),
+            systemPartsTokens,
+            promptTokens,
+            nudgeTokens: legacyNudgeTokens,
+          });
           const { contextText, messageCount } = assembleContext(history, {
-            maxMessages: budget.maxMessages,
-            maxContentLength: budget.maxContentLengthPerMsg,
-            maxTotalTokens: Math.min(budgetForContext, budget.maxContextTokens),
+            maxTotalTokens: budgetForContext,
           });
           catContextHistory = contextText || undefined;
 
           // Degradation check: notify user if context was truncated (count budget or char budget)
-          const degradation = detectContextDegradation(history.length, messageCount, budget);
+          const degradation = detectContextDegradation(history.length, messageCount);
           if (degradation?.degraded) {
             yield {
               type: 'system_info' as AgentMessageType,
@@ -300,27 +1551,260 @@ export async function* routeSerial(
         }
 
         const catModePromptLegacy = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-        if (invocationContext || catModePromptLegacy || mcpInstructions || bootstrapContext) {
-          const parts = [invocationContext, catModePromptLegacy, bootstrapContext, mcpInstructions].filter(Boolean);
-          if (catContextHistory) parts.push(catContextHistory);
-          prompt = `${parts.join('\n\n---\n\n')}\n\n---\n\n${prompt}`;
-        } else if (catContextHistory) {
-          prompt = `${catContextHistory}\n\n---\n\n${prompt}`;
-        }
+        rebuildPromptWithBootstrap = (bootstrap) => {
+          if (invocationContext || catModePromptLegacy || mcpInstructions || bootstrap) {
+            const parts = [invocationContext, catModePromptLegacy, bootstrap, mcpInstructions].filter(Boolean);
+            if (catContextHistory) parts.push(catContextHistory);
+            return `${parts.join('\n\n---\n\n')}\n\n---\n\n${invocationMessagePrompt}`;
+          }
+          return catContextHistory
+            ? `${catContextHistory}\n\n---\n\n${invocationMessagePrompt}`
+            : invocationMessagePrompt;
+        };
+        prompt = rebuildPromptWithBootstrap(bootstrapContext);
+      }
+
+      if (!incrementalMode) prompt = appendRoutePromptAdditions(prompt);
+      const rebuildPromptAfterSessionSeal =
+        !defersProjection && rebuildSessionBootstrap && (rebuildPromptWithBootstrap || contextPromptFactory)
+          ? async () => {
+              const refreshed = await rebuildSessionBootstrap();
+              if (!refreshed) {
+                log.warn(
+                  { catId, threadId },
+                  '[routeSerial] session bootstrap rebuild returned no sealed prior; degrading to initial bootstrap context',
+                );
+              } else {
+                bootstrapContext = refreshed.text;
+                if (refreshed.pushRecallPresentations?.length) {
+                  currentPushRecallPresentations.push(...refreshed.pushRecallPresentations);
+                }
+              }
+              return rebuildPromptWithBootstrap
+                ? appendRoutePromptAdditions(rebuildPromptWithBootstrap(bootstrapContext))
+                : prompt;
+            }
+          : undefined;
+
+      if (!incrementalMode) {
+        exactPromptMessageIds = collectExactPromptMessageIds(options.persistedPromptMessageIds ?? [], [
+          currentUserMessageId,
+          a2aTriggerMessageId,
+          streamReplyTo,
+        ]);
       }
 
       let textContent = '';
-      let thinkingContent = '';
-      let firstMetadata: MessageMetadata | undefined;
+      checkpointPreparation('history_and_prompt');
+      let persistedDoneContent: string | undefined;
+      let persistedLayoutContent: string | undefined;
+      const thinkingChunks: string[] = [];
+      let persistedMetadata: MessageMetadata | undefined;
+      const remoteCancellation = createRemoteCancellationObserver();
       let doneMsg: AgentMessage | undefined;
+      let lifecycleResponseMessageId: string | undefined;
+      let lifecyclePriorFrontierMessageId: string | null | undefined;
       let hadError = false;
+      /** F155: tracks whether cat produced user-visible output (for guide completion ack). */
+      let catProducedOutput = false;
+      let turnStoredMessageId: string | undefined;
+      let sawUserFacingSystemInfo = false;
+      // Issue #1208 P2: collect user-facing system_info payloads so they can be
+      // persisted to messageStore even when the cat produces no text/tools/rich.
+      // Without this, warnings yielded in the live stream disappear on refresh.
+      const userFacingSystemInfoContents: string[] = [];
+      // #267: track errors that happened BEFORE abort — only these are real provider failures
+      let hadProviderError = false;
+      // Collect error text separately for system-message persistence (F5 reload)
+      let collectedErrorText = '';
+      // F117 KD-22: kept when this member's output timeout fires, before it is stopped.
+      let memberTimeout: MemberTimeoutEvent | undefined;
+      const onMemberTimeout = options.stopMember
+        ? (timeout: MemberTimeoutEvent): void => {
+            memberTimeout = timeout;
+            options.stopMember?.(catId as string, timeout.executionId);
+          }
+        : undefined;
+      // F212 Phase B (云端 codex P2-8 2026-05-27): persist Phase A's structured
+      // cliDiagnostics alongside the error text so cold hydration (F5 reload) can
+      // restore the folded panel — without this, only the legacy red-pill survives.
+      let collectedCliDiagnostics: import('@cat-cafe/shared').CliDiagnostics | undefined;
       const collectedToolEvents: StoredToolEvent[] = [];
+      // F148 OQ-2: Collect tool names for context eval signals
+      const collectedToolNames: string[] = [];
+      const pendingToolResults: PendingToolResult[] = [];
+      const recordPersistedOutputMessageId = (messageId: string): void => {
+        sameRouteOutputMessageIds.add(messageId);
+        const persistenceContext = options.persistenceContext;
+        if (!persistenceContext) return;
+        const existing = persistenceContext.persistedOutputMessageIds ?? [];
+        if (existing.includes(messageId)) return;
+        persistenceContext.persistedOutputMessageIds = [...existing, messageId];
+      };
+      // #573: a confirmed post_message is its own durable output, never the turn's final.
+      const callbackPosts = new CallbackPostTracker(recordPersistedOutputMessageId);
+      const verifiedConciergeToolTargets = new VerifiedConciergeToolTargetCollector();
+      const pendingCallbackRoutingExits: CallbackContentRoutingExit[] = [];
+      const confirmedCallbackRoutingGuardMentions = new Set<CatId>();
+      let confirmedCallbackRoutingGuardHasCoCreatorLineStartMention = false;
+      let confirmedLocalCallbackRoutingHasCoCreatorLineStartMention = false;
+      const emittedBallHandedCvoMessageIds = new Set<string>();
+      const structuredTargetCats = new Set<string>();
       // F060: Collect rich blocks emitted inline via system_info (not MCP buffer)
       const streamRichBlocks: import('@cat-cafe/shared').RichBlock[] = [];
       // F22 R2 P1-1: Capture own invocationId from stream (not getLatestId)
       let ownInvocationId: string | undefined;
+      const initialExecutionKind: TurnExecutionKind = 'ordinary';
+      const turnExecutionProjectionByInvocation = new Map<string, TurnExecutionMessageProjection>();
+      const rememberTurnExecutionProjection = (invocationId: string, executionKind: TurnExecutionKind): void => {
+        if (!deps.invocationDeps.turnExecutionStore) return;
+        turnExecutionProjectionByInvocation.set(invocationId, {
+          invocationId,
+          parentInvocationId: options.parentInvocationId ?? invocationId,
+          executionKind,
+        });
+      };
+      const collectAuxiliaryTurnExecutions = (
+        visibleInvocationId: string | undefined,
+        existing: readonly TurnExecutionMessageProjection[] = [],
+      ): TurnExecutionMessageProjection[] => {
+        const auxiliaryByInvocationId = new Map<string, TurnExecutionMessageProjection>();
+        for (const projection of existing) {
+          if (projection.invocationId !== visibleInvocationId) {
+            auxiliaryByInvocationId.set(projection.invocationId, projection);
+          }
+        }
+        for (const projection of turnExecutionProjectionByInvocation.values()) {
+          if (projection.invocationId !== visibleInvocationId) {
+            auxiliaryByInvocationId.set(projection.invocationId, projection);
+          }
+        }
+        return [...auxiliaryByInvocationId.values()];
+      };
+      const projectLiveTurnExecution = (event: AgentMessage): AgentMessage => {
+        if (!deps.invocationDeps.turnExecutionStore || !event.invocationId) return event;
+        const turnExecution = turnExecutionProjectionByInvocation.get(event.invocationId);
+        const auxiliaryTurnExecutions = collectAuxiliaryTurnExecutions(
+          event.invocationId,
+          event.extra?.auxiliaryTurnExecutions,
+        );
+        if (!turnExecution && auxiliaryTurnExecutions.length === 0) return event;
+        return {
+          ...event,
+          extra: {
+            ...event.extra,
+            ...(turnExecution ? { turnExecution } : {}),
+            ...(auxiliaryTurnExecutions.length > 0 ? { auxiliaryTurnExecutions } : {}),
+          },
+        };
+      };
+      const readTurnExecution = async (invocationId: string | undefined) => {
+        if (!invocationId || !deps.invocationDeps.turnExecutionStore) return undefined;
+        const emittedProjection = turnExecutionProjectionByInvocation.get(invocationId);
+        if (emittedProjection) return emittedProjection;
+        try {
+          const record = await deps.invocationDeps.turnExecutionStore.get(invocationId);
+          return record ? projectTurnExecutionMessage(record) : undefined;
+        } catch (error) {
+          log.warn(
+            { threadId, catId: catId as string, invocationId, err: error },
+            'Turn execution projection read failed; preserving visible output without badge metadata',
+          );
+          return undefined;
+        }
+      };
+      const readTurnExecutionProjections = async (visibleInvocationId: string | undefined) => {
+        const turnExecution = await readTurnExecution(visibleInvocationId);
+        const auxiliaryTurnExecutions = collectAuxiliaryTurnExecutions(visibleInvocationId);
+        if (
+          ownInvocationId &&
+          ownInvocationId !== visibleInvocationId &&
+          !auxiliaryTurnExecutions.some((projection) => projection.invocationId === ownInvocationId)
+        ) {
+          const ownExecution = await readTurnExecution(ownInvocationId);
+          if (ownExecution) auxiliaryTurnExecutions.push(ownExecution);
+        }
+        return {
+          ...(turnExecution ? { turnExecution } : {}),
+          ...(auxiliaryTurnExecutions.length > 0 ? { auxiliaryTurnExecutions } : {}),
+        };
+      };
+      const commitCompletedResponse = async (
+        message: AppendMessageInput,
+        terminal: { status: 'completed'; completedAt: number },
+        targets: readonly CatId[],
+        allowDotReturn: boolean,
+      ): Promise<StoredMessage> => {
+        if (!ownInvocationId || !lifecycleResponseMessageId) throw new Error('canonical response identity missing');
+        return commitCompletedRouteResponse(deps, {
+          responseMessageId: lifecycleResponseMessageId,
+          invocationId: ownInvocationId,
+          message,
+          terminal,
+          targetCats: [...targets],
+          allowDotReturn,
+          triggerMessageId: turnTriggerMessageId,
+          admitWake: commitCompletedA2AWake,
+          userId,
+          ownerAuthProvenance,
+          threadId,
+          callerCatId: catId,
+          ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
+        });
+      };
+      let eventBackedRoutingExitPromise: ReturnType<typeof resolveEventBackedRoutingExit> | undefined;
+      let verifiedEventBackedRoutingExit = false;
+      const hasVerifiedEventBackedRoutingExit = async (): Promise<boolean> => {
+        const lifecycleResponse = lifecycleResponseMessageId
+          ? await deps.messageStore.getById(lifecycleResponseMessageId)
+          : null;
+        const lifecycleInputMessageIds =
+          lifecycleResponse?.lifecycle?.kind === 'response' &&
+          lifecycleResponse.lifecycle.invocationId === ownInvocationId
+            ? lifecycleResponse.lifecycle.inputMessageIds
+            : [];
+        const sources =
+          lifecycleInputMessageIds.length > 0
+            ? await Promise.all(
+                lifecycleInputMessageIds.map(async (sourceMessageId) => {
+                  const source = await deps.messageStore.getById(sourceMessageId);
+                  const taskId = source?.source?.meta?.taskId;
+                  return {
+                    sourceMessageId,
+                    ...(source &&
+                    isOwnerVisibleManagedHoldConnector(source, userId) &&
+                    source.source?.meta?.catId === catId &&
+                    typeof taskId === 'string' &&
+                    taskId.length > 0
+                      ? { holdTaskId: taskId }
+                      : {}),
+                  };
+                }),
+              )
+            : [];
+        eventBackedRoutingExitPromise ??= resolveEventBackedRoutingExit({
+          taskStore: deps.taskStore,
+          userId,
+          threadId,
+          catId: catId as string,
+          invocationId: ownInvocationId,
+          sources,
+        });
+        const resolution = await eventBackedRoutingExitPromise;
+        if (resolution.kind === 'reject') {
+          routingEventWaitRejectedTotal.add(1, { [ROUTING_EVENT_WAIT_REASON]: resolution.reason });
+          return false;
+        }
+        routingEventWaitBypassTotal.add(1);
+        routingEventWaitRedundantHoldPreventedTotal.add(1);
+        verifiedEventBackedRoutingExit = true;
+        return true;
+      };
+      let visibleContentInvocationIdOverride: string | undefined;
       // F111 Phase B: Streaming TTS chunker for real-time voice (voiceMode only)
       let voiceChunker: StreamingTtsChunker | undefined;
+      let deferredVoiceInvocationId: string | undefined;
+      const deferredVoiceTextChunks: string[] = [];
 
       // #80: Draft flush state — periodic persistence for F5 recovery
       let lastFlushTime = Date.now();
@@ -330,127 +1814,511 @@ export async function* routeSerial(
       const FLUSH_CHAR_DELTA = 2000;
       const noop = () => {};
 
-      // Issue #83: Independent keepalive timer — touch draft every 60s during long tool calls.
-      // Stream events alone can't keep draft alive when tools execute silently for >300s.
-      const KEEPALIVE_INTERVAL_MS = 60_000;
-      let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
+      // F117 KD-23: drafts no longer expire, so nothing renews them on a timer. The ball-custody
+      // heartbeat comes only from real stream activity (the draft flushes below).
+      let lastBallCustodyHeartbeatAt: number | null = null;
+      const emitThrottledBallInvocationHeartbeat = (draftUpdatedAt: number): void => {
+        if (
+          lastBallCustodyHeartbeatAt !== null &&
+          draftUpdatedAt - lastBallCustodyHeartbeatAt < BALL_CUSTODY_INVOCATION_HEARTBEAT_MIN_INTERVAL_MS
+        ) {
+          return;
+        }
+        lastBallCustodyHeartbeatAt = draftUpdatedAt;
+        emitBallInvocationHeartbeat(deps.ballCustody, threadId, ownInvocationId, catId as string, draftUpdatedAt);
+      };
 
       // Always pass isLastCat:false — we set isFinal AFTER A2A detection
+      log.debug(
+        { catId: catId as string, threadId, promptLength: prompt.length, index, worklistSize: worklist.length },
+        'Invoking cat via invokeSingleCat',
+      );
+      const outputTransform = createRoutingMessageTransform(catId);
+      let outputProjection: RoutingMessageOutputProjection | undefined;
+      const invocationSpanRef: { current?: Span } = {};
+      const invocationStartedAt = Date.now();
+      // F215 AC-C3: a malformed 4.8 turn asks the canonical response lifecycle
+      // to publish one durable wake for the 4.6 relay. It must never mutate the
+      // current route worklist: that bypassed Queue custody and made the child
+      // invocation inseparable from its failed parent route.
+      let malformedRelayTarget: CatId | undefined;
+      const createVoiceChunker = (invocationId: string): StreamingTtsChunker | undefined => {
+        if (!voiceMode || !deps.socketManager) return undefined;
+        const ttsRegistry = getStreamingTtsRegistry();
+        if (!ttsRegistry) return undefined;
+        return new StreamingTtsChunker({
+          catId: catId as string,
+          invocationId,
+          threadId,
+          voiceConfig: getCatVoice(catId as string),
+          broadcaster: deps.socketManager,
+          ttsRegistry,
+          signal: catSignal,
+        });
+      };
+      const flushVoiceChunker = async (
+        chunker: StreamingTtsChunker | undefined,
+        invocationId: string | undefined,
+      ): Promise<void> => {
+        if (!chunker) return;
+        let voiceTotalChunks = 0;
+        try {
+          voiceTotalChunks = await chunker.flush();
+        } catch (err) {
+          log.error({ err }, 'Voice chunker flush failed');
+        }
+        if (deps.socketManager && chunker.hasStarted()) {
+          const aborted = catSignal?.aborted ?? false;
+          deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'voice_stream_end', {
+            type: 'voice_stream_end',
+            catId: catId as string,
+            invocationId: invocationId ?? '',
+            threadId,
+            totalChunks: aborted ? -1 : voiceTotalChunks,
+          });
+        }
+      };
+      const resetDeferredVoice = () => {
+        deferredVoiceInvocationId = undefined;
+        deferredVoiceTextChunks.splice(0, deferredVoiceTextChunks.length);
+      };
+      const settleCallbackRoutingExit = (
+        completedTool: PendingToolResult,
+        confirmed: boolean,
+      ): CallbackContentRoutingExit | undefined => {
+        const exitIndex = completedTool.toolUseId
+          ? pendingCallbackRoutingExits.findIndex((candidate) => candidate.toolUseId === completedTool.toolUseId)
+          : pendingCallbackRoutingExits.findIndex((candidate) =>
+              toolNamesMatch(candidate.toolName, completedTool.toolName),
+            );
+        if (exitIndex === -1) return undefined;
+
+        const [exit] = pendingCallbackRoutingExits.splice(exitIndex, 1);
+        if (!confirmed || !exit) return undefined;
+        for (const mention of exit.guardLineStartMentions) confirmedCallbackRoutingGuardMentions.add(mention);
+        if (exit.hasGuardCoCreatorLineStartMention) confirmedCallbackRoutingGuardHasCoCreatorLineStartMention = true;
+        if (exit.hasLocalCoCreatorLineStartMention) confirmedLocalCallbackRoutingHasCoCreatorLineStartMention = true;
+        return exit;
+      };
+      const getRoutingExitLineStartMentions = (textMentions: readonly CatId[] = []): CatId[] => [
+        ...new Set<CatId>([...textMentions, ...confirmedCallbackRoutingGuardMentions]),
+      ];
+      const hasRoutingExitCoCreatorLineStartMention = (content: string): boolean =>
+        Boolean(
+          (content ? detectUserMention(content) : false) || confirmedCallbackRoutingGuardHasCoCreatorLineStartMention,
+        );
+      const hasLocalCoCreatorLineStartMention = (content: string): boolean => {
+        if (content && detectUserMention(content)) return true;
+        return confirmedLocalCallbackRoutingHasCoCreatorLineStartMention;
+      };
+      const emitBallHandedCvoOnce = (
+        messageId: string | undefined,
+        eventThreadId: string | undefined = threadId,
+      ): void => {
+        if (!messageId || !eventThreadId) return;
+        const eventKey = `${eventThreadId}:${messageId}`;
+        if (emittedBallHandedCvoMessageIds.has(eventKey)) return;
+        emittedBallHandedCvoMessageIds.add(eventKey);
+        void emitBallHandedCvo(deps.ballCustody, eventThreadId, catId as string, messageId);
+      };
+      const emitConfirmedCallbackBallHandedCvo = (
+        confirmed: boolean,
+        settledExit: CallbackContentRoutingExit | undefined,
+        messageId: string | undefined,
+        resultThreadId: string | undefined,
+      ): void => {
+        if (!confirmed || !settledExit) return;
+        if (settledExit.hasLocalCoCreatorLineStartMention) {
+          emitBallHandedCvoOnce(messageId, resultThreadId ?? threadId);
+        }
+        if (settledExit.hasTargetCoCreatorLineStartMention) {
+          emitBallHandedCvoOnce(messageId, resultThreadId);
+        }
+      };
+      const toStreamEvent = (effectiveMsg: AgentMessage): AgentMessage | null => {
+        if (effectiveMsg.type === 'text' && !effectiveMsg.content) return null;
+        // F194 Phase Z9 砚砚 R1 P1-1: stamp ownInvocationId on yielded stream events
+        // so downstream broadcaster (messages.ts) doesn't fall back to parent when
+        // assigning turnInvocationId. CLI text/done/tool events don't carry
+        // invocationId; only system_info=invocation_created does. Without explicit
+        // stamping, multi-turn same-cat under shared parent collapses to one bubble.
+        const ownStampedMsg =
+          ownInvocationId && !effectiveMsg.invocationId
+            ? { ...effectiveMsg, invocationId: ownInvocationId }
+            : effectiveMsg;
+        // Tag CLI stdout text with origin: 'stream' (thinking/internal).
+        const projectedMsg = projectLiveTurnExecution(ownStampedMsg);
+        return projectedMsg.type === 'text'
+          ? {
+              ...projectedMsg,
+              origin: 'stream' as const,
+              ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
+              ...(streamReplyPreview ? { replyPreview: streamReplyPreview } : {}),
+            }
+          : projectedMsg;
+      };
+      checkpointPreparation('callback_setup');
+      log.info(
+        {
+          threadId,
+          catId,
+          parentInvocationId: options.parentInvocationId,
+          elapsedMs: preparationCheckpointAt - memberPreparationStartedAt,
+          stages: preparationTimings.splice(0),
+        },
+        'Delivery route preparation timing',
+      );
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
+        executionBinding,
+        ...(options.routingAdmission ? { routingAdmission: options.routingAdmission } : {}),
+        onRemoteExecutionDispatched: remoteCancellation.onDispatched,
+        ...(options.liveCompanion && index === 0 ? { liveCompanion: options.liveCompanion } : {}),
+        ...(options.routeIntent ? { routeIntent: options.routeIntent } : {}),
+        ...(options.routingContextIntent ? { routingContextIntent: options.routingContextIntent } : {}),
+        ...(routingDispatchPreflightDecision ? { routingDispatchPreflightDecision } : {}),
         catId,
-        service: getService(deps.services, catId),
+        service,
+        capacitySnapshot,
+        sessionPolicySnapshot,
         prompt,
+        ...(contextPromptFactory ? { contextPromptFactory } : {}),
+        ...(rebuildPromptAfterSessionSeal ? { rebuildPromptAfterSessionSeal } : {}),
         userId,
+        ownerAuthProvenance,
         threadId,
+        invocationOrigin: resolveInvocationOrigin(options.humanDispositionInvocationOrigin),
+        contextSourceIngress:
+          options.contextSourceIngress ??
+          (options.humanDispositionInvocationOrigin === 'direct_owner' && options.currentUserMessageId
+            ? { kind: 'owner', sourceMessageId: options.currentUserMessageId }
+            : undefined),
+        routeTopology: 'serial',
         ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
-        ...(signal ? { signal } : {}),
+        ...(catSignal ? { signal: catSignal } : {}),
+        ...(onMemberTimeout ? { onMemberTimeout } : {}),
         ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
         ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
-        // F121: Pass A2A trigger message ID for auto-replyTo threading
-        ...(worklistEntry.a2aTriggerMessageId.get(catId)
-          ? { a2aTriggerMessageId: worklistEntry.a2aTriggerMessageId.get(catId) }
+        continuityCapsule,
+        ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
+        ...(entityNudgePresentation ? { entityNudgePresentation } : {}),
+        ...(entityNudgeCuePresentation ? { entityNudgeCuePresentation } : {}),
+        ...(options.asrPersonMemoryScenes?.length ? { asrPersonMemoryScenes: options.asrPersonMemoryScenes } : {}),
+        ...(memoryCueLegacyFallbacks.length > 0 ? { memoryCueLegacyFallbacks } : {}),
+        ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
+        executionKind: initialExecutionKind,
+        ...(options.beforeOutputCommit ? { outputFenced: true } : {}),
+        executionCausal: {
+          ...((initialCloudProvenance?.sourceMessageId ?? streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId)
+            ? {
+                triggerMessageId:
+                  initialCloudProvenance?.sourceMessageId ??
+                  streamReplyTo ??
+                  currentUserMessageId ??
+                  a2aTriggerMessageId,
+              }
+            : {}),
+        },
+        promptMessageIds: exactPromptMessageIds,
+        ...(options.onPromptMessagesExposed
+          ? {
+              onPromptMessagesExposed: async (input) => {
+                return options.onPromptMessagesExposed!(input);
+              },
+            }
           : {}),
+        ...(options.onLifecycleInvocationStarted
+          ? { onLifecycleInvocationStarted: options.onLifecycleInvocationStarted }
+          : {}),
+        ...(options.onAgentClientActiveRunReady
+          ? { onAgentClientActiveRunReady: options.onAgentClientActiveRunReady }
+          : {}),
+        // F247 AC-B1c-3 PR-C: Plumb raw mention text + mentioning cat for cloud bridge dispatch.
+        // - mentionContent: the raw user/cat message (NOT the orchestrated prompt with system context)
+        // - mentioningCatId: A2A → the cat that @ mentioned; user-initiated → userId as fallback
+        //   so the cloud cat knows "who called" (gpt52 R1 P1-2 contract: calledBy ≠ thread owner)
+        mentionContent: isOriginalTarget ? (initialCloudProvenance?.intent ?? message) : cloudA2AContent,
+        mentioningCatId:
+          initialCloudProvenance?.calledByCatId ??
+          (isOriginalTarget ? ((directMessageFrom ?? userId) as import('@cat-cafe/shared').CatId) : directMessageFrom),
+        ...(initialCloudProvenance ? { cloudDispatchProvenance: initialCloudProvenance } : {}),
+        ...(isOriginalTarget && options.requiresExactCloudDispatchProvenance
+          ? { requiresExactCloudDispatchProvenance: true }
+          : {}),
+        // F121/F167: Keep stream threading and callback auth provenance on the same trigger.
+        ...(streamReplyTo ? { a2aTriggerMessageId: streamReplyTo } : {}),
+        ...(options.routeSpan ? { routeSpan: options.routeSpan } : {}),
+        invocationSpanRef,
         isLastCat: false,
       })) {
         // F39 bugfix: stop yielding after cancel (pipe buffer may still drain)
-        if (signal?.aborted) break;
+        if (catSignal?.aborted) break;
+        if (isFinalGenerationBriefingBoundary(msg)) await materializeFinalGenerationBriefing();
+        while (pendingContextProjectionMessages.length > 0) {
+          const pendingMessage = pendingContextProjectionMessages.shift();
+          if (pendingMessage) yield pendingMessage;
+        }
 
-        // F22 R2 P1-1: Capture invocationId from the initial system_info.
-        // Keep forwarding this boundary event so frontend can reset stale task progress.
-        if (msg.type === 'system_info' && msg.content && !ownInvocationId) {
-          try {
-            const parsed = JSON.parse(msg.content);
-            if (parsed.type === 'invocation_created') {
-              ownInvocationId = parsed.invocationId;
-              // F111 Phase B: Start streaming TTS when we have an invocationId
-              if (voiceMode && deps.socketManager) {
-                const ttsRegistry = getStreamingTtsRegistry();
-                if (ttsRegistry) {
-                  voiceChunker = new StreamingTtsChunker({
-                    catId: catId as string,
-                    invocationId: ownInvocationId!,
-                    threadId,
-                    voiceConfig: getCatVoice(catId as string),
-                    broadcaster: deps.socketManager,
-                    ttsRegistry,
-                    signal,
-                  });
+        const effectiveMsgs = outputTransform.transform(msg);
+        for (let effectiveMsg of effectiveMsgs) {
+          // F22 R2 P1-1: Capture invocationId from the initial system_info.
+          // Keep forwarding this boundary event so frontend can reset stale task progress.
+          if (effectiveMsg.type === 'system_info' && effectiveMsg.content && !ownInvocationId) {
+            try {
+              const parsed = JSON.parse(effectiveMsg.content);
+              if (
+                parsed.type === 'invocation_created' &&
+                typeof parsed.invocationId === 'string' &&
+                parsed.invocationId.length > 0
+              ) {
+                ownInvocationId = parsed.invocationId;
+                outputProjection = new RoutingMessageOutputProjection({
+                  threadId,
+                  catId,
+                  turnInvocationId: parsed.invocationId,
+                });
+                if (
+                  typeof effectiveMsg.lifecycleResponseMessageId === 'string' &&
+                  effectiveMsg.lifecycleResponseMessageId.length > 0
+                ) {
+                  lifecycleResponseMessageId = effectiveMsg.lifecycleResponseMessageId;
+                  if (
+                    effectiveMsg.lifecyclePriorFrontierMessageId === null ||
+                    typeof effectiveMsg.lifecyclePriorFrontierMessageId === 'string'
+                  ) {
+                    lifecyclePriorFrontierMessageId = effectiveMsg.lifecyclePriorFrontierMessageId;
+                  }
+                }
+                rememberTurnExecutionProjection(parsed.invocationId, initialExecutionKind);
+                emitBallInvocationStarted(deps.ballCustody, threadId, ownInvocationId, catId as string);
+                // F111 Phase B: Start streaming TTS when we have an invocationId.
+                if (voiceMode) {
+                  voiceChunker = createVoiceChunker(ownInvocationId!);
                 }
               }
-              // Issue #83: Start keepalive timer once we have an invocationId.
-              // This ensures draft TTL is renewed even during long silent tool calls.
-              if (deps.draftStore && !keepaliveTimer) {
-                const keepInvId = ownInvocationId!;
-                keepaliveTimer = setInterval(() => {
-                  deps.draftStore!.touch(userId, threadId, keepInvId)?.catch?.(noop);
-                }, KEEPALIVE_INTERVAL_MS);
+            } catch {
+              /* ignore parse errors */
+            }
+          }
+
+          if (effectiveMsg.extra?.startupRecovery) {
+            if (
+              !(await persistStartupRecovery(
+                deps.messageStore,
+                effectiveMsg,
+                lifecycleResponseMessageId,
+                ownInvocationId,
+              ))
+            )
+              continue;
+            effectiveMsg = { ...effectiveMsg, messageId: lifecycleResponseMessageId };
+          }
+          if (effectiveMsg.type === 'text') {
+            const fragment = effectiveMsg.content;
+            if (outputProjection) {
+              effectiveMsg = outputProjection.text(effectiveMsg, outputTransform.outputFactsFor(effectiveMsg));
+              textContent = outputProjection.snapshot().content;
+            } else if (fragment) {
+              textContent = accumulateTextAggregate(textContent, fragment, effectiveMsg.textMode);
+            }
+            if (fragment) voiceChunker?.feed(fragment);
+          }
+          // F045: Accumulate thinking blocks for persistence (F5 recovery)
+          if (effectiveMsg.type === 'system_info' && effectiveMsg.content) {
+            if (isUserFacingSystemInfoContent(effectiveMsg.content)) {
+              sawUserFacingSystemInfo = true;
+              userFacingSystemInfoContents.push(effectiveMsg.content);
+            }
+            try {
+              const parsed = JSON.parse(effectiveMsg.content);
+              if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
+                thinkingChunks.splice(0, thinkingChunks.length, ...appendThinkingChunk(thinkingChunks, parsed.text));
+              }
+              // F060: Collect inline rich_block for persistence (P1 fix)
+              if (parsed.type === 'rich_block' && parsed.block && isValidRichBlock(parsed.block)) {
+                streamRichBlocks.push(parsed.block);
+              }
+              // F153: Accumulate invocation tokens for route aggregate
+              if (parsed.type === 'invocation_usage' && parsed.usage) {
+                routeTotalTokens += (parsed.usage.inputTokens ?? 0) + (parsed.usage.outputTokens ?? 0);
+              }
+              // F118 AC-C3 / F117: timeout diagnostics persist with the response they explain.
+              persistedMetadata = withTimeoutDiagnostics(persistedMetadata, parsed);
+              // F215 AC-C3: detect 46-接力 relay signal — set flag to push opus-4.6 after loop.
+              // This is an internal routing signal; must be consumed here and NOT yielded to the frontend.
+              if (parsed.type === 'malformed_toolcall_relay_46') {
+                const relay46CatId = createCatId('opus');
+                if (catId !== relay46CatId && Object.hasOwn(deps.services, relay46CatId as string)) {
+                  malformedRelayTarget = relay46CatId;
+                  log.info(
+                    { catId: catId as string, threadId, relay46CatId },
+                    '[F215] malformed_toolcall_relay_46 signal received — will publish a durable relay wake',
+                  );
+                }
+                continue; // consume routing signal — never surfaces to user as raw JSON
+              }
+            } catch {
+              /* ignore parse errors */
+            }
+          }
+          // F215 AC-C3: suppress malformed error when relay to 46 is already queued
+          if (
+            malformedRelayTarget &&
+            effectiveMsg.type === 'error' &&
+            typeof effectiveMsg.error === 'string' &&
+            effectiveMsg.error.startsWith('malformed_toolcall:')
+          ) {
+            continue; // 46 will take over — don't surface error to user
+          }
+          // Accumulate tool events for persistence (before draft flush so current event is available)
+          const toolEvt = toStoredToolEvent(effectiveMsg, ownInvocationId);
+          if (toolEvt) {
+            collectedToolEvents.push(toolEvt);
+            outputProjection?.tool(toolEvt);
+          }
+          verifiedConciergeToolTargets.observe(effectiveMsg);
+
+          if (effectiveMsg.type === 'tool_use') {
+            for (const target of collectStructuredTargetCatsFromInput(effectiveMsg.toolInput)) {
+              structuredTargetCats.add(target);
+            }
+          }
+
+          // F148 OQ-2: Collect tool names for context eval
+          if (effectiveMsg.type === 'tool_use' && effectiveMsg.toolName) {
+            collectedToolNames.push(effectiveMsg.toolName);
+            pendingToolResults.push({
+              toolName: effectiveMsg.toolName,
+              ...(effectiveMsg.toolUseId ? { toolUseId: effectiveMsg.toolUseId } : {}),
+            });
+            const callbackExit = collectCallbackContentRoutingExit(
+              effectiveMsg.toolName,
+              effectiveMsg.toolInput,
+              catId,
+              effectiveMsg.toolUseId,
+            );
+            if (callbackExit) pendingCallbackRoutingExits.push(callbackExit);
+          }
+          // #573: Confirm callback persistence via tool_result success
+          if (effectiveMsg.type === 'tool_result') {
+            const callbackResult = parseCallbackPostResult(effectiveMsg.content);
+            const completedToolName = consumePendingToolResult(
+              pendingToolResults,
+              effectiveMsg,
+              callbackResult.confirmed,
+              Boolean(callbackResult.messageId && callbackResult.threadId),
+            );
+            if (completedToolName && isPostMessageToolName(completedToolName.toolName) && callbackResult.confirmed) {
+              callbackPosts.recordConfirmedPost(callbackResult);
+            }
+            if (completedToolName) {
+              const settledExit = settleCallbackRoutingExit(completedToolName, callbackResult.confirmed);
+              emitConfirmedCallbackBallHandedCvo(
+                callbackResult.confirmed,
+                settledExit,
+                callbackResult.messageId,
+                callbackResult.threadId,
+              );
+            }
+            // F188 Phase F AC-F10 (砚砚 六审 P1-B: also scope by catId for serial route consistency).
+            // 砚砚 cloud-3 P1: also pass toolUseId for exact match when available;
+            // otherwise FIFO toolName+catId match handles same-name parallel calls.
+            if (deps.toolEventLog && completedToolName) {
+              const normalizedName = normalizeMcpToolName(completedToolName.toolName);
+              const resultSummary = deriveResultSummary(normalizedName, effectiveMsg.content);
+              if (Object.keys(resultSummary).length > 0) {
+                const resultMsg = effectiveMsg as { catId?: string; toolUseId?: string };
+                const matcher: { toolUseId?: string; toolName?: string; catId?: string } = resultMsg.toolUseId
+                  ? { toolUseId: resultMsg.toolUseId }
+                  : resultMsg.catId
+                    ? { toolName: normalizedName, catId: resultMsg.catId }
+                    : { toolName: normalizedName };
+                deps.toolEventLog.updateSummary(threadId, matcher, resultSummary).catch(() => {});
               }
             }
-          } catch {
-            /* ignore parse errors */
           }
-        }
-        if (msg.type === 'text' && msg.content) {
-          textContent += msg.content;
-          voiceChunker?.feed(msg.content);
-        }
-        // F045: Accumulate thinking blocks for persistence (F5 recovery)
-        if (msg.type === 'system_info' && msg.content) {
-          try {
-            const parsed = JSON.parse(msg.content);
-            if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
-              thinkingContent += (thinkingContent ? '\n\n---\n\n' : '') + parsed.text;
-            }
-            // F060: Collect inline rich_block for persistence (P1 fix)
-            if (parsed.type === 'rich_block' && parsed.block && isValidRichBlock(parsed.block)) {
-              streamRichBlocks.push(parsed.block);
-            }
-          } catch {
-            /* ignore parse errors */
-          }
-        }
-        // Accumulate tool events for persistence (before draft flush so current event is available)
-        const toolEvt = toStoredToolEvent(msg);
-        if (toolEvt) {
-          collectedToolEvents.push(toolEvt);
-        }
 
-        // #80: Draft flush — fire-and-forget periodic persistence for F5 recovery
-        if (deps.draftStore && ownInvocationId) {
-          const now = Date.now();
-          const charDelta = textContent.length - lastFlushLen;
-          const neverFlushed = lastFlushLen === 0 && lastFlushToolLen === 0;
-          if (
-            msg.type === 'text' &&
-            charDelta > 0 &&
-            (neverFlushed || now - lastFlushTime >= FLUSH_INTERVAL_MS || charDelta >= FLUSH_CHAR_DELTA)
-          ) {
-            deps.draftStore
-              .upsert({
-                userId,
-                threadId,
-                invocationId: ownInvocationId,
-                catId,
-                content: textContent,
-                ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
-                ...(thinkingContent ? { thinking: thinkingContent } : {}),
-                updatedAt: now,
+          // F150: Fire-and-forget tool usage counter
+          if (effectiveMsg.type === 'tool_use' && deps.toolUsageCounter && effectiveMsg.catId) {
+            deps.toolUsageCounter.recordToolUse(
+              effectiveMsg.catId as string,
+              effectiveMsg.toolName ?? 'unknown',
+              effectiveMsg.toolInput as Record<string, unknown> | undefined,
+            );
+          }
+          // F188 Phase F AC-F10: append-only tool event log (砚砚 三审 P1 wiring)
+          if (effectiveMsg.type === 'tool_use' && deps.toolEventLog && effectiveMsg.catId) {
+            const msg = effectiveMsg as {
+              catId?: string;
+              toolName?: string;
+              toolInput?: Record<string, unknown>;
+              toolUseId?: string;
+              invocationId?: string;
+              sessionId?: string;
+              threadId?: string;
+              turnIndex?: number;
+            };
+            // 砚砚 四审 P1-1: normalizeMcpToolName handles mcp__/mcp:/cat_cafe_ child extraction
+            const rawToolName = msg.toolName ?? 'unknown';
+            const classification = classifyTool(rawToolName, msg.toolInput);
+            const normalizedToolName =
+              classification.category === 'skill' ? classification.toolName : normalizeMcpToolName(rawToolName);
+            // 砚砚 cloud-3 P1: propagate toolUseId into summary (as _toolUseId) so
+            // updateSummary can do exact match when provider emits it on tool_result.
+            const baseSummary = (msg.toolInput ?? {}) as Record<string, unknown>;
+            const summary: Record<string, unknown> = msg.toolUseId
+              ? { ...baseSummary, _toolUseId: msg.toolUseId }
+              : baseSummary;
+            deps.toolEventLog
+              .append({
+                invocationId: msg.invocationId ?? ownInvocationId ?? 'unknown',
+                sessionId: msg.sessionId ?? ownInvocationId ?? 'unknown',
+                threadId: msg.threadId ?? threadId ?? 'unknown',
+                catId: msg.catId ?? 'unknown',
+                toolName: normalizedToolName,
+                timestamp: Date.now(),
+                turnIndex: msg.turnIndex ?? 0,
+                status: 'success',
+                summary,
               })
-              ?.catch?.(noop);
-            lastFlushTime = now;
-            lastFlushLen = textContent.length;
-            lastFlushToolLen = collectedToolEvents.length;
-          } else if (
-            (msg.type === 'tool_use' || msg.type === 'tool_result') &&
-            // Cloud R7 P1: bypass interval for the very first flush — tool-first invocations
-            // must create a draft immediately, not wait 2s for the interval gate.
-            (neverFlushed || now - lastFlushTime >= FLUSH_INTERVAL_MS)
-          ) {
-            // Heartbeat for non-text events: keep draft alive during long tool calls.
-            // Cloud R6 P1: upsert when there's unsaved text OR new tool events —
-            // tool-first invocations (no text yet) must still create a draft record.
-            if (textContent.length > lastFlushLen || collectedToolEvents.length > lastFlushToolLen) {
+              .catch(() => {});
+            // 砚砚 二审 P1-4: detect Skill tool_use → SkillLoadEventLog (AS-4 producer path)
+            if (rawToolName === 'Skill' && deps.skillLoadEventLog) {
+              const skillName =
+                msg.toolInput && typeof msg.toolInput['skill'] === 'string'
+                  ? (msg.toolInput['skill'] as string)
+                  : 'unknown';
+              deps.skillLoadEventLog
+                .append({
+                  invocationId: msg.invocationId ?? ownInvocationId ?? 'unknown',
+                  sessionId: msg.sessionId ?? ownInvocationId ?? 'unknown',
+                  skillId: skillName,
+                  loadTrigger: 'explicit_call',
+                  timestamp: Date.now(),
+                })
+                .catch(() => {});
+            }
+          }
+
+          if (effectiveMsg.metadata) {
+            persistedMetadata = mergeMessageMetadataSnapshots(persistedMetadata, effectiveMsg.metadata);
+          }
+          // #80: Draft flush — fire-and-forget periodic persistence for F5 recovery
+          if (deps.draftStore && ownInvocationId) {
+            const now = Date.now();
+            const charDelta = textContent.length - lastFlushLen;
+            const isReplaceText = (effectiveMsg as { textMode?: 'append' | 'replace' }).textMode === 'replace';
+            const neverFlushed = lastFlushLen === 0 && lastFlushToolLen === 0;
+            const childUpdate = effectiveMsg.semanticEvent?.kind === 'subexecution';
+            if (
+              childUpdate ||
+              (effectiveMsg.type === 'text' &&
+                charDelta !== 0 &&
+                (neverFlushed ||
+                  isReplaceText ||
+                  now - lastFlushTime >= FLUSH_INTERVAL_MS ||
+                  charDelta >= FLUSH_CHAR_DELTA))
+            ) {
               deps.draftStore
                 .upsert({
                   userId,
@@ -458,68 +2326,123 @@ export async function* routeSerial(
                   invocationId: ownInvocationId,
                   catId,
                   content: textContent,
+                  ...(persistedMetadata ? { metadata: persistedMetadata } : {}),
+                  ...(outputProjection
+                    ? { extra: { outputLayout: outputProjection.snapshot(textContent).layout } }
+                    : {}),
                   ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
-                  ...(thinkingContent ? { thinking: thinkingContent } : {}),
+                  ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
                   updatedAt: now,
                 })
                 ?.catch?.(noop);
+              if (!childUpdate) emitThrottledBallInvocationHeartbeat(now);
+              lastFlushTime = now;
               lastFlushLen = textContent.length;
               lastFlushToolLen = collectedToolEvents.length;
-            } else {
-              deps.draftStore.touch(userId, threadId, ownInvocationId)?.catch?.(noop);
-            }
-            lastFlushTime = now;
-          }
-        }
-
-        if (msg.type === 'error') {
-          hadError = true;
-          if (msg.error) {
-            textContent += `${textContent ? '\n\n' : ''}[错误] ${msg.error}`;
-          }
-        }
-        if (msg.metadata && !firstMetadata) {
-          firstMetadata = msg.metadata;
-        }
-        if (msg.type === 'done') {
-          doneMsg = msg; // Buffer — yield after A2A detection
-        } else {
-          // Tag CLI stdout text with origin: 'stream' (thinking/internal)
-          yield msg.type === 'text'
-            ? {
-                ...msg,
-                origin: 'stream' as const,
-                ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
-                ...(streamReplyPreview ? { replyPreview: streamReplyPreview } : {}),
+            } else if (
+              (effectiveMsg.type === 'tool_use' || effectiveMsg.type === 'tool_result') &&
+              // Cloud R7 P1: bypass interval for the very first flush — tool-first invocations
+              // must create a draft immediately, not wait 2s for the interval gate.
+              (neverFlushed || now - lastFlushTime >= FLUSH_INTERVAL_MS)
+            ) {
+              // Heartbeat for non-text events: keep draft alive during long tool calls.
+              // Cloud R6 P1: upsert when there's unsaved text OR new tool events —
+              // tool-first invocations (no text yet) must still create a draft record.
+              if (textContent.length > lastFlushLen || collectedToolEvents.length > lastFlushToolLen) {
+                deps.draftStore
+                  .upsert({
+                    userId,
+                    threadId,
+                    invocationId: ownInvocationId,
+                    catId,
+                    content: textContent,
+                    ...(persistedMetadata ? { metadata: persistedMetadata } : {}),
+                    ...(outputProjection
+                      ? { extra: { outputLayout: outputProjection.snapshot(textContent).layout } }
+                      : {}),
+                    ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
+                    ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
+                    updatedAt: now,
+                  })
+                  ?.catch?.(noop);
+                emitThrottledBallInvocationHeartbeat(now);
+                lastFlushLen = textContent.length;
+                lastFlushToolLen = collectedToolEvents.length;
+              } else {
+                emitThrottledBallInvocationHeartbeat(now);
               }
-            : msg;
+              lastFlushTime = now;
+            }
+          }
+
+          if (effectiveMsg.type === 'error') {
+            hadError = true;
+            // #267: errors before abort are real provider failures; errors after abort are cleanup
+            if (!catSignal?.aborted) hadProviderError = true;
+            if (effectiveMsg.error) {
+              collectedErrorText += `${collectedErrorText ? '\n' : ''}${effectiveMsg.error}`;
+            }
+            // F212 Phase B (云端 codex P2-8): capture structured cliDiagnostics from
+            // metadata; keep the first one seen (canonical for this invocation).
+            const meta = effectiveMsg.metadata as
+              | { cliDiagnostics?: import('@cat-cafe/shared').CliDiagnostics }
+              | undefined;
+            if (meta?.cliDiagnostics && !collectedCliDiagnostics) {
+              collectedCliDiagnostics = meta.cliDiagnostics;
+            }
+          }
+          if (effectiveMsg.metadata) {
+            persistedMetadata = mergeMessageMetadataSnapshots(persistedMetadata, effectiveMsg.metadata);
+          }
+          if (effectiveMsg.type === 'done') {
+            doneMsg = effectiveMsg; // Buffer — yield after A2A detection
+          } else {
+            // Once the invocation owns a lifecycle response, provider failures
+            // terminalize that same bubble. Yielding a second error event would
+            // manufacture a transient system surface that disappears on reload.
+            if (effectiveMsg.type === 'error' && lifecycleResponseMessageId) continue;
+            const streamEvent = toStreamEvent(effectiveMsg);
+            if (!streamEvent) continue;
+            yield streamEvent;
+          }
         }
       }
 
-      // Issue #83: Stop keepalive timer — streaming loop has exited.
-      if (keepaliveTimer) {
-        clearInterval(keepaliveTimer);
-        keepaliveTimer = undefined;
+      // F117 KD-22: a member stopped by its output timeout failed, like a provider failure. The
+      // events it produced after the stop were dropped above, so its failure text and diagnostics
+      // come from what its timer kept before stopping it, and it ends with a done that names the
+      // timeout, as a failed provider turn's done names its failure: the Queue settles the entry
+      // failed from that done rather than throwing and broadcasting a second error.
+      if (stoppedByMemberTimeout(catSignal) && memberTimeout) {
+        hadError = true;
+        hadProviderError = true;
+        collectedErrorText += `${collectedErrorText ? '\n' : ''}${memberTimeoutErrorText(memberTimeout.diagnostics)}`;
+        persistedMetadata = {
+          ...(persistedMetadata ?? { provider: '', model: '' }),
+          timeoutDiagnostics: memberTimeout.diagnostics,
+        };
+        doneMsg ??= { type: 'done', catId, errorCode: MEMBER_TIMEOUT_REASON, timestamp: Date.now() };
       }
 
-      // F111 Phase B: Flush remaining buffered text and send voice_stream_end
-      let voiceTotalChunks = 0;
+      // F167 Phase S: this is the single route-side visibility barrier. The
+      // callback records the holder outcome with the durable CAS; nothing below
+      // may enqueue, persist, mutate thread state, synthesize visible output, or
+      // broadcast until it succeeds.
+      const actionOutputCommitAllowed = options.beforeOutputCommit ? await options.beforeOutputCommit(catId) : true;
+      // F117 KD-21: the allowed verdict becomes the turn's durable truth before anything visible, so
+      // a settlement after a crash in between publishes the approved draft. A write that fails throws:
+      // the output stays uncommitted and the execution's failure path settles R. Without a turn store
+      // no child was recorded, so there is no fence to write and no settlement that could read one.
+      const fencedTurnStore = deps.invocationDeps.turnExecutionStore;
+      if (options.beforeOutputCommit && actionOutputCommitAllowed && ownInvocationId && fencedTurnStore) {
+        await requireTurnOutputAllowed(fencedTurnStore, ownInvocationId);
+      }
+
       if (voiceChunker) {
-        try {
-          voiceTotalChunks = await voiceChunker.flush();
-        } catch (err) {
-          log.error({ err }, 'Voice chunker flush failed');
-        }
-        if (deps.socketManager && voiceChunker.hasStarted()) {
-          const aborted = signal?.aborted ?? false;
-          deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'voice_stream_end', {
-            type: 'voice_stream_end',
-            catId: catId as string,
-            invocationId: ownInvocationId ?? '',
-            threadId,
-            totalChunks: aborted ? -1 : voiceTotalChunks,
-          });
-        }
+        // F111 Phase B: Flush remaining buffered text and send voice_stream_end.
+        // Guard-enabled turns do not create this first-pass chunker; their voice is flushed
+        // only after routing validation below.
+        if (actionOutputCommitAllowed) await flushVoiceChunker(voiceChunker, ownInvocationId);
         voiceChunker = undefined;
       }
 
@@ -532,12 +2455,215 @@ export async function* routeSerial(
       // F061: Detect @co-creator mentions in agent response for browser notification
       let mentionsUser = false;
 
-      if (textContent) {
+      const observeLegacyRoutingBlock = (input: Parameters<typeof observesLegacyRoutingBlock>[0]): boolean => {
+        if (
+          hasTerminalCoordinationExit &&
+          observesLegacyRoutingBlock({ ...input, hasTerminalCoordinationExit: false })
+        ) {
+          routingTerminalReleaseCleanStopTotal.add(1);
+        }
+        return observesLegacyRoutingBlock({ ...input, hasTerminalCoordinationExit });
+      };
+
+      const scheduleTurnCustodyObservation = async (legacyObservedBlock: boolean): Promise<void> => {
+        if (turnCustodyShadowRecorded || !turnCustodyProjection || !deps.turnCustodyProjectionService) return;
+        turnCustodyShadowRecorded = true;
+        const projection = turnCustodyProjection;
+        const sampleMessageId = turnTriggerMessageId ?? options.currentUserMessageId;
+        const wakeProvenance =
+          turnCustodyWake.kind === 'structured'
+            ? `structured:${turnCustodyWake.protocol}`
+            : turnCustodyWake.kind === 'unstructured'
+              ? `unstructured:${turnCustodyWake.source}`
+              : turnCustodyWake.kind === 'non_obligation'
+                ? `non_obligation:${turnCustodyWake.source}`
+                : turnCustodyWake.kind === 'legacy'
+                  ? `legacy:${turnCustodyWake.reason}`
+                  : 'action_successor';
+        const sourceSemantic = turnCustodySourceSemantic({
+          terminalCoordination: hasTerminalCoordinationExit,
+          ...(crossThreadReplyHint?.effectClass ? { effectClass: crossThreadReplyHint.effectClass } : {}),
+        });
+        pendingTurnCustodyShadowCloses.push(async (closeCheckpoint) => {
+          const verifiedEventWait =
+            projection.state === 'covered_active' ? await hasVerifiedEventBackedRoutingExit() : false;
+          const rawDecision = await deps.turnCustodyProjectionService!.close(projection);
+          const newDecision =
+            verifiedEventWait && rawDecision.state === 'covered_active'
+              ? {
+                  ...rawDecision,
+                  shouldBlock: false,
+                  transitionObserved: true,
+                  evidenceRefs: [...rawDecision.evidenceRefs, 'event_wait:verified'],
+                }
+              : rawDecision;
+          if (
+            newDecision.state === 'covered_empty' &&
+            turnCustodyWake.kind === 'non_obligation' &&
+            turnCustodyWake.source === 'coordination_terminal'
+          ) {
+            recordTurnCustodyTerminalWitness({
+              kind: 'terminal_silent',
+              projectionState: 'covered_empty',
+              wake: 'coordination_terminal',
+            });
+          }
+          const comparison = compareTurnCustodyShadow(legacyObservedBlock, newDecision.shouldBlock);
+          const projectionReason = turnCustodyProjectionReason(newDecision.evidenceRefs);
+          const sourceCategory = boundedTurnCustodySourceCategory(turnCustodyWakeSourceCategory(turnCustodyWake));
+          const boundedSourceSemantic = boundedTurnCustodySourceSemantic(sourceSemantic);
+          const classification = classifyTurnCustodyNewOnlyBlock({
+            comparison,
+            state: newDecision.state,
+            projectionReason,
+            sourceCategory,
+            sourceSemantic: boundedSourceSemantic,
+            wakeProvenance,
+            closeCheckpoint,
+            transitionObserved: newDecision.transitionObserved,
+          });
+          turnCustodyProjectionTotal.add(1, { [TURN_CUSTODY_METRIC_STATE_ATTR]: newDecision.state });
+          turnCustodyShadowComparisonTotal.add(1, {
+            [TURN_CUSTODY_METRIC_COMPARISON_ATTR]: comparison,
+            [TURN_CUSTODY_METRIC_CLASSIFICATION_ATTR]: classification,
+          });
+          if (legacyObservedBlock) turnCustodyShadowOldBlockTotal.add(1);
+          if (newDecision.shouldBlock) turnCustodyShadowNewBlockTotal.add(1);
+          if (legacyObservedBlock && newDecision.state === 'covered_empty') {
+            legacyGuardWithoutActiveCustodyTotal.add(1);
+          }
+          const traceEventName =
+            comparison === 'old_only_block' || comparison === 'new_only_block'
+              ? TURN_CUSTODY_SHADOW_DISAGREEMENT_EVENT_NAME
+              : comparison === 'agree_block' && newDecision.state === 'unknown_legacy'
+                ? TURN_CUSTODY_UNKNOWN_AGREE_BLOCK_EVENT_NAME
+                : undefined;
+          if (traceEventName && sampleMessageId) {
+            try {
+              const parentSpan = options.routeSpan ?? invocationSpanRef.current;
+              const parentCtx = parentSpan ? trace.setSpan(context.active(), parentSpan) : context.active();
+              const sampleSpan = trace
+                .getTracer('cat-cafe-api', '0.1.0')
+                .startSpan(TURN_CUSTODY_SHADOW_SAMPLE_SPAN, undefined, parentCtx);
+              sampleSpan.addEvent(traceEventName, {
+                messageId: sampleMessageId,
+                invocationId: ownInvocationId ?? 'unknown',
+                threadId,
+                [AGENT_ID]: catId as string,
+                [THREAD_SYSTEM_KIND]: routeThread?.systemKind ?? 'product',
+                [TRIGGER]: comparison,
+                [TURN_CUSTODY_PROJECTION_STATE_ATTR]: newDecision.state,
+                [TURN_CUSTODY_CLOSE_CHECKPOINT_ATTR]: closeCheckpoint,
+                [TURN_CUSTODY_WAKE_PROVENANCE_ATTR]: wakeProvenance,
+                [TURN_CUSTODY_TRANSITION_OBSERVED_ATTR]: String(newDecision.transitionObserved),
+                [TURN_CUSTODY_PROJECTION_REASON_ATTR]: projectionReason,
+                [TURN_CUSTODY_SOURCE_CATEGORY_ATTR]: sourceCategory,
+                [TURN_CUSTODY_SOURCE_SEMANTIC_ATTR]: boundedSourceSemantic,
+              });
+              sampleSpan.end();
+            } catch {
+              /* best-effort sample emission */
+            }
+          }
+          log.info(
+            {
+              threadId,
+              catId: catId as string,
+              state: newDecision.state,
+              comparison,
+              closeCheckpoint,
+              wakeProvenance,
+              transitionObserved: newDecision.transitionObserved,
+              projectionReason,
+              sourceCategory,
+              sourceSemantic: boundedSourceSemantic,
+              classification,
+              evidenceRefs: newDecision.evidenceRefs,
+            },
+            'Turn-custody transition observation',
+          );
+
+          // Observation only. Queue/action fences own deterministic completion;
+          // a missing transition must never trigger a second model conversation.
+        });
+      };
+
+      const noTextLegacyObservedBlock = Boolean(
+        actionOutputCommitAllowed &&
+          !textContent &&
+          !hadError &&
+          observeLegacyRoutingBlock({
+            lineStartMentions: getRoutingExitLineStartMentions(),
+            toolNames: collectedToolNames,
+            structuredTargetCats: [...structuredTargetCats],
+            hasCoCreatorLineStartMention: hasRoutingExitCoCreatorLineStartMention(''),
+          }),
+      );
+      if (!textContent) await scheduleTurnCustodyObservation(noTextLegacyObservedBlock);
+
+      let outputCommitDecision: OutputCommitDecision | undefined;
+      if (!actionOutputCommitAllowed && textContent) await scheduleTurnCustodyObservation(false);
+
+      const cancellationDiagnostics = remoteCancellation.afterAbort(catSignal);
+      if (cancellationDiagnostics) {
+        persistedMetadata = {
+          ...(persistedMetadata ?? { provider: '', model: '' }),
+          cancellationDiagnostics,
+        };
+        // The serial loop breaks on abort before the provider's done arrives.
+        // Publish the committed response through the ordinary per-member done.
+        doneMsg ??= { type: 'done', catId, timestamp: Date.now() };
+      }
+      const terminalFailureContent = cancellationDiagnostics
+        ? appendRemoteCancellationNotice(collectedErrorText)
+        : lifecycleResponseMessageId && collectedErrorText
+          ? collectedErrorText
+          : undefined;
+
+      if (!actionOutputCommitAllowed) {
+        catProducedOutput = Boolean(textContent || bufferedBlocks.length > 0 || collectedToolEvents.length > 0);
+        if (options.persistenceContext) {
+          options.persistenceContext.actionOutputCommitRejected = true;
+          if (callbackPosts.postMessageId) {
+            recordPersistedOutputMessageId(callbackPosts.postMessageId);
+          }
+        }
+        a2aMentions = [];
+        if (lifecycleResponseMessageId && ownInvocationId) {
+          // F117 KD-21: the rejection is the turn's durable truth before R commits, so no later
+          // settlement can publish this draft even if the commit below fails.
+          await recordTurnOutputVerdict(deps.invocationDeps.turnExecutionStore, ownInvocationId, 'rejected', (err) =>
+            log.warn({ err, catId, invocationId: ownInvocationId }, 'rejected output fence verdict not recorded'),
+          );
+          await commitLifecycleResponseFromAppendInput(
+            deps.messageStore,
+            lifecycleResponseMessageId,
+            ownInvocationId,
+            {
+              status: 'interrupted',
+              completedAt: Math.max(Date.now(), invocationStartedAt),
+              reason: 'output_commit_rejected',
+            },
+            {
+              from: { kind: 'agent', catId },
+              userId,
+              content: '',
+              mentions: [],
+              origin: 'stream',
+              timestamp: invocationStartedAt,
+              threadId,
+            },
+          );
+          // F117 KD-21: R is terminal and its output was rejected, so its draft has no reader left.
+          deps.draftStore?.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
+        }
+      } else if (textContent) {
+        catProducedOutput = true;
         const sanitized = sanitizeInjectedContent(textContent);
 
         // F22: Extract cc_rich blocks from text (Route B fallback for non-MCP cats)
         const { cleanText, blocks: textBlocks } = extractRichFromText(sanitized);
-        const storedContent = cleanText;
+        let storedContent = cleanText;
         let allRichBlocks = [...bufferedBlocks, ...textBlocks, ...streamRichBlocks];
 
         // F34-b: Resolve voice blocks (audio with text, no url) — Route B path.
@@ -556,16 +2682,231 @@ export async function* routeSerial(
           }
         }
 
-        // In play mode, CLI stream output (thinking) is hidden from other cats.
-        // Only share previousResponses in debug mode where cats see each other's thinking.
-        // Important: push after review gate mutation so downstream cats see invalid-review marker.
-        if (!incrementalMode && thinkingMode === 'debug') {
-          previousResponses.push({ catId, content: storedContent });
+        const conciergeActionSourceContent =
+          'conciergeConfig' in conciergeCtx &&
+          conciergeContextForCat(conciergeCtx, catId as string)?.conciergeConfig &&
+          storedContent
+            ? storedContent
+            : undefined;
+        if (conciergeActionSourceContent) {
+          storedContent = stripTriagePlanMarkers(storedContent);
+        }
+        const persistedContent = conciergeActionSourceContent
+          ? projectConciergeStoredContent(storedContent)
+          : storedContent;
+        // Layout hashes must attest the same normalized body for live done and cold history.
+        // Keep the existing done.content policy independent of this proof input.
+        persistedLayoutContent = persistedContent;
+        if (conciergeActionSourceContent !== undefined) {
+          persistedDoneContent = persistedContent;
         }
 
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
         // Line-start @mention = always actionable (no keyword gate)
         a2aMentions = parseA2AMentions(storedContent, catId);
+
+        // clowder-ai#489: baseline counter — line-start mentions
+        if (a2aMentions.length > 0) {
+          lineStartDetected.add(a2aMentions.length, { 'agent.id': catId as string });
+        }
+
+        const routingExitLineStartMentions = getRoutingExitLineStartMentions(a2aMentions);
+        const routingExitHasCoCreatorLineStartMention = hasRoutingExitCoCreatorLineStartMention(storedContent);
+        const localCvoHasCoCreatorLineStartMention = hasLocalCoCreatorLineStartMention(storedContent);
+
+        const textLegacyObservedBlock = Boolean(
+          !hadError &&
+            observeLegacyRoutingBlock({
+              lineStartMentions: routingExitLineStartMentions,
+              toolNames: collectedToolNames,
+              structuredTargetCats: [...structuredTargetCats],
+              hasCoCreatorLineStartMention: routingExitHasCoCreatorLineStartMention,
+            }),
+        );
+        await scheduleTurnCustodyObservation(textLegacyObservedBlock);
+        // This response is its own durable source. Callback exits can satisfy the
+        // turn guard, but their targets belong to their callback message, not this
+        // response. Its explicit mentions must survive earlier posts to the same cat.
+        if (
+          malformedRelayTarget &&
+          !worklist.slice(index + 1).includes(malformedRelayTarget) &&
+          !a2aMentions.includes(malformedRelayTarget)
+        ) {
+          a2aMentions = [...a2aMentions, malformedRelayTarget];
+          log.info(
+            { catId: catId as string, relay46CatId: malformedRelayTarget, threadId },
+            '[F215] Publishing opus-4.6 relay through completed-response durable wake',
+          );
+        }
+        // Preserve independent first-pass reasoning inside one serial route.
+        // Only debug mode injects an earlier cat's in-flight response directly;
+        // later invocations still receive that response after it is persisted.
+        if (!incrementalMode && thinkingMode === 'debug') {
+          previousResponses.push({ catId, content: storedContent });
+        }
+
+        // F167 Phase H AC-H3/H5 (KD-24): final routing slot validator.
+        // Mechanical slot check with zero intent classifier. Runs BEFORE #417
+        // inline mention and AC-C7 verdict checks; a syntax hit remains the root
+        // correction signal (and keeps setMentionRoutingFeedback for the next turn).
+        const phaseHRosterHandles: string[] = [];
+        {
+          const allCfg = catRegistry.getAllConfigs();
+          for (const cfg of Object.values(allCfg) as CatConfig[]) {
+            for (const pattern of cfg.mentionPatterns) phaseHRosterHandles.push(pattern);
+          }
+        }
+        const phaseHResult = validateRoutingSyntax({
+          text: storedContent,
+          lineStartMentions: routingExitLineStartMentions,
+          toolNames: collectedToolNames,
+          structuredTargetCats: [...structuredTargetCats],
+          rosterHandles: phaseHRosterHandles,
+        });
+        const phaseHHit = phaseHResult.kind === 'invalid_route_syntax';
+        if (phaseHHit && phaseHResult.kind === 'invalid_route_syntax') {
+          routingSyntaxCorrectionDetected.add(1);
+          log.info(
+            { catId: catId as string, threadId, inlineMentions: phaseHResult.inlineMentions },
+            'Routing syntax guard recorded an internal correction signal',
+          );
+        }
+
+        const pendingRoutingFeedback: ThreadMentionRoutingFeedbackItem[] = [];
+        // #417 / F064 AC-B3: Write-side feedback for inline action-like @mentions
+        // clowder-ai#489: counters for detection, shadow, feedback, hint
+        if (deps.invocationDeps.threadStore) {
+          const {
+            strictHits: inlineHits,
+            shadowMisses,
+            routedSetSkips,
+          } = detectInlineActionMentionsWithShadow(storedContent, catId, a2aMentions);
+          const agentAttr = { 'agent.id': catId as string };
+          inlineActionChecked.add(1, agentAttr);
+          if (inlineHits.length > 0) inlineActionDetected.add(inlineHits.length, agentAttr);
+          if (shadowMisses.length > 0) inlineActionShadowMiss.add(shadowMisses.length, agentAttr);
+          if (routedSetSkips > 0) inlineActionRoutedSetSkip.add(routedSetSkips, agentAttr);
+
+          if (inlineHits.length > 0) {
+            pendingRoutingFeedback.push(
+              ...inlineHits.map((m) => ({ targetCatId: m.catId, reason: 'inline_action' as const })),
+            );
+            // Keep agent-formatting correction out of public History. The durable
+            // next-turn feedback above is the correction channel.
+            if (a2aMentions.length === 0 && !phaseHHit) {
+              // Preserve the historical metric name for eval continuity; this now
+              // counts the internal correction signal, not a public hint row.
+              inlineActionHintEmitted.add(1, agentAttr);
+            }
+          }
+        }
+
+        // F167 Phase H AC-H5: suppress AC-C7 verdict-without-pass when Phase H hit
+        // (format error is the root cause; verdict-without-pass is the consequence).
+        // 2026-04-25 fix (砚砚 GPT-5.5): pass hasCoCreatorLineStartMention so summary
+        // reports ending with `@co-creator` / `@co-creator` (legitimate escalation to co-creator)
+        // don't trigger the verdict-without-pass false-positive. parseA2AMentions only
+        // returns cat handles, never co-creator ones.
+        //
+        // C2 denominator (F192 2026-05-29): count every turn the verdict-without-pass
+        // exit-check actually evaluates, so attribution can grade verdict_without_pass_count
+        // against a real `c2.checked` base instead of fabricating a 100% ratio. phaseHHit
+        // turns are excluded — a format error short-circuits the check (AC-H5), so they
+        // were never evaluated.
+        // C2 telemetry labels (F192 2026-06-03 build verdict): every C2 counter carries
+        // `thread.system_kind` (the OTel label value behind `THREAD_SYSTEM_KIND`) so
+        // attribution can distinguish eval-domain noise from real product-thread friction.
+        // The verdict fire counters additionally carry `trigger` (`TRIGGER` semconv,
+        // reusing the existing key — values are instrument-scoped) to spot keyword
+        // overload — e.g. a `p1p2`-driven spike (review-discussion vocab) vs a `放行`-driven
+        // one (real verdict-without-pass). All emitted attribute keys are in F152
+        // metric-allowlist or the OTel SDK silently drops them (砚砚 PR #2058 R1 catch).
+        const c2BaseAttr: Record<string, string> = {
+          [AGENT_ID]: catId as string,
+          [THREAD_SYSTEM_KIND]: routeThread?.systemKind ?? 'product',
+        };
+        if (!phaseHHit) {
+          c2ExitChecked.add(1, c2BaseAttr);
+        }
+        // F192 Phase D — local R1 review P1-1 fix: capture trigger here, defer addEvent
+        // emission until `storedMsgId` is bound to the CAT's verdict-bearing message
+        // (line ~1625 / ~1680). The hint message appended below is NOT the original
+        // verdict source — using its id as sample.messageId would land drilldown on
+        // the hint text, not the cat's output that triggered detection.
+        let pendingC2SampleTrigger: string | null = null;
+        if (
+          !phaseHHit &&
+          // #949 P2: Use dedicated verdictPassWarningEnabled flag (not frustrationAutoIssueEligible)
+          // to suppress verdict-without-pass warning ONLY for connector-sourced flows
+          // (MR reviews, CI notifications). A2A/multi-mention callbacks set
+          // frustrationAutoIssueEligible=false but still need verdict-pass handoff guards.
+          options.verdictPassWarningEnabled !== false &&
+          shouldWarnVerdictWithoutPass({
+            text: storedContent,
+            lineStartMentions: routingExitLineStartMentions,
+            toolNames: collectedToolNames,
+            structuredTargetCats: [...structuredTargetCats],
+            hasCoCreatorLineStartMention: routingExitHasCoCreatorLineStartMention,
+          })
+        ) {
+          const verdictFireAttr: Record<string, string> = {
+            ...c2BaseAttr,
+            [TRIGGER]: detectMatchedVerdictKeyword(storedContent) ?? 'unknown',
+          };
+          // Historical metric name retained for eval continuity. This is an
+          // internal protocol signal and no longer creates a public History row.
+          c2VerdictHintEmitted.add(1, verdictFireAttr);
+          c2VerdictWithoutPassCount.add(1, verdictFireAttr);
+          // F192 Phase D — capture trigger for deferred sample emission. The actual
+          // addEvent fires after `storedMsgId` is bound to the cat's verdict message.
+          pendingC2SampleTrigger = verdictFireAttr[TRIGGER] as string;
+        }
+
+        // F167 Phase I AC-I1 (KD-25): void hold detection — text says "持球" but
+        // no cat_cafe_hold_ball tool call this turn.声明-动作一致性 check.
+        // C2 void-hold denominator (PR #1941 P2): count every void-hold evaluation so
+        // attribution grades void_hold_hint against c2.void_hold_checked, NOT the
+        // verdict-check count c2.checked (different guard → wrong ratio / suppression).
+        c2VoidHoldChecked.add(1, c2BaseAttr);
+        // F192 Phase D — eval:a2a 2026-06-10 build verdict: capture matched HOLD_PATTERN
+        // id as trigger for deferred sample emission. Same pattern as verdict-without-pass:
+        // addEvent fires in the post-storage block once `storedMsgId` is bound to the cat's
+        // hold-claim message, so drilldown lands on the original content, not on the hint.
+        let pendingC2VoidHoldSampleTrigger: string | null = null;
+        const voidHoldEval = evaluateVoidHold({
+          text: storedContent,
+          toolNames: collectedToolNames,
+          lineStartMentions: routingExitLineStartMentions,
+          structuredTargetCats: [...structuredTargetCats],
+          hasCoCreatorLineStartMention: routingExitHasCoCreatorLineStartMention,
+          hasVerifiedEventBackedRoutingExit: verifiedEventBackedRoutingExit,
+        });
+        if (voidHoldEval.shouldEmit) {
+          const voidHoldFireAttr: Record<string, string> = {
+            ...c2BaseAttr,
+            [TRIGGER]: voidHoldEval.matchedPattern ?? 'unknown',
+          };
+          // Historical metric name retained; reconcile privately on the next natural turn.
+          c2VoidHoldHintEmitted.add(1, voidHoldFireAttr);
+          pendingRoutingFeedback.push({ targetCatId: catId, reason: 'void_hold' });
+          // F192 Phase D — capture trigger for deferred sample event emission.
+          pendingC2VoidHoldSampleTrigger = voidHoldFireAttr[TRIGGER] as string;
+        }
+
+        // One write preserves both inline-routing and wait facts instead of overwriting either.
+        if (pendingRoutingFeedback.length > 0 && deps.invocationDeps.threadStore) {
+          const hasInlineFeedback = pendingRoutingFeedback.some((item) => item.reason === 'inline_action');
+          try {
+            await deps.invocationDeps.threadStore.setMentionRoutingFeedback(threadId, catId, {
+              sourceTimestamp: Date.now(),
+              items: pendingRoutingFeedback,
+            });
+            if (hasInlineFeedback) inlineActionFeedbackWritten.add(1, { 'agent.id': catId as string });
+          } catch (err) {
+            if (hasInlineFeedback) inlineActionFeedbackWriteFailed.add(1, { 'agent.id': catId as string });
+            log.warn({ err, catId: catId as string, threadId }, 'Routing reconciliation feedback write failed');
+          }
+        }
 
         // F079 Phase 2: Vote interception — extract [VOTE:xxx] from cat response
         const votedOption = extractVoteFromText(storedContent);
@@ -612,8 +2953,8 @@ export async function* routeSerial(
                   // Gap 3: persist separate connector message for ConnectorBubble rendering
                   try {
                     const stored = await deps.messageStore.append({
+                      from: { kind: 'system', service: 'vote' },
                       userId,
-                      catId: null,
                       content: `投票结果: ${voteState.question}`,
                       mentions: [],
                       timestamp: Date.now(),
@@ -627,6 +2968,7 @@ export async function* routeSerial(
                         threadId,
                         message: {
                           id: stored.id,
+                          from: stored.from,
                           type: 'connector',
                           content: stored.content,
                           source: VOTE_RESULT_SOURCE,
@@ -647,49 +2989,351 @@ export async function* routeSerial(
           }
         }
 
-        const storedTimestamp = Date.now();
+        // #1332: a proactive callback is already durable before a later independent
+        // final is committed. Timestamp that final at commit time so hydrated history
+        // preserves the same callback-before-final order users saw live.
+        const storedTimestamp = callbackPosts.postConfirmed ? Date.now() : invocationStartedAt;
 
-        // F061: Detect @co-creator mentions in agent response for browser notification
-        mentionsUser = storedContent ? detectUserMention(storedContent) : false;
+        // F061: Detect local @co-creator mentions for browser/unread notification.
+        // Cross-post callbacks can satisfy the guard and emit target-thread operator, but must not
+        // create a source-thread unread/user notification.
+        mentionsUser = Boolean(
+          (storedContent ? detectUserMention(storedContent) : false) || localCvoHasCoCreatorLineStartMention,
+        );
 
         // Store with actual mentions — degrade on failure to ensure done reaches frontend
         // (缅因猫 review P1-2: Redis failure must not block done yield)
         let storedMsgId: string | undefined;
+        let triagePlanIdsToLink: string[] = [];
         try {
-          const storedMsg = await deps.messageStore.append({
+          // #573: persist with the OUTER cat-cafe parentInvocationId (set by QueueProcessor)
+          const visibleTurnInvocationId = visibleContentInvocationIdOverride ?? ownInvocationId;
+          const persistedInvocationId = options.parentInvocationId ?? visibleTurnInvocationId;
+          // F229 KD-23: Post-process concierge reply — resolve markers against per-invocation handle table
+          if (conciergeActionSourceContent) {
+            try {
+              // Phase B: pass triageDeps if TriagePlanStore is available
+              const triageDeps: TriagePlanExtractionDeps | undefined = deps.invocationDeps.conciergeTriagePlanStore
+                ? {
+                    triagePlanStore: deps.invocationDeps.conciergeTriagePlanStore,
+                    userId,
+                    sourceMessageId: currentUserMessageId ?? `triage-${Date.now()}`,
+                    ...(deps.invocationDeps.threadStore
+                      ? {
+                          targetCatsResolverDeps: {
+                            messageStore: deps.messageStore,
+                            threadStore: deps.invocationDeps.threadStore,
+                          },
+                        }
+                      : {}),
+                  }
+                : undefined;
+              const verifiedToolAnchor = await resolveVerifiedConciergeToolAnchor(
+                verifiedConciergeToolTargets,
+                threadId,
+                deps.invocationDeps.threadStore,
+              );
+              conciergeVerifiedToolTargetsPerReply.record(verifiedConciergeToolTargets.verifiedTargetCount());
+              const conciergeActions = await buildConciergeActions(
+                conciergeActionSourceContent,
+                conciergeHandles,
+                triageDeps,
+                verifiedToolAnchor,
+              );
+              if (
+                verifiedToolAnchor &&
+                conciergeActions.some(
+                  (action) => !action.handle && action.payload.threadId === verifiedToolAnchor.threadId,
+                )
+              ) {
+                conciergeVerifiedToolActions.add(1);
+              }
+              triagePlanIdsToLink = extractTriagePlanIdsFromActions(conciergeActions);
+              if (conciergeActions.length > 0) {
+                allRichBlocks = [
+                  ...allRichBlocks,
+                  {
+                    kind: 'card' as const,
+                    v: 1 as const,
+                    id: `concierge-actions-${Date.now()}`,
+                    title: '',
+                    actions: conciergeActions,
+                  },
+                ];
+              }
+            } catch {
+              // Fail-open: action extraction failure → no actions, no crash
+            }
+          }
+
+          const executionProjections = await readTurnExecutionProjections(visibleTurnInvocationId);
+          const deliveryBoundary = createMessageDeliveryBoundary({
+            cursor: deliveryBoundaryId,
             userId,
+            threadId,
             catId,
-            content: storedContent,
+            turnInvocationId: visibleTurnInvocationId,
+            sourceMessageId: turnTriggerMessageId,
+            succeeded:
+              Boolean(doneMsg) &&
+              !hadError &&
+              !doneMsg?.errorCode &&
+              !catSignal?.aborted &&
+              actionOutputCommitAllowed &&
+              visibleTurnInvocationId === ownInvocationId,
+          });
+          const outputConfig = executionBinding.catConfig;
+          outputProjection?.settle({
+            succeeded:
+              Boolean(doneMsg) && !hadError && !doneMsg?.errorCode && !catSignal?.aborted && actionOutputCommitAllowed,
+            nativePhases:
+              !outputConfig?.clientId || outputConfig.clientId === 'openai' || outputConfig.provider === 'openai',
+          });
+          const streamMessageInput: AppendMessageInput = {
+            from: { kind: 'agent', catId },
+            userId,
+            content: terminalFailureContent ? `${storedContent}\n\n${terminalFailureContent}` : storedContent,
             mentions: a2aMentions,
             origin: 'stream',
             timestamp: storedTimestamp,
             threadId,
             ...(mentionsUser ? { mentionsUser } : {}),
-            ...(thinkingContent ? { thinking: thinkingContent } : {}),
-            ...(firstMetadata ? { metadata: firstMetadata } : {}),
+            ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
+            ...(persistedMetadata ? { metadata: persistedMetadata } : {}),
             ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
             ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
             extra: {
+              ...(outputProjection ? { outputLayout: outputProjection.snapshot(persistedContent).layout } : {}),
               ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
-              ...(ownInvocationId ? { stream: { invocationId: ownInvocationId } } : {}),
+              ...(deliveryBoundary ? { deliveryBoundary } : {}),
+              // F194 Phase Z3: dual id — invocationId=parent (legacy SoT for liveness/queue/cancel),
+              // turnInvocationId=own (Z3 new SoT for frontend bubble identity stable key, prevents
+              // same-parent multi-turn-same-cat bubble merge).
+              // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId.
+              // First-in-chain (ownInvocationId === parent) still gets explicit
+              // turn stamp so frontend bubble identity never falls back to parent
+              // (which would let multi-turn same-cat under same parent collapse).
+              ...(persistedInvocationId
+                ? {
+                    stream: {
+                      invocationId: persistedInvocationId,
+                      turnInvocationId: visibleTurnInvocationId ?? persistedInvocationId,
+                    },
+                  }
+                : {}),
+              ...(turnTriggerMessageId
+                ? {
+                    causal: {
+                      kind: 'invocation_reply' as const,
+                      triggerMessageId: turnTriggerMessageId,
+                      ...(turnTriggerThreadId ? { triggerThreadId: turnTriggerThreadId } : {}),
+                    },
+                  }
+                : {}),
+              ...executionProjections,
+              ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
             },
+          };
+          const { status: lifecycleTerminalStatus, reason: lifecycleTerminalReason } = resolveResponseTerminal({
+            aborted: catSignal?.aborted === true,
+            abortReason: catSignal?.reason,
+            failed: hadProviderError,
+            errorCode: doneMsg?.errorCode,
           });
-          storedMsgId = storedMsg.id;
+          const lifecycleResponse =
+            lifecycleResponseMessageId && lifecyclePriorFrontierMessageId !== undefined && ownInvocationId
+              ? {
+                  messageId: lifecycleResponseMessageId,
+                  priorFrontierMessageId: lifecyclePriorFrontierMessageId,
+                  status: lifecycleTerminalStatus,
+                  completedAt: Math.max(Date.now(), invocationStartedAt),
+                  ...(lifecycleTerminalReason ? { reason: lifecycleTerminalReason } : {}),
+                }
+              : undefined;
+          const completedA2AWakeCommit =
+            lifecycleResponse?.status === 'completed' &&
+            (a2aMentions.length > 0 || (!collectiveBoundTurn && deps.dotReplyTarget))
+              ? (message: AppendMessageInput) =>
+                  commitCompletedResponse(
+                    message,
+                    { status: 'completed', completedAt: lifecycleResponse.completedAt },
+                    a2aMentions,
+                    !collectiveBoundTurn,
+                  )
+              : undefined;
+          const failedA2AReportCommit =
+            lifecycleResponse?.status === 'failed' &&
+            (commitFailedA2AReport || (a2aTriggerMessageId && options.a2aCallerCatId && !options.a2aFailureReport))
+              ? async (message: AppendMessageInput) => {
+                  if (!commitFailedA2AReport) {
+                    throw new Error('failed response A2A report admission unavailable');
+                  }
+                  return commitFailedA2AReport({
+                    responseMessageId: lifecycleResponse.messageId,
+                    invocationId: ownInvocationId!,
+                    terminal: {
+                      status: 'failed',
+                      completedAt: lifecycleResponse.completedAt,
+                      ...(lifecycleResponse.reason ? { reason: lifecycleResponse.reason } : {}),
+                    },
+                    message,
+                    userId,
+                    ownerAuthProvenance,
+                    threadId,
+                    reporterCatId: catId,
+                    ...(!options.a2aFailureReport && options.a2aCallerCatId
+                      ? { predecessorCatId: options.a2aCallerCatId as CatId }
+                      : {}),
+                    ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
+                  });
+                }
+              : undefined;
+          const lifecycleWakeCommit = completedA2AWakeCommit ?? failedA2AReportCommit;
+          let storedMsg = null;
+          if (deps.freshnessOutputCommitCoordinator && ownInvocationId) {
+            const decision = await deps.freshnessOutputCommitCoordinator.commit({
+              userId,
+              threadId,
+              catId: catId as string,
+              invocationId: options.parentInvocationId ?? ownInvocationId,
+              turnInvocationId: ownInvocationId,
+              originTriggerMessageId: streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId ?? null,
+              message: streamMessageInput,
+              ...(lifecycleResponse ? { lifecycleResponse } : {}),
+              ...(lifecycleWakeCommit ? { commitLifecycleResponse: lifecycleWakeCommit } : {}),
+            });
+            outputCommitDecision = decision;
+            if (options.persistenceContext) {
+              options.persistenceContext.outputCommitDecisions = {
+                ...(options.persistenceContext.outputCommitDecisions ?? {}),
+                [catId as string]: decision,
+              };
+            }
+            storedMsg = await deps.messageStore.getById(decision.messageId);
+          } else if (lifecycleResponse && ownInvocationId) {
+            storedMsg = lifecycleWakeCommit
+              ? await lifecycleWakeCommit(streamMessageInput)
+              : await commitLifecycleResponseFromAppendInput(
+                  deps.messageStore,
+                  lifecycleResponse.messageId,
+                  ownInvocationId,
+                  lifecycleResponse,
+                  streamMessageInput,
+                );
+          } else {
+            storedMsg = await deps.messageStore.append(streamMessageInput);
+          }
+          if (
+            storedMsg &&
+            ownInvocationId &&
+            actionOutputCommitAllowed &&
+            lifecycleTerminalStatus === 'completed' &&
+            deps.messageSearchAnswerService
+          ) {
+            try {
+              storedMsg = await deps.messageSearchAnswerService.publishResponse(storedMsg, ownInvocationId);
+              allRichBlocks = [...(storedMsg.extra?.rich?.blocks ?? allRichBlocks)];
+            } catch {
+              log.warn({ threadId, messageId: storedMsg.id }, 'Search answer binding pending on committed response');
+            }
+          }
+          storedMsgId = storedMsg?.id;
+          turnStoredMessageId = storedMsgId;
+          if (storedMsgId) recordPersistedOutputMessageId(storedMsgId);
+          const triagePlanStore = deps.invocationDeps.conciergeTriagePlanStore;
+          if (storedMsg && triagePlanStore && triagePlanIdsToLink.length > 0) {
+            try {
+              await Promise.all(
+                triagePlanIdsToLink.map((planId) => triagePlanStore.setConfirmationMessageId(planId, storedMsg.id)),
+              );
+            } catch (err) {
+              log.warn({ err, threadId, messageId: storedMsg.id }, 'Failed to link triage plan confirmation message');
+            }
+          }
           // F088-P3: Stash rich blocks for outbound delivery
-          if (options.persistenceContext && allRichBlocks.length > 0) {
+          if (storedMsg && options.persistenceContext && allRichBlocks.length > 0) {
             options.persistenceContext.richBlocks = allRichBlocks;
           }
-          // #80: Clean up draft only after successful append (guard: keep draft if append fails)
-          if (deps.draftStore && ownInvocationId) {
+          // #80/F254: Delete only after MessageStore or closure truth proves custody.
+          if (deps.draftStore && ownInvocationId && mayDeleteDraft(outputCommitDecision, Boolean(storedMsgId))) {
             deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
           }
           // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
           if (deps.invocationDeps.threadStore) {
             try {
-              await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId);
+              await deps.invocationDeps.threadStore.updateParticipantActivity(
+                threadId,
+                catId,
+                // #267: only errors before abort are provider failures
+                !hadProviderError,
+              );
             } catch (activityErr) {
               log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
             }
+          }
+          if (localCvoHasCoCreatorLineStartMention && storedMsgId) {
+            emitBallHandedCvoOnce(storedMsgId);
+          }
+          // F192 Phase D — deferred per-fire sample emission (local R1 P1-1 fix +
+          // cloud R1 P1 fix: use dedicated sample span instead of getActiveSpan).
+          //
+          // Why a fresh span and not `invocationSpanRef.current.addEvent(...)`:
+          // invokeSingleCat ends the cat invocation span in its `finally` once the
+          // generator closes. By the time control reaches here (post-storage, outside
+          // the for-await loop), the cat invocation span is ended — `.addEvent()` on
+          // an ended span is a silent no-op in the OTel JS SDK and the sample would
+          // be dropped despite the counter incrementing. A short-lived marker span
+          // parented to a still-open span (route span first, falling back to the
+          // ended invocation span as parent ref only) guarantees the event reaches
+          // LocalTraceStore via RedactingSpanProcessor (which HMACs IDs per the
+          // 782b346d0 events-redaction fix).
+          if (pendingC2SampleTrigger !== null && storedMsgId) {
+            try {
+              const parentSpan = options.routeSpan ?? invocationSpanRef.current;
+              const parentCtx = parentSpan ? trace.setSpan(context.active(), parentSpan) : context.active();
+              const sampleSpan = trace
+                .getTracer('cat-cafe-api', '0.1.0')
+                .startSpan('cat_cafe.a2a.c2.verdict_without_pass_sample', undefined, parentCtx);
+              sampleSpan.addEvent('c2.verdict_without_pass_fired', {
+                messageId: storedMsgId,
+                invocationId: ownInvocationId ?? 'unknown',
+                threadId,
+                [AGENT_ID]: catId as string,
+                [THREAD_SYSTEM_KIND]: routeThread?.systemKind ?? 'product',
+                [TRIGGER]: pendingC2SampleTrigger,
+              });
+              sampleSpan.end();
+            } catch {
+              /* best-effort sample emission */
+            }
+          }
+          // F192 Phase D — eval:a2a 2026-06-10 build verdict: parallel per-fire sample
+          // for void_hold_hint fires. Same span/event discipline as verdict-without-pass:
+          // marker span parented to still-open route/invocation span so RedactingSpanProcessor
+          // HMACs the raw IDs (Class C) before they reach LocalTraceStore.
+          // Independent of the verdict sample emission above — both can fire on the same
+          // turn if the cat both gave a verdict AND text-claimed a hold without tool call.
+          if (pendingC2VoidHoldSampleTrigger !== null && storedMsgId) {
+            try {
+              const parentSpan = options.routeSpan ?? invocationSpanRef.current;
+              const parentCtx = parentSpan ? trace.setSpan(context.active(), parentSpan) : context.active();
+              const sampleSpan = trace
+                .getTracer('cat-cafe-api', '0.1.0')
+                .startSpan('cat_cafe.a2a.c2.void_hold_sample', undefined, parentCtx);
+              sampleSpan.addEvent('c2.void_hold_fired', {
+                messageId: storedMsgId,
+                invocationId: ownInvocationId ?? 'unknown',
+                threadId,
+                [AGENT_ID]: catId as string,
+                [THREAD_SYSTEM_KIND]: routeThread?.systemKind ?? 'product',
+                [TRIGGER]: pendingC2VoidHoldSampleTrigger,
+              });
+              sampleSpan.end();
+            } catch {
+              /* best-effort sample emission */
+            }
+            // F233 Phase B (B2): 同一虚空传球旁路写 ball.void_pass（storedMsgId 此时已绑定）
+            emitBallVoidPass(deps.ballCustody, threadId, storedMsgId, pendingC2VoidHoldSampleTrigger);
           }
         } catch (err) {
           log.error({ catId: catId as string, err }, 'messageStore.append failed, degrading');
@@ -701,143 +3345,208 @@ export async function* routeSerial(
             });
           }
         }
-
-        // A2A: extend worklist if mention found + depth allows + queue fairness gate
-        // F27: dedup only against pending (not-yet-executed) tail — cats that already ran
-        // can be re-enqueued for another round (e.g. A→B→A review ping-pong).
-        let queuedMessagesPending = false;
-        if (queueHasQueuedMessages) {
-          try {
-            queuedMessagesPending = queueHasQueuedMessages(threadId);
-          } catch {
-            queuedMessagesPending = false;
-          }
-        }
-
-        if (a2aMentions.length > 0 && worklistEntry.a2aCount < maxDepth && !signal?.aborted && !queuedMessagesPending) {
-          const pendingTail = worklist.slice(index + 1);
-          const pendingOriginalTargets = targetCats.slice(index + 1);
-          for (const nextCat of a2aMentions) {
-            if (worklistEntry.a2aCount >= maxDepth) break;
-            // A2A cross-path dedup: skip if this cat was already dispatched via callback (InvocationQueue)
-            if (hasQueuedOrActiveAgentForCat && hasQueuedOrActiveAgentForCat(threadId, nextCat)) {
-              log.info(
-                { threadId, catId: nextCat, fromCat: catId },
-                'A2A text-scan dedup: cat already in InvocationQueue, skipping',
-              );
-              continue;
-            }
-            if (pendingTail.includes(nextCat)) {
-              // Keep original user-selected targets replying to user, not to another cat.
-              if (!pendingOriginalTargets.includes(nextCat)) {
-                worklistEntry.a2aFrom.set(nextCat, catId);
-                // F121: response-text path — set trigger message for auto-replyTo
-                if (storedMsgId) worklistEntry.a2aTriggerMessageId.set(nextCat, storedMsgId);
-              }
-              continue;
-            }
-
-            worklist.push(nextCat);
-            worklistEntry.a2aCount++;
-            pendingTail.push(nextCat); // Keep dedup view in sync
-            worklistEntry.a2aFrom.set(nextCat, catId);
-            // F121: response-text path — set trigger message for auto-replyTo
-            if (storedMsgId) worklistEntry.a2aTriggerMessageId.set(nextCat, storedMsgId);
-          }
-        }
-
-        // F27: Emit a2a_handoff for ALL new A2A targets (both response-text and callback-pushed).
-        // We track which targets have already been announced to avoid duplicate handoff events.
-        for (let wi = handoffEmitted; wi < worklist.length; wi++) {
-          const pendingCat = worklist[wi]!;
-          if (wi < targetCats.length) continue; // Skip original targets — not A2A
-
-          // === A2A_HANDOFF 审计 (fire-and-forget, 缅因猫 review P2-3) ===
-          const auditLog = getEventAuditLog();
-          auditLog
-            .append({
-              type: AuditEventTypes.A2A_HANDOFF,
-              threadId,
-              data: {
-                fromCat: catId,
-                toCat: pendingCat,
-                userId,
-                a2aDepth: worklistEntry.a2aCount,
-                maxDepth,
-              },
-            })
-            .catch((err) => {
-              log.warn({ threadId, fromCat: catId, toCat: pendingCat, err }, 'A2A_HANDOFF audit write failed');
-            });
-
-          const nextConfig: CatConfig | undefined =
-            catRegistry.tryGet(pendingCat as string)?.config ?? CAT_CONFIGS[pendingCat as string];
-          yield {
-            type: 'a2a_handoff' as AgentMessageType,
-            catId,
-            content: `${catConfig?.displayName ?? catId} → ${nextConfig?.displayName ?? pendingCat}`,
-            timestamp: Date.now(),
-          } as AgentMessage;
-        }
-        handoffEmitted = worklist.length;
       } else if (!hadError) {
         // No text content and no error.
         // Persist only when we have non-text payload (tool/thinking/rich).
         // Purely empty turns should not create blank chat bubbles.
         const noTextBlocks = [...bufferedBlocks, ...streamRichBlocks];
         const hasRichBlocks = noTextBlocks.length > 0;
-        const shouldPersistNoTextMessage =
-          hasRichBlocks || collectedToolEvents.length > 0 || Boolean(thinkingContent?.trim().length > 0);
+        const hasNoTextStreamPayload =
+          hasRichBlocks ||
+          collectedToolEvents.length > 0 ||
+          Boolean(renderThinkingChunks(thinkingChunks).trim().length > 0);
+        // A callback is its own named Message, never a replacement for R
+        // (fork f8071e44ae). Retired glass-box supplements (c94a58ac73)
+        // cannot suppress or own this turn's persistence.
+        const shouldPersistNoTextMessage = hasNoTextStreamPayload;
 
-        // Diagnostic: if cat ran tools but produced no text, emit a system_info so the
-        // user sees *something* instead of a silent vanish (bugfix: silent-exit P1).
-        if (collectedToolEvents.length > 0 && !hasRichBlocks) {
-          yield {
-            type: 'system_info' as AgentMessageType,
-            catId,
-            content: JSON.stringify({
-              type: 'silent_completion',
-              detail: `${catConfig?.displayName ?? (catId as string)} completed with tool calls but no text response.`,
-              toolCount: collectedToolEvents.length,
-            }),
-            timestamp: Date.now(),
-          } as AgentMessage;
+        log.debug(
+          {
+            catId: catId as string,
+            threadId,
+            hasRichBlocks,
+            sawUserFacingSystemInfo,
+            toolCount: collectedToolEvents.length,
+            shouldPersist: shouldPersistNoTextMessage,
+            thinkingLen: renderThinkingChunks(thinkingChunks).length,
+          },
+          'Cat produced no text — evaluating silent_completion',
+        );
+        // The response owns its terminal result even when its body is empty.
+        // A transport/status notice cannot acknowledge a business guide outcome.
+        if (shouldPersistNoTextMessage) {
+          catProducedOutput = true;
         }
 
-        if (shouldPersistNoTextMessage) {
+        if (shouldPersistNoTextMessage || lifecycleResponseMessageId || cancellationDiagnostics) {
           try {
-            await deps.messageStore.append({
+            const visibleTurnInvocationId = visibleContentInvocationIdOverride ?? ownInvocationId;
+            let storedNoText = null;
+            const executionProjections = await readTurnExecutionProjections(visibleTurnInvocationId);
+            const deliveryBoundary = createMessageDeliveryBoundary({
+              cursor: deliveryBoundaryId,
               userId,
+              threadId,
               catId,
-              content: '',
+              turnInvocationId: visibleTurnInvocationId,
+              sourceMessageId: turnTriggerMessageId,
+              succeeded:
+                Boolean(doneMsg) &&
+                !hadError &&
+                !doneMsg?.errorCode &&
+                !catSignal?.aborted &&
+                actionOutputCommitAllowed &&
+                visibleTurnInvocationId === ownInvocationId,
+            });
+            const noTextMessageInput: AppendMessageInput = {
+              from: { kind: 'agent', catId },
+              userId,
+              content: cancellationDiagnostics ? (terminalFailureContent ?? '') : '',
               mentions: [],
               origin: 'stream',
-              timestamp: Date.now(),
+              timestamp: invocationStartedAt,
               threadId,
               ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
-              ...(thinkingContent ? { thinking: thinkingContent } : {}),
-              ...(firstMetadata ? { metadata: firstMetadata } : {}),
+              ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
+              ...(persistedMetadata ? { metadata: persistedMetadata } : {}),
               ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
               extra: {
                 ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
-                ...(ownInvocationId ? { stream: { invocationId: ownInvocationId } } : {}),
+                ...(deliveryBoundary ? { deliveryBoundary } : {}),
+                // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId
+                // (= ownInvocationId, else parent fallback).
+                ...((options.parentInvocationId ?? visibleTurnInvocationId)
+                  ? {
+                      stream: {
+                        invocationId: (options.parentInvocationId ?? visibleTurnInvocationId) as string,
+                        turnInvocationId: (visibleTurnInvocationId ?? options.parentInvocationId) as string,
+                      },
+                    }
+                  : {}),
+                ...(turnTriggerMessageId
+                  ? {
+                      causal: {
+                        kind: 'invocation_reply' as const,
+                        triggerMessageId: turnTriggerMessageId,
+                        ...(turnTriggerThreadId ? { triggerThreadId: turnTriggerThreadId } : {}),
+                      },
+                    }
+                  : {}),
+                ...executionProjections,
+                ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
               },
+            };
+            const { status: lifecycleTerminalStatus, reason: lifecycleTerminalReason } = resolveResponseTerminal({
+              aborted: catSignal?.aborted === true,
+              abortReason: catSignal?.reason,
+              failed: hadProviderError,
+              errorCode: doneMsg?.errorCode,
             });
+            const lifecycleResponse =
+              lifecycleResponseMessageId && lifecyclePriorFrontierMessageId !== undefined && ownInvocationId
+                ? {
+                    messageId: lifecycleResponseMessageId,
+                    priorFrontierMessageId: lifecyclePriorFrontierMessageId,
+                    status: lifecycleTerminalStatus,
+                    completedAt: Math.max(Date.now(), invocationStartedAt),
+                    ...(lifecycleTerminalReason ? { reason: lifecycleTerminalReason } : {}),
+                  }
+                : undefined;
+            const answerBearingNoText =
+              hasRichBlocks || Boolean(renderThinkingChunks(thinkingChunks).trim().length > 0);
+            const completedNoTextCommit =
+              answerBearingNoText &&
+              lifecycleResponse?.status === 'completed' &&
+              !collectiveBoundTurn &&
+              deps.dotReplyTarget
+                ? (message: AppendMessageInput) =>
+                    commitCompletedResponse(
+                      message,
+                      { status: 'completed', completedAt: lifecycleResponse.completedAt },
+                      [],
+                      true,
+                    )
+                : undefined;
+            if (answerBearingNoText && deps.freshnessOutputCommitCoordinator && ownInvocationId) {
+              const decision = await deps.freshnessOutputCommitCoordinator.commit({
+                userId,
+                threadId,
+                catId: catId as string,
+                invocationId: options.parentInvocationId ?? ownInvocationId,
+                turnInvocationId: ownInvocationId,
+                originTriggerMessageId: streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId ?? null,
+                message: noTextMessageInput,
+                ...(lifecycleResponse ? { lifecycleResponse } : {}),
+                ...(completedNoTextCommit ? { commitLifecycleResponse: completedNoTextCommit } : {}),
+              });
+              outputCommitDecision = decision;
+              if (options.persistenceContext) {
+                options.persistenceContext.outputCommitDecisions = {
+                  ...(options.persistenceContext.outputCommitDecisions ?? {}),
+                  [catId as string]: decision,
+                };
+              }
+              storedNoText = await deps.messageStore.getById(decision.messageId);
+            } else if (lifecycleResponse && ownInvocationId) {
+              storedNoText = completedNoTextCommit
+                ? await completedNoTextCommit(noTextMessageInput)
+                : await commitLifecycleResponseFromAppendInput(
+                    deps.messageStore,
+                    lifecycleResponse.messageId,
+                    ownInvocationId,
+                    lifecycleResponse,
+                    noTextMessageInput,
+                  );
+            } else {
+              // A tool-only record is audit output, not answer content: no frontier-annotated
+              // commit, because there is no bubble whose position anyone reads. The replay-unsafe
+              // distinction that used to route mutating tools here belonged to the closure gate,
+              // which is retired — nothing downstream re-runs a turn behind the cat's back.
+              storedNoText = await deps.messageStore.append(noTextMessageInput);
+            }
+            if (
+              storedNoText &&
+              ownInvocationId &&
+              actionOutputCommitAllowed &&
+              lifecycleTerminalStatus === 'completed' &&
+              deps.messageSearchAnswerService
+            ) {
+              try {
+                storedNoText = await deps.messageSearchAnswerService.publishResponse(storedNoText, ownInvocationId);
+                const bound = storedNoText.extra?.messageSearchAnswer;
+                const block = bound && storedNoText.extra?.rich?.blocks.find((block) => block.id === bound.blockId);
+                if (block && !noTextBlocks.some((current) => current.id === block.id)) noTextBlocks.push(block);
+              } catch {
+                log.warn(
+                  { threadId, messageId: storedNoText.id },
+                  'Search answer binding pending on committed response',
+                );
+              }
+            }
             // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
-            if (options.persistenceContext && noTextBlocks.length > 0) {
+            if (storedNoText && options.persistenceContext && noTextBlocks.length > 0) {
               options.persistenceContext.richBlocks = [
                 ...(options.persistenceContext.richBlocks ?? []),
                 ...noTextBlocks,
               ];
             }
-            // #80: Clean up draft only after successful append
-            if (deps.draftStore && ownInvocationId) {
+            if (storedNoText) {
+              turnStoredMessageId = storedNoText.id;
+              recordPersistedOutputMessageId(storedNoText.id);
+            }
+            // #80/F254: retained means DraftStore is still the only recoverable copy.
+            if (deps.draftStore && ownInvocationId && mayDeleteDraft(outputCommitDecision, Boolean(storedNoText))) {
               deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
             }
             // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
             if (deps.invocationDeps.threadStore) {
               try {
-                await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId);
+                await deps.invocationDeps.threadStore.updateParticipantActivity(
+                  threadId,
+                  catId,
+                  // #267: only errors before abort are provider failures
+                  !hadProviderError,
+                );
               } catch (activityErr) {
                 log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
               }
@@ -852,39 +3561,108 @@ export async function* routeSerial(
               });
             }
           }
-        } else {
-          yield {
-            type: 'system_info' as AgentMessageType,
-            catId,
-            content: JSON.stringify({
-              type: 'silent_completion',
-              detail: `${catConfig?.displayName ?? (catId as string)} completed without textual output.`,
-              toolCount: 0,
-            }),
-            timestamp: Date.now(),
-          } as AgentMessage;
-          // No persisted message for fully silent turns.
+        }
+
+        if (!shouldPersistNoTextMessage) {
+          // No persisted message for fully silent turns; clean up draft for turns whose
+          // only user-visible content was a system_info warning (persisted in the common path below).
           if (deps.draftStore && ownInvocationId) {
             deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
           }
         }
-      } else if (collectedToolEvents.length > 0) {
+      } else if (collectedToolEvents.length > 0 || lifecycleResponseMessageId) {
         // hadError && textContent === '' but toolEvents exist — persist tool record so
         // refreshing the page still shows what the cat attempted before the error.
         try {
-          await deps.messageStore.append({
+          const visibleTurnInvocationId = visibleContentInvocationIdOverride ?? ownInvocationId;
+          const executionProjections = await readTurnExecutionProjections(visibleTurnInvocationId);
+          const errorMessageInput: AppendMessageInput = {
+            from: { kind: 'agent', catId },
             userId,
-            catId,
-            content: '',
+            content: terminalFailureContent ?? '',
             mentions: [],
             origin: 'stream',
-            timestamp: Date.now(),
+            timestamp: invocationStartedAt,
             threadId,
             ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
-            ...(firstMetadata ? { metadata: firstMetadata } : {}),
-            toolEvents: collectedToolEvents,
-            ...(ownInvocationId ? { extra: { stream: { invocationId: ownInvocationId } } } : {}),
-          });
+            ...(persistedMetadata ? { metadata: persistedMetadata } : {}),
+            ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
+            ...((options.parentInvocationId ?? visibleTurnInvocationId) || doneMsg?.tracing
+              ? {
+                  extra: {
+                    // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId
+                    // for error+toolEvents records too.
+                    ...((options.parentInvocationId ?? visibleTurnInvocationId)
+                      ? {
+                          stream: {
+                            invocationId: (options.parentInvocationId ?? visibleTurnInvocationId) as string,
+                            turnInvocationId: (visibleTurnInvocationId ?? options.parentInvocationId) as string,
+                          },
+                        }
+                      : {}),
+                    ...(turnTriggerMessageId
+                      ? {
+                          causal: {
+                            kind: 'invocation_reply' as const,
+                            triggerMessageId: turnTriggerMessageId,
+                            ...(turnTriggerThreadId ? { triggerThreadId: turnTriggerThreadId } : {}),
+                          },
+                        }
+                      : {}),
+                    ...executionProjections,
+                    ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
+                  },
+                }
+              : {}),
+          };
+          let storedErrorTools;
+          if (lifecycleResponseMessageId && ownInvocationId) {
+            // F117 KD-22: a member stopped by its output timeout failed; any other stop interrupted it.
+            const timedOut = stoppedByMemberTimeout(catSignal);
+            const terminal = {
+              status: catSignal?.aborted && !timedOut ? ('interrupted' as const) : ('failed' as const),
+              completedAt: Math.max(Date.now(), invocationStartedAt),
+              reason: timedOut
+                ? MEMBER_TIMEOUT_REASON
+                : typeof doneMsg?.errorCode === 'string' && doneMsg.errorCode.length > 0
+                  ? doneMsg.errorCode
+                  : 'provider_error',
+            };
+            if (
+              terminal.status === 'failed' &&
+              (commitFailedA2AReport || (a2aTriggerMessageId && options.a2aCallerCatId && !options.a2aFailureReport))
+            ) {
+              if (!commitFailedA2AReport) {
+                throw new Error('failed response A2A report admission unavailable');
+              }
+              storedErrorTools = await commitFailedA2AReport({
+                responseMessageId: lifecycleResponseMessageId,
+                invocationId: ownInvocationId,
+                terminal: { ...terminal, status: 'failed' },
+                message: errorMessageInput,
+                userId,
+                ownerAuthProvenance,
+                threadId,
+                reporterCatId: catId,
+                ...(!options.a2aFailureReport && options.a2aCallerCatId
+                  ? { predecessorCatId: options.a2aCallerCatId as CatId }
+                  : {}),
+                ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
+              });
+            } else {
+              storedErrorTools = await commitLifecycleResponseFromAppendInput(
+                deps.messageStore,
+                lifecycleResponseMessageId,
+                ownInvocationId,
+                terminal,
+                errorMessageInput,
+              );
+            }
+          } else {
+            storedErrorTools = await deps.messageStore.append(errorMessageInput);
+          }
+          turnStoredMessageId = storedErrorTools.id;
+          recordPersistedOutputMessageId(storedErrorTools.id);
           // #80: Clean up draft only after successful append
           if (deps.draftStore && ownInvocationId) {
             deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
@@ -892,7 +3670,12 @@ export async function* routeSerial(
           // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
           if (deps.invocationDeps.threadStore) {
             try {
-              await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId);
+              await deps.invocationDeps.threadStore.updateParticipantActivity(
+                threadId,
+                catId,
+                // #267: only errors before abort are provider failures
+                !hadProviderError,
+              );
             } catch (activityErr) {
               log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
             }
@@ -912,19 +3695,144 @@ export async function* routeSerial(
         if (deps.draftStore && ownInvocationId) {
           deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
         }
+        // Update activity for error-only responses (no text/tools branch handles it)
+        if (deps.invocationDeps.threadStore) {
+          try {
+            await deps.invocationDeps.threadStore.updateParticipantActivity(threadId, catId, !hadProviderError);
+          } catch (activityErr) {
+            log.warn({ catId: catId as string, err: activityErr }, 'updateParticipantActivity failed');
+          }
+        }
       }
-      // hadError && textContent === '' && no toolEvents → skip persistence
-      // Error events were already yielded to frontend via the stream.
+
+      // Persist after all text/no-text/error branches so every live warning survives refresh.
+      // Do not broadcast again: the system_info stream already delivered the live event.
+      await persistUserFacingSystemInfoNotices({
+        messageStore: deps.messageStore,
+        threadId,
+        catId: catId as string,
+        contents: userFacingSystemInfoContents,
+        ...(turnTriggerMessageId ? { expectedSourceMessageId: turnTriggerMessageId } : {}),
+        ...(ownInvocationId ? { expectedDispatchInvocationId: ownInvocationId } : {}),
+        ...(lifecycleResponseMessageId && turnStoredMessageId === lifecycleResponseMessageId
+          ? { responseMessageId: lifecycleResponseMessageId }
+          : {}),
+        ...(options.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
+      });
+
+      // Persist error as system message so it survives F5 reload.
+      // During streaming, errors render as red badges via ephemeral frontend state.
+      // Without persistence, they vanish on page refresh.
+      const lifecycleErrorOwnedByResponse =
+        lifecycleResponseMessageId !== undefined && turnStoredMessageId === lifecycleResponseMessageId;
+      if (collectedErrorText && !lifecycleErrorOwnedByResponse) {
+        try {
+          await deps.messageStore.append({
+            from: { kind: 'system', service: 'agent-error' },
+            userId: 'system',
+            content: `Error: ${collectedErrorText}`,
+            mentions: [],
+            origin: 'stream',
+            timestamp: Date.now(),
+            threadId,
+            // F212 Phase B (云端 codex P2-8): carry cliDiagnostics through to persistence
+            // so cold hydration / F5 reload can re-render the folded panel.
+            ...(collectedCliDiagnostics
+              ? { metadata: { provider: '', model: '', cliDiagnostics: collectedCliDiagnostics } }
+              : {}),
+          });
+        } catch (err) {
+          log.error({ catId: catId as string, err }, 'messageStore.append (error system msg) failed');
+        }
+      }
+
+      // F117 KD-22: the response is committed; now report the timeout like a provider failure, so
+      // the Queue counts this member failed (not cancelled) and releases its slot.
+      if (stoppedByMemberTimeout(catSignal) && memberTimeout) {
+        yield {
+          type: 'error' as const,
+          catId,
+          error: cancellationDiagnostics
+            ? appendRemoteCancellationNotice(memberTimeoutErrorText(memberTimeout.diagnostics))
+            : memberTimeoutErrorText(memberTimeout.diagnostics),
+          metadata: persistedMetadata,
+          timestamp: Date.now(),
+        };
+      }
+
+      // F222: Frustration auto-issue — detect CLI error + cancel burst signals.
+      // Non-blocking: errors in frustration detection must not interrupt the route pipeline.
+      // F222 P1: Skip for A2A/connector origins — only detect frustration on user-driven routes.
+      if (deps.frustrationIssueStore && options.frustrationAutoIssueEligible !== false) {
+        const frustrationDeps = {
+          frustrationIssueStore: deps.frustrationIssueStore,
+          messageStore: deps.messageStore,
+          socketManager: deps.socketManager as
+            | import('../../../../../infrastructure/websocket/index.js').SocketManager
+            | undefined,
+        };
+        try {
+          const { evaluate } = await import('../../frustration/FrustrationDetector.js');
+
+          // Signal 1: CLI error (P1-1 original implementation)
+          if (collectedCliDiagnostics?.reasonCode) {
+            await evaluate(
+              {
+                signal: { type: 'cli_error', diagnostics: collectedCliDiagnostics },
+                threadId,
+                userId,
+                catId: catId as string,
+                invocationId: ownInvocationId,
+              },
+              frustrationDeps,
+            );
+          }
+
+          // Signal 2: A2A timeout — cat invoked but produced no visible output AND
+          // elapsed > threshold. Spec AC-C1: "超过阈值（如 60s）未响应".
+          // P1 fix: exclude instant crashes/parse errors — only genuine timeouts.
+          const A2A_TIMEOUT_THRESHOLD_MS = 60_000;
+          const elapsedMs = Date.now() - invocationStartedAt;
+          if (!catProducedOutput && hadProviderError && elapsedMs >= A2A_TIMEOUT_THRESHOLD_MS) {
+            await evaluate(
+              {
+                signal: {
+                  type: 'a2a_timeout',
+                  targetCatId: catId as string,
+                  elapsedMs,
+                },
+                threadId,
+                userId,
+                catId: catId as string,
+                invocationId: ownInvocationId,
+              },
+              frustrationDeps,
+            );
+          }
+        } catch {
+          // Non-blocking: frustration detection failure must not break routing
+        }
+      }
 
       // Ack cursor regardless of hadError: messages were assembled into the prompt
       // and delivered to the cat. Not acking causes infinite re-delivery on subsequent
       // rounds (bug: "砚砚每次都疯狂回之前的消息").
       if (incrementalMode && deliveryBoundaryId) {
         if (options.cursorBoundaries) {
-          // ADR-008 S3: defer ack — caller acks after invocation succeeds
+          // Keep the same-route overlay and caller finalizer as idempotent consumers.
           upsertMaxBoundary(options.cursorBoundaries, catId, deliveryBoundaryId);
-        } else if (deps.deliveryCursorStore) {
-          // Legacy: ack immediately (deprecated route() path)
+        }
+        if (
+          deps.deliveryCursorStore &&
+          (!options.cursorBoundaries ||
+            (doneMsg &&
+              !hadError &&
+              !doneMsg.errorCode &&
+              !catSignal?.aborted &&
+              actionOutputCommitAllowed &&
+              (turnStoredMessageId || !catProducedOutput)))
+        ) {
+          // Commit before this target's done/slot release, not after the whole chain.
           try {
             await deps.deliveryCursorStore.ackCursor(userId, catId, threadId, deliveryBoundaryId);
           } catch (err) {
@@ -933,19 +3841,120 @@ export async function* routeSerial(
         }
       }
 
-      // Yield buffered done with correct isFinal (evaluated AFTER worklist may have grown)
-      // MUST always reach here regardless of append success (缅因猫 review P1-2)
-      if (doneMsg) {
-        const isFinal = index === worklist.length - 1;
-        yield { ...doneMsg, ...(mentionsUser ? { mentionsUser } : {}), isFinal };
-        if (isFinal) yieldedFinalDone = true;
+      // F148 OQ-2: Log briefing→invocation link + context eval signals
+      if (briefingMessageId && ownInvocationId) {
+        const evalSignals = briefingCoverageMap
+          ? extractContextEvalSignals({
+              coverageMap: briefingCoverageMap,
+              toolNames: collectedToolNames,
+              responseTokenEstimate: estimateTokens(textContent),
+            })
+          : undefined;
+        log.info({
+          f148: 'briefing-invocation-link',
+          briefingMessageId,
+          invocationId: ownInvocationId,
+          catId,
+          threadId,
+          hadError: hadProviderError,
+          ...(evalSignals ? { eval: evalSignals } : {}),
+        });
       }
 
-      // F27: Advance executedIndex so pushToWorklist knows which cats are done
-      worklistEntry.executedIndex = index + 1;
+      // F155: Ack guide completion only after cat produced visible output.
+      if (deps.invocationDeps.threadStore) {
+        const { createGuideStoreBridge } = await import('../../../../guides/GuideSessionRepository.js');
+        const sessionStore = deps.invocationDeps.guideSessionStore!;
+        await ackGuideCompletion({
+          ctx: guideCtx,
+          catId,
+          catProducedOutput,
+          targetCatIds,
+          threadId,
+          userId,
+          guideStore: createGuideStoreBridge(sessionStore),
+          threadStore: deps.invocationDeps.threadStore!,
+        });
+      }
+
+      // Yield buffered done with correct isFinal (evaluated AFTER worklist may have grown)
+      // MUST always reach here regardless of append success (缅因猫 review P1-2)
+      // F194 Phase Z9 砚砚 R1 P1-1: stamp ownInvocationId on done if not already set.
+      const isTerminalCoordinationWake =
+        turnCustodyWake.kind === 'non_obligation' && turnCustodyWake.source === 'coordination_terminal';
+      if (index === worklist.length - 1 || isTerminalCoordinationWake) {
+        await flushTurnCustodyShadowCloses(index === worklist.length - 1 ? 'route_settled' : 'next_turn_boundary');
+      }
+
+      if (doneMsg) {
+        if (cancellationDiagnostics) {
+          const stored = turnStoredMessageId ? await deps.messageStore.getById(turnStoredMessageId) : undefined;
+          persistedDoneContent = stored?.content ?? appendRemoteCancellationNotice(textContent);
+        }
+        const isFinal = index === worklist.length - 1;
+        const ownStampedDone =
+          ownInvocationId && !doneMsg.invocationId ? { ...doneMsg, invocationId: ownInvocationId } : doneMsg;
+        yield projectLiveTurnExecution({
+          ...ownStampedDone,
+          extra: {
+            ...ownStampedDone.extra,
+            ...outputLayoutExtra(outputProjection, persistedDoneContent ?? persistedLayoutContent ?? textContent),
+          },
+          ...(cancellationDiagnostics ? { metadata: persistedMetadata } : {}),
+          ...(persistedDoneContent !== undefined ? { content: persistedDoneContent } : {}),
+          ...(turnStoredMessageId ? { messageId: turnStoredMessageId } : {}),
+          ...(await storedMessageTimestamp(deps.messageStore, turnStoredMessageId)),
+          ...(mentionsUser ? { mentionsUser } : {}),
+          ...(turnCustodyTerminalWitnesses[0] ? { turnCustodyTerminalWitness: turnCustodyTerminalWitnesses[0] } : {}),
+          ...(turnCustodyTerminalWitnesses.length > 0 ? { turnCustodyTerminalWitnesses } : {}),
+          isFinal,
+        });
+        if (isFinal) yieldedFinalDone = true;
+        if (ownInvocationId) {
+          completedCatInvocationIds.push([catId, ownInvocationId]);
+          pushRecallPresentationsByInvocation.set(ownInvocationId, currentPushRecallPresentations);
+        }
+      }
+
       index++;
     }
   } finally {
+    await invocationServices.dispose();
+    // Turn-custody observation is recorded after the turn settles: current output persistence,
+    // operator handoff writes, and inline child receiver-boundary handoffs must all
+    // have had a chance to establish machine evidence before the projection closes.
+    await flushTurnCustodyShadowCloses('route_settled');
+
+    // F153: Set route aggregate attributes on the parent route span
+    if (options.routeSpan) {
+      options.routeSpan.setAttribute(ROUTE_TOTAL_CATS_INVOKED, index);
+      options.routeSpan.setAttribute(ROUTE_TOTAL_TOKENS, routeTotalTokens);
+    }
+    // F200 AC-A1: fire-and-forget recall correlation after all cats complete.
+    // TD 2026-08-12: bounded tail read — full-thread reads of large keys
+    // (observed 221MB) froze the API event loop every round-end.
+    if (deps.toolEventLog && deps.evidenceStore && completedCatInvocationIds.length > 0) {
+      const evidenceDb = (deps.evidenceStore as { getDb?: () => import('better-sqlite3').Database }).getDb?.();
+      if (evidenceDb) {
+        deps.toolEventLog
+          .readRecentByThread(threadId, RECALL_CORRELATION_EVENT_WINDOW)
+          .then((events) => {
+            const raw = events as unknown as Parameters<typeof triggerRecallCorrelation>[1];
+            for (const [catId, invId] of completedCatInvocationIds) {
+              const withPush = mergePushRecallPresentations(
+                raw,
+                pushRecallPresentationsByInvocation.get(invId) ?? [],
+                invId,
+                catId,
+                threadId,
+              );
+              triggerRecallCorrelation(evidenceDb, withPush, invId, catId).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
+    }
+
     // F27: Always unregister worklist, even on error/abort.
     // Pass owner ref so preempting new invocation's worklist is not deleted (缅因猫 R1 P1-1)
     unregisterWorklist(threadId, worklistEntry, options.parentInvocationId);

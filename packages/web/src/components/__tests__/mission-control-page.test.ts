@@ -1,8 +1,8 @@
+import type { CatId } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MissionControlPage } from '@/components/mission-control/MissionControlPage';
-import { useChatStore } from '@/stores/chatStore';
 import { useMissionControlStore } from '@/stores/missionControlStore';
 import {
   createMissionControlMockBackend,
@@ -68,15 +68,23 @@ describe('MissionControlPage', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('renders back-to-chat link with href="/"', async () => {
+  it('renders a single rounded Mission Hub content surface without a redundant back button', async () => {
     await act(async () => {
       root.render(React.createElement(MissionControlPage));
     });
     await flush(act);
 
-    const backLink = container.querySelector('[data-testid="mc-back-to-chat"]') as HTMLAnchorElement | null;
-    expect(backLink).not.toBeNull();
-    expect(backLink?.getAttribute('href')).toBe('/');
+    expect(container.querySelector('[data-testid="mc-back-to-chat"]')).toBeNull();
+    expect(container.querySelector('[data-testid="mission-content-surface"]')).not.toBeNull();
+  });
+
+  it('does not render the thread sidebar inside mission hub layout', async () => {
+    await act(async () => {
+      root.render(React.createElement(MissionControlPage));
+    });
+    await flush(act);
+
+    expect(container.querySelector('[data-testid="thread-sidebar"]')).toBeNull();
   });
 
   it('creates backlog items from quick create form', async () => {
@@ -271,7 +279,7 @@ describe('MissionControlPage', () => {
         title: 'Thread Alpha',
         createdBy: 'u_test',
         lastActiveAt: now - 500,
-        participants: ['codex'],
+        participants: ['codex' as CatId],
         backlogItemId: 'seed-situation',
       },
     ]);
@@ -418,7 +426,7 @@ describe('MissionControlPage', () => {
     });
     await flush(act);
 
-    resolveFirstThreads(
+    (resolveFirstThreads as (response: Response) => void)(
       mockResponse(200, {
         threads: [
           {
@@ -426,7 +434,7 @@ describe('MissionControlPage', () => {
             title: 'Thread Old',
             createdBy: 'u_test',
             lastActiveAt: now - 1_000,
-            participants: ['codex'],
+            participants: ['codex' as CatId],
             backlogItemId: itemA.id,
           },
         ],
@@ -466,7 +474,7 @@ describe('MissionControlPage', () => {
         updatedAt: now,
         audit: [{ id: 'a-reject', action: 'created', actor: { kind: 'user', id: 'u_test' }, timestamp: now }],
         suggestion: {
-          catId: 'codex',
+          catId: 'codex' as CatId,
           why: '先给建议',
           plan: '再驳回',
           requestedPhase: 'coding',
@@ -519,7 +527,7 @@ describe('MissionControlPage', () => {
         updatedAt: now,
         audit: [{ id: 'a-approved', action: 'approved', actor: { kind: 'user', id: 'u_test' }, timestamp: now }],
         suggestion: {
-          catId: 'codex',
+          catId: 'codex' as CatId,
           why: '可恢复',
           plan: '手动重试',
           requestedPhase: 'coding',
@@ -575,7 +583,7 @@ describe('MissionControlPage', () => {
     });
 
     expect(container.textContent).toContain('加载 backlog 中...');
-    resolveList?.(mockResponse(200, { items: [] }));
+    (resolveList as unknown as (value: Response) => void)(mockResponse(200, { items: [] }));
     await flush(act);
   });
 
@@ -600,7 +608,7 @@ describe('MissionControlPage', () => {
 
   it('shows self-claim button when policy allows global self-claim', async () => {
     const now = Date.now();
-    backend.setSelfClaimScope('codex', 'global');
+    backend.setSelfClaimScope('codex' as CatId, 'global');
     backend.setItems([
       {
         id: 'seed-self-claim',
@@ -638,7 +646,7 @@ describe('MissionControlPage', () => {
 
   it('hides self-claim button when policy is disabled', async () => {
     const now = Date.now();
-    backend.setSelfClaimScope('codex', 'disabled');
+    backend.setSelfClaimScope('codex' as CatId, 'disabled');
     backend.setItems([
       {
         id: 'seed-self-claim-disabled',
@@ -678,7 +686,7 @@ describe('MissionControlPage', () => {
 
   it('shows once policy blocker reason when self-claim API rejects with once scope conflict', async () => {
     const now = Date.now();
-    backend.setSelfClaimScope('codex', 'once');
+    backend.setSelfClaimScope('codex' as CatId, 'once');
     backend.setItems([
       {
         id: 'seed-self-claim-once',
@@ -744,7 +752,7 @@ describe('MissionControlPage', () => {
 
   it('shows thread policy blocker reason when self-claim API rejects with active lease conflict', async () => {
     const now = Date.now();
-    backend.setSelfClaimScope('codex', 'thread');
+    backend.setSelfClaimScope('codex' as CatId, 'thread');
     backend.setItems([
       {
         id: 'seed-self-claim-thread',
@@ -830,7 +838,7 @@ describe('MissionControlPage', () => {
         dispatchedThreadId: 'thread-lease-ui',
         dispatchedThreadPhase: 'coding',
         lease: {
-          ownerCatId: 'codex',
+          ownerCatId: 'codex' as CatId,
           state: 'active',
           acquiredAt: now - 2_000,
           heartbeatAt: now - 1_000,
@@ -888,7 +896,7 @@ describe('MissionControlPage', () => {
         dispatchedThreadId: 'thread-lease-expired',
         dispatchedThreadPhase: 'coding',
         lease: {
-          ownerCatId: 'codex',
+          ownerCatId: 'codex' as CatId,
           state: 'active',
           acquiredAt: now - 5_000,
           heartbeatAt: now - 4_000,
@@ -958,7 +966,7 @@ describe('MissionControlPage', () => {
         dispatchedThreadId: 'thread-lease-ticking',
         dispatchedThreadPhase: 'coding',
         lease: {
-          ownerCatId: 'codex',
+          ownerCatId: 'codex' as CatId,
           state: 'active',
           acquiredAt: now - 3_000,
           heartbeatAt: now - 2_000,
@@ -1250,7 +1258,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
         updatedAt: now,
         audit: [],
         suggestion: {
-          catId: 'codex',
+          catId: 'codex' as CatId,
           why: 'w',
           plan: 'p',
           requestedPhase: 'coding',
@@ -1389,11 +1397,12 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
 
   it('shows node detail panel when a node is clicked (AC-J5)', async () => {
     const now = Date.now();
+    const longFeatureName = `Clickable Feature ${'keeps-fixed-node-geometry-'.repeat(12)}detail-tail`;
     backend.setItems([
       {
         id: 'click-1',
         userId: 'u',
-        title: '[F070] Clickable Feature',
+        title: `[F070] ${longFeatureName}`,
         summary: 'S',
         priority: 'p1',
         tags: ['feature:f070'],
@@ -1435,6 +1444,8 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
     // Click the node
     const node = container.querySelector('[data-testid="mc-dep-node-F070"]') as HTMLElement;
     expect(node).not.toBeNull();
+    expect(node.querySelector('[data-overflow-measure="inline"]')).not.toBeNull();
+    expect(node.querySelector('[data-overflow-measure="block"]')).toBeNull();
     await act(async () => {
       node.click();
     });
@@ -1443,7 +1454,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
     const detail = container.querySelector('[data-testid="mc-dep-node-detail"]');
     expect(detail).not.toBeNull();
     expect(detail?.textContent).toContain('F070');
-    expect(detail?.textContent).toContain('Clickable Feature');
+    expect(detail?.textContent).toContain('detail-tail');
     expect(detail?.textContent).toContain('F049');
   });
 
@@ -1576,8 +1587,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
     expect(container.querySelector('[data-testid="mc-dep-node-F001"]')).not.toBeNull();
   });
 
-  it('referrer-based back button links to referrer thread when ?from= present', async () => {
-    // Set up window.location.search with ?from=thread-abc
+  it('ignores ?from= and does not render a Mission Hub back button', async () => {
     const originalSearch = window.location.search;
     Object.defineProperty(window, 'location', {
       writable: true,
@@ -1589,68 +1599,8 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
     });
     await flush(act);
 
-    const backLink = container.querySelector('[data-testid="mc-back-to-chat"]') as HTMLAnchorElement;
-    expect(backLink).not.toBeNull();
-    expect(backLink.getAttribute('href')).toBe('/thread/thread-abc');
-
-    // Restore
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      value: { ...window.location, search: originalSearch },
-    });
-  });
-
-  it('back button falls back to store currentThreadId when no ?from= param', async () => {
-    // No ?from= in URL — simulate navigating to /mission-hub directly
-    const originalSearch = window.location.search;
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      value: { ...window.location, search: '' },
-    });
-
-    // Set the store's currentThreadId before render (inside act to avoid warning)
-    await act(async () => {
-      useChatStore.setState({ currentThreadId: 'thread-xyz' });
-    });
-
-    await act(async () => {
-      root.render(React.createElement(MissionControlPage));
-    });
-    await flush(act);
-
-    const backLink = container.querySelector('[data-testid="mc-back-to-chat"]') as HTMLAnchorElement;
-    expect(backLink).not.toBeNull();
-    expect(backLink.getAttribute('href')).toBe('/thread/thread-xyz');
-
-    // Restore
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      value: { ...window.location, search: originalSearch },
-    });
-    await act(async () => {
-      useChatStore.setState({ currentThreadId: 'default' });
-    });
-  });
-
-  it('back button goes to / when store has default thread and no ?from= param', async () => {
-    const originalSearch = window.location.search;
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      value: { ...window.location, search: '' },
-    });
-
-    await act(async () => {
-      useChatStore.setState({ currentThreadId: 'default' });
-    });
-
-    await act(async () => {
-      root.render(React.createElement(MissionControlPage));
-    });
-    await flush(act);
-
-    const backLink = container.querySelector('[data-testid="mc-back-to-chat"]') as HTMLAnchorElement;
-    expect(backLink).not.toBeNull();
-    expect(backLink.getAttribute('href')).toBe('/');
+    expect(container.querySelector('[data-testid="mc-back-to-chat"]')).toBeNull();
+    expect(container.querySelector('[data-testid="mission-content-surface"]')).not.toBeNull();
 
     Object.defineProperty(window, 'location', {
       writable: true,
@@ -1685,7 +1635,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
         title: '[F099] some related thread',
         createdBy: 'u_test',
         lastActiveAt: now - 200,
-        participants: ['codex'],
+        participants: ['codex' as CatId],
         // no backlogItemId!
       },
     ]);
@@ -1738,7 +1688,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
         title: 'Direct Linked Thread',
         createdBy: 'u_test',
         lastActiveAt: now - 100,
-        participants: ['codex'],
+        participants: ['codex' as CatId],
         backlogItemId: 'seed-direct-pref', // direct link
       },
       {
@@ -1746,7 +1696,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
         title: '[F088] title match thread',
         createdBy: 'u_test',
         lastActiveAt: now - 300,
-        participants: ['codex'],
+        participants: ['codex' as CatId],
         // no backlogItemId — would match by title
       },
     ]);

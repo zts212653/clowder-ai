@@ -39,6 +39,14 @@ describe('Callback Docs Routes', () => {
       const body = response.json();
       assert.ok(body.rules, 'response should have rules field');
       assert.ok(body.rules.length > 0, 'rules should be non-empty');
+      assert.ok(
+        body.rules.includes('cat-cafe-runtime/packages/api/uploads/'),
+        'rules should warn cats that /uploads/ files must land in the runtime API upload directory',
+      );
+      assert.ok(
+        body.rules.includes('addEventListener'),
+        'rules should warn cats that inline on* handlers are stripped and to bind events via addEventListener',
+      );
     } finally {
       await app.close();
     }

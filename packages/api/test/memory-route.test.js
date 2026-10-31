@@ -173,7 +173,7 @@ describe('Memory API Routes', () => {
   it('uses X-Cat-Cafe-User header over legacy userId query', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/api/memory?userId=legacy-user-should-not-win',
+      url: '/api/memory',
       headers: { 'x-cat-cafe-user': 'test-user' },
       payload: {
         threadId: ownThreadId,

@@ -1,0 +1,165 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import { persistUserFacingSystemInfoNotices } from '../dist/domains/cats/services/agents/routing/persist-system-info-warnings.js';
+import { isUserFacingSystemInfoContent } from '../dist/domains/cats/services/agents/routing/route-helpers.js';
+import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+
+function lifecycle(status, overrides = {}) {
+  return JSON.stringify({
+    type: 'session_rollover_lifecycle',
+    v: 1,
+    rolloverId: 'inv-oversized-1:codex-native-resume',
+    status,
+    reason: 'oversized_retire',
+    ...overrides,
+  });
+}
+
+async function persistedLifecycleMessages(store, contents) {
+  await persistUserFacingSystemInfoNotices({
+    messageStore: store,
+    threadId: 'thread-owner',
+    catId: 'codex-sol',
+    contents,
+  });
+  return (await store.getByThread('thread-owner')).filter(
+    (message) => message.source?.connector === 'session-rollover-lifecycle',
+  );
+}
+
+describe('F296 oversized native rollover response-owned diagnostics', () => {
+  it('keeps lifecycle stages out of History because the response bubble owns execution status', async () => {
+    const store = new MessageStore();
+    const pending = lifecycle('pending');
+    const succeeded = lifecycle('succeeded');
+
+    assert.equal(isUserFacingSystemInfoContent(pending), true);
+    const messages = await persistedLifecycleMessages(store, [pending, pending, succeeded, succeeded]);
+
+    assert.equal(messages.length, 0);
+  });
+
+  it('does not append a second system row for a failed response-owned rollover', async () => {
+    const store = new MessageStore();
+    const failed = lifecycle('failed', { failureStage: 'seal_finalize' });
+    const messages = await persistedLifecycleMessages(store, [
+      lifecycle('failed'),
+      lifecycle('succeeded', { reason: 'invented_reason' }),
+      lifecycle('pending', { rolloverId: '' }),
+      lifecycle('pending', { v: 2 }),
+      failed,
+      failed,
+    ]);
+
+    assert.equal(messages.length, 0);
+  });
+
+  it('does not create another warning result for an exact failed response regardless of wording', async () => {
+    const store = new MessageStore();
+    const failureText = 'Codex CLI: CLI 异常退出 (code=1)';
+    const response = store.append({
+      userId: 'owner',
+      threadId: 'thread-owner',
+      from: { kind: 'agent', catId: 'codex-sol' },
+      content: failureText,
+      mentions: [],
+      timestamp: 100,
+      lifecycle: {
+        kind: 'response',
+        orderKey: 'r-order',
+        invocationId: 'failed-child',
+        targetId: 'codex-sol',
+        inputEntryIds: [],
+        inputMessageIds: [],
+        status: 'failed',
+        startedAt: 100,
+        completedAt: 200,
+      },
+    });
+
+    await persistUserFacingSystemInfoNotices({
+      messageStore: store,
+      threadId: 'thread-owner',
+      catId: 'codex-sol',
+      responseMessageId: response.id,
+      expectedDispatchInvocationId: 'failed-child',
+      contents: [
+        JSON.stringify({ type: 'warning', presentation: 'user_action_required', message: failureText }),
+        JSON.stringify({
+          type: 'warning',
+          presentation: 'user_action_required',
+          message: 'The provider disconnected; reauthorize to try again',
+        }),
+      ],
+    });
+
+    const warnings = (await store.getByThread('thread-owner')).filter(
+      (message) => message.source?.connector === 'system-warning',
+    );
+    assert.deepEqual(warnings, []);
+    assert.equal(store.getByThread('thread-owner').length, 1);
+    assert.equal(store.getById(response.id).content, failureText);
+  });
+
+  it('does not persist an unclassified provider diagnostic as a conversation notice', async () => {
+    const store = new MessageStore();
+
+    await persistUserFacingSystemInfoNotices({
+      messageStore: store,
+      threadId: 'thread-owner',
+      catId: 'codex-sol',
+      contents: [JSON.stringify({ type: 'warning', message: 'Model metadata not found; using fallback metadata' })],
+    });
+
+    assert.equal(
+      (await store.getByThread('thread-owner')).some((message) => message.source?.connector === 'system-warning'),
+      false,
+    );
+  });
+
+  for (const mismatch of [
+    { threadId: 'other-thread' },
+    { targetId: 'opus' },
+    { invocationId: 'other-child' },
+    { status: 'completed' },
+  ]) {
+    it(`does not borrow failure ownership from a mismatched response ${JSON.stringify(mismatch)}`, async () => {
+      const store = new MessageStore();
+      const response = store.append({
+        userId: 'owner',
+        threadId: mismatch.threadId ?? 'thread-owner',
+        from: { kind: 'agent', catId: 'codex-sol' },
+        content: 'failure',
+        mentions: [],
+        timestamp: 100,
+        lifecycle: {
+          kind: 'response',
+          orderKey: 'scope-order',
+          invocationId: 'failed-child',
+          targetId: 'codex-sol',
+          inputEntryIds: [],
+          inputMessageIds: [],
+          status: 'failed',
+          startedAt: 100,
+          completedAt: 200,
+          ...mismatch,
+        },
+      });
+      await persistUserFacingSystemInfoNotices({
+        messageStore: store,
+        threadId: 'thread-owner',
+        catId: 'codex-sol',
+        responseMessageId: response.id,
+        expectedDispatchInvocationId: 'failed-child',
+        contents: [
+          JSON.stringify({ type: 'warning', presentation: 'user_action_required', message: 'please authorize' }),
+        ],
+      });
+      assert.equal(
+        store.getByThread('thread-owner').filter((message) => message.source?.connector === 'system-warning').length,
+        1,
+      );
+    });
+  }
+});

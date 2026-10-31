@@ -1,0 +1,346 @@
+.shared-artifact-library {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 24px 28px;
+}
+.shared-artifact-library h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+.shared-artifact-library header p {
+  color: var(--cafe-text-muted);
+  font-size: 13px;
+}
+.shared-artifact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 14px;
+  margin-top: 24px;
+}
+.shared-artifact-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  max-width: 440px;
+  margin: 10px 0;
+  padding: 15px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 12px;
+  background: var(--console-card-bg);
+  text-align: left;
+}
+.shared-artifact-card > span:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+}
+.shared-artifact-card strong,
+.shared-artifact-card small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.shared-artifact-card strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.shared-artifact-card small {
+  margin-top: 6px;
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+}
+.shared-artifact-card > .shared-artifact-open {
+  color: var(--cafe-accent);
+  font-size: 12px;
+}
+.shared-artifact-page {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 48px;
+  flex-shrink: 0;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 5px;
+  background: var(--console-panel-bg);
+  color: var(--cafe-text-muted);
+  font-size: 24px;
+}
+.scene-layout[data-shared-artifact-open="true"] {
+  grid-template-columns: minmax(280px, 0.55fr) minmax(0, 1fr);
+}
+.scene-layout[data-shared-artifact-open="true"] > .context-panel {
+  position: static;
+  width: auto;
+  box-shadow: none;
+  border-left: 0;
+  border-right: 1px solid var(--console-border-soft);
+}
+.channel-scene[hidden] {
+  display: none;
+}
+.shared-artifact-surface {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--console-panel-bg);
+}
+.shared-artifact-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 72px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--console-border-soft);
+  background: var(--console-card-bg);
+}
+.shared-artifact-header button {
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.shared-artifact-header > button {
+  min-width: 0;
+}
+.shared-artifact-header strong {
+  display: block;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.shared-artifact-header > button span {
+  display: block;
+  margin-top: 4px;
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+.shared-artifact-header > div {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+.shared-artifact-header label {
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+}
+.shared-artifact-header select {
+  margin-left: 6px;
+  padding: 5px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 6px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text);
+  font-size: 12px;
+}
+.shared-artifact-info {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px 20px;
+  margin: 0;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--console-border-soft);
+  background: var(--console-card-bg);
+  font-size: 12px;
+}
+.shared-artifact-info dt {
+  color: var(--cafe-text-muted);
+}
+.shared-artifact-info dd {
+  margin: 0;
+}
+.shared-artifact-info button,
+.shared-artifact-footer button,
+.shared-artifact-history-banner button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cafe-accent);
+}
+.shared-artifact-document {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: clamp(20px, 4vw, 48px);
+}
+.shared-artifact-document > .message-markdown {
+  max-width: 740px;
+  min-height: 100%;
+  margin: auto;
+  padding: clamp(20px, 4vw, 40px);
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-card-bg);
+  font-size: 15px;
+  line-height: 1.9;
+}
+.shared-artifact-document h1 {
+  font-size: 26px;
+}
+.shared-artifact-document h2 {
+  font-size: 21px;
+}
+.shared-artifact-footer {
+  display: flex;
+  flex-shrink: 0;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 22px;
+  border-top: 1px solid var(--console-border-soft);
+  background: var(--console-card-bg);
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+.shared-artifact-history-banner {
+  margin: 0;
+  padding: 12px 22px;
+  background: var(--cafe-accent-soft);
+  font-size: 12px;
+}
+.shared-artifact-history-banner button {
+  margin-left: 14px;
+}
+.shared-artifact-state {
+  max-width: 600px;
+  margin: auto;
+  padding: 40px 24px;
+  text-align: center;
+}
+.shared-artifact-state h2 {
+  font-size: 20px;
+}
+.shared-artifact-state p {
+  color: var(--cafe-text-muted);
+  font-size: 14px;
+  line-height: 1.8;
+}
+.shared-artifact-state button {
+  padding: 8px 14px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-card-bg);
+}
+.shared-publication-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 16px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text);
+  box-shadow: var(--shadow-elevation-3);
+}
+.shared-publication-dialog::backdrop {
+  background: var(--console-overlay-backdrop);
+}
+.shared-publication-dialog header,
+.shared-publication-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.shared-publication-dialog h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.shared-publication-dialog header button {
+  border: 0;
+  background: transparent;
+  font-size: 24px;
+}
+.shared-publication-dialog p,
+.shared-publication-dialog blockquote,
+.shared-publication-dialog small {
+  color: var(--cafe-text-muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.shared-publication-dialog blockquote {
+  margin: 18px 0;
+  padding: 10px 14px;
+  border-left: 2px solid var(--cafe-accent);
+  background: var(--console-panel-bg);
+}
+.shared-publication-dialog label {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0;
+  font-size: 13px;
+}
+.shared-publication-dialog input,
+.shared-publication-dialog select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-panel-bg);
+  color: var(--cafe-text);
+}
+.shared-publication-dialog footer {
+  justify-content: flex-end;
+  margin-top: 24px;
+}
+.shared-publication-dialog footer button {
+  padding: 8px 16px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-card-bg);
+}
+.shared-publication-dialog button[type="submit"] {
+  border-color: var(--cafe-accent);
+  background: var(--cafe-accent);
+  color: var(--cafe-accent-foreground);
+}
+.shared-discussion-toggle {
+  display: none;
+}
+.scene-layout[data-shared-artifact-open="true"] > .context-panel .topic-close {
+  display: none;
+}
+@container (max-width: 760px) {
+  .scene-layout[data-shared-artifact-open="true"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .scene-layout[data-shared-artifact-open="true"] > .context-panel {
+    display: none;
+  }
+  .scene-layout[data-shared-artifact-open="true"][data-shared-discussion-open="true"] > .context-panel {
+    display: flex;
+  }
+  .scene-layout[data-shared-discussion-open="true"] > .shared-artifact-surface {
+    display: none;
+  }
+  .shared-artifact-header {
+    gap: 8px;
+    padding: 12px 14px;
+  }
+  .shared-artifact-header > div {
+    gap: 8px;
+  }
+  .shared-artifact-header label {
+    font-size: 0;
+  }
+  .shared-artifact-document {
+    padding: 14px;
+  }
+  .shared-artifact-document > .message-markdown {
+    padding: 20px;
+  }
+  .shared-artifact-footer {
+    padding: 12px 14px;
+  }
+  .shared-artifact-footer span {
+    max-width: 64%;
+  }
+  .shared-discussion-toggle {
+    display: inline-flex;
+  }
+  .scene-layout[data-shared-artifact-open="true"] > .context-panel .topic-close {
+    display: inline-flex;
+  }
+}

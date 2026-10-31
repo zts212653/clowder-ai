@@ -5,18 +5,25 @@
  * 1. Claude: Anthropic OAuth API（/api/oauth/usage）+ ccusage CLI fallback
  * 2. Codex: OpenAI Wham API（/backend-api/wham/usage）+ PATCH 推送 fallback
  * 3. Gemini: Google internal API + PATCH 推送 fallback
- * 4. Antigravity: 本地 Language Server RPC + PATCH 推送 fallback
+ * 4. Kimi: CLI `/usage` 默认探测 + env-gated API fallback
+ * 5. Antigravity: 本地 Language Server RPC + PATCH 推送 fallback
  *
  * 硬约束：看板值 = 官方 API 值，不二次换算。获取失败显示"获取失败"。
  */
 
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { FastifyInstance } from 'fastify';
+import * as pty from 'node-pty';
 import { z } from 'zod';
+import { resolveForClient } from '../config/account-resolver.js';
+import { type CodexAccountLaunchDescriptor, resolveCodexAccountLaunch } from '../config/codex-account-launch.js';
+import type { RoutingQuotaSnapshotObserver } from '../domains/routing-context/F051QuotaRoutingSignalAdapter.js';
+import { resolveCliCommand } from '../utils/cli-resolve.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -46,6 +53,8 @@ export interface ClaudeQuota {
   activeBlock: CcusageBillingBlock | null;
   usageItems?: CodexUsageItem[];
   recentBlocks: CcusageBillingBlock[];
+  officialError?: string;
+  cliError?: string;
   error?: string;
   lastChecked: string | null;
 }
@@ -73,6 +82,15 @@ export interface GeminiQuota {
   lastChecked: string | null;
 }
 
+export interface KimiQuota {
+  platform: 'kimi';
+  usageItems: CodexUsageItem[];
+  error?: string;
+  lastChecked: string | null;
+  status?: 'ok' | 'unavailable';
+  note?: string;
+}
+
 export interface AntigravityQuota {
   platform: 'antigravity';
   usageItems: CodexUsageItem[];
@@ -84,11 +102,12 @@ export interface QuotaResponse {
   claude: ClaudeQuota;
   codex: CodexQuota;
   gemini: GeminiQuota;
+  kimi: KimiQuota;
   antigravity: AntigravityQuota;
   fetchedAt: string;
 }
 
-export type QuotaProbeTargetPlatform = 'claude' | 'codex' | 'antigravity';
+export type QuotaProbeTargetPlatform = 'claude' | 'codex' | 'kimi' | 'antigravity';
 export type QuotaProbeRuntimeStatus = 'ok' | 'error' | 'disabled';
 
 export interface QuotaProbeAction {
@@ -99,7 +118,8 @@ export interface QuotaProbeAction {
 }
 
 export interface QuotaProbeDescriptor {
-  id: 'claude-cli' | 'official-browser' | 'antigravity-placeholder';
+  // Stable probe identifier; the executable for the kimi-cli key is Kimi Code (kimi).
+  id: 'claude-cli' | 'official-browser' | 'kimi-cli' | 'antigravity-placeholder';
   sourceKind: 'cli' | 'browser' | 'placeholder';
   refreshMode: 'manual' | 'scheduled';
   enabled: boolean;
@@ -132,15 +152,18 @@ export interface QuotaSummaryResponse {
   platforms: {
     codex: QuotaSummaryPlatform;
     claude: QuotaSummaryPlatform;
+    kimi: QuotaSummaryPlatform;
     antigravity: QuotaSummaryPlatform;
   };
   probes: {
     official: Pick<QuotaProbeDescriptor, 'enabled' | 'status' | 'reason'>;
     claudeCli: Pick<QuotaProbeDescriptor, 'enabled' | 'status' | 'reason'>;
+    kimi: Pick<QuotaProbeDescriptor, 'enabled' | 'status' | 'reason'>;
   };
   actions: {
     refreshOfficialPath: '/api/quota/refresh/official';
     refreshClaudePath: '/api/quota/refresh/claude';
+    refreshKimiPath: '/api/quota/refresh/kimi';
   };
 }
 
@@ -171,6 +194,16 @@ function createInitialGeminiCache(): GeminiQuota {
   };
 }
 
+function createInitialKimiCache(): KimiQuota {
+  return {
+    platform: 'kimi',
+    usageItems: [],
+    lastChecked: null,
+    status: 'unavailable',
+    note: '暂无 Kimi CLI 额度数据，请先手动刷新。',
+  };
+}
+
 function createInitialAntigravityCache(): AntigravityQuota {
   return {
     platform: 'antigravity',
@@ -182,18 +215,32 @@ function createInitialAntigravityCache(): AntigravityQuota {
 let claudeCache: ClaudeQuota = createInitialClaudeCache();
 let codexCache: CodexQuota = createInitialCodexCache();
 let geminiCache: GeminiQuota = createInitialGeminiCache();
+let kimiCache: KimiQuota = createInitialKimiCache();
 let antigravityCache: AntigravityQuota = createInitialAntigravityCache();
+let kimiCliProbeOverrideForTests: ((env?: NodeJS.ProcessEnv) => Promise<CodexUsageItem[]>) | null = null;
 
 export function resetQuotaCachesForTests(): void {
   claudeCache = createInitialClaudeCache();
   codexCache = createInitialCodexCache();
   geminiCache = createInitialGeminiCache();
+  kimiCache = createInitialKimiCache();
   antigravityCache = createInitialAntigravityCache();
+  kimiCliProbeOverrideForTests = null;
+}
+
+export function setKimiCliProbeOverrideForTests(
+  override: ((env?: NodeJS.ProcessEnv) => Promise<CodexUsageItem[]>) | null,
+): void {
+  kimiCliProbeOverrideForTests = override;
 }
 
 const OFFICIAL_REFRESH_ENABLED_ENV = 'QUOTA_OFFICIAL_REFRESH_ENABLED';
 const CLAUDE_CREDENTIALS_PATH_ENV = 'CLAUDE_CREDENTIALS_PATH';
 const CODEX_CREDENTIALS_PATH_ENV = 'CODEX_CREDENTIALS_PATH';
+const KIMI_AUTH_TOKEN_ENV = 'KIMI_AUTH_TOKEN';
+const KIMI_QUOTA_API_FALLBACK_ENABLED_ENV = 'KIMI_QUOTA_API_FALLBACK_ENABLED';
+const KIMI_CLI_PROBE_TIMEOUT_MS = 15_000;
+const KIMI_CLI_IDLE_SETTLE_MS = 350;
 
 function isTruthyFlag(raw: string | undefined): boolean {
   if (!raw) return false;
@@ -201,11 +248,28 @@ function isTruthyFlag(raw: string | undefined): boolean {
 }
 
 function hasOfficialProbeFailure(): boolean {
-  const messages = [codexCache.error, claudeCache.error].filter((message): message is string => Boolean(message));
+  const messages = [codexCache.error, claudeCache.officialError].filter((message): message is string =>
+    Boolean(message),
+  );
   return messages.some((message) => {
     if (/temporarily disabled/i.test(message)) return false;
     return /official fetch failed|OAuth failed|credentials/i.test(message);
   });
+}
+
+function isKimiQuotaApiFallbackEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isTruthyFlag(env[KIMI_QUOTA_API_FALLBACK_ENABLED_ENV]);
+}
+
+function isKimiCliProbeAvailable(): boolean {
+  return kimiCliProbeOverrideForTests != null || Boolean(resolveCliCommand('kimi'));
+}
+
+function getKimiProbeStatus(env: NodeJS.ProcessEnv = process.env): QuotaProbeRuntimeStatus {
+  const fallbackConfigured = isKimiQuotaApiFallbackEnabled(env) && Boolean(resolveKimiAuthToken(env));
+  if (!isKimiCliProbeAvailable() && !fallbackConfigured) return 'disabled';
+  if (kimiCache.error) return 'error';
+  return kimiCache.status === 'ok' ? 'ok' : 'error';
 }
 
 export function listQuotaProbeDescriptors(env: NodeJS.ProcessEnv = process.env): QuotaProbeDescriptor[] {
@@ -215,7 +279,8 @@ export function listQuotaProbeDescriptors(env: NodeJS.ProcessEnv = process.env):
     : hasOfficialProbeFailure()
       ? 'error'
       : 'ok';
-  const claudeStatus: QuotaProbeRuntimeStatus = /ccusage failed/i.test(claudeCache.error ?? '') ? 'error' : 'ok';
+  const claudeStatus: QuotaProbeRuntimeStatus = claudeCache.cliError ? 'error' : 'ok';
+  const kimiStatus = getKimiProbeStatus(env);
 
   return [
     {
@@ -235,7 +300,7 @@ export function listQuotaProbeDescriptors(env: NodeJS.ProcessEnv = process.env):
       ],
       reason:
         claudeStatus === 'error'
-          ? (claudeCache.error ?? 'ccusage probe error')
+          ? (claudeCache.cliError ?? 'ccusage probe error')
           : 'Uses ccusage CLI output. No browser scraping.',
     },
     {
@@ -257,8 +322,32 @@ export function listQuotaProbeDescriptors(env: NodeJS.ProcessEnv = process.env):
         officialStatus === 'disabled'
           ? 'Disabled by default for risk control. Set QUOTA_OFFICIAL_REFRESH_ENABLED=1 to enable.'
           : officialStatus === 'error'
-            ? (codexCache.error ?? claudeCache.error ?? 'official OAuth probe error')
-            : 'Enabled. Uses Anthropic/OpenAI OAuth APIs (ClaudeBar-compatible).',
+            ? (codexCache.error ?? claudeCache.officialError ?? 'official OAuth probe error')
+            : 'Enabled. Uses Claude/Codex OAuth APIs.',
+    },
+    {
+      id: 'kimi-cli',
+      sourceKind: 'cli',
+      refreshMode: 'manual',
+      enabled: kimiStatus !== 'disabled',
+      status: kimiStatus,
+      targets: ['kimi'],
+      actions: [
+        {
+          kind: 'refresh',
+          method: 'POST',
+          path: '/api/quota/refresh/kimi',
+          requiresInteractive: false,
+        },
+      ],
+      reason:
+        kimiStatus === 'disabled'
+          ? `Kimi CLI not found. Install kimi to use /usage by default, or set ${KIMI_QUOTA_API_FALLBACK_ENABLED_ENV}=1 with ${KIMI_AUTH_TOKEN_ENV} to allow API fallback.`
+          : (kimiCache.error ??
+            kimiCache.note ??
+            (isKimiQuotaApiFallbackEnabled(env)
+              ? `Enabled. Uses Kimi CLI /usage by default; API fallback is allowed when ${KIMI_AUTH_TOKEN_ENV} is available.`
+              : 'Enabled. Uses Kimi CLI /usage by default.')),
     },
     {
       id: 'antigravity-placeholder',
@@ -271,6 +360,228 @@ export function listQuotaProbeDescriptors(env: NodeJS.ProcessEnv = process.env):
       reason: 'Antigravity official probe not implemented yet.',
     },
   ];
+}
+
+function stripAnsi(text: string): string {
+  return text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+}
+
+export function parseKimiCliUsageOutput(text: string): CodexUsageItem[] {
+  const cleaned = stripAnsi(text);
+  const items: CodexUsageItem[] = [];
+  for (const line of cleaned.split(/\r?\n/)) {
+    const lower = line.toLowerCase();
+    const percentMatch = line.match(/(\d+)%\s+left/i);
+    if (!percentMatch) continue;
+    const remaining = normalizePercent(Number.parseInt(percentMatch[1] ?? '', 10));
+    const resetMatch = line.match(/\(resets\s+in\s+(.+?)\)/i);
+    if (lower.includes('weekly')) {
+      items.push({
+        label: '每周使用限额',
+        usedPercent: remaining,
+        percentKind: 'remaining',
+        poolId: 'kimi-weekly',
+        ...(resetMatch?.[1] ? { resetsText: `Resets in ${resetMatch[1].trim()}` } : {}),
+      });
+      continue;
+    }
+    if (lower.includes('5h') || lower.includes('5 hour') || lower.includes('5-hour')) {
+      items.push({
+        label: '5小时使用限额',
+        usedPercent: remaining,
+        percentKind: 'remaining',
+        poolId: 'kimi-rate-limit',
+        ...(resetMatch?.[1] ? { resetsText: `Resets in ${resetMatch[1].trim()}` } : {}),
+      });
+    }
+  }
+  return items;
+}
+
+const KIMI_BILLING_URL = 'https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages';
+
+interface KimiUsageResponse {
+  usages: Array<{
+    scope: string;
+    detail: {
+      limit: string;
+      used?: string | null;
+      remaining?: string | null;
+      resetTime?: string | null;
+    };
+    limits?: Array<{
+      window?: {
+        duration?: number | null;
+        timeUnit?: string | null;
+      } | null;
+      detail: {
+        limit: string;
+        used?: string | null;
+        remaining?: string | null;
+        resetTime?: string | null;
+      };
+    }> | null;
+  }>;
+}
+
+function resolveKimiAuthToken(env: NodeJS.ProcessEnv = process.env): string | null {
+  const raw = env[KIMI_AUTH_TOKEN_ENV]?.trim();
+  if (raw) return raw;
+  return null;
+}
+
+async function probeKimiQuotaViaCli(env: NodeJS.ProcessEnv = process.env): Promise<CodexUsageItem[]> {
+  if (kimiCliProbeOverrideForTests) return kimiCliProbeOverrideForTests(env);
+
+  const kimiCommand = resolveCliCommand('kimi');
+  if (!kimiCommand) throw new Error('Kimi CLI not found in PATH');
+
+  return await new Promise<CodexUsageItem[]>((resolve, reject) => {
+    let settled = false;
+    let sentUsage = false;
+    let output = '';
+
+    const proc = pty.spawn(kimiCommand, [], {
+      name: 'xterm-color',
+      cols: 120,
+      rows: 40,
+      cwd: process.cwd(),
+      env: { ...process.env, ...env },
+    });
+
+    const finish = (value: CodexUsageItem[] | null, error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(startTimer);
+      clearTimeout(idleTimer);
+      clearTimeout(timeoutTimer);
+      try {
+        proc.kill();
+      } catch {
+        // best effort
+      }
+      if (error) reject(error);
+      else resolve(value ?? []);
+    };
+
+    const tryParse = (): boolean => {
+      const items = parseKimiCliUsageOutput(output);
+      if (items.length > 0) {
+        finish(items);
+        return true;
+      }
+      return false;
+    };
+
+    const sendUsage = () => {
+      if (settled || sentUsage) return;
+      sentUsage = true;
+      try {
+        proc.write('/usage\r');
+      } catch (error) {
+        finish(null, error instanceof Error ? error : new Error(String(error)));
+      }
+    };
+
+    const startTimer = setTimeout(sendUsage, 500);
+    let idleTimer = setTimeout(() => {
+      if (!tryParse()) {
+        finish(null, new Error('Kimi CLI /usage output did not contain quota data'));
+      }
+    }, KIMI_CLI_IDLE_SETTLE_MS);
+    const timeoutTimer = setTimeout(() => {
+      finish(null, new Error(`Kimi CLI quota probe timed out after ${Math.round(KIMI_CLI_PROBE_TIMEOUT_MS / 1000)}s`));
+    }, KIMI_CLI_PROBE_TIMEOUT_MS);
+
+    proc.onData((chunk) => {
+      output += chunk;
+      if (!sentUsage && /💫|weekly limit|5h limit|api usage/i.test(output)) {
+        sendUsage();
+      }
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        if (!tryParse()) {
+          finish(null, new Error('Kimi CLI /usage output did not contain quota data'));
+        }
+      }, KIMI_CLI_IDLE_SETTLE_MS);
+    });
+
+    proc.onExit(() => {
+      if (!tryParse()) {
+        finish(null, new Error('Kimi CLI exited before quota data was parsed'));
+      }
+    });
+  });
+}
+
+function decodeKimiTokenContext(token: string): { deviceId?: string; sessionId?: string; trafficId?: string } | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    let payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (payload.length % 4 !== 0) payload += '=';
+    const decoded = JSON.parse(Buffer.from(payload, 'base64').toString('utf8')) as Record<string, unknown>;
+    return {
+      deviceId: typeof decoded.device_id === 'string' ? decoded.device_id : undefined,
+      sessionId: typeof decoded.ssid === 'string' ? decoded.ssid : undefined,
+      trafficId: typeof decoded.sub === 'string' ? decoded.sub : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseKimiUsageValue(detail: { limit: string; used?: string | null; remaining?: string | null }): {
+  limit: number;
+  used: number;
+  remaining: number | null;
+} | null {
+  const limit = Number.parseInt(detail.limit, 10);
+  if (!Number.isFinite(limit) || limit <= 0) return null;
+  const remaining = detail.remaining != null ? Number.parseInt(detail.remaining, 10) : null;
+  const used =
+    detail.used != null
+      ? Number.parseInt(detail.used, 10)
+      : Number.isFinite(remaining as number)
+        ? Math.max(0, limit - (remaining as number))
+        : 0;
+  return {
+    limit,
+    used: Number.isFinite(used) ? used : 0,
+    remaining: Number.isFinite(remaining as number) ? (remaining as number) : null,
+  };
+}
+
+export function parseKimiOfficialUsageResponse(json: KimiUsageResponse): CodexUsageItem[] {
+  const codingUsage = Array.isArray(json.usages) ? json.usages.find((item) => item.scope === 'FEATURE_CODING') : null;
+  if (!codingUsage) return [];
+  const items: CodexUsageItem[] = [];
+  const weekly = parseKimiUsageValue(codingUsage.detail);
+  if (weekly) {
+    items.push({
+      label: '每周使用限额',
+      usedPercent: normalizePercent(Math.round((weekly.used / weekly.limit) * 10000) / 100),
+      percentKind: 'used',
+      poolId: 'kimi-weekly',
+      ...(codingUsage.detail.resetTime ? { resetsAt: codingUsage.detail.resetTime } : {}),
+      resetsText: `${weekly.used}/${weekly.limit} requests`,
+    });
+  }
+  const rateLimit = Array.isArray(codingUsage.limits)
+    ? codingUsage.limits.find((item) => item?.window?.duration === 5 && /hour/i.test(item?.window?.timeUnit ?? ''))
+    : null;
+  const rate = rateLimit ? parseKimiUsageValue(rateLimit.detail) : null;
+  if (rate) {
+    items.push({
+      label: '5小时使用限额',
+      usedPercent: normalizePercent(Math.round((rate.used / rate.limit) * 10000) / 100),
+      percentKind: 'used',
+      poolId: 'kimi-rate-limit',
+      ...(rateLimit?.detail.resetTime ? { resetsAt: rateLimit.detail.resetTime } : {}),
+      resetsText: `${rate.used}/${rate.limit} requests / 5h`,
+    });
+  }
+  return items;
 }
 
 function normalizePercent(value: number): number {
@@ -433,17 +744,76 @@ function buildAntigravitySummaryPlatform(): QuotaSummaryPlatform {
   };
 }
 
+function buildKimiSummaryPlatform(): QuotaSummaryPlatform {
+  if (kimiCache.error) {
+    return {
+      id: 'kimi',
+      label: '梵花猫 (Kimi)',
+      displayPercent: null,
+      displayKind: null,
+      utilizationPercent: null,
+      status: 'error',
+      note: kimiCache.error,
+      lastChecked: kimiCache.lastChecked,
+    };
+  }
+  if (kimiCache.status === 'unavailable') {
+    return {
+      id: 'kimi',
+      label: '梵花猫 (Kimi)',
+      displayPercent: null,
+      displayKind: null,
+      utilizationPercent: null,
+      status: 'pending',
+      note:
+        kimiCache.note ??
+        (isKimiQuotaApiFallbackEnabled(process.env)
+          ? `暂无 Kimi CLI 额度数据；若 CLI 失败可按配置降级到 API。`
+          : '暂无 Kimi CLI 额度数据，请点击刷新。'),
+      lastChecked: kimiCache.lastChecked,
+    };
+  }
+  const primary = pickPrimaryUsageItem(kimiCache.usageItems);
+  if (!primary) {
+    return {
+      id: 'kimi',
+      label: '梵花猫 (Kimi)',
+      displayPercent: null,
+      displayKind: null,
+      utilizationPercent: null,
+      status: 'pending',
+      note: '暂无 Kimi 额度数据。',
+      lastChecked: kimiCache.lastChecked,
+    };
+  }
+  const utilization = toUtilizationPercent(primary);
+  return {
+    id: 'kimi',
+    label: '梵花猫 (Kimi)',
+    displayPercent: normalizePercent(primary.usedPercent),
+    displayKind: primary.percentKind ?? 'used',
+    utilizationPercent: utilization,
+    status: statusFromUtilization(utilization),
+    note: primary.resetsText ?? primary.resetsAt ?? primary.label,
+    lastChecked: kimiCache.lastChecked,
+  };
+}
+
 export function buildQuotaSummary(env: NodeJS.ProcessEnv = process.env): QuotaSummaryResponse {
   const probes = listQuotaProbeDescriptors(env);
   const officialProbe = probes.find((probe) => probe.id === 'official-browser');
   const claudeCliProbe = probes.find((probe) => probe.id === 'claude-cli');
   const codex = buildCodexSummaryPlatform();
   const claude = buildClaudeSummaryPlatform();
+  const kimi = buildKimiSummaryPlatform();
   const antigravity = buildAntigravitySummaryPlatform();
 
-  const utilizationValues = [codex.utilizationPercent, claude.utilizationPercent].filter(
-    (value): value is number => typeof value === 'number' && Number.isFinite(value),
-  );
+  const utilizationValues = [
+    codex.utilizationPercent,
+    claude.utilizationPercent,
+    kimi.utilizationPercent,
+    antigravity.utilizationPercent,
+  ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
   const maxUtilization = utilizationValues.length > 0 ? Math.max(...utilizationValues) : null;
 
   const reasons: string[] = [];
@@ -469,6 +839,11 @@ export function buildQuotaSummary(env: NodeJS.ProcessEnv = process.env): QuotaSu
     level = 'high';
   }
 
+  if (kimi.status === 'error') {
+    reasons.push(`梵花猫额度异常：${kimi.note}`);
+    level = 'high';
+  }
+
   if (maxUtilization != null && maxUtilization >= 95) {
     reasons.push(`综合利用率达到 ${maxUtilization}%（高风险）`);
     level = 'high';
@@ -487,6 +862,7 @@ export function buildQuotaSummary(env: NodeJS.ProcessEnv = process.env): QuotaSu
     platforms: {
       codex,
       claude,
+      kimi,
       antigravity,
     },
     probes: {
@@ -500,10 +876,20 @@ export function buildQuotaSummary(env: NodeJS.ProcessEnv = process.env): QuotaSu
         status: claudeCliProbe?.status ?? 'ok',
         reason: claudeCliProbe?.reason ?? 'claude-cli probe unavailable',
       },
+      kimi: {
+        enabled: probes.some((probe) => probe.id === 'kimi-cli' && probe.enabled),
+        status: probes.find((probe) => probe.id === 'kimi-cli')?.status ?? getKimiProbeStatus(env),
+        reason:
+          probes.find((probe) => probe.id === 'kimi-cli')?.reason ??
+          kimiCache.error ??
+          kimiCache.note ??
+          'Kimi CLI probe unavailable',
+      },
     },
     actions: {
       refreshOfficialPath: '/api/quota/refresh/official',
       refreshClaudePath: '/api/quota/refresh/claude',
+      refreshKimiPath: '/api/quota/refresh/kimi',
     },
   };
 }
@@ -551,7 +937,8 @@ export function parseClaudeOAuthUsageResponse(json: ClaudeOAuthUsageResponse): C
 
 interface CodexWhamRateLimitWindow {
   used_percent?: number;
-  reset_at?: string;
+  limit_window_seconds?: number;
+  reset_at?: string | number;
   label?: string;
 }
 
@@ -566,35 +953,71 @@ interface CodexWhamUsageResponse {
   credits_balance?: number;
 }
 
-export function parseCodexWhamUsageResponse(json: CodexWhamUsageResponse): CodexUsageItem[] {
+type HeaderReader = Pick<Headers, 'get'> | Record<string, string | undefined> | null | undefined;
+
+function codexWindowLabel(window: CodexWhamRateLimitWindow, fallbackLabel: string, prefix = ''): string {
+  const explicitLabel = window.label?.trim();
+  if (explicitLabel) return explicitLabel;
+
+  const seconds = window.limit_window_seconds;
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return fallbackLabel;
+  if (seconds === 7 * 24 * 60 * 60) return `${prefix}每周使用限额`;
+  if (seconds % (24 * 60 * 60) === 0) return `${prefix}${seconds / (24 * 60 * 60)}天使用限额`;
+  if (seconds % (60 * 60) === 0) return `${prefix}${seconds / (60 * 60)}小时使用限额`;
+  return fallbackLabel;
+}
+
+export function parseCodexWhamUsageResponse(json: CodexWhamUsageResponse, headers?: HeaderReader): CodexUsageItem[] {
   const items: CodexUsageItem[] = [];
   const rl = json.rate_limit;
-  if (!rl) return items;
+  type BodySource = keyof NonNullable<typeof rl> | 'credits_balance';
+  const parsedBodySources = new Set<BodySource>();
 
-  const defs: Array<{ key: keyof NonNullable<typeof rl>; label: string; poolId: string }> = [
+  const defs: Array<{ key: keyof NonNullable<typeof rl>; label: string; poolId: string; prefix?: string }> = [
     { key: 'primary_window', label: '5小时使用限额', poolId: 'codex-main' },
     { key: 'secondary_window', label: '每周使用限额', poolId: 'codex-main' },
-    { key: 'spark_primary', label: 'GPT-5.3-Codex-Spark 5小时使用限额', poolId: 'codex-spark' },
-    { key: 'spark_secondary', label: 'GPT-5.3-Codex-Spark 每周使用限额', poolId: 'codex-spark' },
+    {
+      key: 'spark_primary',
+      label: 'GPT-5.3-Codex-Spark 5小时使用限额',
+      poolId: 'codex-spark',
+      prefix: 'GPT-5.3-Codex-Spark ',
+    },
+    {
+      key: 'spark_secondary',
+      label: 'GPT-5.3-Codex-Spark 每周使用限额',
+      poolId: 'codex-spark',
+      prefix: 'GPT-5.3-Codex-Spark ',
+    },
     { key: 'code_review', label: '代码审查', poolId: 'codex-review' },
   ];
 
-  for (const def of defs) {
-    const window = rl[def.key];
-    if (!window || typeof window !== 'object') continue;
-    const pct = window.used_percent;
-    if (pct == null || typeof pct !== 'number') continue;
-    items.push({
-      label: window.label ?? def.label,
-      usedPercent: Math.max(0, Math.min(100, pct)),
-      percentKind: 'used',
-      poolId: def.poolId,
-      ...(window.reset_at ? { resetsAt: window.reset_at } : {}),
-    });
+  if (rl) {
+    for (const def of defs) {
+      const window = rl[def.key];
+      if (!window || typeof window !== 'object') continue;
+      const pct = window.used_percent;
+      if (pct == null || typeof pct !== 'number') continue;
+      const resetsAt =
+        normalizeCodexResetAt(window.reset_at) ??
+        (def.key === 'primary_window'
+          ? readCodexResetHeader(headers, 'x-codex-primary-reset-at')
+          : def.key === 'secondary_window'
+            ? readCodexResetHeader(headers, 'x-codex-secondary-reset-at')
+            : undefined);
+      parsedBodySources.add(def.key);
+      items.push({
+        label: codexWindowLabel(window, def.label, def.prefix),
+        usedPercent: Math.max(0, Math.min(100, pct)),
+        percentKind: 'used',
+        poolId: def.poolId,
+        ...(resetsAt ? { resetsAt } : {}),
+      });
+    }
   }
 
   // Overflow credits
   if ('credits_balance' in json && typeof json.credits_balance === 'number') {
+    parsedBodySources.add('credits_balance');
     items.push({
       label: '溢出额度',
       usedPercent: Math.max(0, Math.min(100, json.credits_balance)),
@@ -603,7 +1026,86 @@ export function parseCodexWhamUsageResponse(json: CodexWhamUsageResponse): Codex
     });
   }
 
+  const headerDefs: Array<{
+    header: string;
+    bodySource: BodySource;
+    label: string;
+    poolId: string;
+    percentKind: 'used' | 'remaining';
+    resetHeader?: string;
+  }> = [
+    {
+      header: 'x-codex-primary-used-percent',
+      bodySource: 'primary_window',
+      label: '5小时使用限额',
+      poolId: 'codex-main',
+      percentKind: 'used',
+      resetHeader: 'x-codex-primary-reset-at',
+    },
+    {
+      header: 'x-codex-secondary-used-percent',
+      bodySource: 'secondary_window',
+      label: '每周使用限额',
+      poolId: 'codex-main',
+      percentKind: 'used',
+      resetHeader: 'x-codex-secondary-reset-at',
+    },
+    {
+      header: 'x-codex-credits-balance',
+      bodySource: 'credits_balance',
+      label: '溢出额度',
+      poolId: 'codex-overflow',
+      percentKind: 'remaining',
+    },
+  ];
+  for (const def of headerDefs) {
+    if (parsedBodySources.has(def.bodySource)) continue;
+    const pct = readPercentHeader(headers, def.header);
+    if (pct == null) continue;
+    const resetsAt = def.resetHeader ? readCodexResetHeader(headers, def.resetHeader) : undefined;
+    items.push({
+      label: def.label,
+      usedPercent: pct,
+      percentKind: def.percentKind,
+      poolId: def.poolId,
+      ...(resetsAt ? { resetsAt } : {}),
+    });
+  }
+
   return items;
+}
+
+function normalizeCodexResetAt(value: string | number | undefined): string | undefined {
+  if (typeof value === 'string') return value || undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const milliseconds = value < 10_000_000_000 ? value * 1000 : value;
+  const date = new Date(milliseconds);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+/** Codex 0.159.0 rate_limits.rs uses Unix seconds for these two official reset headers. */
+function readCodexResetHeader(headers: HeaderReader, name: string): string | undefined {
+  if (!headers) return undefined;
+  const value =
+    'get' in headers && typeof headers.get === 'function'
+      ? headers.get(name)
+      : (headers as Record<string, string | undefined>)[name];
+  if (!value?.trim() || !/^\d+$/.test(value.trim())) return undefined;
+  return normalizeCodexResetAt(Number(value));
+}
+
+function readPercentHeader(headers: HeaderReader, name: string): number | undefined {
+  if (!headers) return undefined;
+  const maybeHeaders = headers as { get?: unknown };
+  const raw =
+    typeof maybeHeaders.get === 'function'
+      ? (maybeHeaders.get as Headers['get'])(name)
+      : ((headers as Record<string, string | undefined>)[name] ??
+        (headers as Record<string, string | undefined>)[name.toLowerCase()]);
+  if (raw == null || raw === '') return undefined;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return undefined;
+  return Math.max(0, Math.min(100, parsed));
 }
 
 // ============================================================
@@ -631,28 +1133,59 @@ function loadClaudeCredentials(envPath?: string): OAuthCredentials | null {
   }
 }
 
-function loadCodexCredentials(envPath?: string): CodexOAuthCredentials | null {
-  if (!envPath) return null;
+function readCodexCredentialsFile(credPath: string): CodexOAuthCredentials | null {
   try {
-    const raw = readFileSync(envPath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (!parsed.accessToken || !parsed.refreshToken) return null;
-    return {
-      accessToken: parsed.accessToken,
-      refreshToken: parsed.refreshToken,
-      accountId: parsed.accountId,
-    };
+    const raw = readFileSync(credPath, 'utf-8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const tokens = asRecord(parsed.tokens);
+    if (tokens) {
+      const accessToken = readNonEmptyString(tokens.access_token);
+      const refreshToken = readNonEmptyString(tokens.refresh_token);
+      if (!accessToken || !refreshToken) return null;
+      const accountId = readNonEmptyString(tokens.account_id);
+      return { accessToken, refreshToken, ...(accountId ? { accountId } : {}) };
+    }
+
+    const accessToken = readNonEmptyString(parsed.accessToken);
+    const refreshToken = readNonEmptyString(parsed.refreshToken);
+    if (!accessToken || !refreshToken) return null;
+    const accountId = readNonEmptyString(parsed.accountId);
+    return { accessToken, refreshToken, ...(accountId ? { accountId } : {}) };
   } catch {
     return null;
   }
 }
 
+function loadCodexCredentials(
+  envPath?: string,
+  accountLaunch?: CodexAccountLaunchDescriptor,
+): CodexOAuthCredentials | null {
+  if (accountLaunch) return readCodexCredentialsFile(join(accountLaunch.credentialHome, 'auth.json'));
+  const explicitPath = envPath?.trim();
+  // CODEX_CREDENTIALS_PATH is an operator-selected account boundary. When it is
+  // present, its native or legacy file is the only allowed source; missing or
+  // malformed content fails closed instead of silently switching to an ambient
+  // CODEX_HOME account.
+  if (explicitPath) return readCodexCredentialsFile(explicitPath);
+
+  const nativePath = join(process.env.CODEX_HOME?.trim() || join(homedir(), '.codex'), 'auth.json');
+  return readCodexCredentialsFile(nativePath);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function readNonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+export const loadCodexCredentialsForTests = loadCodexCredentials;
+
 const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const ANTHROPIC_TOKEN_REFRESH_URL = 'https://platform.claude.com/v1/oauth/token';
 const ANTHROPIC_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const OPENAI_WHAM_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
-const OPENAI_TOKEN_REFRESH_URL = 'https://auth.openai.com/oauth/token';
-const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 
 interface OAuthCredentials {
   accessToken: string;
@@ -663,9 +1196,93 @@ interface CodexOAuthCredentials extends OAuthCredentials {
   accountId?: string;
 }
 
+type OfficialQuotaProvider = 'claude' | 'codex';
+
+function reconcileClaudeErrors(current: ClaudeQuota): ClaudeQuota {
+  const { error: _aggregateError, officialError, cliError, ...base } = current;
+  const normalizedOfficialError = officialError?.trim() || undefined;
+  const normalizedCliError = cliError?.trim() || undefined;
+  const messages = [...new Set([normalizedOfficialError, normalizedCliError].filter(Boolean))] as string[];
+  return {
+    ...base,
+    ...(normalizedOfficialError ? { officialError: normalizedOfficialError } : {}),
+    ...(normalizedCliError ? { cliError: normalizedCliError } : {}),
+    ...(messages.length > 0 ? { error: messages.join('; ') } : {}),
+  };
+}
+
+export function mergeClaudeOfficialUsage(
+  current: ClaudeQuota,
+  usageItems: CodexUsageItem[],
+  checkedAt: string,
+): ClaudeQuota {
+  return reconcileClaudeErrors({
+    ...current,
+    usageItems,
+    officialError: undefined,
+    lastChecked: checkedAt,
+  });
+}
+
+export function mergeClaudeOfficialFailure(current: ClaudeQuota, message: string, checkedAt: string): ClaudeQuota {
+  return reconcileClaudeErrors({
+    ...current,
+    officialError: message,
+    lastChecked: checkedAt,
+  });
+}
+
+export function mergeClaudeCliFailure(current: ClaudeQuota, message: string, checkedAt: string): ClaudeQuota {
+  return reconcileClaudeErrors({
+    ...current,
+    cliError: message,
+    lastChecked: checkedAt,
+  });
+}
+
+function setRequestedOfficialCacheError(
+  requestedProviders: ReadonlySet<OfficialQuotaProvider>,
+  message: string,
+  checkedAt: string,
+): void {
+  if (requestedProviders.has('codex')) {
+    codexCache = { ...codexCache, error: message, lastChecked: checkedAt };
+  }
+  if (requestedProviders.has('claude')) {
+    claudeCache = mergeClaudeOfficialFailure(claudeCache, message, checkedAt);
+  }
+}
+
+function requestedCredentialHints(requestedProviders: ReadonlySet<OfficialQuotaProvider>): string {
+  return [
+    ...(requestedProviders.has('claude') ? ['Claude: ~/.claude/.credentials.json.'] : []),
+    ...(requestedProviders.has('codex')
+      ? [`Codex: ${CODEX_CREDENTIALS_PATH_ENV} or CODEX_HOME/auth.json or ~/.codex/auth.json.`]
+      : []),
+  ].join(' ');
+}
+
+function markMissingRequestedCredentials(
+  requestedProviders: ReadonlySet<OfficialQuotaProvider>,
+  credentials: Readonly<Record<OfficialQuotaProvider, OAuthCredentials | null>>,
+  checkedAt: string,
+): string[] {
+  const errors: string[] = [];
+  for (const provider of requestedProviders) {
+    if (credentials[provider]) continue;
+    const providerSet = new Set<OfficialQuotaProvider>([provider]);
+    const providerLabel = provider === 'claude' ? 'Claude' : 'Codex';
+    const message = `${providerLabel} official quota credentials not found. ${requestedCredentialHints(providerSet)}`;
+    setRequestedOfficialCacheError(providerSet, message, checkedAt);
+    errors.push(message);
+  }
+  return errors;
+}
+
 interface RefreshOAuthOptions {
   claudeCredentials: OAuthCredentials | null;
   codexCredentials: CodexOAuthCredentials | null;
+  kimiAuthToken?: string | null;
   fetchLike?: typeof globalThis.fetch;
 }
 
@@ -677,10 +1294,11 @@ interface RefreshOAuthProviderResult {
 interface RefreshOAuthResult {
   claude?: RefreshOAuthProviderResult;
   codex?: RefreshOAuthProviderResult;
+  kimi?: RefreshOAuthProviderResult;
   skipped?: string[];
 }
 
-async function refreshAccessToken(
+async function refreshClaudeAccessToken(
   refreshUrl: string,
   clientId: string,
   refreshToken: string,
@@ -717,7 +1335,7 @@ async function fetchProviderUsage(
   accessToken: string,
   extraHeaders: Record<string, string>,
   fetchFn: typeof globalThis.fetch,
-): Promise<{ json: unknown; status: number }> {
+): Promise<{ json: unknown; status: number; headers: Headers }> {
   const response = await fetchFn(url, {
     method: 'GET',
     headers: {
@@ -733,7 +1351,7 @@ async function fetchProviderUsage(
     throw new Error(`API returned ${response.status}`);
   }
   const json = await response.json();
-  return { json, status: response.status };
+  return { json, status: response.status, headers: response.headers };
 }
 
 export async function refreshOfficialQuotaViaOAuth(options: RefreshOAuthOptions): Promise<RefreshOAuthResult> {
@@ -754,7 +1372,7 @@ export async function refreshOfficialQuotaViaOAuth(options: RefreshOAuthOptions)
             ({ json } = await fetchProviderUsage(ANTHROPIC_USAGE_URL, token, {}, fetchFn));
           } catch (err) {
             if (err instanceof TokenExpiredError) {
-              const freshToken = await refreshAccessToken(
+              const freshToken = await refreshClaudeAccessToken(
                 ANTHROPIC_TOKEN_REFRESH_URL,
                 ANTHROPIC_CLIENT_ID,
                 creds.refreshToken,
@@ -771,21 +1389,13 @@ export async function refreshOfficialQuotaViaOAuth(options: RefreshOAuthOptions)
             }
           }
           const items = parseClaudeOAuthUsageResponse(json as Parameters<typeof parseClaudeOAuthUsageResponse>[0]);
-          const { error: _oldError, ...claudeWithoutError } = claudeCache;
-          claudeCache = {
-            ...claudeWithoutError,
-            usageItems: items,
-            lastChecked: new Date().toISOString(),
-          };
+          claudeCache = mergeClaudeOfficialUsage(claudeCache, items, new Date().toISOString());
           result.claude = { items: items.length };
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          claudeCache = {
-            ...claudeCache,
-            error: `Claude OAuth failed: ${message}`,
-            lastChecked: new Date().toISOString(),
-          };
-          result.claude = { items: 0, error: `Claude OAuth failed: ${message}` };
+          const error = `Claude OAuth failed: ${message}`;
+          claudeCache = mergeClaudeOfficialFailure(claudeCache, error, new Date().toISOString());
+          result.claude = { items: 0, error };
         }
       })(),
     );
@@ -797,34 +1407,31 @@ export async function refreshOfficialQuotaViaOAuth(options: RefreshOAuthOptions)
     tasks.push(
       (async () => {
         const creds = options.codexCredentials!;
-        let token = creds.accessToken;
+        const token = creds.accessToken;
         const extraHeaders: Record<string, string> = {};
         if (creds.accountId) {
           extraHeaders['ChatGPT-Account-Id'] = creds.accountId;
         }
         try {
           let json: unknown;
+          let headers: Headers | undefined;
           try {
-            ({ json } = await fetchProviderUsage(OPENAI_WHAM_USAGE_URL, token, extraHeaders, fetchFn));
+            ({ json, headers } = await fetchProviderUsage(OPENAI_WHAM_USAGE_URL, token, extraHeaders, fetchFn));
           } catch (err) {
             if (err instanceof TokenExpiredError) {
-              const freshToken = await refreshAccessToken(
-                OPENAI_TOKEN_REFRESH_URL,
-                OPENAI_CLIENT_ID,
-                creds.refreshToken,
-                fetchFn,
-              );
-              if (freshToken) {
-                token = freshToken;
-                ({ json } = await fetchProviderUsage(OPENAI_WHAM_USAGE_URL, token, extraHeaders, fetchFn));
-              } else {
-                throw new Error('API returned 401; token refresh failed');
-              }
+              // Codex refresh tokens rotate. Refreshing here without atomically updating
+              // Codex's auth store would consume the token and break the CLI login. The
+              // Codex CLI owns that lifecycle; this read-only probe reloads auth.json on
+              // the next request after Codex refreshes it.
+              throw new Error('API returned 401; refresh the Codex CLI login and retry');
             } else {
               throw err;
             }
           }
-          const items = parseCodexWhamUsageResponse(json as Parameters<typeof parseCodexWhamUsageResponse>[0]);
+          const items = parseCodexWhamUsageResponse(json as Parameters<typeof parseCodexWhamUsageResponse>[0], headers);
+          if (items.length === 0) {
+            throw new Error('Codex Wham API returned no usage items');
+          }
           codexCache = {
             platform: 'codex',
             usageItems: items,
@@ -846,14 +1453,206 @@ export async function refreshOfficialQuotaViaOAuth(options: RefreshOAuthOptions)
     skipped.push('codex');
   }
 
+  if (options.kimiAuthToken) {
+    tasks.push(
+      (async () => {
+        const token = options.kimiAuthToken!;
+        const tokenContext = decodeKimiTokenContext(token);
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          Cookie: `kimi-auth=${token}`,
+          Origin: 'https://www.kimi.com',
+          Referer: 'https://www.kimi.com/code/console',
+          Accept: '*/*',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+          'connect-protocol-version': '1',
+          'x-language': 'en-US',
+          'x-msh-platform': 'web',
+        };
+        if (tokenContext?.deviceId) headers['x-msh-device-id'] = tokenContext.deviceId;
+        if (tokenContext?.sessionId) headers['x-msh-session-id'] = tokenContext.sessionId;
+        if (tokenContext?.trafficId) headers['x-traffic-id'] = tokenContext.trafficId;
+        try {
+          const response = await fetchFn(KIMI_BILLING_URL, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ scope: ['FEATURE_CODING'] }),
+          });
+          if (response.status === 401 || response.status === 403) {
+            throw new Error(`Kimi auth failed: HTTP ${response.status}`);
+          }
+          if (!response.ok) {
+            throw new Error(`Kimi billing API failed: HTTP ${response.status}`);
+          }
+          const json = (await response.json()) as KimiUsageResponse;
+          const items = parseKimiOfficialUsageResponse(json);
+          if (items.length === 0) {
+            throw new Error('Kimi billing API returned no FEATURE_CODING usage windows');
+          }
+          kimiCache = {
+            platform: 'kimi',
+            usageItems: items,
+            lastChecked: new Date().toISOString(),
+            status: 'ok',
+            note: '来自 Kimi 官方额度接口（每周 + 5 小时窗口）。',
+          };
+          result.kimi = { items: items.length };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          kimiCache = {
+            platform: 'kimi',
+            usageItems: [],
+            error: message,
+            lastChecked: new Date().toISOString(),
+            status: 'unavailable',
+            note: message,
+          };
+          result.kimi = { items: 0, error: message };
+        }
+      })(),
+    );
+  } else {
+    skipped.push('kimi');
+  }
+
   await Promise.all(tasks);
   if (skipped.length > 0) result.skipped = skipped;
   return result;
 }
 
+export async function refreshKimiQuota(options?: {
+  env?: NodeJS.ProcessEnv;
+  fetchLike?: typeof globalThis.fetch;
+}): Promise<{ source: 'cli' | 'api'; items: number; fallbackUsed: boolean; error?: string }> {
+  const env = options?.env ?? process.env;
+  const checkedAt = new Date().toISOString();
+  try {
+    const items = await probeKimiQuotaViaCli(env);
+    kimiCache = {
+      platform: 'kimi',
+      usageItems: items,
+      lastChecked: checkedAt,
+      status: 'ok',
+      note: '来自 Kimi CLI /usage。',
+    };
+    return { source: 'cli', items: items.length, fallbackUsed: false };
+  } catch (cliError) {
+    const cliMessage = cliError instanceof Error ? cliError.message : String(cliError);
+    const fallbackEnabled = isKimiQuotaApiFallbackEnabled(env);
+    const kimiAuthToken = resolveKimiAuthToken(env);
+    if (fallbackEnabled && kimiAuthToken) {
+      const apiResult = await refreshOfficialQuotaViaOAuth({
+        claudeCredentials: null,
+        codexCredentials: null,
+        kimiAuthToken,
+        fetchLike: options?.fetchLike,
+      });
+      if ((apiResult.kimi?.items ?? 0) > 0 && !apiResult.kimi?.error) {
+        kimiCache = {
+          ...kimiCache,
+          error: undefined,
+          lastChecked: checkedAt,
+          note: 'Kimi CLI /usage 失败，已按配置降级到 Kimi API。',
+        };
+        return { source: 'api', items: apiResult.kimi?.items ?? 0, fallbackUsed: true };
+      }
+      const apiMessage = apiResult.kimi?.error ?? `Kimi API fallback failed after CLI error: ${cliMessage}`;
+      const message = `Kimi CLI /usage failed: ${cliMessage}; API fallback failed: ${apiMessage}`;
+      kimiCache = {
+        platform: 'kimi',
+        usageItems: [],
+        error: message,
+        lastChecked: checkedAt,
+        status: 'unavailable',
+        note: message,
+      };
+      return { source: 'api', items: 0, fallbackUsed: true, error: message };
+    }
+
+    const fallbackHint = fallbackEnabled
+      ? `API fallback is enabled but ${KIMI_AUTH_TOKEN_ENV} is missing.`
+      : `API fallback is disabled. Set ${KIMI_QUOTA_API_FALLBACK_ENABLED_ENV}=1 and ${KIMI_AUTH_TOKEN_ENV} to allow fallback.`;
+    const message = `Kimi CLI /usage failed: ${cliMessage}. ${fallbackHint}`;
+    kimiCache = {
+      platform: 'kimi',
+      usageItems: [],
+      error: message,
+      lastChecked: checkedAt,
+      status: 'unavailable',
+      note: message,
+    };
+    return { source: 'cli', items: 0, fallbackUsed: false, error: message };
+  }
+}
+
+export function mergeClaudeCliUsage(
+  current: ClaudeQuota,
+  blocks: CcusageBillingBlock[],
+  checkedAt: string,
+): ClaudeQuota {
+  const activeBlock = blocks.find((block) => block.isActive) ?? null;
+  return reconcileClaudeErrors({
+    ...current,
+    platform: 'claude',
+    activeBlock,
+    recentBlocks: blocks.slice(-5),
+    cliError: undefined,
+    lastChecked: checkedAt,
+  });
+}
+
 // --- Route ---
 
-export async function quotaRoutes(app: FastifyInstance): Promise<void> {
+export interface QuotaRoutesOptions {
+  routingQuotaObserver?: RoutingQuotaSnapshotObserver;
+  routingOwnerId?: string;
+}
+
+function sanitizedRoutingQuotaItems(items: readonly CodexUsageItem[]) {
+  return items.map((item) => {
+    const resetAt = item.resetsAt ? Date.parse(item.resetsAt) : Number.NaN;
+    return {
+      ...(item.poolId ? { poolId: item.poolId } : {}),
+      usedPercent: item.usedPercent,
+      ...(item.percentKind ? { percentKind: item.percentKind } : {}),
+      ...(Number.isFinite(resetAt) && resetAt >= 0 ? { resetsAt: resetAt } : {}),
+    };
+  });
+}
+
+export async function quotaRoutes(app: FastifyInstance, options: QuotaRoutesOptions = {}): Promise<void> {
+  const observeCanonicalRefresh = async (
+    providerId: string,
+    items: readonly CodexUsageItem[],
+    checkedAt: string | null,
+  ): Promise<void> => {
+    if (!options.routingQuotaObserver || !options.routingOwnerId || !checkedAt || items.length === 0) return;
+    const observedAt = Date.parse(checkedAt);
+    if (!Number.isFinite(observedAt) || observedAt < 0) return;
+    const routingItems = sanitizedRoutingQuotaItems(items);
+    const observationDigest = createHash('sha256')
+      .update(JSON.stringify({ providerId, observedAt, items: routingItems }))
+      .digest('hex')
+      .slice(0, 32);
+    try {
+      await options.routingQuotaObserver.observeSnapshot({
+        v: 1,
+        kind: 'quota_snapshot',
+        ownerId: options.routingOwnerId,
+        observationId: `quota-refresh:${observationDigest}`,
+        observedAt,
+        evidenceRef: `quota-cache:${providerId}:${observedAt}`,
+        providerId,
+        items: routingItems,
+      });
+    } catch {
+      app.log.warn({ providerId }, 'F293 routing quota observation failed after canonical refresh');
+    }
+  };
+
   app.get('/api/quota/probes', async () => {
     return {
       probes: listQuotaProbeDescriptors(),
@@ -867,6 +1666,7 @@ export async function quotaRoutes(app: FastifyInstance): Promise<void> {
       claude: claudeCache,
       codex: codexCache,
       gemini: geminiCache,
+      kimi: kimiCache,
       antigravity: antigravityCache,
       fetchedAt: new Date().toISOString(),
     };
@@ -878,61 +1678,98 @@ export async function quotaRoutes(app: FastifyInstance): Promise<void> {
     return buildQuotaSummary();
   });
 
+  // POST: refresh Kimi quota (CLI by default, API fallback only when explicitly enabled)
+  app.post('/api/quota/refresh/kimi', async (_request, reply) => {
+    const result = await refreshKimiQuota();
+    if (result.error) {
+      return reply.status(502).send({ error: result.error });
+    }
+    await observeCanonicalRefresh('kimi', kimiCache.usageItems, kimiCache.lastChecked);
+    return { kimi: kimiCache, source: result.source, fallbackUsed: result.fallbackUsed };
+  });
+
   // POST: refresh Claude quota via ccusage CLI
   app.post('/api/quota/refresh/claude', async () => {
+    const checkedAt = new Date().toISOString();
     try {
       const { stdout } = await execFileAsync('npx', ['ccusage', 'blocks', '--json'], { timeout: 30_000 });
       const parsed = JSON.parse(stdout) as { blocks: CcusageBillingBlock[] };
       const blocks = parsed.blocks.filter((b) => !b.isGap);
-      const activeBlock = blocks.find((b) => b.isActive) ?? null;
-      claudeCache = {
-        platform: 'claude',
-        activeBlock,
-        recentBlocks: blocks.slice(-5),
-        lastChecked: new Date().toISOString(),
-      };
+      claudeCache = mergeClaudeCliUsage(claudeCache, blocks, checkedAt);
     } catch (err) {
-      claudeCache = {
-        ...claudeCache,
-        error: `ccusage failed: ${err instanceof Error ? err.message : String(err)}`,
-      };
+      const message = `ccusage failed: ${err instanceof Error ? err.message : String(err)}`;
+      claudeCache = mergeClaudeCliFailure(claudeCache, message, checkedAt);
     }
     return { claude: claudeCache };
   });
 
   // POST: refresh official quota via OAuth APIs (v3, ClaudeBar-compatible)
-  app.post('/api/quota/refresh/official', async (_request, reply) => {
+  app.post('/api/quota/refresh/official', async (request, reply) => {
+    const parsedRequest = z
+      .object({
+        interactive: z.boolean().optional(),
+        providers: z
+          .array(z.enum(['claude', 'codex']))
+          .min(1)
+          .optional(),
+      })
+      .safeParse(request.body ?? {});
+    if (!parsedRequest.success) {
+      return reply.status(400).send({ error: 'Invalid official quota refresh request' });
+    }
+    const requestedProviders = new Set<OfficialQuotaProvider>(parsedRequest.data.providers ?? ['claude', 'codex']);
+
     if (!isTruthyFlag(process.env[OFFICIAL_REFRESH_ENABLED_ENV])) {
       const message = `Official quota refresh is temporarily disabled. Set ${OFFICIAL_REFRESH_ENABLED_ENV}=1 to enable it.`;
       const checkedAt = new Date().toISOString();
-      codexCache = {
-        ...codexCache,
-        error: message,
-        lastChecked: checkedAt,
-      };
-      claudeCache = {
-        ...claudeCache,
-        error: message,
-        lastChecked: checkedAt,
-      };
+      setRequestedOfficialCacheError(requestedProviders, message, checkedAt);
       return reply.status(503).send({ error: message });
     }
 
-    // Load credentials from files
-    const claudeCredentials = loadClaudeCredentials(process.env[CLAUDE_CREDENTIALS_PATH_ENV]);
-    const codexCredentials = loadCodexCredentials(process.env[CODEX_CREDENTIALS_PATH_ENV]);
-
+    // Load only credentials represented by the caller's configured subscription
+    // accounts. Omitted providers are intentionally not probed and cannot create
+    // unrelated errors in the quota board.
+    const claudeCredentials = requestedProviders.has('claude')
+      ? loadClaudeCredentials(process.env[CLAUDE_CREDENTIALS_PATH_ENV])
+      : null;
+    // Legacy operator path remains authoritative for the aggregate endpoint; a selected descriptor never falls back to it.
+    const codexAccount =
+      requestedProviders.has('codex') && !process.env[CODEX_CREDENTIALS_PATH_ENV]?.trim()
+        ? resolveForClient(process.cwd(), 'openai', 'codex')
+        : null;
+    const codexCredentials = requestedProviders.has('codex')
+      ? loadCodexCredentials(
+          process.env[CODEX_CREDENTIALS_PATH_ENV],
+          codexAccount ? resolveCodexAccountLaunch(codexAccount) : undefined,
+        )
+      : null;
     if (!claudeCredentials && !codexCredentials) {
-      const message =
-        'No OAuth credentials found. Claude: ~/.claude/.credentials.json, Codex: set CODEX_CREDENTIALS_PATH.';
+      const message = `No official quota credentials found for requested providers. ${requestedCredentialHints(requestedProviders)}`;
       const checkedAt = new Date().toISOString();
-      codexCache = { ...codexCache, error: message, lastChecked: checkedAt };
-      claudeCache = { ...claudeCache, error: message, lastChecked: checkedAt };
+      setRequestedOfficialCacheError(requestedProviders, message, checkedAt);
       return reply.status(400).send({ error: message });
     }
 
+    const missingCredentialErrors = markMissingRequestedCredentials(
+      requestedProviders,
+      { claude: claudeCredentials, codex: codexCredentials },
+      new Date().toISOString(),
+    );
+
     const result = await refreshOfficialQuotaViaOAuth({ claudeCredentials, codexCredentials });
-    const errors = [result.claude?.error, result.codex?.error].filter(Boolean);
+    if ((result.claude?.items ?? 0) > 0) {
+      await observeCanonicalRefresh('claude', claudeCache.usageItems ?? [], claudeCache.lastChecked);
+    }
+    if ((result.codex?.items ?? 0) > 0) {
+      await observeCanonicalRefresh('codex', codexCache.usageItems, codexCache.lastChecked);
+    }
+    const errors = [...missingCredentialErrors, result.claude?.error, result.codex?.error].filter(
+      (error): error is string => Boolean(error),
+    );
+    const skippedRequestedProviders = (result.skipped ?? []).filter(
+      (provider): provider is OfficialQuotaProvider =>
+        (provider === 'claude' || provider === 'codex') && requestedProviders.has(provider),
+    );
     if (errors.length > 0 && (result.claude?.items ?? 0) === 0 && (result.codex?.items ?? 0) === 0) {
       return reply.status(502).send({ error: errors.join('; ') });
     }
@@ -941,7 +1778,7 @@ export async function quotaRoutes(app: FastifyInstance): Promise<void> {
       claudeItems: result.claude?.items ?? 0,
       codexItems: result.codex?.items ?? 0,
       ...(errors.length > 0 ? { warnings: errors } : {}),
-      ...(result.skipped && result.skipped.length > 0 ? { skipped: result.skipped } : {}),
+      ...(skippedRequestedProviders.length > 0 ? { skipped: skippedRequestedProviders } : {}),
     };
   });
 

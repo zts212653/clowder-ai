@@ -1,0 +1,206 @@
+{
+  "message": {
+    "id": "0001789709613092-000029-b97dfee1",
+    "threadId": "thread_mtmp3gjq2hntizz4",
+    "catId": "codex-astra",
+    "userId": "default-user",
+    "content": "八项关注理由确认（原内容作者 codex-astra）\n\n承接 thread_mtmp3gjq2hntizz4#0001789709420792-000025-aafb35b0；已实读父设计意见0001789709341405-000020-3de37764、完整preview helper及316，沿720的对象和决定边界。以下why回答“为何与目标有关/值得关注”，recommendation.reason回答“为何建议这样处理”，不复述scope。\n\n这是本次新的表述修订，证据仍为既有事实，不是新增实验结论或人类逐项决定。对象scope、recommendation.summary、decision、modifiability均保持现稿/720边界。D2固定是旧组合约束的延续，D4固定是720新技术确认；不补独立软战术资产。\n\nJSON中basisRefs是可展开的精确来源字典；item内引用其键。evidenceNotes供核验事实/未知使用，不要求新增产品schema或直接展示内部说明。正式落入正文时，把相应键展开成原有OwnerRef，并将本消息作为此次理由修订的内容来源；不替换316/720的决定来源。\n\n```json\n{\n  \"purpose\": \"仅用于八项内容核实；不是完整object_map或生产提交体\",\n  \"basisRefs\": {\n    \"R316\": \"thread_mtmp3gjq2hntizz4#0001789373591565-000316-1350ca00\",\n    \"R720\": \"thread_mu0ymg0ek2j5zucl#0001789635982467-000720-8ada8be9\",\n    \"REPORT\": \"git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md\",\n    \"MANIFEST\": \"git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-793-live2-state/manifest.json\",\n    \"LAB_ARENA\": \"microduck-lab@54989dff8e4ec8735a89ff5969c17e12882bf0c0:microduck_local/src/microduck_local/world/arena.py\",\n    \"LAB_COMPOSE\": \"microduck-lab@54989dff8e4ec8735a89ff5969c17e12882bf0c0:microduck_local/src/microduck_local/world/compose.py\",\n    \"STATE\": \"git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/state_skill.py\",\n    \"STATE_TEST\": \"git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_state_skill.py\",\n    \"CONTRACT\": \"git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/contract.py\",\n    \"INBOX\": \"git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/inbox.py\",\n    \"CONTROL\": \"git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/control.py\",\n    \"LIFETIME\": \"git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_command_lifetime.py\",\n    \"WORLD\": \"git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/world.py\",\n    \"PHYSICS_TEST\": \"git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_physics.py\",\n    \"CALIBRATION\": \"git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-kick-calibration-v2.json\",\n    \"RUN\": \"git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/run.py\",\n    \"ANNOTATION\": \"git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/annotate_evidence.py\",\n    \"REVIEW\": \"thread_mtmp3gjq2hntizz4#0001789038735370-000413-ae17665a\",\n    \"RUNS\": \"git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/runs.json.gz\",\n    \"ARCHIVE\": \"git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json\"\n  },\n  \"items\": [\n    {\n      \"id\": \"D1\",\n      \"itemId\": \"onnx-policies\",\n      \"why\": \"鸭能否把上层意图变成实际走动和踢腿，是完成足球任务的身体条件；需要核对这组权重在现有执行条件下做得到什么，避免把所有失败都归给战术或模型。\",\n      \"recommendation\": {\n        \"reason\": \"现有组合在18个摆球夹具和部分公开对局中已有指定脚触球，尚不足以证明必须更换权重。先保留本轮权重，有助于比较局部控制与战术变化；是否另选模型或训练，须有身体瓶颈和资源依据。\",\n        \"basisRefs\": [\n          \"R316\",\n          \"R720\",\n          \"REPORT\",\n          \"CALIBRATION\",\n          \"MANIFEST\"\n        ]\n      },\n      \"evidenceNotes\": {\n        \"observed\": \"18点摆球夹具均记录指定脚触球，公开新seed也有触球；这是权重、执行配置和场景共同作用下的结果。\",\n        \"unknown\": \"全局身体能力是否足够、权重是否构成当前主要瓶颈、训练必要性及预算未定；未重新核供应方当前权重字节。\"\n      }\n    },\n    {\n      \"id\": \"D2\",\n      \"itemId\": \"body-execution\",\n      \"why\": \"要判断局部控制或猫的战术是否改善，必须确认它们驱动的身体执行条件可比；相同权重名称本身不足以说明身体基线相同。\",\n      \"recommendation\": {\n        \"reason\": \"316把position执行配置纳入固定motor组合，720已澄清拆项继续受该约束。单独追溯可让身体基线清楚可查，不能因此开始扫参，也不能把既有组合的触球结果算成执行配置的独立贡献。\",\n        \"basisRefs\": [\n          \"R316\",\n          \"R720\",\n          \"LAB_ARENA\",\n          \"LAB_COMPOSE\"\n        ]\n      },\n      \"evidenceNotes\": {\n        \"observed\": \"现行配置及其消费代码已定位，Lab固定commit可追溯。\",\n        \"unknown\": \"增益、窗口、clip或频率各自对失败的因果贡献没有单独验证；316也未逐参数独立选定。\"\n      }\n    },\n    {\n      \"id\": \"D3\",\n      \"itemId\": \"state-control\",\n      \"why\": \"从接近球到真正发起有效踢腿仍有缺口：公开801–808中state候选只有3场发起踢腿并触球，另5场未踢。这个缺口直接限制稳定踢球，值得优先定位。\",\n      \"recommendation\": {\n        \"reason\": \"旧settle使用过时球位已有定向复现，但state同时改变输入域与持续反馈，不能把结果归给单一因素。保留sensor对照并分析未尝试场景，才能分清后续该查贴墙、拥挤、朝向还是起脚窗口，而非只看3次命中。\",\n        \"basisRefs\": [\n          \"R316\",\n          \"R720\",\n          \"REPORT\",\n          \"STATE\",\n          \"STATE_TEST\",\n          \"RUNS\"\n        ]\n      },\n      \"evidenceNotes\": {\n        \"observed\": \"旧球位问题有复现；两臂均为脚本队，双方同种局部反馈；3次触球与5场未踢均保留。\",\n        \"unknown\": \"5场未踢各自的完整根因尚未分离；不能把速度信息未直接使用或某一条件写成全部原因。\"\n      }\n    },\n    {\n      \"id\": \"D4\",\n      \"itemId\": \"command-protocol\",\n      \"why\": \"猫给出的指令要在持续变化的球场中生效，必须分清策略内容、到达时效和被拒收的原因；否则无法判断一次指挥究竟有没有进入执行。\",\n      \"recommendation\": {\n        \"reason\": \"live2已接受指令的观察年龄为10.58–19.70秒，另有约58秒迟到选择被拒；接收边界会影响可执行的指令集合。本次沿720固定现行协议，保留原观察时效与队伍限制，使战术比较有明确边界；具体缺陷另记修复版本。\",\n        \"basisRefs\": [\n          \"R316\",\n          \"R720\",\n          \"REPORT\",\n          \"CONTRACT\",\n          \"INBOX\",\n          \"CONTROL\",\n          \"LIFETIME\"\n        ]\n      },\n      \"evidenceNotes\": {\n        \"observed\": \"有限指令存在接受、拒绝与执行记录；历史确曾修正重生失效范围。\",\n        \"unknown\": \"时延对球队收益的独立影响、可靠战术持续性尚未证明；协议不是已版本化的软战术skill。固定D4是720的新技术确认，并非316原有独立决定。\"\n      }\n    },\n    {\n      \"id\": \"D5\",\n      \"itemId\": \"pitch-rules\",\n      \"why\": \"足球结果发生在具体场景与重置规则中。要看控制或战术变化是否带来改善，需要知道回合是不是在可比条件下进行，尤其不能把旧BAM runner和这套Lab球场混成同一基线。\",\n      \"recommendation\": {\n        \"reason\": \"316已将共享球场和可比动力学固定，现有公开回合与live证据也依赖这些版本。保持环境便于读懂差异；如以后改变门线、开球或回位条件，应另存版本，不能回写旧结果。\",\n        \"basisRefs\": [\n          \"R316\",\n          \"R720\",\n          \"REPORT\",\n          \"WORLD\",\n          \"PHYSICS_TEST\",\n          \"MANIFEST\"\n        ]\n      },\n      \"evidenceNotes\": {\n        \"observed\": \"四鸭一球的既有回合、环境版本和物理parity测试均有来源。\",\n        \"unknown\": \"现有场景是否充分代表完整比赛或真机条件尚未证明；未把贴墙或拥挤归因单独定给环境。\"\n      }\n    },\n    {\n      \"id\": \"D6\",\n      \"itemId\": \"contact-goal-observation\",\n      \"why\": \"要回答鸭是否真的踢到球、球队是否完成目标，必须把踢腿动作、指定脚触球、进球和配合分开；它们在已有回合中并不等价。\",\n      \"recommendation\": {\n        \"reason\": \"18个摆球正例及踢空、半球过线等反例，为限定物理事件提供了核验材料。保留现行判定有助于保持比较口径；这些材料和实现审阅不能自动证明自主成功率、可靠配合或观看价值，也不能替代正式测量校准。\",\n        \"basisRefs\": [\n          \"R316\",\n          \"REPORT\",\n          \"CONTRACT\",\n          \"WORLD\",\n          \"CALIBRATION\",\n          \"PHYSICS_TEST\",\n          \"REVIEW\"\n        ]\n      },\n      \"evidenceNotes\": {\n        \"observed\": \"采集使用动作实例、指定脚接触与整球越线边界；已有夹具、反例与有限实现审阅。\",\n        \"unknown\": \"协作机会单位、完整比赛收益量尺、价值阈值与正式测量有效性仍待核；源码所在渠道不等于GT适用域。\"\n      }\n    },\n    {\n      \"id\": \"D7\",\n      \"itemId\": \"recording-video\",\n      \"why\": \"要让观看者和复核者读懂猫实际做了什么，需要把指令、物理经过和视频展示对应起来。旧字幕曾混淆coach世界态与local sensor/state，说明呈现也可能改变人对实验的理解。\",\n      \"recommendation\": {\n        \"reason\": \"原片保留，澄清字幕及选段已有可追溯派生关系，Terra独立验证过限定产物可重建。延续这条记录链可支持复核时效和观察域；不回写旧时钟、指令或原片，也不把素材交付当作观看者验收。\",\n        \"basisRefs\": [\n          \"R316\",\n          \"R720\",\n          \"REPORT\",\n          \"RUN\",\n          \"ANNOTATION\",\n          \"ARCHIVE\",\n          \"REVIEW\"\n        ]\n      },\n      \"evidenceNotes\": {\n        \"observed\": \"原片hash保留，字幕分别标明coach/world和local信息域；限定派生产物经独立复验。\",\n        \"unknown\": \"观看体验与价值判断未知；旧记录不能证明当前正在执行，也不能证明猫的战术已有效。\"\n      }\n    },\n    {\n      \"id\": \"D8\",\n      \"itemId\": \"samples-calibration\",\n      \"why\": \"已有样本既包含触球，也包含未尝试、踢空、迟到和拒绝。分析完整样本才能看清能力缺口，避免让成功选段代替整体情况。\",\n      \"recommendation\": {\n        \"reason\": \"56个公开条件、两场live和18点夹具可分别用于诊断或限定校准；用途和观测单位不同，不能混成统一成功率。先保留原件及完整分母，只整理有来源的派生分析；801–808已公开分析，不能再次充当未暴露holdout。\",\n        \"basisRefs\": [\n          \"R316\",\n          \"R720\",\n          \"REPORT\",\n          \"RUNS\",\n          \"CALIBRATION\",\n          \"ARCHIVE\"\n        ]\n      },\n      \"evidenceNotes\": {\n        \"observed\": \"既有公开结果、事件、完整live轨迹和校准原件可追溯，失败与未尝试保留。\",\n        \"unknown\": \"未来独立样本量、封存方案、训练集采用及观看者数据采集授权未定；现有数据不自动获得这些用途。\"\n      }\n    }\n  ]\n}\n```\n\n本轮只读核源并确认上述理由；未改子线程源码、原seq17、实验、权重、runtime或生产revision。",
+    "timestamp": 1789709613092,
+    "mentions": []
+  },
+  "source": {
+    "messageId": "0001789709613092-000029-b97dfee1",
+    "threadId": "thread_mtmp3gjq2hntizz4",
+    "catId": "codex-astra",
+    "timestamp": 1789709613092
+  },
+  "purpose": "仅用于八项内容核实；不是完整object_map或生产提交体",
+  "basisRefs": {
+    "R316": {
+      "ownerFeatureId": "F117",
+      "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+    },
+    "R720": {
+      "ownerFeatureId": "F117",
+      "ownerStateRef": "message:0001789635982467-000720-8ada8be9"
+    },
+    "REPORT": {
+      "ownerFeatureId": "F311",
+      "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+    },
+    "MANIFEST": {
+      "ownerFeatureId": "F311",
+      "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-793-live2-state/manifest.json"
+    },
+    "LAB_ARENA": {
+      "ownerFeatureId": "microduck-lab",
+      "ownerStateRef": "git:54989dff8e4ec8735a89ff5969c17e12882bf0c0:microduck_local/src/microduck_local/world/arena.py"
+    },
+    "LAB_COMPOSE": {
+      "ownerFeatureId": "microduck-lab",
+      "ownerStateRef": "git:54989dff8e4ec8735a89ff5969c17e12882bf0c0:microduck_local/src/microduck_local/world/compose.py"
+    },
+    "STATE": {
+      "ownerFeatureId": "F311",
+      "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/state_skill.py"
+    },
+    "STATE_TEST": {
+      "ownerFeatureId": "F311",
+      "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_state_skill.py"
+    },
+    "CONTRACT": {
+      "ownerFeatureId": "F311",
+      "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/contract.py"
+    },
+    "INBOX": {
+      "ownerFeatureId": "F311",
+      "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/inbox.py"
+    },
+    "CONTROL": {
+      "ownerFeatureId": "F311",
+      "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/control.py"
+    },
+    "LIFETIME": {
+      "ownerFeatureId": "F311",
+      "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_command_lifetime.py"
+    },
+    "WORLD": {
+      "ownerFeatureId": "F311",
+      "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/world.py"
+    },
+    "PHYSICS_TEST": {
+      "ownerFeatureId": "F311",
+      "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_physics.py"
+    },
+    "CALIBRATION": {
+      "ownerFeatureId": "F311",
+      "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-kick-calibration-v2.json"
+    },
+    "RUN": {
+      "ownerFeatureId": "F311",
+      "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/run.py"
+    },
+    "ANNOTATION": {
+      "ownerFeatureId": "F311",
+      "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/annotate_evidence.py"
+    },
+    "REVIEW": {
+      "ownerFeatureId": "F117",
+      "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+    },
+    "RUNS": {
+      "ownerFeatureId": "F311",
+      "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/runs.json.gz"
+    },
+    "ARCHIVE": {
+      "ownerFeatureId": "F311",
+      "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+    }
+  },
+  "items": [
+    {
+      "id": "D1",
+      "itemId": "onnx-policies",
+      "why": "鸭能否把上层意图变成实际走动和踢腿，是完成足球任务的身体条件；需要核对这组权重在现有执行条件下做得到什么，避免把所有失败都归给战术或模型。",
+      "recommendation": {
+        "reason": "现有组合在18个摆球夹具和部分公开对局中已有指定脚触球，尚不足以证明必须更换权重。先保留本轮权重，有助于比较局部控制与战术变化；是否另选模型或训练，须有身体瓶颈和资源依据。",
+        "basisRefs": ["R316", "R720", "REPORT", "CALIBRATION", "MANIFEST"]
+      },
+      "evidenceNotes": {
+        "observed": "18点摆球夹具均记录指定脚触球，公开新seed也有触球；这是权重、执行配置和场景共同作用下的结果。",
+        "unknown": "全局身体能力是否足够、权重是否构成当前主要瓶颈、训练必要性及预算未定；未重新核供应方当前权重字节。"
+      }
+    },
+    {
+      "id": "D2",
+      "itemId": "body-execution",
+      "why": "要判断局部控制或猫的战术是否改善，必须确认它们驱动的身体执行条件可比；相同权重名称本身不足以说明身体基线相同。",
+      "recommendation": {
+        "reason": "316把position执行配置纳入固定motor组合，720已澄清拆项继续受该约束。单独追溯可让身体基线清楚可查，不能因此开始扫参，也不能把既有组合的触球结果算成执行配置的独立贡献。",
+        "basisRefs": ["R316", "R720", "LAB_ARENA", "LAB_COMPOSE"]
+      },
+      "evidenceNotes": {
+        "observed": "现行配置及其消费代码已定位，Lab固定commit可追溯。",
+        "unknown": "增益、窗口、clip或频率各自对失败的因果贡献没有单独验证；316也未逐参数独立选定。"
+      }
+    },
+    {
+      "id": "D3",
+      "itemId": "state-control",
+      "why": "从接近球到真正发起有效踢腿仍有缺口：公开801–808中state候选只有3场发起踢腿并触球，另5场未踢。这个缺口直接限制稳定踢球，值得优先定位。",
+      "recommendation": {
+        "reason": "旧settle使用过时球位已有定向复现，但state同时改变输入域与持续反馈，不能把结果归给单一因素。保留sensor对照并分析未尝试场景，才能分清后续该查贴墙、拥挤、朝向还是起脚窗口，而非只看3次命中。",
+        "basisRefs": ["R316", "R720", "REPORT", "STATE", "STATE_TEST", "RUNS"]
+      },
+      "evidenceNotes": {
+        "observed": "旧球位问题有复现；两臂均为脚本队，双方同种局部反馈；3次触球与5场未踢均保留。",
+        "unknown": "5场未踢各自的完整根因尚未分离；不能把速度信息未直接使用或某一条件写成全部原因。"
+      }
+    },
+    {
+      "id": "D4",
+      "itemId": "command-protocol",
+      "why": "猫给出的指令要在持续变化的球场中生效，必须分清策略内容、到达时效和被拒收的原因；否则无法判断一次指挥究竟有没有进入执行。",
+      "recommendation": {
+        "reason": "live2已接受指令的观察年龄为10.58–19.70秒，另有约58秒迟到选择被拒；接收边界会影响可执行的指令集合。本次沿720固定现行协议，保留原观察时效与队伍限制，使战术比较有明确边界；具体缺陷另记修复版本。",
+        "basisRefs": ["R316", "R720", "REPORT", "CONTRACT", "INBOX", "CONTROL", "LIFETIME"]
+      },
+      "evidenceNotes": {
+        "observed": "有限指令存在接受、拒绝与执行记录；历史确曾修正重生失效范围。",
+        "unknown": "时延对球队收益的独立影响、可靠战术持续性尚未证明；协议不是已版本化的软战术skill。固定D4是720的新技术确认，并非316原有独立决定。"
+      }
+    },
+    {
+      "id": "D5",
+      "itemId": "pitch-rules",
+      "why": "足球结果发生在具体场景与重置规则中。要看控制或战术变化是否带来改善，需要知道回合是不是在可比条件下进行，尤其不能把旧BAM runner和这套Lab球场混成同一基线。",
+      "recommendation": {
+        "reason": "316已将共享球场和可比动力学固定，现有公开回合与live证据也依赖这些版本。保持环境便于读懂差异；如以后改变门线、开球或回位条件，应另存版本，不能回写旧结果。",
+        "basisRefs": ["R316", "R720", "REPORT", "WORLD", "PHYSICS_TEST", "MANIFEST"]
+      },
+      "evidenceNotes": {
+        "observed": "四鸭一球的既有回合、环境版本和物理parity测试均有来源。",
+        "unknown": "现有场景是否充分代表完整比赛或真机条件尚未证明；未把贴墙或拥挤归因单独定给环境。"
+      }
+    },
+    {
+      "id": "D6",
+      "itemId": "contact-goal-observation",
+      "why": "要回答鸭是否真的踢到球、球队是否完成目标，必须把踢腿动作、指定脚触球、进球和配合分开；它们在已有回合中并不等价。",
+      "recommendation": {
+        "reason": "18个摆球正例及踢空、半球过线等反例，为限定物理事件提供了核验材料。保留现行判定有助于保持比较口径；这些材料和实现审阅不能自动证明自主成功率、可靠配合或观看价值，也不能替代正式测量校准。",
+        "basisRefs": ["R316", "REPORT", "CONTRACT", "WORLD", "CALIBRATION", "PHYSICS_TEST", "REVIEW"]
+      },
+      "evidenceNotes": {
+        "observed": "采集使用动作实例、指定脚接触与整球越线边界；已有夹具、反例与有限实现审阅。",
+        "unknown": "协作机会单位、完整比赛收益量尺、价值阈值与正式测量有效性仍待核；源码所在渠道不等于GT适用域。"
+      }
+    },
+    {
+      "id": "D7",
+      "itemId": "recording-video",
+      "why": "要让观看者和复核者读懂猫实际做了什么，需要把指令、物理经过和视频展示对应起来。旧字幕曾混淆coach世界态与local sensor/state，说明呈现也可能改变人对实验的理解。",
+      "recommendation": {
+        "reason": "原片保留，澄清字幕及选段已有可追溯派生关系，Terra独立验证过限定产物可重建。延续这条记录链可支持复核时效和观察域；不回写旧时钟、指令或原片，也不把素材交付当作观看者验收。",
+        "basisRefs": ["R316", "R720", "REPORT", "RUN", "ANNOTATION", "ARCHIVE", "REVIEW"]
+      },
+      "evidenceNotes": {
+        "observed": "原片hash保留，字幕分别标明coach/world和local信息域；限定派生产物经独立复验。",
+        "unknown": "观看体验与价值判断未知；旧记录不能证明当前正在执行，也不能证明猫的战术已有效。"
+      }
+    },
+    {
+      "id": "D8",
+      "itemId": "samples-calibration",
+      "why": "已有样本既包含触球，也包含未尝试、踢空、迟到和拒绝。分析完整样本才能看清能力缺口，避免让成功选段代替整体情况。",
+      "recommendation": {
+        "reason": "56个公开条件、两场live和18点夹具可分别用于诊断或限定校准；用途和观测单位不同，不能混成统一成功率。先保留原件及完整分母，只整理有来源的派生分析；801–808已公开分析，不能再次充当未暴露holdout。",
+        "basisRefs": ["R316", "R720", "REPORT", "RUNS", "CALIBRATION", "ARCHIVE"]
+      },
+      "evidenceNotes": {
+        "observed": "既有公开结果、事件、完整live轨迹和校准原件可追溯，失败与未尝试保留。",
+        "unknown": "未来独立样本量、封存方案、训练集采用及观看者数据采集授权未定；现有数据不自动获得这些用途。"
+      }
+    }
+  ]
+}

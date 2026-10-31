@@ -1,0 +1,419 @@
+/* Geometry is the accepted proposal.html .fc / .card / .grid3 contract.
+   Office and GitHub colors identify external formats/states (F206 brand exemption). */
+.reference {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--shell-ink);
+  border: 1px solid var(--shell-hairline);
+  background: #fff;
+  text-decoration: none;
+  font-family: var(--font-sans);
+  font-weight: 400;
+  letter-spacing: normal;
+}
+:global([data-theme="dark"]) .reference {
+  background: var(--shell-paper);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 7px 0 5px;
+  margin: 0 1px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1;
+  vertical-align: -4px;
+  white-space: nowrap;
+}
+.interactive {
+  cursor: pointer;
+}
+.fileTooltip {
+  z-index: 50;
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 12px;
+  width: min(480px, calc(100vw - 32px));
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: var(--shell-ink);
+  color: var(--shell-paper);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.fileTooltip code {
+  display: block;
+  width: 100%;
+  font-size: 12px;
+}
+.fileTooltip button {
+  font-size: 12.5px;
+}
+.interactive:hover {
+  border-color: var(--shell-hairline-strong);
+  background: var(--shell-surface);
+}
+.reference .open {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.filename {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.line {
+  color: var(--shell-muted);
+}
+.icon,
+.icon svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--shell-muted);
+}
+.officeIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  color: #fff;
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.2px;
+  flex: none;
+}
+.pdfIcon {
+  font-size: 5.5px;
+  letter-spacing: -0.4px;
+}
+.thumbnail {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--shell-hairline);
+  border-radius: 3px;
+  object-fit: cover;
+  flex: none;
+  margin: 0;
+}
+.missing {
+  color: var(--shell-muted);
+  border-style: dashed;
+  background: transparent;
+}
+.mono {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.reference .commit {
+  font-size: 12.5px;
+}
+.card {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  width: 400px;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 2px 0 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  vertical-align: top;
+}
+.card .open {
+  display: flex;
+  width: 100%;
+  gap: 11px;
+}
+.big {
+  width: 40px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.big .icon,
+.big .icon svg {
+  width: 30px;
+  height: 34px;
+}
+.big .officeIcon {
+  width: 34px;
+  height: 40px;
+  font-size: 12px;
+  border-radius: 5px;
+}
+.big .pdfIcon {
+  font-size: 9px;
+}
+.fileBody {
+  display: block;
+  min-width: 0;
+  flex: 1;
+}
+.name {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.directory {
+  display: block;
+  max-width: 310px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--shell-muted);
+  font-size: 12px;
+}
+.meta {
+  display: block;
+  color: var(--shell-muted);
+  font-size: 12px;
+}
+.fileMeta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.imageCard {
+  width: 300px;
+  padding: 0;
+  overflow: hidden;
+  gap: 0;
+}
+.imageCard .open {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+.preview {
+  display: block;
+  width: 100%;
+  height: 150px;
+  object-fit: cover;
+  object-position: center;
+  border-bottom: 1px solid var(--shell-hairline);
+  margin: 0;
+  border-radius: 0;
+}
+.caption {
+  display: block;
+  padding: 7px 11px;
+}
+.caption .name {
+  font-size: 13px;
+}
+.pill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: 1px 6px;
+  margin-left: 2px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1;
+  color: #fff;
+  white-space: nowrap;
+}
+.merged {
+  --github-state: #8250df;
+}
+.githubOpen {
+  --github-state: #2f8a4b;
+}
+.closed {
+  --github-state: #c4453b;
+}
+.githubIcon {
+  color: var(--github-state, var(--shell-muted));
+}
+.pill {
+  background: var(--github-state);
+}
+.inlineTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prCard {
+  align-items: flex-start;
+  width: 470px;
+}
+.prCard .big {
+  height: auto;
+  padding-top: 2px;
+}
+.prCard .big .icon,
+.prCard .big svg {
+  width: 22px;
+  height: 22px;
+}
+.prBody {
+  display: block;
+  min-width: 0;
+  flex: 1;
+}
+.prCard .name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+}
+.prStatus,
+.prRepository {
+  --pr-meta-gap: 4px;
+  --pr-meta-separator-width: calc(1ch + var(--pr-meta-gap));
+  display: block;
+  overflow-x: clip;
+}
+.prMetaFlow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: var(--pr-meta-gap);
+  /* Each line starts with a separator slot outside the clip; its text stays available to reading. */
+  margin-inline-start: calc(-1 * var(--pr-meta-separator-width));
+}
+.prStatus {
+  margin-top: 3px;
+}
+.prMetaItem,
+.prMetaLeading {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+}
+.prMetaLeading {
+  /* The state pill keeps its ordinary gap before the first, separator-free metadata item. */
+  margin-inline-end: calc(var(--pr-meta-gap) - var(--pr-meta-separator-width));
+}
+.prMetaSeparator {
+  flex: none;
+  inline-size: var(--pr-meta-separator-width);
+  white-space: pre;
+  text-align: end;
+}
+.prMetaValue {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prStatus .pill {
+  margin: 0 2px 0 0;
+  padding: 1px 8px;
+  font-size: 12px;
+  border-radius: 10px;
+  line-height: 1.6;
+}
+.prActions {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 12px;
+  margin-top: 4px;
+  line-height: 22.4px;
+}
+.prActions .open,
+.prActions a {
+  display: inline;
+  width: auto;
+  color: var(--shell-primary);
+  font-size: 12.5px;
+  text-decoration: none;
+}
+.prActions a {
+  color: var(--shell-muted);
+}
+.prActions .open:hover,
+.prActions a:hover {
+  text-decoration: underline;
+}
+.group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 2px 0 10px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  max-width: 780px;
+  gap: 8px;
+}
+.grid .card {
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+}
+.grid .big {
+  width: 28px;
+  height: 32px;
+}
+.grid .big .icon,
+.grid .big .icon svg {
+  width: 22px;
+  height: 26px;
+}
+.grid .big .officeIcon {
+  width: 24px;
+  height: 28px;
+  font-size: 9px;
+}
+@media (max-width: 600px) {
+  .group,
+  .grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .card {
+    width: 100%;
+  }
+  .grid .card {
+    padding: 10px 12px;
+  }
+  .grid .big {
+    width: 40px;
+    height: 44px;
+  }
+  .grid .big .icon,
+  .grid .big .icon svg {
+    width: 30px;
+    height: 34px;
+  }
+  .grid .big .officeIcon {
+    width: 34px;
+    height: 40px;
+    font-size: 12px;
+  }
+}

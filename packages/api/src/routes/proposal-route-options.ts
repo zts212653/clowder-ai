@@ -1,0 +1,24 @@
+import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import type { AgentRouter } from '../domains/cats/services/index.js';
+import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type { IProposalStore } from '../domains/cats/services/stores/ports/ProposalStore.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import type { SocketManager } from '../infrastructure/websocket/index.js';
+
+export interface ProposalRoutesOptions {
+  /** Active config root for F277's TTL=0 owner conversation-group truth. */
+  projectRoot?: string;
+  proposalStore: IProposalStore;
+  threadStore: IThreadStore;
+  messageStore: IMessageStore;
+  socketManager: SocketManager;
+  router?: Pick<AgentRouter, 'resolveTargetsAndIntent'>;
+  invocationQueue?: Pick<InvocationQueue, 'send' | 'enqueueExistingMessageDurable'>;
+  onProposalReject?: (input: {
+    proposalId: string;
+    catId: string;
+    threadId: string;
+    proposalTitle?: string;
+    rejectionReason?: string;
+  }) => void;
+}

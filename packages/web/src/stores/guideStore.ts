@@ -1,0 +1,229 @@
+/**
+ * F155: Guide Engine Store (v2 — tag-based engine)
+ *
+ * OrchestrationStep schema matches backend flow definitions.
+ * Engine auto-advances on user interaction — no manual next/prev/skip.
+ */
+import { create } from 'zustand';
+
+/* ── Orchestration Types (shared schema with backend) ── */
+
+export interface TipsMetadata {
+  /** data-guide-id of a pre-composed card div (type: 'card') */
+  target?: string;
+  type: 'card' | 'png';
+  /** Static image path (type: 'png') */
+  src?: string;
+  layout?: 'horizontal' | 'vertical';
+  alt?: string;
+}
+
+export interface OrchestrationStep {
+  id: string;
+  /** data-guide-id value on the target element */
+  target: string;
+  /** Guide text shown to user (from flow definition, NOT frontend) */
+  tips: string;
+  /** How to advance: click target / visible / input / confirm / auto-confirm / next (manual HUD button) */
+  advance: 'click' | 'visible' | 'input' | 'confirm' | 'auto-confirm' | 'next';
+  page?: string;
+  timeoutSec?: number;
+  /** Rich tips content — card div or static image displayed alongside tips text */
+  tipsMetadata?: TipsMetadata;
+}
+
+export interface OrchestrationFlow {
+  id: string;
+  name: string;
+  description?: string;
+  /** Informational reminders never capture focus or block interaction. */
+  nonBlocking?: boolean;
+  steps: OrchestrationStep[];
+}
+
+/* ── Session State ── */
+
+export type GuidePhase = 'locating' | 'active' | 'complete';
+
+export interface GuideSession {
+  flow: OrchestrationFlow;
+  sessionId: string;
+  /** Thread where this guide was triggered (for completion callback) */
+  threadId: string | null;
+  currentStepIndex: number;
+  phase: GuidePhase;
+  startedAt: number;
+}
+
+/** B-5: Server event shape for Socket.io → Zustand reducer. */
+export interface GuideServerEvent {
+  action: 'start' | 'control_next' | 'control_skip' | 'control_exit' | 'complete';
+  guideId: string;
+  threadId: string;
+}
+
+interface GuideState {
+  session: GuideSession | null;
+  /** Recoverable definition-load failure; completion still belongs to the original receipt owner. */
+  startFailure: { guideId: string; threadId: string; message: string } | null;
+  /** True once the backend has acknowledged guide completion */
+  completionPersisted: boolean;
+  /** True when completion callback failed permanently — overlay shows error instead of dismiss */
+  completionFailed: boolean;
+  /** Pending flow to start — set by reduceServerEvent('start'), consumed by useGuideEngine */
+  pendingStart: { guideId: string; threadId: string } | null;
+  /** Completed guide keys (`threadId::guideId`) — survives exitGuide, prevents re-offer */
+  completedGuides: ReadonlySet<string>;
+  startGuide: (flow: OrchestrationFlow, threadId?: string) => void;
+  advanceStep: () => void;
+  /**
+   * Clear the active guide session.
+   *
+   * Defaults to `{ recordCompletion: true }` — adds `threadId::flowId` to
+   * `completedGuides` so the ChatContainer trigger guard blocks the same guide
+   * from re-firing on the next input event (PR #877 fix).
+   *
+   * Callers that are NOT explicit dismissals (e.g. `useGuideEngine` thread-switch
+   * cleanup, `GuideErrorBoundary` auto-recovery) must pass `{ recordCompletion:
+   * false }` so the in-memory abort is not recorded as user-completed, otherwise
+   * the guide is permanently suppressed in that thread (cloud Codex P1 on PR
+   * #2166 HEAD 39b128bd).
+   *
+   * When `completionFailed=true` (set by `markCompletionFailed` after
+   * `/api/guide-actions/complete` fails), the key is also NOT written even with
+   * `recordCompletion: true`, because `useGuideEngine.rollbackCompletedGuide`
+   * has already removed it to allow retry.
+   */
+  exitGuide: (opts?: { recordCompletion?: boolean }) => void;
+  setPhase: (phase: GuidePhase) => void;
+  markCompletionPersisted: (sessionId: string) => void;
+  markCompletionFailed: (sessionId: string) => void;
+  /** B-5: Central reducer for all Socket.io guide events. */
+  reduceServerEvent: (event: GuideServerEvent) => void;
+  clearPendingStart: () => void;
+}
+
+let sessionCounter = 0;
+
+export const useGuideStore = create<GuideState>((set, get) => ({
+  session: null,
+  startFailure: null,
+  completionPersisted: false,
+  completionFailed: false,
+  pendingStart: null,
+  completedGuides: new Set<string>(),
+
+  startGuide: (flow, threadId) => {
+    sessionCounter += 1;
+    set({
+      startFailure: null,
+      completionPersisted: false,
+      completionFailed: false,
+      session: {
+        flow,
+        sessionId: `guide-${flow.id}-${sessionCounter}`,
+        threadId: threadId ?? null,
+        currentStepIndex: 0,
+        phase: 'locating',
+        startedAt: Date.now(),
+      },
+    });
+  },
+
+  advanceStep: () => {
+    const { session, completedGuides } = get();
+    if (!session) return;
+    const nextIndex = session.currentStepIndex + 1;
+    if (nextIndex >= session.flow.steps.length) {
+      const key = session.threadId ? `${session.threadId}::${session.flow.id}` : null;
+      const nextCompleted = key ? new Set([...completedGuides, key]) : completedGuides;
+      set({
+        session: { ...session, currentStepIndex: nextIndex, phase: 'complete' },
+        completedGuides: nextCompleted,
+      });
+      return;
+    }
+    set({
+      session: { ...session, currentStepIndex: nextIndex, phase: 'locating' },
+    });
+  },
+
+  exitGuide: (opts) => {
+    const { session, completedGuides, completionFailed } = get();
+    if (!session) {
+      set({ session: null, completionPersisted: false, completionFailed: false });
+      return;
+    }
+    // Defaults to recordCompletion=true: PR #877 re-trigger guard for explicit
+    // dismiss / control_exit / completion exit paths. Non-dismiss callers
+    // (useGuideEngine thread-switch, GuideErrorBoundary auto-recovery) must
+    // pass { recordCompletion: false } — see GuideState.exitGuide JSDoc.
+    const recordCompletion = opts?.recordCompletion !== false;
+    // Even with recordCompletion=true, suppress the write when completionFailed=true:
+    // useGuideEngine.rollbackCompletedGuide has already removed the key to allow retry;
+    // re-adding it via dismissWithReconciliation → exitGuide would undo the rollback
+    // and block ChatContainer's retry trigger.
+    const shouldWrite = recordCompletion && !completionFailed && session.threadId !== null;
+    const key = shouldWrite ? `${session.threadId}::${session.flow.id}` : null;
+    const nextCompleted = key ? new Set([...completedGuides, key]) : completedGuides;
+    set({ session: null, completionPersisted: false, completionFailed: false, completedGuides: nextCompleted });
+  },
+
+  markCompletionPersisted: (sessionId) =>
+    set((state) => {
+      if (!state.session) return state;
+      if (state.session.sessionId !== sessionId || state.session.phase !== 'complete') {
+        return state;
+      }
+      return { completionPersisted: true, completionFailed: false };
+    }),
+
+  markCompletionFailed: (sessionId) =>
+    set((state) => {
+      if (!state.session) return state;
+      if (state.session.sessionId !== sessionId || state.session.phase !== 'complete') {
+        return state;
+      }
+      return { completionFailed: true };
+    }),
+
+  setPhase: (phase) => {
+    const { session } = get();
+    if (!session || session.phase === phase) return;
+    if (session.currentStepIndex >= session.flow.steps.length) {
+      if (session.phase !== 'complete') {
+        set({ session: { ...session, phase: 'complete' } });
+      }
+      return;
+    }
+    if (session.phase === 'complete') return;
+    set({ session: { ...session, phase } });
+  },
+
+  reduceServerEvent: (event) => {
+    const { session, advanceStep, exitGuide, setPhase } = get();
+
+    const sessionMatch = session && session.flow.id === event.guideId && session.threadId === event.threadId;
+
+    switch (event.action) {
+      case 'start':
+        set({ startFailure: null, pendingStart: { guideId: event.guideId, threadId: event.threadId } });
+        break;
+      case 'control_next':
+      case 'control_skip':
+        if (sessionMatch) advanceStep();
+        break;
+      case 'control_exit':
+        if (sessionMatch) exitGuide();
+        if (get().pendingStart?.guideId === event.guideId && get().pendingStart?.threadId === event.threadId) {
+          set({ pendingStart: null });
+        }
+        break;
+      case 'complete':
+        if (sessionMatch) setPhase('complete');
+        break;
+    }
+  },
+
+  clearPendingStart: () => set({ pendingStart: null }),
+}));

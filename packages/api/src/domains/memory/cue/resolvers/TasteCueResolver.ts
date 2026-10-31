@@ -1,0 +1,144 @@
+import type { RecallOpportunityV1 } from '@cat-cafe/shared';
+import { EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX } from '../ExplicitApprovedTasteTriggerCatalog.js';
+import {
+  buildCueEnvelope,
+  type MemoryCueResolver,
+  type MemoryCueResolverContext,
+} from '../MemoryCueResolverRegistry.js';
+import { tasteTaskBundleAnchor } from '../TasteTaskBundleCatalog.js';
+
+export interface TasteDimensionMapSource {
+  resolve(input: {
+    ownerUserId: string;
+    stage: 'quality_gate' | 'review';
+    selectedSkill: 'writing-plans' | 'co-creation-docs' | 'fresh-context-review' | 'request-review';
+    featureId: string;
+  }): Promise<{
+    dimensions: string[];
+    revision: string;
+    visibility?: 'owner_public' | 'owner_private';
+  } | null>;
+  resolveTaskBundle?(input: {
+    ownerUserId: string;
+    stage: 'quality_gate' | 'review';
+    selectedSkill: 'writing-plans' | 'co-creation-docs' | 'fresh-context-review' | 'request-review';
+    featureId: string;
+  }): Promise<TasteTaskBundleProjection | null>;
+  matchesTaskBundle?(input: {
+    ownerUserId: string;
+    stage: 'quality_gate' | 'review';
+    selectedSkill: 'writing-plans' | 'co-creation-docs' | 'fresh-context-review' | 'request-review';
+    featureId: string;
+  }): boolean;
+  resolveExplicit?(input: { ownerUserId: string; triggerKey: 'ELI5' }): Promise<{
+    triggerKey: 'ELI5';
+    sourcePath: string;
+    revision: string;
+    visibility: 'owner_public' | 'owner_private';
+  } | null>;
+}
+
+export interface TasteTaskBundleProjection {
+  bundleId: string;
+  consumerTaskRef: string;
+  sources: Array<{
+    sourcePath: string;
+    revision: string;
+    visibility: 'owner_public';
+  }>;
+}
+
+function normalizeDimensions(dimensions: readonly string[]): string[] {
+  return [...new Set(dimensions.map((dimension) => dimension.trim()).filter(Boolean))].sort().slice(0, 6);
+}
+
+export class TasteCueResolver implements MemoryCueResolver {
+  readonly family = 'taste' as const;
+  readonly resolverVersion = 3;
+
+  constructor(private readonly source: TasteDimensionMapSource) {}
+
+  async resolve(opportunity: RecallOpportunityV1, context: MemoryCueResolverContext) {
+    if (opportunity.kind === 'approved_taste_invoked') {
+      if (!this.source.resolveExplicit) return [];
+      const result = await this.source.resolveExplicit({
+        ownerUserId: opportunity.scope.ownerUserId,
+        triggerKey: opportunity.payload.triggerKey,
+      });
+      if (!result) return [];
+      return [
+        buildCueEnvelope({
+          opportunity,
+          family: this.family,
+          resolverVersion: this.resolverVersion,
+          whyNow: 'The owner explicitly invoked a closed trigger backed by an approved Taste source.',
+          source: {
+            title: 'An explicitly requested Taste contract is available',
+            summary: 'Drill the exact approved Taste source before responding, then satisfy its application contract.',
+            anchor: `${EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX}${result.sourcePath}`,
+            revision: result.revision,
+            visibility: result.visibility,
+            drillFamily: 'taste',
+          },
+          context,
+        }),
+      ];
+    }
+    if (opportunity.kind !== 'judgment_surface_entered') return [];
+    const taskBundleInput = {
+      ownerUserId: opportunity.scope.ownerUserId,
+      stage: opportunity.payload.stage,
+      selectedSkill: opportunity.payload.selectedSkill,
+      featureId: opportunity.payload.featureId,
+    };
+    const taskBundleMatched = this.source.matchesTaskBundle?.(taskBundleInput) ?? false;
+    const taskBundle = taskBundleMatched ? await this.source.resolveTaskBundle?.(taskBundleInput) : null;
+    if (taskBundle) {
+      return taskBundle.sources.map((source) =>
+        buildCueEnvelope({
+          opportunity,
+          family: this.family,
+          resolverVersion: this.resolverVersion,
+          whyNow: `Named UI review ${taskBundle.consumerTaskRef} is bound to approved Taste evidence.`,
+          source: {
+            title: 'An approved Taste constraint is relevant to this named UI review',
+            summary: `Drill this exact source for ${taskBundle.consumerTaskRef}; record applied/dismissed, or preserve an explicit unconfirmed row in task evidence.`,
+            anchor: tasteTaskBundleAnchor(taskBundle.bundleId, source.sourcePath),
+            revision: source.revision,
+            visibility: source.visibility,
+            drillFamily: 'taste',
+          },
+          context,
+        }),
+      );
+    }
+    if (taskBundleMatched) return [];
+    const result = await this.source.resolve({
+      ownerUserId: opportunity.scope.ownerUserId,
+      stage: opportunity.payload.stage,
+      selectedSkill: opportunity.payload.selectedSkill,
+      featureId: opportunity.payload.featureId,
+    });
+    if (!result) return [];
+    const dimensions = normalizeDimensions(result.dimensions);
+    if (dimensions.length === 0) return [];
+    const dimensionList = dimensions.join(',');
+    return [
+      buildCueEnvelope({
+        opportunity,
+        family: this.family,
+        resolverVersion: this.resolverVersion,
+        whyNow: 'An explicit workflow-selected judgment surface is active.',
+        source: {
+          title: 'Relevant Taste dimensions are available',
+          summary: `Relevant dimensions: ${dimensions.join(', ')}. Drill the map to choose evidence.`,
+          anchor: `taste-dimensions:${dimensionList}`,
+          revision: result.revision,
+          visibility: result.visibility ?? 'owner_private',
+          drillFamily: 'taste',
+        },
+        context,
+      }),
+    ];
+  }
+}

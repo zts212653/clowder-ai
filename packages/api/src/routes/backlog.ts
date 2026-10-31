@@ -1,5 +1,5 @@
 import type { BacklogDependencies, BacklogItem, CatId, MissionHubSelfClaimScope, ThreadPhase } from '@cat-cafe/shared';
-import { catIdSchema, catRegistry } from '@cat-cafe/shared';
+import { catIdSchema, catRegistry, deploymentDefaults } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getMissionHubSelfClaimScope } from '../config/cat-config-loader.js';
@@ -18,6 +18,7 @@ import {
   readFeatureDocDependencies,
   readFeatureDocStatuses,
 } from './backlog-doc-import.js';
+import { sanitizeThreadForResponse } from './threads.js';
 
 export interface BacklogRoutesOptions {
   backlogStore: IBacklogStore;
@@ -247,8 +248,8 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
     let kickoffMessageId = next.kickoffMessageId;
     if (!kickoffMessageId) {
       const kickoffMessage = await messageStore.append({
+        from: { kind: 'system', service: 'backlog-dispatch' },
         userId,
-        catId: null,
         threadId,
         idempotencyKey: `kickoff:${next.id}:${next.dispatchAttemptId}`,
         content: buildKickoffMessage(next, phase),
@@ -295,7 +296,13 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
       );
     }
     const refreshedThread = await threadStore.get(threadId);
-    return { statusCode: 200 as const, payload: { item: dispatched, thread: refreshedThread } };
+    return {
+      statusCode: 200 as const,
+      payload: {
+        item: dispatched,
+        thread: refreshedThread ? sanitizeThreadForResponse(refreshedThread, userId) : null,
+      },
+    };
   }
 
   app.post('/api/backlog/items', async (request, reply) => {
@@ -337,7 +344,7 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
     } catch (error) {
       reply.status(500);
       return {
-        error: `Failed to read docs/ROADMAP.md: ${error instanceof Error ? error.message : String(error)}`,
+        error: `Failed to read ${deploymentDefaults.roadmapPath}: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
 
@@ -533,7 +540,8 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
     }
 
     if (existing.status === 'dispatched') {
-      const thread = existing.dispatchedThreadId ? await threadStore.get(existing.dispatchedThreadId) : null;
+      const rawThread = existing.dispatchedThreadId ? await threadStore.get(existing.dispatchedThreadId) : null;
+      const thread = rawThread ? sanitizeThreadForResponse(rawThread, userId) : null;
       return {
         item: existing,
         ...(thread ? { thread } : {}),
@@ -704,7 +712,8 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
 
       const phase = parsed.data.threadPhase as ThreadPhase;
       if (existing.status === 'dispatched') {
-        const thread = existing.dispatchedThreadId ? await threadStore.get(existing.dispatchedThreadId) : null;
+        const rawThread = existing.dispatchedThreadId ? await threadStore.get(existing.dispatchedThreadId) : null;
+        const thread = rawThread ? sanitizeThreadForResponse(rawThread, userId) : null;
         return { item: existing, ...(thread ? { thread } : {}) };
       }
 

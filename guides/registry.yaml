@@ -1,0 +1,186 @@
+# F155 Guide Registry
+# Maps guide IDs to flow files and user-facing discovery metadata.
+# Guide discovery now returns the available catalog directly; the cat chooses
+# among the returned guide descriptions instead of keyword-resolving an intent.
+tips_exempt: "2026-10-15: Registers the automatically triggered first-run reminder; catalog metadata adds no separate operation and does not need an additional user-facing tip."
+
+guides:
+  - id: first-run-entry
+    name: 首次协作入口
+    description: 创建真实伙伴后提醒发送第一句话
+    flow_file: flows/first-run-entry.yaml
+    keywords:
+      - first run
+      - 首次协作
+      - onboarding
+    category: bootcamp
+    priority: P0
+    cross_system: false
+    estimated_time: 1min
+
+  - id: add-member
+    name: 添加成员
+    description: 引导你完成新成员的创建和配置
+    flow_file: flows/add-member.yaml
+    keywords:
+      - 添加成员
+      - 加成员
+      - 新成员
+      - 加猫
+      - 新猫
+      - 新建成员
+      - add member
+      - add cat
+      - create member
+    category: member-config
+    priority: P0
+    cross_system: false
+    estimated_time: 3min
+
+  - id: bootcamp-add-teammate
+    name: 添加第二只猫猫
+    description: 首次体验引导 — 开发完成后添加第二只猫猫队友来协作
+    flow_file: flows/bootcamp-add-teammate.yaml
+    keywords:
+      - bootcamp
+      - 训练营
+      - 第二只猫
+      - 添加队友
+      - add teammate
+    category: bootcamp
+    priority: P0
+    cross_system: false
+    estimated_time: 5min
+
+  - id: bootcamp-farewell
+    name: 毕业引导
+    description: 训练营完成后的操作指引 — 新会话、训练营入口、@mention 用法
+    flow_file: flows/bootcamp-farewell.yaml
+    keywords:
+      - 毕业
+      - farewell
+      - 训练营完成
+      - graduation
+    category: bootcamp
+    priority: P0
+    cross_system: false
+    estimated_time: 2min
+
+  - id: add-account-auth
+    name: 添加账户认证
+    description: 引导你完成 API Key 认证账号的创建和配置
+    flow_file: flows/add-account-auth.yaml
+    keywords:
+      - 添加账户
+      - 添加认证
+      - 添加apikey
+      - 新增apikey
+      - 配置apikey
+      - 添加api key
+      - 添加模型
+      - add account
+      - add api key
+      - add apikey
+    category: account-config
+    priority: P1
+    cross_system: false
+    estimated_time: 3min
+
+  - id: configure-first-provider
+    name: 配置第一个 Provider
+    description: 引导你完成第一个成员的 Client、认证账号与模型配置
+    flow_file: flows/configure-first-provider.yaml
+    keywords:
+      - 第一个provider
+      - 第一个 Provider
+      - 配置provider
+      - 配置 Provider
+      - 配置第一个模型
+      - provider怎么配
+      - provider model
+      - first provider
+      - configure first provider
+      - setup provider
+    category: member-config
+    priority: P0
+    cross_system: false
+    estimated_time: 4min
+
+  - id: edit-member-auth
+    name: 修改成员认证与模型
+    description: 引导你为成员配置认证信息和默认模型
+    flow_file: flows/edit-member-auth.yaml
+    requires_member_cards: true
+    keywords:
+      - 修改成员
+      - 修改认证
+      - 修改模型
+      - 配置模型
+      - 配置认证
+      - 修改provider
+      - 修改client
+      - edit member auth
+      - change model
+      - configure provider
+    category: member-config
+    priority: P1
+    cross_system: false
+    estimated_time: 3min
+
+  - id: view-observability
+    name: 查看可观测性
+    description: 引导你打开 Hub 可观测性面板，查看 traces、metrics 和健康状态
+    flow_file: flows/view-observability.yaml
+    keywords:
+      - 可观测性
+      - 监控
+      - traces
+      - trace
+      - traceId
+      - telemetry
+      - metrics
+      - health
+      - No traces found
+      - 怎么看 trace
+      - 怎么打开可观测性
+      - 查看调用链
+    category: monitoring
+    priority: P1
+    cross_system: false
+    estimated_time: 2min
+
+  - id: connect-wechat
+    name: 对接微信
+    description: 引导你完成微信渠道的接入和扫码配置
+    flow_file: flows/connect-wechat.yaml
+    keywords:
+      - 对接微信
+      - 连接微信
+      - 微信接入
+      - 配置微信
+      - 微信扫码
+      - connect wechat
+      - wechat setup
+    category: connector-config
+    priority: P1
+    cross_system: true
+    estimated_time: 5min
+
+  - id: connect-feishu
+    name: 对接飞书
+    description: 引导你完成飞书渠道的接入与授权配置
+    flow_file: flows/connect-feishu.yaml
+    keywords:
+      - 对接飞书
+      - 飞书接入
+      - 连接飞书
+      - 配置飞书
+      - 飞书授权
+      - 飞书机器人
+      - connect feishu
+      - feishu setup
+      - feishu auth
+    category: connector-config
+    priority: P1
+    cross_system: true
+    estimated_time: 4min

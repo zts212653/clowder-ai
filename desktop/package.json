@@ -1,0 +1,199 @@
+{
+  "name": "cat-cafe-desktop",
+  "version": "1.14.0",
+  "description": "Clowder AI Desktop - Multi-Agent Collaboration Platform",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac dmg --arm64 --x64"
+  },
+  "author": "Clowder AI",
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "@electron/asar": "3.4.1",
+    "electron": "35.7.5",
+    "electron-builder": "26.8.1"
+  },
+  "overrides": {
+    "extract-zip": {
+      "yauzl": "3.4.0"
+    }
+  },
+  "build": {
+    "appId": "ai.clowderai.desktop",
+    "productName": "Clowder AI",
+    "artifactName": "ClowderAI-${version}-${arch}.${ext}",
+    "win": {
+      "target": "dir",
+      "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "assets/icon.icns",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extraResources": [
+        {
+          "from": "../bundled/node-darwin-${arch}",
+          "to": "node"
+        },
+        {
+          "from": "../bundled/redis-darwin-${arch}",
+          "to": ".cat-cafe/redis/darwin-${arch}"
+        }
+      ]
+    },
+    "dmg": {
+      "writeUpdateInfo": false
+    },
+    "files": [
+      "app-identity.js",
+      "desktop-update-menu.js",
+      "lifecycle-diagnostics.js",
+      "app-lifecycle.js",
+      "desktop-update-runtime.js",
+      "main.js",
+      "window-close-policy.js",
+      "window-recovery.js",
+      "installation-lifecycle.js",
+      "mac-install-location.js",
+      "preload.js",
+      "project-root.js",
+      "plugin-network-bridge.js",
+      "renderer-link-policy.js",
+      "renderer-navigation.js",
+      "service-manager.js",
+      "project-mirrors.js",
+      "project-provider-directory.js",
+      "project-resource-tree.js",
+      "project-resource-materialization.js",
+      "project-mirror-readiness.js",
+      "project-mirror-consumer.js",
+      "project-mirror-diagnostics.js",
+      "memory-fallback-consent.js",
+      "client-homes.js",
+      "subprocess-entry.js",
+      "desktop-template.js",
+      "api-startup-probe.mjs",
+      "api-startup-read-ahead.mjs",
+      "startup-failure-handler.js",
+      "startup-error-diagnostics.js",
+      "startup-state.js",
+      "startup-timing.js",
+      "startup-services.js",
+      "shutdown-controller.js",
+      "visible-renderer.js",
+      "runtime-config.js",
+      "runtime-web-server.js",
+      "runtime-web-config.js",
+      "update-checker.js",
+      "update-downloader.js",
+      "update-installer.js",
+      "update-install-flow.js",
+      "update-manager.js",
+      "update-network-diagnostics.js",
+      "update-prompt-controller.js",
+      "splash.html",
+      "assets/**/*",
+      "plugin-window/**/*",
+      "!plugin-window/**/*.test.*",
+      "!plugin-window/**/*-fixture.cjs"
+    ],
+    "extraResources": [
+      {
+        "from": "../bundled/deploy/api",
+        "to": "packages/api"
+      },
+      {
+        "from": "../bundled/deploy/web",
+        "to": "packages/web"
+      },
+      {
+        "from": "../bundled/deploy/mcp-server",
+        "to": "packages/mcp-server"
+      },
+      {
+        "from": "../cat-template.json",
+        "to": "cat-template.json"
+      },
+      {
+        "from": "../pnpm-workspace.yaml",
+        "to": "pnpm-workspace.yaml"
+      },
+      {
+        "from": "../package.json",
+        "to": "package.json"
+      },
+      {
+        "from": "../cat-cafe-skills",
+        "to": "cat-cafe-skills",
+        "filter": [
+          "**/*",
+          "!**/.cat-cafe-shared-refs"
+        ]
+      },
+      {
+        "from": "../cat-cafe-skills/refs",
+        "to": "cat-cafe-skills/.cat-cafe-shared-refs"
+      },
+      {
+        "from": "../.claude/hooks/user-level",
+        "to": ".claude/hooks/user-level"
+      },
+      {
+        "from": "../.claude/hooks/f24-compaction.mjs",
+        "to": ".claude/hooks/f24-compaction.mjs"
+      },
+      {
+        "from": "./scripts/sync-agent-hooks-offline.mjs",
+        "to": "scripts/sync-agent-hooks-offline.mjs"
+      },
+      {
+        "from": "../docs",
+        "to": "docs"
+      },
+      {
+        "from": "../scripts",
+        "to": "scripts",
+        "filter": [
+          "**/*",
+          "!**/*.ps1",
+          "!**/*.test.*",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "../guides",
+        "to": "guides"
+      },
+      {
+        "from": "../assets",
+        "to": "assets"
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "**/node_modules/@anthropic-ai/claude-agent-sdk-*/claude-agent-sdk.*.node",
+      "**/api-startup-probe.mjs",
+      "**/api-startup-read-ahead.mjs",
+      "**/runtime-web-server.js",
+      "**/runtime-web-config.js",
+      "**/startup-timing.js",
+      "**/installation-lifecycle.js"
+    ],
+    "afterPack": "./afterPack.js"
+  }
+}

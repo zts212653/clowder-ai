@@ -31,6 +31,7 @@ describe('Callback Bootcamp State', () => {
     achievementStore = new AchievementStore();
     socketManager = {
       broadcastAgentMessage() {},
+      broadcastToRoom() {},
       getMessages() {
         return [];
       },
@@ -64,9 +65,8 @@ describe('Callback Bootcamp State', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': 'fake-id', 'x-callback-token': 'fake-token' },
       payload: {
-        invocationId: 'fake-id',
-        callbackToken: 'fake-token',
         threadId: 'thread-1',
         phase: 'phase-1-intro',
       },
@@ -80,28 +80,27 @@ describe('Callback Bootcamp State', () => {
 
     // Create a thread with initial bootcamp state
     const thread = await threadStore.create('user-1', '🎓 训练营');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
     await threadStore.updateBootcampState(thread.id, {
       v: 1,
-      phase: 'phase-0-select-cat',
+      phase: 'phase-1-intro',
       startedAt: 1000,
     });
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: thread.id,
-        phase: 'phase-1-intro',
+        phase: 'phase-2-env-check',
         leadCat: 'opus',
       },
     });
 
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
-    assert.equal(body.bootcampState.phase, 'phase-1-intro');
+    assert.equal(body.bootcampState.phase, 'phase-2-env-check');
     assert.equal(body.bootcampState.leadCat, 'opus');
     assert.equal(body.bootcampState.startedAt, 1000); // preserved
   });
@@ -110,7 +109,7 @@ describe('Callback Bootcamp State', () => {
     const app = await createApp();
 
     const thread = await threadStore.create('user-1', '🎓 训练营');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
     await threadStore.updateBootcampState(thread.id, {
       v: 1,
       phase: 'phase-3-config-help',
@@ -118,16 +117,14 @@ describe('Callback Bootcamp State', () => {
       startedAt: 1000,
     });
 
-    // Only update phase (skip 3.5 allowed), leadCat should be preserved
+    // Only update phase (+1 step), leadCat should be preserved
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: thread.id,
         phase: 'phase-4-task-select',
-        selectedTaskId: 'Q3',
       },
     });
 
@@ -135,20 +132,18 @@ describe('Callback Bootcamp State', () => {
     const body = JSON.parse(response.body);
     assert.equal(body.bootcampState.phase, 'phase-4-task-select');
     assert.equal(body.bootcampState.leadCat, 'opus'); // preserved
-    assert.equal(body.bootcampState.selectedTaskId, 'Q3');
     assert.equal(body.bootcampState.startedAt, 1000); // preserved
   });
 
   test('returns 404 for non-existent thread', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', 'nonexistent');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'nonexistent');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: 'nonexistent',
         phase: 'phase-1-intro',
       },
@@ -159,16 +154,15 @@ describe('Callback Bootcamp State', () => {
 
   test('returns 400 for invalid phase', async () => {
     const app = await createApp();
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const thread = await threadStore.create('user-1', '🎓 训练营');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: thread.id,
         phase: 'phase-99-invalid',
       },
@@ -183,20 +177,19 @@ describe('Callback Bootcamp State', () => {
     const threadB = await threadStore.create('user-1', 'Thread B');
     await threadStore.updateBootcampState(threadB.id, {
       v: 1,
-      phase: 'phase-0-select-cat',
+      phase: 'phase-1-intro',
       startedAt: 1000,
     });
 
     // Invocation is bound to thread A
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', threadA.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadA.id);
 
     // Try to write to thread B — should be rejected
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: threadB.id,
         phase: 'phase-11-farewell',
       },
@@ -206,7 +199,7 @@ describe('Callback Bootcamp State', () => {
 
     // Verify thread B state was NOT modified
     const threadBAfter = await threadStore.get(threadB.id);
-    assert.equal(threadBAfter.bootcampState.phase, 'phase-0-select-cat');
+    assert.equal(threadBAfter.bootcampState.phase, 'phase-1-intro');
   });
 
   test('P1: rejects default-thread invocation writing another thread', async () => {
@@ -214,20 +207,19 @@ describe('Callback Bootcamp State', () => {
     const threadB = await threadStore.create('user-1', 'Thread B');
     await threadStore.updateBootcampState(threadB.id, {
       v: 1,
-      phase: 'phase-0-select-cat',
+      phase: 'phase-1-intro',
       startedAt: 1000,
     });
 
     // Invocation with default thread (no threadId passed)
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     // Try to write thread B — should be rejected
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: threadB.id,
         phase: 'phase-11-farewell',
       },
@@ -235,58 +227,58 @@ describe('Callback Bootcamp State', () => {
 
     assert.equal(response.statusCode, 403);
     const after = await threadStore.get(threadB.id);
-    assert.equal(after.bootcampState.phase, 'phase-0-select-cat');
+    assert.equal(after.bootcampState.phase, 'phase-1-intro');
   });
 
-  test('P2: ignores stale invocation (superseded by newer invocation)', async () => {
+  test('P2: rejects a replaced invocation (superseded by newer invocation)', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', '🎓 训练营');
     await threadStore.updateBootcampState(thread.id, {
       v: 1,
-      phase: 'phase-0-select-cat',
+      phase: 'phase-1-intro',
       startedAt: 1000,
     });
 
     // First invocation (will become stale)
-    const old = registry.create('user-1', 'opus', thread.id);
+    const old = await registry.create('user-1', 'opus', thread.id);
     // Second invocation supersedes the first
-    registry.create('user-1', 'opus', thread.id);
+    await registry.create('user-1', 'opus', thread.id);
 
     // Old invocation tries to write — should be ignored
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': old.invocationId, 'x-callback-token': old.callbackToken },
       payload: {
-        invocationId: old.invocationId,
-        callbackToken: old.callbackToken,
         threadId: thread.id,
         phase: 'phase-11-farewell',
       },
     });
 
-    assert.equal(response.statusCode, 200);
+    assert.equal(response.statusCode, 401);
     const body = JSON.parse(response.body);
-    assert.equal(body.status, 'stale_ignored');
+    assert.equal(body.reason, 'replaced');
 
     // Verify state was NOT modified
     const after = await threadStore.get(thread.id);
-    assert.equal(after.bootcampState.phase, 'phase-0-select-cat');
+    assert.equal(after.bootcampState.phase, 'phase-1-intro');
   });
 
-  test('P1: rejects phase skip (phase-0 → phase-11 directly)', async () => {
+  test('P1: rejects phase skip (phase-1 → phase-11 directly)', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', '🎓 训练营');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
     await threadStore.updateBootcampState(thread.id, {
       v: 1,
-      phase: 'phase-0-select-cat',
+      phase: 'phase-1-intro',
       startedAt: 1000,
     });
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-bootcamp-state',
-      payload: { invocationId, callbackToken, threadId: thread.id, phase: 'phase-11-farewell' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, phase: 'phase-11-farewell' },
     });
 
     assert.equal(response.statusCode, 400);
@@ -295,7 +287,7 @@ describe('Callback Bootcamp State', () => {
 
     // Verify state was NOT modified
     const after = await threadStore.get(thread.id);
-    assert.equal(after.bootcampState.phase, 'phase-0-select-cat');
+    assert.equal(after.bootcampState.phase, 'phase-1-intro');
 
     // Verify no achievement was emitted
     const unlocked = achievementStore.getUnlocked('user-1');
@@ -305,7 +297,7 @@ describe('Callback Bootcamp State', () => {
   test('P1: rejects backward phase transition', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', '🎓 训练营');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
     await threadStore.updateBootcampState(thread.id, {
       v: 1,
       phase: 'phase-5-kickoff',
@@ -315,7 +307,8 @@ describe('Callback Bootcamp State', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-bootcamp-state',
-      payload: { invocationId, callbackToken, threadId: thread.id, phase: 'phase-2-env-check' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, phase: 'phase-2-env-check' },
     });
 
     assert.equal(response.statusCode, 400);
@@ -323,13 +316,13 @@ describe('Callback Bootcamp State', () => {
     assert.ok(body.error.includes('must advance forward'));
   });
 
-  test('allows skipping phase-3.5-advanced (optional)', async () => {
+  test('allows skipping phase-3 (env OK → first-project)', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', '🎓 训练营');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
     await threadStore.updateBootcampState(thread.id, {
       v: 1,
-      phase: 'phase-3-config-help',
+      phase: 'phase-2-env-check',
       startedAt: 1000,
     });
 
@@ -344,41 +337,13 @@ describe('Callback Bootcamp State', () => {
     assert.equal(body.bootcampState.phase, 'phase-4-task-select');
   });
 
-  test('emits bootcamp-enrolled achievement on phase-1-intro transition', async () => {
+  test('allows graduation shortcut (phase-9 → phase-11)', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', '🎓 训练营');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
     await threadStore.updateBootcampState(thread.id, {
       v: 1,
-      phase: 'phase-0-select-cat',
-      startedAt: 1000,
-    });
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/update-bootcamp-state',
-      payload: { invocationId, callbackToken, threadId: thread.id, phase: 'phase-1-intro', leadCat: 'opus' },
-    });
-
-    assert.equal(response.statusCode, 200);
-    const body = JSON.parse(response.body);
-    assert.equal(body.unlockedAchievement, 'bootcamp-enrolled');
-
-    // Verify achievement is in the store
-    const unlocked = achievementStore.getUnlocked('user-1');
-    assert.ok(
-      unlocked.some((a) => a.id === 'bootcamp-enrolled'),
-      'Should have bootcamp-enrolled achievement',
-    );
-  });
-
-  test('emits bootcamp-graduated achievement on phase-11-farewell', async () => {
-    const app = await createApp();
-    const thread = await threadStore.create('user-1', '🎓 训练营');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
-    await threadStore.updateBootcampState(thread.id, {
-      v: 1,
-      phase: 'phase-10-retro',
+      phase: 'phase-9-complete',
       leadCat: 'opus',
       startedAt: 1000,
     });
@@ -397,6 +362,62 @@ describe('Callback Bootcamp State', () => {
 
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
+    assert.equal(body.bootcampState.phase, 'phase-11-farewell');
+  });
+
+  test('emits bootcamp-env-ready achievement on phase-4-task-select transition', async () => {
+    const app = await createApp();
+    const thread = await threadStore.create('user-1', '🎓 训练营');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+    await threadStore.updateBootcampState(thread.id, {
+      v: 1,
+      phase: 'phase-3-config-help',
+      startedAt: 1000,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, phase: 'phase-4-task-select' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.unlockedAchievement, 'bootcamp-env-ready');
+
+    // Verify achievement is in the store
+    const unlocked = achievementStore.getUnlocked('user-1');
+    assert.ok(
+      unlocked.some((a) => a.id === 'bootcamp-env-ready'),
+      'Should have bootcamp-env-ready achievement',
+    );
+  });
+
+  test('emits bootcamp-graduated achievement on phase-11-farewell', async () => {
+    const app = await createApp();
+    const thread = await threadStore.create('user-1', '🎓 训练营');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+    await threadStore.updateBootcampState(thread.id, {
+      v: 1,
+      phase: 'phase-9-complete',
+      leadCat: 'opus',
+      startedAt: 1000,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        threadId: thread.id,
+        phase: 'phase-11-farewell',
+        completedAt: Date.now(),
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
     assert.equal(body.unlockedAchievement, 'bootcamp-graduated');
     assert.equal(body.bootcampState.phase, 'phase-11-farewell');
 
@@ -407,7 +428,7 @@ describe('Callback Bootcamp State', () => {
   test('does not emit achievement for phases without mapping', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', '🎓 训练营');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
     await threadStore.updateBootcampState(thread.id, {
       v: 1,
       phase: 'phase-1-intro',
@@ -418,7 +439,8 @@ describe('Callback Bootcamp State', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-bootcamp-state',
-      payload: { invocationId, callbackToken, threadId: thread.id, phase: 'phase-2-env-check' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, phase: 'phase-2-env-check' },
     });
 
     assert.equal(response.statusCode, 200);
@@ -440,30 +462,31 @@ describe('Callback Bootcamp State', () => {
     // Deliberately NOT registering leaderboardEventsRoutes
 
     const thread = await threadStore.create('user-1', '🎓 训练营');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
     await threadStore.updateBootcampState(thread.id, {
       v: 1,
-      phase: 'phase-0-select-cat',
+      phase: 'phase-2-env-check',
       startedAt: 1000,
     });
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-bootcamp-state',
-      payload: { invocationId, callbackToken, threadId: thread.id, phase: 'phase-1-intro', leadCat: 'opus' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, phase: 'phase-3-config-help' },
     });
 
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     // Phase transition succeeds but achievement NOT reported (events route unavailable)
     assert.equal(body.unlockedAchievement, undefined, 'Should not report achievement when events pipeline fails');
-    assert.equal(body.bootcampState.phase, 'phase-1-intro', 'Phase should still advance');
+    assert.equal(body.bootcampState.phase, 'phase-3-config-help', 'Phase should still advance');
   });
 
   test('rejects re-submitting same phase (not forward)', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', '🎓 训练营');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
     await threadStore.updateBootcampState(thread.id, {
       v: 1,
       phase: 'phase-1-intro',
@@ -475,7 +498,8 @@ describe('Callback Bootcamp State', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-bootcamp-state',
-      payload: { invocationId, callbackToken, threadId: thread.id, phase: 'phase-1-intro' },
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, phase: 'phase-1-intro' },
     });
 
     assert.equal(response.statusCode, 400);
@@ -486,10 +510,10 @@ describe('Callback Bootcamp State', () => {
   test('auto-pins thread when advancing to phase-11-farewell', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', '🎓 训练营');
-    const { invocationId, callbackToken } = registry.create('user-1', 'opus', thread.id);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
     await threadStore.updateBootcampState(thread.id, {
       v: 1,
-      phase: 'phase-10-retro',
+      phase: 'phase-9-complete',
       leadCat: 'opus',
       startedAt: 1000,
     });
@@ -497,9 +521,8 @@ describe('Callback Bootcamp State', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        invocationId,
-        callbackToken,
         threadId: thread.id,
         phase: 'phase-11-farewell',
         completedAt: Date.now(),
@@ -510,5 +533,98 @@ describe('Callback Bootcamp State', () => {
     const after = await threadStore.get(thread.id);
     assert.equal(after.bootcampState.phase, 'phase-11-farewell');
     assert.equal(after.pinned, true, 'Thread should be auto-pinned on farewell');
+  });
+
+  test('legacy phase-4-first-project normalizes to phase-7-dev and allows multi-step gap', async () => {
+    const app = await createApp();
+    const thread = await threadStore.create('user-1', '🎓 训练营');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+    await threadStore.updateBootcampState(thread.id, {
+      v: 1,
+      phase: 'phase-4-task-select',
+      startedAt: 1000,
+    });
+
+    // Old callback sends legacy phase name — should normalize and allow the gap
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, phase: 'phase-4-first-project' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    // Must persist the normalized name, not the legacy one
+    assert.equal(body.bootcampState.phase, 'phase-7-dev');
+  });
+
+  test('legacy phase-4.5-add-teammate normalizes to phase-7.5-add-teammate', async () => {
+    const app = await createApp();
+    const thread = await threadStore.create('user-1', '🎓 训练营');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+    await threadStore.updateBootcampState(thread.id, {
+      v: 1,
+      phase: 'phase-7-dev',
+      startedAt: 1000,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, phase: 'phase-4.5-add-teammate' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.bootcampState.phase, 'phase-7.5-add-teammate');
+  });
+
+  test('legacy phase-4-first-project from phase-1 is rejected (too-wide skip)', async () => {
+    const app = await createApp();
+    const thread = await threadStore.create('user-1', '🎓 训练营');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+    await threadStore.updateBootcampState(thread.id, {
+      v: 1,
+      phase: 'phase-1-intro',
+      startedAt: 1000,
+    });
+
+    // Old callback sends phase-4-first-project from phase-1 — should be rejected
+    // because phase-1→phase-7-dev is not in the allowed legacy skip pairs
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, phase: 'phase-4-first-project' },
+    });
+
+    assert.equal(response.statusCode, 400);
+    const body = JSON.parse(response.body);
+    assert.ok(body.error.includes('Phase skip not allowed'));
+  });
+
+  test('legacy phase normalization still rejects backward transitions', async () => {
+    const app = await createApp();
+    const thread = await threadStore.create('user-1', '🎓 训练营');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+    await threadStore.updateBootcampState(thread.id, {
+      v: 1,
+      phase: 'phase-8-collab',
+      startedAt: 1000,
+    });
+
+    // phase-4-first-project normalizes to phase-7-dev which is backward from phase-8-collab
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-bootcamp-state',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { threadId: thread.id, phase: 'phase-4-first-project' },
+    });
+
+    assert.equal(response.statusCode, 400);
+    const body = JSON.parse(response.body);
+    assert.ok(body.error.includes('must advance forward'));
   });
 });

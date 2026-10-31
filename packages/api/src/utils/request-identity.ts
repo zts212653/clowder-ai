@@ -1,15 +1,17 @@
 /**
  * Unified request identity resolver.
  *
- * Priority: X-Cat-Cafe-User header > userId query param > fallbackUserId > defaultUserId
+ * Browser path (Origin header present): session cookie > defaultUserId.
+ *   X-Cat-Cafe-User header and body fallback are blocked.
+ * Non-browser path (no Origin): session cookie > X-Cat-Cafe-User header > body > defaultUserId.
  *
- * Header-based identity is preferred because:
- * - Not logged in access logs / referer headers / browser history
- * - Single injection point in frontend api-client
- * - Easier to upgrade to JWT/session later
+ * Blocking the header for browser requests prevents cross-origin identity
+ * spoofing even when CORS_ALLOW_PRIVATE_NETWORK is enabled.
  */
 
 import type { FastifyRequest } from 'fastify';
+import { isOriginAllowed, PRIVATE_NETWORK_ORIGIN, resolveFrontendCorsOrigins } from '../config/frontend-origin.js';
+import { isDirectLoopbackRequest } from './loopback-request.js';
 
 export interface ResolveUserIdOptions {
   /** Optional explicit fallback (e.g., legacy body/form field). */
@@ -18,31 +20,113 @@ export interface ResolveUserIdOptions {
   defaultUserId?: string;
 }
 
+/**
+ * Origins trusted for defaultUserId fallback (identity without session).
+ * Excludes PRIVATE_NETWORK_ORIGIN — LAN devices must establish a session cookie.
+ * Lazy-initialized on first call.
+ */
+let _trustedOrigins: (string | RegExp)[] | null = null;
+function getTrustedOrigins(): (string | RegExp)[] {
+  if (!_trustedOrigins) {
+    _trustedOrigins = resolveFrontendCorsOrigins(process.env).filter((o) => o !== PRIVATE_NETWORK_ORIGIN);
+  }
+  return _trustedOrigins;
+}
+
 function nonEmptyString(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
 }
 
-/**
- * Trusted request identity source for browser/API calls.
- *
- * Unlike resolveUserId(), this does not accept caller-controlled query params.
- */
 export function resolveHeaderUserId(request: FastifyRequest): string | null {
+  const fromSession = nonEmptyString((request as FastifyRequest & { sessionUserId?: string }).sessionUserId);
+  if (fromSession) return fromSession;
+  if (request.headers.origin) {
+    // Trusted browser origins get default-user fallback when session is missing.
+    // This prevents 28+ browser-facing routes from returning 401 on session loss
+    // (API restart, cookie expiry) while still blocking untrusted origins.
+    const origin = String(request.headers.origin);
+    if (isOriginAllowed(origin, getTrustedOrigins())) {
+      return 'default-user';
+    }
+    return null;
+  }
+  return nonEmptyString(request.headers['x-cat-cafe-user']);
+}
+
+/**
+ * Session-only identity resolver (strict auth for write endpoints).
+ * Unlike resolveUserId, does NOT fall back to headers or defaults.
+ */
+export function resolveSessionUserId(request: FastifyRequest): string | null {
+  const userId = (request as FastifyRequest & { sessionUserId?: string }).sessionUserId;
+  return typeof userId === 'string' && userId.trim() ? userId.trim() : null;
+}
+
+/**
+ * Authorization-grade identity for sensitive read surfaces.
+ *
+ * The current session issuer creates `default-user` sessions without remote
+ * pairing, so neither a session nor the legacy explicit identity header is an
+ * authorization principal outside a direct loopback request. The header also
+ * remains unavailable to browser-originated requests.
+ */
+export function resolveDirectLocalAuthorizationUserId(request: FastifyRequest): string | null {
+  if (!isDirectLoopbackRequest(request)) return null;
+  const fromSession = resolveSessionUserId(request);
+  if (fromSession) return fromSession;
+  if (request.headers.origin) return null;
   return nonEmptyString(request.headers['x-cat-cafe-user']);
 }
 
 export function resolveUserId(request: FastifyRequest, options?: ResolveUserIdOptions): string | null {
+  // F156 D-1: session cookie is the primary identity source
+  const fromSession = nonEmptyString((request as FastifyRequest & { sessionUserId?: string }).sessionUserId);
+  if (fromSession) return fromSession;
+
   const fromHeader = resolveHeaderUserId(request);
   if (fromHeader) return fromHeader;
 
-  const query = request.query as Record<string, unknown>;
-  const fromQuery = nonEmptyString(query.userId);
-  if (fromQuery) return fromQuery;
+  // Browser requests: header was blocked above. Skip body fallback too
+  // (prevents cross-origin POST body identity injection).
+  // defaultUserId is only allowed for trusted origins (localhost/loopback/configured).
+  // Private network origins (LAN/Tailscale) must use session cookies.
+  if (request.headers.origin) {
+    const origin = String(request.headers.origin);
+    if (isOriginAllowed(origin, getTrustedOrigins())) {
+      return nonEmptyString(options?.defaultUserId) ?? null;
+    }
+    return null;
+  }
 
   const fromFallback = nonEmptyString(options?.fallbackUserId);
   if (fromFallback) return fromFallback;
 
   return nonEmptyString(options?.defaultUserId);
+}
+
+/**
+ * Strict identity resolver for mutation endpoints.
+ *
+ * Unlike resolveUserId, trusted-origin browser requests with no session are
+ * treated as unauthenticated (returns null → 401). Prevents unauthenticated
+ * browser callers from overwriting TTL=0 user data under 'default-user'.
+ *
+ * Accepted identity sources (in priority order):
+ *   1. Session cookie (browser or CLI)
+ *   2. X-Cat-Cafe-User header (non-browser / agent / CLI path only)
+ *
+ * Browser requests without a session always return null regardless of origin.
+ */
+export function resolveStrictUserId(request: FastifyRequest): string | null {
+  // Session cookie is the only accepted identity for browser paths
+  const fromSession = nonEmptyString((request as FastifyRequest & { sessionUserId?: string }).sessionUserId);
+  if (fromSession) return fromSession;
+
+  // Any request with an Origin header is a browser request — reject if no session
+  if (request.headers.origin) return null;
+
+  // Non-browser path (CLI / agent): accept the explicit X-Cat-Cafe-User header
+  return nonEmptyString(request.headers['x-cat-cafe-user'] as string);
 }

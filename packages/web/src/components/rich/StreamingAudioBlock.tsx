@@ -8,8 +8,9 @@ const CAT_VOICE_COLORS: Record<string, { bg: string; bar: string }> = {
   opus: { bg: 'bg-[var(--color-opus-bg)]', bar: 'bg-[var(--color-opus-primary)]' },
   codex: { bg: 'bg-[var(--color-codex-bg)]', bar: 'bg-[var(--color-codex-primary)]' },
   gemini: { bg: 'bg-[var(--color-gemini-bg)]', bar: 'bg-[var(--color-gemini-primary)]' },
+  kimi: { bg: 'bg-[var(--color-kimi-bg)]', bar: 'bg-[var(--color-kimi-primary)]' },
 };
-const DEFAULT_VOICE_COLORS = { bg: 'bg-gray-100 dark:bg-gray-800', bar: 'bg-gray-400' };
+const DEFAULT_VOICE_COLORS = { bg: 'bg-cafe-surface-elevated', bar: 'bg-gray-400' };
 
 interface Props {
   request: TtsStreamRequest;
@@ -105,7 +106,7 @@ export function StreamingAudioBlock({ request, catId, autoPlay = true }: Props) 
           )}
         </span>
 
-        <div className="flex-1 h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+        <div className="flex-1 h-1 bg-cafe-surface rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-[width] duration-200 ${colors.bar}`}
             style={{ width: `${Math.min(state.progress * 100, 100)}%` }}
@@ -113,17 +114,17 @@ export function StreamingAudioBlock({ request, catId, autoPlay = true }: Props) 
         </div>
 
         {state.totalChunks > 0 && (
-          <span className="text-[10px] text-gray-400 flex-shrink-0 tabular-nums">{formatChunkInfo()}</span>
+          <span className="text-micro text-cafe-muted flex-shrink-0 tabular-nums">{formatChunkInfo()}</span>
         )}
       </button>
 
       {request.text && (
-        <div className="text-[11px] text-gray-400 dark:text-gray-500 pl-1 max-w-[420px] whitespace-pre-wrap break-words leading-relaxed">
+        <div className="text-xs text-cafe-muted pl-1 max-w-[420px] whitespace-pre-wrap break-words leading-relaxed">
           {request.text}
         </div>
       )}
 
-      {state.status === 'error' && <div className="text-[11px] text-red-400 pl-1">{state.error}</div>}
+      {state.status === 'error' && <div className="text-xs text-conn-red-text pl-1">{state.error}</div>}
 
       <audio ref={audioRef} preload="none" />
     </div>

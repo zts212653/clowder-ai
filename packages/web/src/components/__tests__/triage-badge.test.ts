@@ -62,13 +62,13 @@ describe('TriageBadge', () => {
       expect(badge?.className).toContain('red');
     });
 
-    it('renders later with gray styling', () => {
+    it('renders later with neutral cafe styling', () => {
       act(() => {
         root.render(React.createElement(BucketBadge, { bucket: 'later' }));
       });
       const badge = container.querySelector('[data-testid="bucket-badge"]');
       expect(badge?.textContent).toBe('Later');
-      expect(badge?.className).toContain('gray');
+      expect(badge?.className).toContain('cafe');
     });
   });
 

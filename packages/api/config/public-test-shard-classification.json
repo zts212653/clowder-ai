@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "defaultIsolationEvidence": {
+    "kind": "kernel-no-egress-plus-runtime-guard",
+    "rulesVersion": "f308-runtime-v2",
+    "source": "Target-CI distributable lanes run inside a Linux network namespace with only loopback enabled, then irreversibly drop privilege with no_new_privs and empty capability sets before tests start. The kernel therefore denies cross-VM IP egress and prevents re-entering the parent namespace independently of the Node, native, or shell API used. Each file still runs in a fresh process, one file at a time. The preload guard adds before-I/O diagnostics for its recognized Node and child-process surfaces, including non-loopback Bash /dev/tcp and /dev/udp redirections and explicit privilege-escape commands; exact temporary executable fixtures remain explicitly declared."
+  },
+  "sharedResources": []
+}

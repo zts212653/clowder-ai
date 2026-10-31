@@ -1,10 +1,184 @@
 /**
- * Message Visibility — F35 Whisper
+ * Message Visibility — F35 Whisper + System-user exemption
  * Pure functions for determining whether a message is visible to a given viewer.
  */
 
-import type { CatId } from '@cat-cafe/shared';
-import type { StoredMessage } from './ports/MessageStore.js';
+import { type CatId, isManagedHoldConnectorSource } from '@cat-cafe/shared';
+import { messageFrom } from './message-from.js';
+import type { IMessageStore, StoredMessage, ThreadMessageReadOptions } from './ports/MessageStore.js';
+import {
+  isDeliveredMessage,
+  isOwnerVisibleRecalledUserMessage,
+  isQueuedCatTimelineMessage,
+  isQueuedOwnerWork,
+  isRealCatSpeech,
+  type TimelineOrderMessage,
+} from './thread-publication-predicates.js';
+
+/**
+ * System-level userIds whose messages are visible to ALL thread participants
+ * regardless of the per-user filter (scheduler, system, etc.).
+ */
+export const SYSTEM_USER_IDS: ReadonlySet<string> = new Set(['scheduler', 'system']);
+
+/**
+ * Returns true if a message was authored by a trusted system-level source.
+ *
+ * Historical writes use `catId: 'system'`; newer display-only badges (for example
+ * persisted ACP errors) use `catId: null`. Both must bypass per-user filtering.
+ */
+export function isSystemUserMessage(
+  msg: Pick<StoredMessage, 'from' | 'userId' | 'catId' | 'source' | 'sourceParseFailure' | 'origin'>,
+): boolean {
+  return messageFrom(msg).kind === 'system';
+}
+
+/**
+ * Cat-visible publication is independent from execution custody: cat-authored
+ * speech is published as soon as it is persisted. Queued user/system/briefing
+ * work remains private until delivery.
+ */
+export function isTimelinePublished(msg: StoredMessage): boolean {
+  if (!msg.deliveryStatus || msg.deliveryStatus === 'delivered') return true;
+  if (msg.deliveryStatus === 'canceled' && msg.lifecycle?.kind === 'response') return true;
+  return msg.deliveryStatus === 'queued' && isRealCatSpeech(msg);
+}
+
+/**
+ * A scheduler-authored managed-hold row is user-visible only when its durable
+ * persisted owner binds the exact viewer. Scheduler authorship is provenance,
+ * never access authority. Legacy ownerless records and hidden trigger rows
+ * fail closed.
+ */
+type ManagedHoldConnectorVisibilityMessage = Pick<
+  StoredMessage,
+  'from' | 'userId' | 'catId' | 'threadId' | 'source' | 'extra'
+>;
+
+/** Classify the protected scheduler namespace before evaluating publication authority. */
+export function isManagedHoldConnectorMessage(msg: ManagedHoldConnectorVisibilityMessage): boolean {
+  return messageFrom(msg).kind === 'system' && msg.source?.connector === 'hold-ball';
+}
+
+export function isOwnerVisibleManagedHoldConnector(
+  msg: ManagedHoldConnectorVisibilityMessage,
+  viewerUserId?: string,
+): boolean {
+  return (
+    typeof viewerUserId === 'string' &&
+    viewerUserId.length > 0 &&
+    isManagedHoldConnectorMessage(msg) &&
+    msg.extra?.scheduler?.hiddenTrigger !== true &&
+    msg.userId === viewerUserId &&
+    isManagedHoldConnectorSource(msg.source) &&
+    msg.source?.meta?.threadId === msg.threadId
+  );
+}
+
+/** Narrow system-message exception shared by full and incremental cat context. */
+export function isAgentReadableManagedHoldMessage(msg: StoredMessage): boolean {
+  return (
+    isDeliveredMessage(msg) &&
+    isManagedHoldConnectorMessage(msg) &&
+    msg.extra?.scheduler?.hiddenTrigger !== true &&
+    typeof msg.userId === 'string' &&
+    !SYSTEM_USER_IDS.has(msg.userId) &&
+    isManagedHoldConnectorSource(msg.source) &&
+    msg.source?.meta?.threadId === msg.threadId
+  );
+}
+
+/**
+ * Protect every viewer-bound read before generic scheduler/system exemptions.
+ * Internal reads without a human viewer keep their existing execution-history semantics.
+ */
+export function passesManagedHoldViewerBoundary(
+  msg: ManagedHoldConnectorVisibilityMessage,
+  viewerUserId?: string,
+): boolean {
+  return (
+    viewerUserId === undefined ||
+    !isManagedHoldConnectorMessage(msg) ||
+    isOwnerVisibleManagedHoldConnector(msg, viewerUserId)
+  );
+}
+
+/** Queued browser-publication subset of the owner-bound managed-hold contract. */
+export function isOwnerVisibleQueuedManagedHoldConnector(msg: StoredMessage, viewerUserId?: string): boolean {
+  return msg.deliveryStatus === 'queued' && isOwnerVisibleManagedHoldConnector(msg, viewerUserId);
+}
+
+/**
+ * Owner read cursors are durable evidence, not a mirror of what the mutable
+ * timeline can currently paint. Stream speech is intentionally published
+ * while it grows, but only its queued -> delivered transition proves that the
+ * owner had a final result available to read. Complete callback speech keeps
+ * the existing queued-publication contract.
+ */
+export function isDurableOwnerReadEvidence(msg: StoredMessage): boolean {
+  return isTimelinePublished(msg) && !(msg.deliveryStatus === 'queued' && msg.origin === 'stream');
+}
+
+/** Resolve the publication predicate for a thread read in one place. */
+export function resolveThreadMessageVisibility(
+  options?: ThreadMessageReadOptions,
+  viewerUserId?: string,
+): (message: StoredMessage) => boolean {
+  return (message) => {
+    if (
+      options?.onlyUnpositionedOwnerMessages === true &&
+      (!viewerUserId ||
+        message.userId !== viewerUserId ||
+        messageFrom(message).kind !== 'user' ||
+        (message.deliveryStatus !== 'queued' &&
+          (message.recall === undefined || message.recall.recalledAt < (options.ownerUncertaintySinceMs ?? 0))))
+    )
+      return false;
+    if (!passesManagedHoldViewerBoundary(message, viewerUserId)) return false;
+    if (viewerUserId !== undefined && isManagedHoldConnectorMessage(message)) {
+      return (
+        isDeliveredMessage(message) ||
+        (options?.includeQueuedUserMessages === true && message.deliveryStatus === 'queued')
+      );
+    }
+
+    return (
+      isDeliveredMessage(message) ||
+      (options?.includeQueuedCatMessages === true && isQueuedCatTimelineMessage(message)) ||
+      (options?.includeQueuedUserMessages === true && isQueuedOwnerWork(message)) ||
+      (options?.includeRecalledUserMessages === true && isOwnerVisibleRecalledUserMessage(message))
+    );
+  };
+}
+
+/**
+ * One message, judged by exactly the same admission as a thread timeline read.
+ *
+ * Mirrors `RedisMessageStore.getByThread(threadId, n, userId, { includeQueuedCatMessages: true })`:
+ * the catalogue's `collectAllThreadMessages` scans that read, so a block it lists must be
+ * readable here, and a block it cannot list must not be.
+ */
+export function isThreadMessageVisibleToViewer(message: StoredMessage, viewerUserId: string): boolean {
+  // The store skips tombstones during hydration (`hydrateMessages`, includeDeleted=false).
+  if (message.deletedAt) return false;
+  if (message.userId !== viewerUserId && !isSystemUserMessage(message)) return false;
+  return resolveThreadMessageVisibility({ includeQueuedCatMessages: true }, viewerUserId)(message);
+}
+
+/**
+ * Delivery time and publication order are distinct for real-cat speech: it is
+ * published when authored, even if recipient execution custody ends later.
+ */
+export function resolveDeliveryTimelineScore(message: StoredMessage, deliveredAt: number): number {
+  return isTimelinePublished(message) ? message.timestamp : deliveredAt;
+}
+
+/** Match the Redis timeline score when constructing pagination cursors in memory. */
+export function getTimelineOrderTime(message: StoredMessage): number {
+  if (message.timelineOrderAt !== undefined) return message.timelineOrderAt;
+  if (isQueuedCatTimelineMessage(message)) return message.timestamp;
+  return message.deliveredAt ?? message.timestamp;
+}
 
 /** Who is viewing */
 export type Viewer = { readonly type: 'user' } | { readonly type: 'cat'; readonly catId: CatId };
@@ -13,7 +187,7 @@ export type Viewer = { readonly type: 'user' } | { readonly type: 'cat'; readonl
  * Check if a message is visible to the given viewer.
  *
  * Rules:
- * - User (铲屎官) always sees everything
+ * - User (co-creator) always sees everything
  * - Public messages (visibility undefined or 'public') are visible to all
  * - Revealed whispers (revealedAt set) are visible to all
  * - Unrevealed whispers are only visible to recipients listed in whisperTo
@@ -29,4 +203,98 @@ export function canViewMessage(msg: StoredMessage, viewer: Viewer): boolean {
   }
 
   return false;
+}
+
+/**
+ * #699: Unified parent eligibility for reply-to inline preview.
+ *
+ * A fetched parent message is eligible for inline preview only if it passes
+ * the SAME predicates used to build prompt context. This prevents leaking
+ * system/undelivered/deleted/whisper content via formatMessage preview.
+ *
+ * Used by: route-helpers cursor-gap fetch, callbacks replyTo validation.
+ */
+export interface ReplyParentEligibilityOptions {
+  /** Thread the child belongs to — parent must be same thread */
+  threadId: string;
+  /** Viewer context for whisper visibility */
+  viewer: Viewer;
+  /** The catId of the child message sender — NOT filtered out (own messages are valid parents) */
+  childCatId?: CatId | null;
+}
+
+/**
+ * #699: Can a parent message be safely quoted in a public (non-whisper) reply?
+ * Unrevealed whispers must not be quoted in public replies — hydrateReplyPreview
+ * fetches raw content without visibility checks, so the preview would leak
+ * whisper content to non-recipients.
+ *
+ * Use AFTER isEligibleReplyParent passes (sender CAN see the parent),
+ * when the reply itself is public (e.g. callback posts which have no visibility field).
+ */
+export function canQuoteInPublicReply(parent: StoredMessage): boolean {
+  if (parent.visibility === 'whisper' && !parent.revealedAt) return false;
+  return true;
+}
+
+/**
+ * #699 P1 (gpt52 intake review, cat-cafe#2111): system / briefing messages are
+ * internal, non-routable content that must never be quoted as a reply parent or
+ * returned via get-message. Single source of truth shared by isEligibleReplyParent,
+ * POST /api/messages replyTo validation, and the get-message route — so no path can
+ * forget the exclusion (the "fetch + gate" invariant in this file's header).
+ */
+export function isInternalNonQuotableParent(
+  msg: Pick<StoredMessage, 'from' | 'userId' | 'catId' | 'source' | 'sourceParseFailure' | 'origin'>,
+): boolean {
+  return messageFrom(msg).kind === 'system' || msg.origin === 'briefing';
+}
+
+export function isEligibleReplyParent(parent: StoredMessage, opts: ReplyParentEligibilityOptions): boolean {
+  // Must be same thread
+  if (parent.threadId !== opts.threadId) return false;
+  // Must already be cat-visible published speech; queued user work is browser-only.
+  if (!isTimelinePublished(parent)) return false;
+  // Must not be deleted
+  if (parent.deletedAt) return false;
+  // System-generated / briefing messages are internal, non-routable — never valid parents
+  // (shared with POST /api/messages replyTo + get-message via isInternalNonQuotableParent)
+  if (isInternalNonQuotableParent(parent)) return false;
+  // Whisper visibility
+  if (!canViewMessage(parent, opts.viewer)) return false;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Atomic resolvers — bind "fetch + visibility gate" so callers can't forget.
+// All "fetch parent by ID for inline preview" paths must go through these,
+// never raw store.getById() + manual predicate.
+// ---------------------------------------------------------------------------
+
+export interface ResolveReplyParentOptions extends ReplyParentEligibilityOptions {
+  /**
+   * When true, additionally block quoting unrevealed whispers in public replies
+   * (callback/A2A paths which have no visibility field on the outgoing message).
+   */
+  publicReply?: boolean;
+}
+
+/**
+ * Atomically fetch + validate a reply parent for inline preview.
+ * Returns the parent message if it passes all eligibility predicates,
+ * or null if not found / not eligible / whisper-unsafe for public reply.
+ *
+ * This is the ONLY sanctioned way to resolve a parent by ID for preview —
+ * raw `store.getById()` followed by manual isEligibleReplyParent is forbidden
+ * in preview paths (enforced by lint at intake).
+ */
+export async function resolveVisibleReplyParent(
+  store: Pick<IMessageStore, 'getById'>,
+  id: string,
+  opts: ResolveReplyParentOptions,
+): Promise<StoredMessage | null> {
+  const msg = await store.getById(id);
+  if (!msg || !isEligibleReplyParent(msg, opts)) return null;
+  if (opts.publicReply && !canQuoteInPublicReply(msg)) return null;
+  return msg;
 }

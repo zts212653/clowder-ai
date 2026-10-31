@@ -15,7 +15,9 @@ import path from 'node:path';
 import type { RichBlock } from '@cat-cafe/shared';
 import { getCatVoice } from '../../../../config/cat-voices.js';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
+import { chunkStaticTtsText } from './TtsChunker.js';
 import type { TtsRegistry } from './TtsRegistry.js';
+import { concatenatePcmWavSegments } from './WavConcatenator.js';
 
 const log = createModuleLogger('voice-synthesizer');
 
@@ -77,11 +79,13 @@ function isRetryableError(err: unknown): boolean {
 }
 
 const RETRY_DELAY_MS = 2_000;
+const LONG_FORM_CACHE_VERSION = 'chunked-pcm-wav-v1';
 
 export class VoiceBlockSynthesizer {
   constructor(
     private readonly ttsRegistry: TtsRegistry,
     private readonly cacheDir: string,
+    private readonly retryDelayMs = RETRY_DELAY_MS,
   ) {}
 
   /**
@@ -163,8 +167,8 @@ export class VoiceBlockSynthesizer {
     } catch (err) {
       if (!isRetryableError(err)) throw err;
 
-      log.warn({ retryDelayMs: RETRY_DELAY_MS, error: err }, 'Transient error, retrying');
-      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+      log.warn({ retryDelayMs: this.retryDelayMs, error: err }, 'Transient error, retrying');
+      await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs));
       return await this.synthesizeToFile(text, catId);
     }
   }
@@ -194,9 +198,12 @@ export class VoiceBlockSynthesizer {
     const refText = catVoice.refText;
     const instruct = catVoice.instruct;
     const temperature = catVoice.temperature;
+    const textChunks = chunkStaticTtsText(text);
 
     // Cache hash — includes clone params for distinct cache entries per voice config
     const hashParts = [provider.id, provider.model, voice, langCode, String(speed), format, text];
+    // Invalidate truncated pre-chunking cache entries without evicting valid short audio.
+    if (textChunks.length > 1) hashParts.push(LONG_FORM_CACHE_VERSION);
     if (refAudio) hashParts.push(refAudio);
     if (refText) hashParts.push(refText);
     if (instruct) hashParts.push(instruct);
@@ -216,18 +223,32 @@ export class VoiceBlockSynthesizer {
     }
 
     if (!cached) {
-      const result = await provider.synthesize({
-        text,
-        voice,
-        langCode,
-        speed,
-        format,
-        ...(refAudio ? { refAudio } : {}),
-        ...(refText ? { refText } : {}),
-        ...(instruct ? { instruct } : {}),
-        ...(temperature != null ? { temperature } : {}),
-      });
-      await writeFile(filePath, result.audio);
+      const results = [];
+      for (const chunk of textChunks) {
+        results.push(
+          await provider.synthesize({
+            text: chunk,
+            voice,
+            langCode,
+            speed,
+            format,
+            ...(refAudio ? { refAudio } : {}),
+            ...(refText ? { refText } : {}),
+            ...(instruct ? { instruct } : {}),
+            ...(temperature != null ? { temperature } : {}),
+          }),
+        );
+      }
+
+      if (results.length === 1) {
+        await writeFile(filePath, results[0].audio);
+      } else {
+        if (results.some((result) => result.format !== 'wav')) {
+          throw new Error('Long-form TTS provider must return WAV segments');
+        }
+        const joined = concatenatePcmWavSegments(results.map((result) => result.audio));
+        await writeFile(filePath, joined.audio);
+      }
     }
 
     return { audioUrl: `/api/tts/audio/${filename}` };

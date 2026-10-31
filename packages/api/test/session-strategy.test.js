@@ -3,6 +3,7 @@
  * Unit tests for the pure strategy decision function.
  */
 
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
@@ -264,6 +265,21 @@ describe('session-strategy', () => {
       assert.equal(config.thresholds.action, 0.65);
     });
 
+    test('returns opencode-specific defaults for opencode (clowder#915)', async () => {
+      // clowder#915: before this fix, opencode fell through to GLOBAL_DEFAULT_STRATEGY
+      // because DEFAULT_STRATEGY_BY_PROVIDER had no opencode entry. The fallback was
+      // technically correct (handoff at 0.75/0.85) but masked an architectural gap:
+      // any opencode-specific threshold tuning was silently dropped. We add an explicit
+      // entry so opencode is a first-class strategy peer with anthropic/openai/google.
+      const { getSessionStrategy } = await loadModule();
+      const config = getSessionStrategy('opencode');
+      assert.equal(config.strategy, 'handoff');
+      // Opencode (golden chinchilla / GLM-5.1) has 160k effective context per cat-template.
+      // Use 0.75/0.85 thresholds like openai (similar context budget envelope).
+      assert.equal(config.thresholds.warn, 0.75);
+      assert.equal(config.thresholds.action, 0.85);
+    });
+
     test('returns global default for unknown cat', async () => {
       const { getSessionStrategy } = await loadModule();
       const config = getSessionStrategy('unknown-cat-42');
@@ -330,6 +346,59 @@ describe('session-strategy', () => {
       const merged = mergeStrategyConfig(base, {});
       assert.deepStrictEqual(merged.thresholds, base.thresholds);
       assert.equal(merged.strategy, base.strategy);
+    });
+  });
+
+  // ── #1208 denominator fix: inputCeiling, not windowTokens ──
+
+  describe('#1208 denominator fix', () => {
+    function makeStrategy(overrides = {}) {
+      return {
+        strategy: 'handoff',
+        thresholds: { warn: 0.75, action: 0.85 },
+        turnBudget: 12_000,
+        safetyMargin: 4_000,
+        ...overrides,
+      };
+    }
+
+    test('inputCeiling-based remaining catches overflow that windowTokens would miss', async () => {
+      const { shouldTakeAction } = await loadModule();
+      const strategy = makeStrategy();
+      // Scenario: 200K window, 16K output reserve → inputCeiling = 184K.
+      // usedTokens = 170K.
+      // With inputCeiling (correct): remaining = 184K - 170K = 14K < 16K → seal
+      // With windowTokens (wrong):   remaining = 200K - 170K = 30K > 16K → no seal → overflow!
+      const inputCeiling = 184_000; // 200K - 16K output reserve
+      const action = shouldTakeAction(0.92, inputCeiling, 170_000, 0, strategy);
+      assert.equal(action.type, 'seal', 'inputCeiling-based remaining should trigger seal');
+      assert.equal(action.reason, 'budget_exhausted');
+    });
+
+    test('fillRatio with inputCeiling triggers action threshold correctly', async () => {
+      const { shouldTakeAction } = await loadModule();
+      const strategy = makeStrategy();
+      // 200K window, 16K reserve → inputCeiling = 184K.
+      // usedTokens = 160K.
+      // Correct fillRatio = 160K/184K ≈ 0.8696 → above 0.85 action threshold → seal
+      // Wrong fillRatio   = 160K/200K = 0.80   → below 0.85 → no action
+      const inputCeiling = 184_000;
+      const correctFillRatio = 160_000 / inputCeiling; // ~0.8696
+      const action = shouldTakeAction(correctFillRatio, inputCeiling, 160_000, 0, strategy);
+      assert.equal(action.type, 'seal', 'correct fillRatio should exceed action threshold');
+    });
+
+    test('hybrid strategy uses inputCeiling for remaining budget', async () => {
+      const { shouldTakeAction } = await loadModule();
+      const strategy = makeStrategy({ strategy: 'hybrid', hybrid: { maxCompressions: 2 } });
+      // inputCeiling=184K, used=170K → remaining=14K < 16K → budget exhausted
+      // compressionCount=0 < max 2 → allow_compress (not seal yet)
+      const action = shouldTakeAction(0.92, 184_000, 170_000, 0, strategy);
+      assert.equal(
+        action.type,
+        'allow_compress',
+        'hybrid with compressions remaining should allow compress on budget exhaust',
+      );
     });
   });
 

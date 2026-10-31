@@ -1,9 +1,32 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { _resetCachedConfig, getCoCreatorConfig } from '../../dist/config/cat-config-loader.js';
 import { computeCvoLevel } from '../../dist/domains/leaderboard/achievement-defs.js';
 import { AchievementStore } from '../../dist/domains/leaderboard/achievement-store.js';
 
 describe('AchievementStore', () => {
+  it('projects the current owner address on reads and repeated unlocks without changing the unlock time', () => {
+    const store = new AchievementStore();
+    try {
+      getCoCreatorConfig({
+        version: 2,
+        coCreator: { name: 'Mina', nickname: 'First', aliases: [], mentionPatterns: ['@mina'] },
+      });
+      const first = store.unlock('user1', 'bootcamp-first-decision');
+      assert.match(first.description, /First/);
+      getCoCreatorConfig({
+        version: 2,
+        coCreator: { name: 'Mina', nickname: 'Second', aliases: [], mentionPatterns: ['@mina'] },
+      });
+      const current = store.getUnlocked('user1')[0];
+      assert.match(current.description, /Second/);
+      assert.equal(current.unlockedAt, first.unlockedAt);
+      assert.deepEqual(store.unlock('user1', 'bootcamp-first-decision'), current);
+      assert.equal(store.getUnlocked('user1').length, 1);
+    } finally {
+      _resetCachedConfig();
+    }
+  });
   it('unlocks an achievement and returns it', () => {
     const store = new AchievementStore();
     const ach = store.unlock('user1', 'cvo-first-review');
@@ -50,11 +73,11 @@ describe('AchievementStore', () => {
     assert.ok(lvl.needed);
   });
 
-  it('getCvoLevel advances with CVO achievements', () => {
+  it('getCvoLevel advances with operator achievements', () => {
     const store = new AchievementStore();
     store.unlock('user1', 'cvo-first-review');
     store.unlock('user1', 'cvo-5-reviews');
-    // 2 CVO achievements → level 2
+    // 2 operator achievements → level 2
     const lvl = store.getCvoLevel('user1');
     assert.equal(lvl.level, 2);
     assert.equal(lvl.title, '正式员工');
@@ -72,13 +95,13 @@ describe('AchievementStore', () => {
 });
 
 describe('computeCvoLevel', () => {
-  it('level 1 at 0 CVO achievements', () => {
+  it('level 1 at 0 operator achievements', () => {
     const lvl = computeCvoLevel(0);
     assert.equal(lvl.level, 1);
     assert.equal(lvl.progress, 0); // 0/2
   });
 
-  it('level 5 at max CVO achievements', () => {
+  it('level 5 at max operator achievements', () => {
     const lvl = computeCvoLevel(7);
     assert.equal(lvl.level, 5);
     assert.equal(lvl.title, '首席铲码官');

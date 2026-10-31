@@ -17,13 +17,32 @@ import type {
   UpdateBacklogDispatchProgressInput,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import type { IBacklogStore } from '../ports/BacklogStore.js';
-import { BacklogTransitionError } from '../ports/BacklogStore.js';
+import type { EnsureTaskBackedBacklogItemInput, IBacklogStore } from '../ports/BacklogStore.js';
+import { BacklogTransitionError, buildTaskBackedBacklogItem, isMatchingTaskBackedItem } from '../ports/BacklogStore.js';
 import { generateSortableId } from '../ports/MessageStore.js';
 import { BacklogKeys } from '../redis-keys/backlog-keys.js';
 import { makeCatActor, makeCreatorActor, makeUserActor } from '../shared/backlog-audit-actors.js';
 
-const DEFAULT_TTL = 90 * 24 * 60 * 60; // 90 days
+const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
+
+const ENSURE_TASK_BACKED_ITEM_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  return 0
+end
+
+local fields = cjson.decode(ARGV[1])
+for field, value in pairs(fields) do
+  redis.call('HSET', KEYS[1], field, value)
+end
+redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
+
+local ttl = tonumber(ARGV[4])
+if ttl and ttl > 0 then
+  redis.call('EXPIRE', KEYS[1], ttl)
+  redis.call('EXPIRE', KEYS[2], ttl)
+end
+return 1
+`;
 
 /**
  * KEYS[1] = backlog:item:{id}
@@ -363,15 +382,11 @@ export class RedisBacklogStore implements IBacklogStore {
 
   constructor(redis: RedisClient, options?: { ttlSeconds?: number }) {
     this.redis = redis;
-    const ttl = options?.ttlSeconds;
-    if (ttl === undefined) {
-      this.ttlSeconds = DEFAULT_TTL;
-    } else if (!Number.isFinite(ttl)) {
-      this.ttlSeconds = DEFAULT_TTL;
-    } else if (ttl <= 0) {
+    const raw = options?.ttlSeconds ?? DEFAULT_TTL;
+    if (!Number.isFinite(raw) || raw <= 0) {
       this.ttlSeconds = null;
     } else {
-      this.ttlSeconds = Math.floor(ttl);
+      this.ttlSeconds = Math.floor(raw);
     }
   }
 
@@ -420,6 +435,27 @@ export class RedisBacklogStore implements IBacklogStore {
     }
     await pipeline.exec();
     return item;
+  }
+
+  async ensureTaskBackedItem(input: EnsureTaskBackedBacklogItemInput): Promise<BacklogItem> {
+    const item = buildTaskBackedBacklogItem(input);
+    const created = (await this.redis.eval(
+      ENSURE_TASK_BACKED_ITEM_LUA,
+      2,
+      BacklogKeys.detail(item.id),
+      BacklogKeys.userList(item.userId),
+      JSON.stringify(this.serializeItem(item)),
+      String(item.createdAt),
+      item.id,
+      String(this.ttlSeconds ?? 0),
+    )) as number;
+    if (created === 1) return item;
+
+    const existing = await this.get(item.id);
+    if (!existing || !isMatchingTaskBackedItem(existing, input)) {
+      throw new BacklogTransitionError(`Task-backed backlog identity collision for "${input.taskId}"`);
+    }
+    return existing;
   }
 
   async refreshMetadata(itemId: string, input: RefreshBacklogItemInput): Promise<BacklogItem | null> {
@@ -907,6 +943,7 @@ export class RedisBacklogStore implements IBacklogStore {
     if (item.dispatchAttemptId) result.dispatchAttemptId = item.dispatchAttemptId;
     if (item.pendingThreadId) result.pendingThreadId = item.pendingThreadId;
     if (item.kickoffMessageId) result.kickoffMessageId = item.kickoffMessageId;
+    if (item.projectId) result.projectId = item.projectId;
     return result;
   }
 
@@ -936,6 +973,7 @@ export class RedisBacklogStore implements IBacklogStore {
       ...(data.dispatchAttemptId ? { dispatchAttemptId: data.dispatchAttemptId } : {}),
       ...(data.pendingThreadId ? { pendingThreadId: data.pendingThreadId } : {}),
       ...(data.kickoffMessageId ? { kickoffMessageId: data.kickoffMessageId } : {}),
+      ...(data.projectId ? { projectId: data.projectId } : {}),
       ...(approvedAt ? { approvedAt } : {}),
       ...(dispatchedAt ? { dispatchedAt } : {}),
     };

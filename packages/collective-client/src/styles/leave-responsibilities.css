@@ -1,0 +1,122 @@
+.leave-responsibility-groups {
+  display: grid;
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.leave-responsibility-group h3 {
+  margin: 0 0 6px;
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.leave-responsibility-group > p {
+  margin: 0 0 8px;
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.leave-responsibility-group > div {
+  border-top: 1px solid var(--console-border-soft);
+}
+
+.leave-responsibility-row,
+.leave-responsibility-hidden {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--console-border-soft);
+}
+
+.leave-responsibility-row-no-status {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.leave-responsibility-copy,
+.leave-responsibility-hidden > span,
+.leave-responsibility-static {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.leave-responsibility-copy strong,
+.leave-responsibility-hidden strong,
+.leave-responsibility-static strong {
+  overflow: hidden;
+  color: var(--cafe-text);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leave-responsibility-copy small,
+.leave-responsibility-hidden small,
+.leave-responsibility-static small {
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.leave-responsibility-row > button,
+.leave-responsibility-hidden > button {
+  min-height: 32px;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cafe-accent);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.leave-responsibility-row > button:hover,
+.leave-responsibility-hidden > button:hover {
+  background: var(--console-hover-bg);
+}
+
+.leave-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--semantic-info);
+}
+
+.leave-status-dot[data-tone="warning"] {
+  background: var(--semantic-warning);
+}
+
+.leave-status-dot[data-tone="critical"] {
+  background: var(--semantic-critical);
+}
+
+.leave-status-dot[data-tone="success"] {
+  background: var(--semantic-success);
+}
+
+.leave-responsibility-static {
+  min-height: 54px;
+  justify-content: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--console-border-soft);
+}
+
+.leave-responsibility-hidden {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  color: var(--cafe-text-muted);
+}
+
+.leave-responsibility-hidden svg {
+  width: 16px;
+  height: 16px;
+}

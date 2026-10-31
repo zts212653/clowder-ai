@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
 
 describe('Task 5: Wiring – handoffConfig in SessionSealer', () => {
-  it('SessionSealer accepts handoffConfig as 6th parameter', async () => {
+  it('SessionSealer accepts handoffConfig without a parallel capacity resolver', async () => {
     const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
     const fakeChainStore = { getLatest: mock.fn(), seal: mock.fn() };
     const fakeWriter = { appendEvent: mock.fn(), flush: mock.fn(), getEventCount: mock.fn() };
@@ -17,20 +17,12 @@ describe('Task 5: Wiring – handoffConfig in SessionSealer', () => {
       readAllEvents: mock.fn(),
       getSessionDir: mock.fn(() => '/tmp/test'),
     };
-    const fakeBudgetFn = () => 4096;
     const handoffConfig = {
       getBootstrapDepth: () => 'extractive',
       resolveProfile: async () => null,
     };
 
-    const sealer = new SessionSealer(
-      fakeChainStore,
-      fakeWriter,
-      fakeThreadStore,
-      fakeReader,
-      fakeBudgetFn,
-      handoffConfig,
-    );
+    const sealer = new SessionSealer(fakeChainStore, fakeWriter, fakeThreadStore, fakeReader, handoffConfig);
     assert.ok(sealer, 'SessionSealer constructed with handoffConfig');
   });
 
@@ -40,9 +32,7 @@ describe('Task 5: Wiring – handoffConfig in SessionSealer', () => {
     const fakeWriter = { appendEvent: mock.fn(), flush: mock.fn(), getEventCount: mock.fn() };
     const fakeThreadStore = { get: mock.fn() };
     const fakeReader = { readDigest: mock.fn() };
-    const fakeBudgetFn = () => 4096;
-
-    const sealer = new SessionSealer(fakeChainStore, fakeWriter, fakeThreadStore, fakeReader, fakeBudgetFn);
+    const sealer = new SessionSealer(fakeChainStore, fakeWriter, fakeThreadStore, fakeReader);
     assert.ok(sealer, 'SessionSealer constructed without handoffConfig');
   });
 });

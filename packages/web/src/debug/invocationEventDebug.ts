@@ -1,3 +1,4 @@
+import { apiFetch } from '../utils/api-client';
 import {
   clearPersistedDebugFlag,
   clearStorageKey,
@@ -15,6 +16,8 @@ import type {
   DebugDumpOptions,
   DebugDumpResult,
   DebugEventInput,
+  DebugExportOptions,
+  DebugExportResult,
   DebugStatus,
   DebugWindowApi,
   StoredDebugEvent,
@@ -105,7 +108,7 @@ function sanitizeEvent(input: DebugEventInput): StoredDebugEvent {
       continue;
     }
 
-    if (key === 'origin' && (value === 'stream' || value === 'callback')) {
+    if (key === 'origin' && (value === 'stream' || value === 'callback' || value === 'briefing')) {
       out.origin = value;
       continue;
     }
@@ -118,20 +121,45 @@ function sanitizeEvent(input: DebugEventInput): StoredDebugEvent {
         key === 'routeThreadId' ||
         key === 'storeThreadId' ||
         key === 'catId' ||
+        key === 'actorId' ||
         key === 'messageId' ||
-        key === 'invocationId') &&
+        key === 'existingMessageId' ||
+        key === 'incomingMessageId' ||
+        key === 'invocationId' ||
+        key === 'canonicalInvocationId' ||
+        key === 'bubbleKind' ||
+        key === 'eventType' ||
+        key === 'originPhase' ||
+        key === 'sourcePath' ||
+        key === 'recoveryAction' ||
+        key === 'violationKind') &&
       typeof value === 'string'
     ) {
       out[key] = value;
       continue;
     }
 
-    if (key === 'queueLength' && typeof value === 'number' && Number.isFinite(value)) {
-      out.queueLength = value;
+    if ((key === 'existingMessageId' || key === 'incomingMessageId') && value === null) {
+      out[key] = null;
       continue;
     }
 
-    if ((key === 'isFinal' || key === 'queuePaused' || key === 'hasActiveInvocation') && typeof value === 'boolean') {
+    if ((key === 'queueLength' || key === 'seq') && typeof value === 'number' && Number.isFinite(value)) {
+      out[key] = value;
+      continue;
+    }
+
+    if (key === 'seq' && value === null) {
+      out.seq = null;
+      continue;
+    }
+
+    if (key === 'level' && (value === 'warn' || value === 'error')) {
+      out.level = value;
+      continue;
+    }
+
+    if ((key === 'isFinal' || key === 'hasActiveInvocation') && typeof value === 'boolean') {
       out[key] = value;
     }
   }
@@ -185,6 +213,27 @@ function makeDumpResult(events: StoredDebugEvent[], rawThreadId: boolean): Debug
   };
 }
 
+async function exportDebugEventsToRuntime(options: DebugExportOptions = {}): Promise<DebugExportResult> {
+  const kind = options.kind ?? 'events';
+  const dump = kind === 'bubbleTimeline' ? dumpBubbleTimeline(options) : dumpDebugEvents(options);
+  const response = await apiFetch('/api/debug/invocation-events/export', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      kind,
+      ...(options.label ? { label: options.label } : {}),
+      dump,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`debug export failed (${response.status}): ${text}`);
+  }
+
+  return (await response.json()) as DebugExportResult;
+}
+
 export function configureDebug(input: DebugConfigureInput): DebugStatus {
   if (input.enabled === false) {
     resetToDisabled();
@@ -235,7 +284,9 @@ export function dumpDebugEvents(options: DebugDumpOptions = {}): DebugDumpResult
 
 export function dumpBubbleTimeline(options: DebugDumpOptions = {}): DebugDumpResult {
   const rawThreadId = options.rawThreadId === true;
-  const events = makeDumpEvents(rawThreadId).filter((item) => item.event === 'bubble_lifecycle');
+  const events = makeDumpEvents(rawThreadId).filter(
+    (item) => item.event === 'bubble_lifecycle' || item.event === 'bubble_invariant_violation',
+  );
   return makeDumpResult(events, rawThreadId);
 }
 
@@ -271,6 +322,7 @@ export function ensureWindowDebugApi() {
     },
     dump: (options?: DebugDumpOptions) => JSON.stringify(dumpDebugEvents(options), null, 2),
     dumpBubbleTimeline: (options?: DebugDumpOptions) => JSON.stringify(dumpBubbleTimeline(options), null, 2),
+    exportToRuntime: (options?: DebugExportOptions) => exportDebugEventsToRuntime(options),
     clear: () => {
       clearDebugEvents();
     },
@@ -353,6 +405,8 @@ export type {
   DebugDumpOptions,
   DebugDumpResult,
   DebugEventInput,
+  DebugExportOptions,
+  DebugExportResult,
   DebugStatus,
   StoredDebugEvent,
 } from './invocationEventDebug.types';

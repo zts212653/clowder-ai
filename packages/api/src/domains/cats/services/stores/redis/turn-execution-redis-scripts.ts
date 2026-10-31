@@ -1,0 +1,88 @@
+export const CREATE_TURN_EXECUTION_LUA = `
+local recordExists = redis.call('EXISTS', KEYS[1])
+local currentIdentity = redis.call('HGET', KEYS[1], 'immutableIdentity')
+if currentIdentity then
+  if currentIdentity == ARGV[1] then return 2 end
+  return 0
+end
+if recordExists == 1 then return -1 end
+
+redis.call('HSET', KEYS[1],
+  'immutableIdentity', ARGV[1],
+  'invocationId', ARGV[2],
+  'parentInvocationId', ARGV[3],
+  'threadId', ARGV[4],
+  'userId', ARGV[5],
+  'catId', ARGV[6],
+  'executionKind', ARGV[7],
+  'startedAt', ARGV[8],
+  'causal', ARGV[9],
+  'queueCompletionPolicy', ARGV[11] or '',
+  'providerLifecycleTracked', ARGV[12] or '',
+  'status', 'running',
+  'endedAt', '',
+  'terminalReason', '',
+  'outputFence', ARGV[10])
+redis.call('SADD', KEYS[2], ARGV[2])
+redis.call('SADD', KEYS[3], ARGV[2])
+return 1
+`;
+
+export const TERMINALIZE_TURN_EXECUTION_LUA = `
+local current = redis.call('HGET', KEYS[1], 'status')
+if not current then return -1 end
+if current ~= 'running' then return 0 end
+
+redis.call('HSET', KEYS[1],
+  'status', ARGV[1],
+  'endedAt', ARGV[2],
+  'terminalReason', ARGV[3])
+if ARGV[5] and ARGV[5] ~= '' then redis.call('HSET', KEYS[1], 'providerTeardownAt', ARGV[5]) end
+redis.call('SREM', KEYS[2], ARGV[4])
+redis.call('SADD', KEYS[3], ARGV[4])
+return 1
+`;
+
+export const BIND_TURN_EXECUTION_COVERAGE_LUA = `
+local immutableIdentity = redis.call('HGET', KEYS[1], 'immutableIdentity')
+if not immutableIdentity then return -1 end
+local currentCoverage = redis.call('HGET', KEYS[1], 'coveredMessageIds')
+local currentCoverageIdentity = redis.call('HGET', KEYS[1], 'coveredMessageIdsIdentity')
+if currentCoverage then
+  if currentCoverageIdentity == ARGV[2] and currentCoverage == ARGV[1] then return 2 end
+  return 0
+end
+if currentCoverageIdentity then return -1 end
+
+redis.call('HSET', KEYS[1],
+  'coveredMessageIds', ARGV[1],
+  'coveredMessageIdsIdentity', ARGV[2])
+return 1
+`;
+
+/**
+ * F117 KD-21: a gated fence's verdict only moves forward (gated → allowed → rejected). An open
+ * child, and a record written before the fence existed (no outputFence field), stay as they are.
+ */
+export const SETTLE_TURN_OUTPUT_FENCE_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+local current = redis.call('HGET', KEYS[1], 'outputFence')
+if not current or current == 'open' then return 2 end
+local rank = { gated = 0, allowed = 1, rejected = 2 }
+if rank[current] == nil or rank[ARGV[1]] == nil then return -1 end
+if rank[ARGV[1]] > rank[current] then
+  redis.call('HSET', KEYS[1], 'outputFence', ARGV[1])
+  return 1
+end
+return 2
+`;
+
+export const ADVANCE_TURN_PROVIDER_LUA = `
+local started = redis.call('HGET', KEYS[1], 'startedAt')
+if not started or tonumber(ARGV[2]) < tonumber(started) then return 0 end
+if ARGV[1] == 'providerStartedAt' then
+  if redis.call('HGET', KEYS[1], 'status') ~= 'running' or redis.call('HGET', KEYS[1], 'providerLifecycleTracked') ~= '1' then return 0 end
+end
+redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2])
+return 1
+`;

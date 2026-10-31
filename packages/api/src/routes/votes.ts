@@ -11,6 +11,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
+import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 const log = createModuleLogger('routes/votes');
 
@@ -41,9 +42,8 @@ const castVoteSchema = z.object({
   option: z.string().min(1).max(100),
 });
 
-function resolveUserId(request: { headers: Record<string, string | string[] | undefined> }): string {
-  const header = request.headers['x-cat-cafe-user'];
-  return (Array.isArray(header) ? header[0] : header) ?? 'anonymous';
+function resolveUserId(request: import('fastify').FastifyRequest): string {
+  return resolveHeaderUserId(request) ?? 'anonymous';
 }
 
 /** Phase 2: In-memory timeout timers. Cleared on close/auto-close. Lost on restart (acceptable). */
@@ -92,8 +92,8 @@ export async function closeVoteInternal(
   if (messageStore) {
     try {
       const stored = await messageStore.append({
+        from: { kind: 'system', service: 'vote' },
         userId: votingState.createdBy,
-        catId: null,
         content: `投票结果: ${votingState.question}`,
         mentions: [],
         timestamp: Date.now(),
@@ -105,6 +105,7 @@ export async function closeVoteInternal(
         threadId,
         message: {
           id: stored.id,
+          from: stored.from,
           type: 'connector',
           content: stored.content,
           source: VOTE_RESULT_SOURCE,
@@ -290,8 +291,8 @@ export const voteRoutes: FastifyPluginAsync<VoteRoutesOptions> = async (app, opt
       if (messageStore) {
         try {
           const stored = await messageStore.append({
+            from: { kind: 'system', service: 'vote' },
             userId: 'system',
-            catId: null,
             content: `投票结果: ${votingState.question}`,
             mentions: [],
             timestamp: Date.now(),
@@ -303,6 +304,7 @@ export const voteRoutes: FastifyPluginAsync<VoteRoutesOptions> = async (app, opt
             threadId,
             message: {
               id: stored.id,
+              from: stored.from,
               type: 'connector',
               content: stored.content,
               source: VOTE_RESULT_SOURCE,
@@ -399,8 +401,8 @@ export const voteRoutes: FastifyPluginAsync<VoteRoutesOptions> = async (app, opt
     if (messageStore) {
       try {
         const stored = await messageStore.append({
+          from: { kind: 'system', service: 'vote' },
           userId: result.createdBy,
-          catId: null,
           content: `投票结果: ${result.question}`,
           mentions: [],
           timestamp: Date.now(),
@@ -412,6 +414,7 @@ export const voteRoutes: FastifyPluginAsync<VoteRoutesOptions> = async (app, opt
           threadId,
           message: {
             id: stored.id,
+            from: stored.from,
             type: 'connector',
             content: stored.content,
             source: VOTE_RESULT_SOURCE,

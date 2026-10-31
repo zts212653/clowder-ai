@@ -12,7 +12,7 @@ created: 2026-02-26
 > **Created**: 2026-02-26
 
 ## Why
-- 2026-02-14 team lead亲历
+- 2026-02-14 operator亲历
 
 ## What
 - **F27**: ae873cd — callback enqueue to worklist，统一单路径 + 共享 AbortController + 多目标 mention。已合入 main。Bug report: 2026-02-14-a2a-feedback-loop

@@ -1,0 +1,103 @@
+/**
+ * Config Secrets Route — Host configuration
+ *
+ * POST /api/config/secrets — write Host web-push credentials.
+ * Allowlist-gated, loopback-guarded, audit-logged (keys only, never values).
+ */
+
+import { resolve } from 'node:path';
+import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import { applyHostSecretUpdates } from '../config/host-secret-updater.js';
+import { requireOwnerWrite, resolveSessionUserId, validateHostSecretUpdate } from '../config/owner-write-guards.js';
+import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
+import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
+import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
+
+const secretsPatchSchema = z.object({
+  updates: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        value: z.string().nullable(),
+      }),
+    )
+    .min(1),
+});
+
+interface ConfigSecretsRoutesOptions {
+  auditLog?: {
+    append(input: { type: string; data: Record<string, unknown> }): Promise<unknown>;
+  };
+  envFilePath?: string;
+  skipLoopbackCheck?: boolean;
+}
+
+function validateSecretUpdate(update: { name: string; value: string | null }): string | null {
+  return validateHostSecretUpdate(update);
+}
+
+export async function configSecretsRoutes(app: FastifyInstance, opts: ConfigSecretsRoutesOptions = {}): Promise<void> {
+  const auditLog = opts.auditLog ?? getEventAuditLog();
+  const projectRoot = resolveActiveProjectRoot();
+  const envFilePath = opts.envFilePath ?? resolve(projectRoot, '.env');
+
+  app.post('/api/config/secrets', async (request, reply) => {
+    // Loopback guard — reject proxied requests where request.ip is loopback
+    // but the actual client is remote (reverse proxy / Tailscale sidecar).
+    if (!opts.skipLoopbackCheck && !isDirectLoopbackRequest(request)) {
+      reply.status(403);
+      return { error: 'Secrets endpoint is loopback-only' };
+    }
+
+    const parsed = secretsPatchSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request', details: parsed.error.issues };
+    }
+
+    const operator = resolveSessionUserId(request);
+    if (!operator) {
+      reply.status(401);
+      return { error: 'Identity required (session cookie)' };
+    }
+
+    const ownerError = requireOwnerWrite(operator);
+    if (ownerError) {
+      reply.status(ownerError.status);
+      return { error: ownerError.error };
+    }
+
+    // Allowlist validation
+    const updates = new Map<string, string | null>();
+    for (const update of parsed.data.updates) {
+      const validationError = validateSecretUpdate(update);
+      if (validationError) {
+        reply.status(400);
+        return { error: validationError };
+      }
+      updates.set(update.name, update.value);
+    }
+
+    await applyHostSecretUpdates(
+      [...updates.entries()].map(([name, value]) => ({ name, value })),
+      { envFilePath },
+    );
+
+    // Audit log — keys only, never values
+    try {
+      await auditLog.append({
+        type: AuditEventTypes.CONFIG_UPDATED,
+        data: {
+          target: 'secrets',
+          keys: [...updates.keys()],
+          operator,
+        },
+      });
+    } catch (err) {
+      request.log.warn({ err, keys: [...updates.keys()] }, 'secrets config audit append failed');
+    }
+
+    return { ok: true };
+  });
+}

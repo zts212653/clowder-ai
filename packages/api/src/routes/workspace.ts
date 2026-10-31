@@ -1,3 +1,4 @@
+import { isLocalHumanFileActionRequest } from './media-file-actions.js';
 /**
  * Workspace Explorer Routes — F063
  *
@@ -9,19 +10,39 @@
  * GET  /api/workspace/diff         — git diff for worktree (changed files + unified diff)
  * POST /api/workspace/linked-roots  — add a linked root (name + path)
  * DELETE /api/workspace/linked-roots — remove a linked root by id
- * POST /api/workspace/reveal         — open file in system file manager (Finder/Explorer)
  * POST /api/workspace/navigate       — F131: cat-initiated workspace panel navigation
+ * POST /api/workspace/resolve-document-link — F063: absolute local link → typed target
  *
  * Edit routes: see workspace-edit.ts
  */
 
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { dirname, extname, join, relative } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
-import type { FastifyPluginAsync } from 'fastify';
+import type { CallbackPrincipal } from '@cat-cafe/shared';
+import { isAbsoluteFilesystemPath, normalizeWorkspaceRelativePath } from '@cat-cafe/shared/utils';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { type EventAuditLog, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import {
+  type SkillConsumptionReceiptService,
+  type SkillConsumptionScope,
+  type SkillConsumptionVerificationFailure,
+  WORKSPACE_NAVIGATOR_CONSUMER_ID,
+} from '../domains/cats/services/tool-usage/SkillConsumptionReceiptService.js';
+import type { PullRequestChangesDependencies } from '../domains/workspace/pull-request-changes.js';
+import { canonicalLinkedRootId, readLinkedRootState } from '../domains/workspace/roots/workspace-linked-root-store.js';
+import { readWorkspaceFileMetadata } from '../domains/workspace/workspace-file-metadata.js';
+import { guessMime, readWorkspaceFilePreview } from '../domains/workspace/workspace-file-read.js';
+import type { WorkspaceNavigationEmitter } from '../domains/workspace/workspace-navigation-delivery.js';
+import {
+  resolveWorkspacePathLinkHref,
+  WorkspacePathNotFoundError,
+  WorkspacePathNotRegisteredError,
+} from '../domains/workspace/workspace-path-resolution.js';
+import { searchWorkspace } from '../domains/workspace/workspace-search.js';
 import {
   addLinkedRoot,
   getLinkedRootsAsync,
@@ -30,55 +51,69 @@ import {
   listWorktrees,
   registerWorktrees,
   removeLinkedRoot,
-  resolveWorkspacePath,
+  resolveWorkspaceFilesystemPath,
   WorkspaceSecurityError,
 } from '../domains/workspace/workspace-security.js';
+import {
+  canonicalWorkspaceIdentityRoot,
+  durableIdForCanonicalRoot,
+} from '../domains/workspace/workspace-worktree-identity.js';
+import { resolveDirectLocalAuthorizationUserId, resolveSessionUserId } from '../utils/request-identity.js';
+import {
+  type AgentKeyAuthRegistry,
+  type CallbackAuthRegistry,
+  registerCallbackAuthHook,
+} from './callback-auth-prehandler.js';
+import { resolvePrincipalThread } from './callback-scope-helpers.js';
+import { registerWorkspaceMediaFileActions } from './local-media-file-actions.js';
+import { registerChatChanges } from './workspace-chat-changes.js';
+import { registerWorkspaceChatReferences } from './workspace-chat-references.js';
+import { parseWorkspaceChangedFiles } from './workspace-diff.js';
+import { workspaceDirectHuman } from './workspace-direct-human.js';
+import { registerWorkspaceFileActions } from './workspace-file-actions.js';
+import { registerWorkspaceFileDownload } from './workspace-file-download.js';
+import { sendWorkspaceFileBytes } from './workspace-file-response.js';
+import { registerWorkspaceFileSourceRoutes } from './workspace-file-source-routes.js';
+import { registerWorkspaceHtmlPreviewRoutes } from './workspace-html-preview.js';
+import {
+  handleWorkspaceNavigateBody,
+  parseWorkspaceNavigateBody,
+  type ResolveWorktreeIdByPathForNavigate,
+  type WorkspaceNavigateBody,
+} from './workspace-navigate-handler.js';
+import { registerWorkspacePullRequestChangesRoutes } from './workspace-pull-request-changes.js';
+import { registerWorkspaceRootConnectionRoutes } from './workspace-root-connection-routes.js';
 
 const execFileAsync = promisify(execFile);
 const MAX_FILE_SIZE = 1024 * 1024; // 1 MB text preview
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB image preview
+const MAX_IMAGE_AUDIO_SIZE = 10 * 1024 * 1024; // 10 MB image/audio preview
 const MAX_SEARCH_RESULTS = 100;
 const MAX_TREE_DEPTH = 5;
 
-const MIME_MAP: Record<string, string> = {
-  '.ts': 'text/typescript',
-  '.tsx': 'text/tsx',
-  '.js': 'text/javascript',
-  '.jsx': 'text/jsx',
-  '.json': 'application/json',
-  '.md': 'text/markdown',
-  '.css': 'text/css',
-  '.html': 'text/html',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.ico': 'image/x-icon',
-  '.yaml': 'text/yaml',
-  '.yml': 'text/yaml',
-  '.toml': 'text/toml',
-  '.sh': 'text/x-shellscript',
-  '.py': 'text/x-python',
-  // Audio
-  '.mp3': 'audio/mpeg',
-  '.wav': 'audio/wav',
-  '.m4a': 'audio/mp4',
-  '.ogg': 'audio/ogg',
-  '.flac': 'audio/flac',
-  // Video
-  '.mp4': 'video/mp4',
-  '.webm': 'video/webm',
-  '.mov': 'video/quicktime',
-};
-
-function guessMime(filepath: string): string {
-  return MIME_MAP[extname(filepath)] ?? 'text/plain';
-}
-
-function sha256(content: string): string {
-  return createHash('sha256').update(content).digest('hex');
+async function resolveDocumentLinkRouteResult(href: string): Promise<{
+  statusCode: number;
+  body: unknown;
+}> {
+  try {
+    return { statusCode: 200, body: await resolveWorkspacePathLinkHref(href) };
+  } catch (error) {
+    if (!(error instanceof WorkspaceSecurityError)) {
+      return { statusCode: 500, body: { code: 'PATH_RESOLUTION_FAILED' } };
+    }
+    if (error instanceof WorkspacePathNotRegisteredError) {
+      return { statusCode: 404, body: { code: 'PATH_NOT_IN_REGISTERED_WORKSPACE' } };
+    }
+    if (error instanceof WorkspacePathNotFoundError) {
+      return { statusCode: 404, body: { code: 'PATH_NOT_FOUND' } };
+    }
+    if (error.code === 'DENIED' || error.code === 'TRAVERSAL') {
+      return { statusCode: 403, body: { code: 'PATH_ACCESS_DENIED' } };
+    }
+    return {
+      statusCode: error.code === 'NOT_FOUND' ? 404 : 500,
+      body: { code: 'PATH_RESOLUTION_FAILED' },
+    };
+  }
 }
 
 interface TreeNode {
@@ -88,7 +123,12 @@ interface TreeNode {
   children?: TreeNode[];
 }
 
-const SKIP_DIRS = new Set(['node_modules', '.next', 'dist', '.git', '.turbo', 'coverage']);
+const SKIP_DIRS = new Set(['node_modules', '.next', 'dist', '.git', '.turbo', 'coverage', '.claude']);
+
+/** The tree listing's own visibility rule: dot entries (except .claude/.kimi) and SKIP_DIRS are not shown. */
+function hiddenFromTree(name: string): boolean {
+  return (name.startsWith('.') && name !== '.claude' && name !== '.kimi-code') || SKIP_DIRS.has(name);
+}
 
 async function buildTree(root: string, dirPath: string, depth: number, maxDepth: number): Promise<TreeNode[]> {
   if (depth >= maxDepth) return [];
@@ -102,11 +142,10 @@ async function buildTree(root: string, dirPath: string, depth: number, maxDepth:
   });
 
   for (const entry of sorted) {
-    if (entry.name.startsWith('.') && entry.name !== '.claude') continue;
-    if (SKIP_DIRS.has(entry.name)) continue;
+    if (hiddenFromTree(entry.name)) continue;
 
     const fullPath = join(dirPath, entry.name);
-    const relPath = relative(root, fullPath);
+    const relPath = normalizeWorkspaceRelativePath(relative(root, fullPath));
 
     if (entry.isDirectory()) {
       if (depth + 1 >= maxDepth) {
@@ -124,16 +163,144 @@ async function buildTree(root: string, dirPath: string, depth: number, maxDepth:
   return nodes;
 }
 
-interface WorkspaceRouteOpts {
-  socketEmit?: (event: string, data: unknown, room: string) => void;
+interface WorkspaceRouteOpts extends WorkspaceNavigationEmitter {
+  pullRequestChangesDependencies?: PullRequestChangesDependencies;
+  auditLog?: EventAuditLog;
+  resolveWorktreeIdByPathForNavigate?: ResolveWorktreeIdByPathForNavigate;
+  callbackRegistry?: CallbackAuthRegistry;
+  agentKeyRegistry?: AgentKeyAuthRegistry;
+  threadStore?: Pick<IThreadStore, 'get' | 'list'>;
+  skillConsumptionReceipts?: SkillConsumptionReceiptService;
+}
+
+function resolveWorkspaceInteractiveUserId(request: FastifyRequest): string | null {
+  return resolveSessionUserId(request) ?? resolveDirectLocalAuthorizationUserId(request);
+}
+
+type WorkspaceNavigatePrincipal = CallbackPrincipal | { kind: 'interactive'; userId: string };
+
+function resolveWorkspaceNavigatePrincipal(request: FastifyRequest): WorkspaceNavigatePrincipal | null {
+  if (request.callbackPrincipal) return request.callbackPrincipal;
+  const userId = resolveWorkspaceInteractiveUserId(request);
+  return userId ? { kind: 'interactive', userId } : null;
+}
+
+function skillConsumptionScope(principal: Extract<CallbackPrincipal, { kind: 'invocation' }>): SkillConsumptionScope {
+  return {
+    userId: principal.userId,
+    threadId: principal.threadId,
+    invocationId: principal.invocationId,
+    catId: principal.catId,
+  };
+}
+
+function skillConsumptionFailureStatus(reason: SkillConsumptionVerificationFailure): number {
+  if (reason === 'expired') return 410;
+  if (reason === 'source_revision_changed' || reason === 'already_consumed') return 409;
+  return 404;
+}
+
+function workspaceDeliveryStatus(value: unknown): 'applied' | 'queued' | 'blocked' | 'unconfirmed' | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = (value as { deliveryStatus?: unknown }).deliveryStatus;
+  return candidate === 'applied' || candidate === 'queued' || candidate === 'blocked' || candidate === 'unconfirmed'
+    ? candidate
+    : null;
+}
+
+type SkillConsumptionContext = {
+  handle: string;
+  principal: Extract<CallbackPrincipal, { kind: 'invocation' }>;
+  receipts: SkillConsumptionReceiptService;
+};
+
+type SkillConsumptionPreflight =
+  | { ok: true; context?: SkillConsumptionContext }
+  | { ok: false; statusCode: number; body: Record<string, string> };
+
+async function preflightSkillConsumption(
+  body: WorkspaceNavigateBody,
+  principal: WorkspaceNavigatePrincipal,
+  receipts: SkillConsumptionReceiptService | undefined,
+): Promise<SkillConsumptionPreflight> {
+  const handle = body.skillConsumptionHandle;
+  if (!handle) return { ok: true };
+  if (principal.kind !== 'invocation') {
+    return {
+      ok: false,
+      statusCode: 409,
+      body: { error: 'carrier_unsupported', reason: 'same_invocation_receipt_requires_invocation_auth' },
+    };
+  }
+  if (body.threadId !== undefined && body.threadId !== principal.threadId) {
+    return { ok: false, statusCode: 409, body: { error: 'scope_mismatch' } };
+  }
+  if (!receipts) {
+    return { ok: false, statusCode: 503, body: { error: 'skill_consumption_receipt_unavailable' } };
+  }
+  if (body.action !== 'open') {
+    return { ok: false, statusCode: 409, body: { error: 'consumer_mismatch' } };
+  }
+  const verified = await receipts.verifyPrepared(
+    handle,
+    skillConsumptionScope(principal),
+    WORKSPACE_NAVIGATOR_CONSUMER_ID,
+  );
+  if (!verified.ok) {
+    return { ok: false, statusCode: skillConsumptionFailureStatus(verified.reason), body: { error: verified.reason } };
+  }
+  return { ok: true, context: { handle, principal, receipts } };
+}
+
+async function attachSkillConsumptionReceipt(
+  result: { statusCode: number; body: unknown },
+  context: SkillConsumptionContext | undefined,
+): Promise<{ statusCode: number; body: unknown }> {
+  if (!context || result.statusCode !== 200) return result;
+  const deliveryStatus = workspaceDeliveryStatus(result.body);
+  if (!deliveryStatus) {
+    return { statusCode: 500, body: { error: 'skill_consumption_outcome_unavailable' } };
+  }
+  const recorded = await context.receipts.recordApplied({
+    handle: context.handle,
+    scope: skillConsumptionScope(context.principal),
+    outcome: { kind: 'workspace_navigation_delivery.v1', deliveryStatus },
+  });
+  if (!recorded.ok) {
+    return {
+      statusCode: skillConsumptionFailureStatus(recorded.reason),
+      body: { error: recorded.reason },
+    };
+  }
+  return {
+    statusCode: result.statusCode,
+    body: { ...(result.body as Record<string, unknown>), skillConsumptionReceipt: recorded.receipt },
+  };
 }
 
 export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (app, opts) => {
+  registerWorkspaceChatReferences(app, resolveWorkspaceInteractiveUserId, opts.threadStore);
+  registerWorkspaceFileActions(app, resolveWorkspaceInteractiveUserId);
+  registerWorkspaceFileDownload(app, resolveWorkspaceInteractiveUserId);
+  registerChatChanges(app, resolveWorkspaceInteractiveUserId, opts.threadStore, opts.pullRequestChangesDependencies);
+  registerWorkspaceMediaFileActions(app);
+  const auditLog = opts.auditLog ?? getEventAuditLog();
+  if (opts.callbackRegistry) {
+    registerCallbackAuthHook(app, opts.callbackRegistry, { agentKeyRegistry: opts.agentKeyRegistry });
+  }
+  registerWorkspaceFileSourceRoutes(app, resolveWorkspaceInteractiveUserId);
+  registerWorkspaceHtmlPreviewRoutes(app, resolveWorkspaceInteractiveUserId);
+  registerWorkspacePullRequestChangesRoutes(
+    app,
+    resolveWorkspaceInteractiveUserId,
+    opts.pullRequestChangesDependencies,
+  );
+  registerWorkspaceRootConnectionRoutes(app, resolveWorkspaceInteractiveUserId);
   // GET /api/workspace/worktrees (includes linked roots)
   app.get<{ Querystring: { repoRoot?: string } }>('/api/workspace/worktrees', async (request, reply) => {
     const { repoRoot } = request.query;
     if (repoRoot) {
-      if (!repoRoot.startsWith('/')) {
+      if (!isAbsoluteFilesystemPath(repoRoot)) {
         reply.status(400);
         return { error: 'repoRoot must be an absolute path' };
       }
@@ -149,10 +316,27 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
     // Prefix foreign repo worktree IDs with a short hash to prevent cross-repo collision
     if (repoRoot) {
       const prefix = createHash('sha256').update(repoRoot).digest('hex').slice(0, 6);
-      for (const e of entries) e.id = `${prefix}_${e.id}`;
+      for (const e of entries) {
+        const canonicalId = e.id;
+        e.id = `${prefix}_${canonicalId}`;
+        e.canonicalId = canonicalId;
+      }
     }
     const linked = await getLinkedRootsAsync();
-    const all = [...entries, ...linked];
+    const rootState = readLinkedRootState();
+    const all = await Promise.all(
+      [...entries, ...linked].map(async (entry) => {
+        const resolvedRoot = await canonicalWorkspaceIdentityRoot(entry);
+        return {
+          ...entry,
+          // Discovery relates a display alias to the existing F063 owner; it grants no filesystem access.
+          rootIdentity: resolvedRoot ? durableIdForCanonicalRoot(resolvedRoot) : undefined,
+          ...(resolvedRoot
+            ? { resolvedRoot, rootEpoch: rootState.rootEpochs[canonicalLinkedRootId(resolvedRoot)] ?? 0 }
+            : {}),
+        };
+      }),
+    );
     registerWorktrees(all);
     return { worktrees: all };
   });
@@ -171,17 +355,41 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
 
     try {
       const root = await getWorktreeRoot(worktreeId);
-      const resolved = subpath ? await resolveWorkspacePath(root, subpath) : root;
+      const resolved = subpath ? await resolveWorkspaceFilesystemPath(root, subpath) : root;
       const tree = await buildTree(root, resolved, 0, depth);
-      return { root: subpath || '.', worktreeId, tree };
+      if (!subpath) return { root: '.', worktreeId, tree };
+      const normalized = normalizeWorkspaceRelativePath(subpath);
+      // A listable sub-path the parent listing would still leave out: the answer a caller can show as a reason.
+      const hidden = normalized.split('/').some((segment) => segment !== '.' && hiddenFromTree(segment));
+      return { root: normalized, worktreeId, tree, hiddenFromTree: hidden };
     } catch (e) {
       if (e instanceof WorkspaceSecurityError) {
         reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
         return { error: e.message };
       }
+      // Path resolution tolerates a missing target (writes create it); a listing of one is simply absent.
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+        reply.status(404);
+        return { error: 'Path not found' };
+      }
       reply.status(500);
       return { error: 'Internal error' };
     }
+  });
+
+  app.post<{ Body: { href?: unknown } }>('/api/workspace/resolve-document-link', async (request, reply) => {
+    if (!resolveWorkspaceInteractiveUserId(request)) {
+      reply.status(401);
+      return { code: 'AUTHENTICATION_REQUIRED' };
+    }
+    const { href } = request.body ?? {};
+    if (typeof href !== 'string' || href.trim().length === 0) {
+      reply.status(400);
+      return { code: 'INVALID_HREF' };
+    }
+    const result = await resolveDocumentLinkRouteResult(href);
+    reply.status(result.statusCode);
+    return result.body;
   });
 
   // GET /api/workspace/file?worktreeId=&path=
@@ -196,7 +404,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
 
     try {
       const root = await getWorktreeRoot(worktreeId);
-      const resolved = await resolveWorkspacePath(root, filePath);
+      const resolved = await resolveWorkspaceFilesystemPath(root, filePath);
       const fileStat = await stat(resolved);
 
       if (fileStat.isDirectory()) {
@@ -204,32 +412,23 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
         return { error: 'Path is a directory' };
       }
 
-      const mime = guessMime(resolved);
-      const isBinary = mime.startsWith('image/') || mime.startsWith('audio/') || mime.startsWith('video/');
-
-      if (isBinary) {
-        return {
-          path: filePath,
-          content: '',
-          sha256: '',
-          size: fileStat.size,
-          mime,
-          truncated: false,
-          binary: true,
-        };
-      }
-
-      const truncated = fileStat.size > MAX_FILE_SIZE;
-      const content = await readFile(resolved, 'utf-8');
-      const displayContent = truncated ? content.slice(0, MAX_FILE_SIZE) : content;
+      // Memory-bounded read: never pulls more than MAX_FILE_SIZE into a string.
+      // Binary detection (known media MIME + NUL-byte content sniff) and the
+      // hashing policy live in the shared helper, so this route and the
+      // file-watcher classify files identically (F063 OOM fix).
+      const preview = await readWorkspaceFilePreview(resolved, { maxBytes: MAX_FILE_SIZE });
+      const office = /\.(?:pptx?|docx?|xlsx?)$/i.test(filePath) ? await readWorkspaceFileMetadata(resolved) : null;
 
       return {
         path: filePath,
-        content: displayContent,
-        sha256: sha256(content),
-        size: fileStat.size,
-        mime,
-        truncated,
+        absolutePath: resolved,
+        content: preview.content,
+        sha256: preview.sha256,
+        size: preview.size,
+        mime: preview.mime,
+        truncated: preview.truncated,
+        binary: preview.binary,
+        ...(office ? { ...office, content: '', sha256: '', binary: true, truncated: false } : {}),
       };
     } catch (e) {
       if (e instanceof WorkspaceSecurityError) {
@@ -257,7 +456,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
 
     try {
       const root = await getWorktreeRoot(worktreeId);
-      const resolved = await resolveWorkspacePath(root, filePath);
+      const resolved = await resolveWorkspaceFilesystemPath(root, filePath);
       const fileStat = await stat(resolved);
 
       if (fileStat.isDirectory()) {
@@ -271,14 +470,11 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
         reply.status(400);
         return { error: 'Raw endpoint only serves image, audio, and video files' };
       }
-      if (fileStat.size > MAX_IMAGE_SIZE) {
+      if (!mime.startsWith('video/') && fileStat.size > MAX_IMAGE_AUDIO_SIZE) {
         reply.status(413);
         return { error: `File too large (${Math.round(fileStat.size / 1024 / 1024)}MB, max 10MB)` };
       }
-      reply.header('Content-Type', mime);
-      reply.header('Content-Length', fileStat.size);
-      reply.header('Cache-Control', 'private, max-age=60');
-      return reply.send(createReadStream(resolved));
+      return sendWorkspaceFileBytes(request, reply, resolved, fileStat.size, mime);
     } catch (e) {
       if (e instanceof WorkspaceSecurityError) {
         reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
@@ -307,161 +503,43 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       return { error: 'Query too long (max 200 chars)' };
     }
 
-    const limit = Math.min(rawLimit ?? 50, MAX_SEARCH_RESULTS);
+    const requestedLimit = rawLimit ?? 50;
+    if (!Number.isInteger(requestedLimit) || requestedLimit < 1) {
+      reply.status(400);
+      return { error: 'limit must be a positive integer' };
+    }
+    const limit = Math.min(requestedLimit, MAX_SEARCH_RESULTS);
 
     try {
       const root = await getWorktreeRoot(worktreeId);
 
-      if (type === 'filename') {
-        // List all non-excluded files, then post-filter on the *relative* path.
-        // We avoid using find's -path for the query because it matches against
-        // the absolute path — if the worktree root itself contains the query
-        // string, nearly every file would match (P2 from cloud review).
-        const { stdout } = await execFileAsync(
-          'find',
-          [
-            root,
-            '-type',
-            'f',
-            '-not',
-            '-path',
-            '*/node_modules/*',
-            '-not',
-            '-path',
-            '*/.git/*',
-            '-not',
-            '-path',
-            '*/.next/*',
-            '-not',
-            '-path',
-            '*/dist/*',
-            '-not',
-            '-path',
-            '*/secrets/*',
-            '-not',
-            '-name',
-            '.env*',
-            '-not',
-            '-name',
-            '*.pem',
-            '-not',
-            '-name',
-            '*.key',
-            '-not',
-            '-name',
-            'id_rsa*',
-          ],
-          { timeout: 5000, maxBuffer: 1024 * 1024 },
-        );
-
-        const lowerQuery = query.toLowerCase();
-        const results = stdout
-          .trim()
-          .split('\n')
-          .filter(Boolean)
-          .map((fullPath) => relative(root, fullPath))
-          .filter((relPath) => !isDenylisted(relPath) && relPath.toLowerCase().includes(lowerQuery))
-          .slice(0, limit)
-          .map((relPath) => ({
-            path: relPath,
-            line: 0,
-            content: '',
-            contextBefore: '',
-            contextAfter: '',
-          }));
-
-        return { query, results, totalMatches: results.length, truncated: false };
-      }
-
-      // Content search using grep -rn with context
-      let grepOutput = '';
-      try {
-        const { stdout } = await execFileAsync(
-          'grep',
-          [
-            '-rn',
-            '-B2',
-            '-A2',
-            '--include=*.ts',
-            '--include=*.tsx',
-            '--include=*.js',
-            '--include=*.jsx',
-            '--include=*.json',
-            '--include=*.md',
-            '--include=*.css',
-            '--include=*.html',
-            '--include=*.yaml',
-            '--include=*.yml',
-            query,
-            root,
-          ],
-          { timeout: 10000, maxBuffer: 5 * 1024 * 1024 },
-        );
-        grepOutput = stdout;
-      } catch {
-        // grep exits 1 when no matches — that's fine
-      }
-
-      const results: Array<{
-        path: string;
-        line: number;
-        content: string;
-        contextBefore: string;
-        contextAfter: string;
-      }> = [];
-
-      const groups = grepOutput.split('--\n');
-      for (const group of groups) {
-        if (results.length >= limit) break;
-        const lines = group.trim().split('\n').filter(Boolean);
-
-        // Find the actual match line (not context lines which use -)
-        const matchLine = lines.find((l) => {
-          const m = l.match(/^(.+?):(\d+):/);
-          return m != null;
-        });
-        if (!matchLine) continue;
-
-        const match = matchLine.match(/^(.+?):(\d+):(.*)$/);
-        if (!match) continue;
-
-        const [, fullPath, lineStr, content] = match;
-        const relPath = relative(root, fullPath!);
-
-        if (relPath.includes('node_modules') || relPath.includes('.git') || isDenylisted(relPath)) continue;
-
-        const matchIdx = lines.indexOf(matchLine);
-        const beforeLines = lines.slice(0, matchIdx);
-        const afterLines = lines.slice(matchIdx + 1);
-
-        results.push({
-          path: relPath,
-          line: parseInt(lineStr!, 10),
-          content: content?.trim(),
-          contextBefore: beforeLines.map((l) => l.replace(/^.+?:\d+[:-]/, '')).join('\n'),
-          contextAfter: afterLines.map((l) => l.replace(/^.+?:\d+[:-]/, '')).join('\n'),
-        });
-      }
+      const { results, truncated } = await searchWorkspace(
+        root,
+        query,
+        type === 'filename' ? 'filename' : 'content',
+        limit,
+      );
 
       return {
         query,
         results,
         totalMatches: results.length,
-        truncated: results.length >= limit,
+        truncated,
       };
     } catch (e) {
       if (e instanceof WorkspaceSecurityError) {
         reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
         return { error: e.message };
       }
+      request.log.error({ err: e }, 'workspace search failed');
       reply.status(500);
       return { error: 'Internal error' };
     }
   });
 
-  // GET /api/workspace/diff?worktreeId=&path= — git diff (all changed files or single file)
+  // GET /api/workspace/diff?worktreeId=&path=&view=files — file list or full patch
   app.get<{
-    Querystring: { worktreeId?: string; path?: string };
+    Querystring: { worktreeId?: string; path?: string; view?: 'files' };
   }>('/api/workspace/diff', async (request, reply) => {
     const { worktreeId, path: filePath } = request.query;
     if (!worktreeId) {
@@ -478,31 +556,19 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
         timeout: 5000,
       });
 
-      const changedFiles = statusOut
-        .trim()
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => {
-          const status = line.slice(0, 2).trim();
-          let path = line.slice(3);
-          // Normalize rename paths: "old.ts -> new.ts" → "new.ts"
-          // Only apply for rename (R) or copy (C) statuses to avoid
-          // misparsing filenames that literally contain " -> "
-          if ((status.startsWith('R') || status.startsWith('C')) && path.includes(' -> ')) {
-            path = path.slice(path.indexOf(' -> ') + 4);
-          }
-          return { status, path };
-        })
-        .filter((f) => !isDenylisted(f.path));
+      const changedFiles = parseWorkspaceChangedFiles(statusOut).filter((file) => !isDenylisted(file.path));
 
       // Build pathspec: only diff allowed (non-denylisted) files
       // P0 security: git diff without pathspec would leak .env/.pem/.key content
       const allowedPaths = changedFiles.map((f) => f.path);
       if (filePath) {
-        await resolveWorkspacePath(root, filePath); // security check
+        await resolveWorkspaceFilesystemPath(root, filePath); // security check
         if (!allowedPaths.includes(filePath)) {
           return { worktreeId, changedFiles, diff: '' };
         }
+      }
+      if (request.query.view === 'files') {
+        return { worktreeId, changedFiles, diff: '' };
       }
       const pathspec = filePath ? [filePath] : allowedPaths;
 
@@ -538,7 +604,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
 
       for (const uf of targetUntracked) {
         try {
-          await resolveWorkspacePath(root, uf.path); // security check
+          await resolveWorkspaceFilesystemPath(root, uf.path); // security check
           // Use relative path so diff headers match changedFiles.path entries
           const { stdout } = await execFileAsync(
             'git',
@@ -568,6 +634,8 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
   app.post<{
     Body: { name?: string; path?: string };
   }>('/api/workspace/linked-roots', async (request, reply) => {
+    if (!workspaceDirectHuman(request, resolveWorkspaceInteractiveUserId))
+      return reply.code(401).send({ error: 'identity_required' });
     const { name, path: rootPath } = request.body ?? {};
     if (!name || !rootPath) {
       reply.status(400);
@@ -592,94 +660,126 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
 
   // DELETE /api/workspace/linked-roots?id=
   app.delete<{
-    Querystring: { id?: string };
+    Querystring: { id?: string; expectedEpoch?: string };
   }>('/api/workspace/linked-roots', async (request, reply) => {
-    const { id } = request.query;
-    if (!id) {
+    if (!workspaceDirectHuman(request, resolveWorkspaceInteractiveUserId))
+      return reply.code(401).send({ error: 'identity_required' });
+    const { id, expectedEpoch } = request.query;
+    const epoch = expectedEpoch !== undefined && /^\d+$/.test(expectedEpoch) ? Number(expectedEpoch) : NaN;
+    if (!id || !Number.isSafeInteger(epoch) || epoch < 0) {
       reply.status(400);
-      return { error: 'id is required' };
-    }
-    const removed = await removeLinkedRoot(id);
-    if (!removed) {
-      reply.status(404);
-      return { error: 'Linked root not found in config' };
-    }
-    return { ok: true };
-  });
-
-  // POST /api/workspace/reveal — open file/directory in system file manager
-  app.post<{
-    Body: { worktreeId: string; path: string };
-  }>('/api/workspace/reveal', async (request, reply) => {
-    const { worktreeId, path: filePath } = request.body ?? {};
-    if (!worktreeId || !filePath) {
-      reply.status(400);
-      return { error: 'worktreeId and path required' };
+      return { error: 'id and expectedEpoch are required' };
     }
     try {
-      const root = await getWorktreeRoot(worktreeId);
-      const resolved = await resolveWorkspacePath(root, filePath);
+      const removed = await removeLinkedRoot(id, epoch);
+      return { ok: true, removed };
+    } catch (error) {
+      if (error instanceof WorkspaceSecurityError) return reply.code(409).send({ error: 'connection_changed' });
+      return reply.code(503).send({ error: 'connection_state_unavailable' });
+    }
+  });
+
+  // F095 Phase F: POST /api/workspace/reveal-project — open project directory in Finder
+  app.post<{
+    Body: { projectPath: string };
+  }>('/api/workspace/reveal-project', async (request, reply) => {
+    if (!isLocalHumanFileActionRequest(request) || !workspaceDirectHuman(request, resolveWorkspaceInteractiveUserId))
+      return reply.code(403).send({ error: 'local_human_required' });
+    const { projectPath } = request.body ?? {};
+    if (!projectPath) {
+      reply.status(400);
+      return { error: 'projectPath required' };
+    }
+    try {
+      // Security: validate projectPath is within a registered worktree/linked root.
+      // projectPath can be a root OR a subdirectory (e.g. packages/web inside a monorepo).
+      const allRoots = [...(await listWorktrees()), ...(await getLinkedRootsAsync())];
+      const absPath = resolve(projectPath);
+      const matchedRoot = allRoots.find((e) => {
+        const rel = relative(e.root, absPath);
+        // Guard: absolute rel = cross-drive (Windows), `..` + sep = parent traversal.
+        // Use `..${sep}` to avoid false-blocking dirs named e.g. `..cache`.
+        const escapes = rel === '..' || rel.startsWith(`..${sep}`);
+        return !isAbsolute(rel) && !escapes && resolve(e.root, rel) === absPath;
+      });
+      if (!matchedRoot) {
+        throw new WorkspaceSecurityError('Path not in any registered workspace', 'NOT_FOUND');
+      }
+      // Full security check (traversal, symlink, denylist)
+      const relPath = relative(matchedRoot.root, absPath) || '.';
+      await resolveWorkspaceFilesystemPath(matchedRoot.root, relPath);
+
+      const fileStat = await stat(projectPath);
+      if (!fileStat.isDirectory()) {
+        reply.status(400);
+        return { error: 'Not a directory' };
+      }
       if (process.platform === 'darwin') {
-        // macOS: open -R reveals the file in Finder
-        await execFileAsync('open', ['-R', resolved], { timeout: 5000 });
+        await execFileAsync('open', [projectPath], { timeout: 5000 });
       } else if (process.platform === 'win32') {
-        await execFileAsync('explorer', ['/select,', resolved], { timeout: 5000 });
+        await execFileAsync('explorer', [projectPath], { timeout: 5000 });
       } else {
-        // Linux: xdg-open can only open directories, not select files
-        const fileStat = await stat(resolved);
-        const dir = fileStat.isDirectory() ? resolved : dirname(resolved);
-        await execFileAsync('xdg-open', [dir], { timeout: 5000 });
+        await execFileAsync('xdg-open', [projectPath], { timeout: 5000 });
       }
       return { ok: true };
     } catch (e) {
       if (e instanceof WorkspaceSecurityError) {
-        reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
-        return { error: e.message };
+        reply.status(403);
+        return { error: 'Path not in a registered workspace' };
       }
       if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
         reply.status(404);
-        return { error: 'File not found' };
+        return { error: 'Directory not found' };
       }
       reply.status(500);
-      return { error: 'Failed to reveal file' };
+      return { error: 'Failed to open directory' };
     }
   });
 
   // POST /api/workspace/navigate — F131: cat-initiated workspace panel navigation
-  app.post<{
-    Body: { worktreeId?: string; path?: string; action?: 'reveal' | 'open'; line?: number; threadId?: string };
-  }>('/api/workspace/navigate', async (request, reply) => {
-    const { worktreeId, path: filePath, action = 'reveal', line, threadId } = request.body ?? {};
-    if (!worktreeId || !filePath) {
+  app.post<{ Body: unknown }>('/api/workspace/navigate', async (request, reply) => {
+    const principal = resolveWorkspaceNavigatePrincipal(request);
+    if (!principal) {
+      reply.status(401);
+      return { error: 'Authentication required' };
+    }
+    const parsedBody = parseWorkspaceNavigateBody(request.body);
+    if (!parsedBody.ok) {
       reply.status(400);
-      return { error: 'worktreeId and path required' };
+      return { error: parsedBody.error };
     }
-
-    try {
-      const root = await getWorktreeRoot(worktreeId);
-      const resolved = await resolveWorkspacePath(root, filePath);
-      await stat(resolved);
-    } catch (e) {
-      if (e instanceof WorkspaceSecurityError) {
-        reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
-        return { error: e.message };
+    const skillPreflight = await preflightSkillConsumption(parsedBody.body, principal, opts.skillConsumptionReceipts);
+    if (!skillPreflight.ok) {
+      reply.status(skillPreflight.statusCode);
+      return skillPreflight.body;
+    }
+    let threadId = parsedBody.body.threadId;
+    if (principal.kind !== 'interactive') {
+      const threadResolution = await resolvePrincipalThread(principal, threadId, {
+        threadStore: opts.threadStore,
+        threadStoreMissingError: 'Thread store not configured for Workspace navigation',
+        accessDeniedError: 'Thread access denied',
+      });
+      if (!threadResolution.ok) {
+        reply.status(threadResolution.statusCode);
+        return { error: threadResolution.error };
       }
-      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-        reply.status(404);
-        return { error: 'File not found' };
-      }
-      reply.status(500);
-      return { error: 'Internal error' };
+      threadId = threadResolution.threadId;
     }
-
-    const eventData = { path: filePath, worktreeId, action, line, threadId };
-    if (worktreeId) {
-      opts.socketEmit?.('workspace:navigate', eventData, `worktree:${worktreeId}`);
-      opts.socketEmit?.('workspace:navigate', eventData, 'workspace:global');
-    } else {
-      opts.socketEmit?.('workspace:navigate', eventData, 'workspace:global');
-    }
-
-    return { ok: true, path: filePath, action };
+    const consumerResult = await handleWorkspaceNavigateBody(
+      {
+        ...parsedBody.body,
+        threadId,
+        catId: principal.kind === 'interactive' ? undefined : principal.catId,
+      },
+      {
+        ...opts,
+        auditLog,
+        warn: (data, message) => request.log.warn(data, message),
+      },
+    );
+    const result = await attachSkillConsumptionReceipt(consumerResult, skillPreflight.context);
+    reply.status(result.statusCode);
+    return result.body;
   });
 };

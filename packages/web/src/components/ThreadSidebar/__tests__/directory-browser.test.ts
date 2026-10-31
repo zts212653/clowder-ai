@@ -7,6 +7,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DirectoryBrowser } from '../DirectoryBrowser';
+import { defaultDirectoryBrowserCopy } from '../directory-browser-copy';
 
 // ── Mock apiFetch ──────────────────────────────────────────────
 const mockApiFetch = vi.fn();
@@ -23,6 +24,30 @@ function jsonFail(status = 500, error = 'fail') {
 }
 
 const HOME = '/home/user';
+const englishDirectoryCopy = {
+  configuredPathUnavailable: 'That folder is unavailable. Showing your home folder.',
+  browseFailed: 'Unable to browse this folder',
+  connectFailed: 'Unable to connect to the server',
+  createFailed: 'Unable to create the folder',
+  folderNamePlaceholder: 'Folder name…',
+  create: 'Create',
+  cancel: 'Cancel',
+  loading: 'Loading…',
+  noSubdirectories: 'No subfolders',
+  currentProject: 'Current project',
+  pathPlaceholder: 'Enter a path…',
+  goToPath: 'Go to path',
+  thisPc: 'This PC',
+  collapseBrowser: 'Hide browser',
+  newFolderTitle: 'Create folder',
+  newFolder: 'New folder',
+  drivesLoading: 'Loading drives…',
+  drivesFailed: 'Unable to load drives',
+  retry: 'Retry',
+  noDrives: 'No drives found',
+  viewAllDrives: 'View all drives',
+  switchDrive: 'Switch drive',
+};
 
 function makeBrowseResult(current: string, entries: { name: string; path: string }[], parent: string | null = HOME) {
   return {
@@ -63,7 +88,7 @@ describe('DirectoryBrowser', () => {
 
   function render(props: Partial<React.ComponentProps<typeof DirectoryBrowser>> = {}) {
     const defaults = {
-      onSelect: vi.fn(),
+      onCurrentPathChange: vi.fn(),
       onCancel: vi.fn(),
       ...props,
     };
@@ -211,34 +236,39 @@ describe('DirectoryBrowser', () => {
     expect(mockApiFetch).toHaveBeenCalledWith(`/api/projects/browse?path=${encodeURIComponent(`${HOME}/projects`)}`);
   });
 
-  // ── Select and cancel ─────────────────────────────────
+  // ── Current path and cancel ────────────────────────────
 
-  it('calls onSelect with current path when "选择此目录" is clicked', async () => {
+  it('calls onCurrentPathChange when the current path loads', async () => {
     mockApiFetch.mockReturnValueOnce(jsonOk(makeBrowseResult(`${HOME}/projects`, [], HOME)));
     const fns = render({ initialPath: `${HOME}/projects` });
     await flush();
 
-    const selectBtn = findButtonByText('选择此目录');
-    expect(selectBtn).toBeTruthy();
-    act(() => {
-      selectBtn!.click();
-    });
-
-    expect(fns.onSelect).toHaveBeenCalledWith(`${HOME}/projects`);
+    expect(fns.onCurrentPathChange).toHaveBeenCalledWith(`${HOME}/projects`);
+    expect(findButtonByText('选择此目录')).toBeFalsy();
   });
 
-  it('calls onCancel when "取消" is clicked', async () => {
+  it('calls onCancel when "收起浏览" is clicked', async () => {
     mockApiFetch.mockReturnValueOnce(jsonOk(makeBrowseResult(HOME, [], null)));
     const fns = render();
     await flush();
 
-    const cancelBtn = findButtonByText('取消');
+    const cancelBtn = findButtonByText('收起浏览');
     expect(cancelBtn).toBeTruthy();
     act(() => {
       cancelBtn!.click();
     });
 
     expect(fns.onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers the loaded folder to a host that owns project selection', async () => {
+    mockApiFetch.mockReturnValueOnce(jsonOk(makeBrowseResult(`${HOME}/projects`, [], HOME)));
+    const onSelectCurrent = vi.fn();
+    render({ initialPath: `${HOME}/projects`, onSelectCurrent, selectCurrentLabel: '使用这个文件夹' });
+    await flush();
+
+    act(() => findButtonByText('使用这个文件夹')?.click());
+    expect(onSelectCurrent).toHaveBeenCalledWith(`${HOME}/projects`);
   });
 
   // ── Active project highlight ──────────────────────────
@@ -289,6 +319,7 @@ describe('DirectoryBrowser', () => {
         name: 'cat-cafe',
         parent: `${winHome}\\projects`,
         homePath: winHome,
+        isWindows: true,
         entries: [{ name: 'src', path: `${winHome}\\projects\\cat-cafe\\src`, isDirectory: true }],
       }),
     );
@@ -300,6 +331,38 @@ describe('DirectoryBrowser', () => {
     expect(container.textContent).toContain('projects');
     expect(container.textContent).toContain('cat-cafe');
     expect(container.textContent).toContain('src');
+  });
+
+  it('shows the drive letter as a breadcrumb segment for Windows drive paths outside home', async () => {
+    // F113: a path like D:\XXX must render "此电脑 > D: > XXX" (VS Code style:
+    // drive letter without trailing separator). homePath is on C: so D: is outside home.
+    const winHome = 'C:\\Users\\test';
+    const driveRoot = 'D:\\';
+    mockApiFetch.mockReturnValueOnce(
+      jsonOk({
+        current: 'D:\\Projects',
+        name: 'Projects',
+        parent: driveRoot,
+        homePath: winHome,
+        isWindows: true,
+        entries: [{ name: 'src', path: 'D:\\Projects\\src', isDirectory: true }],
+      }),
+    );
+    // Also mock the drives endpoint (the component may fetch it lazily —
+    // if not called, this mock is simply unused, which is fine).
+    mockApiFetch.mockReturnValueOnce(jsonOk({ drives: [{ letter: 'D', path: driveRoot, label: '本地磁盘 (D:)' }] }));
+
+    render({ initialPath: 'D:\\Projects' });
+    await flush();
+
+    // The drive root must appear as its own breadcrumb segment so the user
+    // can click back to D:\. Without the fix, only "Projects" showed.
+    const driveButton = getAllButtons().find((b) => b.textContent?.includes('D:'));
+    expect(driveButton).toBeTruthy();
+    // Drive label is "D:" (no trailing backslash) — never the raw "D:\"
+    expect(driveButton?.textContent).not.toContain('\\');
+    // And the leaf folder is still present
+    expect(container.textContent).toContain('Projects');
   });
 
   // ── Path input navigation ─────────────────────────────
@@ -342,7 +405,7 @@ describe('DirectoryBrowser', () => {
     const fns = render({ initialPath: `${HOME}/projects` });
     await flush();
 
-    expect(findButtonByText('选择此目录')).toBeTruthy();
+    expect(fns.onCurrentPathChange).toHaveBeenCalledWith(`${HOME}/projects`);
     expect(container.textContent).toContain('cat-cafe');
 
     // Navigate to a forbidden path
@@ -362,14 +425,8 @@ describe('DirectoryBrowser', () => {
     // Error banner shown AND listing still visible (non-destructive)
     expect(container.textContent).toContain('Access denied');
     expect(container.textContent).toContain('cat-cafe');
-    // "选择此目录" still works — selects the PREVIOUS valid directory
-    const selectBtn = findButtonByText('选择此目录');
-    expect(selectBtn).toBeTruthy();
-    expect(selectBtn!.disabled).toBe(false);
-    act(() => {
-      selectBtn!.click();
-    });
-    expect(fns.onSelect).toHaveBeenCalledWith(`${HOME}/projects`);
+    expect(findButtonByText('选择此目录')).toBeFalsy();
+    expect(fns.onCurrentPathChange).toHaveBeenCalledTimes(1);
   });
 
   // ── Non-home path breadcrumbs (cloud P2) ──────────────
@@ -425,5 +482,447 @@ describe('DirectoryBrowser', () => {
 
     expect(mockApiFetch).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('Cannot read directory');
+  });
+
+  it('clears create-folder state when entering drives view (no stale parentPath)', async () => {
+    // Regression (R2 review): start create-folder in a directory, then enter
+    // 此电脑 drive-picker view. The inline editor + new-folder input must not
+    // survive the transition - otherwise handleCreateDir posts parentPath from
+    // the stale previous directory, a wrong-location filesystem mutation.
+    const winHome = 'C:\\Users\\test';
+    const driveRoot = 'D:\\';
+    mockApiFetch.mockReturnValueOnce(
+      jsonOk({
+        current: 'D:\\Projects',
+        name: 'Projects',
+        parent: driveRoot,
+        homePath: winHome,
+        isWindows: true,
+        entries: [{ name: 'src', path: 'D:\\Projects\\src', isDirectory: true }],
+      }),
+    );
+    mockApiFetch.mockReturnValueOnce(jsonOk({ drives: [{ letter: 'D', path: driveRoot, label: '本地磁盘 (D:)' }] }));
+
+    render({ initialPath: 'D:\\Projects' });
+    await flush();
+
+    // Start create-folder in D:\Projects -> inline editor opens
+    const newBtn = findButtonByText('新建');
+    expect(newBtn).toBeTruthy();
+    await act(async () => {
+      newBtn!.click();
+    });
+    // Inline editor is now visible (folder-name input rendered).
+    // Use the specific placeholder to distinguish from the path input bar.
+    const folderInput = () => container.querySelector('input[placeholder="文件夹名称..."]');
+    expect(folderInput()).toBeTruthy();
+
+    // Enter drives view ("此电脑" breadcrumb button)
+    await act(async () => {
+      const thisPc = findButtonByText('此电脑');
+      expect(thisPc).toBeTruthy();
+      thisPc!.click();
+    });
+    await flush();
+
+    // After entering drives view: no create-folder controls remain.
+    // The 新建 button is hidden AND the inline editor/input is cleared.
+    expect(findButtonByText('新建')).toBeUndefined();
+    expect(folderInput()).toBeNull();
+    // Virtual root is not a concrete directory; do not keep the previously
+    // browsed directory in the manual path input.
+    expect((container.querySelector('input[placeholder="Enter path..."]') as HTMLInputElement).value).toBe('');
+    // R2 follow-up P1: drives view must not render the stale directory
+    // breadcrumb. The old segment "Projects" (from D:\Projects) must not
+    // appear in the breadcrumb row while viewing 此电脑 (it renders as a
+    // non-button span when it is the leaf, so check textContent not buttons).
+    expect(container.textContent).not.toContain('Projects');
+  });
+
+  it('ignores a late directory browse after entering drives view', async () => {
+    const winHome = 'C:\\Users\\test';
+    const driveRoot = 'D:\\';
+    const stalePath = 'D:\\Projects\\src';
+    let resolveBrowse: (value: unknown) => void = () => {};
+
+    mockApiFetch
+      .mockReturnValueOnce(
+        jsonOk({
+          current: 'D:\\Projects',
+          name: 'Projects',
+          parent: driveRoot,
+          homePath: winHome,
+          entries: [{ name: 'src', path: stalePath, isDirectory: true }],
+          isWindows: true,
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveBrowse = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        jsonOk({ drives: [{ letter: 'D', path: driveRoot, label: '本地磁盘 (D:)' }], isWindows: true }),
+      );
+
+    const fns = render({ initialPath: 'D:\\Projects', onVirtualLocationChange: vi.fn() });
+    await flush();
+
+    // Start a concrete-directory browse, but leave it in flight.
+    await act(async () => {
+      findButtonByText('src')!.click();
+      await Promise.resolve();
+    });
+
+    // Move to the virtual root before the older browse resolves.
+    await act(async () => {
+      findButtonByText('此电脑')!.click();
+    });
+    await flush();
+
+    expect(fns.onVirtualLocationChange).toHaveBeenCalledTimes(1);
+    expect((container.querySelector('input[placeholder="Enter path..."]') as HTMLInputElement).value).toBe('');
+    expect(container.textContent).toContain('本地磁盘 (D:)');
+
+    // The stale response must not restore a concrete selection or path input.
+    await act(async () => {
+      resolveBrowse(
+        await jsonOk({
+          current: stalePath,
+          name: 'src',
+          parent: 'D:\\Projects',
+          homePath: winHome,
+          entries: [],
+          isWindows: true,
+        }),
+      );
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(fns.onCurrentPathChange).toHaveBeenCalledTimes(1);
+    expect(fns.onCurrentPathChange).not.toHaveBeenCalledWith(stalePath);
+    expect((container.querySelector('input[placeholder="Enter path..."]') as HTMLInputElement).value).toBe('');
+    expect(container.textContent).toContain('本地磁盘 (D:)');
+  });
+
+  it('ignores a late create-folder completion after entering drives view', async () => {
+    const winHome = 'C:\\Users\\test';
+    const driveRoot = 'D:\\';
+    const createdPath = 'D:\\Projects\\new-folder';
+    let resolveMkdir: (value: unknown) => void = () => {};
+
+    mockApiFetch
+      .mockReturnValueOnce(
+        jsonOk({
+          current: 'D:\\Projects',
+          name: 'Projects',
+          parent: driveRoot,
+          homePath: winHome,
+          entries: [],
+          isWindows: true,
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveMkdir = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        jsonOk({ drives: [{ letter: 'D', path: driveRoot, label: '本地磁盘 (D:)' }], isWindows: true }),
+      )
+      .mockReturnValueOnce(
+        jsonOk({
+          current: createdPath,
+          name: 'new-folder',
+          parent: 'D:\\Projects',
+          homePath: winHome,
+          entries: [],
+          isWindows: true,
+        }),
+      );
+
+    const fns = render({ initialPath: 'D:\\Projects', onVirtualLocationChange: vi.fn() });
+    await flush();
+
+    act(() => findButtonByText('新建')!.click());
+    const folderInput = container.querySelector('input[placeholder="文件夹名称..."]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(folderInput, 'new-folder');
+      folderInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+
+    await act(async () => {
+      findButtonByText('创建')!.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      findButtonByText('此电脑')!.click();
+    });
+    await flush();
+    expect(container.textContent).toContain('本地磁盘 (D:)');
+
+    await act(async () => {
+      resolveMkdir(await jsonOk({ createdPath }));
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(mockApiFetch).not.toHaveBeenCalledWith(`/api/projects/browse?path=${encodeURIComponent(createdPath)}`);
+    expect(fns.onCurrentPathChange).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('本地磁盘 (D:)');
+  });
+
+  it('hides 此电脑 entry when server capability isWindows is false', async () => {
+    // R4 P2#3: server capability (not path shape) controls whether 此电脑 appears.
+    // A non-Windows browse result (isWindows absent/false) must not show the entry.
+    mockApiFetch.mockReturnValue(
+      jsonOk({
+        current: '/home/user/projects',
+        name: 'projects',
+        parent: '/home/user',
+        homePath: HOME,
+        entries: [{ name: 'cat-cafe', path: `${HOME}/cat-cafe`, isDirectory: true }],
+        // isWindows absent -> false
+      }),
+    );
+    render();
+    await flush();
+
+    expect(findButtonByText('此电脑')).toBeUndefined();
+  });
+
+  it('shows 此电脑 entry when server capability isWindows is true', async () => {
+    // Even with a non-Windows-looking path, server isWindows:true shows the entry.
+    mockApiFetch.mockReturnValue(
+      jsonOk({
+        current: '/home/user/projects',
+        name: 'projects',
+        parent: '/home/user',
+        homePath: HOME,
+        entries: [],
+        isWindows: true,
+      }),
+    );
+    render();
+    await flush();
+
+    expect(findButtonByText('此电脑')).toBeTruthy();
+  });
+
+  it('shows a discoverable 此电脑 row in the directory list on Windows', async () => {
+    const winHome = 'C:\\Users\\test';
+    const driveRoot = 'D:\\';
+    mockApiFetch.mockReturnValueOnce(
+      jsonOk({
+        current: 'D:\\Projects',
+        name: 'Projects',
+        parent: driveRoot,
+        homePath: winHome,
+        entries: [{ name: 'src', path: 'D:\\Projects\\src', isDirectory: true }],
+        isWindows: true,
+      }),
+    );
+    mockApiFetch.mockReturnValueOnce(jsonOk({ drives: [{ letter: 'D', path: driveRoot, label: '本地磁盘 (D:)' }] }));
+
+    render({ initialPath: 'D:\\Projects' });
+    await flush();
+
+    const thisPcButtons = getAllButtons().filter((button) => button.textContent?.includes('此电脑'));
+    expect(thisPcButtons).toHaveLength(2);
+    const listEntry = thisPcButtons.find((button) => button.textContent?.includes('切换磁盘'));
+    expect(listEntry).toBeTruthy();
+
+    await act(async () => {
+      listEntry!.click();
+    });
+    await flush();
+
+    expect(container.textContent).toContain('本地磁盘 (D:)');
+  });
+
+  it('shows loading state then drives when entering drives view', async () => {
+    // R4 P1#2 regression: pending -> loading -> ready state machine.
+    const winHome = 'C:\\Users\\test';
+    const driveRoot = 'D:\\';
+    // First call: browse. Second call (drives): resolve after a tick.
+    let resolveDrives: (v: unknown) => void = () => {};
+    mockApiFetch
+      .mockReturnValueOnce(
+        jsonOk({
+          current: 'D:\\Projects',
+          name: 'Projects',
+          parent: driveRoot,
+          homePath: winHome,
+          entries: [],
+          isWindows: true,
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveDrives = resolve;
+        }),
+      );
+
+    render({ initialPath: 'D:\\Projects' });
+    await flush();
+
+    // Enter drives view
+    await act(async () => {
+      findButtonByText('此电脑')!.click();
+    });
+
+    // Drives request is pending -> loading state
+    expect(container.textContent).toContain('正在加载磁盘列表');
+
+    // Resolve drives
+    await act(async () => {
+      resolveDrives(jsonOk({ drives: [{ letter: 'D', path: driveRoot, label: '本地磁盘 (D:)' }], isWindows: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+
+    // Ready -> drive grid shows
+    expect(container.textContent).toContain('本地磁盘 (D:)');
+  });
+
+  it('recovers to ready after retry (error -> retry -> ready)', async () => {
+    // R5: exercise the full retry transition, not just the button.
+    const winHome = 'C:\\Users\\test';
+    const driveRoot = 'D:\\';
+    mockApiFetch
+      .mockReturnValueOnce(
+        jsonOk({
+          current: 'D:\\Projects',
+          name: 'Projects',
+          parent: driveRoot,
+          homePath: winHome,
+          entries: [],
+          isWindows: true,
+        }),
+      )
+      .mockReturnValueOnce(jsonFail(500, 'server error'))
+      .mockReturnValueOnce(
+        jsonOk({ drives: [{ letter: 'D', path: driveRoot, label: '本地磁盘 (D:)' }], isWindows: true }),
+      );
+
+    render({ initialPath: 'D:\\Projects' });
+    await flush();
+
+    await act(async () => {
+      findButtonByText('此电脑')!.click();
+    });
+    await flush();
+
+    // Error state
+    expect(container.textContent).toContain('磁盘列表加载失败');
+    expect(findButtonByText('重试')).toBeTruthy();
+
+    // Click retry -> idle -> loading -> ready
+    await act(async () => {
+      findButtonByText('重试')!.click();
+    });
+    await flush();
+
+    // Ready -> drive grid shows (recovered)
+    expect(container.textContent).toContain('本地磁盘 (D:)');
+    expect(container.textContent).not.toContain('磁盘列表加载失败');
+  });
+
+  it('shows 未发现可用磁盘 when ready but no drives', async () => {
+    // R5: empty-state coverage (ready + [] -> 未发现可用磁盘).
+    const winHome = 'C:\\Users\\test';
+    const driveRoot = 'D:\\';
+    mockApiFetch
+      .mockReturnValueOnce(
+        jsonOk({
+          current: 'D:\\Projects',
+          name: 'Projects',
+          parent: driveRoot,
+          homePath: winHome,
+          entries: [],
+          isWindows: true,
+        }),
+      )
+      .mockReturnValueOnce(jsonOk({ drives: [], isWindows: true }));
+
+    render({ initialPath: 'D:\\Projects' });
+    await flush();
+
+    await act(async () => {
+      findButtonByText('此电脑')!.click();
+    });
+    await flush();
+
+    // Ready + empty -> 未发现可用磁盘 (not loading, not error)
+    expect(container.textContent).toContain('未发现可用磁盘');
+    expect(container.textContent).not.toContain('正在加载磁盘列表');
+    expect(container.textContent).not.toContain('磁盘列表加载失败');
+  });
+
+  it('lets a v2 host supply one coherent English browser vocabulary without changing classic defaults', async () => {
+    const projectPath = `${HOME}/project`;
+    mockApiFetch.mockReturnValueOnce(jsonOk(makeBrowseResult(HOME, [{ name: 'project', path: projectPath }], null)));
+    const localizedProps = {
+      initialPath: HOME,
+      activeProjectPath: projectPath,
+      copy: englishDirectoryCopy,
+    };
+
+    render(localizedProps);
+    await flush();
+
+    expect(container.textContent).toContain('New folder');
+    expect(container.textContent).toContain('Current project');
+    expect(container.querySelector('input[placeholder="Enter a path…"]')).not.toBeNull();
+    expect(findButtonByText('Hide browser')).toBeTruthy();
+    expect(container.textContent).not.toContain('当前项目');
+    expect(container.textContent).not.toContain('收起浏览');
+  });
+
+  it('changes browser vocabulary in place without refetching or resetting the browsed folder', async () => {
+    const onCancel = vi.fn();
+    const onCurrentPathChange = vi.fn();
+    mockApiFetch
+      .mockReturnValueOnce(jsonOk(makeBrowseResult(HOME, [{ name: 'projects', path: `${HOME}/projects` }], null)))
+      .mockReturnValueOnce(
+        jsonOk(makeBrowseResult(`${HOME}/projects`, [{ name: 'cafe', path: `${HOME}/projects/cafe` }])),
+      );
+
+    act(() =>
+      root.render(
+        React.createElement(DirectoryBrowser, {
+          initialPath: HOME,
+          onCancel,
+          onCurrentPathChange,
+          copy: defaultDirectoryBrowserCopy,
+        }),
+      ),
+    );
+    await flush();
+    await act(async () => {
+      findButtonByText('projects')?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(container.textContent).toContain('cafe');
+    const callsBeforeLanguageChange = mockApiFetch.mock.calls.length;
+
+    act(() =>
+      root.render(
+        React.createElement(DirectoryBrowser, {
+          initialPath: HOME,
+          onCancel,
+          onCurrentPathChange,
+          copy: englishDirectoryCopy,
+        }),
+      ),
+    );
+    await flush();
+
+    expect(mockApiFetch).toHaveBeenCalledTimes(callsBeforeLanguageChange);
+    expect(container.textContent).toContain('cafe');
+    expect(container.textContent).toContain('New folder');
   });
 });

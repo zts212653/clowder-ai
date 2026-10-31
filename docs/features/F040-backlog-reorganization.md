@@ -19,7 +19,7 @@ created: 2026-02-26
 
 ### 痛点来源
 
-team lead 2026-02-26 提出：
+operator 2026-02-26 提出：
 > "我们这套机制有大问题了，现在这个我们最重要的真相源头发散出不同 feat md 的蜘蛛网乱七八糟的。"
 
 ### 核心问题
@@ -31,7 +31,7 @@ team lead 2026-02-26 提出：
 
 ### 设计灵感
 
-team lead的记忆系统设计 proposal（三层记忆）：
+operator的记忆系统设计 proposal（三层记忆）：
 - **热层**：直接在 context（BACKLOG 索引表）
 - **温层**：轻量索引，快速召回（feat 聚合文件）
 - **冷层**：需要搜索（散落的 feature-specs/discussions）
@@ -85,7 +85,7 @@ docs/
 #### `docs/ROADMAP.md`（热层 - 活跃 Feature 索引）
 
 ```markdown
-# Cat Cafe Feature Roadmap
+# Clowder AI Feature Roadmap
 
 > 维护者：三猫 | 最后更新：YYYY-MM-DD
 >
@@ -94,11 +94,11 @@ docs/
 
 | ID | 名称 | Status | Owner | Link |
 |----|------|--------|-------|------|
-| F010 | 手机端猫猫 | in-progress | Ragdoll | [F010](features/F010-mobile-cat.md) |
-| F032 | Agent Plugin Architecture | review | Ragdoll | [F032](features/F032-agent-plugin.md) |
-| F037 | Agent Swarm 协同模式 | in-progress | 三猫 | [F037](features/F037-agent-swarm.md) |
-| F039 | 消息排队投递 | spec | Ragdoll | [F039](features/F039-message-queue.md) |
-| F040 | BACKLOG 整理 | in-progress | Ragdoll | [F040](features/F040-backlog-reorganization.md) |
+| F010 | 手机端猫猫 | in-progress | Ragdoll | [F010](F010-mobile-cat.md) |
+| F032 | Agent Plugin Architecture | review | Ragdoll | [F032](F032-agent-plugin-architecture.md) |
+| F037 | Agent Swarm 协同模式 | in-progress | 三猫 | [F037](F037-agent-swarm.md) |
+| F039 | 消息排队投递 | spec | Ragdoll | [F039](F039-message-queue-delivery.md) |
+| F040 | BACKLOG 整理 | in-progress | Ragdoll | [F040](F040-backlog-reorganization.md) |
 ```
 
 > **超级简洁！** 只有 ~10 行活跃项，不是 200+ 行历史。
@@ -106,7 +106,7 @@ docs/
 #### `docs/TECH-DEBT.md`（技术债务独立文件）
 
 ```markdown
-# Cat Cafe 技术债务
+# Clowder AI 技术债务
 
 > 维护者：三猫 | 最后更新：YYYY-MM-DD
 >
@@ -239,14 +239,14 @@ created: 2026-02-26           # 创建日期
 
 | 类型 | 路径 | 说明 |
 |------|------|------|
-| **Discussion** | 本 thread（2026-02-26 team lead + Ragdoll）| BACKLOG 问题诊断 |
+| **Discussion** | 本 thread（2026-02-26 operator + Ragdoll）| BACKLOG 问题诊断 |
 | **BACKLOG 条目** | 待登记 | - |
 
 ---
 
-## Feature 演化图（team lead梳理 2026-02-26）
+## Feature 演化图（operator梳理 2026-02-26）
 
-team lead用 Mermaid 可视化了 Cat Café 的 Feature 演化关系，分为 5 个逻辑栈：
+operator用 Mermaid 可视化了 Clowder AI 的 Feature 演化关系，分为 5 个逻辑栈：
 
 ### 1. 语音栈（Voice Stack）
 ```
@@ -323,7 +323,7 @@ F014 → F015 → F036
 - [x] 历史文档补 frontmatter（research/discussion/bug-report 共 50+ 文件）— **Maine Coon**
 - [x] TECH-DEBT commit 标注（52/83 条，剩余 31 条无对应 commit）— **Maine Coon**
 - [x] 创建维护脚本 `scripts/tech-debt-maintain.mjs` — **Maine Coon**
-- [x] 验收 F021 重新开放（F21++ 未完成，不能标 done）— **Ragdoll+team lead**
+- [x] 验收 F021 重新开放（F21++ 未完成，不能标 done）— **Ragdoll+operator**
 - [x] 扩展 frontmatter contract 加入 `debt_ids` 字段 — **Ragdoll**（commit `3fb8aa9`）
 - [x] 更新 SOP.md "完成后真相源同步" 章节 — **Ragdoll**（commit `3fb8aa9`）
 
@@ -335,7 +335,7 @@ F014 → F015 → F036
 ### Phase 4: 沉淀同步（2026-02-27，已完成）
 
 - [x] 写 ADR: Metadata Contract — **Ragdoll**（`docs/decisions/011-metadata-contract.md`，commit `14a8b53`）
-- [x] 更新 lessons-learned.md（LL-024: 状态字段多点写入会复发蜘蛛网）— **Ragdoll**
+- [x] 更新 public-lessons.md（LL-024: 状态字段多点写入会复发蜘蛛网）— **Ragdoll**
 - [x] 同步 CLAUDE.md/AGENTS.md/GEMINI.md（frontmatter 规范 + feat-kickoff/completion 触发）— **Ragdoll**
 
 ### Phase 5: 验收与优化（2026-02-27，已完成）
@@ -375,9 +375,9 @@ F014 → F015 → F036
 ### `feat-completion` skill 设计草案
 
 **触发条件**（任一）：
-- team lead说"这个 Feature 完成了"、"F0xx done"
+- operator说"这个 Feature 完成了"、"F0xx done"
 - 所有 Acceptance Criteria 都打勾
-- PR 合入且云端 review 通过
+- PR 合入且remote review 通过
 
 **详细步骤**：
 
@@ -433,7 +433,7 @@ F014 → F015 → F036
 
 ### Step 3: 更新 lessons-learned（P2，~10min）
 
-1. 编辑 `docs/lessons-learned.md`
+1. 编辑 `docs/public-lessons.md`
 2. 添加："状态字段多点写入会复发蜘蛛网"
 3. 关联 F040
 

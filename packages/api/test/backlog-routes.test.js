@@ -937,7 +937,7 @@ describe('Backlog Routes', () => {
 
     await writeFile(
       backlogDocPath,
-      `# Cat Cafe Feature Roadmap
+      `# Clowder AI Feature Roadmap
 
 | ID | 名称 | Status | Owner | Link |
 |----|------|--------|-------|------|
@@ -980,7 +980,7 @@ describe('Backlog Routes', () => {
 
       await writeFile(
         backlogDocPath,
-        `# Cat Cafe Feature Roadmap
+        `# Clowder AI Feature Roadmap
 
 | ID | 名称 | Status | Owner | Link |
 |----|------|--------|-------|------|
@@ -1252,7 +1252,7 @@ describe('Backlog Routes', () => {
 
     await writeFile(
       backlogDocPath,
-      `# Cat Cafe Feature Roadmap
+      `# Clowder AI Feature Roadmap
 
 | ID | 名称 | Status | Owner | Link |
 |----|------|--------|-------|------|
@@ -1527,6 +1527,7 @@ describe('Import sync marks disappeared items as done (any status)', () => {
       threadStore,
       messageStore,
       backlogDocPath: backlogPath,
+      featuresDir: tempDir,
     });
 
     // Create a dispatched item tagged as F999
@@ -1612,6 +1613,7 @@ describe('Import sync marks suggested items as done when disappeared', () => {
       threadStore,
       messageStore,
       backlogDocPath: backlogPath,
+      featuresDir: tempDir,
     });
 
     // Create a suggested item tagged as F888 (not dispatched!)

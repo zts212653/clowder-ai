@@ -3,8 +3,8 @@
  * Verifies that cancel_invocation produces correct catId-aware broadcasts.
  *
  * Tests the REAL production buildCancelMessages function (not a copy).
- * - Single system_info message (no "cancel chorus")
  * - Per-cat done messages to clear each cat's loading state
+ * - No duplicate system row: the durable response bubble owns the terminal label
  */
 
 import './helpers/setup-cat-registry.js';
@@ -15,35 +15,29 @@ const { InvocationTracker } = await import('../dist/domains/cats/services/agents
 const { buildCancelMessages } = await import('../dist/infrastructure/websocket/SocketManager.js');
 
 describe('buildCancelMessages (production function)', () => {
-  test('single cat cancel: 1 system_info + 1 done with correct catId', () => {
+  test('single cat cancel: only 1 done with correct catId', () => {
     const tracker = new InvocationTracker();
     // start(threadId, catId, userId, catIds)
     tracker.start('t1', 'gemini', 'user1', ['gemini']);
     const result = tracker.cancel('t1', 'gemini', 'user1');
     const messages = buildCancelMessages(result);
 
-    assert.equal(messages.length, 2);
-    assert.equal(messages[0].type, 'system_info');
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].type, 'done');
     assert.equal(messages[0].catId, 'gemini');
-    assert.equal(messages[1].type, 'done');
-    assert.equal(messages[1].catId, 'gemini');
-    assert.equal(messages[1].isFinal, true);
+    assert.equal(messages[0].isFinal, true);
   });
 
-  test('multi-cat cancel: 1 system_info + N done (no cancel chorus)', () => {
+  test('multi-cat cancel: only N done messages (no duplicate system row)', () => {
     const tracker = new InvocationTracker();
     // start(threadId, catId, userId, catIds) — primary cat is opus
     tracker.start('t1', 'opus', 'user1', ['opus', 'codex', 'gemini']);
     const result = tracker.cancel('t1', 'opus', 'user1');
     const messages = buildCancelMessages(result);
 
-    // 1 system_info + 3 done = 4 total
-    assert.equal(messages.length, 4);
-
-    // Only one system_info (not three!)
+    assert.equal(messages.length, 3);
     const systemInfos = messages.filter((m) => m.type === 'system_info');
-    assert.equal(systemInfos.length, 1);
-    assert.equal(systemInfos[0].catId, 'opus');
+    assert.equal(systemInfos.length, 0);
 
     // Three done messages, one per cat
     const dones = messages.filter((m) => m.type === 'done');
@@ -55,6 +49,21 @@ describe('buildCancelMessages (production function)', () => {
     assert.ok(dones.every((d) => d.isFinal === true));
   });
 
+  // F-parallel-cancel: when SocketManager / queue.ts scope the broadcast to the requested cat,
+  // a single-cat Stop on a multi-cat batch must clear ONLY that cat — not its siblings. This is
+  // the most direct cause of "取消一只两只一起取消" from the real Stop button.
+  test('scoped single-cat cancel from multi-cat batch: only the requested cat gets a done', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex', 'gemini'], 'user1');
+    const result = tracker.cancel('t1', 'codex', 'user1');
+    // result.catIds carries the whole batch [opus,codex,gemini]; SocketManager scopes to [codex].
+    const scopedResult = { ...result, catIds: ['codex'] };
+    const messages = buildCancelMessages(scopedResult);
+    const dones = messages.filter((m) => m.type === 'done');
+    assert.equal(dones.length, 1, 'only the cancelled cat gets a done — siblings stay alive in UI');
+    assert.equal(dones[0].catId, 'codex');
+  });
+
   test('empty catIds fallback: defaults to opus', () => {
     const tracker = new InvocationTracker();
     // start(threadId, catId, userId) — no catIds
@@ -62,9 +71,8 @@ describe('buildCancelMessages (production function)', () => {
     const result = tracker.cancel('t1', 'opus', 'user1');
     const messages = buildCancelMessages(result);
 
-    assert.equal(messages.length, 2);
+    assert.equal(messages.length, 1);
     assert.equal(messages[0].catId, 'opus');
-    assert.equal(messages[1].catId, 'opus');
   });
 
   test('failed cancel: no messages', () => {
@@ -77,7 +85,8 @@ describe('buildCancelMessages (production function)', () => {
     // F32-a: createCatId accepts any non-empty string, so unknown catId no longer throws
     const result = { cancelled: true, catIds: ['unknown-cat'] };
     const messages = buildCancelMessages(result);
-    assert.equal(messages.length, 2); // system + done
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].type, 'done');
     assert.equal(messages[0].catId, 'unknown-cat');
   });
 });

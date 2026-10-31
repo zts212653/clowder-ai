@@ -1,0 +1,190 @@
+import { type AgentKeyRecord, type CallbackPrincipal, type CatId, createCatId } from '@cat-cafe/shared';
+import type { InvocationRecord } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
+import type {
+  IInvocationRecordStore,
+  InvocationActionLeaseRef,
+} from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
+import { DEFAULT_THREAD_ID, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+
+type DeletedThreadLookup = {
+  get(threadId: string): { deletedAt?: number | null } | null | Promise<{ deletedAt?: number | null } | null>;
+};
+
+export interface CallbackActor {
+  invocationId: string;
+  /** #573: parent (queue-level) invocationId — when present, is the OUTER id used for
+   * broadcast/persistence identity. Falls back to `invocationId` if no parent. */
+  parentInvocationId?: string;
+  threadId: string;
+  userId: string;
+  catId: CatId;
+}
+
+export function deriveCallbackActor(record: InvocationRecord): CallbackActor {
+  return {
+    invocationId: record.invocationId,
+    ...(record.parentInvocationId ? { parentInvocationId: record.parentInvocationId } : {}),
+    threadId: record.threadId,
+    userId: record.userId,
+    catId: createCatId(record.catId),
+  };
+}
+
+/** Parent execution scope for queue, cancellation and callback attribution.
+ * Callback messages and final responses retain independent message/source identities.
+ */
+export function effectiveInvocationId(actor: Pick<CallbackActor, 'invocationId' | 'parentInvocationId'>): string {
+  return actor.parentInvocationId ?? actor.invocationId;
+}
+
+export async function resolveCallbackActionLeaseRef(
+  record: InvocationRecord,
+  invocationRecordStore: Pick<IInvocationRecordStore, 'get'> | undefined,
+): Promise<InvocationActionLeaseRef | undefined> {
+  if (!invocationRecordStore) return undefined;
+  const stored = await invocationRecordStore.get(record.parentInvocationId ?? record.invocationId);
+  if (
+    !stored ||
+    stored.threadId !== record.threadId ||
+    stored.userId !== record.userId ||
+    !stored.targetCats.includes(record.catId) ||
+    stored.actionLeaseCarrier.kind !== 'action_successor'
+  ) {
+    return undefined;
+  }
+  return { leaseId: stored.actionLeaseCarrier.leaseId, generation: stored.actionLeaseCarrier.generation };
+}
+
+export async function getDeletedCallbackThreadGuard(
+  threadStore: DeletedThreadLookup | undefined,
+  threadId: string,
+): Promise<{ statusCode: 410; body: { error: string; code: 'THREAD_DELETED' } } | null> {
+  let thread: { deletedAt?: number | null } | null = null;
+  try {
+    thread = threadStore ? await threadStore.get(threadId) : null;
+  } catch {
+    return null;
+  }
+  if (!thread?.deletedAt) return null;
+  return {
+    statusCode: 410,
+    body: {
+      error: 'Thread is deleted',
+      code: 'THREAD_DELETED',
+    },
+  };
+}
+
+export function resolveBoundThreadScope(
+  actor: Pick<CallbackActor, 'threadId'>,
+  requestedThreadId: string,
+  error = 'Cross-thread write rejected',
+): { ok: true; threadId: string } | { ok: false; statusCode: 403; error: string } {
+  if (actor.threadId !== requestedThreadId) {
+    return { ok: false, statusCode: 403, error };
+  }
+  return { ok: true, threadId: requestedThreadId };
+}
+
+export async function resolveScopedThreadId(
+  actor: Pick<CallbackActor, 'threadId' | 'userId'>,
+  requestedThreadId: string | undefined,
+  options: {
+    threadStore?: Pick<IThreadStore, 'get' | 'list'>;
+    threadStoreMissingError?: string;
+    accessDeniedError?: string;
+  },
+): Promise<{ ok: true; threadId: string } | { ok: false; statusCode: 403 | 503; error: string }> {
+  if (!requestedThreadId || requestedThreadId === actor.threadId) {
+    return { ok: true, threadId: requestedThreadId ?? actor.threadId };
+  }
+
+  if (!options.threadStore) {
+    return {
+      ok: false,
+      statusCode: 503,
+      error: options.threadStoreMissingError ?? 'Thread store not configured for cross-thread access',
+    };
+  }
+
+  const targetThread = await options.threadStore.get(requestedThreadId);
+  if (!targetThread || !(await isThreadInPrincipalScope(options.threadStore, targetThread, actor.userId))) {
+    return {
+      ok: false,
+      statusCode: 403,
+      error: options.accessDeniedError ?? 'Thread access denied',
+    };
+  }
+  return { ok: true, threadId: requestedThreadId };
+}
+
+export function derivePrincipal(
+  record: InvocationRecord | AgentKeyRecord,
+  options: { readonly cloudBoundary?: boolean } = {},
+): CallbackPrincipal {
+  if ('agentKeyId' in record) {
+    return {
+      kind: 'agent_key',
+      agentKeyId: record.agentKeyId,
+      userId: record.userId,
+      catId: createCatId(record.catId),
+      scope: record.scope,
+      cloudBoundary: options.cloudBoundary === true,
+    };
+  }
+  return {
+    kind: 'invocation',
+    invocationId: record.invocationId,
+    ...(record.parentInvocationId ? { parentInvocationId: record.parentInvocationId } : {}),
+    threadId: record.threadId,
+    userId: record.userId,
+    catId: createCatId(record.catId),
+  };
+}
+
+export async function resolvePrincipalThread(
+  principal: CallbackPrincipal,
+  requestedThreadId: string | undefined,
+  options: {
+    threadStore?: Pick<IThreadStore, 'get' | 'list'>;
+    threadStoreMissingError?: string;
+    accessDeniedError?: string;
+  },
+): Promise<{ ok: true; threadId: string } | { ok: false; statusCode: 400 | 403 | 503; error: string }> {
+  if (principal.kind === 'agent_key') {
+    if (!requestedThreadId) {
+      return { ok: false, statusCode: 400, error: 'threadId required for agent-key auth' };
+    }
+    if (!options.threadStore) {
+      return {
+        ok: false,
+        statusCode: 503,
+        error: options.threadStoreMissingError ?? 'Thread store not configured for cross-thread access',
+      };
+    }
+    const thread = await options.threadStore.get(requestedThreadId);
+    if (!thread || !(await isThreadInPrincipalScope(options.threadStore, thread, principal.userId))) {
+      return {
+        ok: false,
+        statusCode: 403,
+        error: options.accessDeniedError ?? 'Thread access denied',
+      };
+    }
+    return { ok: true, threadId: requestedThreadId };
+  }
+
+  return resolveScopedThreadId(principal, requestedThreadId, options);
+}
+
+async function isThreadInPrincipalScope(
+  threadStore: Pick<IThreadStore, 'list'>,
+  targetThread: { id: string; createdBy: string; deletedAt?: number | null },
+  userId: string,
+): Promise<boolean> {
+  if (targetThread.createdBy === userId) return true;
+  if (targetThread.createdBy !== 'system') return false;
+  if (targetThread.id === DEFAULT_THREAD_ID) return false;
+
+  const userVisibleThreads = await threadStore.list(userId);
+  return userVisibleThreads.some((thread) => thread.id === targetThread.id);
+}

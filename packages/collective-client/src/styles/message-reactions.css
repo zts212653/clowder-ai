@@ -1,0 +1,100 @@
+.reaction-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.reaction-chip-visual,
+.reaction-pending,
+.reaction-picker button {
+  min-width: 27px;
+  min-height: 24px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 999px;
+  background: var(--cafe-surface-sunken);
+  color: var(--cafe-secondary);
+}
+
+.reaction-chip {
+  display: inline-grid;
+  place-items: center;
+  min-width: 27px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cafe-secondary);
+}
+
+.reaction-chip-visual {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.reaction-pending {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+
+.reaction-chip[aria-pressed="true"] .reaction-chip-visual {
+  border-color: var(--cafe-accent);
+  background: var(--cafe-accent-soft);
+  color: var(--cafe-primary);
+}
+
+.reaction-chip:focus-visible {
+  outline: none;
+}
+
+.reaction-chip:focus-visible .reaction-chip-visual {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 2px;
+}
+
+.reaction-picker {
+  display: flex;
+  gap: 2px;
+  border-radius: 999px;
+}
+
+.reaction-picker button {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 15px;
+}
+
+.reaction-picker button:hover,
+.reaction-picker button:focus-visible,
+.reaction-picker button[aria-pressed="true"] {
+  background: var(--console-active-bg);
+}
+
+.reaction-error {
+  margin: 0;
+  color: var(--cafe-danger, #b42318);
+  font-size: 11px;
+}
+
+.topic-event .reaction-bar {
+  margin-left: 38px;
+}
+
+@media (hover: none), (max-width: 640px) {
+  .reaction-picker button,
+  .reaction-chip {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

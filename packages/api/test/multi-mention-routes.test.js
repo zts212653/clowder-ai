@@ -6,30 +6,43 @@
 
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
-import { CAT_CONFIGS, catRegistry } from '@cat-cafe/shared';
+import './helpers/setup-cat-registry.js';
 import Fastify from 'fastify';
+import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
+import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { registerCallbackAuthHook } from '../dist/routes/callback-auth-prehandler.js';
 import { resetMultiMentionOrchestrator } from '../dist/routes/callback-multi-mention-routes.js';
-
-// Bootstrap catRegistry from CAT_CONFIGS (same as server startup)
-for (const [id, config] of Object.entries(CAT_CONFIGS)) {
-  if (!catRegistry.has(id)) catRegistry.register(id, config);
-}
+import {
+  adaptInvocationQueue,
+  adaptMessageStore,
+  appendTestLifecycleResponseSource,
+  canonicalTestQueueInput,
+} from './helpers/message-from-fixtures.js';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
 
 function createMockRegistry() {
   const records = new Map();
   return {
-    register(catId, threadId, userId) {
+    register(catId, threadId, userId, parentInvocationId) {
       const id = `inv-${records.size}`;
       const token = `tok-${records.size}`;
-      records.set(id, { catId, threadId, userId, invocationId: id, callbackToken: token });
+      records.set(id, {
+        catId,
+        threadId,
+        userId,
+        invocationId: id,
+        callbackToken: token,
+        ownerAuthProvenance: 'strict',
+        ...(parentInvocationId ? { parentInvocationId } : {}),
+      });
       return { invocationId: id, callbackToken: token };
     },
-    verify(invocationId, callbackToken) {
+    async verify(invocationId, callbackToken) {
       const r = records.get(invocationId);
-      if (!r || r.callbackToken !== callbackToken) return null;
-      return r;
+      if (!r) return { ok: false, reason: 'unknown_invocation' };
+      if (r.callbackToken !== callbackToken) return { ok: false, reason: 'invalid_token' };
+      return { ok: true, record: r };
     },
     isLatest() {
       return true;
@@ -50,6 +63,7 @@ function createMockSocketManager() {
     broadcastToRoom(room, event, data) {
       roomEvents.push({ room, event, data });
     },
+    emitToUser() {},
     getMessages() {
       return messages;
     },
@@ -60,17 +74,16 @@ function createMockSocketManager() {
 }
 
 function createMockMessageStore() {
+  const store = adaptMessageStore(new MessageStore());
   const messages = [];
-  return {
-    append(msg) {
-      const stored = { id: `msg-${messages.length}`, ...msg };
-      messages.push(stored);
-      return stored;
-    },
-    getMessages() {
-      return messages;
-    },
+  const append = store.append.bind(store);
+  store.append = (msg) => {
+    const stored = append(msg);
+    messages.push(stored);
+    return stored;
   };
+  store.getMessages = () => messages;
+  return store;
 }
 
 function createMockInvocationRecordStore() {
@@ -111,6 +124,8 @@ function createMockInvocationRecordStore() {
 function createMockInvocationTracker() {
   const starts = [];
   const completes = [];
+  const slotCompletes = [];
+  const allCompletes = [];
   return {
     start(threadId, catId, userId, catIds) {
       const controller = new AbortController();
@@ -120,11 +135,26 @@ function createMockInvocationTracker() {
     complete(threadId, catId, controller) {
       completes.push({ threadId, catId, controller });
     },
+    completeSlot(threadId, catId, controller) {
+      slotCompletes.push({ threadId, catId, controller });
+    },
+    completeAll(threadId, catIds, controller) {
+      allCompletes.push({ threadId, catIds: [...catIds], controller });
+    },
+    trackExternalSlot() {
+      return true;
+    },
     getStarts() {
       return starts;
     },
     getCompletes() {
       return completes;
+    },
+    getSlotCompletes() {
+      return slotCompletes;
+    },
+    getAllCompletes() {
+      return allCompletes;
     },
   };
 }
@@ -145,6 +175,21 @@ function createMockRouter(responses = {}) {
   };
 }
 
+function createMockQueueProcessor() {
+  const hooks = new Map();
+  return {
+    registerEntryCompleteHook(entryId, hook) {
+      hooks.set(entryId, hook);
+    },
+    unregisterEntryCompleteHook(entryId) {
+      hooks.delete(entryId);
+    },
+    requestDrain() {
+      return Promise.resolve();
+    },
+  };
+}
+
 // ── Test setup ─────────────────────────────────────────────────────────
 
 describe('Multi-Mention Routes', () => {
@@ -156,6 +201,8 @@ describe('Multi-Mention Routes', () => {
   let mockInvocationRecordStore;
   let mockInvocationTracker;
   let mockRouter;
+  let invocationQueue;
+  let mockQueueProcessor;
   let creds;
 
   beforeEach(async () => {
@@ -167,11 +214,15 @@ describe('Multi-Mention Routes', () => {
     mockInvocationRecordStore = createMockInvocationRecordStore();
     mockInvocationTracker = createMockInvocationTracker();
     mockRouter = createMockRouter({ codex: 'Codex says hello', gemini: 'Gemini says hi' });
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
+    mockQueueProcessor = createMockQueueProcessor();
 
     // Register a caller invocation (opus calling)
     creds = mockRegistry.register('opus', 'thread-1', 'user-1');
+    appendTestLifecycleResponseSource(mockMessageStore, creds);
 
     app = Fastify({ logger: false });
+    registerCallbackAuthHook(app, mockRegistry);
 
     const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
 
@@ -182,6 +233,8 @@ describe('Multi-Mention Routes', () => {
       router: mockRouter,
       invocationRecordStore: mockInvocationRecordStore,
       invocationTracker: mockInvocationTracker,
+      invocationQueue,
+      queueProcessor: mockQueueProcessor,
     });
 
     await app.ready();
@@ -197,9 +250,8 @@ describe('Multi-Mention Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex'],
         question: 'What do you think?',
         callbackTo: 'opus',
@@ -212,13 +264,258 @@ describe('Multi-Mention Routes', () => {
     assert.equal(body.status, 'running');
   });
 
+  test('uses durable prompt coverage so a same-wave sibling reply does not hold multi-mention', async () => {
+    const freshnessApp = Fastify({ logger: false });
+    registerCallbackAuthHook(freshnessApp, mockRegistry);
+    const causalMessageStore = createMockMessageStore();
+    appendTestLifecycleResponseSource(causalMessageStore, creds);
+    const trigger = causalMessageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'M1 shared wave',
+      mentions: ['opus', 'fable5'],
+      threadId: 'thread-1',
+      timestamp: 1,
+    });
+    causalMessageStore.append({
+      userId: 'user-1',
+      catId: 'fable5',
+      content: 'Fable sibling reply',
+      mentions: [],
+      threadId: 'thread-1',
+      timestamp: 2,
+      extra: { causal: { kind: 'invocation_reply', triggerMessageId: trigger.id } },
+    });
+    causalMessageStore.getByThreadAfter = async (_threadId, afterId, limit = 20) =>
+      causalMessageStore
+        .getMessages()
+        .filter((message) => message.id > afterId)
+        .slice(0, limit);
+    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
+    registerMultiMentionRoutes(freshnessApp, {
+      messageStore: causalMessageStore,
+      socketManager: mockSocket,
+      router: mockRouter,
+      invocationRecordStore: mockInvocationRecordStore,
+      invocationTracker: mockInvocationTracker,
+      invocationQueue,
+      queueProcessor: mockQueueProcessor,
+      deliveryCursorStore: {
+        async getSeenCursor() {
+          return trigger.id;
+        },
+      },
+      turnExecutionStore: {
+        async get(invocationId) {
+          return {
+            invocationId,
+            parentInvocationId: invocationId,
+            threadId: 'thread-1',
+            userId: 'user-1',
+            catId: 'opus',
+            executionKind: 'ordinary',
+            status: 'running',
+            startedAt: 1,
+            causal: { triggerMessageId: trigger.id, coveredMessageIds: [trigger.id] },
+          };
+        },
+      },
+    });
+    await freshnessApp.ready();
+
+    const res = await freshnessApp.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
+      payload: {
+        targets: ['codex'],
+        question: 'Continue the actual work',
+        callbackTo: 'opus',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).status, 'running');
+    await freshnessApp.close();
+  });
+
+  test('multi-mention does not hide a dispatch behind unread-message state', async () => {
+    const freshnessApp = Fastify({ logger: false });
+    registerCallbackAuthHook(freshnessApp, mockRegistry);
+    const causalMessageStore = createMockMessageStore();
+    appendTestLifecycleResponseSource(causalMessageStore, creds);
+    const baseline = causalMessageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'baseline already seen',
+      mentions: ['opus'],
+      threadId: 'thread-1',
+      timestamp: 1,
+    });
+    causalMessageStore.append({
+      userId: 'user-1',
+      catId: 'codex-sol',
+      content: 'unread persisted cat answer',
+      mentions: [],
+      origin: 'stream',
+      threadId: 'thread-1',
+      timestamp: 2,
+    });
+    causalMessageStore.getByThreadAfter = async (_threadId, afterId, limit = 20) =>
+      causalMessageStore
+        .getMessages()
+        .filter((message) => message.id > afterId)
+        .slice(0, limit);
+    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
+    registerMultiMentionRoutes(freshnessApp, {
+      messageStore: causalMessageStore,
+      socketManager: mockSocket,
+      router: mockRouter,
+      invocationRecordStore: mockInvocationRecordStore,
+      invocationTracker: mockInvocationTracker,
+      invocationQueue: adaptInvocationQueue(new InvocationQueue()),
+      queueProcessor: createMockQueueProcessor(),
+      deliveryCursorStore: {
+        async getSeenCursor() {
+          return baseline.id;
+        },
+      },
+      threadStore: {
+        async get() {
+          return { id: 'thread-1', thinkingMode: 'play' };
+        },
+      },
+    });
+    await freshnessApp.ready();
+
+    const res = await freshnessApp.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
+      payload: { targets: ['codex'], question: 'dispatch without inbox side effects', callbackTo: 'opus' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).status, 'running');
+    await freshnessApp.close();
+  });
+
+  test('multi-mention does not let queued continue-current work veto dispatch', async () => {
+    const freshnessApp = Fastify({ logger: false });
+    registerCallbackAuthHook(freshnessApp, mockRegistry);
+    const parentInvocationId = 'parent-multi-freshness';
+    const parentCreds = mockRegistry.register('opus', 'thread-multi-parent', 'user-1', parentInvocationId);
+    const queueMessageStore = createMockMessageStore();
+    appendTestLifecycleResponseSource(queueMessageStore, {
+      ...parentCreds,
+      threadId: 'thread-multi-parent',
+      userId: 'user-1',
+      catId: 'opus',
+    });
+    queueMessageStore.getByThreadAfter = async () => [];
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const invocationQueue = adaptInvocationQueue(new InvocationQueue());
+    invocationQueue.enqueue(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'strict',
+        threadId: 'thread-multi-parent',
+        userId: 'user-1',
+        kind: 'conversation_input',
+        content: 'read before starting a multi-mention',
+        source: 'user',
+        targetCats: ['opus'],
+        authorIntentByCatId: {
+          opus: { requested: 'continue_current', boundParentInvocationId: parentInvocationId },
+        },
+        intent: 'execute',
+      }),
+    );
+    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
+    registerMultiMentionRoutes(freshnessApp, {
+      messageStore: queueMessageStore,
+      socketManager: mockSocket,
+      router: mockRouter,
+      invocationRecordStore: mockInvocationRecordStore,
+      invocationTracker: mockInvocationTracker,
+      invocationQueue,
+      queueProcessor: createMockQueueProcessor(),
+      deliveryCursorStore: { getSeenCursor: async () => 'seen-cursor' },
+      turnExecutionStore: {
+        async get(invocationId) {
+          return {
+            invocationId,
+            parentInvocationId,
+            threadId: 'thread-multi-parent',
+            userId: 'user-1',
+            catId: 'opus',
+            executionKind: 'ordinary',
+            status: 'running',
+            startedAt: 1,
+          };
+        },
+      },
+    });
+    await freshnessApp.ready();
+
+    const res = await freshnessApp.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      headers: {
+        'x-invocation-id': parentCreds.invocationId,
+        'x-callback-token': parentCreds.callbackToken,
+      },
+      payload: {
+        targets: ['codex'],
+        question: 'Start without making this tool an inbox reader',
+        callbackTo: 'opus',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).status, 'running');
+    await freshnessApp.close();
+  });
+
+  test('fails closed when callback auth has no durable child execution', async () => {
+    const missingLedgerApp = Fastify({ logger: false });
+    registerCallbackAuthHook(missingLedgerApp, mockRegistry);
+    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
+    registerMultiMentionRoutes(missingLedgerApp, {
+      messageStore: mockMessageStore,
+      socketManager: mockSocket,
+      router: mockRouter,
+      invocationRecordStore: mockInvocationRecordStore,
+      invocationTracker: mockInvocationTracker,
+      turnExecutionStore: {
+        async get() {
+          return null;
+        },
+      },
+    });
+    await missingLedgerApp.ready();
+
+    const res = await missingLedgerApp.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
+      payload: {
+        targets: ['codex'],
+        question: 'must not run without child truth',
+        callbackTo: 'opus',
+      },
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(JSON.parse(res.body).status, 'turn_execution_not_found');
+    await missingLedgerApp.close();
+  });
+
   test('rejects invalid callback credentials', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': 'fake', 'x-callback-token': 'fake' },
       payload: {
-        invocationId: 'fake',
-        callbackToken: 'fake',
         targets: ['codex'],
         question: 'test',
         callbackTo: 'opus',
@@ -232,9 +529,8 @@ describe('Multi-Mention Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['nonexistent-cat'],
         question: 'test',
         callbackTo: 'opus',
@@ -250,9 +546,8 @@ describe('Multi-Mention Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex'],
         question: 'test',
         callbackTo: 'nonexistent-cat',
@@ -264,96 +559,63 @@ describe('Multi-Mention Routes', () => {
     assert.ok(body.error.includes('callbackTo'));
   });
 
-  test('dispatches to all targets', async () => {
-    await app.inject({
+  test('queues all targets without direct provider dispatch', async () => {
+    const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex', 'gemini'],
         question: 'Review this design',
         callbackTo: 'opus',
       },
     });
 
-    // Wait for async dispatch to complete
-    await new Promise((r) => setTimeout(r, 100));
-
-    // Should have dispatched to both targets
-    const executions = mockRouter.getExecutions();
-    assert.equal(executions.length, 2);
-    assert.ok(executions.some((e) => e.targetCats[0] === 'codex'));
-    assert.ok(executions.some((e) => e.targetCats[0] === 'gemini'));
+    assert.equal(res.statusCode, 200);
+    assert.equal(mockRouter.getExecutions().length, 0);
+    const entries = invocationQueue.list('thread-1', 'user-1');
+    assert.equal(entries.length, 1);
+    assert.deepEqual(entries[0].targets.toSorted(), ['codex', 'gemini']);
   });
 
-  test('broadcasts intent_mode and tracks active slots for dispatched targets', async () => {
+  test('includes multi-mention prefix in queued content', async () => {
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
-        targets: ['codex', 'gemini'],
-        question: 'Review this design',
-        callbackTo: 'opus',
-      },
-    });
-
-    await new Promise((r) => setTimeout(r, 100));
-
-    const starts = mockInvocationTracker.getStarts();
-    assert.equal(starts.length, 2);
-    assert.deepEqual(starts.map((entry) => entry.catId).sort(), ['codex', 'gemini']);
-
-    const roomEvents = mockSocket.getRoomEvents().filter((event) => event.event === 'intent_mode');
-    assert.equal(roomEvents.length, 2);
-    assert.deepEqual(roomEvents.map((event) => event.data.targetCats[0]).sort(), ['codex', 'gemini']);
-    for (const event of roomEvents) {
-      assert.equal(event.data.threadId, 'thread-1');
-      assert.ok(event.data.invocationId, 'intent_mode should include invocationId');
-    }
-
-    const agentMessages = mockSocket
-      .getMessages()
-      .filter((message) => ['text', 'done'].includes(message.type) && ['codex', 'gemini'].includes(message.catId));
-    assert.ok(agentMessages.length >= 4, 'expected streamed text+done messages for both targets');
-    for (const message of agentMessages) {
-      assert.ok(message.invocationId, 'streamed multi-mention events should carry invocationId');
-    }
-
-    const completes = mockInvocationTracker.getCompletes();
-    assert.equal(completes.length, 2);
-  });
-
-  test('includes multi-mention prefix in dispatched message', async () => {
-    await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/multi-mention',
-      payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex'],
         question: 'What is your opinion?',
         callbackTo: 'opus',
       },
     });
 
-    await new Promise((r) => setTimeout(r, 100));
-
-    const executions = mockRouter.getExecutions();
-    assert.equal(executions.length, 1);
-    assert.ok(executions[0].message.includes('[Multi-Mention from opus]'));
-    assert.ok(executions[0].message.includes('What is your opinion?'));
+    const [entry] = invocationQueue.list('thread-1', 'user-1');
+    assert.ok(entry.payload.content.includes('[Multi-Mention from opus]'));
+    assert.ok(entry.payload.content.includes('What is your opinion?'));
+    const source = await mockMessageStore.getById(entry.payload.sourceRecordId);
+    assert.ok(source, 'Queue source must be a real History message');
+    assert.equal(entry.payload.messageId, source.id);
+    assert.equal(entry.payload.content, source.content);
+    const callerResponse = await mockMessageStore.getByIdempotencyKey(
+      'user-1',
+      'thread-1',
+      `message-lifecycle-response:${creds.invocationId}`,
+    );
+    assert.ok(callerResponse);
+    assert.equal(source.replyTo, callerResponse.id);
+    assert.deepEqual(source.extra?.causal, {
+      kind: 'invocation_reply',
+      triggerMessageId: callerResponse.id,
+    });
   });
 
   test('uses default timeout when not specified', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex'],
         question: 'test',
         callbackTo: 'opus',
@@ -367,9 +629,8 @@ describe('Multi-Mention Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex'],
         question: 'test',
         callbackTo: 'opus',
@@ -390,9 +651,8 @@ describe('Multi-Mention Routes', () => {
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
         targets: ['codex'],
         question: 'test',
         callbackTo: 'opus',
@@ -404,11 +664,8 @@ describe('Multi-Mention Routes', () => {
     const statusRes = await app.inject({
       method: 'GET',
       url: '/api/callbacks/multi-mention-status',
-      query: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
-        requestId,
-      },
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
+      query: { requestId },
     });
 
     assert.equal(statusRes.statusCode, 200);
@@ -421,11 +678,8 @@ describe('Multi-Mention Routes', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/callbacks/multi-mention-status',
-      query: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
-        requestId: 'nonexistent',
-      },
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
+      query: { requestId: 'nonexistent' },
     });
 
     assert.equal(res.statusCode, 404);
@@ -443,38 +697,6 @@ describe('Multi-Mention Routes', () => {
     });
 
     assert.equal(res.statusCode, 401);
-  });
-
-  // ── Result aggregation ────────────────────────────────────────────
-
-  test('flushes aggregated result when all targets respond', async () => {
-    await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/multi-mention',
-      payload: {
-        invocationId: creds.invocationId,
-        callbackToken: creds.callbackToken,
-        targets: ['codex'],
-        question: 'Quick question',
-        callbackTo: 'opus',
-      },
-    });
-
-    // Wait for dispatch + flush
-    await new Promise((r) => setTimeout(r, 200));
-
-    // Should have stored the aggregated result
-    const stored = mockMessageStore.getMessages();
-    assert.ok(stored.length > 0);
-
-    const resultMsg = stored.find((m) => m.content.includes('Multi-Mention 结果汇总'));
-    assert.ok(resultMsg, 'Should have stored aggregated result message');
-    assert.ok(resultMsg.content.includes('Quick question'));
-
-    // Should have broadcast via connector_message
-    const roomEvents = mockSocket.getRoomEvents();
-    const connectorEvent = roomEvents.find((e) => e.event === 'connector_message');
-    assert.ok(connectorEvent, 'Should have broadcast connector_message');
   });
 
   // ── Anti-cascade ──────────────────────────────────────────────────
@@ -501,9 +723,8 @@ describe('Multi-Mention Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': codexCreds.invocationId, 'x-callback-token': codexCreds.callbackToken },
       payload: {
-        invocationId: codexCreds.invocationId,
-        callbackToken: codexCreds.callbackToken,
         targets: ['gemini'],
         question: 'Cascading question',
         callbackTo: 'codex',
@@ -513,71 +734,6 @@ describe('Multi-Mention Routes', () => {
     assert.equal(res.statusCode, 409);
     const body = JSON.parse(res.body);
     assert.ok(body.error.includes('Anti-cascade'));
-  });
-
-  // ── InvocationTracker concurrent abort bug ──────────────────────
-
-  test('concurrent dispatches are NOT aborted by InvocationTracker (per-thread singleton)', async () => {
-    // Reproduce the bug: InvocationTracker.start() aborts prior invocation
-    // for the same threadId, causing all but the last dispatch to lose their response.
-    resetMultiMentionOrchestrator();
-
-    const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
-    const tracker = new InvocationTracker();
-
-    // Slow mock router: each target yields text after a delay, giving tracker
-    // time to abort earlier dispatches
-    const slowRouter = {
-      async *routeExecution(_userId, _message, _threadId, _invId, targetCats, _intent, opts) {
-        const catId = targetCats[0];
-        // Small delay to let concurrent starts happen
-        await new Promise((r) => setTimeout(r, 30));
-        // Check if we've been aborted
-        if (opts?.signal?.aborted) return;
-        yield { type: 'text', catId, content: `Reply from ${catId}`, timestamp: Date.now() };
-        yield { type: 'done', catId, isFinal: true, timestamp: Date.now() };
-      },
-    };
-
-    // Re-create app with invocationTracker
-    const trackerApp = Fastify({ logger: false });
-    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
-    registerMultiMentionRoutes(trackerApp, {
-      registry: mockRegistry,
-      messageStore: mockMessageStore,
-      socketManager: mockSocket,
-      router: slowRouter,
-      invocationRecordStore: mockInvocationRecordStore,
-      invocationTracker: tracker,
-    });
-    await trackerApp.ready();
-
-    // Use a separate creds so initiator (codex) is different from all targets
-    const callerCreds = mockRegistry.register('codex', 'thread-1', 'user-1');
-
-    await trackerApp.inject({
-      method: 'POST',
-      url: '/api/callbacks/multi-mention',
-      payload: {
-        invocationId: callerCreds.invocationId,
-        callbackToken: callerCreds.callbackToken,
-        targets: ['opus', 'gemini'],
-        question: 'Test concurrent dispatch',
-        callbackTo: 'codex',
-      },
-    });
-
-    // Wait for all dispatches to complete
-    await new Promise((r) => setTimeout(r, 500));
-
-    // The aggregated result should contain replies from BOTH cats
-    const stored = mockMessageStore.getMessages();
-    const resultMsg = stored.find((m) => m.content.includes('Multi-Mention 结果汇总'));
-    assert.ok(resultMsg, 'Should have aggregated result');
-    assert.ok(resultMsg.content.includes('Reply from opus'), `Opus response missing. Got:\n${resultMsg?.content}`);
-    assert.ok(resultMsg.content.includes('Reply from gemini'), `Gemini response missing. Got:\n${resultMsg?.content}`);
-
-    await trackerApp.close();
   });
 
   // ── Idempotency ───────────────────────────────────────────────────
@@ -598,181 +754,5 @@ describe('Multi-Mention Routes', () => {
     const body1 = JSON.parse(res1.body);
     const body2 = JSON.parse(res2.body);
     assert.equal(body1.requestId, body2.requestId);
-  });
-
-  // ── F122: target crash releases target slot (AC-A7) ────────────
-
-  test('F122 AC-A7: target execution failure releases target tracker slot', async () => {
-    resetMultiMentionOrchestrator();
-
-    const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
-    const tracker = new InvocationTracker();
-
-    // Router that throws (simulating target crash / context limit exceeded)
-    const crashRouter = {
-      async *routeExecution() {
-        throw new Error('prompt token count of 158302 exceeds the limit of 128000');
-      },
-    };
-
-    const crashApp = Fastify({ logger: false });
-    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
-    registerMultiMentionRoutes(crashApp, {
-      registry: mockRegistry,
-      messageStore: mockMessageStore,
-      socketManager: mockSocket,
-      router: crashRouter,
-      invocationRecordStore: mockInvocationRecordStore,
-      invocationTracker: tracker,
-    });
-    await crashApp.ready();
-
-    const crashCreds = mockRegistry.register('opus', 'thread-crash', 'user-1');
-
-    const res = await crashApp.inject({
-      method: 'POST',
-      url: '/api/callbacks/multi-mention',
-      payload: {
-        invocationId: crashCreds.invocationId,
-        callbackToken: crashCreds.callbackToken,
-        targets: ['codex'],
-        question: 'This will crash',
-        callbackTo: 'opus',
-      },
-    });
-
-    assert.equal(res.statusCode, 200);
-
-    // Wait for background dispatch to complete (with error)
-    await new Promise((r) => setTimeout(r, 200));
-
-    // The key assertion: target slot must be released after crash
-    assert.equal(
-      tracker.has('thread-crash', 'codex'),
-      false,
-      'Target cat slot must be released after execution failure',
-    );
-    // Thread-level check
-    assert.equal(tracker.has('thread-crash'), false, 'Thread must have no active slots after target crash');
-    const failedUpdate = mockInvocationRecordStore
-      .getUpdates()
-      .find((entry) => entry.data.status === 'failed' && entry.data.error === 'dispatch_error');
-    assert.ok(failedUpdate, 'crashed multi-mention target must converge InvocationRecord to failed');
-
-    await crashApp.close();
-  });
-
-  test('F122 AC-A7: pre-aborted controller still releases target tracker slot', async () => {
-    resetMultiMentionOrchestrator();
-
-    const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
-    const tracker = new InvocationTracker();
-
-    // Pre-abort the slot: simulate another invocation aborting this one
-    // by starting a slot for codex, then starting again (which aborts the first)
-    const controller1 = tracker.start('thread-preabort', 'codex', 'user-1', ['codex']);
-    // The slot is now active and not aborted
-    assert.equal(tracker.has('thread-preabort', 'codex'), true);
-    // Abort it to simulate preemption
-    controller1.abort();
-    tracker.complete('thread-preabort', 'codex', controller1);
-
-    // Now the slot should be free for the next dispatch
-    // The router doesn't matter here — what matters is the aborted-before-start path
-    const normalRouter = {
-      async *routeExecution(_u, _m, _t, _i, targetCats) {
-        const catId = targetCats[0];
-        yield { type: 'text', catId, content: 'ok', timestamp: Date.now() };
-        yield { type: 'done', catId, isFinal: true, timestamp: Date.now() };
-      },
-    };
-
-    const preAbortApp = Fastify({ logger: false });
-    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
-    registerMultiMentionRoutes(preAbortApp, {
-      registry: mockRegistry,
-      messageStore: mockMessageStore,
-      socketManager: mockSocket,
-      router: normalRouter,
-      invocationRecordStore: mockInvocationRecordStore,
-      invocationTracker: tracker,
-    });
-    await preAbortApp.ready();
-
-    const preCreds = mockRegistry.register('opus', 'thread-preabort', 'user-1');
-
-    const res = await preAbortApp.inject({
-      method: 'POST',
-      url: '/api/callbacks/multi-mention',
-      payload: {
-        invocationId: preCreds.invocationId,
-        callbackToken: preCreds.callbackToken,
-        targets: ['codex'],
-        question: 'After preempt',
-        callbackTo: 'opus',
-      },
-    });
-
-    assert.equal(res.statusCode, 200);
-    await new Promise((r) => setTimeout(r, 200));
-
-    // Slot must be released regardless of whether dispatch ran or was pre-aborted
-    assert.equal(tracker.has('thread-preabort', 'codex'), false, 'Slot must be released after pre-aborted dispatch');
-
-    await preAbortApp.close();
-  });
-
-  // ── F122: parentInvocationId passthrough ───────────────────────
-
-  test('F122 AC-A1: dispatchToTarget passes parentInvocationId to routeExecution', async () => {
-    resetMultiMentionOrchestrator();
-
-    const capturedOpts = [];
-    const capturingRouter = {
-      async *routeExecution(_userId, _message, _threadId, _invId, targetCats, _intent, opts) {
-        capturedOpts.push(opts);
-        const catId = targetCats[0];
-        yield { type: 'text', catId, content: `Response from ${catId}`, timestamp: Date.now() };
-        yield { type: 'done', catId, isFinal: true, timestamp: Date.now() };
-      },
-    };
-
-    const capApp = Fastify({ logger: false });
-    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
-    registerMultiMentionRoutes(capApp, {
-      registry: mockRegistry,
-      messageStore: mockMessageStore,
-      socketManager: mockSocket,
-      router: capturingRouter,
-      invocationRecordStore: mockInvocationRecordStore,
-      invocationTracker: mockInvocationTracker,
-    });
-    await capApp.ready();
-
-    const capCreds = mockRegistry.register('opus', 'thread-pid', 'user-1');
-
-    const res = await capApp.inject({
-      method: 'POST',
-      url: '/api/callbacks/multi-mention',
-      payload: {
-        invocationId: capCreds.invocationId,
-        callbackToken: capCreds.callbackToken,
-        targets: ['codex'],
-        question: 'F122 parentInvocationId test',
-        callbackTo: 'opus',
-      },
-    });
-
-    assert.equal(res.statusCode, 200);
-
-    // Wait for background dispatch
-    await new Promise((r) => setTimeout(r, 100));
-
-    assert.equal(capturedOpts.length, 1, 'routeExecution should be called once');
-    assert.ok(capturedOpts[0].parentInvocationId, 'opts must include parentInvocationId');
-    assert.ok(typeof capturedOpts[0].parentInvocationId === 'string', 'parentInvocationId must be a string');
-    assert.ok(capturedOpts[0].signal, 'opts must still include signal');
-
-    await capApp.close();
   });
 });

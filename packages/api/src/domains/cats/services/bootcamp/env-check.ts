@@ -20,6 +20,9 @@ export interface EnvCheckResult {
   pnpm: EnvCheckItem;
   git: EnvCheckItem;
   claudeCli: EnvCheckItem;
+  codexCli: EnvCheckItem;
+  geminiCli: EnvCheckItem;
+  kimiCli: EnvCheckItem;
   mcp: EnvCheckItem;
   tts: { ok: boolean; recommended: string };
   asr: { ok: boolean };
@@ -34,6 +37,24 @@ async function checkCommand(cmd: string): Promise<EnvCheckItem> {
   } catch {
     return { ok: false };
   }
+}
+
+function checkCurrentPnpmEnvironment(): EnvCheckItem | null {
+  const npmExecPath = process.env.npm_execpath?.toLowerCase() ?? '';
+  const packageManagerUserAgent = process.env.npm_config_user_agent ?? '';
+  const userAgentVersion = packageManagerUserAgent.match(/\bpnpm\/([^\s]+)/)?.[1];
+
+  if (!npmExecPath.includes('pnpm') && !userAgentVersion) {
+    return null;
+  }
+
+  return userAgentVersion
+    ? { ok: true, version: userAgentVersion, note: 'Detected from current package manager environment' }
+    : { ok: true, note: 'Detected from current package manager environment' };
+}
+
+async function checkPnpm(): Promise<EnvCheckItem> {
+  return checkCurrentPnpmEnvironment() ?? checkCommand('pnpm --version');
 }
 
 async function checkPort(port: number): Promise<boolean> {
@@ -51,11 +72,14 @@ async function checkPort(port: number): Promise<boolean> {
 }
 
 export async function runEnvironmentCheck(): Promise<EnvCheckResult> {
-  const [node, pnpm, git, claudeCli] = await Promise.all([
+  const [node, pnpm, git, claudeCli, codexCli, geminiCli, kimiCli] = await Promise.all([
     checkCommand('node --version'),
-    checkCommand('pnpm --version'),
+    checkPnpm(),
     checkCommand('git --version'),
     checkCommand('claude --version'),
+    checkCommand('codex --version'),
+    checkCommand('gemini --version'),
+    checkCommand('kimi --version'),
   ]);
 
   const mcpPath = process.env.CAT_CAFE_MCP_SERVER_PATH || resolveDefaultClaudeMcpServerPath();
@@ -70,6 +94,9 @@ export async function runEnvironmentCheck(): Promise<EnvCheckResult> {
     pnpm,
     git,
     claudeCli,
+    codexCli,
+    geminiCli,
+    kimiCli,
     mcp,
     tts: {
       ok: ttsPort,

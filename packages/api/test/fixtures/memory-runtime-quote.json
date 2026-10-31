@@ -1,0 +1,32 @@
+{
+  "sourceRef": "thread_muj2qdalfr36pbjz#0001791192671507-001359-8068a030",
+  "id": "0001791192671507-001359-8068a030",
+  "userId": "default-user",
+  "catId": null,
+  "content": "",
+  "contentLength": 0,
+  "truncated": false,
+  "contentBlocks": [
+    {
+      "type": "context_attachment",
+      "attachment": {
+        "v": 1,
+        "id": "ctx-quote-ec9e904d-a820-4554-b009-436dd7fc7737",
+        "kind": "quote",
+        "text": "它准备的解决办法很简单：另开一个隔离的测试浏览器，只访问本机 Clowder AI，不会碰你的私人 Chrome，也不发消息、不调用模型、不重启服务。",
+        "comment": "可以啊 你喊他继续啊",
+        "selectionStart": 183,
+        "selectionEnd": 256,
+        "source": {
+          "kind": "cli_output",
+          "threadId": "thread_muj2qdalfr36pbjz",
+          "messageId": "0001791192354251-001355-57703493",
+          "segmentId": "stdout"
+        }
+      }
+    }
+  ],
+  "speaker": "co-creator",
+  "timestamp": 1791192671507,
+  "threadId": "thread_muj2qdalfr36pbjz"
+}

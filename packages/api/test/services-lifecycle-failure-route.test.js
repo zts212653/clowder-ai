@@ -1,0 +1,742 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import Fastify from 'fastify';
+import { resolveServiceScriptPath } from '../dist/domains/services/service-lifecycle.js';
+import { servicesRoutes } from '../dist/routes/services.js';
+
+const SESSION_HEADERS = { 'x-test-session-user': 'you' };
+const ORIGINAL_OWNER_ID = 'you';
+process.env.DEFAULT_OWNER_USER_ID = ORIGINAL_OWNER_ID;
+
+function buildIsolatedTestEnv(baseEnv = process.env) {
+  const env = Object.fromEntries(Object.entries(baseEnv).filter(([key]) => !/^CAT_CAFE_SERVICE_.*_ENABLED$/.test(key)));
+  for (const key of [
+    'ASR_ENABLED',
+    'TTS_ENABLED',
+    'EMBED_ENABLED',
+    'LLM_POSTPROCESS_ENABLED',
+    'AUDIO_SERVICE_ENABLED',
+  ]) {
+    delete env[key];
+  }
+  env.CAT_CAFE_PROFILE = 'test';
+  env.CAT_CAFE_SERVICE_ASR_ENABLED = '0';
+  env.ASR_ENABLED = '0';
+  return env;
+}
+
+async function buildApp(options = {}) {
+  const app = Fastify({ logger: false });
+  app.addHook('preHandler', async (request) => {
+    const sessionUser = request.headers['x-test-session-user'];
+    if (typeof sessionUser === 'string' && sessionUser.trim()) {
+      request.sessionUserId = sessionUser.trim();
+    }
+  });
+  const testEnv = options.env === undefined ? buildIsolatedTestEnv(process.env) : options.env;
+  await app.register(servicesRoutes, {
+    ...options,
+    env: testEnv,
+    fetchHealth:
+      options.fetchHealth ??
+      (async () => ({
+        ok: false,
+        status: 503,
+        error: 'unreachable',
+      })),
+  });
+  await app.ready();
+  return app;
+}
+
+function restoreOwner(previousOwner) {
+  if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+  else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+}
+
+function createAuditLog() {
+  const events = [];
+  return {
+    events,
+    auditLog: {
+      append: async (input) => {
+        events.push(input);
+        return input;
+      },
+      readByType: async (type) => events.filter((event) => event.type === type),
+    },
+  };
+}
+
+describe('service lifecycle failure handling', () => {
+  it('fails closed and audits when the service port probe is unavailable', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const { auditLog, events } = createAuditLog();
+    let didRun = false;
+    const app = await buildApp({
+      lifecycle: {
+        auditLog,
+        findPidsByPort: async () => {
+          throw new Error('lsof unavailable');
+        },
+        runScript: async () => {
+          didRun = true;
+          return { code: 0, output: 'started' };
+        },
+      },
+    });
+    try {
+      const start = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/start',
+        headers: SESSION_HEADERS,
+      });
+      assert.equal(start.statusCode, 503, start.payload);
+      assert.match(JSON.parse(start.payload).error, /port probe/i);
+      assert.equal(didRun, false);
+
+      const stop = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/stop',
+        headers: SESSION_HEADERS,
+      });
+      assert.equal(stop.statusCode, 503, stop.payload);
+      assert.match(JSON.parse(stop.payload).error, /port probe/i);
+
+      assert.deepEqual(
+        events.map((event) => event.data),
+        [
+          {
+            serviceId: 'whisper-stt',
+            action: 'start',
+            operator: 'you',
+            status: 'rejected',
+            reason: 'port-probe-unavailable',
+          },
+          {
+            serviceId: 'whisper-stt',
+            action: 'stop',
+            operator: 'you',
+            status: 'rejected',
+            reason: 'port-probe-unavailable',
+          },
+        ],
+      );
+    } finally {
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('returns a controlled failure and audits install runner exceptions', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const { auditLog, events } = createAuditLog();
+    const configs = new Map();
+    const app = await buildApp({
+      lifecycle: {
+        auditLog,
+        serviceConfig: {
+          get: (id) => configs.get(id),
+          set: (id, patch) => {
+            const updated = { ...(configs.get(id) ?? { enabled: false }), ...patch };
+            configs.set(id, updated);
+            return updated;
+          },
+        },
+        runScript: async () => {
+          throw new Error('spawn ENOENT /private/raw/script/path');
+        },
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/install',
+        headers: SESSION_HEADERS,
+        payload: { model: 'mlx-community/whisper-large-v3-turbo' },
+      });
+
+      assert.equal(res.statusCode, 502, res.payload);
+      assert.match(JSON.parse(res.payload).error, /runner failed/i);
+      assert.equal(res.payload.includes('ENOENT'), false);
+      assert.equal(res.payload.includes('/private/raw/script/path'), false);
+      assert.deepEqual(
+        events.map((event) => event.data.status),
+        ['started', 'failed'],
+      );
+      assert.equal(events.at(-1).data.reason, 'runner-error');
+      assert.equal(configs.get('whisper-stt').installed, false, 'failed install must not leave service installed');
+      assert.equal(configs.get('whisper-stt').enabled, false, 'failed install must leave service disabled');
+
+      const listRes = await app.inject({
+        method: 'GET',
+        url: '/api/services',
+        headers: SESSION_HEADERS,
+      });
+      const whisper = JSON.parse(listRes.payload).services.find((s) => s.id === 'whisper-stt');
+      assert.equal(whisper.installed, false, 'failed install remains installable in API list');
+    } finally {
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('preserves the prior installed service state when a reinstall fails', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const configs = new Map([['whisper-stt', { enabled: true, installed: true, selectedModel: 'base', port: 19901 }]]);
+    const app = await buildApp({
+      lifecycle: {
+        findPidsByPort: async () => [],
+        serviceConfig: {
+          get: (id) => configs.get(id),
+          set: (id, patch) => {
+            const updated = { ...(configs.get(id) ?? { enabled: false }), ...patch };
+            configs.set(id, updated);
+            return updated;
+          },
+        },
+        runScript: async () => ({ code: 1, output: 'pip failed' }),
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/install',
+        headers: SESSION_HEADERS,
+        payload: { model: 'large-v3-turbo', port: 19902 },
+      });
+
+      assert.equal(res.statusCode, 422, res.payload);
+      assert.deepEqual(configs.get('whisper-stt'), {
+        enabled: true,
+        installed: true,
+        selectedModel: 'base',
+        port: 19901,
+      });
+    } finally {
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('returns a controlled failure and audits start runner exceptions', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const { auditLog, events } = createAuditLog();
+    const app = await buildApp({
+      lifecycle: {
+        auditLog,
+        findPidsByPort: async () => [],
+        runScript: async () => {
+          throw new Error('spawn ENOENT /private/raw/start/path');
+        },
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/start',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 502, res.payload);
+      assert.match(JSON.parse(res.payload).error, /runner failed/i);
+      assert.equal(res.payload.includes('ENOENT'), false);
+      assert.equal(res.payload.includes('/private/raw/start/path'), false);
+      assert.deepEqual(
+        events.map((event) => event.data.status),
+        ['started', 'failed'],
+      );
+      assert.equal(events.at(-1).data.reason, 'runner-error');
+    } finally {
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('keeps the service lock during detached startup grace', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    let runCount = 0;
+    const app = await buildApp({
+      lifecycle: {
+        timeoutMs: 50,
+        startupGraceMs: 50,
+        findPidsByPort: async () => [],
+        runScript: async () => {
+          runCount += 1;
+          return { code: null, pid: 7000 + runCount };
+        },
+      },
+    });
+    try {
+      const first = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/start',
+        headers: SESSION_HEADERS,
+      });
+      assert.equal(first.statusCode, 200, first.payload);
+
+      const second = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/start',
+        headers: SESSION_HEADERS,
+      });
+      assert.equal(second.statusCode, 409, second.payload);
+      assert.equal(runCount, 1);
+    } finally {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('treats an owned listener as already running instead of invoking start again', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const { auditLog, events } = createAuditLog();
+    let didRun = false;
+    const configs = new Map([
+      [
+        'whisper-stt',
+        {
+          installed: true,
+          enabled: true,
+          selectedModel: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+        },
+      ],
+    ]);
+    const resolvedScript = resolveServiceScriptPath('scripts/services/whisper-server.sh');
+    const app = await buildApp({
+      lifecycle: {
+        auditLog,
+        serviceConfig: {
+          get: (id) => configs.get(id),
+          set: (id, patch) => {
+            const updated = { ...(configs.get(id) ?? { enabled: false }), ...patch };
+            configs.set(id, updated);
+            return updated;
+          },
+        },
+        findPidsByPort: async () => [5151],
+        readProcessCommand: async () => `/bin/bash ${resolvedScript}`,
+        runScript: async () => {
+          didRun = true;
+          return { code: 0, output: 'started' };
+        },
+      },
+      fetchHealth: async () => ({
+        ok: true,
+        status: 200,
+        error: null,
+        details: {
+          status: 'ok',
+          model: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+          backend: 'mlx-audio',
+        },
+      }),
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/start',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(didRun, false);
+      assert.deepEqual(JSON.parse(res.payload), {
+        ok: true,
+        message: 'Speech Recognition is already running',
+        pids: [5151],
+      });
+      assert.deepEqual(
+        events.map((event) => event.data),
+        [
+          {
+            serviceId: 'whisper-stt',
+            action: 'start',
+            operator: 'you',
+            status: 'completed',
+            reason: 'already-running',
+          },
+        ],
+      );
+    } finally {
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('persists an explicit Qwen env contract over stale Whisper lifecycle state', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const env = buildIsolatedTestEnv(process.env);
+    delete env.CAT_CAFE_SERVICE_ASR_ENABLED;
+    delete env.ASR_ENABLED;
+    env.CAT_CAFE_SERVICE_QWEN3_ASR_ENABLED = '1';
+    const configs = new Map([
+      [
+        'whisper-stt',
+        {
+          installed: true,
+          enabled: true,
+          selectedModel: 'mlx-community/whisper-large-v3-turbo',
+        },
+      ],
+    ]);
+    let didRun = false;
+    const resolvedScript = resolveServiceScriptPath('scripts/services/whisper-server.sh');
+    const app = await buildApp({
+      env,
+      lifecycle: {
+        serviceConfig: {
+          get: (id) => configs.get(id),
+          set: (id, patch) => {
+            const updated = { ...(configs.get(id) ?? { enabled: false }), ...patch };
+            configs.set(id, updated);
+            return updated;
+          },
+        },
+        findPidsByPort: async () => [5151],
+        readProcessCommand: async () => `/bin/bash ${resolvedScript}`,
+        runScript: async () => {
+          didRun = true;
+          return { code: 0, output: 'started' };
+        },
+      },
+      fetchHealth: async () => ({
+        ok: true,
+        status: 200,
+        error: null,
+        details: {
+          status: 'ok',
+          model: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+          backend: 'mlx-audio',
+        },
+      }),
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/start',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(didRun, false);
+      assert.equal(configs.get('whisper-stt').selectedModel, 'mlx-community/Qwen3-ASR-1.7B-8bit');
+    } finally {
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('restarts an owned ASR listener when live model or backend identity is stale', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const matrix = [
+      {
+        desiredModel: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+        liveModel: 'mlx-community/whisper-large-v3-turbo',
+        liveBackend: 'mlx-whisper',
+      },
+      {
+        desiredModel: 'mlx-community/whisper-large-v3-turbo',
+        liveModel: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+        liveBackend: 'mlx-audio',
+      },
+      {
+        desiredModel: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+        liveModel: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+        liveBackend: 'mlx-whisper',
+      },
+      {
+        desiredModel: 'mlx-community/whisper-large-v3-turbo',
+        liveModel: 'mlx-community/whisper-large-v3-turbo',
+        liveBackend: 'faster-whisper',
+      },
+      {
+        desiredModel: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+        liveModel: undefined,
+        liveBackend: undefined,
+      },
+    ];
+
+    try {
+      for (const row of matrix) {
+        const configs = new Map([['whisper-stt', { installed: true, enabled: true, selectedModel: row.desiredModel }]]);
+        const killed = new Set();
+        let didRun = false;
+        const resolvedScript = resolveServiceScriptPath('scripts/services/whisper-server.sh');
+        const app = await buildApp({
+          lifecycle: {
+            startupGraceMs: 10,
+            serviceConfig: {
+              get: (id) => configs.get(id),
+              set: (id, patch) => {
+                const updated = { ...(configs.get(id) ?? { enabled: false }), ...patch };
+                configs.set(id, updated);
+                return updated;
+              },
+            },
+            findPidsByPort: async () => (killed.has(5151) ? [] : [5151]),
+            readProcessCommand: async () => `/bin/bash ${resolvedScript}`,
+            killPid: (pid) => killed.add(pid),
+            runScript: async () => {
+              didRun = true;
+              return { code: null, pid: 7001 };
+            },
+          },
+          fetchHealth: async () => ({
+            ok: true,
+            status: 200,
+            error: null,
+            details: { status: 'ok', model: row.liveModel, backend: row.liveBackend },
+          }),
+        });
+        try {
+          const res = await app.inject({
+            method: 'POST',
+            url: '/api/services/whisper-stt/start',
+            headers: SESSION_HEADERS,
+          });
+
+          assert.equal(res.statusCode, 200, res.payload);
+          assert.equal(didRun, true, `must restart stale ${row.liveBackend} listener`);
+          assert.deepEqual([...killed], [5151]);
+          assert.match(JSON.parse(res.payload).message, /start initiated/i);
+        } finally {
+          await new Promise((resolve) => setTimeout(resolve, 15));
+          await app.close();
+        }
+      }
+    } finally {
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('restarts an owned TTS listener that predates the streaming route contract', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const configs = new Map([
+      ['mlx-tts', { installed: true, enabled: true, selectedModel: 'mlx-community/Kokoro-82M-bf16' }],
+    ]);
+    const killed = new Set();
+    let didRun = false;
+    const resolvedRuntime = resolveServiceScriptPath('scripts/services/tts-api.py');
+    const app = await buildApp({
+      lifecycle: {
+        startupGraceMs: 10,
+        serviceConfig: {
+          get: (id) => configs.get(id),
+          set: (id, patch) => {
+            const updated = { ...(configs.get(id) ?? { enabled: false }), ...patch };
+            configs.set(id, updated);
+            return updated;
+          },
+        },
+        findPidsByPort: async () => (killed.has(5151) ? [] : [5151]),
+        readProcessCommand: async () => `python3 ${resolvedRuntime} --port 9879`,
+        killPid: (pid) => killed.add(pid),
+        runScript: async () => {
+          didRun = true;
+          return { code: null, pid: 7001 };
+        },
+      },
+      fetchHealth: async () => ({
+        ok: true,
+        status: 200,
+        error: null,
+        details: didRun ? { status: 'ok', capabilities: ['speech', 'speech-stream-route-v1'] } : { status: 'ok' },
+      }),
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/mlx-tts/start',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(didRun, true, 'must restart a sidecar that cannot advertise the F279 stream route');
+      assert.deepEqual([...killed], [5151]);
+      assert.match(JSON.parse(res.payload).message, /start initiated/i);
+    } finally {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('waits for an unhealthy owned listener to exit before restarting', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const killed = [];
+    let portProbeCount = 0;
+    let portProbeCountAtStart = 0;
+    const resolvedScript = resolveServiceScriptPath('scripts/services/whisper-server.sh');
+    const app = await buildApp({
+      lifecycle: {
+        startupGraceMs: 10,
+        findPidsByPort: async () => {
+          portProbeCount += 1;
+          return portProbeCount === 1 ? [5151] : [];
+        },
+        readProcessCommand: async () => `/bin/bash ${resolvedScript}`,
+        killPid: (pid, signal) => {
+          killed.push({ pid, signal });
+        },
+        runScript: async () => {
+          portProbeCountAtStart = portProbeCount;
+          return { code: null, pid: 7001 };
+        },
+      },
+      fetchHealth: async () => ({ ok: false, status: 503, error: 'unreachable' }),
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/start',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.deepEqual(killed, [{ pid: 5151, signal: 'SIGTERM' }]);
+      assert.equal(portProbeCountAtStart, 2, 'restart must re-probe the port after terminating stale listener');
+    } finally {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('does not terminate stale listeners when start cannot acquire the lifecycle lock', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    let releaseInstall;
+    let installStarted = false;
+    const killed = [];
+    const resolvedScript = resolveServiceScriptPath('scripts/services/whisper-server.sh');
+    const app = await buildApp({
+      lifecycle: {
+        findPidsByPort: async () => [5151],
+        readProcessCommand: async () => `/bin/bash ${resolvedScript}`,
+        killPid: (pid, signal) => {
+          killed.push({ pid, signal });
+        },
+        runScript: async ({ action }) => {
+          if (action === 'install') {
+            installStarted = true;
+            return new Promise((resolve) => {
+              releaseInstall = () => resolve({ code: 0, output: 'installed' });
+            });
+          }
+          return { code: null, pid: 7001 };
+        },
+      },
+    });
+    try {
+      const install = app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/install',
+        headers: SESSION_HEADERS,
+        payload: { model: 'base' },
+      });
+      while (!installStarted) await new Promise((resolve) => setImmediate(resolve));
+
+      const start = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/start',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(start.statusCode, 409, start.payload);
+      assert.deepEqual(killed, []);
+      releaseInstall();
+      assert.equal((await install).statusCode, 200);
+    } finally {
+      releaseInstall?.();
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('surfaces stop failures when signaling an owned process fails', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const { auditLog, events } = createAuditLog();
+    const killed = [];
+    const resolvedScript = resolveServiceScriptPath('scripts/services/whisper-server.sh');
+    const app = await buildApp({
+      lifecycle: {
+        auditLog,
+        findPidsByPort: async () => [5151],
+        readProcessCommand: async () => `/bin/bash ${resolvedScript}`,
+        killPid: (pid, signal) => {
+          killed.push({ pid, signal });
+          throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+        },
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/stop',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 502, res.payload);
+      assert.deepEqual(killed, [{ pid: 5151, signal: 'SIGTERM' }]);
+      assert.deepEqual(JSON.parse(res.payload), {
+        ok: false,
+        error: 'Speech Recognition stop failed for 1 process(es)',
+        stopped: [],
+        failed: [5151],
+      });
+      assert.equal(events.at(-1).data.status, 'failed');
+      assert.equal(events.at(-1).data.reason, 'terminate-failed');
+    } finally {
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('treats ESRCH during stop as an already-exited owned process', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const { auditLog, events } = createAuditLog();
+    const resolvedScript = resolveServiceScriptPath('scripts/services/whisper-server.sh');
+    const app = await buildApp({
+      lifecycle: {
+        auditLog,
+        findPidsByPort: async () => [5151],
+        readProcessCommand: async () => `/bin/bash ${resolvedScript}`,
+        killPid: () => {
+          throw Object.assign(new Error('no such process'), { code: 'ESRCH' });
+        },
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/stop',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.deepEqual(JSON.parse(res.payload), {
+        ok: true,
+        message: 'Speech Recognition stopped (0 process(es))',
+        stopped: [],
+      });
+      assert.equal(events.at(-1).data.status, 'completed');
+    } finally {
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+});

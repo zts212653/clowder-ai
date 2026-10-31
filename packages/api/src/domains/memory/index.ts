@@ -1,10 +1,19 @@
 // F102: Memory domain barrel export
 
+// F152 Phase A: Scanners
+export { CatCafeScanner } from './CatCafeScanner.js';
+export type { CollectionRebuildResult } from './CollectionIndexBuilder.js';
+// F186 Phase B: Collection scanners
+export { CollectionIndexBuilder } from './CollectionIndexBuilder.js';
 // Phase C: embedding + vector
 export { EmbeddingService } from './EmbeddingService.js';
+export { loadExternalCollections, resolveCollectionStorePath, saveExternalCollection } from './external-collections.js';
+export { FlatScanner } from './FlatScanner.js';
 export type { MemoryConfig, MemoryServices } from './factory.js';
 // Factory
 export { createMemoryServices } from './factory.js';
+export { GenericRepoScanner } from './GenericRepoScanner.js';
+export { GlobalIndexBuilder } from './GlobalIndexBuilder.js';
 export type { MessageListFn, StoredMessageSnapshot } from './IndexBuilder.js';
 export { IndexBuilder } from './IndexBuilder.js';
 // Interfaces + types
@@ -28,8 +37,12 @@ export type {
   MarkerFilter,
   MarkerStatus,
   MaterializeResult,
+  Provenance,
+  ProvenanceTier,
   RebuildResult,
   ReflectionContext,
+  RepoScanner,
+  ScannedEvidence,
   SearchOptions,
 } from './interfaces.js';
 export {
@@ -41,16 +54,28 @@ export {
   IMarkerQueueSymbol,
   IMaterializationServiceSymbol,
   IReflectionServiceSymbol,
+  IRepoScannerSymbol,
   MARKER_STATUSES,
   resolveEmbedConfig,
 } from './interfaces.js';
 export { KnowledgeResolver } from './KnowledgeResolver.js';
 export { MarkerQueue } from './MarkerQueue.js';
 export { MaterializationService } from './MaterializationService.js';
+export {
+  type ActiveEmbeddingRuntimeMode,
+  type EmbeddingActivationFailure,
+  type EmbeddingActivationResult,
+  type EmbeddingRuntimeMode,
+  type EmbeddingRuntimeStatus,
+  MemoryEmbeddingLifecycle,
+} from './MemoryEmbeddingLifecycle.js';
+export { PassageVectorStore, parsePassageVectorKey, passageVectorKey } from './PassageVectorStore.js';
 export { ReflectionService } from './ReflectionService.js';
 export { SemanticReranker } from './SemanticReranker.js';
 // Implementations
 export type { PassageResult } from './SqliteEvidenceStore.js';
 export { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
-export { ensureVectorTable } from './schema.js';
+export { StructuredScanner } from './StructuredScanner.js';
+export { detectScannerLevel, resolveCollectionScanner } from './scanner-resolver.js';
+export { ensurePassageVectorTable, ensureVectorTable } from './schema.js';
 export { VectorStore } from './VectorStore.js';

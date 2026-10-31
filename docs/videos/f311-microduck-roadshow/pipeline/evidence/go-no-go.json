@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "subject": "F311-microduck-roadshow:T1-pipeline",
+  "observedAt": "2026-09-04T08:45:00Z",
+  "verdict": "partial-go",
+  "currentGoal": {
+    "id": "local-baseline-observation",
+    "budget": "zero",
+    "verdict": "go",
+    "blockers": [],
+    "claimBoundary": "existing ONNX artifact, local CPU smoke, and one real simulator capture only; no training or robustness claim"
+  },
+  "runnableBaseline": {
+    "status": "passed",
+    "onnxReceiptRef": "./baseline-onnx-smoke.json",
+    "captureRef": "./baseline-space-live.png",
+    "captureSha256": "ede4b724d0e107d06207fe26d7db9394e3691a0cda4efd17b78bcb5bb765a833",
+    "browserObservation": {
+      "url": "https://pollen-robotics-microduck-simulator.hf.space/?boot=1",
+      "controlHz": 50,
+      "command": "ArrowUp held for 4 seconds",
+      "odometerBeforeMApprox": 0.1,
+      "odometerAfterMApprox": 0.7
+    },
+    "claimBoundary": "real simulator capture only; not a robustness evaluation"
+  },
+  "futureNewPolicyTraining": {
+    "status": "not-requested",
+    "requirements": [
+    {
+      "id": "official-walking-pt-not-published",
+      "status": "required-if-activated",
+      "requiredFor": "resume one zero-mutation control and three single-variable training candidates from one official checkpoint",
+      "evidenceRef": "./official-checkpoint-search.json",
+      "evidenceSha256": "0ac061e576fe344fed1ffd47588558f1a9d112695d196c19a54308f27636776c",
+      "observed": "24 GitHub branch trees, releases, Actions artifacts, Pollen HF models, and the historical maintainer HF account yielded no public .pt; the official policy repo contains ONNX only",
+      "unknown": "a private Pollen W&B or HF checkpoint may exist"
+    },
+    {
+      "id": "hf-owner-not-authenticated",
+      "status": "required-if-activated",
+      "requiredFor": "submit/query/cancel billed HF Jobs and persist private checkpoints",
+      "evidenceRef": "command:hf auth whoami",
+      "observed": "Not logged in"
+    },
+    {
+      "id": "hf-jobs-budget-not-authorized",
+      "status": "required-if-activated",
+      "requiredFor": "three candidate GPU jobs already bounded by the charter",
+      "evidenceRef": "../../README.md#8-开放项",
+      "observed": "HF Jobs paid allowance remains an open operator item"
+    },
+    {
+      "id": "matched-control-job-not-authorized",
+      "status": "required-if-activated",
+      "requiredFor": "one additional zero-mutation control job needed for attributable candidate deltas",
+      "evidenceRef": "../../README.md#7-预算护栏",
+      "observed": "the charter bounds up to three candidate jobs but does not authorize a separate matched control job"
+    },
+    {
+      "id": "sealed-holdout-owner-missing",
+      "status": "required-if-activated",
+      "requiredFor": "public plus sealed holdout evaluation without exposure leakage",
+      "evidenceRef": "../../README.md#3-硬边界-f311-spec-硬约束在鸭鸭上的实例化",
+      "observed": "no independent seed-set owner ref/hash/count has been delivered"
+    },
+    {
+      "id": "simulator-space-source-unlicensed",
+      "status": "required-if-activated",
+      "requiredFor": "copy or publish a modified fork of the official Space source",
+      "evidenceRef": "https://huggingface.co/api/spaces/pollen-robotics/microduck-simulator",
+      "evidenceSha256": "0d0a0a47fc08b98467c481127c3071393ceccb86b82cab2f73c891ad46b0ef35",
+      "observed": "cardData has no license and repository root has no LICENSE",
+      "safeCurrentAction": "run official instance; keep our policy loader independent"
+    }
+    ]
+  }
+}

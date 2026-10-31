@@ -1,0 +1,120 @@
+/* Shared two-line language for running, waiting and session rows. */
+[data-shell="v2"] .home-status-summary {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--shell-body);
+  text-align: left;
+}
+[data-shell="v2"] .home-status-summary > .home-trajectory {
+  margin-left: auto;
+}
+[data-shell="v2"] .home-live-main.home-live-link {
+  width: 100%;
+  min-height: 32px;
+  display: block;
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+  text-align: left;
+}
+[data-shell="v2"] .home-live-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 0;
+}
+[data-shell="v2"] .home-live-row[data-execution-jump-focus="true"] {
+  background: var(--shell-selected);
+}
+[data-shell="v2"] .home-execution-detail {
+  flex: 0 0 100%;
+  padding: 2px 0 4px 25px;
+}
+[data-shell="v2"] .home-live-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 5px;
+}
+[data-shell="v2"] .home-live-heading .home-live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  color: var(--shell-muted);
+}
+[data-shell="v2"] .home-live-heading > :not(.home-live-name) {
+  flex-shrink: 0;
+}
+[data-shell="v2"] .home-live-heading .home-live-clock {
+  white-space: nowrap;
+}
+[data-shell="v2"] .home-execution-status-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--semantic-info);
+}
+[data-shell="v2"] .home-live-status[data-tone="wait"] .home-execution-status-dot {
+  background: var(--semantic-warning);
+}
+.home-execution-status-compact {
+  display: none;
+}
+@container home (max-width: 340px) {
+  .home-execution-status-full {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .home-execution-status-compact {
+    display: inline;
+  }
+}
+[data-shell="v2"] .home-live-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+[data-shell="v2"] .home-trajectory,
+[data-shell="v2"] .home-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 28px;
+  color: var(--shell-muted);
+  border: 0;
+  border-radius: 5px;
+}
+[data-shell="v2"] .home-execution-stop [data-testid="execution-not-cancelable"] {
+  display: block;
+  max-width: 65px;
+}
+[data-shell="v2"] .home-live-main.home-live-link .home-live-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-shell="v2"] .home-live-main.home-live-link .home-live-sub {
+  flex: 1 1 0;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow: hidden;
+  margin-top: 4px;
+}

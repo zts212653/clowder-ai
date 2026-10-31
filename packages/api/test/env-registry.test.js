@@ -9,7 +9,19 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { buildEnvSummary, ENV_CATEGORIES, ENV_VARS, maskUrlCredentials } from '../dist/config/env-registry.js';
+import {
+  buildEnvSummary,
+  buildSystemEnvSummary,
+  ENV_CATEGORIES,
+  ENV_VARS,
+  hasSensitiveEditableVars,
+  isEditableEnvVar,
+  isSensitiveEditableEnvVar,
+  maskUrlCredentials,
+  parseBoolEnv,
+  SETTINGS_GROUPS,
+  SYSTEM_VARS,
+} from '../dist/config/env-registry.js';
 
 // Save and restore env vars around tests
 const savedEnv = {};
@@ -19,6 +31,16 @@ const BOOTSTRAP_ONLY_NEXT_PUBLIC_VARS = [
   'NEXT_PUBLIC_LLM_POSTPROCESS_URL',
   'NEXT_PUBLIC_PROJECT_ROOT',
   'NEXT_PUBLIC_DEBUG_SKIP_FILE_CHANGE_UI',
+];
+const DEPRECATED_ENV_VARS = ['MODE_SWITCH_REQUIRES_APPROVAL'];
+const RETIRED_PLUGIN_ENV_VARS = [
+  'GITHUB_MCP_PAT',
+  'GITHUB_REVIEW_IMAP_USER',
+  'GITHUB_REVIEW_IMAP_PASS',
+  'GITHUB_REVIEW_IMAP_HOST',
+  'GITHUB_REVIEW_IMAP_PORT',
+  'GITHUB_REVIEW_POLL_INTERVAL_MS',
+  'GITHUB_REVIEW_IMAP_PROXY',
 ];
 
 function setEnv(key, value) {
@@ -65,6 +87,67 @@ describe('env-registry', () => {
     assert.equal(apiKey.sensitive, true);
   });
 
+  it('keeps the desktop plugin bridge handoff internal and its bearer sensitive', () => {
+    const bridgeNames = ['CAT_CAFE_PLUGIN_NETWORK_BRIDGE_URL', 'CAT_CAFE_PLUGIN_NETWORK_BRIDGE_TOKEN'];
+    for (const name of bridgeNames) {
+      const definition = ENV_VARS.find((entry) => entry.name === name);
+      assert.ok(definition, `${name} must be registered`);
+      assert.equal(definition.hubVisible, false, `${name} is an internal desktop handoff`);
+      assert.equal(definition.runtimeEditable, false);
+      assert.equal(isEditableEnvVar(definition), false);
+    }
+    assert.equal(ENV_VARS.find((entry) => entry.name === bridgeNames[1]).sensitive, true);
+    setEnv(bridgeNames[0], 'http://127.0.0.1:41827');
+    setEnv(bridgeNames[1], 'test-only-bridge-bearer');
+    for (const summary of [buildEnvSummary(), buildSystemEnvSummary()]) {
+      assert.equal(
+        summary.some((entry) => bridgeNames.includes(entry.name)),
+        false,
+      );
+      assert.equal(JSON.stringify(summary).includes('test-only-bridge-bearer'), false);
+    }
+  });
+
+  it('registers KIMI_QUOTA_API_FALLBACK_ENABLED as bootstrap-only quota config', () => {
+    const def = ENV_VARS.find((v) => v.name === 'KIMI_QUOTA_API_FALLBACK_ENABLED');
+    assert.ok(def, 'KIMI_QUOTA_API_FALLBACK_ENABLED should be in registry');
+    assert.equal(def.category, 'quota');
+    assert.equal(def.runtimeEditable, false);
+    assert.equal(def.hubVisible, false);
+  });
+
+  it('registers only native KIMI_CODE_HOME as bootstrap-only kimi config', () => {
+    const def = ENV_VARS.find((v) => v.name === 'KIMI_CODE_HOME');
+    assert.ok(def, 'KIMI_CODE_HOME should be in registry');
+    assert.equal(def.category, 'kimi');
+    assert.equal(
+      ENV_VARS.some((entry) => ['KIMI_SHARE_DIR', 'KIMI_CONFIG_FILE'].includes(entry.name)),
+      false,
+    );
+    assert.equal(def.runtimeEditable, false);
+    assert.equal(def.hubVisible, false);
+  });
+
+  it('exposes official quota credential configuration in Hub as bootstrap-only paths', () => {
+    const summaryNames = new Set(buildEnvSummary().map((entry) => entry.name));
+    for (const name of ['QUOTA_OFFICIAL_REFRESH_ENABLED', 'CLAUDE_CREDENTIALS_PATH', 'CODEX_CREDENTIALS_PATH']) {
+      const def = ENV_VARS.find((entry) => entry.name === name);
+      assert.ok(def, `${name} should be registered`);
+      assert.ok(summaryNames.has(name), `${name} should be visible in Hub`);
+    }
+    for (const name of ['CLAUDE_CREDENTIALS_PATH', 'CODEX_CREDENTIALS_PATH']) {
+      const def = ENV_VARS.find((entry) => entry.name === name);
+      assert.equal(def.runtimeEditable, false, `${name} should require restart instead of a misleading hot edit`);
+    }
+  });
+
+  it('does not advertise retired connector autostart as Host configuration', () => {
+    assert.equal(
+      ENV_VARS.some((entry) => entry.name === 'CONNECTOR_GATEWAY_AUTOSTART'),
+      false,
+    );
+  });
+
   it('REDIS_URL has maskMode url', () => {
     const redis = ENV_VARS.find((v) => v.name === 'REDIS_URL');
     assert.ok(redis, 'REDIS_URL should be in registry');
@@ -89,6 +172,21 @@ describe('env-registry', () => {
     assert.equal(redisUrl.runtimeEditable, false);
   });
 
+  it('registers the F255 awakened lease as bootstrap-only runtime configuration', () => {
+    const lease = ENV_VARS.find((v) => v.name === 'CAT_CAFE_F255_AWAKENED_LEASE_MS');
+    assert.ok(lease, 'CAT_CAFE_F255_AWAKENED_LEASE_MS should be in registry');
+    assert.equal(lease.defaultValue, '5400000');
+    assert.equal(lease.runtimeEditable, false);
+  });
+
+  it('registers the Codex OAuth transport rollback as a hot-editable enum', () => {
+    const transport = ENV_VARS.find((v) => v.name === 'CAT_CAFE_CODEX_OAUTH_TRANSPORT');
+    assert.ok(transport, 'CAT_CAFE_CODEX_OAUTH_TRANSPORT should be in registry');
+    assert.equal(transport.defaultValue, 'builtin');
+    assert.equal(transport.runtimeEditable, true);
+    assert.deepEqual(transport.allowedValues, ['builtin', 'https']);
+  });
+
   it('marks client-bundled NEXT_PUBLIC vars as bootstrap-only in the hub env editor', () => {
     for (const name of BOOTSTRAP_ONLY_NEXT_PUBLIC_VARS) {
       const envVar = ENV_VARS.find((v) => v.name === name);
@@ -100,6 +198,209 @@ describe('env-registry', () => {
   it('no HINDSIGHT_* vars remain after D-1 cleanup', () => {
     const hindsightVars = ENV_VARS.filter((v) => v.name.startsWith('HINDSIGHT_'));
     assert.equal(hindsightVars.length, 0, 'All HINDSIGHT_* vars should be removed');
+  });
+
+  it('marks the retained F102_API_KEY as sensitive and runtime editable', () => {
+    for (const name of ['F102_API_KEY']) {
+      const def = ENV_VARS.find((v) => v.name === name);
+      assert.ok(def, `${name} should be in registry`);
+      assert.equal(def.sensitive, true, `${name} should be sensitive`);
+      assert.equal(def.runtimeEditable, true, `${name} should be runtimeEditable`);
+      assert.ok(isSensitiveEditableEnvVar(def), `${name} should pass isSensitiveEditableEnvVar`);
+    }
+    // #340 P6: OPENAI_API_KEY is no longer runtimeEditable (managed by accounts system)
+    const openai = ENV_VARS.find((v) => v.name === 'OPENAI_API_KEY');
+    assert.ok(openai, 'OPENAI_API_KEY should still be in registry');
+    assert.equal(openai.sensitive, true, 'OPENAI_API_KEY should remain sensitive');
+    assert.ok(!openai.runtimeEditable, 'OPENAI_API_KEY should not be runtimeEditable');
+  });
+
+  it('hasSensitiveEditableVars detects whitelisted sensitive vars', () => {
+    assert.equal(hasSensitiveEditableVars(RETIRED_PLUGIN_ENV_VARS), false);
+    for (const name of RETIRED_PLUGIN_ENV_VARS) {
+      assert.equal(
+        ENV_VARS.some((entry) => entry.name === name),
+        false,
+        `${name} belongs to its plugin`,
+      );
+    }
+    assert.ok(hasSensitiveEditableVars(['FRONTEND_URL', 'F102_API_KEY']));
+    assert.ok(!hasSensitiveEditableVars(['FRONTEND_URL', 'AUDIT_LOG_DIR']));
+    assert.ok(!hasSensitiveEditableVars(['OPENAI_API_KEY']), 'OPENAI_API_KEY is no longer editable (#340 P6)');
+  });
+
+  it('marks DEFAULT_OWNER_USER_ID as non-editable (trust anchor)', () => {
+    const def = ENV_VARS.find((v) => v.name === 'DEFAULT_OWNER_USER_ID');
+    assert.ok(def, 'DEFAULT_OWNER_USER_ID should be in registry');
+    assert.equal(def.runtimeEditable, false, 'trust anchor must not be editable from Hub');
+  });
+
+  it('locks startup-only telemetry vars as non-editable and hot-reloadable ones as editable (F153 Phase K)', () => {
+    const STARTUP_ONLY = [
+      'OTEL_SDK_DISABLED',
+      'TELEMETRY_HMAC_SALT',
+      'PROMETHEUS_PORT',
+      'OTEL_EXPORTER_OTLP_ENDPOINT',
+      'TELEMETRY_EXPORT_RAW_SYSTEM_IDS',
+      // BurnRateMonitor caches thresholds at construction — env change
+      // without restart has no effect (cloud review P1, PR #2594).
+      'TELEMETRY_ALERT_ERROR_RATE',
+      'TELEMETRY_ALERT_P95_LATENCY_S',
+      'TELEMETRY_ALERT_ACTIVE_INVOCATIONS',
+    ];
+    const HOT_RELOADABLE = ['PROMPT_CAPTURE', 'PROMPT_CAPTURE_CATS'];
+    for (const name of STARTUP_ONLY) {
+      const def = ENV_VARS.find((v) => v.name === name);
+      assert.ok(def, `${name} should be in registry`);
+      assert.equal(def.runtimeEditable, false, `${name} is startup-only — must not be editable from Hub`);
+      assert.equal(isEditableEnvVar(def), false, `${name} must be rejected by isEditableEnvVar`);
+    }
+    for (const name of HOT_RELOADABLE) {
+      const def = ENV_VARS.find((v) => v.name === name);
+      assert.ok(def, `${name} should be in registry`);
+      assert.equal(def.runtimeEditable, true, `${name} is hot-reloadable — must be editable from Hub`);
+      assert.equal(isEditableEnvVar(def), true, `${name} must pass isEditableEnvVar`);
+    }
+  });
+});
+
+describe('#770: curated System Settings projection', () => {
+  afterEach(() => restoreEnv());
+
+  it('fails closed unless runtime editing is explicitly enabled', () => {
+    const undeclared = ENV_VARS.filter((definition) => definition.runtimeEditable === undefined);
+    assert.ok(undeclared.length > 0, 'fixture should include undeclared registry entries');
+    for (const definition of undeclared) {
+      assert.equal(isEditableEnvVar(definition), false, `${definition.name} must not be implicitly editable`);
+    }
+  });
+
+  it('defines exactly 24 registered, labelled, grouped, explicitly classified System variables', () => {
+    // 24 since F117 KD-23 removed DRAFT_TTL_SECONDS: a draft lives until its R ends, so nothing expires it.
+    assert.equal(SYSTEM_VARS.size, 24);
+    assert.equal(SYSTEM_VARS.has('DRAFT_TTL_SECONDS'), false);
+    for (const name of SYSTEM_VARS) {
+      const definition = ENV_VARS.find((candidate) => candidate.name === name);
+      assert.ok(definition, `${name} must remain in the full registry`);
+      assert.ok(definition.label, `${name} must have a user-facing label`);
+      assert.ok(definition.settingsGroup, `${name} must have a settings group`);
+      assert.equal(typeof definition.runtimeEditable, 'boolean', `${name} must have explicit editability`);
+    }
+  });
+
+  it('keeps security-boundary variables read-only', () => {
+    for (const name of [
+      'PROJECT_ALLOWED_ROOTS',
+      'PROJECT_ALLOWED_ROOTS_APPEND',
+      'PROJECT_DENIED_ROOTS',
+      'DEFAULT_OWNER_USER_ID',
+    ]) {
+      const definition = ENV_VARS.find((candidate) => candidate.name === name);
+      assert.ok(definition, `${name} must remain registered`);
+      assert.equal(definition.runtimeEditable, false);
+      assert.equal(definition.settingsGroup, 'security');
+    }
+  });
+
+  it('projects DEFAULT_OWNER_USER_ID as a restart-required trust anchor without opening a write path', () => {
+    const definition = ENV_VARS.find((candidate) => candidate.name === 'DEFAULT_OWNER_USER_ID');
+    assert.ok(definition, 'DEFAULT_OWNER_USER_ID must remain registered');
+    assert.ok(SYSTEM_VARS.has(definition.name), 'trust anchor must be visible in the curated System surface');
+    assert.equal(definition.runtimeEditable, false, 'trust anchor must remain fail-closed for generic env writes');
+    assert.equal(isEditableEnvVar(definition), false);
+    assert.equal(definition.settingsGroup, 'security');
+    assert.equal(definition.restartRequired, true);
+    assert.ok(definition.label, 'trust anchor needs a user-facing label');
+    assert.match(definition.description, /单用户/, 'read-only projection must explain unset single-user semantics');
+  });
+
+  it('builds a System summary without shrinking the canonical registry', () => {
+    const summary = buildSystemEnvSummary();
+    assert.equal(summary.length, SYSTEM_VARS.size);
+    assert.ok(ENV_VARS.length > summary.length, 'full registry must remain broader than the curated surface');
+    for (const variable of summary) {
+      assert.ok(SYSTEM_VARS.has(variable.name), `${variable.name} must be curated`);
+    }
+  });
+
+  it('publishes the five display groups', () => {
+    assert.deepEqual(Object.keys(SETTINGS_GROUPS), ['network', 'storage', 'lifecycle', 'runtime', 'security']);
+  });
+
+  it('parses the shared boolean convention', () => {
+    assert.equal(parseBoolEnv('1'), true);
+    assert.equal(parseBoolEnv('TRUE'), true);
+    assert.equal(parseBoolEnv('0'), false);
+    assert.equal(parseBoolEnv(undefined), false);
+    assert.equal(parseBoolEnv(undefined, true), true);
+  });
+});
+
+describe('#770: deprecated env metadata', () => {
+  it('retains every known dead config in the canonical registry with a reason', () => {
+    for (const name of DEPRECATED_ENV_VARS) {
+      const definition = ENV_VARS.find((candidate) => candidate.name === name);
+      assert.ok(definition, `${name} must remain in the canonical registry`);
+      assert.equal(typeof definition.deprecated, 'string', `${name} must expose deprecated metadata`);
+      assert.ok(definition.deprecated.length > 0, `${name} deprecated reason must be non-empty`);
+    }
+  });
+
+  it('keeps every deprecated config out of both runtime writes and the curated System surface', () => {
+    for (const definition of ENV_VARS) {
+      if (!definition.deprecated) continue;
+      assert.equal(isEditableEnvVar(definition), false, `${definition.name} must not become runtime-editable`);
+      assert.ok(!SYSTEM_VARS.has(definition.name), `${definition.name} must not appear in System Settings`);
+    }
+  });
+
+  it('passes deprecated metadata through the API summary consumed by the existing frontend badge', () => {
+    const summary = buildEnvSummary();
+    const visibleDeprecated = summary.filter((entry) => typeof entry.deprecated === 'string');
+    assert.ok(visibleDeprecated.length > 0, 'at least one deprecated var must reach the API payload');
+    for (const name of DEPRECATED_ENV_VARS) {
+      const definition = ENV_VARS.find((candidate) => candidate.name === name);
+      const entry = summary.find((candidate) => candidate.name === name);
+      if (definition?.hubVisible === false) continue;
+      assert.equal(entry?.deprecated, definition?.deprecated, `${name} metadata must survive summary projection`);
+    }
+  });
+});
+
+describe('#770: GET /api/config/env-summary?surface=system', () => {
+  it('returns only curated variables while leaving the full response unchanged', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app);
+      await app.ready();
+
+      const curated = await app.inject({ method: 'GET', url: '/api/config/env-summary?surface=system' });
+      assert.equal(curated.statusCode, 200);
+      const curatedBody = JSON.parse(curated.payload);
+      assert.deepEqual(curatedBody.groups, SETTINGS_GROUPS);
+      assert.equal(curatedBody.variables.length, SYSTEM_VARS.size);
+      assert.equal(curatedBody.categories, undefined);
+      assert.equal(curatedBody.paths, undefined);
+      const owner = curatedBody.variables.find((entry) => entry.name === 'DEFAULT_OWNER_USER_ID');
+      assert.ok(owner, 'curated API surface must include the owner trust anchor');
+      assert.equal(owner.runtimeEditable, false);
+      assert.equal(owner.settingsGroup, 'security');
+      assert.equal(owner.restartRequired, true);
+
+      const full = await app.inject({ method: 'GET', url: '/api/config/env-summary' });
+      assert.equal(full.statusCode, 200);
+      const fullBody = JSON.parse(full.payload);
+      assert.ok(fullBody.variables.length > SYSTEM_VARS.size);
+      assert.ok(fullBody.categories);
+      assert.ok(fullBody.paths);
+      assert.ok(
+        fullBody.variables.some((entry) => typeof entry.deprecated === 'string'),
+        'full API surface must carry deprecated metadata to the existing frontend badge',
+      );
+    } finally {
+      await app.close();
+    }
   });
 });
 
@@ -231,6 +532,59 @@ describe('GET /api/config/env-summary (route)', () => {
 
     await app.close();
   });
+
+  // F212 Phase F (cloud codex R3 P2 on 3083d7c5f + R4 P2-#2 on fc69597675):
+  // env-summary.runtimeLogs MUST equal logger's CAPTURED LOG_DIR_PATH — not
+  // process.env.LOG_DIR read at request time. Runtime `PATCH /api/config/env` LOG_DIR
+  // edit would change process.env but pino destination is already bound to the
+  // captured path → users following the AC-F5 hint would grep an empty new directory.
+  it('AC-F5 (R3+R4): runtimeLogs equals logger captured LOG_DIR_PATH (single source of truth)', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const { LOG_DIR_PATH } = await import('../dist/infrastructure/logger.js');
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app);
+      await app.ready();
+      const res = await app.inject({ method: 'GET', url: '/api/config/env-summary' });
+      const body = JSON.parse(res.payload);
+      assert.equal(
+        body.paths.dataDirs.runtimeLogs,
+        LOG_DIR_PATH,
+        'runtimeLogs MUST equal logger LOG_DIR_PATH (R3+R4 single-source fix)',
+      );
+      assert.ok(body.paths.dataDirs.runtimeLogs.startsWith('/'), 'absolute path');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('AC-F5 (R4 P2-#2): runtime process.env.LOG_DIR mutation MUST NOT change reported runtimeLogs', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const { LOG_DIR_PATH } = await import('../dist/infrastructure/logger.js');
+    // Mutate AFTER logger already captured (simulates runtime PATCH /api/config/env).
+    const mutatedPath = mkdtempSync(resolve(tmpdir(), 'cat-cafe-mutated-log-'));
+    setEnv('LOG_DIR', mutatedPath);
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app);
+      await app.ready();
+      const res = await app.inject({ method: 'GET', url: '/api/config/env-summary' });
+      const body = JSON.parse(res.payload);
+      assert.equal(
+        body.paths.dataDirs.runtimeLogs,
+        LOG_DIR_PATH,
+        'env-summary ignores runtime mutation — stays on captured logger path',
+      );
+      assert.notEqual(
+        body.paths.dataDirs.runtimeLogs,
+        mutatedPath,
+        'mutated env value MUST NOT propagate (R4 P2-#2 regression guard)',
+      );
+    } finally {
+      await app.close();
+      rmSync(mutatedPath, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('PATCH /api/config/env (route)', () => {
@@ -241,7 +595,7 @@ describe('PATCH /api/config/env (route)', () => {
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
     const envFilePath = resolve(tempRoot, '.env');
     const auditEvents = [];
-    writeFileSync(envFilePath, 'FRONTEND_URL=http://localhost:3004\nOPENAI_API_KEY=sk-old\n', 'utf8');
+    writeFileSync(envFilePath, 'PREVIEW_GATEWAY_PORT=4100\nOPENAI_API_KEY=sk-old\n', 'utf8');
 
     const app = Fastify({ logger: false });
     try {
@@ -261,15 +615,15 @@ describe('PATCH /api/config/env (route)', () => {
         url: '/api/config/env',
         headers: { 'x-cat-cafe-user': 'codex' },
         payload: {
-          updates: [{ name: 'FRONTEND_URL', value: 'http://localhost:3200' }],
+          updates: [{ name: 'PREVIEW_GATEWAY_PORT', value: '4200' }],
         },
       });
 
       assert.equal(res.statusCode, 200);
       const body = JSON.parse(res.payload);
       assert.equal(body.ok, true);
-      assert.equal(readFileSync(envFilePath, 'utf8'), 'FRONTEND_URL=http://localhost:3200\nOPENAI_API_KEY=sk-old\n');
-      assert.equal(process.env.FRONTEND_URL, 'http://localhost:3200');
+      assert.equal(readFileSync(envFilePath, 'utf8'), 'PREVIEW_GATEWAY_PORT=4200\nOPENAI_API_KEY=sk-old\n');
+      assert.equal(process.env.PREVIEW_GATEWAY_PORT, '4200');
       assert.equal(auditEvents.length, 1);
       assert.equal(auditEvents[0].data.target, '.env');
     } finally {
@@ -299,15 +653,15 @@ describe('PATCH /api/config/env (route)', () => {
         url: '/api/config/env',
         headers: { 'x-cat-cafe-user': 'codex' },
         payload: {
-          updates: [{ name: 'FRONTEND_URL', value: literal }],
+          updates: [{ name: 'THEME_CONFIG', value: literal }],
         },
       });
 
       assert.equal(res.statusCode, 200);
       const persisted = readFileSync(envFilePath, 'utf8');
-      assert.match(persisted, /^FRONTEND_URL="https:\/\/proxy\.example\/\\\$HOME\/\\\$\(whoami\)\/\\`whoami\\`"$/m);
+      assert.match(persisted, /^THEME_CONFIG="https:\/\/proxy\.example\/\\\$HOME\/\\\$\(whoami\)\/\\`whoami\\`"$/m);
 
-      const sourced = execFileSync('sh', ['-lc', `set -a; . "${envFilePath}"; printf '%s' "$FRONTEND_URL"`], {
+      const sourced = execFileSync('sh', ['-lc', `set -a; . "${envFilePath}"; printf '%s' "$THEME_CONFIG"`], {
         encoding: 'utf8',
       }).trim();
       assert.equal(sourced, literal);
@@ -338,16 +692,16 @@ describe('PATCH /api/config/env (route)', () => {
         url: '/api/config/env',
         headers: { 'x-cat-cafe-user': 'codex' },
         payload: {
-          updates: [{ name: 'FRONTEND_URL', value: literal }],
+          updates: [{ name: 'THEME_CONFIG', value: literal }],
         },
       });
 
       assert.equal(res.statusCode, 200);
       const persisted = readFileSync(envFilePath, 'utf8');
-      assert.match(persisted, /^FRONTEND_URL="line1\\\\r\\\\nline2\\\\nline3"$/m);
+      assert.match(persisted, /^THEME_CONFIG="line1\\\\r\\\\nline2\\\\nline3"$/m);
       assert.equal(persisted.trimEnd().split('\n').length, 1);
 
-      const sourced = execFileSync('sh', ['-lc', `set -a; . "${envFilePath}"; printf '%s' "$FRONTEND_URL"`], {
+      const sourced = execFileSync('sh', ['-lc', `set -a; . "${envFilePath}"; printf '%s' "$THEME_CONFIG"`], {
         encoding: 'utf8',
       }).trim();
       assert.equal(sourced, 'line1\\r\\nline2\\nline3');
@@ -357,11 +711,12 @@ describe('PATCH /api/config/env (route)', () => {
     }
   });
 
-  it('rejects sensitive env vars from hub writes', async () => {
+  it('rejects OPENAI_API_KEY env write since it is no longer runtimeEditable (#340 P6)', async () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
     const envFilePath = resolve(tempRoot, '.env');
     writeFileSync(envFilePath, 'OPENAI_API_KEY=sk-old\n', 'utf8');
+    setEnv('DEFAULT_OWNER_USER_ID', undefined);
 
     const app = Fastify({ logger: false });
     try {
@@ -381,10 +736,44 @@ describe('PATCH /api/config/env (route)', () => {
         },
       });
 
+      // #340 P6: OPENAI_API_KEY is no longer runtimeEditable (managed by accounts system)
       assert.equal(res.statusCode, 400);
-      const body = JSON.parse(res.payload);
-      assert.match(body.error, /not editable/);
       assert.equal(readFileSync(envFilePath, 'utf8'), 'OPENAI_API_KEY=sk-old\n');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects writes to the retired connector autostart variable', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    writeFileSync(envFilePath, 'CONNECTOR_GATEWAY_AUTOSTART=0\n', 'utf8');
+    setEnv('CONNECTOR_GATEWAY_AUTOSTART', '0');
+
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: {
+          updates: [{ name: 'CONNECTOR_GATEWAY_AUTOSTART', value: '1' }],
+        },
+      });
+
+      assert.equal(res.statusCode, 400);
+      assert.match(JSON.parse(res.payload).error, /not editable/i);
+      assert.equal(readFileSync(envFilePath, 'utf8'), 'CONNECTOR_GATEWAY_AUTOSTART=0\n');
+      assert.equal(process.env.CONNECTOR_GATEWAY_AUTOSTART, '0');
     } finally {
       await app.close();
       rmSync(tempRoot, { recursive: true, force: true });
@@ -472,6 +861,36 @@ describe('PATCH /api/config/env (route)', () => {
     }
   });
 
+  it('rejects desktop plugin bridge handoff edits without changing the file or process', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    const bridgeNames = ['CAT_CAFE_PLUGIN_NETWORK_BRIDGE_URL', 'CAT_CAFE_PLUGIN_NETWORK_BRIDGE_TOKEN'];
+    const original = `${bridgeNames.map((name) => `${name}=original`).join('\n')}\n`;
+    writeFileSync(envFilePath, original, 'utf8');
+    for (const name of bridgeNames) setEnv(name, 'original');
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app, { projectRoot: tempRoot, envFilePath, auditLog: { append: async () => {} } });
+      await app.ready();
+      for (const name of bridgeNames) {
+        const res = await app.inject({
+          method: 'PATCH',
+          url: '/api/config/env',
+          headers: { 'x-cat-cafe-user': 'codex' },
+          payload: { updates: [{ name, value: 'changed' }] },
+        });
+        assert.equal(res.statusCode, 400, name);
+        assert.match(JSON.parse(res.payload).error, /not editable/);
+        assert.equal(readFileSync(envFilePath, 'utf8'), original);
+        assert.equal(process.env[name], 'original');
+      }
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('rejects API_SERVER_PORT from hub writes but keeps PREVIEW_GATEWAY_PORT editable', async () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
@@ -545,6 +964,89 @@ describe('PATCH /api/config/env (route)', () => {
       const body = JSON.parse(res.payload);
       assert.match(body.error, /not editable/i);
       assert.equal(readFileSync(envFilePath, 'utf8'), 'REDIS_URL=redis://localhost:6399/15\n');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects filesystem policy and owner trust-anchor writes through the generic env endpoint', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    writeFileSync(envFilePath, '', 'utf8');
+
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      for (const name of [
+        'PROJECT_ALLOWED_ROOTS',
+        'PROJECT_ALLOWED_ROOTS_APPEND',
+        'PROJECT_DENIED_ROOTS',
+        'DEFAULT_OWNER_USER_ID',
+      ]) {
+        const response = await app.inject({
+          method: 'PATCH',
+          url: '/api/config/env',
+          headers: { 'x-cat-cafe-user': 'codex' },
+          payload: { updates: [{ name, value: '/tmp/untrusted' }] },
+        });
+        assert.equal(response.statusCode, 400, `${name} must be rejected`);
+        assert.match(JSON.parse(response.payload).error, /not editable/i);
+      }
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects startup-only telemetry vars from hub writes (F153 Phase K regression)', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    writeFileSync(envFilePath, 'OTEL_SDK_DISABLED=false\nPROMETHEUS_PORT=9464\n', 'utf8');
+
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      // Startup-only telemetry var must be rejected
+      const otelRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: {
+          updates: [{ name: 'OTEL_SDK_DISABLED', value: 'true' }],
+        },
+      });
+      assert.equal(otelRes.statusCode, 400, 'OTEL_SDK_DISABLED should be rejected');
+      assert.match(JSON.parse(otelRes.payload).error, /not editable/i);
+
+      // BurnRateMonitor caches thresholds at construction — must also be rejected
+      const alertRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: {
+          updates: [{ name: 'TELEMETRY_ALERT_ERROR_RATE', value: '0.5' }],
+        },
+      });
+      assert.equal(alertRes.statusCode, 400, 'TELEMETRY_ALERT_ERROR_RATE should be rejected (startup-only)');
+
+      // Verify .env file unchanged for startup-only var
+      const envContent = readFileSync(envFilePath, 'utf8');
+      assert.match(envContent, /OTEL_SDK_DISABLED=false/, 'startup-only var must not be written');
     } finally {
       await app.close();
       rmSync(tempRoot, { recursive: true, force: true });

@@ -1,13 +1,26 @@
-import type { CatId } from '@cat-cafe/shared';
+import { type CatId, catRegistry } from '@cat-cafe/shared';
 
 export interface ParsedMention {
   targetCatId: CatId;
+  matched: boolean;
 }
 
 // ASCII + CJK full-width punctuation + brackets that can follow a mention
 const MENTION_BOUNDARY_RIGHT = '[\\s,.:;!?，。！？；：、)\\]）】」』]';
 // Left boundary: @ must not be preceded by word chars or dots (rejects email/domain)
 const MENTION_BOUNDARY_LEFT = '(?<!\\w)';
+
+/**
+ * #969: Strip zero-width Unicode characters that LLMs may insert around mentions.
+ * Also strips markdown bold/italic markers (`**`, `*`, `__`, `_`) immediately before `@`.
+ */
+const ZERO_WIDTH_RE = /(?:​|‌|‍|﻿|­|⁠)/g;
+const MD_BEFORE_MENTION_RE = /(?:\*{1,2}|_{1,2})(?=@)/g;
+const MD_AFTER_MENTION_RE = /(@\S+?)(?:\*{1,2}|_{1,2})(?=\s|$|[,.:;!?，。！？])/g;
+
+function normalizeMentionNoise(text: string): string {
+  return text.replace(ZERO_WIDTH_RE, '').replace(MD_BEFORE_MENTION_RE, '').replace(MD_AFTER_MENTION_RE, '$1');
+}
 
 /**
  * Parse @-mentions from external platform message text.
@@ -18,6 +31,8 @@ const MENTION_BOUNDARY_LEFT = '(?<!\\w)';
  * @param defaultCatId — fallback when no mention found
  */
 export function parseMentions(text: string, allPatterns: Map<string, string[]>, defaultCatId: CatId): ParsedMention {
+  // #969: normalize invisible chars and markdown around mentions before matching
+  const normalizedText = normalizeMentionNoise(text);
   let bestIndex = Infinity;
   let bestCatId: string | undefined;
 
@@ -25,7 +40,7 @@ export function parseMentions(text: string, allPatterns: Map<string, string[]>, 
     for (const pattern of patterns) {
       const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const regex = new RegExp(`${MENTION_BOUNDARY_LEFT}${escaped}(?=${MENTION_BOUNDARY_RIGHT}|$)`, 'i');
-      const match = regex.exec(text);
+      const match = regex.exec(normalizedText);
       if (match && match.index < bestIndex) {
         bestIndex = match.index;
         bestCatId = catId;
@@ -33,5 +48,22 @@ export function parseMentions(text: string, allPatterns: Map<string, string[]>, 
     }
   }
 
-  return { targetCatId: (bestCatId ?? defaultCatId) as CatId };
+  return { targetCatId: (bestCatId ?? defaultCatId) as CatId, matched: Boolean(bestCatId) };
+}
+
+/**
+ * Build @-mention patterns from catRegistry for {@link parseMentions}.
+ *
+ * Shared truth source: ConnectorRouter and the F202 C1 plugin ingress path (gap A) must resolve
+ * the same mentions during the cutover, so neither owns a private copy of this derivation.
+ */
+export function catRegistryMentionPatterns(): Map<string, string[]> {
+  const patterns = new Map<string, string[]>();
+  for (const catId of catRegistry.getAllIds()) {
+    const entry = catRegistry.tryGet(catId);
+    if (entry?.config.mentionPatterns && entry.config.mentionPatterns.length > 0) {
+      patterns.set(catId, [...entry.config.mentionPatterns]);
+    }
+  }
+  return patterns;
 }

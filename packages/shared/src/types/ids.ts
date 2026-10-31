@@ -14,6 +14,7 @@ export type CatId = Brand<string, 'CatId'>;
 export type ThreadId = Brand<string, 'ThreadId'>;
 export type SessionId = Brand<string, 'SessionId'>;
 export type UserId = Brand<string, 'UserId'>;
+export type ProposalId = Brand<string, 'ProposalId'>;
 
 /**
  * Generate a random ID with optional prefix
@@ -83,4 +84,18 @@ export function generateSessionId(): SessionId {
  */
 export function createUserId(id: string): UserId {
   return id as UserId;
+}
+
+/**
+ * Create a ProposalId from a string
+ */
+export function createProposalId(id: string): ProposalId {
+  return id as ProposalId;
+}
+
+/**
+ * Generate a new ProposalId
+ */
+export function generateProposalId(): ProposalId {
+  return createProposalId(generateId('proposal'));
 }

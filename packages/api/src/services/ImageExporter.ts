@@ -1,12 +1,71 @@
-import puppeteer, { type Browser } from 'puppeteer';
+import type { ResolvedMessageSelectionItem } from '@cat-cafe/shared';
+import type { Page } from 'puppeteer-core';
 import sharp from 'sharp';
 import { createModuleLogger } from '../infrastructure/logger.js';
+import {
+  assertBeforeHtmlWidgetExportDeadline,
+  assertFreshHtmlWidgetExportCapturePlan,
+  type BrowserDocumentSnapshot,
+  captureVerifiedImageExportCandidate,
+  createHtmlWidgetExportOperation,
+  type HtmlWidgetExportOperation,
+  readHtmlWidgetExportLayoutSnapshot,
+  readImageExportCaptureHeight,
+  refreshHtmlWidgetExportLayoutProof,
+} from './html-widget-export-readiness.js';
+import { ImageExportBrowserSession } from './image-export-browser-session.js';
+
+export { resolveExportCaptureHeight } from './html-widget-export-readiness.js';
 
 const log = createModuleLogger('image-exporter');
 
 /** Chunk height for scroll-and-stitch. 4000px is well under Chrome's ~16384 GPU limit. */
 const CHUNK_HEIGHT = 4000;
+const INITIAL_VIEWPORT_HEIGHT = 900;
 const VIEWPORT_WIDTH = 1280;
+
+interface BrowserWindowSnapshot {
+  requestAnimationFrame(callback: () => void): number;
+  scrollTo(x: number, y: number): void;
+}
+
+export interface ImageExportCaptureOptions {
+  selectionMessageIds?: readonly string[];
+  selectionItems?: readonly ResolvedMessageSelectionItem[];
+}
+
+export function buildImageExportUrl(url: string, userId: string, options?: ImageExportCaptureOptions): string {
+  const exportUrl = new URL(url);
+  exportUrl.searchParams.set('export', 'true');
+  exportUrl.searchParams.set('userId', userId);
+  for (const messageId of options?.selectionMessageIds ?? []) {
+    exportUrl.searchParams.append('messageId', messageId);
+  }
+  return exportUrl.toString();
+}
+
+export interface ImageExportChunk {
+  buffer: Buffer;
+  top: number;
+}
+
+export async function stitchImageExportChunks(
+  width: number,
+  height: number,
+  chunks: readonly ImageExportChunk[],
+): Promise<Buffer> {
+  return sharp({
+    create: {
+      width,
+      height,
+      channels: 4,
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
+    },
+  })
+    .composite(chunks.map((chunk) => ({ input: chunk.buffer, top: chunk.top, left: 0 })))
+    .png()
+    .toBuffer();
+}
 
 /**
  * ImageExporter service for capturing screenshots of web pages using Chrome headless.
@@ -14,50 +73,65 @@ const VIEWPORT_WIDTH = 1280;
  * hitting Chrome's GPU texture limit (~16384px) which causes content duplication.
  */
 export class ImageExporter {
-  private browser: Browser | null = null;
+  private readonly browserSession = new ImageExportBrowserSession();
+
+  private get browser() {
+    return this.browserSession.browser;
+  }
 
   /**
    * Capture a screenshot of the given URL.
    * For pages taller than CHUNK_HEIGHT, scrolls through the page in chunks
    * and stitches them together using Sharp.
    */
-  async capture(url: string, userId: string): Promise<Buffer> {
+  async capture(url: string, userId: string, options?: ImageExportCaptureOptions): Promise<Buffer> {
+    let page: Page | null = null;
     try {
-      if (!this.browser) {
-        this.browser = await puppeteer.launch({
-          headless: true,
-          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-        });
-      }
-
-      const page = await this.browser.newPage();
+      page = await this.browserSession.openPage();
+      const capturePage = page;
 
       await page.setExtraHTTPHeaders({ 'X-Cat-Cafe-User': userId });
-      await page.setViewport({ width: VIEWPORT_WIDTH, height: CHUNK_HEIGHT });
+      await page.setViewport({ width: VIEWPORT_WIDTH, height: INITIAL_VIEWPORT_HEIGHT });
 
-      const exportUrl = new URL(url);
-      exportUrl.searchParams.set('export', 'true');
-      exportUrl.searchParams.set('userId', userId);
-
-      await page.goto(exportUrl.toString(), {
+      if (options?.selectionItems) {
+        await page.evaluateOnNewDocument((items) => {
+          (globalThis as unknown as { __catCafeImageExportItems: typeof items }).__catCafeImageExportItems = items;
+        }, options.selectionItems);
+      }
+      await page.goto(buildImageExportUrl(url, userId, options), {
         waitUntil: 'networkidle2',
         timeout: 30000,
       });
 
-      // Wait for messages to render (export mode uses flow layout, no data-chat-container)
-      await page.waitForSelector('[data-message-id]', { timeout: 15000 });
+      // Wait for messages AND cat data to fully load and render.
+      // data-export-ready is set by ChatContainer when !isLoadingHistory && messages.length > 0 && !isLoadingCatData.
+      await page.waitForSelector('[data-export-ready="true"]', { timeout: 20000 });
 
-      // Let React settle
-      await this.waitForPaint(page);
+      // Next's development error indicator is outside the application export root.
+      // It must never become part of a user document, even when dogfooding a dev build.
+      const htmlWidgetExportOperation = createHtmlWidgetExportOperation();
+      await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' });
+      assertBeforeHtmlWidgetExportDeadline(htmlWidgetExportOperation, 'export preparation');
 
-      const pageHeight = await page.evaluate(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (globalThis as any).document.documentElement.scrollHeight as number,
-      );
-      const messageCount = await page.evaluate(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => ((globalThis as any).document.querySelectorAll('[data-message-id]') ?? []).length,
-      );
+      // A sandbox iframe's internal document height is invisible to the parent page.
+      // HtmlWidgetBlock bridges it explicitly and marks export expansion readiness.
+      // Fail closed here instead of measuring the still-clipped iframe rectangle.
+      await this.waitForHtmlWidgets(page, htmlWidgetExportOperation);
+
+      // Wait for React and responsive iframe reflow to finish changing the parent height.
+      await this.waitForStableHeight(page, htmlWidgetExportOperation);
+
+      const pageHeight = await readImageExportCaptureHeight(page, htmlWidgetExportOperation);
+      const messageCount = await page.evaluate(() => {
+        const { document } = globalThis as unknown as { document: BrowserDocumentSnapshot };
+        return document.querySelectorAll('[data-message-id]').length;
+      });
+      assertBeforeHtmlWidgetExportDeadline(htmlWidgetExportOperation, 'message count read');
+      if (options?.selectionMessageIds && messageCount !== options.selectionMessageIds.length) {
+        throw new Error(
+          `Selection DOM count mismatch: expected ${options.selectionMessageIds.length}, rendered ${messageCount}`,
+        );
+      }
       log.info(
         { pageHeight, messageCount, chunks: Math.ceil(pageHeight / CHUNK_HEIGHT) },
         'Page height and message count captured',
@@ -66,88 +140,222 @@ export class ImageExporter {
       // Short page: single viewport screenshot (no stitching needed)
       if (pageHeight <= CHUNK_HEIGHT) {
         await page.setViewport({ width: VIEWPORT_WIDTH, height: pageHeight });
-        await this.waitForPaint(page);
-        const screenshot = await page.screenshot({ type: 'png' });
-        log.info({ bytes: screenshot.length }, 'Captured single screenshot');
-        await page.close();
+        assertBeforeHtmlWidgetExportDeadline(htmlWidgetExportOperation, 'single capture viewport');
+        await this.waitForPaint(page, htmlWidgetExportOperation);
+        const screenshot = await captureVerifiedImageExportCandidate(
+          (operation) => assertFreshHtmlWidgetExportCapturePlan(capturePage, pageHeight, operation),
+          () => capturePage.screenshot({ type: 'png' }),
+          htmlWidgetExportOperation,
+        );
+        log.info(
+          {
+            bytes: screenshot.length,
+            exportElapsedMs: Date.now() - htmlWidgetExportOperation.startedAt,
+            exportBudgetMs: htmlWidgetExportOperation.deadlineAt - htmlWidgetExportOperation.startedAt,
+            layoutProofs: htmlWidgetExportOperation.proofSequence,
+          },
+          'Captured single screenshot',
+        );
         return screenshot as Buffer;
       }
 
       // Tall page: scroll-and-stitch to avoid Chrome's tiling duplication bug
       const chunks: { buffer: Buffer; top: number; height: number }[] = [];
 
+      await page.setViewport({ width: VIEWPORT_WIDTH, height: CHUNK_HEIGHT });
+      assertBeforeHtmlWidgetExportDeadline(htmlWidgetExportOperation, 'chunk capture viewport');
+      await this.waitForPaint(page, htmlWidgetExportOperation);
+
       // Scroll to top first
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await page.evaluate(() => (globalThis as any).window.scrollTo(0, 0));
-      await this.waitForPaint(page);
+      await page.evaluate(() => (globalThis as unknown as BrowserWindowSnapshot).scrollTo(0, 0));
+      assertBeforeHtmlWidgetExportDeadline(htmlWidgetExportOperation, 'chunk capture scroll');
+      await this.waitForPaint(page, htmlWidgetExportOperation);
 
       for (let y = 0; y < pageHeight; y += CHUNK_HEIGHT) {
         const chunkH = Math.min(CHUNK_HEIGHT, pageHeight - y);
 
         // Scroll to this chunk's position
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await page.evaluate((scrollY: number) => {
-          (globalThis as any).window.scrollTo(0, scrollY);
+          (globalThis as unknown as BrowserWindowSnapshot).scrollTo(0, scrollY);
         }, y);
-        await this.waitForPaint(page);
+        assertBeforeHtmlWidgetExportDeadline(htmlWidgetExportOperation, 'chunk capture scroll');
+        await this.waitForPaint(page, htmlWidgetExportOperation);
 
         // For the last chunk, resize viewport to exact remaining height
         if (chunkH < CHUNK_HEIGHT) {
           await page.setViewport({ width: VIEWPORT_WIDTH, height: chunkH });
-          await this.waitForPaint(page);
+          assertBeforeHtmlWidgetExportDeadline(htmlWidgetExportOperation, 'chunk capture viewport');
+          await this.waitForPaint(page, htmlWidgetExportOperation);
+          // Re-scroll after resize: with the larger viewport, scrollTo(y) above was
+          // clamped to maxScrollTop (= pageHeight - oldViewportHeight). After shrinking
+          // the viewport, maxScrollTop increases, so we can now reach y.
+          await page.evaluate((scrollY: number) => {
+            (globalThis as unknown as BrowserWindowSnapshot).scrollTo(0, scrollY);
+          }, y);
+          assertBeforeHtmlWidgetExportDeadline(htmlWidgetExportOperation, 'chunk capture scroll');
+          await this.waitForPaint(page, htmlWidgetExportOperation);
         }
 
-        const chunk = (await page.screenshot({ type: 'png' })) as Buffer;
+        const chunk = await captureVerifiedImageExportCandidate(
+          (operation) => assertFreshHtmlWidgetExportCapturePlan(capturePage, pageHeight, operation),
+          async () => (await capturePage.screenshot({ type: 'png' })) as Buffer,
+          htmlWidgetExportOperation,
+        );
         chunks.push({ buffer: chunk, top: y, height: chunkH });
       }
 
       log.info({ chunks: chunks.length }, 'Chunks captured, stitching...');
 
       // Stitch chunks vertically using Sharp
-      const stitched = await sharp({
-        create: {
-          width: VIEWPORT_WIDTH,
-          height: pageHeight,
-          channels: 4,
-          background: { r: 255, g: 255, b: 255, alpha: 1 },
-        },
-      })
-        .composite(
-          chunks.map((c) => ({
-            input: c.buffer,
-            top: c.top,
-            left: 0,
-          })),
-        )
-        .png()
-        .toBuffer();
+      const stitched = await stitchImageExportChunks(VIEWPORT_WIDTH, pageHeight, chunks);
+      assertBeforeHtmlWidgetExportDeadline(htmlWidgetExportOperation, 'stitched PNG commit');
 
-      log.info({ bytes: stitched.length }, 'Stitched image ready');
-      await page.close();
+      log.info(
+        {
+          bytes: stitched.length,
+          exportElapsedMs: Date.now() - htmlWidgetExportOperation.startedAt,
+          exportBudgetMs: htmlWidgetExportOperation.deadlineAt - htmlWidgetExportOperation.startedAt,
+          layoutProofs: htmlWidgetExportOperation.proofSequence,
+        },
+        'Stitched image ready',
+      );
       return stitched;
     } catch (error) {
       throw new Error(`Screenshot capture failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (page) {
+        await page.close().catch((error) => {
+          log.warn({ error }, 'Failed to close image export page');
+        });
+      }
+    }
+  }
+
+  /**
+   * Wait until document.scrollHeight stabilizes (no change for multiple consecutive checks).
+   * Handles React rendering large message lists that may take many frames to commit.
+   */
+  private async waitForStableHeight(page: Page, operation: HtmlWidgetExportOperation, interval = 300): Promise<void> {
+    const requiredStableChecks = 3;
+    let lastHeight = 0;
+    let stableChecks = 0;
+    const start = Date.now();
+
+    while (true) {
+      assertBeforeHtmlWidgetExportDeadline(operation, 'height stability');
+      const { height } = await refreshHtmlWidgetExportLayoutProof(page, operation);
+      if (height === lastHeight && height > 0) {
+        stableChecks++;
+        if (stableChecks >= requiredStableChecks) {
+          assertBeforeHtmlWidgetExportDeadline(operation, 'height stability');
+          log.info({ height, elapsed: Date.now() - start }, 'Page height stabilized');
+          return;
+        }
+      } else {
+        stableChecks = 0;
+        lastHeight = height;
+      }
+      const remainingWait = operation.deadlineAt - Date.now();
+      await new Promise<void>((resolve) => setTimeout(resolve, Math.min(interval, remainingWait)));
+    }
+  }
+
+  private async waitForHtmlWidgets(page: Page, operation: HtmlWidgetExportOperation, interval = 100): Promise<void> {
+    const start = Date.now();
+    let pendingWidgetIds: string[] = [];
+    while (true) {
+      await this.assertHtmlWidgetReadinessDeadline(page, operation, pendingWidgetIds);
+      const { readiness } = await readHtmlWidgetExportLayoutSnapshot(page);
+      pendingWidgetIds = readiness.widgetIds;
+      await this.assertHtmlWidgetReadinessDeadline(page, operation, pendingWidgetIds);
+      if (readiness.status === 'ready') {
+        await refreshHtmlWidgetExportLayoutProof(page, operation);
+        await this.assertHtmlWidgetReadinessDeadline(page, operation, pendingWidgetIds);
+        log.info({ widgets: readiness.widgetIds.length, elapsed: Date.now() - start }, 'HTML widgets export-ready');
+        return;
+      }
+      if (readiness.status === 'error') {
+        throw new Error(`HTML widget layout failed: ${readiness.widgetIds.join(', ')}`);
+      }
+      const remainingWait = operation.deadlineAt - Date.now();
+      await new Promise<void>((resolve) => setTimeout(resolve, Math.min(interval, remainingWait)));
+    }
+  }
+
+  private async assertHtmlWidgetReadinessDeadline(
+    page: Page,
+    operation: HtmlWidgetExportOperation,
+    pendingWidgetIds: readonly string[],
+  ): Promise<void> {
+    try {
+      assertBeforeHtmlWidgetExportDeadline(operation, 'widget readiness');
+    } catch (error) {
+      let diagnostics: unknown;
+      try {
+        diagnostics = await page.evaluate((ids) => {
+          const browserGlobal = globalThis as unknown as {
+            innerHeight: number;
+            innerWidth: number;
+            scrollY: number;
+            document: {
+              querySelectorAll(selector: string): ArrayLike<{
+                getAttribute(name: string): string | null;
+                getBoundingClientRect(): { top: number; bottom: number; left: number; right: number };
+                querySelector(selector: string): {
+                  getBoundingClientRect(): { top: number; bottom: number; left: number; right: number };
+                } | null;
+              }>;
+            };
+          };
+          const pending = new Set(ids);
+          const widgets = Array.from(browserGlobal.document.querySelectorAll('[data-html-widget]'))
+            .filter((element) => pending.has(element.getAttribute('data-html-widget') ?? 'unknown'))
+            .map((element) => {
+              const rect = element.getBoundingClientRect();
+              const iframeRect = element.querySelector('iframe')?.getBoundingClientRect() ?? null;
+              return {
+                widgetId: element.getAttribute('data-html-widget') ?? 'unknown',
+                layoutState: element.getAttribute('data-html-widget-layout-state'),
+                expanded: element.getAttribute('data-html-widget-expanded') === 'true',
+                rect,
+                iframeRect,
+                inViewport: rect.bottom > 0 && rect.top < browserGlobal.innerHeight,
+              };
+            });
+          return {
+            scrollY: browserGlobal.scrollY,
+            viewport: { width: browserGlobal.innerWidth, height: browserGlobal.innerHeight },
+            widgets,
+          };
+        }, pendingWidgetIds);
+      } catch (diagnosticError) {
+        diagnostics = { diagnosticError: String(diagnosticError) };
+      }
+      log.warn(
+        {
+          operationElapsedMs: Date.now() - operation.startedAt,
+          pendingWidgetIds,
+          diagnostics,
+          error: String(error),
+        },
+        'HTML widget readiness deadline exceeded',
+      );
+      throw error;
     }
   }
 
   /** Wait for two animation frames (one paint cycle). */
-  private async waitForPaint(page: puppeteer.Page): Promise<void> {
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) =>
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (globalThis as any).requestAnimationFrame(() =>
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (globalThis as any).requestAnimationFrame(() => resolve()),
-          ),
-        ),
-    );
+  private async waitForPaint(page: Page, operation: HtmlWidgetExportOperation): Promise<void> {
+    await page.evaluate(() => {
+      const browserWindow = globalThis as unknown as BrowserWindowSnapshot;
+      return new Promise<void>((resolve) =>
+        browserWindow.requestAnimationFrame(() => browserWindow.requestAnimationFrame(() => resolve())),
+      );
+    });
+    assertBeforeHtmlWidgetExportDeadline(operation, 'paint wait');
   }
 
-  async close() {
-    if (this.browser) {
-      await this.browser.close();
-      this.browser = null;
-    }
+  async close(): Promise<void> {
+    await this.browserSession.close();
   }
 }

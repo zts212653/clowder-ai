@@ -5,14 +5,32 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { mock, test } from 'node:test';
+import { describe, mock, test } from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
+import { upstreamMcpServersFromArgs } from './helpers/direct-mcp-contract.js';
+import { assertSelectedApiAccount, installAmbientCodexAccount } from './helpers/f320-auth-environment.js';
+import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
-const { CodexAgentService, isGitRepositoryPath } = await import(
-  '../dist/domains/cats/services/agents/providers/CodexAgentService.js'
-);
+const {
+  CodexAgentService: ProductionCodexAgentService,
+  buildCodexReasoningArgs,
+  codexConfigObjectFromArgs,
+  isGitRepositoryPath,
+  resolveCodexApiKeyIsolationRoot,
+} = await import('../dist/domains/cats/services/agents/providers/CodexAgentService.js');
+const { _resetCachedConfig } = await import('../dist/config/cat-config-loader.js');
+
+// Every invocation in this suite injects a mock spawn function. Resolve a
+// guaranteed executable first so the public runner never needs Codex itself
+// merely to reach that mock. Production still defaults to `codex`.
+class CodexAgentService extends ProductionCodexAgentService {
+  constructor(options = {}) {
+    super({ ...options, cliCommand: process.execPath });
+  }
+}
 
 /** Helper: collect all items from async iterable */
 async function collect(iterable) {
@@ -30,9 +48,40 @@ function createMockProcess() {
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const emitter = new EventEmitter();
+  const originalEmit = emitter.emit.bind(emitter);
+  let pendingExit;
+  emitter.emit = (event, ...args) => {
+    // Invoke-time source validation can await filesystem I/O before spawn.
+    // A fixture cannot exit before the mock child is observed by spawnCli.
+    if (event === 'exit' && emitter.listenerCount('exit') === 0) {
+      pendingExit = args;
+      return false;
+    }
+    const emitted = originalEmit(event, ...args);
+    if (event === 'exit') {
+      process.nextTick(() => originalEmit('close', ...args));
+    }
+    return emitted;
+  };
+  const flushPendingExit = () => {
+    if (!pendingExit || emitter.listenerCount('exit') === 0) return;
+    const args = pendingExit;
+    pendingExit = undefined;
+    setImmediate(() => emitter.emit('exit', ...args));
+  };
+  let stdinData = '';
   const proc = {
     stdout,
     stderr,
+    // Incident 2026-05-29: prompt 走 stdin（不进 argv）。捕获写入供断言。
+    stdin: {
+      write: (chunk) => {
+        stdinData += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+        return true;
+      },
+      end: () => {},
+      on: () => proc.stdin,
+    },
     pid: 12345,
     exitCode: null,
     kill: mock.fn(() => {
@@ -44,11 +93,16 @@ function createMockProcess() {
     }),
     on: (event, listener) => {
       emitter.on(event, listener);
+      flushPendingExit();
       return proc;
     },
     once: (event, listener) => {
       emitter.once(event, listener);
+      flushPendingExit();
       return proc;
+    },
+    get stdinData() {
+      return stdinData;
     },
     _emitter: emitter,
   };
@@ -60,1112 +114,4052 @@ function createMockSpawnFn(proc) {
   return mock.fn(() => proc);
 }
 
-/** Write NDJSON events to mock process stdout, then end with exit 0 */
+for (const selectedRouting of [{}, { OPENAI_ORGANIZATION: 'org-b', OPENAI_PROJECT: 'project-b' }])
+  test(
+    `F320 API/custom actual spawn receives selected routing and an existing CODEX_HOME (selectedRouting=${Object.keys(selectedRouting).length})`,
+    { timeout: 5000 },
+    async (t) => {
+      installAmbientCodexAccount(t);
+      const proc = createMockProcess();
+      const spawnFn = mock.fn(() => {
+        setImmediate(() => emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'fixture-api' }]));
+        return proc;
+      });
+      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+      const run = collect(
+        service.invoke('fixture', {
+          callbackEnv: {
+            CODEX_AUTH_MODE: 'api_key',
+            OPENAI_API_KEY: 'fixture-key',
+            OPENAI_BASE_URL: 'http://127.0.0.1:1/v1',
+            ...selectedRouting,
+          },
+        }),
+      );
+      await run;
+      assertSelectedApiAccount(spawnFn.mock.calls[0]?.arguments[2].env, 'fixture-key', selectedRouting);
+      const home = spawnFn.mock.calls[0]?.arguments[2].env.CODEX_HOME;
+      assert.ok(home);
+      t.after(() => rmSync(dirname(home), { recursive: true, force: true }));
+      assert.equal(existsSync(home), true, 'native rejects a nonexistent explicit home');
+    },
+  );
+
+test('F320 explicit OAuth clears credentials after accountEnv composition', { timeout: 5000 }, async (t) => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+  const keys = [
+    'CODEX_API_KEY',
+    'CODEX_ACCESS_TOKEN',
+    'OPENAI_API_KEY',
+    'OPENAI_FEDERATION_RULE_ID',
+    'OPENAI_IDENTITY_TOKEN_FILE',
+  ];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  t.after(() => {
+    for (const key of keys) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+  for (const key of keys) process.env[key] = 'fixture-ambient';
+  const promise = collect(
+    service.invoke('OAuth account selection', {
+      callbackEnv: { CODEX_AUTH_MODE: 'oauth' },
+      accountEnv: Object.fromEntries(keys.map((key) => [key, 'fixture-account-override'])),
+    }),
+  );
+  setTimeout(() => emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'f320-final-env' }]), 50);
+  await promise;
+  assert.equal(spawnFn.mock.callCount(), 1);
+  const childEnv = spawnFn.mock.calls[0].arguments[2].env;
+  for (const key of keys) assert.equal(childEnv[key], undefined, `${key} must not override the selected OAuth account`);
+});
+
+test('F320 actual capability entry uses the selected account home rather than ambient home', async () => {
+  const chosenHome = join(process.env.HOME, 'chosen-codex-home');
+  let launch;
+  const service = new CodexAgentService({
+    l0CompilerFn: fakeL0Compiler,
+    carrierMode: 'app_server',
+    appServerHostPool: {
+      createSession: async (options) => {
+        launch = options;
+        throw new Error('fixture_spawn_boundary');
+      },
+    },
+  });
+  await assert.rejects(
+    service.requestNativeCapabilitySource({
+      invocationId: 'chosen-probe',
+      timeoutMs: 1000,
+      cwd: process.cwd(),
+      account: {
+        id: 'codex-chosen',
+        authType: 'oauth',
+        client: 'openai',
+        envVars: { CODEX_HOME: chosenHome },
+      },
+    }),
+    /fixture_spawn_boundary/,
+  );
+  assert.equal(launch.env.CODEX_HOME, chosenHome);
+  assert.equal(launch.env.CODEX_API_KEY, null);
+});
+
+/**
+ * Write NDJSON events to mock process stdout, then end with exit 0.
+ *
+ * F203 Phase C: stream end + 'exit' are deferred via setImmediate. invoke()
+ * now awaits L0 compile before spawnCli (fail-closed native system prompt),
+ * so a synchronous 'exit' here would fire before spawnCli attaches its
+ * process listeners and be lost (real codex never exits pre-listener — this
+ * only models the mock correctly). stdout writes stay sync (PassThrough
+ * buffers them; replayed once the consumer attaches).
+ */
 function emitCodexEvents(proc, events) {
   for (const event of events) {
     proc.stdout.write(`${JSON.stringify(event)}\n`);
   }
-  proc.stdout.end();
-  proc._emitter.emit('exit', 0, null);
+  setImmediate(() => {
+    proc.stdout.end();
+    proc._emitter.emit('exit', 0, null);
+  });
+}
+
+/**
+ * Defer stream end + (non-zero) 'exit' past spawnCli's listener attach.
+ * Same rationale as emitCodexEvents: invoke() awaits L0 compile before spawn
+ * (F203 Phase C), so a synchronous exit emitted right after invoke() would
+ * race ahead of the consumer and be lost.
+ */
+function finishExit(proc, code) {
+  setImmediate(() => {
+    if (!proc.stdout.destroyed) proc.stdout.end();
+    proc._emitter.emit('exit', code, null);
+  });
+}
+
+const CAT_CAFE_SPLIT_SERVER_IDS = [
+  'cat-cafe-collab',
+  'cat-cafe-memory',
+  'cat-cafe-signals',
+  'cat-cafe-limb',
+  'cat-cafe-audio',
+  'cat-cafe-finance',
+];
+const CAT_CAFE_SPLIT_ENTRYPOINTS = [
+  'index.js',
+  'collab.js',
+  'memory.js',
+  'signals.js',
+  'limb.js',
+  'audio.js',
+  'finance.js',
+];
+// F213 (2026-05-26): Legacy `cat-cafe` no longer auto-provisioned nor env-overlayed.
+// L5 startup cleanup (writeCodexMcpConfig + deprecated-managed-servers registry)
+// removes user-config legacy entries; L4 per-invocation only writes split servers.
+// See ADR-036 amendment 2026-05-26.
+const CAT_CAFE_WORKSPACE_ENV_SERVER_IDS = [...CAT_CAFE_SPLIT_SERVER_IDS];
+
+async function withWorkspaceEnv(env, fn) {
+  const previousAllowedWorkspaceDirs = process.env.ALLOWED_WORKSPACE_DIRS;
+  const previousCatCafeWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+
+  try {
+    if (env.ALLOWED_WORKSPACE_DIRS === undefined) {
+      delete process.env.ALLOWED_WORKSPACE_DIRS;
+    } else {
+      process.env.ALLOWED_WORKSPACE_DIRS = env.ALLOWED_WORKSPACE_DIRS;
+    }
+    if (env.CAT_CAFE_WORKSPACE_ROOT === undefined) {
+      delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+    } else {
+      process.env.CAT_CAFE_WORKSPACE_ROOT = env.CAT_CAFE_WORKSPACE_ROOT;
+    }
+    await fn();
+  } finally {
+    if (previousAllowedWorkspaceDirs === undefined) {
+      delete process.env.ALLOWED_WORKSPACE_DIRS;
+    } else {
+      process.env.ALLOWED_WORKSPACE_DIRS = previousAllowedWorkspaceDirs;
+    }
+    if (previousCatCafeWorkspaceRoot === undefined) {
+      delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+    } else {
+      process.env.CAT_CAFE_WORKSPACE_ROOT = previousCatCafeWorkspaceRoot;
+    }
+  }
+}
+
+async function withRuntimeRootEnv(runtimeRoot, fn) {
+  const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+  try {
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    await fn();
+  } finally {
+    if (previousRuntimeRoot === undefined) {
+      delete process.env.CAT_CAFE_RUNTIME_ROOT;
+    } else {
+      process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
+    }
+  }
+}
+
+async function collectCodexSpawnArgs(workingDirectory) {
+  const runtimeRoot = makeTempDir('.tmp-codex-spawn-runtime-root-');
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+  try {
+    writeMcpDistStubs(runtimeRoot, CAT_CAFE_SPLIT_ENTRYPOINTS);
+    const workspace = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    if (workspace) {
+      // These cases test allowed workspace arguments, with an explicitly configured default source.
+      writeCapabilitiesConfig(
+        workspace,
+        CAT_CAFE_SPLIT_SERVER_IDS.map((id, index) => ({
+          id,
+          type: 'mcp',
+          source: 'cat-cafe',
+          globalEnabled: true,
+          mcpServer: {
+            command: 'node',
+            args: [join(runtimeRoot, 'packages/mcp-server/dist', CAT_CAFE_SPLIT_ENTRYPOINTS[index + 1])],
+          },
+        })),
+      );
+    }
+    await withRuntimeRootEnv(runtimeRoot, async () => {
+      const promise = collect(
+        service.invoke('hello from workspace env test', {
+          workingDirectory,
+          callbackEnv: {
+            CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+            CAT_CAFE_INVOCATION_ID: 'inv-workspace-env',
+            CAT_CAFE_CALLBACK_TOKEN: 'tok-workspace-env',
+            CAT_CAFE_CAT_ID: 'codex',
+          },
+        }),
+      );
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-mcp-workspace-env' }]);
+      const messages = await promise;
+      assert.equal(spawnFn.mock.callCount(), 1, JSON.stringify(messages));
+    });
+
+    return spawnFn.mock.calls[0].arguments[1];
+  } finally {
+    rmSync(runtimeRoot, { recursive: true, force: true });
+  }
+}
+
+function assertWorkspaceScopedServersUseAllowedWorkspaceDirs(args, expected, reason) {
+  const servers = upstreamMcpServersFromArgs(args);
+  for (const serverId of CAT_CAFE_WORKSPACE_ENV_SERVER_IDS) {
+    assert.equal(servers[serverId].env.ALLOWED_WORKSPACE_DIRS, expected, `${serverId} must use ${reason}`);
+  }
+}
+
+function makeTempDir(prefix) {
+  return mkdtempSync(join(import.meta.dirname ?? '.', prefix));
+}
+
+function writeCodexEffortTemplate(projectRoot, effort, cliOverrides = {}, defaultModel = 'gpt-5.6-sol') {
+  const templatePath = join(projectRoot, 'cat-template.json');
+  writeFileSync(
+    templatePath,
+    JSON.stringify({
+      version: 2,
+      breeds: [
+        {
+          id: 'codex-sol',
+          catId: 'runtime-sol',
+          name: 'Sol',
+          displayName: 'Sol',
+          avatar: '/avatars/sol.png',
+          color: { primary: '#64843A', secondary: '#64843A' },
+          mentionPatterns: ['@runtime-sol'],
+          roleDescription: '旗舰推理与编码',
+          defaultVariantId: 'sol-default',
+          variants: [
+            {
+              id: 'sol-default',
+              clientId: 'openai',
+              defaultModel,
+              mcpSupport: true,
+              cli: { command: 'codex', outputFormat: 'json', effort, ...cliOverrides },
+            },
+          ],
+        },
+      ],
+      roster: {
+        'runtime-sol': {
+          family: 'codex-sol',
+          roles: ['assistant'],
+          lead: false,
+          available: true,
+          evaluation: 'test',
+        },
+      },
+      reviewPolicy: {
+        requireDifferentFamily: true,
+        preferActiveInThread: true,
+        preferLead: true,
+        excludeUnavailable: true,
+      },
+      coCreator: {
+        name: 'Co-creator',
+        aliases: ['owner'],
+        mentionPatterns: ['@owner'],
+      },
+    }),
+  );
+  return templatePath;
+}
+
+function writeCapabilitiesConfig(projectRoot, capabilities) {
+  mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+  writeFileSync(
+    join(projectRoot, '.cat-cafe', 'capabilities.json'),
+    JSON.stringify({ version: 1, capabilities }),
+    'utf8',
+  );
+}
+
+function writeMcpDistStubs(projectRoot, entrypoints = ['index.js']) {
+  const mcpDistDir = join(projectRoot, 'packages', 'mcp-server', 'dist');
+  mkdirSync(mcpDistDir, { recursive: true });
+  for (const entrypoint of entrypoints) {
+    writeFileSync(join(mcpDistDir, entrypoint), '// stub');
+  }
 }
 
 // --- Test cases ---
 
-test('yields session_init, text, and done on basic success', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
+  test('yields session_init, text, and done on basic success', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
-  const promise = collect(service.invoke('Hello'));
+    const promise = collect(service.invoke('Hello'));
 
-  emitCodexEvents(proc, [
-    { type: 'thread.started', thread_id: 'thread-abc' },
-    { type: 'turn.started' },
-    {
-      type: 'item.completed',
-      item: { id: 'msg-1', type: 'agent_message', text: 'Hello from Codex!' },
-    },
-    { type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 20 } },
-  ]);
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-abc' },
+      { type: 'turn.started' },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: 'Hello from Codex!' },
+      },
+      { type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 20 } },
+    ]);
 
-  const msgs = await promise;
+    const msgs = await promise;
 
-  assert.equal(msgs.length, 3);
-  assert.equal(msgs[0].type, 'session_init');
-  assert.equal(msgs[0].sessionId, 'thread-abc');
-  assert.equal(msgs[0].catId, 'codex');
-  assert.equal(msgs[1].type, 'text');
-  assert.equal(msgs[1].content, 'Hello from Codex!');
-  assert.equal(msgs[2].type, 'done');
-});
+    assert.equal(msgs.length, 4);
+    assert.equal(msgs[0].type, 'session_init');
+    assert.equal(msgs[0].sessionId, 'thread-abc');
+    assert.equal(msgs[0].catId, 'codex');
+    assert.equal(msgs[1].type, 'text');
+    assert.equal(msgs[1].content, 'Hello from Codex!');
+    assert.equal(msgs[2].type, 'text');
+    assert.equal(msgs[2].content, '\n\n[砚砚/gpt-5.3-codex🐾]');
+    assert.equal(msgs[3].type, 'done');
+  });
 
-test('uses exec resume when sessionId is provided', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
+  test('uses exec resume when sessionId is provided', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
 
-  const promise = collect(service.invoke('Continue', { sessionId: 'existing-thread-456' }));
-  emitCodexEvents(proc, [
-    { type: 'thread.started', thread_id: 'existing-thread-456' },
-    {
-      type: 'item.completed',
-      item: { id: 'msg-1', type: 'agent_message', text: 'Resumed' },
-    },
-  ]);
-  await promise;
+    const promise = collect(service.invoke('Continue', { sessionId: 'existing-thread-456' }));
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'existing-thread-456' },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: 'Resumed' },
+      },
+    ]);
+    await promise;
 
-  const args = spawnFn.mock.calls[0].arguments[1];
-  assert.equal(args[0], 'exec');
-  assert.equal(args[1], 'resume');
-  assert.equal(args[2], 'existing-thread-456');
-  assert.equal(args.at(-1), 'Continue');
-  // resume 子命令不接受 --sandbox（sandbox 在创建时已锁定）
-  assert.ok(!args.includes('--sandbox'), 'resume args must not include --sandbox');
-  assert.ok(args.includes('--json'), 'resume args must include --json');
-  const modelFlagIndex = args.indexOf('--model');
-  assert.ok(modelFlagIndex >= 0, 'resume args must include --model');
-  assert.equal(args[modelFlagIndex + 1], 'gpt-5.3-codex');
-  assert.ok(args.includes('--config'), 'resume args must include approval policy override');
-  assert.ok(args.includes('approval_policy="on-request"'), 'default approval policy should be on-request');
-  assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
-});
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args[0], 'exec');
+    assert.equal(args[1], 'resume');
+    assert.equal(args[2], 'existing-thread-456');
+    // Incident 2026-05-29: prompt 走 stdin，argv 末尾是 '-'（codex 从 stdin 读 PROMPT）
+    assert.equal(args.at(-1), '-', 'prompt 走 stdin，argv 末尾是 -');
+    assert.equal(proc.stdinData, 'Continue', 'prompt 经 stdin 传入');
+    // resume 子命令不接受 --sandbox；sandbox mode is replayed through --config.
+    assert.ok(!args.includes('--sandbox'), 'resume args must not include --sandbox');
+    assert.ok(args.includes('--json'), 'resume args must include --json');
+    const modelFlagIndex = args.indexOf('--model');
+    assert.ok(modelFlagIndex >= 0, 'resume args must include --model');
+    assert.equal(args[modelFlagIndex + 1], 'gpt-5.3-codex');
+    assert.ok(args.includes('sandbox_mode="danger-full-access"'), 'resume args must preserve default sandbox mode');
+    assert.ok(args.includes('--config'), 'resume args must include approval policy override');
+    assert.ok(args.includes('approval_policy="on-request"'), 'default approval policy should be on-request');
+    assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
+  });
 
-test('injects cat-cafe MCP config even when cwd is outside repo', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
-  const cwdMock = mock.method(process, 'cwd', () => '/tmp/not-cat-cafe');
+  test('injects cat-cafe MCP config from runtime root, not thread workingDirectory', async () => {
+    const runtimeRoot = makeTempDir('.tmp-mcp-runtime-root-');
+    const threadWorkspace = makeTempDir('.tmp-mcp-thread-workspace-');
+    const previousAllowedWorkspaceDirs = process.env.ALLOWED_WORKSPACE_DIRS;
+    const previousCatCafeWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const mcpDistDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
+    mkdirSync(mcpDistDir, { recursive: true });
+    for (const entrypoint of [
+      'index.js',
+      'collab.js',
+      'memory.js',
+      'signals.js',
+      'limb.js',
+      'audio.js',
+      'finance.js',
+    ]) {
+      writeFileSync(join(mcpDistDir, entrypoint), '// stub');
+    }
 
-  try {
-    const promise = collect(
-      service.invoke('hello from outside cwd', {
-        callbackEnv: {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      delete process.env.ALLOWED_WORKSPACE_DIRS;
+      delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+      const promise = collect(
+        service.invoke('hello from outside cwd', {
+          workingDirectory: threadWorkspace,
+          callbackEnv: {
+            CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+            CAT_CAFE_INVOCATION_ID: 'inv-test-1',
+            CAT_CAFE_CALLBACK_TOKEN: 'tok-test-1',
+            CAT_CAFE_THREAD_ID: 'thread-test-1',
+            CAT_CAFE_USER_ID: 'user-test-1\nline2',
+            CAT_CAFE_CAT_ID: 'codex',
+            CAT_CAFE_SIGNAL_USER: 'codex',
+          },
+        }),
+      );
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-mcp-fallback' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+
+      // F193 Phase C (#1605): legacy `cat-cafe` MCP server is gone, replaced by
+      // split servers (cat-cafe-collab / -memory / -signals / -limb).
+      // Each split server must be injected with command + args path + enabled + full callback env.
+      const splitServers = [
+        ['cat-cafe-collab', 'collab.js'],
+        ['cat-cafe-memory', 'memory.js'],
+        ['cat-cafe-signals', 'signals.js'],
+        ['cat-cafe-limb', 'limb.js'],
+        ['cat-cafe-audio', 'audio.js'],
+        ['cat-cafe-finance', 'finance.js'],
+      ];
+      const servers = upstreamMcpServersFromArgs(args);
+      for (const [serverId, entrypoint] of splitServers) {
+        const server = servers[serverId];
+        assert.equal(server.command, process.execPath, `${serverId} uses runtime Node`);
+        assert.deepEqual(
+          server.args,
+          [join(mcpDistDir, entrypoint)],
+          'upstream binary belongs to runtime, not thread cwd',
+        );
+        assert.equal(server.enabled, true);
+        assert.equal(server.default_tools_approval_mode, 'approve');
+        assert.deepEqual(server.env, {
+          ALLOWED_WORKSPACE_DIRS: threadWorkspace,
           CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
           CAT_CAFE_INVOCATION_ID: 'inv-test-1',
           CAT_CAFE_CALLBACK_TOKEN: 'tok-test-1',
+          CAT_CAFE_THREAD_ID: 'thread-test-1',
           CAT_CAFE_USER_ID: 'user-test-1\nline2',
+          CAT_CAFE_CAT_ID: 'codex',
           CAT_CAFE_SIGNAL_USER: 'codex',
+        });
+      }
+
+      // F213 (2026-05-26, post 砚砚 review P2 fix): legacy `cat-cafe` server gets
+      // L4 per-invocation dummy disabled override (covers user-level / $CODEX_HOME
+      // / system config sources that L5 cleanup cannot reach). Dummy disabled form
+      // verified by 砚砚 strict-npm-Codex reproducer: passes config parse + codex
+      // skips server startup (enabled=false).
+      //
+      // INVARIANTS:
+      // - command="echo" (complete transport, strict-codex accepts)
+      // - args=["legacy-shim"] (no real process spawn)
+      // - enabled=false (server not actually started, no callback env needed)
+      // - NO env.* overlay (env-only would be partial definition if transport missing
+      //   from another source — but with our complete transport above, env is irrelevant
+      //   because enabled=false short-circuits server startup)
+      assert.equal(servers['cat-cafe'].command, 'echo');
+      assert.deepEqual(servers['cat-cafe'].args, ['legacy-shim']);
+      assert.equal(servers['cat-cafe'].enabled, false);
+      assert.equal(servers['cat-cafe'].env, undefined, 'disabled legacy shim cannot receive credentials');
+    } finally {
+      if (previousAllowedWorkspaceDirs === undefined) {
+        delete process.env.ALLOWED_WORKSPACE_DIRS;
+      } else {
+        process.env.ALLOWED_WORKSPACE_DIRS = previousAllowedWorkspaceDirs;
+      }
+      if (previousCatCafeWorkspaceRoot === undefined) {
+        delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      } else {
+        process.env.CAT_CAFE_WORKSPACE_ROOT = previousCatCafeWorkspaceRoot;
+      }
+      if (previousRuntimeRoot === undefined) {
+        delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      } else {
+        process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(threadWorkspace, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config reads capabilities from runtime root while cwd is user project', async () => {
+    const runtimeRoot = makeTempDir('.tmp-codex-runtime-cap-root-');
+    const projectDir = makeTempDir('.tmp-codex-user-project-');
+    const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const previousAllowedWorkspaceDirs = process.env.ALLOWED_WORKSPACE_DIRS;
+    const previousCatCafeWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    const mcpDistDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
+    mkdirSync(mcpDistDir, { recursive: true });
+    for (const entrypoint of ['index.js', 'collab.js', 'memory.js']) {
+      writeFileSync(join(mcpDistDir, entrypoint), '// stub');
+    }
+    writeCapabilitiesConfig(runtimeRoot, [
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        globalEnabled: false,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: [] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        globalEnabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: [] },
+      },
+      {
+        id: 'runtime-tool',
+        type: 'mcp',
+        globalEnabled: true,
+        source: 'external',
+        mcpServer: { command: 'node', args: ['runtime-tool.js'] },
+      },
+    ]);
+
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+      delete process.env.ALLOWED_WORKSPACE_DIRS;
+      delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      const promise = collect(
+        service.invoke('hello from user project', {
+          workingDirectory: projectDir,
+          callbackEnv: {
+            CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+            CAT_CAFE_INVOCATION_ID: 'inv-runtime-root',
+            CAT_CAFE_CALLBACK_TOKEN: 'tok-runtime-root',
+            CAT_CAFE_CAT_ID: 'codex',
+          },
+        }),
+      );
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-runtime-root' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      // #1072 fix: disabled servers emit a complete dummy shape (command +
+      // args + enabled=false) to suppress any stale .codex/config.toml entries.
+      // Bare `enabled=false` fails Codex ≥0.142 schema validation; including
+      // command+args satisfies the schema (same principle as legacy cat-cafe shim).
+      const servers = upstreamMcpServersFromArgs(args);
+      assert.equal(servers['cat-cafe-collab'].command, 'echo');
+      assert.deepEqual(servers['cat-cafe-collab'].args, ['disabled-shim']);
+      assert.equal(servers['cat-cafe-collab'].enabled, false);
+      assert.equal(servers['cat-cafe-collab'].env, undefined, 'disabled entries do not receive callback/workspace env');
+      assert.equal(servers['cat-cafe-memory'].command, process.execPath);
+      assert.equal(servers['runtime-tool'].command, 'node');
+      assert.equal(servers['cat-cafe-memory'].env.ALLOWED_WORKSPACE_DIRS, projectDir);
+    } finally {
+      if (previousRuntimeRoot === undefined) {
+        delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      } else {
+        process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
+      }
+      if (previousAllowedWorkspaceDirs === undefined) {
+        delete process.env.ALLOWED_WORKSPACE_DIRS;
+      } else {
+        process.env.ALLOWED_WORKSPACE_DIRS = previousAllowedWorkspaceDirs;
+      }
+      if (previousCatCafeWorkspaceRoot === undefined) {
+        delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      } else {
+        process.env.CAT_CAFE_WORKSPACE_ROOT = previousCatCafeWorkspaceRoot;
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config suppresses external entry with unsupported transport as disabled dummy', async () => {
+    // #1072 fix: external entry with managed name but unsupported transport
+    // resolves as disabled (transport unsupported for this provider). The
+    // disabled handler emits a complete dummy shape (command + args +
+    // enabled=false) to suppress any stale config.toml entries — stale user
+    // paths and secrets must never leak into CLI args.
+    const runtimeRoot = makeTempDir('.tmp-codex-managed-shadow-root-');
+    const projectDir = makeTempDir('.tmp-codex-managed-shadow-project-');
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'cat-cafe-limb',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            command: 'node',
+            args: ['/stale/user/cat-cafe-limb.js'],
+            transport: 'streamableHttp',
+            resolver: 'pencil',
+            env: { ALLOWED_WORKSPACE_DIRS: '/stale/user/workspace', STALE_SECRET: 'must-not-leak' },
+          },
+        },
+      ]);
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('hello managed shadow', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-managed-shadow',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-managed-shadow',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-managed-shadow' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          // Entry is disabled (transport unsupported) → emits dummy suppression shape
+          assert.ok(
+            args.includes('mcp_servers.cat-cafe-limb.command="echo"'),
+            'disabled entry must emit dummy command to suppress stale config.toml',
+          );
+          assert.ok(args.includes('mcp_servers.cat-cafe-limb.enabled=false'), 'disabled entry must emit enabled=false');
+          // Stale user paths and secrets must never leak
+          assert.ok(
+            !args.some(
+              (arg) => arg.includes('/stale/user') || arg.includes('STALE_SECRET') || arg.includes('must-not-leak'),
+            ),
+            'stale user paths and secrets must never leak into CLI args',
+          );
+        });
+      });
+    } finally {
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config resolves runtime binary + managed env for same-repo external split', async () => {
+    // #1072 regression test: ensureCatCafeMainServer migration can leave a
+    // split entry with source='external' but binary pointing to our own repo
+    // dist (isSameRepoExternalSplit). These entries must:
+    //   1. Resolve binary from current mcpDistDir (not the entry's stale args[0])
+    //   2. Receive managed env injection (callback env, workspace dirs, approval mode)
+    const runtimeRoot = makeTempDir('.tmp-codex-same-repo-ext-');
+    const projectDir = makeTempDir('.tmp-codex-same-repo-ext-project-');
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      // Same-repo external shape: source='external', args[0] ends with
+      // packages/mcp-server/dist/limb.js but uses a STALE worktree path
+      // (different from current runtimeRoot). The code must resolve from
+      // current mcpDistDir, not trust the stale absolute path.
+      const staleLimbPath = '/old/worktree/packages/mcp-server/dist/limb.js';
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'cat-cafe-limb',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: { command: 'node', args: [staleLimbPath] },
+        },
+      ]);
+
+      const currentLimbPath = join(runtimeRoot, 'packages', 'mcp-server', 'dist', 'limb.js');
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('hello same-repo external', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-same-repo',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-same-repo',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-same-repo' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          const server = upstreamMcpServersFromArgs(args)['cat-cafe-limb'];
+          assert.equal(server.enabled, true);
+          assert.deepEqual(
+            server.args,
+            [currentLimbPath],
+            'managed upstream must resolve to the current runtime binary',
+          );
+          assert.ok(!args.some((a) => a.includes('/old/worktree/')), 'stale worktree path must not appear in CLI args');
+          assert.equal(server.default_tools_approval_mode, 'approve');
+          assert.equal(server.env.ALLOWED_WORKSPACE_DIRS, projectDir);
+          assert.equal(server.env.CAT_CAFE_API_URL, 'http://127.0.0.1:3004');
+        });
+      });
+    } finally {
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config injects streamableHttp URL for enabled entries', async () => {
+    // Codex CLI supports URL-based MCP servers (codex mcp add --url).
+    // Verify that streamableHttp entries with a valid URL are injected
+    // via --config mcp_servers.X.url=... instead of command/args.
+    // resolveServersForCat requires the cat to be registered with a provider
+    // in STREAMABLE_HTTP_PROVIDERS for streamableHttp to be enabled.
+    const runtimeRoot = makeTempDir('.tmp-codex-streamable-http-');
+    const projectDir = makeTempDir('.tmp-codex-streamable-http-project-');
+    const savedConfigs = catRegistry.getAllConfigs();
+    const hadCodex = catRegistry.has('codex');
+
+    if (!hadCodex) {
+      catRegistry.register('codex', {
+        id: 'codex',
+        name: 'codex',
+        displayName: 'Codex',
+        avatar: '',
+        color: 'blue',
+        mentionPatterns: ['@codex'],
+        clientId: 'openai',
+        defaultModel: 'gpt-5.3-codex',
+        mcpSupport: true,
+        roleDescription: 'test',
+        personality: 'test',
+      });
+    }
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'remote-mcp',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            transport: 'streamableHttp',
+            url: 'https://mcp.example.com/v1',
+            command: '',
+            args: [],
+          },
+        },
+      ]);
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('hello streamable http', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-streamable',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-streamable',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-streamable' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          const server = upstreamMcpServersFromArgs(args)['remote-mcp'];
+          assert.equal(server.url, 'https://mcp.example.com/v1');
+          assert.equal(server.enabled, true);
+          assert.equal(server.command, undefined, 'upstream remains a remote transport behind the inspected relay');
+        });
+      });
+    } finally {
+      if (!hadCodex) {
+        catRegistry.reset();
+        for (const [id, config] of Object.entries(savedConfigs)) {
+          catRegistry.register(id, config);
+        }
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config maps Authorization Bearer header to bearer_token_env_var', async () => {
+    // #1074: When a streamableHttp entry has an Authorization: Bearer header,
+    // CodexAgentService must extract the token into a process env var and
+    // inject bearer_token_env_var pointing at it — Codex CLI does not accept
+    // arbitrary headers, only bearer_token_env_var.
+    const runtimeRoot = makeTempDir('.tmp-codex-bearer-');
+    const projectDir = makeTempDir('.tmp-codex-bearer-project-');
+    const savedConfigs = catRegistry.getAllConfigs();
+    const hadCodex = catRegistry.has('codex');
+
+    if (!hadCodex) {
+      catRegistry.register('codex', {
+        id: 'codex',
+        name: 'codex',
+        displayName: 'Codex',
+        avatar: '',
+        color: 'blue',
+        mentionPatterns: ['@codex'],
+        clientId: 'openai',
+        defaultModel: 'gpt-5.3-codex',
+        mcpSupport: true,
+        roleDescription: 'test',
+        personality: 'test',
+      });
+    }
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'authed-remote',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            transport: 'streamableHttp',
+            url: 'https://mcp.secure.example.com/v1',
+            command: '',
+            args: [],
+            headers: { Authorization: 'Bearer sk-test-secret-token-123' },
+          },
+        },
+      ]);
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('hello authed streamable', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-bearer',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-bearer',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-bearer' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+          const server = upstreamMcpServersFromArgs(args)['authed-remote'];
+          assert.equal(server.url, 'https://mcp.secure.example.com/v1');
+          assert.equal(server.enabled, true);
+          assert.match(server.bearer_token_env_var, /^CAT_CAFE_MCP_BEARER_AUTHED_REMOTE_/);
+          assert.equal(spawnOpts.env[server.bearer_token_env_var], 'sk-test-secret-token-123');
+          assert.equal(server.command, undefined);
+          assert.ok(
+            !args.some((arg) => arg.includes('sk-test-secret-token-123')),
+            'bearer values must remain outside argv',
+          );
+        });
+      });
+    } finally {
+      if (!hadCodex) {
+        catRegistry.reset();
+        for (const [id, config] of Object.entries(savedConfigs)) {
+          catRegistry.register(id, config);
+        }
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Bearer env var names are collision-proof for MCP ids that normalize identically', async () => {
+    // Regression: `foo-bar` and `foo_bar` both sanitize to `FOO_BAR`.
+    // Without a hash suffix the second overwrites the first in bearerEnv,
+    // routing one MCP's token to another — a secret misrouting bug.
+    const runtimeRoot = makeTempDir('.tmp-codex-bearer-collision-');
+    const projectDir = makeTempDir('.tmp-codex-bearer-collision-project-');
+    const savedConfigs = catRegistry.getAllConfigs();
+    const hadCodex = catRegistry.has('codex');
+
+    if (!hadCodex) {
+      catRegistry.register('codex', {
+        id: 'codex',
+        name: 'codex',
+        displayName: 'Codex',
+        avatar: '',
+        color: 'blue',
+        mentionPatterns: ['@codex'],
+        clientId: 'openai',
+        defaultModel: 'gpt-5.3-codex',
+        mcpSupport: true,
+        roleDescription: 'test',
+        personality: 'test',
+      });
+    }
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'foo-bar',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            transport: 'streamableHttp',
+            url: 'https://mcp-a.example.com',
+            command: '',
+            args: [],
+            headers: { Authorization: 'Bearer token-A' },
+          },
+        },
+        {
+          id: 'foo_bar',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            transport: 'streamableHttp',
+            url: 'https://mcp-b.example.com',
+            command: '',
+            args: [],
+            headers: { Authorization: 'Bearer token-B' },
+          },
+        },
+      ]);
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('test collision', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-collision',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-collision',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-collision' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+
+          const servers = upstreamMcpServersFromArgs(args);
+          const dash = servers['foo-bar'].bearer_token_env_var;
+          const underscore = servers.foo_bar.bearer_token_env_var;
+          assert.match(dash, /^CAT_CAFE_MCP_BEARER_/);
+          assert.match(underscore, /^CAT_CAFE_MCP_BEARER_/);
+          assert.notEqual(dash, underscore, 'normalizing IDs must not collapse bearer identity');
+          assert.equal(spawnOpts.env[dash], 'token-A');
+          assert.equal(spawnOpts.env[underscore], 'token-B');
+        });
+      });
+    } finally {
+      if (!hadCodex) {
+        catRegistry.reset();
+        for (const [id, config] of Object.entries(savedConfigs)) {
+          catRegistry.register(id, config);
+        }
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Bearer auth maps case-insensitive Authorization header', async () => {
+    // HTTP headers are case-insensitive per RFC 7230. A descriptor with
+    // `AUTHORIZATION` or `authorization` must still be mapped.
+    const runtimeRoot = makeTempDir('.tmp-codex-bearer-case-');
+    const projectDir = makeTempDir('.tmp-codex-bearer-case-project-');
+    const savedConfigs = catRegistry.getAllConfigs();
+    const hadCodex = catRegistry.has('codex');
+
+    if (!hadCodex) {
+      catRegistry.register('codex', {
+        id: 'codex',
+        name: 'codex',
+        displayName: 'Codex',
+        avatar: '',
+        color: 'blue',
+        mentionPatterns: ['@codex'],
+        clientId: 'openai',
+        defaultModel: 'gpt-5.3-codex',
+        mcpSupport: true,
+        roleDescription: 'test',
+        personality: 'test',
+      });
+    }
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      // Use AUTHORIZATION (all-caps) — must still be recognized
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'upper-auth',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            transport: 'streamableHttp',
+            url: 'https://mcp.upper.example.com',
+            command: '',
+            args: [],
+            headers: { AUTHORIZATION: 'Bearer sk-upper-token' },
+          },
+        },
+      ]);
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('test upper auth', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-upper',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-upper',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-upper' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+
+          const server = Object.values(upstreamMcpServersFromArgs(args)).find(
+            (entry) => entry.url === 'https://mcp.upper.example.com',
+          );
+          assert.ok(server, 'AUTHORIZATION (all-caps) must retain its remote transport');
+          assert.match(server.bearer_token_env_var, /^CAT_CAFE_MCP_BEARER_/);
+          assert.equal(spawnOpts.env[server.bearer_token_env_var], 'sk-upper-token');
+        });
+      });
+    } finally {
+      if (!hadCodex) {
+        catRegistry.reset();
+        for (const [id, config] of Object.entries(savedConfigs)) {
+          catRegistry.register(id, config);
+        }
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Bearer auth resolves ${ENV_VAR} placeholders in Authorization header', async () => {
+    // Regression: mcp-probe.ts resolves ${ENV} in headers before connecting.
+    // Codex invoke must do the same — otherwise probe succeeds but Codex sends
+    // the literal placeholder string as the bearer token.
+    const runtimeRoot = makeTempDir('.tmp-codex-bearer-envref-');
+    const projectDir = makeTempDir('.tmp-codex-bearer-envref-project-');
+    const savedConfigs = catRegistry.getAllConfigs();
+    const hadCodex = catRegistry.has('codex');
+
+    if (!hadCodex) {
+      catRegistry.register('codex', {
+        id: 'codex',
+        name: 'codex',
+        displayName: 'Codex',
+        avatar: '',
+        color: 'blue',
+        mentionPatterns: ['@codex'],
+        clientId: 'openai',
+        defaultModel: 'gpt-5.3-codex',
+        mcpSupport: true,
+        roleDescription: 'test',
+        personality: 'test',
+      });
+    }
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    // Set a real env var for the placeholder to resolve against
+    const envKey = 'TEST_MCP_BEARER_PLACEHOLDER_TOKEN';
+    const originalEnv = process.env[envKey];
+    process.env[envKey] = 'resolved-secret-token-456';
+
+    try {
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'env-backed-remote',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            transport: 'streamableHttp',
+            url: 'https://mcp.envbacked.example.com',
+            command: '',
+            args: [],
+            headers: { Authorization: `Bearer \${${envKey}}` },
+          },
+        },
+      ]);
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('test env-backed bearer', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-envref',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-envref',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-envref' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+
+          const server = Object.values(upstreamMcpServersFromArgs(args)).find((entry) => entry.bearer_token_env_var);
+          assert.ok(server, 'env-backed authorization must retain its bearer reference');
+          assert.equal(
+            spawnOpts.env[server.bearer_token_env_var],
+            'resolved-secret-token-456',
+            'resolved token, not placeholder',
+          );
+        });
+      });
+    } finally {
+      // Restore original env
+      if (originalEnv === undefined) {
+        delete process.env[envKey];
+      } else {
+        process.env[envKey] = originalEnv;
+      }
+      if (!hadCodex) {
+        catRegistry.reset();
+        for (const [id, config] of Object.entries(savedConfigs)) {
+          catRegistry.register(id, config);
+        }
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config emits URL-based disabled override for streamableHttp entries', async () => {
+    // When a streamableHttp entry from .codex/config.toml is disabled, we must
+    // emit url + enabled=false (not command/args stdio dummy). Overlaying stdio
+    // fields on a TOML table that already has `url` causes Codex CLI error
+    // "url is not supported for stdio" — transport conflict.
+    const runtimeRoot = makeTempDir('.tmp-codex-disabled-streamable-');
+    const projectDir = makeTempDir('.tmp-codex-disabled-streamable-project-');
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      // Disabled streamableHttp entry — globalEnabled=false with a URL
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'disabled-remote',
+          type: 'mcp',
+          globalEnabled: false,
+          source: 'external',
+          mcpServer: {
+            transport: 'streamableHttp',
+            url: 'https://mcp.disabled.example.com/v1',
+            command: '',
+            args: [],
+          },
+        },
+      ]);
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('hello disabled streamable http', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-disabled-streamable',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-disabled-streamable',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-disabled-streamable' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          // Must use url + enabled=false (not stdio dummy)
+          assert.ok(
+            args.includes('mcp_servers.disabled-remote.url="https://mcp.disabled.example.com/v1"'),
+            'disabled streamableHttp must emit url (not command/args) to avoid transport conflict',
+          );
+          assert.ok(
+            args.includes('mcp_servers.disabled-remote.enabled=false'),
+            'disabled streamableHttp must emit enabled=false',
+          );
+          // Must NOT have command/args (would cause transport conflict)
+          assert.ok(
+            !args.some((a) => a.includes('mcp_servers.disabled-remote.command=')),
+            'disabled streamableHttp must not inject command (transport conflict)',
+          );
+          assert.ok(
+            !args.some((a) => a.includes('mcp_servers.disabled-remote.args=')),
+            'disabled streamableHttp must not inject args (transport conflict)',
+          );
+        });
+      });
+    } finally {
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config resolves pencil binary at invoke time', async () => {
+    // Pencil entries have resolver='pencil' with empty command/args.
+    // CodexAgentService must resolve the pencil binary at invoke time
+    // (same pattern as ClaudeAgentService) and inject via --config.
+    const runtimeRoot = makeTempDir('.tmp-codex-pencil-');
+    const projectDir = makeTempDir('.tmp-codex-pencil-project-');
+
+    // Create a mock pencil binary (must be executable for isExecutableCommandPath)
+    const pencilBin = join(projectDir, 'mock-pencil-mcp-server');
+    writeFileSync(pencilBin, '#!/bin/sh\necho "mock pencil"', 'utf8');
+    chmodSync(pencilBin, 0o755);
+
+    const previousPencilBin = process.env.PENCIL_MCP_BIN;
+    const previousPencilApp = process.env.PENCIL_MCP_APP;
+    try {
+      // Use PENCIL_MCP_BIN env override so resolvePencilCommand finds our mock
+      process.env.PENCIL_MCP_BIN = pencilBin;
+      process.env.PENCIL_MCP_APP = 'vscode';
+
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'pencil',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'cat-cafe',
+          mcpServer: {
+            resolver: 'pencil',
+            command: '',
+            args: [],
+          },
+        },
+      ]);
+
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('hello pencil', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-pencil',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-pencil',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-pencil' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          const server = upstreamMcpServersFromArgs(args).pencil;
+          assert.ok(server.command.includes('mock-pencil-mcp-server'), 'upstream must use the resolved Pencil binary');
+          assert.ok(server.args.includes('--app'));
+          assert.ok(server.args.includes('visual_studio_code'), 'keep the current Pencil host identifier');
+          assert.equal(server.enabled, true, 'enabled state overrides stale user config');
+        });
+      });
+    } finally {
+      if (previousPencilBin === undefined) {
+        delete process.env.PENCIL_MCP_BIN;
+      } else {
+        process.env.PENCIL_MCP_BIN = previousPencilBin;
+      }
+      if (previousPencilApp === undefined) {
+        delete process.env.PENCIL_MCP_APP;
+      } else {
+        process.env.PENCIL_MCP_APP = previousPencilApp;
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config emits disabled dummy when pencil binary is not found', async () => {
+    // When resolvePencilCommand returns null (no pencil installation),
+    // CodexAgentService must emit a disabled dummy shape to prevent
+    // stale .codex/config.toml entries from reviving an old binary.
+    const runtimeRoot = makeTempDir('.tmp-codex-pencil-null-');
+    const projectDir = makeTempDir('.tmp-codex-pencil-null-project-');
+
+    const previousPencilBin = process.env.PENCIL_MCP_BIN;
+    try {
+      // Point PENCIL_MCP_BIN at a non-existent path so resolution returns null
+      process.env.PENCIL_MCP_BIN = '/nonexistent/path/pencil-mcp-server';
+
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'pencil',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'cat-cafe',
+          mcpServer: {
+            resolver: 'pencil',
+            command: '',
+            args: [],
+          },
+        },
+      ]);
+
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('hello pencil null', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-pencil-null',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-pencil-null',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-pencil-null' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          // Unresolved pencil must emit disabled dummy to suppress stale config.toml
+          assert.ok(args.includes('mcp_servers.pencil.command="echo"'), 'unresolved pencil must emit dummy command');
+          assert.ok(
+            args.some((a) => a.includes('mcp_servers.pencil.args=') && a.includes('disabled-shim')),
+            'unresolved pencil must emit disabled-shim args',
+          );
+          assert.ok(args.includes('mcp_servers.pencil.enabled=false'), 'unresolved pencil must be explicitly disabled');
+        });
+      });
+    } finally {
+      if (previousPencilBin === undefined) {
+        delete process.env.PENCIL_MCP_BIN;
+      } else {
+        process.env.PENCIL_MCP_BIN = previousPencilBin;
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config prefers explicit ALLOWED_WORKSPACE_DIRS over thread workingDirectory', async () => {
+    const tmpRoot = makeTempDir('.tmp-mcp-explicit-env-');
+    const allowedRoot = makeTempDir('.tmp-mcp-allowed-root-');
+    const startupRoot = makeTempDir('.tmp-mcp-startup-root-');
+
+    try {
+      await withWorkspaceEnv(
+        { ALLOWED_WORKSPACE_DIRS: allowedRoot, CAT_CAFE_WORKSPACE_ROOT: startupRoot },
+        async () => {
+          const args = await collectCodexSpawnArgs(tmpRoot);
+          assertWorkspaceScopedServersUseAllowedWorkspaceDirs(args, allowedRoot, 'explicit ALLOWED_WORKSPACE_DIRS');
+        },
+      );
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true });
+      rmSync(allowedRoot, { recursive: true, force: true });
+      rmSync(startupRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config prefers thread workingDirectory over CAT_CAFE_WORKSPACE_ROOT', async () => {
+    const tmpRoot = makeTempDir('.tmp-mcp-workspace-root-');
+    const startupRoot = makeTempDir('.tmp-mcp-startup-root-');
+
+    try {
+      await withWorkspaceEnv({ CAT_CAFE_WORKSPACE_ROOT: startupRoot }, async () => {
+        const args = await collectCodexSpawnArgs(tmpRoot);
+        assertWorkspaceScopedServersUseAllowedWorkspaceDirs(args, tmpRoot, 'thread workingDirectory');
+      });
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true });
+      rmSync(startupRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config uses CAT_CAFE_WORKSPACE_ROOT when thread workingDirectory is absent', async () => {
+    const startupRoot = makeTempDir('.tmp-mcp-fallback-root-');
+    try {
+      await withWorkspaceEnv({ CAT_CAFE_WORKSPACE_ROOT: startupRoot }, async () => {
+        const args = await collectCodexSpawnArgs();
+        assertWorkspaceScopedServersUseAllowedWorkspaceDirs(args, startupRoot, 'CAT_CAFE_WORKSPACE_ROOT fallback');
+      });
+    } finally {
+      rmSync(startupRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP external env stays out of argv and command-only servers stay enabled', async () => {
+    const projectDir = makeTempDir('.tmp-codex-external-env-');
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(projectDir);
+      writeCapabilitiesConfig(projectDir, [
+        {
+          id: 'secret-tool',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            command: 'node',
+            env: { SECRET_TOKEN: 'super-secret-token' },
+          },
+        },
+      ]);
+
+      await withWorkspaceEnv({ CAT_CAFE_WORKSPACE_ROOT: projectDir }, () =>
+        withRuntimeRootEnv(projectDir, async () => {
+          const promise = collect(
+            service.invoke('hello external env', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-secret',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-secret',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-secret' }]);
+          const messages = await promise;
+          assert.equal(spawnFn.mock.callCount(), 1, JSON.stringify(messages));
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          const server = upstreamMcpServersFromArgs(args)['secret-tool'];
+          assert.equal(server.command, process.execPath, 'credential-file wrapper must use runtime Node');
+          assert.equal(server.enabled, true);
+          const privateSpec = JSON.parse(readFileSync(server.args.at(-1), 'utf8'));
+          assert.equal(privateSpec.command, 'node');
+          assert.equal(privateSpec.env.SECRET_TOKEN, 'super-secret-token');
+          assert.ok(
+            !args.some((arg) => arg.includes('SECRET_TOKEN') || arg.includes('super-secret-token')),
+            'external MCP env names and values must not be exposed in argv',
+          );
+        }),
+      );
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP plugin-shaped IDs with dots retain one literal server namespace', async () => {
+    const projectDir = makeTempDir('.tmp-codex-dotted-plugin-');
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    try {
+      writeMcpDistStubs(projectDir);
+      // Activation/admission is tested by the installed-plugin suites. This
+      // registry entry isolates the provider's handling of the same ID shape.
+      writeCapabilitiesConfig(projectDir, [
+        {
+          id: 'plugin:dev.clowder.xiangqi:xiangqi-analysis',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: { command: 'node', args: ['/fixture/xiangqi.mjs'] },
+        },
+      ]);
+      await withWorkspaceEnv({ CAT_CAFE_WORKSPACE_ROOT: projectDir }, () =>
+        withRuntimeRootEnv(projectDir, async () => {
+          const pending = collect(
+            service.invoke('hello plugin', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-plugin',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-plugin',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-plugin' }]);
+          const messages = await pending;
+          assert.equal(spawnFn.mock.callCount(), 1, JSON.stringify(messages));
+          const args = spawnFn.mock.calls[0].arguments[1];
+          const servers = codexConfigObjectFromArgs(args).mcp_servers;
+          const server = upstreamMcpServersFromArgs(args)['plugin__dev.clowder.xiangqi__xiangqi-analysis'];
+          assert.deepEqual(
+            Object.keys(servers).filter((name) => name.startsWith('plugin__')),
+            ['plugin__dev.clowder.xiangqi__xiangqi-analysis'],
+          );
+          assert.equal(server.enabled, true);
+          assert.equal(server.command, 'node');
+          assert.deepEqual(server.args, ['/fixture/xiangqi.mjs']);
+          assert.equal(
+            args.some((arg) => arg.startsWith('mcp_servers."')),
+            false,
+            'literal server keys must be carried in a root value; Codex splits quoted dotted override keys',
+          );
+        }),
+      );
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP external relative command resolves against workingDir', async () => {
+    const projectDir = makeTempDir('.tmp-codex-relative-command-project-');
+    const toolDir = makeTempDir('.tmp-codex-relative-command-tool-');
+    const toolPath = join(toolDir, 'server');
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(projectDir);
+      writeFileSync(toolPath, '#!/usr/bin/env node\n', 'utf8');
+      writeCapabilitiesConfig(projectDir, [
+        {
+          id: 'relative-tool',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            command: './server',
+            workingDir: toolDir,
+          },
+        },
+      ]);
+
+      await withWorkspaceEnv({ CAT_CAFE_WORKSPACE_ROOT: projectDir }, () =>
+        withRuntimeRootEnv(projectDir, async () => {
+          const promise = collect(
+            service.invoke('hello relative command', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-relative-command',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-relative-command',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-relative-command' }]);
+          const messages = await promise;
+          assert.equal(spawnFn.mock.callCount(), 1, JSON.stringify(messages));
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          const server = upstreamMcpServersFromArgs(args)['relative-tool'];
+          assert.equal(server.command, toolPath);
+          assert.notEqual(server.command, './server');
+        }),
+      );
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+      rmSync(toolDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP external relative workingDir resolves from project root', async () => {
+    const projectDir = makeTempDir('.tmp-codex-relative-workdir-project-');
+    const toolDir = join(projectDir, 'tools');
+    const toolPath = join(toolDir, 'server');
+    const dataPath = join(toolDir, 'data.json');
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(projectDir);
+      mkdirSync(toolDir, { recursive: true });
+      writeFileSync(toolPath, '#!/usr/bin/env node\n', 'utf8');
+      writeFileSync(dataPath, '{}\n', 'utf8');
+      writeCapabilitiesConfig(projectDir, [
+        {
+          id: 'relative-root-tool',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            command: './server',
+            args: ['data.json'],
+            env: { SECRET_TOKEN: 'super-secret-token' },
+            workingDir: 'tools',
+          },
+        },
+      ]);
+
+      await withWorkspaceEnv({ CAT_CAFE_WORKSPACE_ROOT: projectDir }, () =>
+        withRuntimeRootEnv(projectDir, async () => {
+          const promise = collect(
+            service.invoke('hello relative workingDir', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-relative-workdir',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-relative-workdir',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-relative-workdir' }]);
+          const messages = await promise;
+          assert.equal(spawnFn.mock.callCount(), 1, JSON.stringify(messages));
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          const server = upstreamMcpServersFromArgs(args)['relative-root-tool'];
+          assert.equal(server.command, process.execPath);
+          const specPath = server.args.at(-1);
+          assert.ok(specPath.endsWith('mcp-env-spec.json'), 'private upstream wrapper still owns env/cwd');
+          const spec = JSON.parse(readFileSync(specPath, 'utf8'));
+          assert.equal(spec.command, toolPath);
+          assert.deepEqual(spec.args, [dataPath]);
+          assert.equal(spec.cwd, toolDir);
+          assert.ok(
+            !args.some((arg) => arg.includes('SECRET_TOKEN') || arg.includes('super-secret-token')),
+            'external MCP env names and values must not be exposed in argv',
+          );
+        }),
+      );
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('does not include resume when no sessionId', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    const promise = collect(service.invoke('hello'));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't1' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args[0], 'exec');
+    assert.equal(args[1], '--json');
+    assert.ok(!args.includes('resume'));
+    const modelFlagIndex = args.indexOf('--model');
+    assert.ok(modelFlagIndex >= 0, 'fresh exec args must include --model');
+    assert.equal(args[modelFlagIndex + 1], 'gpt-5.3-codex');
+    assert.ok(args.includes('--sandbox'), 'fresh exec should include sandbox mode');
+    assert.ok(args.includes('danger-full-access'), 'default sandbox should allow git writes');
+    assert.ok(args.includes('approval_policy="on-request"'), 'fresh exec should set default approval policy');
+    assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
+  });
+
+  test('unavailable approval surface keeps Apps writes gated and injects the audited GitHub route', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      approvalSurface: 'unavailable',
+      carrierMode: 'exec_json',
+    });
+
+    const promise = collect(service.invoke('open a pull request'));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-github-route-unavailable' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(
+      args.includes('apps._default.default_tools_approval_mode="writes"'),
+      'Clowder AI must keep unconfigured Apps writes behind approval instead of auto-approving them',
+    );
+    const developerInstructions = args.find((arg) => arg.startsWith('developer_instructions='));
+    assert.match(developerInstructions ?? '', /GitHub routing/);
+    assert.match(developerInstructions ?? '', /GitHub MCP.*retired/i);
+    assert.match(developerInstructions ?? '', /confirmation_unavailable/);
+    assert.match(developerInstructions ?? '', /gh.*merge-gate/i);
+    assert.ok(
+      !args.some((arg) => /default_tools_approval_mode="approve"/.test(arg)),
+      'routing must not silently expand Apps permissions',
+    );
+  });
+
+  test('interactive approval surface still routes GitHub work to gh without a false unavailable claim', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      approvalSurface: 'interactive',
+      carrierMode: 'exec_json',
+    });
+
+    const promise = collect(service.invoke('open a pull request'));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-github-route-interactive' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(args.includes('apps._default.default_tools_approval_mode="writes"'));
+    const developerInstructions = args.find((arg) => arg.startsWith('developer_instructions='));
+    assert.match(developerInstructions ?? '', /GitHub routing/);
+    assert.match(developerInstructions ?? '', /GitHub MCP.*retired/i);
+    assert.match(developerInstructions ?? '', /canonical.*gh/i);
+    assert.doesNotMatch(developerInstructions ?? '', /confirmation_unavailable/);
+  });
+
+  test('serializes one provider-native effort value as structured TOML argv', () => {
+    assert.deepEqual(buildCodexReasoningArgs('ultra"native\nnext'), [
+      '--config',
+      'model_reasoning_effort="ultra\\"native\\nnext"',
+    ]);
+  });
+
+  test('unknown Codex cat falls back to xhigh reasoning effort for new invocations', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      catId: 'runtime-unknown-codex',
+      model: 'gpt-5.4',
+    });
+
+    const promise = collect(service.invoke('hello'));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-effort-fallback' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(args.includes('--config'), 'reasoning effort must be passed via --config');
+    assert.ok(
+      args.includes('model_reasoning_effort="xhigh"'),
+      `expected xhigh fallback for unknown Codex cat, got argv: ${JSON.stringify(args)}`,
+    );
+  });
+
+  test('F262 applies a compatible thread reasoning effort override to Codex argv', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      catId: 'runtime-sol',
+      model: 'gpt-5.6-sol',
+    });
+
+    const promise = collect(service.invoke('hello', { reasoningEffortOverride: 'ultra' }));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-effort-thread-override' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(
+      args.includes('model_reasoning_effort="ultra"'),
+      `expected thread ultra override, got argv: ${JSON.stringify(args)}`,
+    );
+  });
+
+  test('F262 rejects a stale thread ultra override for an older effective Codex model', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      catId: 'runtime-codex',
+      model: 'gpt-5.4',
+    });
+
+    const promise = collect(service.invoke('hello', { reasoningEffortOverride: 'ultra' }));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-effort-thread-stale' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(args.includes('model_reasoning_effort="xhigh"'));
+    assert.ok(!args.includes('model_reasoning_effort="ultra"'));
+  });
+
+  test('F291 maps requested Standard/Fast speed to reserved Codex exec config', async () => {
+    for (const { requestedServiceTier, expected } of [
+      { requestedServiceTier: 'standard', expected: 'service_tier="default"' },
+      { requestedServiceTier: 'fast', expected: 'service_tier="fast"' },
+    ]) {
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({
+        l0CompilerFn: fakeL0Compiler,
+        spawnFn,
+        catId: 'runtime-sol',
+        model: 'gpt-5.6-sol',
+      });
+
+      const promise = collect(
+        service.invoke('hello', {
+          requestedServiceTier,
+          cliConfigArgs: ['--config service_tier="user-bypass"'],
+        }),
+      );
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: `t-speed-${requestedServiceTier}` }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      assert.equal(args.filter((arg) => arg.startsWith('service_tier=')).length, 1);
+      assert.ok(args.includes(expected), `expected ${expected}, got argv: ${JSON.stringify(args)}`);
+      assert.ok(!args.includes('service_tier="user-bypass"'));
+    }
+  });
+
+  test('F291 inheritance omits service_tier and still blocks raw cliConfigArgs bypass', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.6-sol' });
+
+    const promise = collect(service.invoke('hello', { cliConfigArgs: ['-c service_tier="fast"'] }));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-speed-inherit' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(
+      args.some((arg) => arg.startsWith('service_tier=')),
+      false,
+    );
+  });
+
+  test('F291 strips attached service_tier config spellings across inherit, API-key, and Standard modes', async () => {
+    const rawBypasses = ['--config=service_tier="fast"', '-c=service_tier="fast"', '-cservice_tier="fast"'];
+    const cases = [
+      {
+        name: 'inherit',
+        options: { cliConfigArgs: rawBypasses },
+        expected: undefined,
+      },
+      {
+        name: 'API-key',
+        options: {
+          requestedServiceTier: 'fast',
+          cliConfigArgs: rawBypasses,
+          callbackEnv: { CODEX_AUTH_MODE: 'api_key', OPENAI_API_KEY: 'sk-test' },
+        },
+        expected: undefined,
+      },
+      {
+        name: 'Standard',
+        options: { requestedServiceTier: 'standard', cliConfigArgs: rawBypasses },
+        expected: 'service_tier="default"',
+      },
+    ];
+
+    for (const { name, options, expected } of cases) {
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.6-sol' });
+
+      const promise = collect(service.invoke('hello', options));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: `t-speed-attached-${name}` }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      const serviceTierArgs = args.filter((arg) => arg.includes('service_tier='));
+      assert.deepEqual(serviceTierArgs, expected ? [expected] : [], `${name}: ${JSON.stringify(args)}`);
+    }
+  });
+
+  test('F291 suppresses a typed Fast request in API-key mode', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.6-sol' });
+
+    const promise = collect(
+      service.invoke('hello', {
+        requestedServiceTier: 'fast',
+        callbackEnv: { CODEX_AUTH_MODE: 'api_key', OPENAI_API_KEY: 'sk-test' },
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-speed-api-key' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(
+      args.some((arg) => arg.startsWith('service_tier=')),
+      false,
+    );
+  });
+
+  test('passes persisted GPT-5.6 ultra effort and invocation-owned capacity to new Codex invocations', async () => {
+    const projectRoot = makeTempDir('codex-ultra-effort-');
+    const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    const templatePath = writeCodexEffortTemplate(projectRoot, 'ultra', {
+      contextWindow: 372000,
+      autoCompactTokenLimit: 340000,
+    });
+
+    try {
+      process.env.CAT_TEMPLATE_PATH = templatePath;
+      _resetCachedConfig();
+
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({
+        l0CompilerFn: fakeL0Compiler,
+        spawnFn,
+        catId: 'runtime-sol',
+        model: 'gpt-5.6-sol',
+      });
+
+      const promise = collect(
+        service.invoke('hello', {
+          contextCapacity: { windowTokens: 372000, inputCeilingTokens: 356000, actionable: true },
+        }),
+      );
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-effort-ultra' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      assert.ok(
+        args.includes('model_reasoning_effort="ultra"'),
+        `expected persisted ultra effort, got argv: ${JSON.stringify(args)}`,
+      );
+      assert.ok(args.includes('model_context_window=372000'));
+      assert.ok(args.includes('model_auto_compact_token_limit=327360'));
+    } finally {
+      if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
+      _resetCachedConfig();
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('keeps invocation-owned context controls for equivalent bare and provider-prefixed model slugs', async () => {
+    for (const { persistedModel, effectiveModel } of [
+      { persistedModel: 'gpt-5.6-sol', effectiveModel: 'openai/gpt-5.6-sol' },
+      { persistedModel: 'openai/gpt-5.6-sol', effectiveModel: 'gpt-5.6-sol' },
+    ]) {
+      const projectRoot = makeTempDir('codex-equivalent-model-context-');
+      const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;
+      const templatePath = writeCodexEffortTemplate(
+        projectRoot,
+        'ultra',
+        {
+          contextWindow: 372000,
+          autoCompactTokenLimit: 340000,
+        },
+        persistedModel,
+      );
+
+      try {
+        process.env.CAT_TEMPLATE_PATH = templatePath;
+        _resetCachedConfig();
+
+        const proc = createMockProcess();
+        const spawnFn = createMockSpawnFn(proc);
+        const service = new CodexAgentService({
+          l0CompilerFn: fakeL0Compiler,
+          spawnFn,
+          catId: 'runtime-sol',
+          model: persistedModel,
+        });
+
+        const promise = collect(
+          service.invoke('hello', {
+            callbackEnv: { CAT_CAFE_OPENAI_MODEL_OVERRIDE: effectiveModel },
+            contextCapacity: { windowTokens: 372000, inputCeilingTokens: 356000, actionable: true },
+          }),
+        );
+        emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-equivalent-model-context' }]);
+        await promise;
+
+        const args = spawnFn.mock.calls[0].arguments[1];
+        assert.ok(args.includes('model_reasoning_effort="ultra"'));
+        assert.ok(
+          args.includes('model_context_window=372000'),
+          `equivalent model slug ${effectiveModel} must keep the persisted context window`,
+        );
+        assert.ok(
+          args.includes('model_auto_compact_token_limit=327360'),
+          `equivalent model slug ${effectiveModel} must derive compaction from the invocation capacity`,
+        );
+      } finally {
+        if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+        else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
+        _resetCachedConfig();
+        rmSync(projectRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('keeps binding-owned context controls ahead of free-form cliConfigArgs', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      catId: 'runtime-sol',
+      model: 'gpt-5.6-sol',
+    });
+
+    const promise = collect(
+      service.invoke('hello', {
+        contextCapacity: { windowTokens: 372000, inputCeilingTokens: 356000, actionable: true },
+        // API identity is account-owned; ordinary context/reasoning preferences are still configurable.
+        callbackEnv: { CODEX_AUTH_MODE: 'api_key', OPENAI_API_KEY: 'fixture-key' },
+        cliConfigArgs: [
+          '--config model_context_window=111000',
+          '--config=model_auto_compact_token_limit=95000',
+          '-c=model_context_window=222000',
+          '-cmodel_auto_compact_token_limit=96000',
+          '--config model_reasoning_effort="low"',
+        ],
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-binding-owned-context' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(
+      args.includes('model_context_window=372000'),
+      `binding window missing from argv: ${JSON.stringify(args)}`,
+    );
+    assert.ok(
+      args.includes('model_auto_compact_token_limit=327360'),
+      `binding-derived compaction limit missing from argv: ${JSON.stringify(args)}`,
+    );
+    assert.equal(
+      args.some((arg) => /model_context_window=(111000|222000)/.test(arg)),
+      false,
+      'free-form args must not replace the invocation-owned context window',
+    );
+    assert.equal(
+      args.some((arg) => /model_auto_compact_token_limit=(95000|96000)/.test(arg)),
+      false,
+      'free-form args must not replace the invocation-owned compaction limit',
+    );
+    assert.ok(
+      args.includes('model_reasoning_effort="low"'),
+      'ordinary user-configurable Codex preferences must retain their existing precedence',
+    );
+    assert.ok(
+      args.includes('model_provider="custom"'),
+      'account-owned API provider must coexist with the context-capacity binding',
+    );
+  });
+
+  test('injects the config-owned native window, not the session-pinned effective capacity (#1381)', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      catId: 'runtime-sol',
+      model: 'gpt-5.6-sol',
+    });
+
+    const promise = collect(
+      service.invoke('hello', {
+        // Effective capacity after the session pin; Codex reports 95% of the
+        // native window, so injecting this back would recurse (258400 → 245480
+        // → 233206 → …). The native injection must use the config-owned value.
+        contextCapacity: { windowTokens: 245480, inputCeilingTokens: 229480, actionable: true },
+        contextNativeWindowTokens: 258400,
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-native-window-1381' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(
+      args.includes('model_context_window=258400'),
+      `native model_context_window must come from member config, got argv: ${JSON.stringify(args)}`,
+    );
+    assert.ok(
+      !args.includes('model_context_window=245480'),
+      'session-pinned effective capacity must never be fed back as the native window',
+    );
+    assert.ok(
+      args.includes('model_auto_compact_token_limit=227392'),
+      'auto-compact limit derives from the native window',
+    );
+  });
+
+  test('skips native window injection when the invocation has no config-owned window (#1381)', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      catId: 'runtime-sol',
+      model: 'gpt-5.6-sol',
+    });
+
+    const promise = collect(
+      service.invoke('hello', {
+        contextCapacity: { windowTokens: 245480, inputCeilingTokens: 229480, actionable: true },
+        // Explicit null: this invocation's capacity is report/pin-derived, so
+        // there is no raw/native value to hand Codex — injecting the effective
+        // capacity would restart the feedback loop.
+        contextNativeWindowTokens: null,
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-no-native-window-1381' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(
+      args.some((arg) => arg.startsWith('model_context_window=')),
+      false,
+      `report-derived capacity must not become a native window: ${JSON.stringify(args)}`,
+    );
+    assert.equal(
+      args.some((arg) => arg.startsWith('model_auto_compact_token_limit=')),
+      false,
+      'no native window means no derived compaction limit either',
+    );
+  });
+
+  test('keeps binding-owned model identity ahead of free-form cliConfigArgs', async () => {
+    for (const rawOverride of [
+      '--model gpt-4o',
+      '--model=gpt-4o',
+      '-m gpt-4o',
+      '-m=gpt-4o',
+      '-mgpt-4o',
+      '--config model="gpt-4o"',
+    ]) {
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({
+        l0CompilerFn: fakeL0Compiler,
+        spawnFn,
+        catId: 'runtime-sol',
+        model: 'gpt-5.6-sol',
+      });
+
+      const promise = collect(
+        service.invoke('hello', {
+          contextCapacity: { windowTokens: 372000, inputCeilingTokens: 356000, actionable: true },
+          cliConfigArgs: [rawOverride],
+        }),
+      );
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-binding-owned-model' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      const modelIndex = args.indexOf('--model');
+      assert.ok(modelIndex >= 0, `binding model flag missing for ${rawOverride}: ${JSON.stringify(args)}`);
+      assert.equal(args[modelIndex + 1], 'gpt-5.6-sol', `free-form model override survived: ${rawOverride}`);
+      assert.equal(
+        args.some((arg) => arg.includes('gpt-4o')),
+        false,
+        `free-form model identity override survived: ${rawOverride}`,
+      );
+    }
+  });
+
+  test('preserves provider-native effort across an effective invocation model override', async () => {
+    for (const configuredEffort of ['max', 'ultra']) {
+      const projectRoot = makeTempDir(`codex-${configuredEffort}-override-effort-`);
+      const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;
+      const templatePath = writeCodexEffortTemplate(projectRoot, configuredEffort, {
+        contextWindow: 372000,
+        autoCompactTokenLimit: 340000,
+      });
+
+      try {
+        process.env.CAT_TEMPLATE_PATH = templatePath;
+        _resetCachedConfig();
+
+        const proc = createMockProcess();
+        const spawnFn = createMockSpawnFn(proc);
+        const service = new CodexAgentService({
+          l0CompilerFn: fakeL0Compiler,
+          spawnFn,
+          catId: 'runtime-sol',
+          model: 'gpt-5.6-sol',
+        });
+
+        const promise = collect(
+          service.invoke('hello', {
+            callbackEnv: { CAT_CAFE_OPENAI_MODEL_OVERRIDE: 'gpt-5.4-mini' },
+          }),
+        );
+        emitCodexEvents(proc, [{ type: 'thread.started', thread_id: `t-effort-${configuredEffort}-override` }]);
+        await promise;
+
+        const args = spawnFn.mock.calls[0].arguments[1];
+        assert.ok(
+          args.includes(`model_reasoning_effort="${configuredEffort}"`),
+          `expected ${configuredEffort} to reach the provider unchanged, got argv: ${JSON.stringify(args)}`,
+        );
+        assert.ok(
+          !args.includes('model_context_window=372000'),
+          'must not pass the persisted GPT-5.6 context window to the overridden older model',
+        );
+        assert.ok(
+          !args.includes('model_auto_compact_token_limit=340000'),
+          'must not pass the persisted GPT-5.6 compaction limit to the overridden older model',
+        );
+      } finally {
+        if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+        else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
+        _resetCachedConfig();
+        rmSync(projectRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('adds --skip-git-repo-check when workingDirectory is not a git repository', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const nonGitDir = mkdtempSync(join('/tmp', 'codex-non-git-'));
+
+    try {
+      const promise = collect(service.invoke('hello', { workingDirectory: nonGitDir }));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-non-git' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      assert.ok(args.includes('--skip-git-repo-check'));
+    } finally {
+      rmSync(nonGitDir, { recursive: true, force: true });
+    }
+  });
+
+  test('does not add --skip-git-repo-check inside a git repository', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    const promise = collect(service.invoke('hello', { workingDirectory: process.cwd() }));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-git-root' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(!args.includes('--skip-git-repo-check'));
+  });
+
+  test('isGitRepositoryPath walks parent directories instead of shelling out to git', () => {
+    const root = mkdtempSync(join('/tmp', 'codex-git-marker-'));
+    const nestedDir = join(root, 'packages', 'api');
+
+    try {
+      mkdirSync(nestedDir, { recursive: true });
+      writeFileSync(join(root, '.git'), 'gitdir: /tmp/example\n', 'utf8');
+
+      assert.equal(isGitRepositoryPath(nestedDir), true);
+      assert.equal(isGitRepositoryPath(join('/tmp', 'codex-not-a-repo')), false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('uses env-configured sandbox and approval policy for fresh exec', async () => {
+    const oldSandbox = process.env.CAT_CODEX_SANDBOX_MODE;
+    const oldApproval = process.env.CAT_CODEX_APPROVAL_POLICY;
+    process.env.CAT_CODEX_SANDBOX_MODE = 'read-only';
+    process.env.CAT_CODEX_APPROVAL_POLICY = 'never';
+
+    try {
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+      const promise = collect(service.invoke('configurable'));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-config' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      assert.ok(args.includes('--sandbox'), 'sandbox flag should be present');
+      assert.ok(args.includes('read-only'), 'sandbox should follow CAT_CODEX_SANDBOX_MODE');
+      assert.ok(args.includes('--config'), 'approval policy should be set by config override');
+      assert.ok(args.includes('approval_policy="never"'), 'approval policy should follow env');
+    } finally {
+      if (oldSandbox === undefined) {
+        delete process.env.CAT_CODEX_SANDBOX_MODE;
+      } else {
+        process.env.CAT_CODEX_SANDBOX_MODE = oldSandbox;
+      }
+      if (oldApproval === undefined) {
+        delete process.env.CAT_CODEX_APPROVAL_POLICY;
+      } else {
+        process.env.CAT_CODEX_APPROVAL_POLICY = oldApproval;
+      }
+    }
+  });
+
+  test('uses env-configured sandbox for resume through config override', async () => {
+    const oldSandbox = process.env.CAT_CODEX_SANDBOX_MODE;
+    process.env.CAT_CODEX_SANDBOX_MODE = 'read-only';
+
+    try {
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+      const promise = collect(service.invoke('resume configurable', { sessionId: 'thread-config-resume' }));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-config-resume' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      assert.equal(args[1], 'resume');
+      assert.ok(!args.includes('--sandbox'), 'resume args must not include --sandbox');
+      assert.ok(args.includes('sandbox_mode="read-only"'), 'resume sandbox should follow CAT_CODEX_SANDBOX_MODE');
+    } finally {
+      if (oldSandbox === undefined) {
+        delete process.env.CAT_CODEX_SANDBOX_MODE;
+      } else {
+        process.env.CAT_CODEX_SANDBOX_MODE = oldSandbox;
+      }
+    }
+  });
+
+  test('falls back to defaults for invalid sandbox/approval env values', async () => {
+    const oldSandbox = process.env.CAT_CODEX_SANDBOX_MODE;
+    const oldApproval = process.env.CAT_CODEX_APPROVAL_POLICY;
+    process.env.CAT_CODEX_SANDBOX_MODE = 'not-a-mode';
+    process.env.CAT_CODEX_APPROVAL_POLICY = 'not-a-policy';
+
+    try {
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+      const promise = collect(service.invoke('fallback'));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-fallback' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      assert.ok(args.includes('danger-full-access'), 'invalid sandbox should fallback to default');
+      assert.ok(args.includes('approval_policy="on-request"'), 'invalid policy should fallback to default');
+    } finally {
+      if (oldSandbox === undefined) {
+        delete process.env.CAT_CODEX_SANDBOX_MODE;
+      } else {
+        process.env.CAT_CODEX_SANDBOX_MODE = oldSandbox;
+      }
+      if (oldApproval === undefined) {
+        delete process.env.CAT_CODEX_APPROVAL_POLICY;
+      } else {
+        process.env.CAT_CODEX_APPROVAL_POLICY = oldApproval;
+      }
+    }
+  });
+
+  test('new session includes --add-dir .git for git write access', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('hello'));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't1' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const addDirIdx = args.indexOf('--add-dir');
+    assert.ok(addDirIdx >= 0, 'new session args must include --add-dir');
+    assert.equal(args[addDirIdx + 1], '.git', '--add-dir must be followed by .git');
+    assert.ok(args.includes('--sandbox'), 'new session must still include --sandbox');
+  });
+
+  test('resume session does NOT include --add-dir but preserves sandbox mode via config', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('Continue', { sessionId: 'old-session-123' }));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'old-session-123' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(!args.includes('--add-dir'), 'resume args must not include --add-dir');
+    assert.ok(!args.includes('--sandbox'), 'resume args must not include --sandbox');
+    assert.ok(args.includes('sandbox_mode="danger-full-access"'), 'resume args must preserve sandbox mode');
+  });
+
+  test('custom provider: model passed via --config as-is', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'qwen-plus' });
+
+    // Emit events after a tick to ensure generator has started consuming
+    const promise = collect(
+      service.invoke('test custom model', {
+        callbackEnv: {
+          OPENAI_BASE_URL: 'https://dashscope.aliyuncs.com/compatible-mode/v1/',
+          OPENAI_API_KEY: 'sk-test',
+          CODEX_AUTH_MODE: 'api_key',
         },
       }),
     );
-    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-mcp-fallback' }]);
+    setTimeout(() => emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-custom-prefix' }]), 50);
     await promise;
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    assert.ok(args.includes('mcp_servers.cat-cafe.command="node"'));
-    const mcpArgsConfig = args.find((arg) => arg.startsWith('mcp_servers.cat-cafe.args=['));
-    assert.ok(mcpArgsConfig, 'must inject cat-cafe mcp args config');
-    assert.match(mcpArgsConfig, /packages\/mcp-server\/dist\/index\.js/);
-    assert.ok(args.includes('mcp_servers.cat-cafe.enabled=true'));
-    assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_API_URL="http://127.0.0.1:3004"'));
-    assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_INVOCATION_ID="inv-test-1"'));
-    assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_CALLBACK_TOKEN="tok-test-1"'));
-    assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_USER_ID="user-test-1\\nline2"'));
-    assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_SIGNAL_USER="codex"'));
-  } finally {
-    cwdMock.mock.restore();
-  }
-});
-
-test('does not include resume when no sessionId', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
-
-  const promise = collect(service.invoke('hello'));
-  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't1' }]);
-  await promise;
-
-  const args = spawnFn.mock.calls[0].arguments[1];
-  assert.equal(args[0], 'exec');
-  assert.equal(args[1], '--json');
-  assert.ok(!args.includes('resume'));
-  const modelFlagIndex = args.indexOf('--model');
-  assert.ok(modelFlagIndex >= 0, 'fresh exec args must include --model');
-  assert.equal(args[modelFlagIndex + 1], 'gpt-5.3-codex');
-  assert.ok(args.includes('--sandbox'), 'fresh exec should include sandbox mode');
-  assert.ok(args.includes('danger-full-access'), 'default sandbox should allow git writes');
-  assert.ok(args.includes('approval_policy="on-request"'), 'fresh exec should set default approval policy');
-  assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
-});
-
-test('adds --skip-git-repo-check when workingDirectory is not a git repository', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
-  const nonGitDir = mkdtempSync(join('/tmp', 'codex-non-git-'));
-
-  try {
-    const promise = collect(service.invoke('hello', { workingDirectory: nonGitDir }));
-    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-non-git' }]);
-    await promise;
-
-    const args = spawnFn.mock.calls[0].arguments[1];
-    assert.ok(args.includes('--skip-git-repo-check'));
-  } finally {
-    rmSync(nonGitDir, { recursive: true, force: true });
-  }
-});
-
-test('does not add --skip-git-repo-check inside a git repository', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.3-codex' });
-
-  const promise = collect(service.invoke('hello', { workingDirectory: process.cwd() }));
-  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-git-root' }]);
-  await promise;
-
-  const args = spawnFn.mock.calls[0].arguments[1];
-  assert.ok(!args.includes('--skip-git-repo-check'));
-});
-
-test('isGitRepositoryPath walks parent directories instead of shelling out to git', () => {
-  const root = mkdtempSync(join('/tmp', 'codex-git-marker-'));
-  const nestedDir = join(root, 'packages', 'api');
-
-  try {
-    mkdirSync(nestedDir, { recursive: true });
-    writeFileSync(join(root, '.git'), 'gitdir: /tmp/example\n', 'utf8');
-
-    assert.equal(isGitRepositoryPath(nestedDir), true);
-    assert.equal(isGitRepositoryPath(join('/tmp', 'codex-not-a-repo')), false);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('uses env-configured sandbox and approval policy for fresh exec', async () => {
-  const oldSandbox = process.env.CAT_CODEX_SANDBOX_MODE;
-  const oldApproval = process.env.CAT_CODEX_APPROVAL_POLICY;
-  process.env.CAT_CODEX_SANDBOX_MODE = 'read-only';
-  process.env.CAT_CODEX_APPROVAL_POLICY = 'never';
-
-  try {
-    const proc = createMockProcess();
-    const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ spawnFn });
-
-    const promise = collect(service.invoke('configurable'));
-    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-config' }]);
-    await promise;
-
-    const args = spawnFn.mock.calls[0].arguments[1];
-    assert.ok(args.includes('--sandbox'), 'sandbox flag should be present');
-    assert.ok(args.includes('read-only'), 'sandbox should follow CAT_CODEX_SANDBOX_MODE');
-    assert.ok(args.includes('--config'), 'approval policy should be set by config override');
-    assert.ok(args.includes('approval_policy="never"'), 'approval policy should follow env');
-  } finally {
-    if (oldSandbox === undefined) {
-      delete process.env.CAT_CODEX_SANDBOX_MODE;
-    } else {
-      process.env.CAT_CODEX_SANDBOX_MODE = oldSandbox;
-    }
-    if (oldApproval === undefined) {
-      delete process.env.CAT_CODEX_APPROVAL_POLICY;
-    } else {
-      process.env.CAT_CODEX_APPROVAL_POLICY = oldApproval;
-    }
-  }
-});
-
-test('falls back to defaults for invalid sandbox/approval env values', async () => {
-  const oldSandbox = process.env.CAT_CODEX_SANDBOX_MODE;
-  const oldApproval = process.env.CAT_CODEX_APPROVAL_POLICY;
-  process.env.CAT_CODEX_SANDBOX_MODE = 'not-a-mode';
-  process.env.CAT_CODEX_APPROVAL_POLICY = 'not-a-policy';
-
-  try {
-    const proc = createMockProcess();
-    const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ spawnFn });
-
-    const promise = collect(service.invoke('fallback'));
-    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-fallback' }]);
-    await promise;
-
-    const args = spawnFn.mock.calls[0].arguments[1];
-    assert.ok(args.includes('danger-full-access'), 'invalid sandbox should fallback to default');
-    assert.ok(args.includes('approval_policy="on-request"'), 'invalid policy should fallback to default');
-  } finally {
-    if (oldSandbox === undefined) {
-      delete process.env.CAT_CODEX_SANDBOX_MODE;
-    } else {
-      process.env.CAT_CODEX_SANDBOX_MODE = oldSandbox;
-    }
-    if (oldApproval === undefined) {
-      delete process.env.CAT_CODEX_APPROVAL_POLICY;
-    } else {
-      process.env.CAT_CODEX_APPROVAL_POLICY = oldApproval;
-    }
-  }
-});
-
-test('new session includes --add-dir .git for git write access', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
-
-  const promise = collect(service.invoke('hello'));
-  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't1' }]);
-  await promise;
-
-  const args = spawnFn.mock.calls[0].arguments[1];
-  const addDirIdx = args.indexOf('--add-dir');
-  assert.ok(addDirIdx >= 0, 'new session args must include --add-dir');
-  assert.equal(args[addDirIdx + 1], '.git', '--add-dir must be followed by .git');
-  assert.ok(args.includes('--sandbox'), 'new session must still include --sandbox');
-});
-
-test('resume session does NOT include --add-dir (sandbox locked at creation)', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
-
-  const promise = collect(service.invoke('Continue', { sessionId: 'old-session-123' }));
-  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'old-session-123' }]);
-  await promise;
-
-  const args = spawnFn.mock.calls[0].arguments[1];
-  assert.ok(!args.includes('--add-dir'), 'resume args must not include --add-dir');
-  assert.ok(!args.includes('--sandbox'), 'resume args must not include --sandbox');
-});
-
-test('handles multiple agent_message items', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
-
-  const promise = collect(service.invoke('Multi'));
-
-  emitCodexEvents(proc, [
-    { type: 'thread.started', thread_id: 'thread-multi' },
-    {
-      type: 'item.completed',
-      item: { id: 'msg-1', type: 'agent_message', text: 'First message' },
-    },
-    {
-      type: 'item.completed',
-      item: { id: 'msg-2', type: 'agent_message', text: 'Second message' },
-    },
-  ]);
-
-  const msgs = await promise;
-  const textMsgs = msgs.filter((m) => m.type === 'text');
-  assert.equal(textMsgs.length, 2);
-  assert.equal(textMsgs[0].content, 'First message');
-  // Second turn gets \n\n prefix to preserve paragraph break between turns
-  assert.equal(textMsgs[1].content, '\n\nSecond message');
-});
-
-test('separates multi-turn text with paragraph breaks (turn newline fix)', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
-
-  const promise = collect(service.invoke('Multi-turn'));
-
-  // Simulate: text → tool use → text → text (3 text turns with tools in between)
-  emitCodexEvents(proc, [
-    { type: 'thread.started', thread_id: 'thread-turns' },
-    {
-      type: 'item.completed',
-      item: { id: 'msg-1', type: 'agent_message', text: 'Checking implementation...' },
-    },
-    {
-      type: 'item.started',
-      item: { id: 'cmd-1', type: 'command_execution', command: 'ls', status: 'in_progress' },
-    },
-    {
-      type: 'item.completed',
-      item: {
-        id: 'cmd-1',
-        type: 'command_execution',
-        command: 'ls',
-        aggregated_output: 'file.ts',
-        status: 'completed',
-      },
-    },
-    {
-      type: 'item.completed',
-      item: { id: 'msg-2', type: 'agent_message', text: 'Running verification...' },
-    },
-    {
-      type: 'item.completed',
-      item: { id: 'msg-3', type: 'agent_message', text: 'All checks passed.' },
-    },
-  ]);
-
-  const msgs = await promise;
-  const textMsgs = msgs.filter((m) => m.type === 'text');
-  assert.equal(textMsgs.length, 3);
-  assert.equal(textMsgs[0].content, 'Checking implementation...');
-  assert.equal(textMsgs[1].content, '\n\nRunning verification...');
-  assert.equal(textMsgs[2].content, '\n\nAll checks passed.');
-
-  // When concatenated (as route-strategies does), should produce readable paragraphs
-  const concatenated = textMsgs.map((m) => m.content).join('');
-  assert.ok(concatenated.includes('Checking implementation...\n\nRunning verification...'));
-  assert.ok(concatenated.includes('Running verification...\n\nAll checks passed.'));
-});
-
-test('maps command_execution and file_change items into tool events', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
-
-  const promise = collect(service.invoke('With tools'));
-
-  emitCodexEvents(proc, [
-    { type: 'thread.started', thread_id: 'thread-tools' },
-    {
-      type: 'item.started',
-      item: { id: 'cmd-1', type: 'command_execution', command: 'ls', status: 'in_progress' },
-    },
-    {
-      type: 'item.completed',
-      item: { id: 'cmd-1', type: 'command_execution', command: 'ls', aggregated_output: '', status: 'completed' },
-    },
-    {
-      type: 'item.completed',
-      item: { id: 'msg-1', type: 'agent_message', text: 'Response' },
-    },
-    {
-      type: 'item.completed',
-      item: { id: 'file-1', type: 'file_change', changes: [], status: 'completed' },
-    },
-  ]);
-
-  const msgs = await promise;
-  const textMsgs = msgs.filter((m) => m.type === 'text');
-  const toolUseMsgs = msgs.filter((m) => m.type === 'tool_use');
-  const toolResultMsgs = msgs.filter((m) => m.type === 'tool_result');
-
-  assert.equal(textMsgs.length, 1);
-  assert.equal(textMsgs[0].content, 'Response');
-  assert.equal(toolUseMsgs.length, 2);
-  assert.equal(toolResultMsgs.length, 1);
-  assert.equal(toolUseMsgs[0].toolName, 'command_execution');
-  assert.equal(toolUseMsgs[1].toolName, 'file_change');
-  assert.match(toolResultMsgs[0].content, /command: ls/);
-});
-
-test('yields error on CLI non-zero exit', async () => {
-  const proc = createMockProcess();
-  proc.kill = mock.fn(() => true);
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
-
-  const promise = collect(service.invoke('crash'));
-
-  proc.stderr.write('Error: authentication failed\n');
-  proc.stdout.end();
-  proc._emitter.emit('exit', 1, null);
-
-  const msgs = await promise;
-  const errMsg = msgs.find((m) => m.type === 'error');
-  assert.ok(errMsg);
-  // Error message is sanitized — contains exit code but not raw stderr
-  assert.ok(errMsg.error.includes('code: 1'));
-  // Raw stderr should NOT be exposed to users
-  assert.ok(!errMsg.error.includes('authentication failed'), 'stderr should be sanitized');
-});
-
-test('includes reconnect diagnostics in CLI exit error when available', async () => {
-  const proc = createMockProcess();
-  proc.kill = mock.fn(() => true);
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
-
-  const promise = collect(service.invoke('reconnect failure'));
-
-  proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'thread-reconnect' })}\n`);
-  proc.stdout.write(
-    `${JSON.stringify({
-      type: 'error',
-      message: 'Reconnecting... 1/5 (stream disconnected before completion)',
-    })}\n`,
-  );
-  proc.stdout.write(
-    `${JSON.stringify({
-      type: 'error',
-      message: 'Reconnecting... 2/5 (stream disconnected before completion)',
-    })}\n`,
-  );
-  proc.stdout.write(
-    `${JSON.stringify({
-      type: 'error',
-      message: 'stream disconnected before completion',
-    })}\n`,
-  );
-  proc.stdout.end();
-  // Exit code 2 = always a real failure (code 1 is suppressed only with substantive output)
-  proc._emitter.emit('exit', 2, null);
-
-  const msgs = await promise;
-  const sysInfos = msgs.filter((m) => m.type === 'system_info');
-  assert.equal(sysInfos.length, 2, 'should stream reconnect status to UI in real time');
-  assert.ok(sysInfos[0].content.includes('Reconnecting... 1/5'));
-  assert.ok(sysInfos[1].content.includes('Reconnecting... 2/5'));
-
-  const errMsg = msgs.find((m) => m.type === 'error');
-  assert.ok(errMsg);
-  assert.ok(errMsg.error.includes('code: 2'));
-  assert.ok(errMsg.error.includes('Reconnecting... 1/5'), 'error should include reconnect diagnostics');
-  assert.ok(errMsg.error.includes('Reconnecting... 2/5'), 'error should include multiple reconnect attempts');
-});
-
-test('suppresses exit code 1 when Codex produced substantive output (item.completed)', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
-
-  const promise = collect(service.invoke('review this'));
-
-  // Codex outputs thread.started + item.completed (agent_message) = substantive output
-  proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx' })}\n`);
-  proc.stdout.write(
-    `${JSON.stringify({
-      type: 'item.completed',
-      item: { type: 'agent_message', text: 'Looks good!' },
-    })}\n`,
-  );
-  proc.stdout.end();
-  proc._emitter.emit('exit', 1, null); // Codex 0.98+ quirk
-
-  const msgs = await promise;
-  const errors = msgs.filter((m) => m.type === 'error');
-  assert.equal(errors.length, 0, 'exit code 1 with substantive output should be suppressed');
-  assert.ok(
-    msgs.some((m) => m.type === 'text'),
-    'text message should still be yielded',
-  );
-  assert.ok(
-    msgs.some((m) => m.type === 'done'),
-    'done should still be yielded',
-  );
-});
-
-test('does NOT suppress exit code 1 when only thread.started (no substantive output)', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
-
-  const promise = collect(service.invoke('review this'));
-
-  // Only thread.started — no item.completed → NOT substantive
-  proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx' })}\n`);
-  proc.stdout.end();
-  proc._emitter.emit('exit', 1, null);
-
-  const msgs = await promise;
-  const errors = msgs.filter((m) => m.type === 'error');
-  assert.equal(errors.length, 1, 'exit code 1 without substantive output should yield error');
-  assert.ok(errors[0].error.includes('code: 1'));
-});
-
-test('yields error on spawn ENOENT', async () => {
-  const proc = createMockProcess();
-  proc.kill = mock.fn(() => true);
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
-
-  const promise = collect(service.invoke('hi'));
-
-  process.nextTick(() => {
-    const err = new Error('spawn codex ENOENT');
-    err.code = 'ENOENT';
-    proc._emitter.emit('error', err);
-    proc.stdout.end();
-    proc._emitter.emit('exit', null, null);
+    // custom provider: model passed via --config (not --model) to bypass metadata lookup
+    assert.ok(!args.includes('--model'), 'must NOT use --model flag for custom provider');
+    assert.ok(args.includes('model="qwen-plus"'), 'model must be passed as-is via --config');
+    assert.ok(args.includes('model_provider="custom"'), 'must set model_provider=custom');
+    assert.ok(!args.includes('model_provider="openai_https"'), 'custom provider must not force OpenAI OAuth provider');
+    const spawnOptions = spawnFn.mock.calls[0].arguments[2];
+    assert.equal(basename(dirname(spawnOptions.env.HOME)), 'codex-api-execution');
+    assert.match(
+      basename(spawnOptions.env.HOME),
+      /^[a-f0-9]{64}$/,
+      'account/base/cwd own one stable private state home',
+    );
+    assert.equal(spawnOptions.env.CODEX_HOME, join(spawnOptions.env.HOME, '.codex'));
   });
 
-  const msgs = await promise;
-  const errMsg = msgs.find((m) => m.type === 'error');
-  assert.ok(errMsg);
-  assert.ok(errMsg.error.includes('ENOENT'));
-});
+  test('API-key isolation lives under user cache rather than the OS temporary directory', () => {
+    assert.equal(
+      resolveCodexApiKeyIsolationRoot({ HOME: '/home/user', XDG_CACHE_HOME: '/home/user/.cache' }, 'darwin'),
+      '/home/user/Library/Caches/clowder-ai/codex-api-key-homes',
+    );
+    assert.equal(
+      resolveCodexApiKeyIsolationRoot({ HOME: '/home/example', XDG_CACHE_HOME: '/var/cache/example' }, 'linux'),
+      '/var/cache/example/clowder-ai/codex-api-key-homes',
+    );
+  });
 
-test('passes cwd from workingDirectory option', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  test('custom provider: multi-segment model slug preserved as-is', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    // Model like "google/gemini-3-flash-preview" (OpenRouter format) — must NOT be stripped
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'google/gemini-3-flash-preview',
+    });
 
-  const promise = collect(service.invoke('hi', { workingDirectory: '/my/project' }));
-  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't1' }]);
-  await promise;
+    const promise = collect(
+      service.invoke('test multi-segment', {
+        callbackEnv: {
+          OPENAI_BASE_URL: 'https://openrouter.ai/api/v1/',
+          OPENAI_API_KEY: 'sk-test',
+          CODEX_AUTH_MODE: 'api_key',
+        },
+      }),
+    );
+    setTimeout(() => emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-multi-seg' }]), 50);
+    await promise;
 
-  const spawnOpts = spawnFn.mock.calls[0].arguments[2];
-  assert.equal(spawnOpts.cwd, '/my/project');
-});
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const modelArg = args.find((a) => a.startsWith('model='));
+    assert.equal(
+      modelArg,
+      'model="google/gemini-3-flash-preview"',
+      'multi-segment model slug must be preserved verbatim',
+    );
+  });
 
-test('oauth mode (default) does not forward OPENAI_API_KEY to codex child env', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  test('no custom provider: model is passed as-is', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
 
-  const originalApiKey = process.env.OPENAI_API_KEY;
-  const originalAuthMode = process.env.CODEX_AUTH_MODE;
-  try {
-    process.env.OPENAI_API_KEY = 'sk-test-forwarded-key';
-    delete process.env.CODEX_AUTH_MODE; // default = oauth
+    const promise = collect(service.invoke('test no custom'));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-no-custom' }]);
+    await promise;
 
-    const promise = collect(service.invoke('oauth test'));
-    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'oauth-thread' }]);
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const modelIdx = args.indexOf('--model');
+    assert.ok(modelIdx >= 0, 'must use --model flag for non-custom provider');
+    assert.equal(args[modelIdx + 1], 'gpt-5.3-codex', 'model without custom base URL stays as-is');
+    assert.ok(!args.includes('model_provider="custom"'), 'must not set model_provider when no custom URL');
+  });
+
+  test('oauth default provider preserves the built-in OpenAI transport (F319 observation off)', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    const originalTransport = process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT;
+    // F319: served-model observation (default on) rides HTTPS; this test pins the
+    // pre-F319 transport contract that `off` must restore exactly.
+    const originalObservation = process.env.CAT_CAFE_CODEX_SERVED_MODEL_OBSERVATION;
+    process.env.CAT_CAFE_CODEX_SERVED_MODEL_OBSERVATION = 'off';
+    try {
+      delete process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT;
+      const promise = collect(service.invoke('test oauth transport'));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-oauth-transport' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      assert.ok(
+        args.includes('model_provider="openai"'),
+        'default OAuth path must explicitly select the built-in provider',
+      );
+      assert.ok(
+        !args.includes('model_provider="openai_https"'),
+        'default OAuth path must not select the HTTPS-only provider',
+      );
+      assert.ok(
+        !args.some((arg) => arg.startsWith('model_providers.openai_https.')),
+        'default OAuth path must not inject an HTTPS-only provider definition',
+      );
+      assert.ok(
+        !args.includes('model_provider="custom"'),
+        'default OAuth path must not use the custom API-key provider',
+      );
+    } finally {
+      if (originalTransport === undefined) delete process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT;
+      else process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT = originalTransport;
+      if (originalObservation === undefined) delete process.env.CAT_CAFE_CODEX_SERVED_MODEL_OBSERVATION;
+      else process.env.CAT_CAFE_CODEX_SERVED_MODEL_OBSERVATION = originalObservation;
+    }
+  });
+
+  test('oauth HTTPS fallback remains available through an explicit transport override', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    const originalTransport = process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT;
+    try {
+      process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT = 'https';
+      const promise = collect(service.invoke('test oauth https fallback'));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-oauth-https-fallback' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      assert.ok(args.includes('model_provider="openai_https"'), 'fallback must select the HTTPS-only provider');
+      assert.ok(args.includes('model_providers.openai_https.name="OpenAI"'));
+      assert.ok(args.includes('model_providers.openai_https.wire_api="responses"'));
+      assert.ok(args.includes('model_providers.openai_https.requires_openai_auth=true'));
+      assert.ok(args.includes('model_providers.openai_https.supports_websockets=false'));
+      assert.ok(!args.includes('model_provider="custom"'), 'OAuth fallback must not use the custom API-key provider');
+    } finally {
+      if (originalTransport === undefined) delete process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT;
+      else process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT = originalTransport;
+    }
+  });
+
+  test('handles multiple agent_message items', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('Multi'));
+
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-multi' },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: 'First message' },
+      },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-2', type: 'agent_message', text: 'Second message' },
+      },
+    ]);
+
+    const msgs = await promise;
+    const textMsgs = msgs.filter((m) => m.type === 'text');
+    assert.equal(textMsgs.length, 2);
+    assert.equal(textMsgs[0].content, 'First message');
+    // Second turn gets \n\n prefix to preserve paragraph break between turns
+    assert.equal(textMsgs[1].content, '\n\nSecond message');
+  });
+
+  test('#1272: service strips per-message signatures and emits one runtime-canonical signature', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.6-sol',
+      carrierMode: 'exec_json',
+    });
+
+    const promise = collect(service.invoke('Signed multi-turn'));
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-1272-signed' },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: '第一段。 `[砚砚/GPT-5.6 Sol🐾]`' },
+      },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-2', type: 'agent_message', text: '第二段。\n\n[砚砚/GPT-5.6 Sol🐾]' },
+      },
+      { type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 20 } },
+    ]);
+
+    const msgs = await promise;
+    const textMsgs = msgs.filter((msg) => msg.type === 'text');
+    assert.deepEqual(
+      textMsgs.map((msg) => msg.content),
+      ['第一段。', '\n\n第二段。', '\n\n[砚砚/gpt-5.6-sol🐾]'],
+    );
+  });
+
+  test('#1398: service treats the configured display name as a canonical signature alias', async () => {
+    const savedConfigs = catRegistry.getAllConfigs();
+    const catId = 'cat-signature-alias-test';
+    catRegistry.reset();
+    catRegistry.register(catId, {
+      id: catId,
+      name: 'dragon-li',
+      displayName: '狸花猫',
+      nickname: '小狸花',
+      avatar: '',
+      color: 'brown',
+      mentionPatterns: ['@小狸花'],
+      clientId: 'openai',
+      defaultModel: 'deepseek-chat',
+      mcpSupport: true,
+      roleDescription: 'test',
+      personality: 'test',
+    });
+
+    try {
+      const proc = createMockProcess();
+      const service = new CodexAgentService({
+        catId,
+        l0CompilerFn: fakeL0Compiler,
+        spawnFn: createMockSpawnFn(proc),
+        model: 'deepseek-chat',
+        carrierMode: 'exec_json',
+      });
+      const promise = collect(service.invoke('Hello'));
+      emitCodexEvents(proc, [
+        { type: 'thread.started', thread_id: 'thread-signature-alias' },
+        {
+          type: 'item.completed',
+          item: { id: 'msg-1', type: 'agent_message', text: 'Hello～ 狸花猫在 🐾\n\n[狸花猫/deepseek-chat🐾]' },
+        },
+        { type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 20 } },
+      ]);
+
+      const messages = await promise;
+      const text = messages
+        .filter((message) => message.type === 'text')
+        .map((message) => message.content)
+        .join('');
+      assert.equal(text, 'Hello～ 狸花猫在 🐾\n\n[小狸花/deepseek-chat🐾]');
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(savedConfigs)) catRegistry.register(id, config);
+    }
+  });
+
+  test('#1272: multiple completed turns keep the canonical signature at the real stream end', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.6-sol',
+      carrierMode: 'exec_json',
+    });
+
+    const promise = collect(service.invoke('Multi-terminal stream'));
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-1272-multi-terminal' },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: 'turn 1' },
+      },
+      { type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 5 } },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-2', type: 'agent_message', text: 'turn 2' },
+      },
+      { type: 'turn.completed', usage: { input_tokens: 20, output_tokens: 10 } },
+    ]);
+
+    const msgs = await promise;
+    const text = msgs
+      .filter((msg) => msg.type === 'text')
+      .map((msg) => msg.content)
+      .join('');
+    assert.equal(text, 'turn 1\n\nturn 2\n\n[砚砚/gpt-5.6-sol🐾]');
+  });
+
+  test('separates multi-turn text with paragraph breaks (turn newline fix)', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('Multi-turn'));
+
+    // Simulate: text → tool use → text → text (3 text turns with tools in between)
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-turns' },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: 'Checking implementation...' },
+      },
+      {
+        type: 'item.started',
+        item: { id: 'cmd-1', type: 'command_execution', command: 'ls', status: 'in_progress' },
+      },
+      {
+        type: 'item.completed',
+        item: {
+          id: 'cmd-1',
+          type: 'command_execution',
+          command: 'ls',
+          aggregated_output: 'file.ts',
+          status: 'completed',
+        },
+      },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-2', type: 'agent_message', text: 'Running verification...' },
+      },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-3', type: 'agent_message', text: 'All checks passed.' },
+      },
+    ]);
+
+    const msgs = await promise;
+    const textMsgs = msgs.filter((m) => m.type === 'text');
+    assert.equal(textMsgs.length, 3);
+    assert.equal(textMsgs[0].content, 'Checking implementation...');
+    assert.equal(textMsgs[1].content, '\n\nRunning verification...');
+    assert.equal(textMsgs[2].content, '\n\nAll checks passed.');
+
+    // When concatenated (as route-strategies does), should produce readable paragraphs
+    const concatenated = textMsgs.map((m) => m.content).join('');
+    assert.ok(concatenated.includes('Checking implementation...\n\nRunning verification...'));
+    assert.ok(concatenated.includes('Running verification...\n\nAll checks passed.'));
+  });
+
+  test('maps command_execution and file_change items into tool events', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('With tools'));
+
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-tools' },
+      {
+        type: 'item.started',
+        item: { id: 'cmd-1', type: 'command_execution', command: 'ls', status: 'in_progress' },
+      },
+      {
+        type: 'item.completed',
+        item: { id: 'cmd-1', type: 'command_execution', command: 'ls', aggregated_output: '', status: 'completed' },
+      },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: 'Response' },
+      },
+      {
+        type: 'item.completed',
+        item: { id: 'file-1', type: 'file_change', changes: [], status: 'completed' },
+      },
+    ]);
+
+    const msgs = await promise;
+    const textMsgs = msgs.filter((m) => m.type === 'text');
+    const toolUseMsgs = msgs.filter((m) => m.type === 'tool_use');
+    const toolResultMsgs = msgs.filter((m) => m.type === 'tool_result');
+
+    assert.equal(textMsgs.length, 1);
+    assert.equal(textMsgs[0].content, 'Response');
+    assert.equal(toolUseMsgs.length, 2);
+    assert.equal(toolResultMsgs.length, 1);
+    assert.equal(toolUseMsgs[0].toolName, 'command_execution');
+    assert.equal(toolUseMsgs[1].toolName, 'file_change');
+    assert.match(toolResultMsgs[0].content, /command: ls/);
+  });
+
+  test('yields error on CLI non-zero exit', async () => {
+    const proc = createMockProcess();
+    proc.kill = mock.fn(() => true);
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('crash'));
+
+    proc.stderr.write('Error: authentication failed\n');
+    finishExit(proc, 1);
+
+    const msgs = await promise;
+    const errMsg = msgs.find((m) => m.type === 'error');
+    assert.ok(errMsg);
+    // Error message is sanitized — contains exit code but not raw stderr
+    assert.ok(errMsg.error.includes('code: 1'));
+    // Raw stderr should NOT be exposed to users
+    assert.ok(!errMsg.error.includes('authentication failed'), 'stderr should be sanitized');
+  });
+
+  test('includes reconnect diagnostics in CLI exit error when available', async () => {
+    const proc = createMockProcess();
+    proc.kill = mock.fn(() => true);
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('reconnect failure', { invocationId: 'inv-reconnect-failure' }));
+
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'thread-reconnect' })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        message: 'Reconnecting... 1/5 (stream disconnected before completion)',
+      })}\n`,
+    );
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        message: 'Reconnecting... 2/5 (stream disconnected before completion)',
+      })}\n`,
+    );
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        message: 'stream disconnected before completion',
+      })}\n`,
+    );
+    // Exit code 2 = always a real failure (code 1 is suppressed only with substantive output)
+    finishExit(proc, 2);
+
+    const msgs = await promise;
+    const sysInfos = msgs.filter((m) => m.type === 'system_info');
+    assert.equal(sysInfos.length, 3, 'reconnect attempts must end in one terminal failed transition');
+    const recoveryTransitions = sysInfos.map((message) => JSON.parse(message.content));
+    assert.deepEqual(
+      recoveryTransitions.map((transition) => transition.phase),
+      ['reconnecting', 'reconnecting', 'failed'],
+    );
+    assert.equal(recoveryTransitions[2].invocationId, 'inv-reconnect-failure');
+    assert.deepEqual(recoveryTransitions[2].attempts, [
+      'Reconnecting... 1/5 (stream disconnected before completion)',
+      'Reconnecting... 2/5 (stream disconnected before completion)',
+    ]);
+
+    const errMsg = msgs.find((m) => m.type === 'error');
+    assert.ok(errMsg);
+    assert.ok(errMsg.error.includes('code: 2'));
+    assert.ok(errMsg.error.includes('Reconnecting... 1/5'), 'error should include reconnect diagnostics');
+    assert.ok(errMsg.error.includes('Reconnecting... 2/5'), 'error should include multiple reconnect attempts');
+  });
+
+  // F212 Phase H (Sol runtime forensics 2026-07-09): the canonical "silent completion"
+  // predicate is `turn.completed` seen → cli-spawn's semanticCompletionSignal.aborted → cli-spawn
+  // does NOT synthesize __cliError on exit=1 (spawnCli.ts:632). item.completed alone is NOT
+  // enough — that's a message finishing, not a semantic turn completing. Sol's archive pool
+  // (7c3fd591 / 2ffa505f / 261c3754 / 39f2bc4d) had 5 item.completed events each PLUS turn.failed
+  // + exit 1, which the deleted provider-side suppress branch masked as silent success.
+  test('exit code 1 after turn.completed does NOT yield error (semanticDone canonical)', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('review this'));
+
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx' })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'Looks good!' },
+      })}\n`,
+    );
+    // turn.completed → CodexAgentService aborts semanticCompletionSignal → semanticDone=true
+    // → cli-spawn skips __cliError synthesis on exit=1 (Codex 0.98+ quirk handled canonically)
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 10 } })}\n`);
+    finishExit(proc, 1); // Codex 0.98+ quirk — swallowed at cli-spawn layer via semanticDone
+
+    const msgs = await promise;
+    const errors = msgs.filter((m) => m.type === 'error');
+    assert.equal(errors.length, 0, 'exit=1 with semanticDone (turn.completed seen) must not yield error');
+    assert.ok(
+      msgs.some((m) => m.type === 'text'),
+      'text message should still be yielded',
+    );
+    assert.ok(
+      msgs.some((m) => m.type === 'done'),
+      'done should still be yielded',
+    );
+  });
+
+  test('exit code 1 with item.completed but NO turn.completed yields error (Sol Phase H regression)', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('review this'));
+
+    // 5-item.completed archive replay: 39f2bc4d/7c3fd591 pattern — several item.completed
+    // events, then turn.failed + exit 1 (transport/policy failure). Previously masked by
+    // provider suppress branch (sawSubstantiveOutput=true). Phase H expects error yielded.
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx' })}\n`);
+    for (let i = 0; i < 5; i++) {
+      proc.stdout.write(
+        `${JSON.stringify({
+          type: 'item.completed',
+          item: { type: 'agent_message', text: `chunk ${i}` },
+        })}\n`,
+      );
+    }
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.failed', error: { message: 'upstream disconnected' } })}\n`);
+    finishExit(proc, 1);
+
+    const msgs = await promise;
+    const errors = msgs.filter((m) => m.type === 'error');
+    assert.equal(
+      errors.length,
+      1,
+      'exit=1 without turn.completed (semanticDone=false) MUST yield error even with item.completed sequence',
+    );
+    assert.ok(errors[0].error.includes('code: 1'));
+  });
+
+  test('exit code 1 after transient reconnect + turn.completed does NOT yield error', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('review this after reconnect', { invocationId: 'inv-reconnect-success' }));
+
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx' })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        message: 'Reconnecting... 1/5 (stream disconnected before completion)',
+      })}\n`,
+    );
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        message: 'Reconnecting... 2/5 (stream disconnected before completion)',
+      })}\n`,
+    );
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'Recovered answer.' },
+      })}\n`,
+    );
+    // Full recovery: transient error events during reconnect, then turn.completed →
+    // semanticDone=true → cli-spawn does NOT synthesize __cliError on exit=1.
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 10 } })}\n`);
+    finishExit(proc, 1);
+
+    const msgs = await promise;
+    const errors = msgs.filter((m) => m.type === 'error');
+    const sysInfos = msgs.filter((m) => m.type === 'system_info');
+    assert.equal(errors.length, 0, 'transient reconnect events should not defeat semanticDone silent-completion path');
+    assert.equal(sysInfos.length, 3, 'reconnect attempts must end in one recovered transition');
+    const recoveryTransitions = sysInfos.map((message) => JSON.parse(message.content));
+    assert.deepEqual(
+      recoveryTransitions.map((transition) => transition.phase),
+      ['reconnecting', 'reconnecting', 'recovered'],
+    );
+    assert.equal(recoveryTransitions[2].invocationId, 'inv-reconnect-success');
+    assert.deepEqual(recoveryTransitions[2].attempts, [
+      'Reconnecting... 1/5 (stream disconnected before completion)',
+      'Reconnecting... 2/5 (stream disconnected before completion)',
+    ]);
+    assert.ok(
+      msgs.some((m) => m.type === 'text' && m.content === 'Recovered answer.'),
+      'completed answer should still be yielded',
+    );
+  });
+
+  test('reconnect survives resumable turn.failed noise and ends recovered after the next completed turn', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(
+      service.invoke('resume after reconnect failure noise', {
+        invocationId: 'inv-reconnect-resumed',
+      }),
+    );
+
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx-reconnect-resumed' })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        message: 'Reconnecting... 1/5 (stream disconnected before completion)',
+      })}\n`,
+    );
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'turn.failed',
+        error: { message: 'stream disconnected before completion' },
+      })}\n`,
+    );
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.started' })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'Recovered after the failed transport turn.' },
+      })}\n`,
+    );
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 25 } })}\n`);
+    finishExit(proc, 1);
+
+    const messages = await promise;
+    const transitions = messages
+      .filter((message) => message.type === 'system_info')
+      .map((message) => JSON.parse(message.content));
+    assert.deepEqual(
+      transitions.map((transition) => transition.phase),
+      ['reconnecting', 'recovered'],
+    );
+    assert.equal(transitions[1].invocationId, 'inv-reconnect-resumed');
+    assert.equal(transitions[1].evidence, 'turn.started');
+    assert.equal(messages.filter((message) => message.type === 'error').length, 0);
+  });
+
+  // F212 Phase H archive-witness regression: cyber-safety policy rejection (archive
+  // 97449e4b-0dec-433e-885a-0e37ab977b1e). 5 item.completed then upstream policy error
+  // + turn.failed + exit 1. Provider-side suppress branch would mask as silent success;
+  // Phase H requires this classifies as upstream_policy_reject via CLASSIFIER_PATTERNS.
+  test('upstream_policy_reject archive 97449e4b classifies + yields error', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('crawl HN scraper'));
+
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx' })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'Let me research this task.' },
+      })}\n`,
+    );
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        message: 'This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing',
+      })}\n`,
+    );
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.failed', error: { message: 'policy reject' } })}\n`);
+    finishExit(proc, 1);
+
+    const msgs = await promise;
+    const errors = msgs.filter((m) => m.type === 'error');
+    assert.equal(errors.length, 1, 'upstream policy reject must yield error (never silently succeed)');
+    const cliDiag = errors[0].metadata?.cliDiagnostics;
+    assert.ok(cliDiag, 'error must carry cliDiagnostics');
+    assert.equal(cliDiag.reasonCode, 'upstream_policy_reject', 'must classify as upstream_policy_reject');
+  });
+
+  // F212 Phase H R1 P1-2 (Sol runtime forensics 2026-07-10): this test was previously
+  // labeled as an "archive 217969a7 recovery pattern" fixture, but Sol's second-pass
+  // forensics showed archive 217969a7 actually reflects `invoke-single-cat` transient
+  // CLI exit retry (two SEPARATE `service.invoke()` calls with two SEPARATE spawnCli
+  // processes) — NOT compaction-retry within a single spawnCli iteration. This test
+  // remains valid as a **synthetic semanticDone contract**: if turn.completed lands
+  // within the same spawnCli stream (regardless of prior turn.failed noise), semanticDone
+  // suppresses __cliError. But it is NOT the archive fixture; that lives at
+  // `invoke-single-cat-timeout-retry.test.js` "F212 Phase H R1 P1-2 archive 217969a7
+  // authentic pattern" (two-attempt integration test). Renaming clarifies provenance.
+  test('semanticDone contract: prior turn.failed noise then turn.completed in same stream = silent success', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('long research task'));
+
+    // Attempt #1: session init + upstream errors + turn.failed
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx-1' })}\n`);
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.started' })}\n`);
+    for (let i = 0; i < 6; i++) {
+      proc.stdout.write(
+        `${JSON.stringify({
+          type: 'error',
+          message: 'stream disconnected before completion',
+        })}\n`,
+      );
+    }
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'turn.failed',
+        error: { message: 'stream disconnected before completion' },
+      })}\n`,
+    );
+    // Attempt #2: fresh session start + successful completion
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx-2' })}\n`);
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.started' })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'Recovered result after compaction retry.' },
+      })}\n`,
+    );
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 50 } })}\n`);
+    finishExit(proc, 1); // Codex 0.98+ still exits 1 even after successful recovered turn
+
+    const msgs = await promise;
+    const errors = msgs.filter((m) => m.type === 'error');
+    assert.equal(
+      errors.length,
+      0,
+      'recovered turn (turn.completed after prior turn.failed) must be silent success — canonical semanticDone',
+    );
+    assert.ok(
+      msgs.some((m) => m.type === 'text' && m.content === 'Recovered result after compaction retry.'),
+      'recovered text must reach consumer',
+    );
+    assert.ok(
+      msgs.some((m) => m.type === 'done'),
+      'done signal must reach consumer',
+    );
+  });
+
+  test('does NOT suppress exit code 1 when substantive output is followed by compact failure', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('continue this'));
+
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx' })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'Partial answer before compact.' },
+      })}\n`,
+    );
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        message: 'remote compaction failed: compact_error=stream disconnected before completion',
+      })}\n`,
+    );
+    finishExit(proc, 1);
+
+    const msgs = await promise;
+    const errors = msgs.filter((m) => m.type === 'error');
+    assert.equal(errors.length, 1, 'compact failure must yield an error even after substantive output');
+    assert.ok(errors[0].error.includes('code: 1'));
+    assert.ok(
+      errors[0].error.includes('stream disconnected before completion'),
+      'error should retain sanitized compact diagnostics',
+    );
+  });
+
+  test('does NOT suppress exit code 1 when only thread.started (no substantive output)', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('review this'));
+
+    // Only thread.started — no item.completed → NOT substantive
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx' })}\n`);
+    finishExit(proc, 1);
+
+    const msgs = await promise;
+    const errors = msgs.filter((m) => m.type === 'error');
+    assert.equal(errors.length, 1, 'exit code 1 without substantive output should yield error');
+    assert.ok(errors[0].error.includes('code: 1'));
+  });
+
+  test('yields error on spawn ENOENT', async () => {
+    const proc = createMockProcess();
+    proc.kill = mock.fn(() => true);
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('hi'));
+
+    process.nextTick(() => {
+      const err = new Error('spawn codex ENOENT');
+      err.code = 'ENOENT';
+      proc._emitter.emit('error', err);
+      proc.stdout.end();
+      proc._emitter.emit('exit', null, null);
+    });
+
+    const msgs = await promise;
+    const errMsg = msgs.find((m) => m.type === 'error');
+    assert.ok(errMsg);
+    assert.ok(errMsg.error.includes('ENOENT'));
+  });
+
+  test('passes cwd from workingDirectory option', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('hi', { workingDirectory: '/my/project' }));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't1' }]);
     await promise;
 
     const spawnOpts = spawnFn.mock.calls[0].arguments[2];
-    assert.equal(spawnOpts.env.OPENAI_API_KEY, undefined);
-    assert.equal(Object.hasOwn(spawnOpts.env, 'OPENAI_API_KEY'), false);
-  } finally {
-    if (originalApiKey === undefined) delete process.env.OPENAI_API_KEY;
-    else process.env.OPENAI_API_KEY = originalApiKey;
-    if (originalAuthMode === undefined) delete process.env.CODEX_AUTH_MODE;
-    else process.env.CODEX_AUTH_MODE = originalAuthMode;
-  }
-});
+    assert.equal(spawnOpts.cwd, '/my/project');
+  });
 
-test('api_key mode keeps OPENAI_API_KEY for codex child env', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  test('oauth mode (default) does not forward OPENAI_API_KEY to codex child env', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
-  const originalApiKey = process.env.OPENAI_API_KEY;
-  const originalAuthMode = process.env.CODEX_AUTH_MODE;
-  try {
-    process.env.OPENAI_API_KEY = 'sk-test-api-mode';
-    process.env.CODEX_AUTH_MODE = 'api_key';
+    const originalApiKey = process.env.OPENAI_API_KEY;
+    const originalAuthMode = process.env.CODEX_AUTH_MODE;
+    try {
+      process.env.OPENAI_API_KEY = 'sk-test-forwarded-key';
+      delete process.env.CODEX_AUTH_MODE; // default = oauth
 
-    const promise = collect(service.invoke('api-key test'));
+      const promise = collect(service.invoke('oauth test'));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'oauth-thread' }]);
+      await promise;
+
+      const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+      assert.equal(spawnOpts.env.OPENAI_API_KEY, undefined);
+      assert.equal(Object.hasOwn(spawnOpts.env, 'OPENAI_API_KEY'), false);
+    } finally {
+      if (originalApiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = originalApiKey;
+      if (originalAuthMode === undefined) delete process.env.CODEX_AUTH_MODE;
+      else process.env.CODEX_AUTH_MODE = originalAuthMode;
+    }
+  });
+
+  test('api_key mode via callbackEnv keeps OPENAI_API_KEY for codex child env', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(
+      service.invoke('api-key test', {
+        callbackEnv: {
+          CODEX_AUTH_MODE: 'api_key',
+          OPENAI_API_KEY: 'sk-test-api-mode',
+        },
+      }),
+    );
     emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'api-key-thread' }]);
     await promise;
 
     const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+    const args = spawnFn.mock.calls[0].arguments[1];
     assert.equal(spawnOpts.env.OPENAI_API_KEY, 'sk-test-api-mode');
-  } finally {
-    if (originalApiKey === undefined) delete process.env.OPENAI_API_KEY;
-    else process.env.OPENAI_API_KEY = originalApiKey;
-    if (originalAuthMode === undefined) delete process.env.CODEX_AUTH_MODE;
-    else process.env.CODEX_AUTH_MODE = originalAuthMode;
-  }
-});
+    assert.ok(args.includes('model_provider="custom"'), 'explicit API mode must use its selected env_key');
+    assert.ok(args.includes('model_providers.custom.base_url="https://api.openai.com/v1"'));
+    assert.ok(args.includes('model_providers.custom.env_key="OPENAI_API_KEY"'));
+  });
 
-test('callbackEnv auth mode overrides process default when launching codex child env', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  test('auto mode inherits the active Codex config provider instead of forcing OpenAI OAuth', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new ProductionCodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      cliCommand: 'node',
+    });
+    const promise = collect(service.invoke('native config test', { callbackEnv: { CODEX_AUTH_MODE: 'auto' } }));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'native-config-thread' }]);
+    await promise;
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(!args.includes('model_provider="openai"'));
+    assert.ok(!args.includes('model_provider="openai_https"'));
+  });
 
-  const originalAuthMode = process.env.CODEX_AUTH_MODE;
-  try {
-    delete process.env.CODEX_AUTH_MODE;
+  test('explicit OAuth binding still selects the built-in provider and strips ambient API keys', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new ProductionCodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      cliCommand: 'node',
+    });
+    const promise = collect(
+      service.invoke('explicit oauth test', {
+        callbackEnv: { CODEX_AUTH_MODE: 'oauth', OPENAI_API_KEY: 'fixture-key' },
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'explicit-oauth-thread' }]);
+    await promise;
+    const [, args, opts] = spawnFn.mock.calls[0].arguments;
+    assert.ok(args.includes('model_provider="openai"'));
+    assert.equal(opts.env.OPENAI_API_KEY, undefined);
+  });
+
+  test('explicit API Key binding retains its key without forcing the OAuth provider', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new ProductionCodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      cliCommand: 'node',
+    });
+    const promise = collect(
+      service.invoke('explicit key test', {
+        callbackEnv: { CODEX_AUTH_MODE: 'api_key', OPENAI_API_KEY: 'fixture-key' },
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'explicit-key-thread' }]);
+    await promise;
+    const [, args, opts] = spawnFn.mock.calls[0].arguments;
+    assert.ok(!args.includes('model_provider="openai"'));
+    assert.equal(opts.env.OPENAI_API_KEY, 'fixture-key');
+  });
+
+  test('callbackEnv auth mode overrides process default when launching codex child env', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const originalAuthMode = process.env.CODEX_AUTH_MODE;
+    try {
+      delete process.env.CODEX_AUTH_MODE;
+
+      const promise = collect(
+        service.invoke('callback auth test', {
+          callbackEnv: {
+            CODEX_AUTH_MODE: 'api_key',
+            OPENAI_API_KEY: 'sk-callback-key',
+          },
+        }),
+      );
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'callback-auth-thread' }]);
+      await promise;
+
+      const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+      assert.equal(spawnOpts.env.OPENAI_API_KEY, 'sk-callback-key');
+    } finally {
+      if (originalAuthMode === undefined) delete process.env.CODEX_AUTH_MODE;
+      else process.env.CODEX_AUTH_MODE = originalAuthMode;
+    }
+  });
+
+  test('callbackEnv model override takes precedence over constructor model', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.4' });
 
     const promise = collect(
-      service.invoke('callback auth test', {
+      service.invoke('model override test', {
         callbackEnv: {
-          CODEX_AUTH_MODE: 'api_key',
-          OPENAI_API_KEY: 'sk-callback-key',
+          CAT_CAFE_OPENAI_MODEL_OVERRIDE: 'gpt-5.4-mini',
         },
       }),
     );
-    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'callback-auth-thread' }]);
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'model-override-thread' }]);
     await promise;
 
-    const spawnOpts = spawnFn.mock.calls[0].arguments[2];
-    assert.equal(spawnOpts.env.OPENAI_API_KEY, 'sk-callback-key');
-  } finally {
-    if (originalAuthMode === undefined) delete process.env.CODEX_AUTH_MODE;
-    else process.env.CODEX_AUTH_MODE = originalAuthMode;
-  }
-});
+    const spawnArgs = spawnFn.mock.calls[0].arguments[1];
+    const modelFlagIndex = spawnArgs.indexOf('--model');
+    assert.ok(modelFlagIndex >= 0, 'codex args should include --model');
+    assert.equal(spawnArgs[modelFlagIndex + 1], 'gpt-5.4-mini');
+  });
 
-test('callbackEnv model override takes precedence over constructor model', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn, model: 'gpt-5.4' });
+  test('all messages have catId codex', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
-  const promise = collect(
-    service.invoke('model override test', {
-      callbackEnv: {
-        CAT_CAFE_OPENAI_MODEL_OVERRIDE: 'gpt-5.4-mini',
+    const promise = collect(service.invoke('check'));
+
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-catid' },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: 'Test' },
       },
-    }),
-  );
-  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'model-override-thread' }]);
-  await promise;
+    ]);
 
-  const spawnArgs = spawnFn.mock.calls[0].arguments[1];
-  const modelFlagIndex = spawnArgs.indexOf('--model');
-  assert.ok(modelFlagIndex >= 0, 'codex args should include --model');
-  assert.equal(spawnArgs[modelFlagIndex + 1], 'gpt-5.4-mini');
-});
+    const msgs = await promise;
+    for (const msg of msgs) {
+      assert.equal(msg.catId, 'codex', `expected catId codex for ${msg.type} message`);
+    }
+  });
 
-test('all messages have catId codex', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  test('ignores turn.started/unknown controls and finalizes the signature after a completed stream', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
-  const promise = collect(service.invoke('check'));
+    const promise = collect(service.invoke('test'));
 
-  emitCodexEvents(proc, [
-    { type: 'thread.started', thread_id: 'thread-catid' },
-    {
-      type: 'item.completed',
-      item: { id: 'msg-1', type: 'agent_message', text: 'Test' },
-    },
-  ]);
-
-  const msgs = await promise;
-  for (const msg of msgs) {
-    assert.equal(msg.catId, 'codex', `expected catId codex for ${msg.type} message`);
-  }
-});
-
-test('ignores turn.started and turn.completed control events', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
-
-  const promise = collect(service.invoke('test'));
-
-  emitCodexEvents(proc, [
-    { type: 'thread.started', thread_id: 'thread-ctrl' },
-    { type: 'turn.started' },
-    { type: 'item.started', item: { id: 'msg-1', type: 'agent_message' } },
-    {
-      type: 'item.completed',
-      item: { id: 'msg-1', type: 'agent_message', text: 'Hello' },
-    },
-    { type: 'turn.completed', usage: { input_tokens: 5, output_tokens: 10 } },
-    { type: 'unknown_event', data: 'something' },
-  ]);
-
-  const msgs = await promise;
-  // Only session_init, text, done — all control/unknown events skipped
-  assert.equal(msgs.length, 3);
-  assert.equal(msgs[0].type, 'session_init');
-  assert.equal(msgs[1].type, 'text');
-  assert.equal(msgs[1].content, 'Hello');
-  assert.equal(msgs[2].type, 'done');
-});
-
-test('maps command execution lifecycle into tool_use and tool_result', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
-
-  const promise = collect(service.invoke('run tool'));
-
-  emitCodexEvents(proc, [
-    { type: 'thread.started', thread_id: 'thread-tool-lifecycle' },
-    {
-      type: 'item.started',
-      item: {
-        id: 'cmd-1',
-        type: 'command_execution',
-        command: '/bin/zsh -lc pwd',
-        status: 'in_progress',
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-ctrl' },
+      { type: 'turn.started' },
+      { type: 'item.started', item: { id: 'msg-1', type: 'agent_message' } },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: 'Hello' },
       },
-    },
-    {
-      type: 'item.completed',
-      item: {
-        id: 'cmd-1',
-        type: 'command_execution',
-        command: '/bin/zsh -lc pwd',
-        aggregated_output: '/home/user/projects/cat-cafe\n',
-        exit_code: 0,
-        status: 'completed',
-      },
-    },
-    {
-      type: 'item.completed',
-      item: { id: 'msg-1', type: 'agent_message', text: 'done' },
-    },
-  ]);
+      { type: 'turn.completed', usage: { input_tokens: 5, output_tokens: 10 } },
+      { type: 'unknown_event', data: 'something' },
+    ]);
 
-  const msgs = await promise;
-  const toolUse = msgs.find((m) => m.type === 'tool_use');
-  const toolResult = msgs.find((m) => m.type === 'tool_result');
+    const msgs = await promise;
+    // turn.completed remains non-UI control; successful stream exhaustion emits the deterministic signature chunk.
+    assert.equal(msgs.length, 4);
+    assert.equal(msgs[0].type, 'session_init');
+    assert.equal(msgs[1].type, 'text');
+    assert.equal(msgs[1].content, 'Hello');
+    assert.equal(msgs[2].type, 'text');
+    assert.equal(msgs[2].content, '\n\n[砚砚/gpt-5.3-codex🐾]');
+    assert.equal(msgs[3].type, 'done');
+  });
 
-  assert.ok(toolUse, 'should emit tool_use for command_execution start');
-  assert.equal(toolUse.toolName, 'command_execution');
-  assert.equal(toolUse.toolInput.command, '/bin/zsh -lc pwd');
+  test('maps command execution lifecycle into tool_use and tool_result', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
-  assert.ok(toolResult, 'should emit tool_result for command_execution completion');
-  assert.match(toolResult.content, /\/home\/user\/projects\/cat-cafe/);
-  assert.match(toolResult.content, /exit_code:\s*0/);
-});
+    const promise = collect(service.invoke('run tool'));
 
-test('writes CLI tool lifecycle audit events when auditContext is provided', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
-  const rawArchive = { append: mock.fn(async () => {}) };
-  const service = new CodexAgentService({ spawnFn, auditLog, rawArchive });
-
-  const promise = collect(
-    service.invoke('run tool', {
-      auditContext: {
-        invocationId: 'inv-1',
-        threadId: 'thread-1',
-        userId: 'user-1',
-        catId: 'codex',
-      },
-    }),
-  );
-
-  emitCodexEvents(proc, [
-    { type: 'thread.started', thread_id: 'thread-1' },
-    {
-      type: 'item.started',
-      item: {
-        id: 'cmd-1',
-        type: 'command_execution',
-        command: '/bin/zsh -lc pwd',
-        status: 'in_progress',
-      },
-    },
-    {
-      type: 'item.completed',
-      item: {
-        id: 'cmd-1',
-        type: 'command_execution',
-        command: '/bin/zsh -lc pwd',
-        aggregated_output: '/tmp\n',
-        exit_code: 0,
-        status: 'completed',
-      },
-    },
-  ]);
-
-  await promise;
-
-  assert.equal(auditLog.append.mock.callCount(), 2);
-  const started = auditLog.append.mock.calls[0].arguments[0];
-  const completed = auditLog.append.mock.calls[1].arguments[0];
-
-  assert.equal(started.type, 'cli_tool_started');
-  assert.equal(started.threadId, 'thread-1');
-  assert.equal(started.data.invocationId, 'inv-1');
-  assert.equal(started.data.command, '/bin/zsh -lc pwd');
-
-  assert.equal(completed.type, 'cli_tool_completed');
-  assert.equal(completed.threadId, 'thread-1');
-  assert.equal(completed.data.status, 'completed');
-  assert.equal(completed.data.exitCode, 0);
-});
-
-test('archives raw stream events when auditContext is provided', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
-  const rawArchive = { append: mock.fn(async () => {}) };
-  const service = new CodexAgentService({ spawnFn, auditLog, rawArchive });
-
-  const promise = collect(
-    service.invoke('raw trace', {
-      auditContext: {
-        invocationId: 'inv-raw-1',
-        threadId: 'thread-raw-1',
-        userId: 'user-1',
-        catId: 'codex',
-      },
-    }),
-  );
-
-  emitCodexEvents(proc, [
-    { type: 'thread.started', thread_id: 'thread-raw-1' },
-    {
-      type: 'item.completed',
-      item: { id: 'msg-1', type: 'agent_message', text: 'hello' },
-    },
-  ]);
-
-  await promise;
-
-  assert.equal(rawArchive.append.mock.callCount(), 2);
-  assert.equal(rawArchive.append.mock.calls[0].arguments[0], 'inv-raw-1');
-  assert.equal(rawArchive.append.mock.calls[1].arguments[0], 'inv-raw-1');
-});
-
-test('does not write lifecycle audit or raw archive when auditContext is absent', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
-  const rawArchive = { append: mock.fn(async () => {}) };
-  const service = new CodexAgentService({ spawnFn, auditLog, rawArchive });
-
-  const promise = collect(service.invoke('no audit context'));
-
-  emitCodexEvents(proc, [
-    { type: 'thread.started', thread_id: 'thread-no-audit' },
-    {
-      type: 'item.started',
-      item: {
-        id: 'cmd-1',
-        type: 'command_execution',
-        command: '/bin/zsh -lc pwd',
-        status: 'in_progress',
-      },
-    },
-    {
-      type: 'item.completed',
-      item: {
-        id: 'cmd-1',
-        type: 'command_execution',
-        command: '/bin/zsh -lc pwd',
-        aggregated_output: '/tmp\n',
-        exit_code: 0,
-        status: 'completed',
-      },
-    },
-  ]);
-
-  await promise;
-
-  assert.equal(auditLog.append.mock.callCount(), 0);
-  assert.equal(rawArchive.append.mock.callCount(), 0);
-});
-
-test('redacts nested callback tokens before archiving raw events', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
-  const rawArchive = { append: mock.fn(async () => {}) };
-  const service = new CodexAgentService({ spawnFn, auditLog, rawArchive });
-
-  const promise = collect(
-    service.invoke('deep redact', {
-      auditContext: {
-        invocationId: 'inv-redact-1',
-        threadId: 'thread-redact-1',
-        userId: 'user-1',
-        catId: 'codex',
-      },
-    }),
-  );
-
-  emitCodexEvents(proc, [
-    {
-      type: 'item.completed',
-      callbackToken: 'root-secret',
-      item: {
-        id: 'msg-1',
-        type: 'agent_message',
-        text: 'hello',
-        callbackEnv: {
-          CAT_CAFE_CALLBACK_TOKEN: 'nested-secret',
-        },
-        nested: {
-          callbackToken: 'deep-secret',
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-tool-lifecycle' },
+      {
+        type: 'item.started',
+        item: {
+          id: 'cmd-1',
+          type: 'command_execution',
+          command: '/bin/zsh -lc pwd',
+          status: 'in_progress',
         },
       },
-    },
-  ]);
+      {
+        type: 'item.completed',
+        item: {
+          id: 'cmd-1',
+          type: 'command_execution',
+          command: '/bin/zsh -lc pwd',
+          aggregated_output: '/home/user/projects/cat-cafe\n',
+          exit_code: 0,
+          status: 'completed',
+        },
+      },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: 'done' },
+      },
+    ]);
 
-  await promise;
+    const msgs = await promise;
+    const toolUse = msgs.find((m) => m.type === 'tool_use');
+    const toolResult = msgs.find((m) => m.type === 'tool_result');
 
-  assert.equal(rawArchive.append.mock.callCount(), 1);
-  const archived = rawArchive.append.mock.calls[0].arguments[1];
-  assert.equal(archived.callbackToken, '[redacted]');
-  assert.equal(archived.item.callbackEnv.CAT_CAFE_CALLBACK_TOKEN, '[redacted]');
-  assert.equal(archived.item.nested.callbackToken, '[redacted]');
-});
+    assert.ok(toolUse, 'should emit tool_use for command_execution start');
+    assert.equal(toolUse.toolName, 'command_execution');
+    assert.equal(toolUse.toolInput.command, '/bin/zsh -lc pwd');
 
-// --- P1 regression: systemPrompt + image coexistence ---
+    assert.ok(toolResult, 'should emit tool_result for command_execution completion');
+    assert.match(toolResult.content, /\/home\/user\/projects\/cat-cafe/);
+    assert.match(toolResult.content, /exit_code:\s*0/);
+  });
 
-test('systemPrompt is preserved and codex --image is used when contentBlocks contain images', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  test('writes CLI tool lifecycle audit events when auditContext is provided', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
+    const rawArchive = { append: mock.fn(async () => {}) };
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, auditLog, rawArchive });
 
-  const promise = collect(
-    service.invoke('describe this image', {
-      systemPrompt: '你是缅因猫，由 OpenAI 提供的 AI 猫猫。',
-      contentBlocks: [{ type: 'image', url: '/uploads/cat.png' }],
-      uploadDir: '/tmp',
-    }),
-  );
-  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'img-thread' }]);
-  await promise;
+    const promise = collect(
+      service.invoke('run tool', {
+        auditContext: {
+          invocationId: 'inv-1',
+          threadId: 'thread-1',
+          userId: 'user-1',
+          catId: 'codex',
+        },
+      }),
+    );
 
-  // The prompt passed to CLI must preserve systemPrompt.
-  // Images should be passed via native --image flags.
-  const args = spawnFn.mock.calls[0].arguments[1];
-  const imageIdx = args.indexOf('--image');
-  assert.ok(imageIdx >= 0, 'codex should receive image via --image');
-  assert.ok(String(args[imageIdx + 1]).includes('cat.png'));
-  const promptArg = args.at(-1); // last arg is the prompt
-  assert.ok(
-    promptArg.includes('缅因猫'),
-    `systemPrompt should be preserved in prompt when images present, got: ${promptArg.slice(0, 120)}`,
-  );
-});
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-1' },
+      {
+        type: 'item.started',
+        item: {
+          id: 'cmd-1',
+          type: 'command_execution',
+          command: '/bin/zsh -lc pwd',
+          status: 'in_progress',
+        },
+      },
+      {
+        type: 'item.completed',
+        item: {
+          id: 'cmd-1',
+          type: 'command_execution',
+          command: '/bin/zsh -lc pwd',
+          aggregated_output: '/tmp\n',
+          exit_code: 0,
+          status: 'completed',
+        },
+      },
+    ]);
 
-test('fresh exec with --image inserts "--" before prompt to avoid varargs swallowing prompt', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+    await promise;
 
-  const promise = collect(
-    service.invoke('please describe this image path handling', {
-      contentBlocks: [{ type: 'image', url: '/uploads/cat.png' }],
-      uploadDir: '/tmp',
-    }),
-  );
-  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'img-thread-arg-sep' }]);
-  await promise;
+    assert.equal(auditLog.append.mock.callCount(), 2);
+    const started = auditLog.append.mock.calls[0].arguments[0];
+    const completed = auditLog.append.mock.calls[1].arguments[0];
 
-  const args = spawnFn.mock.calls[0].arguments[1];
-  const imageIdx = args.indexOf('--image');
-  assert.ok(imageIdx >= 0, 'codex should receive --image');
-  const promptIdx = args.indexOf('please describe this image path handling');
-  assert.ok(promptIdx >= 0, 'prompt should be present');
-  assert.equal(args[promptIdx - 1], '--', 'prompt must be preceded by "--" separator');
-});
+    assert.equal(started.type, 'cli_tool_started');
+    assert.equal(started.threadId, 'thread-1');
+    assert.equal(started.data.invocationId, 'inv-1');
+    assert.equal(started.data.command, '/bin/zsh -lc pwd');
 
-test('resume exec with --image inserts "--" before prompt', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+    assert.equal(completed.type, 'cli_tool_completed');
+    assert.equal(completed.threadId, 'thread-1');
+    assert.equal(completed.data.status, 'completed');
+    assert.equal(completed.data.exitCode, 0);
+  });
 
-  const promise = collect(
-    service.invoke('resume image argument handling', {
-      sessionId: 'existing-thread-456',
-      contentBlocks: [{ type: 'image', url: '/uploads/cat.png' }],
-      uploadDir: '/tmp',
-    }),
-  );
-  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'existing-thread-456' }]);
-  await promise;
+  test('archives raw stream events when auditContext is provided', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
+    const rawArchive = { append: mock.fn(async () => {}) };
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, auditLog, rawArchive });
 
-  const args = spawnFn.mock.calls[0].arguments[1];
-  assert.equal(args[0], 'exec');
-  assert.equal(args[1], 'resume');
-  assert.equal(args[2], 'existing-thread-456');
-  const imageIdx = args.indexOf('--image');
-  assert.ok(imageIdx >= 0, 'resume path should receive --image');
-  const promptIdx = args.indexOf('resume image argument handling');
-  assert.ok(promptIdx >= 0, 'prompt should be present');
-  assert.equal(args[promptIdx - 1], '--', 'resume prompt must be preceded by "--" separator');
-});
+    const promise = collect(
+      service.invoke('raw trace', {
+        auditContext: {
+          invocationId: 'inv-raw-1',
+          threadId: 'thread-raw-1',
+          userId: 'user-1',
+          catId: 'codex',
+        },
+      }),
+    );
 
-test('F8: turn.completed usage is captured into done metadata', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-raw-1' },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: 'hello' },
+      },
+    ]);
 
-  const promise = collect(service.invoke('test'));
+    await promise;
 
-  emitCodexEvents(proc, [
-    { type: 'thread.started', thread_id: 'thread-usage' },
-    { type: 'turn.started' },
-    {
-      type: 'item.completed',
-      item: { id: 'msg-1', type: 'agent_message', text: 'Hello' },
-    },
-    {
-      type: 'turn.completed',
-      usage: { input_tokens: 500, output_tokens: 200, cached_input_tokens: 100 },
-    },
-  ]);
+    assert.equal(rawArchive.append.mock.callCount(), 2);
+    assert.equal(rawArchive.append.mock.calls[0].arguments[0], 'inv-raw-1');
+    assert.equal(rawArchive.append.mock.calls[1].arguments[0], 'inv-raw-1');
+  });
 
-  const msgs = await promise;
-  const done = msgs.find((m) => m.type === 'done');
-  assert.ok(done, 'should have done message');
-  assert.ok(done.metadata?.usage, 'done should have usage in metadata');
-  assert.equal(done.metadata.usage.inputTokens, 500);
-  assert.equal(done.metadata.usage.outputTokens, 200);
-  assert.equal(done.metadata.usage.cacheReadTokens, 100);
-});
+  test('does not write lifecycle audit or raw archive when auditContext is absent', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
+    const rawArchive = { append: mock.fn(async () => {}) };
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, auditLog, rawArchive });
 
-test('F24: enriches Codex context snapshot from resolver into done metadata', async () => {
-  const proc = createMockProcess();
-  const spawnFn = createMockSpawnFn(proc);
-  const contextSnapshotResolver = mock.fn(async () => ({
-    contextUsedTokens: 186_749,
-    contextWindowTokens: 258_400,
-    contextResetsAtMs: Date.UTC(2026, 1, 18, 0, 0, 0),
-  }));
-  const service = new CodexAgentService({ spawnFn, contextSnapshotResolver });
+    const promise = collect(service.invoke('no audit context'));
 
-  const promise = collect(service.invoke('test context telemetry'));
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-no-audit' },
+      {
+        type: 'item.started',
+        item: {
+          id: 'cmd-1',
+          type: 'command_execution',
+          command: '/bin/zsh -lc pwd',
+          status: 'in_progress',
+        },
+      },
+      {
+        type: 'item.completed',
+        item: {
+          id: 'cmd-1',
+          type: 'command_execution',
+          command: '/bin/zsh -lc pwd',
+          aggregated_output: '/tmp\n',
+          exit_code: 0,
+          status: 'completed',
+        },
+      },
+    ]);
 
-  emitCodexEvents(proc, [
-    { type: 'thread.started', thread_id: 'thread-context' },
-    {
-      type: 'item.completed',
-      item: { id: 'msg-1', type: 'agent_message', text: 'Hello' },
-    },
-    {
-      type: 'turn.completed',
-      usage: { input_tokens: 529593, output_tokens: 10298, cached_input_tokens: 405760 },
-    },
-  ]);
+    await promise;
 
-  const msgs = await promise;
-  const done = msgs.find((m) => m.type === 'done');
-  assert.ok(done, 'should have done message');
-  assert.ok(done.metadata?.usage, 'done should have usage metadata');
-  assert.equal(contextSnapshotResolver.mock.callCount(), 1, 'resolver should be called once');
-  assert.equal(contextSnapshotResolver.mock.calls[0].arguments[0], 'thread-context');
-  assert.equal(done.metadata.usage.contextUsedTokens, 186_749);
-  assert.equal(done.metadata.usage.contextWindowSize, 258_400);
-  assert.equal(done.metadata.usage.contextResetsAtMs, Date.UTC(2026, 1, 18, 0, 0, 0));
-  assert.equal(done.metadata.usage.lastTurnInputTokens, 186_749);
-});
+    assert.equal(auditLog.append.mock.callCount(), 0);
+    assert.equal(rawArchive.append.mock.callCount(), 0);
+  });
 
-test('Issue #116: turn.completed unblocks done even when process exit is delayed', async () => {
-  const stdout = new PassThrough();
-  const stderr = new PassThrough();
-  const emitter = new EventEmitter();
-  const proc = {
-    stdout,
-    stderr,
-    pid: 12345,
-    exitCode: null,
-    kill: mock.fn(() => true),
-    on: (event, listener) => {
-      emitter.on(event, listener);
-      return proc;
-    },
-    once: (event, listener) => {
-      emitter.once(event, listener);
-      return proc;
-    },
-    _emitter: emitter,
-  };
-  const spawnFn = createMockSpawnFn(proc);
-  const service = new CodexAgentService({ spawnFn });
+  test('redacts nested callback tokens before archiving raw events', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const auditLog = { append: mock.fn(async () => ({ id: 'evt-1' })) };
+    const rawArchive = { append: mock.fn(async () => {}) };
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, auditLog, rawArchive });
 
-  const startMs = Date.now();
-  const promise = collect(service.invoke('test'));
+    const promise = collect(
+      service.invoke('deep redact', {
+        auditContext: {
+          invocationId: 'inv-redact-1',
+          threadId: 'thread-redact-1',
+          userId: 'user-1',
+          catId: 'codex',
+        },
+      }),
+    );
 
-  proc.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 'thread-116' }) + '\n');
-  proc.stdout.write(
-    JSON.stringify({
-      type: 'item.completed',
-      item: { id: 'msg-1', type: 'agent_message', text: 'Done!' },
-    }) + '\n',
-  );
-  proc.stdout.write(
-    JSON.stringify({
-      type: 'turn.completed',
-      usage: { input_tokens: 100, output_tokens: 50 },
-    }) + '\n',
-  );
-  proc.stdout.end();
+    emitCodexEvents(proc, [
+      {
+        type: 'item.completed',
+        callbackToken: 'root-secret',
+        item: {
+          id: 'msg-1',
+          type: 'agent_message',
+          text: 'hello',
+          callbackEnv: {
+            CAT_CAFE_CALLBACK_TOKEN: 'nested-secret',
+          },
+          nested: {
+            callbackToken: 'deep-secret',
+          },
+        },
+      },
+    ]);
 
-  // Process exits naturally during grace period (simulating delayed but normal exit)
-  setTimeout(() => emitter.emit('exit', 0, null), 300);
+    await promise;
 
-  const msgs = await promise;
-  const elapsedMs = Date.now() - startMs;
+    assert.equal(rawArchive.append.mock.callCount(), 1);
+    const archived = rawArchive.append.mock.calls[0].arguments[1];
+    assert.equal(archived.callbackToken, '[redacted]');
+    assert.equal(archived.item.callbackEnv.CAT_CAFE_CALLBACK_TOKEN, '[redacted]');
+    assert.equal(archived.item.nested.callbackToken, '[redacted]');
+  });
 
-  assert.ok(elapsedMs < 2000, `Should complete quickly once process exits during grace, took ${elapsedMs}ms`);
+  // --- P1 regression: systemPrompt + image coexistence ---
 
-  const done = msgs.find((m) => m.type === 'done');
-  assert.ok(done, 'should have done message');
-  assert.equal(done.metadata?.usage?.inputTokens, 100);
-  assert.equal(done.metadata?.usage?.outputTokens, 50);
+  test('systemPrompt is preserved and codex --image is used when contentBlocks contain images', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(
+      service.invoke('describe this image', {
+        systemPrompt: '你是缅因猫，由 OpenAI 提供的 AI 猫猫。',
+        contentBlocks: [{ type: 'image', url: '/uploads/cat.png' }],
+        uploadDir: '/tmp',
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'img-thread' }]);
+    await promise;
+
+    // The prompt passed to CLI must preserve systemPrompt.
+    // Images should be passed via native --image flags.
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const imageIdx = args.indexOf('--image');
+    assert.ok(imageIdx >= 0, 'codex should receive image via --image');
+    assert.ok(String(args[imageIdx + 1]).includes('cat.png'));
+    // Incident 2026-05-29: prompt 走 stdin（不进 argv）；systemPrompt 拼进 effectivePrompt → stdin
+    assert.equal(args.at(-1), '-', 'argv 末尾是 - (codex 从 stdin 读)');
+    assert.ok(
+      proc.stdinData.includes('缅因猫'),
+      `systemPrompt should be preserved in stdin prompt when images present, got: ${proc.stdinData.slice(0, 120)}`,
+    );
+  });
+
+  test('Host-verified HMR image path reaches the local CLI without a public upload URL', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const hmrId = `hmr_${'x'.repeat(32)}`;
+    const seen = [];
+    const promise = collect(
+      service.invoke('describe private image', {
+        contentBlocks: [{ type: 'image', url: `hmr:${hmrId}` }],
+        resolveTrustedImagePath: async (id) => {
+          seen.push(id);
+          return '/private/media/verified-image';
+        },
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'hmr-image-thread' }]);
+    await promise;
+    assert.deepEqual(seen, [hmrId]);
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args[args.indexOf('--image') + 1], '/private/media/verified-image');
+    assert.equal(
+      args.some((arg) => String(arg).includes('/uploads/')),
+      false,
+    );
+  });
+
+  test('fresh exec with --image inserts "--" before prompt to avoid varargs swallowing prompt', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(
+      service.invoke('please describe this image path handling', {
+        contentBlocks: [{ type: 'image', url: '/uploads/cat.png' }],
+        uploadDir: '/tmp',
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'img-thread-arg-sep' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const imageIdx = args.indexOf('--image');
+    assert.ok(imageIdx >= 0, 'codex should receive --image');
+    // Incident 2026-05-29: prompt 走 stdin（不进 argv）；image 后 argv 末尾应是 '-- -'
+    // （'--' 分隔避免 varargs 把 stdin 标记 '-' 当成 image 路径）
+    assert.ok(!args.includes('please describe this image path handling'), 'prompt 不应在 argv（走 stdin）');
+    assert.equal(proc.stdinData, 'please describe this image path handling', 'prompt 经 stdin 传入');
+    const dashIdx = args.indexOf('-');
+    assert.ok(dashIdx >= 0, "argv 应含 stdin 标记 '-'");
+    assert.equal(args[dashIdx - 1], '--', "'-' must be preceded by '--' separator");
+  });
+
+  test('resume exec with --image inserts "--" before prompt', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(
+      service.invoke('resume image argument handling', {
+        sessionId: 'existing-thread-456',
+        contentBlocks: [{ type: 'image', url: '/uploads/cat.png' }],
+        uploadDir: '/tmp',
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'existing-thread-456' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args[0], 'exec');
+    assert.equal(args[1], 'resume');
+    assert.equal(args[2], 'existing-thread-456');
+    const imageIdx = args.indexOf('--image');
+    assert.ok(imageIdx >= 0, 'resume path should receive --image');
+    // Incident 2026-05-29: prompt 走 stdin（不进 argv）；image 后 argv 末尾应是 '-- -'
+    assert.ok(!args.includes('resume image argument handling'), 'prompt 不应在 argv（走 stdin）');
+    assert.equal(proc.stdinData, 'resume image argument handling', 'prompt 经 stdin 传入');
+    const dashIdx = args.indexOf('-');
+    assert.ok(dashIdx >= 0, "argv 应含 stdin 标记 '-'");
+    assert.equal(args[dashIdx - 1], '--', "resume '-' must be preceded by '--' separator");
+  });
+
+  test('F8: turn.completed usage is captured into done metadata', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('test'));
+
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-usage' },
+      { type: 'turn.started' },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: 'Hello' },
+      },
+      {
+        type: 'turn.completed',
+        usage: { input_tokens: 500, output_tokens: 200, cached_input_tokens: 100 },
+      },
+    ]);
+
+    const msgs = await promise;
+    const done = msgs.find((m) => m.type === 'done');
+    assert.ok(done, 'should have done message');
+    assert.ok(done.metadata?.usage, 'done should have usage in metadata');
+    assert.equal(done.metadata.usage.inputTokens, 500);
+    assert.equal(done.metadata.usage.outputTokens, 200);
+    assert.equal(done.metadata.usage.cacheReadTokens, 100);
+  });
+
+  test('F24: enriches Codex context snapshot from resolver into done metadata', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const contextSnapshotResolver = mock.fn(async () => ({
+      contextUsedTokens: 186_749,
+      contextWindowTokens: 258_400,
+      contextResetsAtMs: Date.UTC(2026, 1, 18, 0, 0, 0),
+      lastCachedInputTokens: 122_880,
+      lastOutputTokens: 617,
+    }));
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, contextSnapshotResolver });
+
+    const promise = collect(service.invoke('test context telemetry'));
+
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-context' },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: 'Hello' },
+      },
+      {
+        type: 'turn.completed',
+        usage: { input_tokens: 529593, output_tokens: 10298, cached_input_tokens: 405760 },
+      },
+    ]);
+
+    const msgs = await promise;
+    const done = msgs.find((m) => m.type === 'done');
+    assert.ok(done, 'should have done message');
+    assert.ok(done.metadata?.usage, 'done should have usage metadata');
+    assert.equal(contextSnapshotResolver.mock.callCount(), 1, 'resolver should be called once');
+    assert.equal(contextSnapshotResolver.mock.calls[0].arguments[0], 'thread-context');
+    assert.equal(done.metadata.usage.contextUsedTokens, 186_749);
+    assert.equal(done.metadata.usage.contextWindowSize, 258_400);
+    assert.equal(done.metadata.usage.contextResetsAtMs, Date.UTC(2026, 1, 18, 0, 0, 0));
+    assert.equal(done.metadata.usage.inputTokens, 186_749);
+    assert.equal(done.metadata.usage.cacheReadTokens, 122_880);
+    assert.equal(done.metadata.usage.outputTokens, 617);
+    assert.equal(done.metadata.usage.lastTurnInputTokens, 186_749);
+  });
+
+  test('Issue #116: turn.completed unblocks done even when process exit is delayed', async () => {
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const emitter = new EventEmitter();
+    const proc = {
+      stdout,
+      stderr,
+      pid: 12345,
+      exitCode: null,
+      kill: mock.fn(() => true),
+      on: (event, listener) => {
+        emitter.on(event, listener);
+        return proc;
+      },
+      once: (event, listener) => {
+        emitter.once(event, listener);
+        return proc;
+      },
+      _emitter: emitter,
+    };
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const startMs = Date.now();
+    const promise = collect(service.invoke('test'));
+
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'thread-116' })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: 'Done!' },
+      })}\n`,
+    );
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'turn.completed',
+        usage: { input_tokens: 100, output_tokens: 50 },
+      })}\n`,
+    );
+    proc.stdout.end();
+
+    // Process exits naturally during grace period (simulating delayed but normal exit).
+    // Real child_process emits close once stdio is drained.
+    setTimeout(() => {
+      emitter.emit('exit', 0, null);
+      emitter.emit('close', 0, null);
+    }, 300);
+
+    const msgs = await promise;
+    const elapsedMs = Date.now() - startMs;
+
+    assert.ok(elapsedMs < 2000, `Should complete quickly once process exits during grace, took ${elapsedMs}ms`);
+
+    const done = msgs.find((m) => m.type === 'done');
+    assert.ok(done, 'should have done message');
+    assert.equal(done.metadata?.usage?.inputTokens, 100);
+    assert.equal(done.metadata?.usage?.outputTokens, 50);
+  });
+
+  test('[F172] yields system_info rich_block for images found in codex generated_images dir', async () => {
+    const sessionId = 'thread-f172-img';
+    const tmpHome = makeTempDir('.tmp-f172-');
+    const imgDir = join(tmpHome, '.codex', 'generated_images', sessionId);
+    mkdirSync(imgDir, { recursive: true });
+    writeFileSync(join(imgDir, 'ig_test.png'), Buffer.from('fake-png'));
+
+    const uploadDir = makeTempDir('.tmp-f172-uploads-');
+
+    const prevHome = process.env.HOME;
+    process.env.HOME = tmpHome;
+
+    try {
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+      const promise = collect(service.invoke('generate an image', { uploadDir }));
+
+      emitCodexEvents(proc, [
+        { type: 'thread.started', thread_id: sessionId },
+        { type: 'item.completed', item: { id: 'msg-1', type: 'agent_message', text: 'Image generated' } },
+        { type: 'turn.completed', usage: { input_tokens: 50, output_tokens: 30 } },
+      ]);
+
+      const msgs = await promise;
+
+      const sysInfos = msgs.filter((m) => m.type === 'system_info');
+      assert.ok(sysInfos.length >= 1, `expected at least 1 system_info, got ${sysInfos.length}`);
+
+      const imgInfo = sysInfos.find((m) => {
+        const parsed = JSON.parse(m.content);
+        return parsed.type === 'rich_block' && parsed.block?.kind === 'media_gallery';
+      });
+      assert.ok(imgInfo, 'should yield a system_info with media_gallery rich block');
+
+      const parsed = JSON.parse(imgInfo.content);
+      assert.match(parsed.block.items[0].url, /^\/uploads\//);
+      assert.match(parsed.block.items[0].url, /\.png$/);
+
+      // AC-E3: provenance is included for archive ground truth
+      assert.ok(parsed.provenance, 'should include provenance for archive');
+      assert.equal(parsed.provenance.provider, 'codex');
+      assert.equal(parsed.provenance.toolName, 'image_gen');
+      assert.match(parsed.provenance.publishedPath, /^\/uploads\//);
+
+      const doneIdx = msgs.findIndex((m) => m.type === 'done');
+      const imgIdx = msgs.indexOf(imgInfo);
+      assert.ok(imgIdx < doneIdx, 'system_info rich block must appear before done');
+    } finally {
+      process.env.HOME = prevHome;
+      rmSync(tmpHome, { recursive: true, force: true });
+      rmSync(uploadDir, { recursive: true, force: true });
+    }
+  });
 });

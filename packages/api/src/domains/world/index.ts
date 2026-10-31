@@ -1,0 +1,11 @@
+export { CareLoopEvaluator } from './CareLoopEvaluator.js';
+export type { IWorldStore } from './interfaces.js';
+export { IWorldStoreSymbol } from './interfaces.js';
+export { applyPatch } from './json-patch.js';
+export { SqliteWorldStore } from './SqliteWorldStore.js';
+export { applyMigrations, CURRENT_SCHEMA_VERSION } from './schema.js';
+export { WorldContextProvider } from './WorldContextProvider.js';
+export { WorldDriverBridge } from './WorldDriverBridge.js';
+export { WorldKnowledgeAdapter } from './WorldKnowledgeAdapter.js';
+export type { ExecuteResult } from './WorldRuntimeCoordinator.js';
+export { WorldRuntimeCoordinator } from './WorldRuntimeCoordinator.js';

@@ -1,0 +1,489 @@
+#!/usr/bin/env node
+
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { getRepositoryCoordinates } from './brand-dictionary-helper.mjs';
+import { classifyStatusChecks, observeMergePrTruth } from './lib/clowder-merge-check-evidence.mjs';
+
+export const CLOWDER_REPOSITORY = getRepositoryCoordinates().public;
+export const CAT_CAFE_REPOSITORY = getRepositoryCoordinates().home;
+const CAFE_MESSAGE_ID = /^\d{16,}-\d{6}-[0-9a-f]{8}$/i;
+const INTAKE_DECISIONS = new Set(['absorbed', 'public-only', 'rejected']);
+
+function blocked(reasonCode, nextAction, requiresNewAuthorization, detail) {
+  return {
+    outcome: 'blocked',
+    reasonCode,
+    nextAction,
+    requiresNewAuthorization,
+    authorizationContinuity: 'invalid',
+    command: null,
+    detail,
+  };
+}
+
+function canonicalSubjectRef(repository, prNumber) {
+  return `pr:${repository.toLowerCase()}#${prNumber}`;
+}
+
+function validateInvocation(repository, prNumber, expectedHead) {
+  const normalizedRepository = String(repository ?? '').toLowerCase();
+  if (normalizedRepository !== CLOWDER_REPOSITORY) {
+    return blocked(
+      'unsupported_repository',
+      'use_repository_merge_policy',
+      false,
+      `This execution guard only owns ${CLOWDER_REPOSITORY}.`,
+    );
+  }
+  if (!Number.isInteger(prNumber) || prNumber <= 0) {
+    return blocked('invalid_pr_number', 'fix_invocation', false, 'PR number must be a positive integer.');
+  }
+  if (!/^[0-9a-f]{40}$/i.test(String(expectedHead ?? ''))) {
+    return blocked('invalid_expected_head', 'fix_invocation', false, 'Expected HEAD must be a full 40-character SHA.');
+  }
+  return { normalizedRepository };
+}
+
+function validateAuthorization(authorization, expectedSubject, expectedHead) {
+  if (!authorization?.sourceMessageId?.trim()) {
+    return blocked(
+      'authorization_source_missing',
+      'request_authorization',
+      true,
+      'A durable, independently grounded operator authorization messageId is required.',
+    );
+  }
+  if (!CAFE_MESSAGE_ID.test(authorization.sourceMessageId)) {
+    return blocked(
+      'authorization_source_invalid',
+      'request_authorization',
+      true,
+      'Authorization source must be a canonical Clowder AI messageId, not narrative text.',
+    );
+  }
+  if (String(authorization.subjectRef ?? '').toLowerCase() !== expectedSubject) {
+    return blocked(
+      'authorization_subject_mismatch',
+      'request_authorization',
+      true,
+      `Authorization subject must be ${expectedSubject}.`,
+    );
+  }
+  if (authorization.scope === 'pull_request') {
+    return {
+      authorizationContinuity:
+        authorization.authorizedHead && authorization.authorizedHead !== expectedHead
+          ? 'valid_across_head'
+          : 'valid_same_head',
+    };
+  }
+  if (authorization.scope === 'exact_head' && authorization.authorizedHead === expectedHead) {
+    return { authorizationContinuity: 'valid_same_head' };
+  }
+  if (authorization.scope === 'exact_head') {
+    return blocked(
+      'authorization_head_stale',
+      'request_authorization',
+      true,
+      'The authorization was explicitly exact-HEAD scoped and does not cover the current HEAD.',
+    );
+  }
+  return blocked(
+    'authorization_scope_invalid',
+    'request_authorization',
+    true,
+    'Authorization scope must be pull_request or exact_head.',
+  );
+}
+
+function validateIntakePlan(intakePlan, prNumber) {
+  if (!intakePlan?.decision) {
+    return blocked(
+      'intake_plan_missing',
+      'declare_intake_plan',
+      false,
+      'Source merge requires the existing intake decision that will be recorded after merge.',
+    );
+  }
+  if (!INTAKE_DECISIONS.has(intakePlan.decision)) {
+    return blocked(
+      'intake_decision_invalid',
+      'declare_intake_plan',
+      false,
+      'Intake decision must be absorbed, public-only, or rejected.',
+    );
+  }
+  if (
+    intakePlan.decision === 'absorbed' &&
+    (!Number.isInteger(intakePlan.intentIssue) || intakePlan.intentIssue <= 0)
+  ) {
+    return blocked(
+      'intake_intent_issue_missing',
+      'create_intake_intent_issue',
+      false,
+      'An absorbed decision requires a positive Clowder AI Intake Intent Issue number before source merge.',
+    );
+  }
+  if (intakePlan.decision === 'absorbed') {
+    const truth = intakePlan.intentIssueTruth;
+    if (!truth) {
+      return blocked(
+        'intake_intent_issue_unavailable',
+        'refresh_intake_intent_issue',
+        false,
+        'The Intake Intent Issue could not be verified from GitHub truth.',
+      );
+    }
+    if (truth.state !== 'OPEN') {
+      return blocked(
+        'intake_intent_issue_not_open',
+        'fix_intake_intent_issue',
+        false,
+        'The Intake Intent Issue must be open when the source PR is merged.',
+      );
+    }
+    const labels = Array.isArray(truth.labels)
+      ? truth.labels.map((label) => String(label?.name ?? label).toLowerCase())
+      : [];
+    if (!labels.includes('intake')) {
+      return blocked(
+        'intake_intent_issue_label_missing',
+        'fix_intake_intent_issue',
+        false,
+        'The Intake Intent Issue must carry the existing intake label.',
+      );
+    }
+    const body = String(truth.body ?? '').toLowerCase();
+    const sourceRef = new RegExp(
+      String.raw`(?:clowder-ai#${prNumber}\b|/${CLOWDER_REPOSITORY.replaceAll('.', '\\.')}/pull/${prNumber}\b)`,
+    );
+    if (!sourceRef.test(body)) {
+      return blocked(
+        'intake_intent_issue_source_mismatch',
+        'fix_intake_intent_issue',
+        false,
+        `The Intake Intent Issue must reference source PR clowder-ai#${prNumber}.`,
+      );
+    }
+  }
+  return {
+    decision: intakePlan.decision,
+    intentIssue: intakePlan.decision === 'absorbed' ? intakePlan.intentIssue : null,
+  };
+}
+
+function validatePrTruth(prTruth, expectedHead, statusCheckObservation) {
+  if (prTruth?.state !== 'OPEN') {
+    return blocked(
+      'pr_not_open',
+      'inspect_pr_truth',
+      false,
+      `PR state is ${prTruth?.state ?? 'unknown'}; no merge execution is admitted.`,
+    );
+  }
+  if (prTruth.headRefOid !== expectedHead) {
+    return blocked(
+      'pr_head_mismatch',
+      'refresh_pr_truth',
+      false,
+      'Expected HEAD does not match current GitHub PR truth. Refresh gate evidence; do not refresh authorization.',
+    );
+  }
+  if (prTruth.mergeable === 'CONFLICTING') {
+    return blocked(
+      'merge_conflict',
+      'resolve_conflict',
+      false,
+      'The PR has a real merge conflict. Resolve the conflict and refresh gate evidence; authorization remains separate.',
+    );
+  }
+  if (prTruth.mergeable !== 'MERGEABLE') {
+    return blocked(
+      'mergeability_unknown',
+      'refresh_pr_truth',
+      false,
+      `PR mergeability is ${prTruth.mergeable ?? 'unknown'}; refresh GitHub truth before execution.`,
+    );
+  }
+
+  const checks = classifyStatusChecks(prTruth.statusCheckRollup, statusCheckObservation, expectedHead);
+  if (checks === 'unavailable') {
+    return blocked(
+      'checks_unavailable',
+      'refresh_pr_truth',
+      false,
+      'No status-check truth is available for the current HEAD. Refresh gate evidence; authorization remains valid.',
+    );
+  }
+  if (checks === 'pending') {
+    return blocked(
+      'checks_pending',
+      'wait_for_ci',
+      false,
+      'Status checks are still pending for the current HEAD. Wait for CI; do not request merge authorization again.',
+    );
+  }
+  if (checks === 'failed') {
+    return blocked(
+      'checks_failed',
+      'fix_ci',
+      false,
+      'At least one status check failed for the current HEAD. Fix CI; do not request merge authorization again.',
+    );
+  }
+  return null;
+}
+
+/**
+ * Separate durable merge authorization from mutable PR gate evidence.
+ *
+ * The caller must ground authorization.sourceMessageId as direct operator evidence
+ * before calling this function. This planner owns continuity and transport:
+ * a pull-request-scoped grant survives HEAD changes, an exact-HEAD grant does
+ * not, and clowder-ai always uses the repository-required admin transport.
+ */
+export function planClowderMergeExecution({
+  repository,
+  prNumber,
+  expectedHead,
+  prTruth,
+  statusCheckObservation,
+  authorization,
+  intakePlan,
+}) {
+  const invocation = validateInvocation(repository, prNumber, expectedHead);
+  if (invocation.outcome === 'blocked') return invocation;
+
+  const intakeResult = validateIntakePlan(intakePlan, prNumber);
+  if (intakeResult.outcome === 'blocked') return intakeResult;
+
+  const expectedSubject = canonicalSubjectRef(invocation.normalizedRepository, prNumber);
+  const authorizationResult = validateAuthorization(authorization, expectedSubject, expectedHead);
+  if (authorizationResult.outcome === 'blocked') return authorizationResult;
+  const authorizationKey = `merge:${expectedSubject}:${authorization.sourceMessageId}`;
+  const subjectFreshnessKey = `head:${expectedHead}`;
+
+  const prTruthBlock = validatePrTruth(prTruth, expectedHead, statusCheckObservation);
+  if (prTruthBlock) {
+    return {
+      ...prTruthBlock,
+      authorizationContinuity: authorizationResult.authorizationContinuity,
+      authorizationKey,
+      subjectFreshnessKey,
+    };
+  }
+
+  return {
+    outcome: 'admitted',
+    reasonCode: 'authorized_admin_transport',
+    nextAction: 'execute',
+    requiresNewAuthorization: false,
+    authorizationContinuity: authorizationResult.authorizationContinuity,
+    authorizationKey,
+    subjectFreshnessKey,
+    intakePlan: intakeResult,
+    postMergeNextAction:
+      intakeResult.decision === 'absorbed'
+        ? 'complete_absorbed_intake_and_advance_ledger'
+        : 'record_intake_decision_and_advance_ledger',
+    transport: {
+      admin: true,
+      reason: 'clowder_repository_policy',
+    },
+    command: [
+      'gh',
+      'pr',
+      'merge',
+      String(prNumber),
+      '--repo',
+      CLOWDER_REPOSITORY,
+      '--squash',
+      '--admin',
+      '--match-head-commit',
+      expectedHead,
+    ],
+    detail:
+      prTruth.mergeStateStatus === 'BLOCKED'
+        ? 'GitHub ruleset BLOCKED is handled by the required admin transport; it is not a new authorization edge.'
+        : 'Authorization and current PR truth are valid for merge execution.',
+  };
+}
+
+function parseArgs(argv) {
+  const args = {};
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (!token?.startsWith('--')) continue;
+    const value = argv[index + 1];
+    if (value === undefined || value.startsWith('--')) {
+      args[token.slice(2)] = true;
+    } else {
+      args[token.slice(2)] = value;
+      index += 1;
+    }
+  }
+  return args;
+}
+
+function readPrTruth(prNumber) {
+  const fixturePath = process.env.CAT_CAFE_CLOWDER_MERGE_PR_FIXTURE;
+  let raw;
+  if (fixturePath) {
+    raw = readFileSync(fixturePath, 'utf8');
+  } else {
+    raw = execFileSync(
+      'gh',
+      [
+        'pr',
+        'view',
+        String(prNumber),
+        '--repo',
+        CLOWDER_REPOSITORY,
+        '--json',
+        'state,headRefOid,mergeable,mergeStateStatus,statusCheckRollup',
+      ],
+      { encoding: 'utf8' },
+    );
+  }
+  return JSON.parse(raw);
+}
+
+function readIntakeIntentTruth(issueNumber) {
+  const fixturePath = process.env.CAT_CAFE_CLOWDER_MERGE_INTAKE_FIXTURE;
+  let raw;
+  if (fixturePath) {
+    raw = readFileSync(fixturePath, 'utf8');
+  } else {
+    raw = execFileSync(
+      'gh',
+      ['issue', 'view', String(issueNumber), '--repo', CAT_CAFE_REPOSITORY, '--json', 'state,labels,body,url'],
+      { encoding: 'utf8' },
+    );
+  }
+  return JSON.parse(raw);
+}
+
+function usage() {
+  return (
+    'usage: clowder-merge-execution.mjs --pr <N> --head <SHA> ' +
+    '--authorization-ref <messageId> --authorization-subject <pr:repo#N> ' +
+    '--authorization-scope <pull_request|exact_head> --intake-decision <absorbed|public-only|rejected> ' +
+    '[--intake-intent-issue <N>] [--authorized-head <SHA>] [--execute] [--prepare-intake --intake-config <JSON>]'
+  );
+}
+
+// The public merge planner is portable. Automatic source intake is a distinct
+// home capability and must be available before any source merge is attempted.
+async function loadSourceIntakeChain(homeDir) {
+  const modulePath = resolve(homeDir, 'scripts/lib/intake-source-chain.mjs');
+  if (!existsSync(modulePath)) throw new Error('automatic_intake_unavailable');
+  return import(pathToFileURL(modulePath).href);
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const prNumber = Number(args.pr);
+  if (
+    !Number.isInteger(prNumber) ||
+    !args.head ||
+    !args['authorization-ref'] ||
+    !args['authorization-subject'] ||
+    !args['authorization-scope']
+  ) {
+    console.error(usage());
+    process.exit(2);
+  }
+
+  if (args.execute && args['intake-decision'] === 'absorbed' && (args['prepare-intake'] || args['intake-config'])) {
+    if (!args['intake-config']) throw new Error('automatic_intake_config_required_before_source_merge');
+    const homeDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+    const { executeSourceIntakeChain } = await loadSourceIntakeChain(homeDir);
+    const result = await executeSourceIntakeChain({
+      args,
+      config: JSON.parse(readFileSync(args['intake-config'], 'utf8')),
+      homeDir,
+      sourceDir: resolve(args['source-dir'] ?? resolve(homeDir, '../clowder-ai')),
+      planMerge: planClowderMergeExecution,
+    });
+    console.log(JSON.stringify(result));
+    return;
+  }
+
+  let prTruth;
+  let statusCheckObservation = null;
+  try {
+    if (process.env.CAT_CAFE_CLOWDER_MERGE_PR_FIXTURE) {
+      prTruth = readPrTruth(prNumber);
+    } else {
+      ({ prTruth, statusCheckObservation } = await observeMergePrTruth(prNumber, { readPrTruth }));
+    }
+  } catch (error) {
+    const result = blocked(
+      'pr_truth_unavailable',
+      'refresh_pr_truth',
+      false,
+      `Unable to read GitHub PR truth: ${String(error.stderr ?? error.message ?? error).trim()}`,
+    );
+    console.log(JSON.stringify(result));
+    process.exit(1);
+  }
+
+  let intentIssueTruth;
+  const intakeIntentIssue = Number(args['intake-intent-issue']);
+  if (args['intake-decision'] === 'absorbed' && Number.isInteger(intakeIntentIssue) && intakeIntentIssue > 0) {
+    try {
+      intentIssueTruth = readIntakeIntentTruth(intakeIntentIssue);
+    } catch (error) {
+      const result = blocked(
+        'intake_intent_issue_unavailable',
+        'refresh_intake_intent_issue',
+        false,
+        `Unable to read Clowder AI Intake Intent Issue truth: ${String(error.stderr ?? error.message ?? error).trim()}`,
+      );
+      console.log(JSON.stringify(result));
+      process.exit(1);
+    }
+  }
+
+  const result = planClowderMergeExecution({
+    repository: CLOWDER_REPOSITORY,
+    prNumber,
+    expectedHead: args.head,
+    prTruth,
+    statusCheckObservation,
+    authorization: {
+      sourceMessageId: args['authorization-ref'],
+      subjectRef: args['authorization-subject'],
+      scope: args['authorization-scope'],
+      authorizedHead: args['authorized-head'],
+    },
+    intakePlan: args['intake-decision']
+      ? {
+          decision: args['intake-decision'],
+          intentIssue: intakeIntentIssue || undefined,
+          intentIssueTruth,
+        }
+      : undefined,
+  });
+
+  console.log(JSON.stringify(result));
+  if (result.outcome !== 'admitted') process.exit(1);
+  if (!args.execute) return;
+
+  const execution = spawnSync(result.command[0], result.command.slice(1), { stdio: 'inherit' });
+  process.exit(execution.status ?? 1);
+}
+
+if (
+  process.argv[1] &&
+  existsSync(process.argv[1]) &&
+  fileURLToPath(import.meta.url) === realpathSync(process.argv[1])
+) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

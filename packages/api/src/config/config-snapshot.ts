@@ -1,31 +1,27 @@
-import type { ContextBudget } from '@cat-cafe/shared';
+import type { CatCapacityProjection } from './cat-budgets.js';
 
 export type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
 
 export interface ConfigSnapshot {
   coCreator: {
     name: string;
+    nickname?: string;
     aliases: string[];
     mentionPatterns: string[];
+    timeZone?: string;
     avatar?: string;
     color?: {
       primary: string;
       secondary: string;
     };
   };
-  context: {
-    /** @deprecated Use perCatBudgets for actual limits. This is assembleContext default. */
-    maxMessages: number;
-    /** @deprecated Use perCatBudgets for actual limits. */
-    maxContentLength: number;
-    /** @deprecated Use perCatBudgets for actual limits. This is assembleContext default, overridden per-cat at route time. */
-    maxTotalChars: number;
-    /** @deprecated Use perCatBudgets for actual limits. */
-    maxPromptTokens: number;
-    note: string;
-  };
-  /** Per-cat context budgets (Phase 4.0) — the actual limits used at route time */
-  perCatBudgets: Record<string, ContextBudget>;
+  /**
+   * Per-cat resolved capacity projection (#1208).
+   * Includes source/actionable so Hub can distinguish resolved
+   * from unresolved — unresolved cats show inputCeilingTokens=0 with
+   * source='unresolved' instead of masquerading as real capacity.
+   */
+  perCatCapacities: Record<string, CatCapacityProjection>;
   cli: {
     timeoutMs: number;
     killGraceMs: number;
@@ -52,7 +48,7 @@ export interface ConfigSnapshot {
     string,
     {
       displayName: string;
-      provider: string;
+      clientId: string;
       model: string;
       mcpSupport: boolean;
     }
@@ -85,5 +81,12 @@ export interface ConfigSnapshot {
   f102: {
     embedMode: string;
     abstractiveEnabled: boolean;
+  };
+  /** UI display preferences (bubble expand/collapse defaults) */
+  ui: {
+    bubbleDefaults: {
+      thinking: 'expanded' | 'collapsed';
+      cliOutput: 'expanded' | 'collapsed';
+    };
   };
 }

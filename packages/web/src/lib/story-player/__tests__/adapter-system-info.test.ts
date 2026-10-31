@@ -1,0 +1,186 @@
+/**
+ * F252 adapter — system_info transcript handling.
+ */
+
+import { describe, expect, it } from 'vitest';
+import { adaptTranscriptEvents } from '../adapter';
+import { makeEvent } from './adapter-test-helpers';
+
+describe('F252 adapter — system_info thinking events', () => {
+  it('suppresses hosted workspace semantics but keeps plan visible in timeline replay', () => {
+    const events = [
+      makeEvent(1, 1000, {
+        type: 'provider_signal',
+        content: '{"native":"must-not-render"}',
+        semanticEvent: {
+          v: 1,
+          id: 'review-replay-1',
+          kind: 'review',
+          occurredAt: 1000,
+          reviewId: 'review-1',
+          stage: 'result',
+          summary: '检查完成：没有阻塞项。',
+          provenance: { provider: 'codex', nativeType: 'review/result' },
+        },
+      }),
+      makeEvent(2, 1100, {
+        type: 'provider_signal',
+        content: '{"native":"plan-must-not-render"}',
+        semanticEvent: {
+          v: 1,
+          id: 'plan-replay-1',
+          kind: 'plan',
+          occurredAt: 1100,
+          stage: 'updated',
+          text: 'Locate the contract, then fix it.',
+        },
+      }),
+    ];
+
+    expect(adaptTranscriptEvents(events)).toEqual([
+      expect.objectContaining({
+        type: 'system',
+        role: 'system',
+        content: 'Locate the contract, then fix it.',
+      }),
+    ]);
+  });
+  it('extracts thinking from system_info with JSON { type: "thinking" } content', () => {
+    const events = [
+      makeEvent(1, 1000, {
+        type: 'system_info',
+        content: JSON.stringify({ type: 'thinking', catId: 'opus', text: 'Let me analyze...' }),
+      }),
+    ];
+    const result = adaptTranscriptEvents(events);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      type: 'thinking',
+      role: 'assistant',
+      content: 'Let me analyze...',
+    });
+  });
+
+  it('skips operational system_info instead of rendering raw JSON', () => {
+    const events = [
+      makeEvent(1, 1000, {
+        type: 'system_info',
+        content: JSON.stringify({ type: 'rate_limit', message: 'throttled' }),
+      }),
+      makeEvent(2, 1100, {
+        type: 'system_info',
+        content: JSON.stringify({
+          type: 'mcp_server_status',
+          pendingMeaning: 'deferred_tool_loading',
+          servers: [{ name: 'playwright', status: 'pending' }],
+        }),
+      }),
+    ];
+    const result = adaptTranscriptEvents(events);
+
+    expect(result).toHaveLength(0);
+  });
+
+  it('preserves visible warning system_info as formatted system replay content', () => {
+    const events = [
+      makeEvent(1, 1000, {
+        type: 'system_info',
+        content: JSON.stringify({
+          type: 'warning',
+          presentation: 'user_action_required',
+          catId: 'codex',
+          message: 'Tool output was truncated',
+        }),
+      }),
+    ];
+    const result = adaptTranscriptEvents(events);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      type: 'system',
+      role: 'system',
+      content: '⚠️ Tool output was truncated',
+    });
+  });
+
+  it('preserves visible a2a follow-up system_info as formatted system replay content', () => {
+    const events = [
+      makeEvent(1, 1000, {
+        type: 'system_info',
+        content: JSON.stringify({
+          type: 'a2a_followup_available',
+          mentions: [{ catId: 'codex', mentionedBy: 'opus' }],
+        }),
+      }),
+    ];
+    const result = adaptTranscriptEvents(events);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      type: 'system',
+      role: 'system',
+      content: 'opus @了 codex',
+    });
+  });
+
+  it('excludes internal session continuity from replay speech', () => {
+    const events = [
+      makeEvent(1, 1000, {
+        type: 'system_info',
+        content: JSON.stringify({
+          type: 'session_seal_requested',
+          catId: 'codex',
+          sessionSeq: 3,
+          healthSnapshot: { fillRatio: 0.82 },
+        }),
+      }),
+    ];
+    const result = adaptTranscriptEvents(events);
+
+    expect(result).toEqual([]);
+  });
+
+  it('preserves visible governance blocked system_info as formatted system replay content', () => {
+    const events = [
+      makeEvent(1, 1000, {
+        type: 'system_info',
+        content: JSON.stringify({
+          type: 'governance_blocked',
+          projectPath: '/workspaces/demo',
+          reasonKind: 'needs_confirmation',
+        }),
+      }),
+    ];
+    const result = adaptTranscriptEvents(events);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      type: 'system',
+      role: 'system',
+      content: '项目 /workspaces/demo 治理状态异常',
+    });
+  });
+
+  it('excludes completion diagnostics from replay speech', () => {
+    const events = [
+      makeEvent(1, 1000, {
+        type: 'system_info',
+        content: JSON.stringify({
+          type: 'silent_completion',
+          detail: 'codex completed without a text response after using tools.',
+        }),
+      }),
+    ];
+    const result = adaptTranscriptEvents(events);
+
+    expect(result).toEqual([]);
+  });
+
+  it('skips system_info with non-JSON content instead of rendering internal status text', () => {
+    const events = [makeEvent(1, 1000, { type: 'system_info', content: 'plain text info' })];
+    const result = adaptTranscriptEvents(events);
+
+    expect(result).toHaveLength(0);
+  });
+});

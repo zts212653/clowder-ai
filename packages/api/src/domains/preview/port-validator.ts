@@ -1,9 +1,12 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import type { PortValidationOptions, PortValidationResult } from './types.js';
 
 /** Clowder AI 自身服务端口 — 硬编码保底 */
 export const DEFAULT_EXCLUDED_PORTS = [
   3001,
-  3002, // Hub frontend + API
+  3002, // Hub frontend + API (internal defaults)
+  3003,
+  3004, // Hub frontend + API (public/open-source defaults)
   6398,
   6399, // Redis dev + prod
   18888,
@@ -13,6 +16,7 @@ export const DEFAULT_EXCLUDED_PORTS = [
   9877, // Anthropic proxy (default ANTHROPIC_PROXY_PORT)
   9879, // Whisper, LLM postprocess, TTS
   9880, // Embedding server (embed-api.py)
+  9881, // Audio capture service (F195 audio-service.py)
 ];
 
 /**
@@ -46,9 +50,10 @@ const PORT_MIN = 1024;
 const PORT_MAX = 65535;
 
 export function validatePort(rawPort: number | string, opts: PortValidationOptions = {}): PortValidationResult {
-  const port = typeof rawPort === 'string' ? Number.parseInt(rawPort, 10) : rawPort;
-  if (!Number.isFinite(port)) {
-    return { allowed: false, reason: 'Port must be a valid number' };
+  const normalized = typeof rawPort === 'string' ? rawPort.trim() : rawPort;
+  const port = typeof normalized === 'string' && /^\d+$/.test(normalized) ? Number(normalized) : normalized;
+  if (typeof port !== 'number' || !Number.isInteger(port)) {
+    return { allowed: false, reason: 'Port must be a valid integer' };
   }
 
   const { host, gatewaySelfPort, runtimePorts } = opts;
@@ -67,7 +72,10 @@ export function validatePort(rawPort: number | string, opts: PortValidationOptio
   }
 
   if (excludedPorts.includes(port)) {
-    return { allowed: false, reason: `Port ${port} is excluded (Clowder AI service port)` };
+    return {
+      allowed: false,
+      reason: `Port ${port} is excluded (${deploymentDefaults.brand.displayName} service port)`,
+    };
   }
 
   return { allowed: true };

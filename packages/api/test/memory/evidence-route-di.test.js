@@ -4,7 +4,10 @@
  */
 
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
+import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 
 const MOCK_HINDSIGHT = {
@@ -32,6 +35,55 @@ describe('evidence route DI (IEvidenceStore path)', () => {
       initialize: async () => {},
       ...overrides,
     };
+  }
+
+  async function createPrivateGrantFixture({ ownerUserId = 'owner-1', withSessionAuth = false } = {}) {
+    const calls = [];
+    const mockResolver = {
+      resolve: async (_query, options) => {
+        calls.push(options);
+        return { results: [], sources: [], query: 'private', collectionGroups: [] };
+      },
+    };
+    const privateManifest = {
+      id: 'domain:user-profile',
+      kind: 'domain',
+      name: 'user-profile',
+      displayName: 'User Profile',
+      root: '/synthetic/profile',
+      sensitivity: 'private',
+      ownerUserId,
+      scannerLevel: 0,
+      indexPolicy: { autoRebuild: false },
+      reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: true },
+      createdAt: '2026-07-14T00:00:00Z',
+      updatedAt: '2026-07-14T00:00:00Z',
+    };
+    const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
+    app = Fastify();
+    if (withSessionAuth) {
+      const { sessionAuthPlugin, sessionRoute } = await import('../../dist/infrastructure/session-auth.js');
+      await app.register(cookie);
+      await app.register(sessionAuthPlugin);
+      await app.register(sessionRoute);
+    }
+    await app.register(evidenceRoutes, {
+      hindsightClient: MOCK_HINDSIGHT,
+      sharedBank: 'cat-cafe-shared',
+      evidenceStore: createMockEvidenceStore(),
+      knowledgeResolver: mockResolver,
+      catalog: { list: () => [privateManifest], getRoutable: () => [] },
+    });
+    await app.ready();
+    return calls;
+  }
+
+  function privateSearch(overrides = {}) {
+    return app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=private&dimension=collection&collections=domain:user-profile',
+      ...overrides,
+    });
   }
 
   it('uses IEvidenceStore when provided, skipping Hindsight', async () => {
@@ -80,11 +132,146 @@ describe('evidence route DI (IEvidenceStore path)', () => {
     assert.ok(body.results.length > 0);
     assert.equal(searchQuery, 'prompt audit');
     assert.equal(recallCalled, false, 'Hindsight recall should NOT be called when IEvidenceStore is provided');
-    // P1-2: DI path results must have mapped fields (snippet, confidence, sourceType)
+    // F263 AC-A2: DI path exposes explicit result axes, never overloaded confidence.
     const r = body.results[0];
     assert.ok('snippet' in r, 'DI evidence result must have snippet');
-    assert.ok('confidence' in r, 'DI evidence result must have confidence');
+    assert.equal(r.matchRank, 'high');
+    assert.equal(r.confidence, undefined);
+    assert.ok('updatedAt' in r, 'DI evidence result must preserve freshness');
     assert.ok('sourceType' in r, 'DI evidence result must have sourceType');
+  });
+
+  it('preserves entity match explanations in search results', async () => {
+    const mockStore = createMockEvidenceStore({
+      search: async () => [
+        {
+          anchor: 'thread:vision',
+          kind: 'thread',
+          status: 'active',
+          title: 'Vision discussion',
+          summary: 'operator asked about entity anchors',
+          updatedAt: new Date().toISOString(),
+          matchReason: 'entity:person:operator',
+          entityMatches: [
+            {
+              entityId: 'person:operator',
+              type: 'person',
+              canonicalName: 'You',
+              matchedAlias: 'operator',
+              surface: 'co-creator',
+              source: 'passage',
+              docAnchor: 'thread:vision',
+              passageId: 'p1',
+              provenance: [{ source: 'F209 Phase B route contract test' }],
+              why: 'query operator matched entity person:operator via alias co-creator',
+            },
+          ],
+        },
+      ],
+    });
+    const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
+    app = Fastify();
+    await app.register(evidenceRoutes, {
+      hindsightClient: MOCK_HINDSIGHT,
+      sharedBank: 'cat-cafe-shared',
+      evidenceStore: mockStore,
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=operator',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    const match = body.results[0]?.entityMatches?.[0];
+    assert.equal(match?.entityId, 'person:operator');
+    assert.equal(match?.matchedAlias, 'operator');
+    assert.equal(match?.surface, 'co-creator');
+    assert.equal(match?.provenance?.[0]?.source, 'F209 Phase B route contract test');
+    assert.match(match?.why ?? '', /operator.*person:operator.*co-creator/);
+  });
+
+  it('preserves typed drillDown hints in search results', async () => {
+    const mockStore = createMockEvidenceStore({
+      search: async () => [
+        {
+          anchor: 'thread:vision',
+          kind: 'thread',
+          status: 'active',
+          title: 'Vision discussion',
+          summary: 'operator asked about drill-down readers',
+          updatedAt: new Date().toISOString(),
+          drillDown: {
+            tool: 'cat_cafe_get_thread_context',
+            params: { threadId: 'thread_vision', messageId: 'msg-42', before: '3', after: '3' },
+            hint: 'get_thread_context(threadId="thread_vision", messageId="msg-42", before=3, after=3)',
+          },
+        },
+      ],
+    });
+    const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
+    app = Fastify();
+    await app.register(evidenceRoutes, {
+      hindsightClient: MOCK_HINDSIGHT,
+      sharedBank: 'cat-cafe-shared',
+      evidenceStore: mockStore,
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=drill',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    const drillDown = body.results[0]?.drillDown;
+    assert.equal(drillDown?.tool, 'cat_cafe_get_thread_context');
+    assert.equal(drillDown?.params?.threadId, 'thread_vision');
+    assert.equal(drillDown?.params?.messageId, 'msg-42');
+    assert.equal(drillDown?.params?.before, '3');
+    assert.equal(drillDown?.params?.after, '3');
+    assert.match(drillDown?.hint ?? '', /get_thread_context/);
+  });
+
+  it('omits unsafe absolute file-slice drillDown paths from search results', async () => {
+    const absolutePath = join(tmpdir(), 'f209-secret-root', 'docs/source.md');
+    const mockStore = createMockEvidenceStore({
+      search: async () => [
+        {
+          anchor: 'doc:absolute',
+          kind: 'feature',
+          status: 'active',
+          title: 'Absolute path result',
+          summary: 'absolute file-slice path should not leave the API boundary',
+          updatedAt: new Date().toISOString(),
+          drillDown: {
+            tool: 'cat_cafe_read_file_slice',
+            params: { path: absolutePath, startLine: '1', endLine: '120' },
+            hint: `read_file_slice(path="${absolutePath}", startLine=1, endLine=120)`,
+          },
+        },
+      ],
+    });
+    const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
+    app = Fastify();
+    await app.register(evidenceRoutes, {
+      hindsightClient: MOCK_HINDSIGHT,
+      sharedBank: 'cat-cafe-shared',
+      evidenceStore: mockStore,
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=absolute',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.results[0]?.drillDown, undefined);
   });
 
   it('returns 400 for missing q even with IEvidenceStore', async () => {
@@ -130,6 +317,124 @@ describe('evidence route DI (IEvidenceStore path)', () => {
     const body = res.json();
     assert.equal(body.degraded, true);
     assert.equal(body.results.length, 0);
+  });
+
+  it('uses IEvidenceStore.searchWithMeta metadata when available', async () => {
+    const mockStore = createMockEvidenceStore({
+      searchWithMeta: async () => ({
+        items: [],
+        meta: {
+          degraded: true,
+          degradeReason: 'passage_embedding_unavailable',
+          effectiveMode: 'lexical',
+        },
+      }),
+    });
+    const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
+    app = Fastify();
+    await app.register(evidenceRoutes, {
+      hindsightClient: MOCK_HINDSIGHT,
+      sharedBank: 'cat-cafe-shared',
+      evidenceStore: mockStore,
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=test&depth=raw&mode=semantic',
+    });
+
+    const body = res.json();
+    assert.equal(body.degraded, true);
+    assert.equal(body.degradeReason, 'passage_embedding_unavailable');
+    assert.equal(body.effectiveMode, 'lexical');
+  });
+
+  it('surfaces raw non-lexical degradation when KnowledgeResolver omits metadata', async () => {
+    const mockStore = createMockEvidenceStore();
+    const mockResolver = {
+      resolve: async () => ({
+        results: [],
+        sources: ['project'],
+        query: 'test',
+      }),
+    };
+    const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
+    app = Fastify();
+    await app.register(evidenceRoutes, {
+      hindsightClient: MOCK_HINDSIGHT,
+      sharedBank: 'cat-cafe-shared',
+      evidenceStore: mockStore,
+      knowledgeResolver: mockResolver,
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=test&depth=raw&mode=semantic&dimension=library',
+    });
+
+    const body = res.json();
+    assert.equal(body.degraded, true);
+    assert.equal(body.degradeReason, 'raw_lexical_only');
+    assert.equal(body.effectiveMode, 'lexical');
+  });
+
+  it('does not treat explicit collection query params as private authorization', async () => {
+    const calls = await createPrivateGrantFixture();
+    await privateSearch();
+    assert.deepEqual(calls[0].authorizedCollections, [], 'query params cannot self-grant private access');
+  });
+
+  it('allows an explicitly trusted direct-loopback MCP identity header', async () => {
+    const calls = await createPrivateGrantFixture();
+    await privateSearch({ headers: { 'x-cat-cafe-user': 'owner-1' } });
+    assert.deepEqual(calls[0].authorizedCollections, ['domain:user-profile']);
+  });
+
+  it('denies a caller-controlled identity header from a remote peer', async () => {
+    const calls = await createPrivateGrantFixture();
+    await privateSearch({
+      remoteAddress: '192.168.1.50',
+      headers: { 'x-cat-cafe-user': 'owner-1' },
+    });
+    assert.deepEqual(calls[0].authorizedCollections, []);
+  });
+
+  it('denies a caller-controlled identity header through a loopback proxy', async () => {
+    const calls = await createPrivateGrantFixture();
+    await privateSearch({
+      headers: { 'x-cat-cafe-user': 'owner-1', 'x-forwarded-for': '192.168.1.50' },
+    });
+    assert.deepEqual(calls[0].authorizedCollections, []);
+  });
+
+  it('allows a direct-loopback owner session established by the real session plugin', async () => {
+    const calls = await createPrivateGrantFixture({ ownerUserId: 'default-user', withSessionAuth: true });
+    const session = await app.inject({ method: 'GET', url: '/api/session' });
+    const cookieHeader = session.headers['set-cookie']?.split(';')[0];
+    assert.ok(cookieHeader, 'local session establishment must return a cookie');
+
+    await privateSearch({ headers: { cookie: cookieHeader } });
+    assert.deepEqual(calls[0].authorizedCollections, ['domain:user-profile']);
+  });
+
+  it('denies an anonymous remote /api/session cookie replay for private recall', async () => {
+    const calls = await createPrivateGrantFixture({ ownerUserId: 'default-user', withSessionAuth: true });
+    const session = await app.inject({
+      method: 'GET',
+      url: '/api/session',
+      remoteAddress: '192.168.1.50',
+    });
+    assert.equal(session.statusCode, 200);
+    const cookieHeader = session.headers['set-cookie']?.split(';')[0];
+    assert.ok(cookieHeader, 'current LAN session route mints a cookie for the anonymous caller');
+
+    await privateSearch({
+      remoteAddress: '192.168.1.50',
+      headers: { cookie: cookieHeader },
+    });
+    assert.deepEqual(calls[0].authorizedCollections, [], 'anonymous LAN session must not become private owner auth');
   });
 });
 

@@ -1,0 +1,226 @@
+import type { CatId, ConnectorSource, MessageFrom } from '@cat-cafe/shared';
+import { getCoCreatorConfig } from '../../../../../config/cat-config-loader.js';
+import { getCoCreatorDisplay } from '../../../../../config/co-creator-display.js';
+import { getMessageSpeakerName, getSenderName } from '../../context/ContextAssembler.js';
+import { renderSegment } from '../../context/prompt-template-loader.js';
+import { formatPromptTime } from '../../format-time.js';
+import { messageFrom } from '../../stores/message-from.js';
+import type { ThreadExecutionSituation } from '../invocation/thread-execution-situation.js';
+import { formatThreadContextDrill } from './thread-drill-pointer.js';
+
+export interface BatonContext {
+  fromMessageId: string;
+  fromSpeaker: string;
+  fromSpeakerDisplay: string;
+  timestamp: number;
+  mentionExcerpt: string;
+  staleHoldWarning: boolean;
+}
+
+export function extractBatonContext(
+  messages: Array<{
+    id: string;
+    catId: CatId | null;
+    from?: MessageFrom;
+    content: string;
+    timestamp: number;
+    userId: string;
+    origin?: 'stream' | 'callback' | 'briefing';
+    mentions?: readonly string[];
+    source?: ConnectorSource;
+  }>,
+  targetCatId: string,
+): BatonContext | null {
+  const mentionPattern = new RegExp(`@${targetCatId}\\b`);
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    const mentioned =
+      m.mentions && m.mentions.length > 0 ? m.mentions.includes(targetCatId) : mentionPattern.test(m.content);
+    if (!mentioned) continue;
+
+    const from = messageFrom(m);
+    const fromSpeaker =
+      from.kind === 'user'
+        ? 'user'
+        : from.kind === 'agent'
+          ? from.catId
+          : from.kind === 'external'
+            ? `external:${from.connectorId}:${from.sender?.id ?? ''}`
+            : from.kind === 'plugin'
+              ? `plugin:${from.instanceId}`
+              : `system:${from.service}`;
+
+    const excerpt = m.content
+      .split('\n')[0]
+      .replace(/@[\p{L}\p{N}_-]+/gu, '')
+      .trim();
+
+    return {
+      fromMessageId: m.id,
+      fromSpeaker,
+      fromSpeakerDisplay: getMessageSpeakerName(m),
+      timestamp: m.timestamp,
+      mentionExcerpt: excerpt,
+      // Navigation presents provenance. Only an explicit custody action can supersede a hold.
+      staleHoldWarning: false,
+    };
+  }
+  return null;
+}
+
+export interface TaskSummary {
+  id: string;
+  title: string;
+  status: string;
+  ownerCatId: string | null;
+  /** Thread/owner-level registered wait; undefined means the read was unavailable. */
+  hasActiveWait?: boolean;
+}
+
+export function summarizeActiveTasks(
+  tasks: Array<{ id: string; title: string; status: string; ownerCatId: string | null; updatedAt: number }>,
+): TaskSummary[] {
+  return tasks
+    .filter((t) => t.status !== 'done')
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 3)
+    .map(({ id, title, status, ownerCatId }) => ({ id, title, status, ownerCatId }));
+}
+
+export interface NavigationArtifact {
+  type: string;
+  ref: string;
+  label: string;
+  updatedBy: string;
+}
+
+export interface TruthSourceInfo {
+  label: string;
+  ref: string;
+  provenance: 'canonical' | 'regex' | 'recency';
+}
+
+export interface NavigationContext {
+  threadId?: string;
+  currentCatId?: string;
+  baton: BatonContext | null;
+  tasks: TaskSummary[];
+  executionSituation?: ThreadExecutionSituation;
+  artifacts?: NavigationArtifact[];
+  truthSource?: TruthSourceInfo | null;
+  bestNextSource?: string;
+  recentWorkDirectory?: boolean;
+  /** Explicit original roadmap pointer; never a directive or custody grant. */
+  roadmapPointer?: string;
+}
+
+export interface NavigationFormatOptions {
+  nowMs?: number;
+}
+
+function situationSourceLabel(from: import('@cat-cafe/shared').MessageFrom): string {
+  switch (from.kind) {
+    case 'user':
+      return `${getCoCreatorDisplay().nickname}`;
+    case 'agent':
+      return getSenderName(from.catId);
+    case 'external':
+      return `external:${from.connectorId}`;
+    case 'plugin':
+      return `plugin:${from.instanceId}`;
+    case 'system':
+      return `system:${from.service}`;
+  }
+}
+
+/**
+ * Build navigation inner content (conditional blocks).
+ * Template envelope ([导航]...[/导航]) is in n1-navigation.md.
+ */
+function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormatOptions): string {
+  const lines: string[] = [];
+  const coCreatorTimeZone = getCoCreatorConfig().timeZone;
+  const nowMs = options?.nowMs;
+  if (ctx.recentWorkDirectory) {
+    lines.push(
+      '近期工作线: 用户提到本线程外的“那个X/上次的Y” → cat_cafe_list_threads({ includeWork: true }) 按标题+毛线球认线；别只拿原话当keyword；近期没找到≠不存在。',
+    );
+  }
+
+  if (typeof nowMs === 'number') {
+    lines.push(
+      `当前时间: ${formatPromptTime(nowMs, { timeZone: coCreatorTimeZone })} (relative terms use this now; refreshed per invocation)`,
+    );
+  }
+
+  if (ctx.baton) {
+    const timeStr = formatPromptTime(ctx.baton.timestamp, { timeZone: coCreatorTimeZone });
+    lines.push(`传球: ${ctx.baton.fromSpeakerDisplay} → 你 (${timeStr})`);
+    if (ctx.baton.mentionExcerpt) {
+      lines.push(`原文: "${ctx.baton.mentionExcerpt}"`);
+    }
+    if (ctx.baton.staleHoldWarning) {
+      lines.push(`⚠️ ${ctx.baton.fromSpeakerDisplay} 之前说过"别动/等等"，但已传球给你——以传球为准`);
+    }
+  }
+
+  if (ctx.tasks.length > 0) {
+    lines.push('活跃毛线球:');
+    for (const t of ctx.tasks) {
+      const owner = t.ownerCatId ? `@${t.ownerCatId}` : '未分配';
+      const waitFact =
+        t.ownerCatId === ctx.currentCatId && t.status !== 'done' && t.hasActiveWait === false ? ' [未挂等待]' : '';
+      lines.push(`  - [${t.status}] ${t.title} (${owner})${waitFact}`);
+    }
+  }
+
+  if (ctx.executionSituation) {
+    const visibleRuns = ctx.executionSituation.activeRuns.filter((run) => run.targetId !== ctx.currentCatId);
+    if (!ctx.executionSituation.complete) {
+      lines.push('成员运行态: 当前无法完整验证（不按最近发言推断）');
+    } else if (visibleRuns.length === 0) {
+      lines.push('成员运行态: 当前无其他成员执行');
+    } else {
+      lines.push('成员运行态（生命周期真相）:');
+      for (const run of visibleRuns) {
+        const sources = run.sources
+          .map((source) => `${source.messageId} ← ${situationSourceLabel(source.from)}`)
+          .join(', ');
+        lines.push(
+          `  - [processing] ${getSenderName(run.targetId)} (${run.targetId}) · 来源 ${sources} · response=${run.responseMessageId} · invocation=${run.invocationId}`,
+        );
+      }
+    }
+  }
+
+  if (ctx.artifacts && ctx.artifacts.length > 0) {
+    lines.push('最近产物:');
+    for (const a of ctx.artifacts) {
+      lines.push(`  - [${a.type}] ${a.label} (${a.updatedBy})`);
+    }
+  }
+
+  if (ctx.truthSource !== undefined) {
+    if (ctx.truthSource === null) {
+      const coordinate = ctx.threadId ? `（threadId=${ctx.threadId}）` : '';
+      lines.push(`真相源: 未定位${coordinate}`);
+    } else {
+      const tag = ctx.truthSource.provenance === 'regex' ? ' (推断)' : '';
+      lines.push(`真相源: ${ctx.truthSource.label}${tag} — ${ctx.truthSource.ref}`);
+    }
+    if (ctx.bestNextSource) {
+      lines.push(`下一步: ${ctx.bestNextSource}`);
+    } else if (ctx.truthSource === null && ctx.threadId) {
+      lines.push(`下一步: ${formatThreadContextDrill(ctx.threadId)}`);
+    }
+  }
+
+  if (ctx.roadmapPointer) lines.push(ctx.roadmapPointer);
+  return lines.join('\n');
+}
+
+/* @segment N1 — 导航块 (template: n1-navigation.md) */
+export function formatNavigationHeader(ctx: NavigationContext, options?: NavigationFormatOptions): string {
+  return renderSegment('N1', { INNER_CONTENT: buildNavigationInner(ctx, options) }) ?? '[导航]\n[/导航]';
+}

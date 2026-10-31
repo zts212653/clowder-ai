@@ -1,0 +1,267 @@
+/*
+ * Workspace home, part 2 (F322 original-B; home-northstar §1.8 w1 and §1.12 窄栏 1): search, tool rows, footer, and the narrow
+ * rules driven by the `home` size container declared in `workspace-home-cards.css`. Same scope and rules as part 1.
+ */
+
+/* 工具清单 */
+[data-shell="v2"] .home-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin-bottom: 6px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: var(--shell-paper);
+  box-shadow: inset 0 0 0 1px var(--shell-hairline-strong);
+  color: var(--shell-muted);
+}
+
+[data-shell="v2"] .home-search:focus-within {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 2px;
+}
+
+[data-shell="v2"] .home-search svg {
+  color: var(--shell-muted);
+}
+
+[data-shell="v2"] .home-search input {
+  color: var(--shell-ink);
+}
+
+[data-shell="v2"] .home-search input::placeholder {
+  color: var(--shell-muted);
+}
+
+[data-shell="v2"] .home-group {
+  margin-top: 18px;
+}
+
+[data-shell="v2"] .home-group-title {
+  margin: 0 0 6px 4px;
+  font-weight: 600;
+  color: var(--shell-muted);
+}
+
+[data-shell="v2"] .home-tool-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+[data-shell="v2"] .home-tool {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  height: 48px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  color: var(--shell-muted);
+  cursor: pointer;
+}
+
+[data-shell="v2"] .home-tool:hover {
+  background: color-mix(in srgb, var(--shell-selected) 55%, transparent);
+}
+
+[data-shell="v2"] .home-tool-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--shell-selected);
+  color: var(--shell-ink);
+}
+
+[data-shell="v2"] .home-tool-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+[data-shell="v2"] .home-tool-name {
+  overflow: hidden;
+  font-weight: 500;
+  color: var(--shell-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-shell="v2"] .home-tool-desc {
+  overflow: hidden;
+  color: var(--shell-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-shell="v2"] .home-tool-meta {
+  max-width: 40%;
+  overflow: hidden;
+  color: var(--shell-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-shell="v2"] .home-tool-chevron {
+  flex: none;
+  color: var(--shell-muted);
+}
+
+[data-shell="v2"] .home-signpost {
+  margin: 20px 4px 0;
+  line-height: 1.6;
+  color: var(--shell-muted);
+}
+
+[data-shell="v2"] .home-signpost p {
+  margin: 0 0 6px;
+}
+
+[data-shell="v2"] .home-inline-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--shell-primary-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+[data-shell="v2"] .home-empty-search {
+  margin-top: 18px;
+  padding: 28px 16px;
+  border: 1px dashed var(--shell-hairline-strong);
+  border-radius: 12px;
+  text-align: center;
+  color: var(--shell-body);
+}
+
+/* 窄栏: 两个一排，只留名字和一个数字；说明字和箭头先让位。 */
+@container home (max-width: 540px) {
+  [data-shell="v2"] .home-column {
+    padding: 12px;
+  }
+
+  [data-shell="v2"] .home-tool-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px 6px;
+  }
+
+  [data-shell="v2"] .home-tool {
+    gap: 8px;
+    min-height: 40px;
+    padding: 4px 8px 4px 4px;
+  }
+
+  [data-shell="v2"] .home-tool-icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  [data-shell="v2"] .home-tool-desc,
+  [data-shell="v2"] .home-tool-chevron {
+    display: none;
+  }
+
+  [data-shell="v2"] .home-tool-text {
+    flex: 0 1 auto;
+  }
+
+  /* A name may take a second line instead of being cut to its first letters: English names ("Files and code", "Status and
+     sessions") are longer than the Chinese ones, and "Chan…" names nothing. */
+  [data-shell="v2"] .home-tool-name {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow-wrap: break-word;
+    line-height: 1.25;
+    white-space: normal;
+  }
+
+  [data-shell="v2"] .home-tool-meta {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+    color: var(--shell-muted);
+    text-align: right;
+  }
+}
+
+/* 窄栏两列（281–380px）: 数量+单位放不下时整体换到工具名称下面——数字不省略、单位不裁掉前缀，名称仍完整；不靠缩字号或悬停。
+   只管"数量"（变更的 N 个文件 / N files）；仓库名、分支名是名字，仍走原来的省略规则。宽栏和 ≤280 一个一排放得下，原样放在行内。 */
+@container home (min-width: 281px) and (max-width: 380px) {
+  [data-shell="v2"] .home-tool[data-meta-kind="count"] {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    align-items: center;
+    column-gap: 8px;
+  }
+
+  [data-shell="v2"] .home-tool[data-meta-kind="count"] .home-tool-icon {
+    grid-row: 1 / span 2;
+  }
+
+  [data-shell="v2"] .home-tool[data-meta-kind="count"] .home-tool-text {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  [data-shell="v2"] .home-tool[data-meta-kind="count"] .home-tool-meta {
+    grid-column: 2;
+    grid-row: 2;
+    overflow: visible;
+    text-align: left;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
+}
+
+/* 极窄: 两个一排连最长的一个词（Trajectory）都放不下时，一个一排：名字完整，数字照旧，不收进「更多」。 */
+@container home (max-width: 280px) {
+  [data-shell="v2"] .home-tool-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 拖到最窄: 一行放不下按钮时，按钮换到名字下面一行，不收进「更多」。 */
+@container home (max-width: 380px) {
+  /* The 当前对话 / Current conversation mark drops under the name when both do not fit, instead of squeezing the name to its
+     first letter. */
+  [data-shell="v2"] .home-live-name {
+    flex-wrap: wrap;
+    gap: 2px 6px;
+  }
+
+  [data-shell="v2"] .home-live-name-text {
+    max-width: 100%;
+  }
+
+  [data-shell="v2"] .home-badge {
+    margin-left: 0;
+  }
+
+  [data-shell="v2"] .home-live-main {
+    flex-wrap: wrap;
+  }
+
+  /* On its own line, indented under the name: 100% of the line minus that indent, never 100% plus it. */
+  [data-shell="v2"] .home-live-main > .home-actions {
+    flex: 0 1 calc(100% - 32px);
+    flex-wrap: wrap;
+    min-width: 0;
+    margin-left: 32px;
+  }
+}

@@ -6,7 +6,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { transformClaudeEvent } = await import('../dist/domains/cats/services/agents/providers/claude-ndjson-parser.js');
+const { isResultErrorEvent, transformClaudeEvent } = await import(
+  '../dist/domains/cats/services/agents/providers/claude-ndjson-parser.js'
+);
 
 const CAT = 'opus';
 
@@ -32,6 +34,93 @@ test('system/init → session_init', () => {
   assert.equal(result.sessionId, 'sess-abc');
 });
 
+test('system/init with array mcp_servers → session_init + system_info(mcp_server_status)', () => {
+  const state = makeStreamState();
+  const event = {
+    type: 'system',
+    subtype: 'init',
+    session_id: 'sess-mcp',
+    mcp_servers: [
+      { name: 'MCP_DOCKER', status: 'pending' },
+      { name: 'playwright', status: 'connected' },
+      { name: 'jetbrains', status: 'failed' },
+      { name: 'plugin:figma:figma', status: 'disabled' },
+      { name: 'claude.ai Gmail', status: 'needs-auth' },
+      { name: 'ignored_unknown_status', status: 'connecting' },
+      { name: '', status: 'pending' },
+      { status: 'pending' },
+    ],
+  };
+
+  const result = transformClaudeEvent(event, CAT, state);
+
+  assert.ok(Array.isArray(result), 'mcp status telemetry should accompany session_init');
+  assert.equal(result.length, 2);
+  assert.equal(result[0].type, 'session_init');
+  assert.equal(result[0].sessionId, 'sess-mcp');
+  assert.equal(result[1].type, 'system_info');
+
+  const parsed = JSON.parse(result[1].content);
+  assert.equal(parsed.type, 'mcp_server_status');
+  assert.equal(parsed.provider, 'claude');
+  assert.equal(parsed.catId, CAT);
+  assert.equal(parsed.sessionId, 'sess-mcp');
+  assert.equal(parsed.pendingMeaning, 'deferred_tool_loading');
+  assert.deepEqual(parsed.counts, {
+    connected: 1,
+    pending: 1,
+    failed: 1,
+    disabled: 1,
+    'needs-auth': 1,
+  });
+  assert.deepEqual(parsed.pendingServers, ['MCP_DOCKER']);
+  assert.deepEqual(parsed.failedServers, ['jetbrains']);
+  assert.deepEqual(parsed.needsAuthServers, ['claude.ai Gmail']);
+  assert.deepEqual(
+    parsed.servers.map((server) => [server.name, server.status]),
+    [
+      ['MCP_DOCKER', 'pending'],
+      ['playwright', 'connected'],
+      ['jetbrains', 'failed'],
+      ['plugin:figma:figma', 'disabled'],
+      ['claude.ai Gmail', 'needs-auth'],
+    ],
+  );
+});
+
+test('system/init with object mcp_servers keeps backward-compatible telemetry parsing', () => {
+  const state = makeStreamState();
+  const event = {
+    type: 'system',
+    subtype: 'init',
+    session_id: 'sess-mcp-object',
+    mcp_servers: {
+      MCP_DOCKER: 'pending',
+      future_object_shape: { status: 'pending' },
+      ignored_unknown_status: 'connecting',
+    },
+  };
+
+  const result = transformClaudeEvent(event, CAT, state);
+
+  assert.ok(Array.isArray(result), 'mcp status telemetry should accompany session_init');
+  const parsed = JSON.parse(result[1].content);
+  assert.deepEqual(parsed.counts, {
+    connected: 0,
+    pending: 2,
+    failed: 0,
+    disabled: 0,
+    'needs-auth': 0,
+  });
+  assert.deepEqual(
+    parsed.servers.map((server) => [server.name, server.status]),
+    [
+      ['MCP_DOCKER', 'pending'],
+      ['future_object_shape', 'pending'],
+    ],
+  );
+});
+
 test('stream_event text_delta → text', () => {
   const state = makeStreamState();
   state.currentMessageId = 'msg-1';
@@ -55,7 +144,7 @@ test('assistant tool_use → tool_use', () => {
     type: 'assistant',
     message: {
       id: 'msg-2',
-      content: [{ type: 'tool_use', name: 'bash', input: { command: 'ls' } }],
+      content: [{ type: 'tool_use', id: 'toolu_123', name: 'bash', input: { command: 'ls' } }],
     },
   };
   const result = transformClaudeEvent(event, CAT, state);
@@ -64,6 +153,41 @@ test('assistant tool_use → tool_use', () => {
   assert.equal(result.length, 1);
   assert.equal(result[0].type, 'tool_use');
   assert.equal(result[0].toolName, 'bash');
+  assert.equal(result[0].toolUseId, 'toolu_123');
+});
+
+test('synthetic assistant provider payload → structured error, never cat text', () => {
+  const state = makeStreamState();
+  const event = {
+    type: 'assistant',
+    message: {
+      id: 'msg-synthetic-provider-error',
+      model: '<synthetic>',
+      content: [{ type: 'text', text: 'API Error: upstream response — P1: provider-supplied diagnostic' }],
+    },
+  };
+
+  const result = transformClaudeEvent(event, CAT, state);
+
+  assert.ok(result !== null);
+  assert.ok(!Array.isArray(result));
+  assert.equal(result.type, 'error');
+  assert.equal(result.error, 'API Error: upstream response — P1: provider-supplied diagnostic');
+  assert.equal(result.errorDisposition, 'transient');
+});
+
+test('synthetic assistant no-response marker → no cat output', () => {
+  const state = makeStreamState();
+  const event = {
+    type: 'assistant',
+    message: {
+      id: 'msg-synthetic-no-response',
+      model: '<synthetic>',
+      content: [{ type: 'text', text: 'No response requested.' }],
+    },
+  };
+
+  assert.equal(transformClaudeEvent(event, CAT, state), null);
 });
 
 test('result/error → error', () => {
@@ -235,6 +359,26 @@ test('result error_during_execution → error with errorSubtype in content', () 
   assert.equal(parsed.errorSubtype, 'error_during_execution');
 });
 
+test('result success + is_error:true → error using result text (Claude A2 shape)', () => {
+  const state = makeStreamState();
+  const event = {
+    type: 'result',
+    subtype: 'success',
+    is_error: true,
+    result: "The model's tool call could not be parsed (retry also failed).",
+    errors: null,
+  };
+  assert.equal(isResultErrorEvent(event), true, 'is_error:true is authoritative even when subtype is success');
+  const result = transformClaudeEvent(event, CAT, state);
+  assert.ok(result !== null);
+  assert.ok(!Array.isArray(result));
+  assert.equal(result.type, 'error');
+  assert.match(result.error, /could not be parsed/);
+  const parsed = JSON.parse(result.content);
+  assert.equal(parsed.errorSubtype, 'success');
+  assert.equal(parsed.isError, true);
+});
+
 // ─── Issue #24 — error.error should never be "Unknown error" when subtype is known ──
 
 test('error_max_turns with empty errors → error.error should be "Max turns exceeded"', () => {
@@ -281,13 +425,17 @@ test('unknown subtype with empty errors → error.error includes subtype string'
 
 // ─── Task 6 — system events ───────────────────────────────────────────────────
 
-test('system compact_boundary → system_info(compact_boundary) with preTokens', () => {
+test('system compact_boundary → typed provider_signal(compact_boundary) with preTokens', () => {
   const state = makeStreamState();
   const event = { type: 'system', subtype: 'compact_boundary', pre_tokens: 42000 };
   const result = transformClaudeEvent(event, CAT, state);
   assert.ok(result !== null);
   assert.ok(!Array.isArray(result));
-  assert.equal(result.type, 'system_info');
+  assert.equal(result.type, 'provider_signal');
+  assert.deepEqual(result.contextCompaction, {
+    eventSource: 'claude_compact_boundary',
+    preTokens: 42000,
+  });
   assert.equal(result.catId, CAT);
   const parsed = JSON.parse(result.content);
   assert.equal(parsed.type, 'compact_boundary');
@@ -312,4 +460,272 @@ test('rate_limit_event → system_info(rate_limit) with utilization and resetsAt
   assert.equal(parsed.catId, CAT);
   assert.equal(parsed.utilization, 0.87);
   assert.equal(parsed.resetsAt, '2026-02-27T12:00:00Z');
+});
+
+// ── Empty text suppression in assistant events (empty bubble fix) ──
+
+test('assistant event with only empty text block → null (no empty bubble)', () => {
+  const state = makeStreamState();
+  const event = {
+    type: 'assistant',
+    message: {
+      id: 'msg-empty',
+      content: [{ type: 'text', text: '' }],
+    },
+  };
+  const result = transformClaudeEvent(event, CAT, state);
+  assert.equal(result, null, 'assistant event with only empty text block should return null');
+});
+
+// ── #778 + #805 review P3-4: thinking-only assistant message fixture ──
+// Real Claude non-streaming response where content = [{ type: 'thinking', thinking: '...' }]
+// with no text or tool_use blocks. This is the exact pattern that caused silent_completion
+// before the #778 fix. Serves as regression test for Claude API spec drift.
+
+test('assistant thinking-only message → system_info(thinking) (non-streaming fixture)', () => {
+  const state = makeStreamState();
+  // Real Claude API shape: content block has `type: 'thinking'` and `thinking: '...'` field
+  const event = {
+    type: 'assistant',
+    message: {
+      id: 'msg-thinking-only',
+      content: [
+        {
+          type: 'thinking',
+          thinking: 'I need to analyze this problem step by step...',
+        },
+      ],
+    },
+  };
+  const result = transformClaudeEvent(event, CAT, state);
+  assert.ok(result !== null, 'thinking-only message must not return null');
+  assert.ok(!Array.isArray(result), 'should return single message');
+  assert.equal(result.type, 'system_info');
+  assert.equal(result.catId, CAT);
+  const parsed = JSON.parse(result.content);
+  assert.equal(parsed.type, 'thinking');
+  assert.equal(parsed.catId, CAT);
+  assert.equal(parsed.text, 'I need to analyze this problem step by step...');
+});
+
+test('assistant thinking-only with `text` field fallback → system_info(thinking)', () => {
+  const state = makeStreamState();
+  // Some API versions may use `text` instead of `thinking` field
+  const event = {
+    type: 'assistant',
+    message: {
+      id: 'msg-thinking-text-fallback',
+      content: [
+        {
+          type: 'thinking',
+          text: 'Fallback thinking content',
+        },
+      ],
+    },
+  };
+  const result = transformClaudeEvent(event, CAT, state);
+  assert.ok(result !== null, 'thinking-only (text fallback) must not return null');
+  assert.ok(!Array.isArray(result));
+  assert.equal(result.type, 'system_info');
+  const parsed = JSON.parse(result.content);
+  assert.equal(parsed.text, 'Fallback thinking content');
+});
+
+test('assistant event with empty text block alongside tool_use → only tool_use returned', () => {
+  const state = makeStreamState();
+  const event = {
+    type: 'assistant',
+    message: {
+      id: 'msg-mix',
+      content: [
+        { type: 'text', text: '' },
+        { type: 'tool_use', name: 'bash', input: { command: 'ls' } },
+      ],
+    },
+  };
+  const result = transformClaudeEvent(event, CAT, state);
+  assert.ok(Array.isArray(result), 'should return array');
+  assert.equal(result.length, 1, 'only tool_use, empty text filtered out');
+  assert.equal(result[0].type, 'tool_use');
+});
+
+test('#1272: streamed text survives thinking-only envelope without final snapshot duplication', () => {
+  const state = makeStreamState();
+  const events = [
+    { type: 'stream_event', event: { type: 'message_start', message: { id: 'msg-1272-thinking' } } },
+    {
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '只应出现一次。' } },
+    },
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg-1272-thinking',
+        content: [{ type: 'thinking', thinking: '继续分析' }],
+      },
+    },
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg-1272-thinking',
+        content: [{ type: 'text', text: '只应出现一次。' }],
+      },
+    },
+  ];
+
+  const output = events.flatMap((event) => {
+    const result = transformClaudeEvent(event, CAT, state);
+    if (result === null) return [];
+    return Array.isArray(result) ? result : [result];
+  });
+
+  assert.deepEqual(
+    output.filter((msg) => msg.type === 'text').map((msg) => msg.content),
+    ['只应出现一次。'],
+  );
+  assert.equal(state.partialTextMessageIds.has('msg-1272-thinking'), false, 'text-bearing snapshot closes the ID');
+});
+
+test('#1272: tool-only envelope retains partial-text ID until the text-bearing snapshot', () => {
+  const state = makeStreamState();
+  const events = [
+    { type: 'stream_event', event: { type: 'message_start', message: { id: 'msg-1272-tool' } } },
+    {
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '正文' } },
+    },
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg-1272-tool',
+        content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { path: 'README.md' } }],
+      },
+    },
+    {
+      type: 'assistant',
+      message: { id: 'msg-1272-tool', content: [{ type: 'text', text: '正文' }] },
+    },
+  ];
+
+  const output = events.flatMap((event) => {
+    const result = transformClaudeEvent(event, CAT, state);
+    if (result === null) return [];
+    return Array.isArray(result) ? result : [result];
+  });
+
+  assert.deepEqual(
+    output.filter((msg) => msg.type === 'text').map((msg) => msg.content),
+    ['正文'],
+  );
+  assert.equal(output.filter((msg) => msg.type === 'tool_use').length, 1, 'tool event remains visible');
+  assert.equal(state.partialTextMessageIds.has('msg-1272-tool'), false);
+});
+
+test('#1272: empty text alongside a tool does not close the partial-text ID', () => {
+  const state = makeStreamState();
+  const events = [
+    { type: 'stream_event', event: { type: 'message_start', message: { id: 'msg-1272-empty-text' } } },
+    {
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '正文' } },
+    },
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg-1272-empty-text',
+        content: [
+          { type: 'text', text: '' },
+          { type: 'tool_use', id: 'tool-empty', name: 'Read', input: { path: 'README.md' } },
+        ],
+      },
+    },
+    {
+      type: 'assistant',
+      message: { id: 'msg-1272-empty-text', content: [{ type: 'text', text: '正文' }] },
+    },
+  ];
+
+  const output = events.flatMap((event) => {
+    const result = transformClaudeEvent(event, CAT, state);
+    if (result === null) return [];
+    return Array.isArray(result) ? result : [result];
+  });
+
+  assert.deepEqual(
+    output.filter((msg) => msg.type === 'text').map((msg) => msg.content),
+    ['正文'],
+  );
+  assert.equal(output.filter((msg) => msg.type === 'tool_use').length, 1);
+  assert.equal(state.partialTextMessageIds.has('msg-1272-empty-text'), false);
+});
+
+test('#1272: text-bearing snapshot closes the ID without hiding a later tool envelope', () => {
+  const state = makeStreamState();
+  const events = [
+    { type: 'stream_event', event: { type: 'message_start', message: { id: 'msg-1272-text-tool' } } },
+    {
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '正文' } },
+    },
+    {
+      type: 'assistant',
+      message: { id: 'msg-1272-text-tool', content: [{ type: 'text', text: '正文' }] },
+    },
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg-1272-text-tool',
+        content: [{ type: 'tool_use', id: 'tool-after-text', name: 'Read', input: { path: 'README.md' } }],
+      },
+    },
+  ];
+
+  const output = events.flatMap((event) => {
+    const result = transformClaudeEvent(event, CAT, state);
+    if (result === null) return [];
+    return Array.isArray(result) ? result : [result];
+  });
+
+  assert.deepEqual(
+    output.filter((msg) => msg.type === 'text').map((msg) => msg.content),
+    ['正文'],
+  );
+  assert.equal(output.filter((msg) => msg.type === 'tool_use').length, 1);
+  assert.equal(state.partialTextMessageIds.has('msg-1272-text-tool'), false);
+});
+
+test('#1272: terminal result clears a partial-text ID left by a thinking-only message', () => {
+  const state = makeStreamState();
+  transformClaudeEvent(
+    { type: 'stream_event', event: { type: 'message_start', message: { id: 'msg-1272-terminal' } } },
+    CAT,
+    state,
+  );
+  transformClaudeEvent(
+    {
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } },
+    },
+    CAT,
+    state,
+  );
+  transformClaudeEvent(
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg-1272-terminal',
+        content: [{ type: 'thinking', thinking: 'no final text follows' }],
+      },
+    },
+    CAT,
+    state,
+  );
+
+  assert.equal(
+    state.partialTextMessageIds.has('msg-1272-terminal'),
+    true,
+    'thinking-only envelope is not a proven text boundary',
+  );
+  transformClaudeEvent({ type: 'result', subtype: 'success' }, CAT, state);
+  assert.equal(state.partialTextMessageIds.size, 0, 'terminal result prevents cross-invocation state leakage');
 });

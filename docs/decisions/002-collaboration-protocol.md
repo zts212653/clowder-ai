@@ -15,7 +15,7 @@ created: 2026-02-26
 
 ## 背景
 
-Cat Café 的核心目标是让三只猫脱离“人肉路由”模式，形成可持续协作。  
+Clowder AI 的核心目标是让三只猫脱离“人肉路由”模式，形成可持续协作。  
 过去在交接和传话中，容易只记录“改了什么”，缺少“为什么这样改”，导致：
 
 1. 接手方无法快速判断决策是否合理
@@ -39,7 +39,7 @@ Cat Café 的核心目标是让三只猫脱离“人肉路由”模式，形成�
 ### 2. 不确定就提问（强制）
 
 任何关键前提不确定时，必须主动提问，不允许硬猜推进。  
-提问对象包括铲屎官、Ragdoll、Maine Coon、Siamese。
+提问对象包括operator、Ragdoll、Maine Coon、Siamese。
 
 ### 3. 每个可验证子任务都要 commit（强制）
 
@@ -85,7 +85,7 @@ commit message 需带猫猫签名，便于追溯责任与意图。
 1. `AGENTS.md`（Maine Coon）
 2. `CLAUDE.md`（Ragdoll）
 3. `GEMINI.md`（Siamese）
-4. 所有与 Cat Café 相关的任务交接和 commit
+4. 所有与 Clowder AI 相关的任务交接和 commit
 
 ## 否决理由（P0.5 回填）
 

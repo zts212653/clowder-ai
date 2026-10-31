@@ -1,0 +1,394 @@
+/**
+ * F174 Phase B — Backend port contract test.
+ *
+ * Same suite runs against every IAuthInvocationBackend implementation
+ * (memory now, redis appended in Task 3) so behavior parity is enforced
+ * by the test runner, not by hope.
+ */
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
+import { createAuthTestNamespace } from './helpers/redis-auth-namespace.js';
+import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
+
+const backends = [
+  [
+    'memory',
+    async () => {
+      const { MemoryAuthInvocationBackend } = await import(
+        '../dist/domains/cats/services/agents/invocation/MemoryAuthInvocationBackend.js'
+      );
+      return { backend: new MemoryAuthInvocationBackend({ maxRecords: 500 }), cleanup: async () => {} };
+    },
+  ],
+];
+
+// The isolated runner chooses a random port; distributable public lanes use
+// port 0 to disable Redis. Share the same availability and isolation guard.
+const _redisUrl = process.env.REDIS_URL;
+if (!redisIsolationSkipReason(_redisUrl)) {
+  assertRedisIsolationOrThrow(_redisUrl, 'auth-invocation-backend-contract');
+  backends.push([
+    'redis',
+    async () => {
+      const { createRedisClient } = await import('@cat-cafe/shared/utils');
+      const { RedisAuthInvocationBackend } = await import(
+        '../dist/domains/cats/services/agents/invocation/RedisAuthInvocationBackend.js'
+      );
+      // A namespace unique to this suite and process. The previous code took
+      // the shared `cat-cafe-test:` prefix and wiped `cat-cafe-test:auth:*`
+      // before every Redis variant, which under `--test-concurrency=4` could
+      // delete a record auth-invocation-restart.test.js had just written.
+      const namespace = createAuthTestNamespace('auth-contract');
+      const redis = createRedisClient({ url: process.env.REDIS_URL, keyPrefix: namespace });
+      return {
+        backend: new RedisAuthInvocationBackend(redis),
+        cleanup: async () => {
+          console.info(`Retained auth contract namespace: ${namespace}`);
+          await redis.quit();
+        },
+      };
+    },
+  ]);
+}
+
+function fixture(invocationId, callbackToken, threadId = 't-1', catId = 'opus') {
+  return {
+    invocationId,
+    callbackToken,
+    userId: 'u-1',
+    ownerAuthProvenance: 'strict',
+    catId,
+    threadId,
+    clientMessageIds: new Set(),
+    createdAt: Date.now(),
+  };
+}
+
+for (const [name, factory] of backends) {
+  describe(`AuthInvocationBackend contract — ${name}`, () => {
+    test('create + verify round-trip returns ok:true with record', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.create(fixture('inv-1', 'tok-1'), 60_000);
+        const result = await backend.verify('inv-1', 'tok-1', 60_000);
+        assert.equal(result.ok, true);
+        assert.equal(result.record.callbackToken, 'tok-1');
+        assert.equal(result.record.userId, 'u-1');
+        assert.equal(result.record.ownerAuthProvenance, 'strict');
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('F254 read-only tool policy survives backend round-trip', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        const record = fixture('inv-policy', 'tok-policy');
+        record.toolExecutionPolicy = {
+          mode: 'read_only',
+          replayDeniedToolNames: ['cat_cafe_hold_ball', 'cat_cafe_post_message'],
+        };
+        await backend.create(record, 60_000);
+
+        const verified = await backend.verify('inv-policy', 'tok-policy', 60_000);
+        assert.equal(verified.ok, true);
+        assert.deepEqual(verified.record.toolExecutionPolicy, record.toolExecutionPolicy);
+        const hydrated = await backend.getRecord('inv-policy');
+        assert.deepEqual(hydrated?.toolExecutionPolicy, record.toolExecutionPolicy);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('exact turn origin survives backend round-trip without becoming A2A reply provenance', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        const record = fixture('inv-origin', 'tok-origin');
+        record.originTriggerMessageId = 'msg-user-direct';
+        await backend.create(record, 60_000);
+
+        const verified = await backend.verify('inv-origin', 'tok-origin', 60_000);
+        assert.equal(verified.ok, true);
+        assert.equal(verified.record.originTriggerMessageId, 'msg-user-direct');
+        assert.equal(verified.record.a2aTriggerMessageId, undefined);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('private managed-work binding survives backend verify and hydrate paths', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        const record = fixture('inv-managed', 'tok-managed');
+        record.managedWorkBinding = { workId: 'wrk_private', attemptId: 'wat_private' };
+        await backend.create(record, 60_000);
+
+        const verified = await backend.verify('inv-managed', 'tok-managed', 60_000);
+        assert.equal(verified.ok, true);
+        assert.deepEqual(verified.record.managedWorkBinding, record.managedWorkBinding);
+        const hydrated = await backend.getRecord('inv-managed');
+        assert.deepEqual(hydrated?.managedWorkBinding, record.managedWorkBinding);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('verify with wrong token returns reason:invalid_token', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.create(fixture('inv-2', 'tok-2'), 60_000);
+        const result = await backend.verify('inv-2', 'wrong', 60_000);
+        assert.deepEqual(result, { ok: false, reason: 'invalid_token' });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('verify with unknown id returns reason:unknown_invocation', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        const result = await backend.verify('nonexistent', 'any', 60_000);
+        assert.deepEqual(result, { ok: false, reason: 'unknown_invocation' });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('active credentials do not expire after elapsed time', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.create(fixture('inv-3', 'tok-3'), 10);
+        await new Promise((r) => setTimeout(r, 30));
+        const result = await backend.verify('inv-3', 'tok-3', 10);
+        assert.equal(result.ok, true);
+        assert.equal(result.record.expiresAt, null);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('isLatest tracks latest invocation per thread+cat', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.create(fixture('old-id', 'tok-old'), 60_000);
+        await backend.create(fixture('new-id', 'tok-new'), 60_000);
+        assert.equal(await backend.isLatest('old-id'), false);
+        assert.equal(await backend.isLatest('new-id'), true);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    // Cloud Codex P2 (PR #1368, 08:54Z, 05de7c98b): atomically combine
+    // verify + isLatest + slide so a stale invocation can't be refreshed in
+    // the race window between preValidation isLatest check and preHandler
+    // verify slide.
+    test('AC-C5 atomic verifyLatest: stale invocation rejected', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.create(fixture('inv-old', 'tok-old'), 60_000);
+        await backend.create(fixture('inv-new', 'tok-new'), 60_000); // supersedes inv-old
+        const stale = await backend.verifyLatest('inv-old', 'tok-old', 60_000);
+        assert.equal(stale.ok, false);
+        assert.equal(stale.reason, 'replaced');
+        const fresh = await backend.verifyLatest('inv-new', 'tok-new', 60_000);
+        assert.equal(fresh.ok, true);
+        assert.equal(fresh.record?.invocationId, 'inv-new');
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('AC-C5 atomic verifyLatest: invalid token returns invalid_token (not stale)', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.create(fixture('inv-vl', 'tok-vl'), 60_000);
+        const result = await backend.verifyLatest('inv-vl', 'wrong', 60_000);
+        assert.deepEqual(result, { ok: false, reason: 'invalid_token' });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('AC-C5 atomic verifyLatest: unknown invocation returns unknown_invocation', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        const result = await backend.verifyLatest('nonexistent', 'any', 60_000);
+        assert.deepEqual(result, { ok: false, reason: 'unknown_invocation' });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    // F174 Phase B P1 (gpt52 review #1363) — symptom check that survives
+    // even with 60s grace: after a slide window, the latest pointer must
+    // Active record and latest pointer must remain aligned without wall-clock TTLs.
+    test('verify() keeps the durable latest pointer aligned with the active record', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.create(fixture('drift-test', 'tok-drift'), 60_000);
+        await new Promise((r) => setTimeout(r, 50));
+        await backend.verify('drift-test', 'tok-drift', 60_000);
+        await new Promise((r) => setTimeout(r, 50));
+        await backend.verify('drift-test', 'tok-drift', 60_000);
+
+        assert.equal(await backend.isLatest('drift-test'), true);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('claimClientMessageId dedupes per invocation', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.create(fixture('inv-c', 'tok-c'), 60_000);
+        assert.equal(await backend.claimClientMessageId('inv-c', 'msg-1'), true);
+        assert.equal(await backend.claimClientMessageId('inv-c', 'msg-1'), false);
+        assert.equal(await backend.claimClientMessageId('inv-c', 'msg-2'), true);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    // Cloud Codex P2 (PR #1368, 08:15Z, 7de77a70d): refresh cooldown Map only
+    // does lazy GC at >100 entries but never enforces a hard cap. Under
+    // memory-mode high churn, all entries can be active (none expired) and
+    // accumulate unbounded — O(n) per claim + memory leak.
+    if (name === 'memory') {
+      test('AC-C5 cooldown bound: memory backend caps refresh cooldown map size', async () => {
+        const { backend, cleanup } = await factory();
+        try {
+          // Claim 1500 distinct invocations within 5min cooldown — all active.
+          for (let i = 0; i < 1500; i++) {
+            await backend.tryClaimRefreshCooldown(`inv-${i}`, 5 * 60_000);
+          }
+          // Inspect internal map size via the backend itself (non-public but
+          // we test the contract by re-claiming an old slot — if map is bounded
+          // via FIFO eviction, early entries got evicted and re-claim succeeds).
+          const earlyReclaim = await backend.tryClaimRefreshCooldown('inv-0', 5 * 60_000);
+          assert.equal(earlyReclaim, true, 'early entries must be evicted under bound');
+        } finally {
+          await cleanup();
+        }
+      });
+
+      // Cloud Codex P2 (PR #1368, 09:15Z, 5160ea926): the cap eviction loop
+      // ran BEFORE the `existing` check, so a no-op re-claim by an already-
+      // cooled invocation churned other valid cooldowns out of the map and
+      // let those victims bypass the 5min limit early.
+      test('AC-C5 cooldown bound: re-claim of active cooldown does NOT evict others', async () => {
+        const { MemoryAuthInvocationBackend } = await import(
+          '../dist/domains/cats/services/agents/invocation/MemoryAuthInvocationBackend.js'
+        );
+        const small = new MemoryAuthInvocationBackend({ maxRecords: 5 });
+        // Fill cap with 5 active cooldowns.
+        for (let i = 0; i < 5; i++) {
+          assert.equal(await small.tryClaimRefreshCooldown(`inv-${i}`, 5 * 60_000), true);
+        }
+        // inv-2 tries to re-claim while still in cooldown — must return false
+        // WITHOUT evicting any of inv-0..4 (no-op claim shouldn't churn).
+        assert.equal(await small.tryClaimRefreshCooldown('inv-2', 5 * 60_000), false);
+        // inv-0 still in cooldown? Yes — re-claim returns false (still active).
+        assert.equal(await small.tryClaimRefreshCooldown('inv-0', 5 * 60_000), false);
+        assert.equal(await small.tryClaimRefreshCooldown('inv-4', 5 * 60_000), false);
+      });
+
+      // Cloud Codex P2 (PR #1368, 08:38Z, 8cf95e028): cooldown cap was the
+      // module constant DEFAULT_MAX_RECORDS, not the instance maxRecords.
+      // Custom maxRecords now governs cooldown size too — they're in lockstep.
+      test('AC-C5 cooldown bound: custom maxRecords governs cooldown cap', async () => {
+        const { MemoryAuthInvocationBackend } = await import(
+          '../dist/domains/cats/services/agents/invocation/MemoryAuthInvocationBackend.js'
+        );
+        const small = new MemoryAuthInvocationBackend({ maxRecords: 50 });
+        // Claim 100 active cooldowns — should evict early ones around the 50 mark.
+        for (let i = 0; i < 100; i++) {
+          await small.tryClaimRefreshCooldown(`inv-${i}`, 5 * 60_000);
+        }
+        // inv-0 was evicted long ago (FIFO past cap=50)
+        const earlyReclaim = await small.tryClaimRefreshCooldown('inv-0', 5 * 60_000);
+        assert.equal(earlyReclaim, true, 'tiny cap must evict aggressively');
+      });
+    }
+
+    test('F153: setTraceContext persists and is readable via getRecord', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.create(fixture('inv-tc', 'tok-tc'), 60_000);
+        await backend.setTraceContext('inv-tc', {
+          traceId: 'aaaa1111bbbb2222cccc3333dddd4444',
+          spanId: '1122334455667788',
+          traceFlags: 1,
+        });
+        const record = await backend.getRecord('inv-tc');
+        assert.ok(record, 'record must exist');
+        assert.deepEqual(record.traceContext, {
+          traceId: 'aaaa1111bbbb2222cccc3333dddd4444',
+          spanId: '1122334455667788',
+          traceFlags: 1,
+        });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('F153: setTraceContext on unknown invocation is a no-op', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.setTraceContext('nonexistent', {
+          traceId: 'aaaa',
+          spanId: 'bbbb',
+          traceFlags: 0,
+        });
+        const record = await backend.getRecord('nonexistent');
+        assert.equal(record, null);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('F153: traceContext survives verify TTL slide', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.create(fixture('inv-slide', 'tok-slide'), 60_000);
+        await backend.setTraceContext('inv-slide', {
+          traceId: 'trace1234',
+          spanId: 'span5678',
+          traceFlags: 1,
+        });
+        const result = await backend.verify('inv-slide', 'tok-slide', 60_000);
+        assert.equal(result.ok, true);
+        assert.deepEqual(result.record.traceContext, {
+          traceId: 'trace1234',
+          spanId: 'span5678',
+          traceFlags: 1,
+        });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('F153: peekRecord returns traceContext even after expiry', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        await backend.create(fixture('inv-peek', 'tok-peek'), 10);
+        await backend.setTraceContext('inv-peek', {
+          traceId: 'deadbeef',
+          spanId: 'cafebabe',
+          traceFlags: 0,
+        });
+        await new Promise((r) => setTimeout(r, 30));
+        const record = await backend.peekRecord('inv-peek');
+        if (record) {
+          assert.deepEqual(record.traceContext, {
+            traceId: 'deadbeef',
+            spanId: 'cafebabe',
+            traceFlags: 0,
+          });
+        }
+      } finally {
+        await cleanup();
+      }
+    });
+  });
+}

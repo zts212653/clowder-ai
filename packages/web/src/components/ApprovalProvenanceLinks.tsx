@@ -1,0 +1,98 @@
+'use client';
+
+import type { ApprovalNavigation } from '@cat-cafe/shared';
+import { useCallback } from 'react';
+import { useChatStore } from '@/stores/chatStore';
+import { scrollToMessage } from '@/utils/scrollToMessage';
+import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
+import { approvalHistoryCopy } from './approval-history.shell-copy';
+import { useShellCopy } from './shell/shell-copy';
+import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
+
+export function jumpToApprovalAnchor(threadId: string, messageId?: string): void {
+  if (!messageId) {
+    pushThreadRouteWithHistory(threadId, typeof window !== 'undefined' ? window : undefined);
+    return;
+  }
+  const plan = planTeleport({ threadId, messageId, currentThreadId: useChatStore.getState().currentThreadId });
+  if (plan.scrollNow) {
+    scrollToMessage(plan.scrollNow);
+    kickTeleportResolve();
+  } else if (plan.navigateTo) {
+    pushThreadRouteWithHistory(plan.navigateTo, typeof window !== 'undefined' ? window : undefined);
+  }
+}
+
+interface ApprovalProvenanceLinksProps {
+  navigation: ApprovalNavigation;
+  onBeforeNavigate?: () => void;
+  compact?: boolean;
+}
+
+export function ApprovalProvenanceLinks({
+  navigation,
+  onBeforeNavigate,
+  compact = false,
+}: ApprovalProvenanceLinksProps) {
+  const t = useShellCopy(approvalHistoryCopy);
+  const navigate = useCallback(
+    (threadId: string, messageId?: string) => {
+      onBeforeNavigate?.();
+      jumpToApprovalAnchor(threadId, messageId);
+    },
+    [onBeforeNavigate],
+  );
+  const buttonClass = compact
+    ? 'rounded-md border border-[var(--cafe-border)] px-2 py-1 text-micro text-cafe-interactive/55 transition-colors hover:bg-[var(--cafe-muted)] hover:text-cafe-interactive'
+    : 'rounded-md border border-[var(--cafe-border)] px-3 py-1 text-micro font-medium transition-colors hover:bg-[var(--cafe-muted)]';
+  if (navigation.state === 'legacy_unanchored') {
+    const { legacyThreadId } = navigation;
+    return (
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <span className="text-micro text-[var(--semantic-warning)]" data-testid="approval-legacy-warning">
+          {t.legacy}
+        </span>
+        {legacyThreadId && (
+          <button
+            type="button"
+            className={buttonClass}
+            onClick={() => navigate(legacyThreadId)}
+            data-testid="approval-legacy-thread-link"
+          >
+            {t.legacyThread}
+          </button>
+        )}
+      </div>
+    );
+  }
+  const { originRef } = navigation;
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+      <button
+        type="button"
+        className={buttonClass}
+        onClick={() => navigate(navigation.approvalCardRef.threadId, navigation.approvalCardRef.messageId)}
+        data-testid="approval-card-link"
+      >
+        {t.approvalCard}
+      </button>
+      {originRef.kind === 'message' ? (
+        <button
+          type="button"
+          className={buttonClass}
+          onClick={() => navigate(originRef.threadId, originRef.messageId)}
+          data-testid="approval-origin-link"
+        >
+          {t.origin}
+        </button>
+      ) : (
+        <details className="min-w-0 text-micro text-cafe-interactive/55" data-testid="approval-event-origin">
+          <summary className="cursor-pointer">{t.event}</summary>
+          <p className="mt-1 break-words">{originRef.summary}</p>
+          <p className="mt-1 break-all font-mono">{originRef.anchor}</p>
+        </details>
+      )}
+    </div>
+  );
+}

@@ -14,6 +14,12 @@ export interface ApiFetchOptions {
 }
 
 type FetchLike = (url: string, options?: ApiFetchOptions) => Promise<JsonResponseLike>;
+type GitHubPatResolver = () => string | undefined;
+
+export interface ApiFetcherOptions {
+  /** Optional caller-owned credential resolver; the fetcher never reads process environment credentials. */
+  readonly getGitHubPat?: GitHubPatResolver | undefined;
+}
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 
@@ -117,11 +123,19 @@ function isGitHubApiUrl(url: string): boolean {
   }
 }
 
-function resolveHeaders(source: SignalSource): Record<string, string> | undefined {
+function cleanToken(token: string | undefined): string | undefined {
+  const trimmed = token?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+function resolveHeaders(
+  source: SignalSource,
+  getGitHubPat: GitHubPatResolver | undefined,
+): Record<string, string> | undefined {
   const base = source.fetch.headers ?? {};
   if (!isGitHubApiUrl(source.url)) return source.fetch.headers;
 
-  const pat = process.env.GITHUB_MCP_PAT;
+  const pat = cleanToken(getGitHubPat?.());
   if (!pat) return source.fetch.headers;
 
   return { ...base, Authorization: `Bearer ${pat}` };
@@ -129,9 +143,11 @@ function resolveHeaders(source: SignalSource): Record<string, string> | undefine
 
 export class ApiFetcher implements Fetcher {
   private readonly fetchImpl: FetchLike;
+  private readonly getGitHubPat: GitHubPatResolver | undefined;
 
-  constructor(fetchImpl?: FetchLike) {
+  constructor(fetchImpl?: FetchLike, options: ApiFetcherOptions = {}) {
     this.fetchImpl = fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
+    this.getGitHubPat = options.getGitHubPat;
   }
 
   canHandle(source: SignalSource): boolean {
@@ -162,7 +178,7 @@ export class ApiFetcher implements Fetcher {
 
     try {
       const response = await this.fetchImpl(source.url, {
-        headers: resolveHeaders(source),
+        headers: resolveHeaders(source, this.getGitHubPat),
         signal: controller.signal,
       });
       if (!response.ok) {

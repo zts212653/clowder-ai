@@ -6,6 +6,8 @@
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import type { MessageReadObserver } from '../../../../../infrastructure/message-read-diagnostics.js';
+import type { MessageAppendListener } from '../ports/MessageStore.js';
 import { MessageStore } from '../ports/MessageStore.js';
 import { RedisMessageStore } from '../redis/RedisMessageStore.js';
 
@@ -26,13 +28,14 @@ function resolveMessageTtlSeconds(): number | undefined {
 
 export function createMessageStore(
   redis?: RedisClient,
-  options?: { onAppend?: (msg: { id: string; threadId: string; timestamp: number; content: string }) => void },
+  options?: { onAppend?: MessageAppendListener; readDiagnostics?: MessageReadObserver },
 ): AnyMessageStore {
   if (redis) {
     const ttlSeconds = resolveMessageTtlSeconds();
     return new RedisMessageStore(redis, {
       ...(ttlSeconds !== undefined ? { ttlSeconds } : {}),
       onAppend: options?.onAppend,
+      readDiagnostics: options?.readDiagnostics,
     });
   }
   return new MessageStore({ onAppend: options?.onAppend });

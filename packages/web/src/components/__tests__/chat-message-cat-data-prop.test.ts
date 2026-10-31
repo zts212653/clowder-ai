@@ -21,6 +21,8 @@ const useCatDataSpy = vi.fn(() => ({
 
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: useCatDataSpy,
+  formatCatName: (cat: { displayName: string; variantLabel?: string }) =>
+    cat.variantLabel ? `${cat.displayName}（${cat.variantLabel}）` : cat.displayName,
 }));
 
 // ── Stub TTS hook (ChatMessage uses it) ──
@@ -73,7 +75,7 @@ describe('ChatMessage getCatById prop injection (R24 P2-1)', () => {
       displayName: '布偶猫',
       color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
       breedId: 'ragdoll',
-      provider: 'anthropic',
+      clientId: 'anthropic',
       defaultModel: 'claude-sonnet-4-5-20250929',
       avatar: '/avatars/opus.png',
       mentionPatterns: [],
@@ -85,6 +87,7 @@ describe('ChatMessage getCatById prop injection (R24 P2-1)', () => {
       {
         id: '1',
         type: 'assistant' as const,
+        from: { kind: 'agent', catId: 'opus' },
         catId: 'opus',
         content: 'msg-1',
         timestamp: Date.now(),
@@ -93,6 +96,7 @@ describe('ChatMessage getCatById prop injection (R24 P2-1)', () => {
       {
         id: '2',
         type: 'assistant' as const,
+        from: { kind: 'agent', catId: 'opus' },
         catId: 'opus',
         content: 'msg-2',
         timestamp: Date.now(),
@@ -101,6 +105,7 @@ describe('ChatMessage getCatById prop injection (R24 P2-1)', () => {
       {
         id: '3',
         type: 'assistant' as const,
+        from: { kind: 'agent', catId: 'codex' },
         catId: 'codex',
         content: 'msg-3',
         timestamp: Date.now(),
@@ -132,6 +137,7 @@ describe('ChatMessage getCatById prop injection (R24 P2-1)', () => {
     const userMsg = {
       id: 'u1',
       type: 'user' as const,
+      from: { kind: 'user', userId: 'test-user' },
       content: 'Hello cats!',
       timestamp: Date.now(),
       contentBlocks: [],

@@ -144,11 +144,10 @@ describe('SignalArticleDetail', () => {
       tagInput.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
-    // Simulate Enter during IME composition (isComposing = true)
+    // Simulate Enter during IME composition: compositionstart → keydown(Enter)
     act(() => {
-      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
-      Object.defineProperty(event, 'isComposing', { value: true });
-      tagInput.dispatchEvent(event);
+      tagInput.dispatchEvent(new Event('compositionstart', { bubbles: true }));
+      tagInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
 
     expect(onTagsChange).not.toHaveBeenCalled();

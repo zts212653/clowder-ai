@@ -5,10 +5,26 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
+import { InMemoryQueueLedgerStore } from '../dist/domains/cats/services/agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
+
+function refusalDeliveryDependencies() {
+  return {
+    invocationQueue: new InvocationQueue(new InMemoryQueueLedgerStore()),
+    queueProcessor: {
+      requestDrain() {
+        assert.fail('rejected thread must not schedule an execution');
+      },
+    },
+  };
+}
 
 describe('GET /api/messages', () => {
   let app;
   let messageStore;
+  let invocationQueue;
+  let queueLedgerStore;
 
   beforeEach(async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
@@ -16,13 +32,20 @@ describe('GET /api/messages', () => {
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
     );
     const { messagesRoutes } = await import('../dist/routes/messages.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { InMemoryQueueLedgerStore } = await import(
+      '../dist/domains/cats/services/agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js'
+    );
 
     messageStore = new MessageStore();
+    queueLedgerStore = new InMemoryQueueLedgerStore();
+    invocationQueue = new InvocationQueue(queueLedgerStore);
     app = Fastify();
     await app.register(messagesRoutes, {
       registry: new InvocationRegistry(),
       messageStore,
       socketManager: { broadcastAgentMessage: () => {} },
+      invocationQueue,
     });
     await app.ready();
   });
@@ -38,21 +61,103 @@ describe('GET /api/messages', () => {
     assert.equal(body.hasMore, false);
   });
 
-  it('returns messages with correct format', async () => {
+  it('projects server-admitted cloud reply provenance without another extra carrier', async () => {
+    const proof = {
+      v: 1,
+      threadId: 'thread-pro',
+      sourceMessageId: 'source119',
+      targetCatId: 'gpt-pro',
+      dispatchInvocationId: 'attempt119',
+    };
     messageStore.append({
+      from: { kind: 'agent', catId: 'gpt-pro' },
       userId: 'default-user',
-      catId: null,
-      content: 'hello',
-      mentions: ['opus'],
+      content: 'authenticated reply',
+      mentions: [],
       timestamp: 1000,
+      extra: { cloudBridgeReturn: proof },
     });
+    const response = await app.inject({ method: 'GET', url: '/api/messages' });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json().messages[0].extra, { cloudBridgeReturn: proof });
+  });
+
+  it('projects the modification source carrier in real history without requiring another extra field', async () => {
+    const metadata = {
+      v: 1,
+      requestId: 'f309-modification-' + 'a'.repeat(64),
+      requestFingerprint: 'sha256:' + 'b'.repeat(64),
+      contentTitle: '晨光封面',
+      targetCatId: 'codex-astra',
+      targetName: '小星星',
+      executionThreadTitle: '封面共创',
+      completionRule: 'file-writeback-applied',
+    };
     messageStore.append({
       userId: 'default-user',
-      catId: 'opus',
-      content: 'hi there',
+      from: { kind: 'user', userId: 'default-user' },
+      content: '请保留手写文字',
+      mentions: [],
+      timestamp: 1000,
+      extra: { contentModificationRequestV1: metadata },
+    });
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().messages[0].type, 'user');
+    assert.deepEqual(res.json().messages[0].extra?.contentModificationRequestV1, metadata);
+    assert.equal(res.json().messages[0].content, '请保留手写文字');
+  });
+
+  it('projects an immutable modification receipt as a system message through real history hydration', async () => {
+    const receipt = {
+      v: 1,
+      requestId: 'f309-modification-' + 'a'.repeat(64),
+      sourceMessageId: 'human-source-1',
+      targetCatId: 'codex-astra',
+      taskId: 'task-1',
+      state: 'conflict',
+      candidateRef: 'content-patch:request:1',
+      receiptRef: 'workspace-writeback:1',
+      observedAt: 2000,
+      followUp: { kind: 'none', reason: 'task_closed' },
+    };
+    messageStore.append({
+      userId: 'default-user',
+      from: { kind: 'system', service: 'content-modification' },
+      content: '[Host 作品修改回执]',
       mentions: [],
       timestamp: 2000,
+      threadId: 'thread-receipt',
+      replyTo: 'human-source-1',
+      extra: { systemKind: 'content_modification_receipt', contentModificationReceiptV1: receipt },
     });
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-receipt' });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().messages[0].type, 'system');
+    assert.equal(res.json().messages[0].replyTo, 'human-source-1');
+    assert.equal(res.json().messages[0].extra.systemKind, 'content_modification_receipt');
+    assert.deepEqual(res.json().messages[0].extra.contentModificationReceiptV1, receipt);
+  });
+
+  it('returns messages with correct format', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'hello',
+        mentions: ['opus'],
+        timestamp: 1000,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'hi there',
+        mentions: [],
+        timestamp: 2000,
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -69,15 +174,536 @@ describe('GET /api/messages', () => {
     assert.equal(body.messages[1].content, 'hi there');
   });
 
-  it('respects limit parameter', async () => {
-    for (let i = 0; i < 10; i++) {
-      messageStore.append({
+  it('keeps structured routing warnings attached to the delivered input', async () => {
+    const routingWarnings = [
+      {
+        kind: 'cat_not_found',
+        mention: '@missing-cat',
+        alternatives: [],
+      },
+    ];
+    messageStore.append(
+      canonicalTestMessageInput({
         userId: 'default-user',
         catId: null,
-        content: `msg ${i}`,
+        content: '@missing-cat hello',
         mentions: [],
-        timestamp: 1000 + i,
-      });
+        timestamp: 1000,
+        extra: { routingWarnings },
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    const body = JSON.parse(res.body);
+
+    assert.deepEqual(body.messages[0].extra.routingWarnings, routingWarnings);
+  });
+
+  it('F247 F5 hydrates a durable cloud outbound receipt from its exact source without copying the body', async () => {
+    const source = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'codex-sol',
+        content: 'Please inspect the source-bound transport behavior',
+        mentions: ['gpt-pro'],
+        timestamp: 1_000,
+        threadId: 'thread-cloud-audit',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: '已发送给 @gpt-pro，等待它从 ChatGPT 云端会话回写。',
+        mentions: [],
+        timestamp: 1_100,
+        threadId: 'thread-cloud-audit',
+        replyTo: source.id,
+        source: {
+          connector: 'cloud-bridge-status',
+          label: '云端猫投递',
+          icon: '☁️',
+          meta: {
+            presentation: 'system_notice',
+            noticeTone: 'info',
+            cloudBridgeOutboundReceipt: {
+              v: 1,
+              sourceMessageId: source.id,
+              sourceSender: { kind: 'cat', id: 'codex-sol', invocationId: 'inv-source-1' },
+              dispatchInvocationId: 'inv-cloud-1',
+              targetCatId: 'gpt-pro',
+              status: 'sent',
+              transport: 'host',
+              hostMessageId: 'host-message-1',
+              idempotency: { keyKind: 'source_message_id', disposition: 'fresh' },
+            },
+          },
+        },
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-cloud-audit' });
+    const body = JSON.parse(res.body);
+    const receipt = body.messages.find((message) => message.source?.connector === 'cloud-bridge-status');
+    assert.equal(receipt.replyTo, source.id);
+    assert.deepEqual(receipt.replyPreview, {
+      from: { kind: 'agent', catId: 'codex-sol' },
+      senderCatId: 'codex-sol',
+      content: 'Please inspect the source-bound transport behavior',
+    });
+    assert.equal(receipt.content.includes('Please inspect the source-bound transport behavior'), false);
+  });
+
+  it('F247 F5 never hydrates a reply preview from another thread even if a legacy receipt is malformed', async () => {
+    const privateSource = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'codex-sol',
+        content: 'private thread body must never cross the preview boundary',
+        mentions: [],
+        timestamp: 1_000,
+        threadId: 'thread-private-source',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: 'legacy malformed cloud receipt',
+        mentions: [],
+        timestamp: 1_100,
+        threadId: 'thread-public-receipt',
+        replyTo: privateSource.id,
+        source: {
+          connector: 'cloud-bridge-status',
+          label: '云端猫投递',
+          icon: '☁️',
+          meta: { presentation: 'system_notice', noticeTone: 'info' },
+        },
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-public-receipt' });
+    const receipt = res.json().messages.find((message) => message.source?.connector === 'cloud-bridge-status');
+    assert.equal(receipt.replyPreview, undefined);
+    assert.equal(JSON.stringify(receipt).includes('private thread body'), false);
+  });
+
+  it('renders an authored queued cat seed without exposing queued user or system work', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'ordinary queued user work',
+        mentions: ['opus'],
+        timestamp: 1000,
+        threadId: 'thread-f128-seed',
+        deliveryStatus: 'queued',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: 'system',
+        content: 'queued internal system work',
+        mentions: [],
+        timestamp: 1050,
+        threadId: 'thread-f128-seed',
+        deliveryStatus: 'queued',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'codex-sol',
+        content: 'source-cat thread seed',
+        mentions: ['opus'],
+        timestamp: 1100,
+        threadId: 'thread-f128-seed',
+        deliveryStatus: 'queued',
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-f128-seed' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].type, 'assistant');
+    assert.equal(body.messages[0].catId, 'codex-sol');
+    assert.equal(body.messages[0].content, 'source-cat thread seed');
+  });
+
+  it('keeps a pre-admission steered user message out of History', async () => {
+    const steered = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'steered follow-up stays visible while the replacement runs',
+        mentions: ['opus'],
+        timestamp: 1200,
+        threadId: 'thread-steer-publication',
+        deliveryStatus: 'queued',
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-steer-publication' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 0);
+    assert.equal(messageStore.getById(steered.id).deliveryStatus, 'queued');
+  });
+
+  it('keeps untouched durable queued user work out of History until admission', async () => {
+    const queued = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'queued follow-up remains at its authored timeline position',
+        mentions: ['opus'],
+        timestamp: 1300,
+        threadId: 'thread-queued-publication',
+        deliveryStatus: 'queued',
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-queued-publication' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 0);
+    assert.equal(messageStore.getById(queued.id).deliveryStatus, 'queued');
+  });
+
+  it('F264 keeps canceled queued user work out of browser history after F5', async () => {
+    const canceled = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'withdrawn follow-up must not reappear',
+        mentions: ['opus'],
+        timestamp: 1350,
+        threadId: 'thread-canceled-publication',
+        deliveryStatus: 'queued',
+      }),
+    );
+    messageStore.markCanceled(canceled.id);
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-canceled-publication' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 0);
+  });
+
+  it('returns separate delivery and timeline-order timestamps for terminal published cat speech', async () => {
+    const speech = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'codex-sol',
+        content: 'published before recipient execution finishes',
+        mentions: ['opus'],
+        timestamp: 1100,
+        threadId: 'thread-published-order',
+        deliveryStatus: 'queued',
+      }),
+    );
+    messageStore.markDelivered(speech.id, 1500);
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-published-order' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages[0].deliveredAt, 1500);
+    assert.equal(body.messages[0].timelineOrderAt, 1100);
+  });
+
+  it('preserves explicit post flag with stream identity in history response', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'standalone post',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'thread-explicit',
+        extra: {
+          isExplicitPost: true,
+          stream: { invocationId: 'inv-parent', turnInvocationId: 'turn-explicit' },
+        },
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-explicit' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].extra?.isExplicitPost, true);
+    assert.deepEqual(body.messages[0].extra?.stream, {
+      invocationId: 'inv-parent',
+      turnInvocationId: 'turn-explicit',
+    });
+  });
+
+  it('publishes a queued user source only at actual delivery without a Queue receipt', async () => {
+    const admission = await invocationQueue.send(
+      messageStore,
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'message sent during the turn',
+        mentions: ['opus'],
+        timestamp: 1500,
+        threadId: 'thread-receipt',
+        deliveryStatus: 'queued',
+      }),
+      {
+        userId: 'default-user',
+        threadId: 'thread-receipt',
+        kind: 'conversation_input',
+        from: { kind: 'user', userId: 'default-user' },
+        ownerAuthProvenance: 'strict',
+        content: 'message sent during the turn',
+        intent: 'execute',
+        targetCats: ['opus'],
+        priority: 'normal',
+        autoExecute: false,
+      },
+    );
+    assert.equal(admission.outcome, 'enqueued');
+    const queued = admission.message;
+    const entry = admission.entry;
+    assert.ok(entry);
+    assert.equal(queued.timelinePublishedAtAppend, undefined);
+
+    const beforeDelivery = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-receipt' });
+    assert.deepEqual(JSON.parse(beforeDelivery.body).messages, []);
+
+    assert.equal(
+      (
+        await invocationQueue.reconcileQueuedMessageTargetsDurable(
+          queued.threadId,
+          queued.userId,
+          entry.id,
+          [],
+          ['opus'],
+          {},
+        )
+      ).outcome,
+      'updated',
+    );
+    await messageStore.markDelivered(queued.id, 1700);
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-receipt' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].extra?.queueReceipt, undefined);
+    assert.equal(body.messages[0].deliveredAt, 1700);
+    assert.equal(body.messages[0].timelineOrderAt, 1700);
+  });
+
+  it('projects only browser-safe F254 recovery metadata in history response', async () => {
+    const recovery = {
+      kind: 'f254_withheld_message',
+      invocationId: 'inv-recovery-1',
+      manifestSha256: 'a'.repeat(64),
+      contentSha256: 'b'.repeat(64),
+      cvoDecisionRef: '0001783820437069-000027-a6cebcce',
+      recoveredAt: 3000,
+      sourceProof: {
+        transcriptPath: 'data/transcripts/thread_recovery/fable-5/events.jsonl',
+        sessionId: 'session-1',
+        firstEventNo: 1,
+        lastEventNo: 4,
+        terminalEventNo: 4,
+        terminalKind: 'transcript_done',
+      },
+    };
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'fable-5',
+        content: '买到了，正在回家。',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'thread-recovery',
+        extra: {
+          stream: { invocationId: 'inv-recovery-1', turnInvocationId: 'inv-recovery-1' },
+          recovery,
+        },
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-recovery' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.deepEqual(body.messages[0].extra?.recovery, {
+      kind: 'f254_withheld_message',
+      cvoDecisionRef: '0001783820437069-000027-a6cebcce',
+      recoveredAt: 3000,
+    });
+    assert.equal(body.messages[0].extra?.recovery?.invocationId, undefined);
+    assert.equal(body.messages[0].extra?.recovery?.manifestSha256, undefined);
+    assert.equal(body.messages[0].extra?.recovery?.contentSha256, undefined);
+    assert.equal(body.messages[0].extra?.recovery?.sourceProof, undefined);
+  });
+
+  it('maps canonical system messages to type=system', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: 'system',
+        content: '🐺 狼人请睁眼',
+        mentions: [],
+        timestamp: 1000,
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].type, 'system');
+    assert.equal(body.messages[0].catId, null);
+    assert.deepEqual(body.messages[0].from, { kind: 'system', service: 'test-fixture' });
+  });
+
+  it('hydrates lifecycle delivery failures as error system messages', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: 'system',
+        content: '没有可用成员可以处理这条消息。',
+        mentions: [],
+        timestamp: 100,
+        threadId: 'thread-delivery-failure',
+        lifecycle: {
+          kind: 'delivery_failure',
+          orderKey: '100:source-1:failure',
+          from: { kind: 'system', service: 'message_delivery' },
+          status: 'failed',
+          sourceEntryId: 'entry-1',
+          inputMessageId: 'source-1',
+          requestedTargets: [],
+          reason: 'no_available_target',
+          createdAt: 100,
+        },
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-delivery-failure' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].type, 'system');
+    assert.equal(body.messages[0].variant, 'error');
+  });
+
+  it('returns persisted system error messages with catId=null as type=system', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'ping gemini',
+        mentions: ['gemini'],
+        timestamp: 1000,
+        threadId: 'thread-1',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: 'Error: stream_idle_stall: Gemini stopped responding',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'thread-1',
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-1' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 2);
+    assert.equal(body.messages[1].type, 'system');
+    assert.equal(body.messages[1].catId, null);
+    assert.match(body.messages[1].content, /^Error: stream_idle_stall/);
+  });
+
+  it('keeps persisted source-backed notices on the connector path even when userId=system', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: '想交接给 @codex？把它单独放到新起一行开头，才能触发交接。',
+        mentions: [],
+        timestamp: 2500,
+        threadId: 'thread-connector-notice',
+        source: {
+          connector: 'inline-mention-hint',
+          label: '路由提示',
+          icon: '💡',
+          meta: { presentation: 'system_notice', noticeTone: 'info' },
+        },
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-connector-notice',
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].type, 'connector');
+    assert.equal(body.messages[0].catId, null);
+    assert.equal(body.messages[0].source.connector, 'inline-mention-hint');
+    assert.equal(body.messages[0].source.meta.presentation, 'system_notice');
+  });
+
+  it('maps a2a_routing system messages to type=system with extra.systemKind', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: '布偶猫 → 缅因猫',
+        mentions: [],
+        timestamp: 3000,
+        threadId: 'thread-routing',
+        extra: {
+          systemKind: 'a2a_routing',
+          a2aRouting: { fromCatId: 'codex', targetCatId: 'opus-47', invocationId: 'inv-routing' },
+        },
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-routing',
+    });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].type, 'system');
+    assert.equal(body.messages[0].catId, null);
+    assert.equal(body.messages[0].content, '布偶猫 → 缅因猫');
+    assert.equal(body.messages[0].extra.systemKind, 'a2a_routing');
+    assert.deepEqual(body.messages[0].extra.a2aRouting, {
+      fromCatId: 'codex',
+      targetCatId: 'opus-47',
+      invocationId: 'inv-routing',
+    });
+  });
+
+  it('respects limit parameter', async () => {
+    for (let i = 0; i < 10; i++) {
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'default-user',
+          catId: null,
+          content: `msg ${i}`,
+          mentions: [],
+          timestamp: 1000 + i,
+        }),
+      );
     }
 
     const res = await app.inject({
@@ -91,13 +717,15 @@ describe('GET /api/messages', () => {
 
   it('supports cursor pagination with before', async () => {
     for (let i = 0; i < 5; i++) {
-      messageStore.append({
-        userId: 'default-user',
-        catId: null,
-        content: `msg ${i}`,
-        mentions: [],
-        timestamp: 1000 + i * 100,
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'default-user',
+          catId: null,
+          content: `msg ${i}`,
+          mentions: [],
+          timestamp: 1000 + i * 100,
+        }),
+      );
     }
 
     // Get messages before timestamp 1300 (should get msg 0, 1, 2)
@@ -115,13 +743,15 @@ describe('GET /api/messages', () => {
   it('pagination covers all messages without gaps (regression: slice direction)', async () => {
     // Insert 6 messages with distinct timestamps
     for (let i = 0; i < 6; i++) {
-      messageStore.append({
-        userId: 'default-user',
-        catId: null,
-        content: `msg ${i}`,
-        mentions: [],
-        timestamp: 1000 + i * 100,
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'default-user',
+          catId: null,
+          content: `msg ${i}`,
+          mentions: [],
+          timestamp: 1000 + i * 100,
+        }),
+      );
     }
 
     // Page 1: most recent 2
@@ -168,13 +798,15 @@ describe('GET /api/messages', () => {
   it('composite cursor handles same-timestamp messages without gaps', async () => {
     // All messages at the same timestamp (simulates burst writes)
     for (let i = 0; i < 4; i++) {
-      messageStore.append({
-        userId: 'default-user',
-        catId: null,
-        content: `burst ${i}`,
-        mentions: [],
-        timestamp: 5000, // all same timestamp
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'default-user',
+          catId: null,
+          content: `burst ${i}`,
+          mentions: [],
+          timestamp: 5000, // all same timestamp
+        }),
+      );
     }
 
     // First page: most recent 2
@@ -203,17 +835,19 @@ describe('GET /api/messages', () => {
   });
 
   it('returns toolEvents when message has them (缅因猫 R2 P1-2)', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'I read the file',
-      mentions: [],
-      timestamp: 3000,
-      toolEvents: [
-        { id: 'tool-1', type: 'tool_use', label: 'opus → Read', detail: '{"path":"/a.ts"}', timestamp: 3000 },
-        { id: 'toolr-1', type: 'tool_result', label: 'opus ← result', detail: 'file content...', timestamp: 3001 },
-      ],
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'I read the file',
+        mentions: [],
+        timestamp: 3000,
+        toolEvents: [
+          { id: 'tool-1', type: 'tool_use', label: 'opus → Read', detail: '{"path":"/a.ts"}', timestamp: 3000 },
+          { id: 'toolr-1', type: 'tool_result', label: 'opus ← result', detail: 'file content...', timestamp: 3001 },
+        ],
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -228,13 +862,15 @@ describe('GET /api/messages', () => {
   });
 
   it('omits toolEvents when message has none', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'just text',
-      mentions: [],
-      timestamp: 4000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'just text',
+        mentions: [],
+        timestamp: 4000,
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -243,19 +879,21 @@ describe('GET /api/messages', () => {
   });
 
   it('preserves stream invocation identity for persisted assistant messages', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'persisted stream bubble',
-      mentions: [],
-      timestamp: 4500,
-      origin: 'stream',
-      extra: {
-        stream: {
-          invocationId: 'inv-stream-1',
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'persisted stream bubble',
+        mentions: [],
+        timestamp: 4500,
+        origin: 'stream',
+        extra: {
+          stream: {
+            invocationId: 'inv-stream-1',
+          },
         },
-      },
-    });
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -264,24 +902,29 @@ describe('GET /api/messages', () => {
   });
 
   it('filters by userId', async () => {
-    messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: 'alice msg',
-      mentions: [],
-      timestamp: 1000,
-    });
-    messageStore.append({
-      userId: 'bob',
-      catId: null,
-      content: 'bob msg',
-      mentions: [],
-      timestamp: 2000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        content: 'alice msg',
+        mentions: [],
+        timestamp: 1000,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'bob',
+        catId: null,
+        content: 'bob msg',
+        mentions: [],
+        timestamp: 2000,
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/messages?userId=alice',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'alice' },
     });
     const body = JSON.parse(res.body);
     assert.equal(body.messages.length, 1);
@@ -290,20 +933,22 @@ describe('GET /api/messages', () => {
 
   // ── F97: Connector message type mapping ──────────────────────────
 
-  it('maps message with source field to type=connector', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'GitHub Review 通知',
-      mentions: ['opus'],
-      timestamp: 9000,
-      source: {
-        connector: 'github-review',
-        label: 'GitHub Review',
-        icon: '🔔',
-        url: 'https://github.com/org/repo/pull/42',
-      },
-    });
+  it('maps message with source field to type=connector without legacy implicit navigation', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'GitHub Review 通知',
+        mentions: ['opus'],
+        timestamp: 9000,
+        source: {
+          connector: 'github-review',
+          label: 'GitHub Review',
+          icon: '🔔',
+          url: 'https://github.com/org/repo/pull/42',
+        },
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -315,31 +960,33 @@ describe('GET /api/messages', () => {
     assert.equal(msg.source.connector, 'github-review');
     assert.equal(msg.source.label, 'GitHub Review');
     assert.equal(msg.source.icon, '🔔');
-    assert.equal(msg.source.url, 'https://github.com/org/repo/pull/42');
+    assert.equal(Object.hasOwn(msg.source, 'url'), false);
   });
 
   it('includes source.meta in API response (F098-C: needed for direction parsing)', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'review notification',
-      mentions: ['opus'],
-      timestamp: 9002,
-      source: {
-        connector: 'github-review',
-        label: 'GitHub Review',
-        icon: '🔔',
-        url: 'https://github.com/org/repo/pull/42',
-        meta: { targets: ['codex', 'gpt52'], initiator: 'opus' },
-      },
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'review notification',
+        mentions: ['opus'],
+        timestamp: 9002,
+        source: {
+          connector: 'github-review',
+          label: 'GitHub Review',
+          icon: '🔔',
+          url: 'https://github.com/org/repo/pull/42',
+          meta: { targets: ['codex', 'gpt52'], initiator: 'opus' },
+        },
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
     const msg = body.messages[0];
     assert.equal(msg.type, 'connector');
     assert.equal(msg.source.connector, 'github-review');
-    assert.equal(msg.source.url, 'https://github.com/org/repo/pull/42');
+    assert.equal(Object.hasOwn(msg.source, 'url'), false);
     assert.deepStrictEqual(
       msg.source.meta,
       { targets: ['codex', 'gpt52'], initiator: 'opus' },
@@ -348,14 +995,16 @@ describe('GET /api/messages', () => {
   });
 
   it('serializes deliveredAt when present (F098-D P3 regression)', async () => {
-    const stored = messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'queued message',
-      mentions: [],
-      timestamp: 5000,
-      deliveryStatus: 'queued',
-    });
+    const stored = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'queued message',
+        mentions: [],
+        timestamp: 5000,
+        deliveryStatus: 'queued',
+      }),
+    );
     messageStore.markDelivered(stored.id, 12000);
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
@@ -365,13 +1014,15 @@ describe('GET /api/messages', () => {
   });
 
   it('omits deliveredAt when not set (F098-D P3 regression)', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'immediate message',
-      mentions: [],
-      timestamp: 6000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'immediate message',
+        mentions: [],
+        timestamp: 6000,
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -380,15 +1031,17 @@ describe('GET /api/messages', () => {
   });
 
   it('serializes extra.targetCats when present (F098-C1 regression)', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'review done',
-      mentions: ['codex'],
-      origin: 'callback',
-      timestamp: 7000,
-      extra: { targetCats: ['codex', 'gpt52'] },
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'review done',
+        mentions: ['codex'],
+        origin: 'callback',
+        timestamp: 7000,
+        extra: { targetCats: ['codex', 'gpt52'] },
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -401,13 +1054,15 @@ describe('GET /api/messages', () => {
   });
 
   it('message without source and without catId is type=user', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'normal user message',
-      mentions: [],
-      timestamp: 9001,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'normal user message',
+        mentions: [],
+        timestamp: 9001,
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -416,7 +1071,9 @@ describe('GET /api/messages', () => {
   });
 });
 
-describe('GET /api/messages with summaryStore (P1-B integration)', () => {
+// Auto-summary disabled (clowder-ai#343): summaries no longer merged into GET timeline.
+// SummaryStore still persisted for memory infrastructure / future Thread Recap.
+describe('GET /api/messages — summary NOT in timeline (clowder-ai#343)', () => {
   let app;
   let messageStore;
   let summaryStore;
@@ -445,135 +1102,41 @@ describe('GET /api/messages with summaryStore (P1-B integration)', () => {
     if (app) await app.close();
   });
 
-  it('includes summary items with type "summary" in timeline', async () => {
-    // Seed messages
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'hello',
-      mentions: [],
-      timestamp: 1000,
-    });
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'hi there',
-      mentions: [],
-      timestamp: 2000,
-    });
-
-    // Create a summary between the two messages
-    const s = summaryStore.create({
+  it('summaries exist in store but do NOT appear in timeline', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'hello',
+        mentions: [],
+        timestamp: 1000,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'hi there',
+        mentions: [],
+        timestamp: 2000,
+      }),
+    );
+    summaryStore.create({
       threadId: 'default',
       topic: '测试纪要',
       conclusions: ['结论一'],
       openQuestions: [],
       createdBy: 'system',
     });
-    // Backdate to fit in message window
-    Object.defineProperty(s, 'createdAt', { value: 1500, writable: false });
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
 
-    assert.equal(body.messages.length, 3);
-    // Sorted by timestamp: msg@1000, summary@1500, msg@2000
-    assert.equal(body.messages[0].type, 'user');
-    assert.equal(body.messages[1].type, 'summary');
-    assert.equal(body.messages[1].content, '测试纪要');
-    assert.ok(body.messages[1].summary, 'summary item should have summary field');
-    assert.equal(body.messages[1].summary.createdBy, 'system');
-    assert.deepEqual(body.messages[1].summary.conclusions, ['结论一']);
-    assert.equal(body.messages[2].type, 'assistant');
-  });
-
-  it('includes summary with createdAt > newest message on first page (boundary)', async () => {
-    // Seed messages
-    for (let i = 0; i < 3; i++) {
-      messageStore.append({
-        userId: 'default-user',
-        catId: 'opus',
-        content: `msg ${i}`,
-        mentions: [],
-        timestamp: 1000 + i * 100,
-      });
-    }
-    // Summary AFTER all messages (createdAt = 1300 > newest msg at 1200)
-    const s = summaryStore.create({
-      threadId: 'default',
-      topic: '后置纪要',
-      conclusions: [],
-      openQuestions: [],
-      createdBy: 'system',
-    });
-    Object.defineProperty(s, 'createdAt', { value: 1300, writable: false });
-
-    const res = await app.inject({ method: 'GET', url: '/api/messages' });
-    const body = JSON.parse(res.body);
-
-    // Should include all 3 messages + 1 summary = 4 items
-    assert.equal(body.messages.length, 4);
-    // Summary should be last (highest timestamp)
-    const last = body.messages[body.messages.length - 1];
-    assert.equal(last.type, 'summary');
-    assert.equal(last.content, '后置纪要');
-  });
-
-  it('excludes summary with createdAt >= beforeTs during pagination', async () => {
-    for (let i = 0; i < 5; i++) {
-      messageStore.append({
-        userId: 'default-user',
-        catId: null,
-        content: `msg ${i}`,
-        mentions: [],
-        timestamp: 1000 + i * 100,
-      });
-    }
-    // Summary at timestamp 1250 (between msg2@1200 and msg3@1300)
-    const s = summaryStore.create({
-      threadId: 'default',
-      topic: '分页纪要',
-      conclusions: [],
-      openQuestions: [],
-      createdBy: 'system',
-    });
-    Object.defineProperty(s, 'createdAt', { value: 1250, writable: false });
-
-    // Paginate with before=1250 — summary at 1250 should be EXCLUDED (>= beforeTs)
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/messages?before=1250&limit=50',
-    });
-    const body = JSON.parse(res.body);
-
-    const summaryItems = body.messages.filter((m) => m.type === 'summary');
-    assert.equal(summaryItems.length, 0, 'summary at beforeTs should be excluded');
-  });
-
-  it('does not include summaries from other threads', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'hello',
-      mentions: [],
-      timestamp: 1000,
-    });
-
-    // Summary in a different thread
-    const s = summaryStore.create({
-      threadId: 'other-thread',
-      topic: '其他线程纪要',
-      conclusions: [],
-      openQuestions: [],
-      createdBy: 'system',
-    });
-    Object.defineProperty(s, 'createdAt', { value: 1500, writable: false });
-
-    const res = await app.inject({ method: 'GET', url: '/api/messages' });
-    const body = JSON.parse(res.body);
-
-    assert.equal(body.messages.length, 1);
-    assert.equal(body.messages[0].type, 'user');
+    assert.equal(body.messages.length, 2, 'only messages, no summary injection');
+    assert.ok(
+      body.messages.every((m) => m.type !== 'summary'),
+      'no summary type in response',
+    );
   });
 });
 
@@ -606,26 +1169,26 @@ describe('GET /api/messages summary + pagination contract', () => {
     if (app) await app.close();
   });
 
-  it('hasMore reflects message count, not total timeline items', async () => {
-    // 5 messages — with limit=3, hasMore should be true
+  // Auto-summary disabled (clowder-ai#343): summaries no longer merged into timeline
+  it('timeline does NOT inject summaries (clowder-ai#343)', async () => {
     for (let i = 0; i < 5; i++) {
-      messageStore.append({
-        userId: 'default-user',
-        catId: null,
-        content: `msg ${i}`,
-        mentions: [],
-        timestamp: 1000 + i * 100,
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'default-user',
+          catId: null,
+          content: `msg ${i}`,
+          mentions: [],
+          timestamp: 1000 + i * 100,
+        }),
+      );
     }
-    // 1 summary in the latest page window
-    const s = summaryStore.create({
+    summaryStore.create({
       threadId: 'default',
       topic: '分页纪要',
       conclusions: [],
       openQuestions: [],
       createdBy: 'system',
     });
-    Object.defineProperty(s, 'createdAt', { value: 1350, writable: false });
 
     const res = await app.inject({
       method: 'GET',
@@ -633,68 +1196,10 @@ describe('GET /api/messages summary + pagination contract', () => {
     });
     const body = JSON.parse(res.body);
 
-    // hasMore=true based on messages (5 > 3)
     assert.equal(body.hasMore, true);
-    // Total items = 3 messages + 1 summary = 4 (exceeds limit)
-    // This is the documented contract: summaries are bonus items
-    const msgCount = body.messages.filter((m) => m.type !== 'summary').length;
     const sumCount = body.messages.filter((m) => m.type === 'summary').length;
-    assert.equal(msgCount, 3, 'message count should respect limit');
-    assert.equal(sumCount, 1, 'summary injected as bonus item');
-    assert.equal(body.messages.length, 4, 'total = messages + summaries');
-  });
-
-  it('multi-page timeline includes summaries only in correct page', async () => {
-    // 6 messages across the timeline
-    for (let i = 0; i < 6; i++) {
-      messageStore.append({
-        userId: 'default-user',
-        catId: null,
-        content: `msg ${i}`,
-        mentions: [],
-        timestamp: 1000 + i * 100, // 1000, 1100, 1200, 1300, 1400, 1500
-      });
-    }
-    // Summary at 1250 (between msg2@1200 and msg3@1300)
-    const s = summaryStore.create({
-      threadId: 'default',
-      topic: '中间纪要',
-      conclusions: ['c1'],
-      openQuestions: [],
-      createdBy: 'system',
-    });
-    Object.defineProperty(s, 'createdAt', { value: 1250, writable: false });
-
-    // Page 1: limit=3 → newest 3 messages (msg3, msg4, msg5)
-    const page1 = await app.inject({
-      method: 'GET',
-      url: '/api/messages?limit=3',
-    });
-    const body1 = JSON.parse(page1.body);
-    assert.equal(body1.hasMore, true);
-    // msg3@1300 is the oldest on page 1; summary@1250 < 1300 → excluded
-    const page1Summaries = body1.messages.filter((m) => m.type === 'summary');
-    assert.equal(page1Summaries.length, 0, 'summary before page window excluded');
-
-    // Page 2: before=1300 (oldest of page 1), limit=3
-    const page2 = await app.inject({
-      method: 'GET',
-      url: '/api/messages?before=1300&limit=3',
-    });
-    const body2 = JSON.parse(page2.body);
-    assert.equal(body2.hasMore, false);
-    // Page 2 has msg0@1000, msg1@1100, msg2@1200
-    // Summary@1250 >= minTs(1000) AND < beforeTs(1300) → included
-    const page2Summaries = body2.messages.filter((m) => m.type === 'summary');
-    assert.equal(page2Summaries.length, 1, 'summary in correct page window');
-    assert.equal(page2Summaries[0].content, '中间纪要');
-
-    // Verify: union of all non-summary items = all 6 messages
-    const allMsgs = [
-      ...body2.messages.filter((m) => m.type !== 'summary'),
-      ...body1.messages.filter((m) => m.type !== 'summary'),
-    ].map((m) => m.content);
-    assert.deepEqual(allMsgs, ['msg 0', 'msg 1', 'msg 2', 'msg 3', 'msg 4', 'msg 5']);
+    assert.equal(sumCount, 0, 'summaries should not appear in timeline');
+    assert.equal(body.messages.length, 3, 'only messages, no summary injection');
   });
 });
 
@@ -709,6 +1214,7 @@ describe('POST /api/messages orphan rejection (#21)', () => {
 
     const app = Fastify();
     await app.register(messagesRoutes, {
+      ...refusalDeliveryDependencies(),
       registry: new InvocationRegistry(),
       messageStore: new MessageStore(),
       socketManager: { broadcastAgentMessage: () => {}, broadcastToRoom: () => {} },
@@ -748,6 +1254,7 @@ describe('POST /api/messages rejects soft-deleted thread (Phase D P1)', () => {
 
     const app = Fastify();
     await app.register(messagesRoutes, {
+      ...refusalDeliveryDependencies(),
       registry: new InvocationRegistry(),
       messageStore: new MessageStore(),
       socketManager: { broadcastAgentMessage: () => {}, broadcastToRoom: () => {} },
@@ -810,6 +1317,7 @@ describe('POST /api/messages delete-guard protection', () => {
 
     const app = Fastify();
     await app.register(messagesRoutes, {
+      ...refusalDeliveryDependencies(),
       registry: new InvocationRegistry(),
       messageStore,
       socketManager: { broadcastAgentMessage: () => {}, broadcastToRoom: () => {} },
@@ -838,5 +1346,303 @@ describe('POST /api/messages delete-guard protection', () => {
 
     guard.release();
     await app.close();
+  });
+});
+
+// --- User timeline visibility policy ---
+
+describe('GET /api/messages timeline visibility policy', () => {
+  let app;
+  let messageStore;
+
+  beforeEach(async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { InvocationRegistry } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+
+    messageStore = new MessageStore();
+    app = Fastify();
+    await app.register(messagesRoutes, {
+      registry: new InvocationRegistry(),
+      messageStore,
+      socketManager: { broadcastAgentMessage: () => {} },
+    });
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    if (app) await app.close();
+  });
+
+  it('does not publish a queued user source record before admission', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'still waiting in Queue',
+        mentions: ['opus'],
+        timestamp: 900,
+        threadId: 'thread-unadmitted-source',
+        deliveryStatus: 'queued',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'already admitted',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId: 'thread-unadmitted-source',
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-unadmitted-source',
+      headers: { 'x-cat-cafe-user': 'default-user' },
+    });
+    const body = JSON.parse(res.body);
+
+    assert.deepEqual(
+      body.messages.map((message) => message.content),
+      ['already admitted'],
+    );
+  });
+
+  it('preserves typed context_briefing messages in API response', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'user msg',
+        mentions: [],
+        timestamp: 1000,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: 'briefing nav',
+        mentions: [],
+        timestamp: 2000,
+        origin: 'briefing',
+        extra: { systemKind: 'context_briefing' },
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'cat reply',
+        mentions: [],
+        timestamp: 3000,
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    const body = JSON.parse(res.body);
+    assert.equal(body.messages.length, 3);
+    assert.equal(body.messages[0].content, 'user msg');
+    assert.equal(body.messages[1].content, 'briefing nav');
+    assert.equal(body.messages[1].extra.systemKind, 'context_briefing');
+    assert.equal(body.messages[2].content, 'cat reply');
+  });
+
+  it('keeps legacy routing-guard-failure rows out of History after their producer is retired', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'user msg',
+        mentions: [],
+        timestamp: 1000,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: 'route guard failed',
+        mentions: [],
+        timestamp: 2000,
+        source: { connector: 'routing-guard-failure', detail: 'test' },
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    const body = JSON.parse(res.body);
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].content, 'user msg');
+  });
+
+  it('preserves F233 duty briefing (origin=briefing without systemKind)', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: 'duty briefing',
+        mentions: [],
+        timestamp: 1000,
+        origin: 'briefing',
+        extra: { rich: { v: 1, blocks: [{ id: 'duty-briefing', kind: 'card', v: 1, title: 'Duty' }] } },
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    const body = JSON.parse(res.body);
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].content, 'duty briefing');
+  });
+
+  it('loop-scans past large internal message clusters for pagination', async () => {
+    // Regression: fixed overscan=20 would return {messages:[], hasMore:true}
+    // when >20 consecutive internal messages exist between visible ones.
+    const threadId = 'thread-internal-cluster';
+
+    // Oldest visible message
+    messageStore.append(
+      canonicalTestMessageInput({
+        threadId,
+        userId: 'default-user',
+        catId: null,
+        content: 'oldest visible',
+        mentions: [],
+        timestamp: 100,
+      }),
+    );
+
+    // 25 consecutive internal route-guard diagnostics
+    for (let i = 0; i < 25; i++) {
+      messageStore.append(
+        canonicalTestMessageInput({
+          threadId,
+          userId: 'system',
+          catId: null,
+          content: `route-guard-${i}`,
+          mentions: [],
+          timestamp: 200 + i,
+          source: { connector: 'routing-guard-failure', detail: 'test' },
+        }),
+      );
+    }
+
+    // Newest visible message
+    messageStore.append(
+      canonicalTestMessageInput({
+        threadId,
+        userId: 'default-user',
+        catId: null,
+        content: 'newest visible',
+        mentions: [],
+        timestamp: 300,
+      }),
+    );
+
+    // Request with limit=1, cursor before newest visible
+    // This forces pagination to walk through the 25 internal messages
+    const cursor = `301:zzz`;
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/messages?threadId=${threadId}&limit=1&before=${cursor}`,
+    });
+    const body = JSON.parse(res.body);
+
+    // Must return the newest visible message, not an empty page
+    assert.equal(body.messages.length, 1, 'should return 1 visible message, not empty page');
+    assert.equal(body.messages[0].content, 'newest visible');
+    assert.equal(body.hasMore, true, 'should indicate more messages exist');
+  });
+
+  it('scans past 300+ consecutive internal messages to reach buried visible (R4 regression)', async () => {
+    // R3/R4 review (gpt52): the scan must reach visible messages regardless
+    // of cluster size. This test places the ONLY visible message behind 300
+    // internal messages — the loop must walk through all of them. A fixed
+    // iteration cap (MAX_ITERATIONS=10) or scan limit (MAX_RAW_SCANNED=10000)
+    // would fail this test if the cluster exceeded the cap.
+    const threadId = 'thread-mega-cluster';
+    const CLUSTER_SIZE = 300;
+
+    // Only visible message — buried at the bottom behind the cluster
+    messageStore.append(
+      canonicalTestMessageInput({
+        threadId,
+        userId: 'default-user',
+        catId: null,
+        content: 'buried visible',
+        mentions: [],
+        timestamp: 100,
+      }),
+    );
+
+    // 300 consecutive internal route-guard diagnostics on top
+    for (let i = 0; i < CLUSTER_SIZE; i++) {
+      messageStore.append(
+        canonicalTestMessageInput({
+          threadId,
+          userId: 'system',
+          catId: null,
+          content: `route-guard-${i}`,
+          mentions: [],
+          timestamp: 200 + i,
+          source: { connector: 'routing-guard-failure', detail: 'test' },
+        }),
+      );
+    }
+
+    // Cursor after all messages — forces scan through the entire cluster
+    const cursor = `${200 + CLUSTER_SIZE + 1}:zzz`;
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/messages?threadId=${threadId}&limit=1&before=${cursor}`,
+    });
+    const body = JSON.parse(res.body);
+
+    // Must reach the buried visible message, not return empty page
+    assert.equal(body.messages.length, 1, 'must reach buried visible past 300 internal');
+    assert.equal(body.messages[0].content, 'buried visible');
+    assert.equal(body.hasMore, false, 'no more messages after the only visible one');
+  });
+
+  it('returns hasMore=false when store is exhausted after filtering', async () => {
+    const threadId = 'thread-exhausted';
+
+    messageStore.append(
+      canonicalTestMessageInput({
+        threadId,
+        userId: 'default-user',
+        catId: null,
+        content: 'only visible',
+        mentions: [],
+        timestamp: 100,
+      }),
+    );
+
+    // A few internal route-guard diagnostics after
+    for (let i = 0; i < 3; i++) {
+      messageStore.append(
+        canonicalTestMessageInput({
+          threadId,
+          userId: 'system',
+          catId: null,
+          content: `route-guard-${i}`,
+          mentions: [],
+          timestamp: 200 + i,
+          source: { connector: 'routing-guard-failure', detail: 'test' },
+        }),
+      );
+    }
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/messages?threadId=${threadId}&limit=50`,
+    });
+    const body = JSON.parse(res.body);
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].content, 'only visible');
+    assert.equal(body.hasMore, false, 'store exhausted — no more messages');
   });
 });

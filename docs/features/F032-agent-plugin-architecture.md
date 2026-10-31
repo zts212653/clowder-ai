@@ -92,7 +92,7 @@ F032 解决的是“身份/角色/协作规则”被硬编码导致的系统不�
 
 ### 触发事件
 
-- 2026-02-26：team lead指出 Codex 喊 Opus 4.6 帮忙 review 而不是负责人 Opus 4.5
+- 2026-02-26：operator指出 Codex 喊 Opus 4.6 帮忙 review 而不是负责人 Opus 4.5
 - 多分身共存导致规则失效：哪个Ragdoll？哪个Maine Coon？
 
 ## Design Proposal
@@ -273,7 +273,7 @@ z.string().refine(id => catRegistry.has(id), 'Invalid catId')
 | `roles` | string[] | 职能角色（architect, peer-reviewer, designer, thinker...） |
 | `lead` | boolean | 是否是该 family 的负责人 |
 | `available` | boolean | **是否有猫粮**！false = 不要找他 |
-| `evaluation` | string | team lead对这只猫的评价（注入到队友介绍） |
+| `evaluation` | string | operator对这只猫的评价（注入到队友介绍） |
 
 #### B2. Reviewer 匹配规则
 
@@ -291,7 +291,7 @@ async function resolveReviewer(options: ReviewerMatchOptions): Promise<CatId> {
   const roster = getRoster();
   const authorEntry = roster[options.author];
 
-  // 0. 过滤掉没猫粮的猫（team lead 40 美刀的教训！）
+  // 0. 过滤掉没猫粮的猫（operator 40 美刀的教训！）
   // 1. 找所有具有 peer-reviewer 角色的猫
   const candidates = Object.entries(roster)
     .filter(([id, entry]) =>
@@ -334,10 +334,10 @@ async function resolveReviewer(options: ReviewerMatchOptions): Promise<CatId> {
 }
 ```
 
-**降级规则（team lead确认）**：
+**降级规则（operator确认）**：
 - 优先不同 family 的 reviewer
 - 如果不同 family 都没猫粮或不可用，允许降级到同 family 的 lead（非自己）
-- 降级时必须 log 警告，让team lead知道
+- 降级时必须 log 警告，让operator知道
 
 #### B3. SOP/Skill 规则模板化
 
@@ -515,7 +515,7 @@ if (participantsWithActivity.length > 0) {
 | D2 | Reviewers 动态注入 | P2 | B2, C1 | 待开始 |
 | **E** | **接入 Spark 验证** | P2 | A~D | 待开始 |
 
-**执行顺序（team lead确认）**：A → B → C → D → E（顺序执行）
+**执行顺序（operator确认）**：A → B → C → D → E（顺序执行）
 
 ## Decisions（已确认）
 
@@ -529,11 +529,11 @@ if (participantsWithActivity.length > 0) {
 
 **允许同 family 非自己的 lead 降级**，特别是：
 - Ragdoll没猫粮时，Maine Coon可以降级找同 family 的其他Ragdoll分身
-- 必须 log 警告让team lead知道降级发生了
+- 必须 log 警告让operator知道降级发生了
 
-**`available` 字段**：team lead可以标记某只猫"没猫粮"，系统会自动排除。
+**`available` 字段**：operator可以标记某只猫"没猫粮"，系统会自动排除。
 
-> **教训**：2026-02 上周 SOP 写死了"Ragdoll ↔ Maine Coon"，Ragdoll没猫粮了Maine Coon还疯狂找他 review，烧了team lead 40 美刀 extra！
+> **教训**：2026-02 上周 SOP 写死了"Ragdoll ↔ Maine Coon"，Ragdoll没猫粮了Maine Coon还疯狂找他 review，烧了operator 40 美刀 extra！
 
 ### 3. 迁移策略？✅ 已决定
 
@@ -562,3 +562,20 @@ Phase B3 做一次性批量替换 + 守护测试。
 | routes/*.ts | z.enum 写死 | P1 |
 | services/index.ts | AgentService 构造写死 | P1 |
 | MENTION_ALIASES | 模块级常量 import 时求值 | P2 |
+
+## Post-Completion Boundary Adjustments
+
+### KD-13（F208 边界调整）— operator signoff 2026-06-19
+
+F208（Capability Profile Routing）引入 `cat-dossier.md` 能力画像档案后，cat-config 的
+能力描述字段（`teamStrengths` / `caution`）与 dossier 产生语义漂移。三猫讨论 + operator
+拍板后调整边界：
+
+- **cat-config 退回纯身份配置**：管 catId / model / 开关 / 排序 / 硬限制（如"禁止写代码"）
+- **能力描述权归 F208 dossier**：`cat-dossier.md` 结构化投影层（`l0RosterSummary`）
+  替代 `teamStrengths` 作为 compile-l0 / SystemPromptBuilder 的能力描述源
+- **`teamStrengths` / `caution` 标 legacy-fallback**：**永久保留当社区兜底，永不删字段**。
+  社区operator没有 dossier，用 `teamStrengths` 写"产品经理"式角色定位——这是他们唯一入口
+- **Fallback 链**：`dossier.l0RosterSummary ?? config.teamStrengths ?? config.roleDescription`
+
+> 详见 F208 spec KD-8 ~ KD-14；讨论记录：F208 feat doc Timeline 2026-06-19 条目。

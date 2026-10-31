@@ -21,6 +21,11 @@ describe('McpPromptInjector', () => {
     assert.equal(needsMcpInjection(false), true);
   });
 
+  it('needsMcpInjection returns false for antigravity provider (no HTTP callback support)', async () => {
+    const { needsMcpInjection } = await import('../dist/domains/cats/services/agents/invocation/McpPromptInjector.js');
+    assert.equal(needsMcpInjection(false, 'antigravity'), false);
+  });
+
   it('buildMcpCallbackInstructions references env var credentials', async () => {
     const { buildMcpCallbackInstructions } = await import(
       '../dist/domains/cats/services/agents/invocation/McpPromptInjector.js'
@@ -38,7 +43,7 @@ describe('McpPromptInjector', () => {
     const instructions = buildMcpCallbackInstructions({});
 
     assert.ok(instructions.includes('post-message'), 'should list post-message');
-    assert.ok(instructions.includes('register-pr-tracking'), 'should list register-pr-tracking');
+    assert.ok(!instructions.includes('register-pr-tracking'), 'tracking is provided by the installed native MCP');
     assert.ok(instructions.includes('thread-context'), 'should list thread-context');
     assert.ok(instructions.includes('list-threads'), 'should list list-threads');
     assert.ok(instructions.includes('feat-index'), 'should list feat-index');
@@ -53,7 +58,7 @@ describe('McpPromptInjector', () => {
     assert.ok(instructions.includes('search-evidence'), 'should list search-evidence');
     assert.ok(instructions.includes('reflect'), 'should list reflect');
     assert.ok(instructions.includes('retain-memory'), 'should list retain-memory');
-    assert.ok(instructions.includes('request-permission'), 'should list request-permission');
+    assert.ok(!instructions.includes('request-permission'), 'should not advertise the sunset permission callback');
   });
 
   it('buildMcpCallbackInstructions references API endpoints for docs', async () => {
@@ -76,13 +81,13 @@ describe('McpPromptInjector', () => {
     assert.ok(instructions.includes('$CAT_CAFE_API_URL'), 'fallback should use env var, not hardcoded host');
   });
 
-  it('buildMcpCallbackInstructions is compact (<700 chars)', async () => {
+  it('buildMcpCallbackInstructions is compact (<750 chars)', async () => {
     const { buildMcpCallbackInstructions } = await import(
       '../dist/domains/cats/services/agents/invocation/McpPromptInjector.js'
     );
     const instructions = buildMcpCallbackInstructions({});
 
-    assert.ok(instructions.length < 700, `Instructions (${instructions.length} chars) should be <700`);
+    assert.ok(instructions.length < 750, `Instructions (${instructions.length} chars) should be <750`);
   });
 
   it('buildMcpCallbackInstructions uses teammate handle (not self) in examples', async () => {

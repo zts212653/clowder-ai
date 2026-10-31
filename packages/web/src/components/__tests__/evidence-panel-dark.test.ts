@@ -7,7 +7,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { EvidenceResult } from '../EvidenceCard';
 import { EvidenceCard } from '../EvidenceCard';
-import { EvidencePanel } from '../EvidencePanel';
 
 describe('Evidence Panel dark theme (F098-B1)', () => {
   let container: HTMLDivElement;
@@ -34,27 +33,15 @@ describe('Evidence Panel dark theme (F098-B1)', () => {
     container.remove();
   });
 
-  it('EvidencePanel uses slate dark background', () => {
-    act(() => {
-      root.render(
-        React.createElement(EvidencePanel, {
-          data: { results: [], degraded: false },
-        }),
-      );
-    });
-
-    const html = container.innerHTML;
-    expect(html).toContain('bg-slate-800');
-    expect(html).not.toContain('--color-cocreator-bg');
-  });
-
   it('EvidenceCard uses dark card styling with high-contrast text', () => {
     const result: EvidenceResult = {
       title: 'F097 CLI 重构',
       anchor: 'F097',
       snippet: 'tintedDark 品种色方案',
-      confidence: 'high',
+      matchRank: 'high',
       sourceType: 'decision',
+      authority: 'validated',
+      updatedAt: '2026-07-12T00:00:00Z',
     };
 
     act(() => {
@@ -63,19 +50,40 @@ describe('Evidence Panel dark theme (F098-B1)', () => {
 
     const html = container.innerHTML;
     // Dark card background
-    expect(html).toContain('bg-slate-900');
+    expect(html).toContain('bg-cafe-surface-sunken');
     // Should NOT use old light-mode CSS vars
     expect(html).not.toContain('--color-base-white');
     expect(html).not.toContain('--color-gemini-bg');
+    expect(html).toContain('match:high · authority:validated · updated:');
+    expect(html).toContain('2026-07-12T00:00:00Z');
   });
 
-  it('EvidenceCard confidence badge uses appropriate dark colors', () => {
-    const result: EvidenceResult = {
-      title: 'Test',
-      anchor: 'test',
-      snippet: 'test',
+  it('EvidenceCard renders legacy persisted confidence without crashing', () => {
+    const legacyResult = {
+      title: 'Legacy cached result',
+      anchor: 'legacy-anchor',
+      snippet: 'Persisted before F263 split the result axes',
       confidence: 'high',
       sourceType: 'decision',
+    } as unknown as EvidenceResult;
+
+    act(() => {
+      root.render(React.createElement(EvidenceCard, { result: legacyResult }));
+    });
+
+    const html = container.innerHTML;
+    expect(html).toContain('match:high · authority:unknown · updated:');
+    expect(html).toContain('bg-semantic-success-surface');
+    expect(html).toContain('高匹配');
+  });
+
+  it('EvidenceCard renders architecture source type without falling through', () => {
+    const result: EvidenceResult = {
+      title: 'Memory System Overview',
+      anchor: 'doc:architecture/memory-system-overview',
+      snippet: 'Architecture map',
+      matchRank: 'high',
+      sourceType: 'architecture',
     };
 
     act(() => {
@@ -83,8 +91,7 @@ describe('Evidence Panel dark theme (F098-B1)', () => {
     });
 
     const html = container.innerHTML;
-    // High confidence should use emerald in dark mode
-    expect(html).toContain('bg-emerald-900');
-    expect(html).toContain('text-emerald-300');
+    expect(html).toContain('架构');
+    expect(html).toContain('doc:architecture/memory-system-overview');
   });
 });

@@ -3,16 +3,16 @@ import { describe, it } from 'node:test';
 import { detectUserMention } from '../dist/routes/user-mention.js';
 
 describe('detectUserMention', () => {
-  it('detects @铲屎官 at line start', () => {
-    assert.equal(detectUserMention('请看这个\n@铲屎官\n帮忙确认'), true);
+  it('detects @co-creator at line start', () => {
+    assert.equal(detectUserMention('请看这个\n@co-creator\n帮忙确认'), true);
   });
 
   it('detects @co-creator at line start', () => {
     assert.equal(detectUserMention('@co-creator 请帮忙看看'), true);
   });
 
-  it('ignores @铲屎官 in middle of line', () => {
-    assert.equal(detectUserMention('告诉@铲屎官这件事'), false);
+  it('ignores @co-creator in middle of line', () => {
+    assert.equal(detectUserMention('告诉@co-creator这件事'), false);
   });
 
   it('ignores @co-creator inside code block', () => {
@@ -24,7 +24,7 @@ describe('detectUserMention', () => {
   });
 
   it('handles leading whitespace before @co-creator', () => {
-    assert.equal(detectUserMention('  @铲屎官 看看'), true);
+    assert.equal(detectUserMention('  @co-creator 看看'), true);
   });
 
   it('returns false for empty string', () => {
@@ -37,11 +37,11 @@ describe('detectUserMention', () => {
   });
 
   it('handles multiple code blocks correctly', () => {
-    assert.equal(detectUserMention('```js\n@co-creator\n```\n普通文本\n```\n@铲屎官\n```'), false);
+    assert.equal(detectUserMention('```js\n@co-creator\n```\n普通文本\n```\n@co-creator\n```'), false);
   });
 
-  it('detects @铲屎官 after code block', () => {
-    assert.equal(detectUserMention('```\ncode\n```\n@铲屎官 看看'), true);
+  it('detects @co-creator after code block', () => {
+    assert.equal(detectUserMention('```\ncode\n```\n@co-creator 看看'), true);
   });
 
   it('OQ-1: rejects @co-creator123 (token boundary)', () => {
@@ -56,38 +56,40 @@ describe('detectUserMention', () => {
     assert.equal(detectUserMention('@co-creator'), true);
   });
 
-  it('OQ-1: accepts @铲屎官 followed by space', () => {
-    assert.equal(detectUserMention('@铲屎官 检查一下'), true);
+  it('OQ-1: accepts @co-creator followed by space', () => {
+    assert.equal(detectUserMention('@co-creator 检查一下'), true);
   });
 
   it('R2-P2: accepts @co-creator followed by CJK text (no space)', () => {
     assert.equal(detectUserMention('@co-creator请看'), true);
   });
 
-  it('R2-P2: accepts @铲屎官 followed by CJK text (no space)', () => {
-    assert.equal(detectUserMention('@铲屎官请看'), true);
+  it('R2-P2: accepts @co-creator followed by CJK text (no space)', () => {
+    assert.equal(detectUserMention('@co-creator请看'), true);
   });
 
   it('R2-P2: still rejects @co-creatorfoo (ASCII continuation)', () => {
     assert.equal(detectUserMention('@co-creatorfoo'), false);
   });
 
-  // F067 co-creator config: configured mention patterns
-  it('detects configured co-creator @co-creator at line start', () => {
+  // F067 co-creator config + L0: canonical co-creator handles are always-present fallbacks.
+  it('detects @co-creator at line start (always-present fallback)', () => {
+    assert.equal(detectUserMention('@co-creator 请看'), true);
+    assert.equal(detectUserMention('@co-creator请看'), true);
+  });
+
+  it('detects L0 co-creator aliases at line start (always-present fallback)', () => {
     assert.equal(detectUserMention('@co-creator 请看'), true);
     assert.equal(detectUserMention('@co-creator 请看'), true);
+    assert.equal(detectUserMention('@co-creator 请看'), true);
   });
 
-  it('detects configured co-creator @co-creator at line start', () => {
-    assert.equal(detectUserMention('@co-creator 帮忙确认'), true);
+  it('rejects @co-creator continuation (token boundary)', () => {
+    assert.equal(detectUserMention('@co-creator123 not a real mention'), false);
   });
 
-  it('detects configured co-creator @co-creator at line start', () => {
-    assert.equal(detectUserMention('@co-creator 看看'), true);
-  });
-
-  it('rejects @co-creator continuation (e.g. @co-creatorFoo)', () => {
-    assert.equal(detectUserMention('@co-creatorFoo not a mention'), false);
+  it('rejects @co-creator continuation (e.g. @co-creatorfoo)', () => {
+    assert.equal(detectUserMention('@co-creatorfoo not a mention'), false);
   });
 
   it('accepts @co-creator followed by CJK text', () => {

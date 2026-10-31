@@ -1,0 +1,294 @@
+/**
+ * F095 Phase E: Scroll anchor hook for ThreadSidebar.
+ *
+ * Problem: When threads reorder (active thread jumps up), the scroll container
+ * keeps its pixel scrollTop but the content has shifted — the user loses their place.
+ *
+ * Solution: On every scroll event, capture the first visible thread element and its
+ * position relative to the container. After a reorder re-render, find that element's
+ * new position and adjust scrollTop to compensate for the drift.
+ */
+
+import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+
+interface ScrollAnchor {
+  threadId: string;
+  /** Distance from container top to the anchor element top (px) */
+  offsetFromTop: number;
+  /** Scroll-independent position: a viewport move alone is not a row reorder. */
+  contentTop: number;
+}
+
+interface SelectedThreadState {
+  threadId: string;
+  isWorking: boolean;
+}
+
+interface ScrollAnchorOptions {
+  selectedThread: SelectedThreadState | null;
+  onSelectedThreadMissing?: (threadId: string) => void;
+}
+
+/** Minimum scrollTop before we bother anchoring (skip when at the top). */
+const ANCHOR_THRESHOLD_PX = 40;
+
+/** Minimum drift to correct (avoids sub-pixel jitter). */
+const DRIFT_TOLERANCE_PX = 2;
+
+/** Session-scoped scroll memory for thread switches/remounts. */
+const SCROLL_MEMORY_KEY = 'cat-cafe:sidebar:scrollTop';
+const SCROLL_OCCLUDER_SELECTOR = '[data-scroll-occluder="true"]';
+
+function getSessionStorage(): Storage | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function readPersistedScrollTop(): number | null {
+  const storage = getSessionStorage();
+  if (!storage) return null;
+  const raw = storage.getItem(SCROLL_MEMORY_KEY);
+  if (!raw) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+function writePersistedScrollTop(value: number) {
+  const storage = getSessionStorage();
+  if (!storage) return;
+  storage.setItem(SCROLL_MEMORY_KEY, String(Math.max(0, Math.round(value))));
+}
+
+function getVisibleTop(container: HTMLElement): number {
+  const containerTop = container.getBoundingClientRect().top;
+  const occluder = container.querySelector<HTMLElement>(SCROLL_OCCLUDER_SELECTOR);
+  if (!occluder) return containerTop;
+  const rect = occluder.getBoundingClientRect();
+  return rect.top <= containerTop + DRIFT_TOLERANCE_PX && rect.bottom > containerTop ? rect.bottom : containerTop;
+}
+
+function revealOccludedFirstThread(container: HTMLElement): void {
+  const visibleTop = getVisibleTop(container);
+  const items = container.querySelectorAll<HTMLElement>('[data-thread-id]');
+  for (const item of items) {
+    const rect = item.getBoundingClientRect();
+    if (rect.bottom <= visibleTop) continue;
+    const overlap = visibleTop - rect.top;
+    if (overlap > DRIFT_TOLERANCE_PX) {
+      container.scrollTop = Math.max(0, container.scrollTop - overlap);
+    }
+    return;
+  }
+}
+
+function revealThreadNearest(container: HTMLElement, threadId: string): boolean {
+  const selector = `[data-thread-id="${CSS.escape(threadId)}"]`;
+  const item = container.querySelector<HTMLElement>(selector);
+  if (!item) return false;
+
+  const visibleTop = getVisibleTop(container);
+  const visibleBottom = container.getBoundingClientRect().bottom;
+  const rect = item.getBoundingClientRect();
+  if (rect.top < visibleTop - DRIFT_TOLERANCE_PX) {
+    container.scrollTop = Math.max(0, container.scrollTop - (visibleTop - rect.top));
+    return true;
+  }
+  if (rect.bottom > visibleBottom + DRIFT_TOLERANCE_PX) container.scrollTop += rect.bottom - visibleBottom;
+  return true;
+}
+
+/**
+ * Keeps the visible content in place when thread list reorders.
+ *
+ * @param containerRef - ref to the scrollable container div
+ * @param reorderProjection - the current tab's sorted thread projection (used as effect dep)
+ */
+export function useScrollAnchor(
+  containerRef: RefObject<HTMLDivElement | null>,
+  reorderProjection: readonly unknown[],
+  options: ScrollAnchorOptions,
+) {
+  const anchorRef = useRef<ScrollAnchor | null>(null);
+  const selectedThreadRef = useRef<SelectedThreadState | null>(options.selectedThread);
+  const pendingRestoreRef = useRef<number | null>(readPersistedScrollTop());
+  /** Tracks the last known scrollTop — safe to read even after DOM detach. */
+  const lastScrollTopRef = useRef(readPersistedScrollTop() ?? 0);
+
+  const persistScrollTop = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    lastScrollTopRef.current = container.scrollTop;
+    writePersistedScrollTop(container.scrollTop);
+  }, [containerRef]);
+
+  /** Record the first visible `[data-thread-id]` element as anchor. */
+  const captureAnchor = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const items = container.querySelectorAll('[data-thread-id]');
+    const visibleTop = getVisibleTop(container);
+
+    for (const item of items) {
+      const rect = item.getBoundingClientRect();
+      // First element whose bottom is still visible
+      if (rect.bottom > visibleTop) {
+        const threadId = item.getAttribute('data-thread-id');
+        if (!threadId) continue;
+        anchorRef.current = {
+          threadId,
+          offsetFromTop: rect.top - visibleTop,
+          contentTop: rect.top - container.getBoundingClientRect().top + container.scrollTop,
+        };
+        return;
+      }
+    }
+  }, [containerRef]);
+
+  /** Scroll handler — attach to the container's onScroll. */
+  const onScroll = useCallback(() => {
+    persistScrollTop();
+    captureAnchor();
+  }, [captureAnchor, persistScrollTop]);
+
+  // A previous route's position may remain unreachable after groups collapse
+  // or rows are removed. Once the user browses, that old restore must not keep
+  // retrying on every live snapshot and pull them back to the list's boundary.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const takeControl = () => {
+      pendingRestoreRef.current = null;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) takeControl();
+    };
+    container.addEventListener('wheel', takeControl, { passive: true });
+    container.addEventListener('touchstart', takeControl, { passive: true });
+    container.addEventListener('pointerdown', takeControl, { passive: true });
+    container.addEventListener('keydown', onKeyDown);
+    return () => {
+      container.removeEventListener('wheel', takeControl);
+      container.removeEventListener('touchstart', takeControl);
+      container.removeEventListener('pointerdown', takeControl);
+      container.removeEventListener('keydown', onKeyDown);
+    };
+  }, [containerRef]);
+
+  /** Preserve the latest position even if the sidebar unmounts immediately after a click.
+   *  Writes from lastScrollTopRef — NOT from containerRef which may be detached. */
+  useEffect(
+    () => () => {
+      writePersistedScrollTop(lastScrollTopRef.current);
+    },
+    [],
+  );
+
+  /**
+   * Restore scrollTop after route-driven remounts.
+   * This covers the "click a thread near the bottom → sidebar snaps back to top" path,
+   * which is separate from the reorder drift handled below.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rerun when reorderProjection identity changes so async thread loads can restore scroll after remount
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const pendingTop = pendingRestoreRef.current;
+    if (!container || pendingTop === null) return;
+
+    if (Math.abs(container.scrollTop - pendingTop) > DRIFT_TOLERANCE_PX) {
+      container.scrollTop = pendingTop;
+    }
+
+    // Only clear pending + persist if the assignment actually took effect.
+    // If the container is too short (e.g., groups collapsed), keep pending for the
+    // next effect run (triggered when threadGroups identity changes after API fetch).
+    if (Math.abs(container.scrollTop - pendingTop) <= DRIFT_TOLERANCE_PX) {
+      revealOccludedFirstThread(container);
+      captureAnchor();
+      persistScrollTop();
+      pendingRestoreRef.current = null;
+    }
+  }, [containerRef, captureAnchor, persistScrollTop, reorderProjection]);
+
+  /**
+   * After React commits DOM changes (layout phase), check if the anchor
+   * element drifted and compensate scrollTop.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: effect intentionally keys off reorderProjection while reading live refs
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const container = containerRef.current;
+
+    // Judge user intent from the last observed scroll event, not the live DOM value.
+    // Chromium can transiently reset scrollTop to 0 while reconciling a reordered
+    // list; treating that browser-side adjustment as a deliberate trip to the top
+    // loses the captured anchor and produces the exact reverse jump this hook owns.
+    if (!anchor || !container || lastScrollTopRef.current < ANCHOR_THRESHOLD_PX) return;
+
+    const selector = `[data-thread-id="${CSS.escape(anchor.threadId)}"]`;
+    const el = container.querySelector(selector);
+    if (!el) return;
+
+    const visibleTop = getVisibleTop(container);
+    const elTop = el.getBoundingClientRect().top;
+    const contentTop = elTop - container.getBoundingClientRect().top + container.scrollTop;
+    if (Math.abs(contentTop - anchor.contentTop) <= DRIFT_TOLERANCE_PX) {
+      // Native scrolling can precede its coalesced scroll event. A status-only
+      // snapshot must adopt that position rather than restore a stale offset.
+      captureAnchor();
+      persistScrollTop();
+      return;
+    }
+    const drift = elTop - visibleTop - anchor.offsetFromTop;
+
+    if (Math.abs(drift) > DRIFT_TOLERANCE_PX) {
+      container.scrollTop += drift;
+    }
+    // Preserve the anchor's exact offset during reorders. A partially visible row
+    // can be the user's deliberate scroll position, and live status updates also
+    // replace threadGroups without moving any rows. Normalizing that row here
+    // would reverse the user's scroll; restore already handles sticky occlusion.
+    persistScrollTop();
+    anchorRef.current = {
+      ...anchor,
+      offsetFromTop: el.getBoundingClientRect().top - getVisibleTop(container),
+      contentTop,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- containerRef is a live ref, not a dependency
+  }, [captureAnchor, persistScrollTop, reorderProjection]);
+
+  const selectedThread = options.selectedThread;
+  const selectedThreadId = selectedThread ? selectedThread.threadId : null;
+  const selectedThreadIsWorking = selectedThread?.isWorking === true;
+  const onSelectedThreadMissing = options.onSelectedThreadMissing;
+
+  // The browsing anchor remains authoritative for background reorders. The one
+  // exception is the already-selected row itself starting work: after anchor
+  // compensation, recover only enough visibility to keep that row reachable.
+  useLayoutEffect(() => {
+    const previous = selectedThreadRef.current;
+    const nextSelectedThread =
+      selectedThreadId === null ? null : { threadId: selectedThreadId, isWorking: selectedThreadIsWorking };
+    selectedThreadRef.current = nextSelectedThread;
+    const selectedThreadStartedWorking =
+      previous !== null &&
+      nextSelectedThread !== null &&
+      previous.threadId === nextSelectedThread.threadId &&
+      !previous.isWorking &&
+      nextSelectedThread.isWorking;
+    if (!selectedThreadStartedWorking) return;
+
+    const container = containerRef.current;
+    if (!container) return;
+    if (!revealThreadNearest(container, nextSelectedThread.threadId)) {
+      onSelectedThreadMissing?.(nextSelectedThread.threadId);
+    }
+    persistScrollTop();
+  }, [containerRef, onSelectedThreadMissing, persistScrollTop, selectedThreadId, selectedThreadIsWorking]);
+
+  return { onScroll };
+}

@@ -12,7 +12,7 @@ created: 2026-02-26
 > **Created**: 2026-02-26
 
 ## Why
-- team lead洞察 🐬
+- operator洞察 🐬
 
 ## What
 - **F2**: Phase 3.9 7a519b9 — worklist 链式调用 + parseA2AMentions + a2a_handoff 前端显示

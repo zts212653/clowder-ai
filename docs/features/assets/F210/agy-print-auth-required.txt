@@ -1,0 +1,31 @@
+Command:
+HOME=/tmp/cat-cafe-f210-agy-recon/home \
+BROWSER=echo \
+SSH_CONNECTION="127.0.0.1 1 127.0.0.1 2" \
+/tmp/cat-cafe-f210-agy-recon/bin/agy \
+  --log-file /tmp/cat-cafe-f210-agy-recon/raw/print-auth.log \
+  --print-timeout 10s \
+  --print "Reply with OK only."
+
+Captured: 2026-05-22
+Exit: 0
+
+stdout:
+Authentication required. Please visit the URL to log in:
+  https://accounts.google.com/o/oauth2/auth?[REDACTED]
+
+Waiting for authentication (timeout 30s)...
+Or, paste the authorization code here and press Enter:
+
+Error: authentication interrupted.
+
+stderr:
+(empty)
+
+Selected log lines:
+I... Print mode: starting (promptLength=19, model="", conversationID="")
+I... Print mode: not authenticated, trying silent auth
+I... Print mode: silent auth failed, triggering OAuth
+I... Starting OAuth authentication flow
+I... token_storage.go:55] Using file-based token storage because SSH session detected
+W... Print mode: auth cancelled or interrupted

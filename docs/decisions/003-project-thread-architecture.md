@@ -9,23 +9,23 @@ created: 2026-02-26
 
 > **状态**: 已决定
 > **日期**: 2026-02-06
-> **决策者**: 铲屎官 + Ragdoll
+> **决策者**: operator + Ragdoll
 > **上下文**: Phase 3.2 完成后复盘, 参考 Codex App 的 Project/Thread 模型
 
 ## 背景
 
 Phase 3.2 实现了扁平的 Thread（对话）管理，但缺少 **Project 层**。
-铲屎官指出参考 Codex App 的组织方式：
+operator指出参考 Codex App 的组织方式：
 
 ```
 Codex App 侧栏:
 ├── cat-cafe (Project = 目录)
-│   ├── /home/user/relay-st...   (Thread)
+│   ├── /home/user/projects/relay-st...   (Thread)
 │   ├── Study identity injection discussion    (Thread)
 │   ├── 调研 Claude Code Agent Teams ...       (Thread)
 │   └── 你看看这是一个怎么样的工程！...        (Thread)
 └── relay-station (Project = 目录)
-    └── /home/user/antigravit...   (Thread)
+    └── /home/user/.gemini/antigravit...   (Thread)
 ```
 
 ## 决策
@@ -38,7 +38,7 @@ Codex App 侧栏:
 
 2. **文件系统即记忆**: 目录结构本身就是知识的组织方式 — CLAUDE.md, AGENTS.md, GEMINI.md, docs/, src/ 都是项目记忆的一部分。
 
-3. **跨项目天然隔离**: 当猫咖帮铲屎官做别的项目时（非 cat-cafe 本身），`AgentServiceOptions.workingDirectory` 已支持设置不同 cwd。Project = Directory 让这个变得自然。
+3. **跨项目天然隔离**: 当猫咖帮operator做别的项目时（非 cat-cafe 本身），`AgentServiceOptions.workingDirectory` 已支持设置不同 cwd。Project = Directory 让这个变得自然。
 
 4. **与 Phase 3.5 一致**: Task (毛线球) 附着到 Thread, Thread 归属 Project。Task 的文件操作天然在 Project 目录内。
 
@@ -133,8 +133,8 @@ Demo 发现: 三只猫全不知道自己是谁。
 
 ```
 System Prompt 分层组装:
-1. 身份层: "你是Ragdoll(Opus), Cat Cafe 的主架构师..."
-2. 项目层: "当前项目: cat-cafe, 路径: /path/to/project"
+1. 身份层: "你是Ragdoll(Opus), Clowder AI 的主架构师..."
+2. 项目层: "当前项目: cat-cafe, 路径: /home/user/cat-cafe"
 3. 会话层: "当前对话参与者: opus, codex"
 4. 即时层: "用户刚说: ..."
 ```
@@ -172,7 +172,7 @@ System Prompt 分层组装:
 ### 3. Project 自动发现
 
 ```
-用户打开 Cat Cafe → 检测 cwd → 注册为 Project
+用户打开 Clowder AI → 检测 cwd → 注册为 Project
 切换目录 → 切换 Project → Thread 列表跟随
 spawn CLI → cwd = projectPath
 ```
@@ -190,9 +190,9 @@ spawn CLI → cwd = projectPath
 
 ## 给未来Ragdoll的备忘
 
-1. **不要忘记 Project = 目录**。这是铲屎官明确确认的设计决策。
+1. **不要忘记 Project = 目录**。这是operator明确确认的设计决策。
 2. **Thread 是 Project 内的会话**，不是全局扁平的。
 3. **身份注入是万物之基** — 不做身份注入，Phase 3.5 的一切都是空中楼阁。
-4. **参考 Codex App** — `reference-pictures/codex-app-multi-thread.png` 是铲屎官给的参考截图。
+4. **参考 Codex App** — `reference-pictures/codex-app-multi-thread.png` 是operator给的参考截图。
 5. **双轨制 (Task + Roundtable)** — Maine Coon的设计 (`dual-track-collaboration-design.md`) 已获共识。
 6. **Demo 发现** — *(internal reference removed)* 记录了所有 P0-P3 问题。

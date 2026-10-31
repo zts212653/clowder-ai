@@ -81,7 +81,7 @@ document.execCommand('insertText', false, '你的提示词');
 9. [导出] 点击 "分享和导出" → "导出到 Google 文档"
 10. [等跳转] 等待新 tab 打开 Google Docs（~5-10秒）
 11. [下载] Google Docs: 文件 → 下载 → Markdown (.md)
-12. [归档] cp ~/Downloads/xxx.md → docs/research/
+12. [归档] cp ~/Downloads/xxx.md → project-research/
 ```
 
 **所有步骤均可自动化 ✅**
@@ -133,7 +133,7 @@ Deep Research 模式下有专门的「文件」按钮：
 
 1. **两跳导出**：必须先导出到 Google Docs，再从 Docs 下载 Markdown — 无法直接从 Gemini 下载
 2. **Google Docs 加载时间**：导出后新 tab 加载 Google Docs 需要 5-10 秒
-3. **"复制内容" 格式问题**：铲屎官提到直接复制有格式问题，建议走 Google Docs 路径
+3. **"复制内容" 格式问题**：operator提到直接复制有格式问题，建议走 Google Docs 路径
 4. **研究计划确认**：比 ChatGPT/Claude 多一步交互（自动化时需要处理）
 5. **Deep Research 模式粘滞**：和 ChatGPT 类似，选了 Deep Research 后输入框保持该模式
 

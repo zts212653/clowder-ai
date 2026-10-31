@@ -1,0 +1,11 @@
+{
+  "verdictId": "2026-05-23-eval-a2a-live-verdict",
+  "featureId": "F167",
+  "evalSnapshotId": "eval-F167-2026-05-23",
+  "generatedAt": "2026-05-23T03:12:57.174Z",
+  "findings": [],
+  "noFindingRecord": {
+    "reason": "No friction signals detected across 4 components",
+    "evidence": "Checked components: L1, C1, C2, route-serial. Friction metrics examined: c1.zombie_hold_count, c1.hold_cancel_count, c2.verdict_without_pass_count, c2.void_hold_hint_emitted. All values within threshold."
+  }
+}

@@ -1,70 +1,342 @@
+import {
+  deploymentDefaults,
+  type MessageSearchAnswerAttachmentRequest,
+  messageSearchAnswerAttachmentSchema,
+} from '@cat-cafe/shared';
+import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { invocationFetch } from './invocation-auth.js';
+
 /**
  * MCP Callback Tools — core callbacks
- * 鉴权: process.env CAT_CAFE_INVOCATION_ID + CAT_CAFE_CALLBACK_TOKEN
+ * 鉴权: CAT_CAFE_CREDENTIAL_FILE refresh file, with process.env fallback
+ *
+ * #1092 credential refresh: When CAT_CAFE_CREDENTIAL_FILE is set, invocationId
+ * and callbackToken are re-read from the file on each callback call. This lets
+ * the MCP server subprocess pick up fresh credentials after a session resume
+ * without needing to be restarted. The API writes the file before each invocation;
+ * the MCP server reads it before each callback.
  */
 
 import { randomUUID } from 'node:crypto';
-import { normalizeRichBlock } from '@cat-cafe/shared';
+import type {
+  ActionSuccessorRequestMetadata,
+  CallbackAuthFailureReason,
+  ContextAttachment,
+  CustodyAdmissionRequestV1,
+  DispatchGateState,
+  EntrustedWorkClosureSpecV1,
+  EntrustedWorkTerminalClosureV1,
+  EntrustedWorkUpdateActionV1,
+  EntrustedWorkV1,
+  ProfileUpdateTargetLayer,
+  SuggestedCrossPostAction,
+} from '@cat-cafe/shared';
+import {
+  acceptedRevisionSchema,
+  acceptedSourceRefSchema,
+  actionSuccessorMetadataSchema,
+  CALLBACK_AUTH_FAILURE_REASONS,
+  COGNITIVE_TRANSITIONS,
+  custodyAdmissionRequestV1Schema,
+  DEVELOPMENT_SOP_STAGE_IDS,
+  dispatchProposedActionInputSchema,
+  EVENT_CONFIDENCES,
+  EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION,
+  entrustedWorkClosureSpecV1Schema,
+  entrustedWorkTerminalActionV1Schema,
+  entrustedWorkUpdateActionV1Schema,
+  entrustedWorkV1Schema,
+  executableActionSuccessorMetadataSchema,
+  extractFeatureIds,
+  isCallbackAuthFailureReason,
+  isValidAcceptedSource,
+  isValidReviewSubjectRef,
+  isValidRichBlock,
+  localReviewVerdictSchema,
+  normalizeRichBlock,
+  PROFILE_UPDATE_TARGET_LAYERS,
+  reviewSubjectRefSchema,
+  SOP_DEFINITION_IDS,
+  taskFeatureIdSchema,
+  VersionBoundContextAttachmentsSchema,
+} from '@cat-cafe/shared';
+import { hasUsableAgentKeyCredentials, resolveAgentKeySecretFromEnv } from '@cat-cafe/shared/utils';
 import { z } from 'zod';
+import { renderCurrentCoCreatorText } from '../co-creator-presentation.js';
+import { boundedCallbackGet, boundedCallbackResult, type CallbackReadBudget } from './callback-bounded-get.js';
 import { sendCallbackRequest } from './callback-outbox.js';
+import { extractReasonTag } from './callback-retry.js';
+import { formatSuggestedCrossPostActionLines } from './cross-post-suggestion-format.js';
+import { withDegradation } from './degradation.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import {
+  getInvocationAuthSignal,
+  hasInvocationCredentialScope,
+  resolveInvocationCredentials,
+  resolveScopedApiBaseUrl,
+} from './invocation-auth.js';
+import { createMemoryCueTools } from './memory-cue-tools.js';
+import { createPersonMemoryLifecycleTools } from './person-memory-lifecycle-tools.js';
+import { createPersonMemoryProposalTool } from './person-memory-proposal-tool.js';
+import {
+  createDeferredPersonMemoryTool,
+  createProactiveMemoryAbstentionTool,
+} from './proactive-memory-opportunity-tool.js';
+import { withProfileReadRecovery } from './profile-read-recovery.js';
+import { projectRoutingCallbackResponse } from './routing-preflight-response.js';
+
+/**
+ * F174 Phase A — reason taxonomy lives in @cat-cafe/shared (single source of
+ * truth shared with the API). Aliased here for local readability.
+ */
+type AuthFailureReason = CallbackAuthFailureReason;
+const KNOWN_REASONS: ReadonlySet<AuthFailureReason> = new Set(CALLBACK_AUTH_FAILURE_REASONS);
+
+/**
+ * Parse the structured reason tag added by the retry layer (or callbackGet)
+ * into a typed AuthFailureReason. Returns undefined if no tag, the tag is
+ * malformed, or the reason is unknown — callers must handle that case.
+ */
+function parseAuthFailureReason(errorText: string): AuthFailureReason | undefined {
+  const match = /\[reason=([a-z_]+)\]/.exec(errorText);
+  if (!match) return undefined;
+  const reason = match[1];
+  // Use shared type guard so an unknown reason from a future server doesn't
+  // get silently coerced into our local enum.
+  if (reason && isCallbackAuthFailureReason(reason) && KNOWN_REASONS.has(reason)) {
+    return reason;
+  }
+  return undefined;
+}
+
+// F174 Phase E: degradation policy + DEGRADABLE_AUTH_REASONS moved to
+// ./degradation.ts so other write-class tools share a single source of truth.
 
 interface CallbackConfig {
   apiUrl: string;
-  invocationId: string;
-  callbackToken: string;
+  invocationId?: string;
+  callbackToken?: string;
+  agentKeySecret?: string;
 }
 
-export function getCallbackConfig(): CallbackConfig | null {
-  const apiUrl = process.env['CAT_CAFE_API_URL'];
-  const invocationId = process.env['CAT_CAFE_INVOCATION_ID'];
-  const callbackToken = process.env['CAT_CAFE_CALLBACK_TOKEN'];
-  if (!apiUrl || !invocationId || !callbackToken) return null;
-  return { apiUrl, invocationId, callbackToken };
+interface AgentKeyOptions {
+  agentKeyCatId?: string;
+  forceAgentKey?: boolean;
 }
 
-export const NO_CONFIG_ERROR =
-  'Clowder AI callback not configured. Missing CAT_CAFE_API_URL, CAT_CAFE_INVOCATION_ID, or CAT_CAFE_CALLBACK_TOKEN environment variables.';
+interface CallbackGetOptions extends AgentKeyOptions {
+  readBudget?: CallbackReadBudget;
+}
+
+interface CallbackTransportOptions {
+  enableOutbox?: boolean;
+  retryDelaysMs?: number[];
+  fetchTimeoutMs?: number;
+}
+
+// VoiceBlockSynthesizer may run two provider attempts. Each provider attempt
+// has a 10-minute default hard cap, with a 2-second retry delay between them.
+// Keep the one HTTP request alive for that full server-owned retry envelope.
+const SYNTHESIZED_AUDIO_CALLBACK_FETCH_TIMEOUT_MS = 21 * 60_000;
+const SYNTHESIZED_AUDIO_CALLBACK_TRANSPORT: CallbackTransportOptions = {
+  enableOutbox: false,
+  retryDelaysMs: [],
+  fetchTimeoutMs: SYNTHESIZED_AUDIO_CALLBACK_FETCH_TIMEOUT_MS,
+};
+
+interface LocalReviewAnchorInput {
+  reviewSubjectRef?: string | undefined;
+  acceptedSourceRef?: string | undefined;
+  acceptedRevision?: string | undefined;
+}
+
+function hasCompleteLocalReviewAnchor(input: LocalReviewAnchorInput): boolean {
+  if (!input.reviewSubjectRef || !isValidReviewSubjectRef(input.reviewSubjectRef)) return false;
+  if (!input.acceptedSourceRef || !input.acceptedRevision) return false;
+  return isValidAcceptedSource(input.acceptedSourceRef, input.acceptedRevision);
+}
+
+function hasAnyLocalReviewAnchor(input: LocalReviewAnchorInput): boolean {
+  return Boolean(input.reviewSubjectRef || input.acceptedSourceRef || input.acceptedRevision);
+}
+
+function requiresInlineAudioSynthesis(block: unknown): boolean {
+  if (!block) return false;
+  if (typeof block !== 'object') return false;
+  const record = block as Record<string, unknown>;
+  const text = typeof record.text === 'string' ? record.text.trim() : '';
+  const url = typeof record.url === 'string' ? record.url.trim() : '';
+  return record.kind === 'audio' && text.length > 0 && url.length === 0;
+}
+
+// readAgentKeyFile / parseAgentKeyFileMap moved to @cat-cafe/shared/utils
+// (agent-key-credentials), and the resolver core itself now lives there as
+// resolveAgentKeySecretFromEnv — availability decisions and actual callback
+// auth share one implementation, including the bound-identity restriction,
+// precedence, and literal single-FILE path normalization (#1494 round 2).
+
+function resolveAgentKeySecret(options?: AgentKeyOptions): string | undefined {
+  return resolveAgentKeySecretFromEnv(process.env, options);
+}
+
+export function getCallbackConfig(options?: AgentKeyOptions): CallbackConfig | null {
+  // #1092 + F306 Phase B: prefer the per-turn credential scope (member MCP
+  // gateway runs in-process); MCP child processes fall back to launch env.
+  const apiUrl = resolveScopedApiBaseUrl() ?? process.env.CAT_CAFE_API_URL;
+  if (!apiUrl) return null;
+
+  if (hasInvocationCredentialScope()) {
+    // In-process invocation-bound carriers are invocation-only: the API host's
+    // persistent agent key is never a credential for a verified turn.
+    // `forceAgentKey` callers are persistent-agent operations (e.g. external
+    // runtime registration) and must fail closed here rather than dispatch
+    // under the host's identity.
+    if (options?.forceAgentKey === true) return null;
+    const { invocationId, callbackToken } = resolveInvocationCredentials();
+    if (!invocationId || !callbackToken) return null;
+    return { apiUrl, invocationId, callbackToken };
+  }
+
+  const agentKeySecret = resolveAgentKeySecret(options);
+  if (options?.forceAgentKey === true) {
+    if (!agentKeySecret) return null;
+    return { apiUrl, agentKeySecret };
+  }
+
+  // #1092: Prefer credential file over process.env for invocation creds.
+  // The file is updated per-invocation by the API; process.env is set once
+  // at subprocess spawn and goes stale after session resume.
+  const { invocationId, callbackToken } = resolveInvocationCredentials();
+
+  if (!invocationId && !callbackToken && !agentKeySecret) return null;
+
+  const hasFullInvocation = invocationId && callbackToken;
+  if ((invocationId || callbackToken) && !hasFullInvocation && !agentKeySecret) return null;
+
+  return {
+    apiUrl,
+    ...(hasFullInvocation ? { invocationId, callbackToken } : {}),
+    ...(agentKeySecret ? { agentKeySecret } : {}),
+  };
+}
+
+export const NO_CONFIG_ERROR = `${deploymentDefaults.brand.displayName} callback not configured. Missing callback credentials, agent-key credentials, or required agentKeyCatId for shared Antigravity MCP.`;
 // ============ HTTP helpers ============
+
+export function buildAuthHeaders(config: CallbackConfig): Record<string, string> {
+  if (config.invocationId && config.callbackToken) {
+    return {
+      'x-invocation-id': config.invocationId,
+      'x-callback-token': config.callbackToken,
+    };
+  }
+  if (config.agentKeySecret) {
+    return { 'x-agent-key-secret': config.agentKeySecret };
+  }
+  return {};
+}
+
+// F174 Phase F (AC-F2): first-party MCP client stopped dual-writing creds to
+// body/query. Headers are now the only place we put credentials. Server still
+// accepts body/query as fallback for legacy MCP clients during the compat
+// window — that fallback usage is tracked via callback-auth-telemetry's
+// `recordLegacyFallbackHit` so we know when it's safe to delete the schema.
+
+/** KD-6: Format a CatRoutingError as a human-readable prefix for the LLM.
+ * Format: `Cat routing failed [kind=X] target=@Y ...\nAlternatives: @A, @B.` */
+export function formatCatRoutingErrorPrefix(body: {
+  kind: string;
+  catId?: string;
+  mention?: string;
+  alternatives?: Array<{ mention: string; displayName?: string }>;
+}): string {
+  const target = body.catId ? `@${body.catId}` : (body.mention ?? 'unknown');
+  let msg = `Cat routing failed [kind=${body.kind}] target=${target}`;
+  if (body.kind === 'cat_disabled') msg += ' disabled.';
+  else if (body.kind === 'cat_not_found') msg += ' not found.';
+  const alts = body.alternatives
+    ?.slice(0, 3)
+    .map((a) => `${a.mention}${a.displayName ? ` (${a.displayName})` : ''}`)
+    .join(', ');
+  if (alts) msg += `\nAlternatives: ${alts}.`;
+  return msg;
+}
 
 export async function callbackPost(
   path: string,
   body: Record<string, unknown>,
-  options?: { enableOutbox?: boolean },
+  options?: CallbackTransportOptions & {
+    agentKeyCatId?: string;
+    forceAgentKey?: boolean;
+  },
 ): Promise<ToolResult> {
-  const config = getCallbackConfig();
+  const config = getCallbackConfig({
+    agentKeyCatId: options?.agentKeyCatId,
+    forceAgentKey: options?.forceAgentKey,
+  });
   if (!config) return errorResult(NO_CONFIG_ERROR);
-
-  const requestBody = {
-    invocationId: config.invocationId,
-    callbackToken: config.callbackToken,
-    ...body,
-  };
 
   const result = await sendCallbackRequest(
-    { apiUrl: config.apiUrl, path, body: requestBody },
-    { enableOutbox: options?.enableOutbox === true },
+    {
+      apiUrl: config.apiUrl,
+      path,
+      body, // headers-only auth (Phase F AC-F2)
+      headers: buildAuthHeaders(config),
+    },
+    {
+      enableOutbox: options?.enableOutbox === true,
+      retryDelaysMs: options?.retryDelaysMs,
+      fetchTimeoutMs: options?.fetchTimeoutMs,
+    },
   );
-  if (result.ok) return successResult(JSON.stringify(result.data));
-  return errorResult(result.error);
+  if (result.ok) return successResult(JSON.stringify(projectRoutingCallbackResponse(result.data)));
+
+  // KD-6: detect 400 CatRoutingError and prepend human-readable prefix + JSON dual-track
+  const errText = result.error;
+  const match400 = errText.match(/^Callback failed \(400\): ([\s\S]+)$/);
+  if (match400) {
+    try {
+      const parsed = JSON.parse(match400[1]) as { kind?: unknown };
+      if (parsed.kind === 'cat_disabled' || parsed.kind === 'cat_not_found') {
+        const prefix = formatCatRoutingErrorPrefix(parsed as Parameters<typeof formatCatRoutingErrorPrefix>[0]);
+        return errorResult(`${prefix}\n${match400[1]}`);
+      }
+    } catch {
+      /* not JSON — fall through to raw error */
+    }
+  }
+  return errorResult(errText);
 }
 
-export async function callbackGet(path: string, params?: Record<string, string>): Promise<ToolResult> {
-  const config = getCallbackConfig();
+export async function callbackGet(
+  path: string,
+  params?: Record<string, string>,
+  options?: CallbackGetOptions,
+): Promise<ToolResult> {
+  const config = getCallbackConfig(options);
   if (!config) return errorResult(NO_CONFIG_ERROR);
 
-  const query = new URLSearchParams({
-    invocationId: config.invocationId,
-    callbackToken: config.callbackToken,
-    ...params,
-  });
+  const query = new URLSearchParams(params ?? {}); // headers-only auth (Phase F AC-F2)
+  const qs = query.toString();
+  const url = qs ? `${config.apiUrl}${path}?${qs}` : `${config.apiUrl}${path}`;
 
   try {
-    const response = await fetch(`${config.apiUrl}${path}?${query.toString()}`);
+    if (options?.readBudget) {
+      const response = await boundedCallbackGet(url, buildAuthHeaders(config), options.readBudget);
+      return boundedCallbackResult(
+        response,
+        options.readBudget,
+        response.status === 401 ? extractReasonTag(response.body) : '',
+      );
+    }
+    const response = await invocationFetch(url, { headers: buildAuthHeaders(config) });
     if (!response.ok) {
       const text = await response.text();
-      return errorResult(`Callback failed (${response.status}): ${text}`);
+      // F174 Phase A: tag structured reason from 401 callback_auth_failed body
+      // so downstream routing matches the postJsonWithRetry error format.
+      const reasonTag = response.status === 401 ? extractReasonTag(text) : '';
+      return errorResult(`Callback failed (${response.status})${reasonTag}: ${text}`);
     }
     return successResult(JSON.stringify(await response.json()));
   } catch (err) {
@@ -73,13 +345,54 @@ export async function callbackGet(path: string, params?: Record<string, string>)
   }
 }
 
+const agentKeyCatIdSchema = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    'Persistent-agent identity selector. Required for shared Antigravity MCP (antigravity or antig-opus) so agent-key auth uses the matching sidecar key; otherwise callback config fails closed. Ignored when full invocation credentials are present.',
+  );
+
+type AgentKeySelectable = { agentKeyCatId?: string | undefined };
+type WithAgentKey<T> = T & AgentKeySelectable;
+
+function agentKeyOptions(input: AgentKeySelectable): { agentKeyCatId?: string | undefined } {
+  return { agentKeyCatId: input.agentKeyCatId };
+}
+
+const PROPOSED_ACTION_EXECUTABLE_CONTRACT_DESCRIPTION =
+  'The executable proposed action is implement + implementer + task_done with subject:task:<taskId>. Local cat review uses an ordinary durable handoff with localReviewVerdict + reviewedHeadSha + accepted-source fields.';
+
+const IMPLEMENTATION_REVIEW_ANCHOR_ERROR =
+  'acceptedSourceRef/acceptedRevision require localReviewVerdict; they are not implementation authorization. ' +
+  'For an implement work package, cite the human source in content and use the actual Task/standing in action. ' +
+  'Do not add a review verdict or remove action to bypass an implementation refusal.';
+
+const postMessageThreadIdSchema = z.string().min(1);
+
 export const postMessageInputSchema = {
-  content: z.string().min(1).describe('The message content to post'),
-  threadId: z
-    .string()
-    .min(1)
+  searchAnswer: messageSearchAnswerAttachmentSchema
     .optional()
-    .describe('Optional target thread ID for cross-thread posting. Omit to post in current thread.'),
+    .describe(
+      'Prepared server-owned answer reference. Requires stable clientMessageId. For forwarding an actual bound card, add source={messageId,blockId}; the Host re-admits it for this destination.',
+    ),
+  content: z.string().min(1).describe('The message content to post'),
+  effectClass: z
+    .enum(['fyi', 'coordinate', 'investigate'])
+    .optional()
+    .describe(
+      'Message purpose. fyi delivers to scarce dossier engagementPolicy seats without waking them and preserves unread; ' +
+        'ordinary targets still wake. Active coordination, structured actions and localReviewVerdict retain their wake. ' +
+        'Check deliveredWithoutWake in the receipt; delivery does not confirm reading.',
+    ),
+  contextAttachments: VersionBoundContextAttachmentsSchema.optional().describe(
+    'Optional F063 ContextAttachments to persist on this authenticated cat message. Workspace-file references should carry the exact owner revision; attachment v:1 is only the format version and grants no write authority.',
+  ),
+  threadId: postMessageThreadIdSchema
+    .optional()
+    .describe(
+      'Target thread ID. Required for agent-key auth (persistent agent with no default thread). Omit for invocation auth (defaults to invocation thread).',
+    ),
   replyTo: z.string().optional().describe('Optional message ID to reply to'),
   clientMessageId: z
     .string()
@@ -91,15 +404,107 @@ export const postMessageInputSchema = {
     .array(z.string().min(1))
     .optional()
     .describe(
-      'Optional explicit target cat IDs (e.g. ["codex","gpt52"]). Merged with @mentions parsed from content. Used for direction rendering in frontend.',
+      'Optional explicit target cat IDs. Merged with @mentions parsed from content. Use get_thread_cats to discover valid catIds. ' +
+        'F182: disabled cats are dropped (soft degradation) — check routing_warnings in response for cat_disabled entries and read alternatives[] to find replacements. ' +
+        'Response always includes message field (human-readable routing summary).',
     ),
+  coordination: z
+    .object({
+      phase: z
+        .enum(['active', 'terminal'])
+        .describe(
+          'active continues and wakes a direct coordination chain; terminal delivers without waking scarce engagementPolicy seats.',
+        ),
+      id: z
+        .string()
+        .min(1)
+        .max(128)
+        .regex(/^[A-Za-z0-9._:-]+$/)
+        .optional()
+        .describe('Existing coordination id to continue explicitly. Usually omit: the server mints/inherits it.'),
+      subjectRef: z
+        .string()
+        .trim()
+        .min(1)
+        .max(240)
+        .optional()
+        .describe('Stable action subject. A different subject starts a new coordination generation.'),
+    })
+    .optional()
+    .describe(
+      'Invocation-token same-thread coordination lifecycle. Use active for a real handoff and terminal for the final result. ' +
+        'A courtesy reply to terminal is persisted without waking the prior cat.',
+    ),
+  localReviewVerdict: localReviewVerdictSchema
+    .optional()
+    .describe(
+      'Durable local-review fact. Requires clientMessageId, exact reviewedHeadSha, reviewSubjectRef, acceptedSourceRef, acceptedRevision, and an ordinary routed @author handoff. It is independent of action lease, coordination generation, and issuer route. Public prose is presentation only.',
+    ),
+  reviewedHeadSha: z
+    .string()
+    .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
+    .optional()
+    .describe(
+      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required with localReviewVerdict; merge-gate compares it with the current HEAD.',
+    ),
+  reviewSubjectRef: reviewSubjectRefSchema
+    .optional()
+    .describe('Stable review subject, for example pr:owner/repo#123. Required with localReviewVerdict.'),
+  acceptedSourceRef: acceptedSourceRefSchema
+    .optional()
+    .describe(
+      'Accepted feature-document path or immutable threadId#messageId source. Required with localReviewVerdict.',
+    ),
+  acceptedRevision: acceptedRevisionSchema
+    .optional()
+    .describe('Exact feature Git OID or source message id corresponding to acceptedSourceRef.'),
+  action: executableActionSuccessorMetadataSchema
+    .optional()
+    .describe(
+      'Optional same-thread structured successor identity. New dispatches require mode=single; a parallel holder may use returnToPredecessor with one predecessor target to record only its rejected-ownership terminal. Requires explicit clientMessageId and exactly one targetCats entry. ' +
+        'Use claimOrigin=existing_standing plus groundingEvidenceRef to claim verified standing through the same custody CAS. ' +
+        'New claims require terminalPredicate typed parameters; server catalog owns completion semantics, and carrier exit/text never counts as action success. ' +
+        'A mismatched current holder returns with returnToPredecessor={leaseId, expectedGeneration, groundingEvidenceRef}; targetCats must name the persisted predecessor. ' +
+        'Use multi_mention for deliberate parallel review/ideation. ' +
+        EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION,
+    ),
+  agentKeyCatId: agentKeyCatIdSchema,
 };
+
+export type PostMessageRegistrationPrincipal = 'invocation' | 'agent-key' | 'unconfigured';
+
+/**
+ * Project the cross-profile canonical shape into the contract exposed by one
+ * concrete MCP process. Invocation credentials always win during HTTP auth, so
+ * their public schema must not advertise threadId; an agent-key-only process
+ * has no current thread and must advertise it as required.
+ */
+export function projectPostMessageInputSchema(principal: PostMessageRegistrationPrincipal): Record<string, unknown> {
+  const { threadId: _threadId, ...invocationCommon } = postMessageInputSchema;
+  if (principal === 'invocation') return invocationCommon;
+  if (principal === 'agent-key') {
+    return {
+      ...invocationCommon,
+      threadId: postMessageThreadIdSchema.describe(
+        'Target thread ID. Required for agent-key auth because a persistent agent has no current invocation thread.',
+      ),
+    };
+  }
+  return postMessageInputSchema;
+}
 
 export const getPendingMentionsInputSchema = {
   includeAcked: z
     .boolean()
     .optional()
     .describe('When true, include acknowledged mentions for explicit history review.'),
+  responseMode: z
+    .enum(['anchor', 'full'])
+    .optional()
+    .describe(
+      'Response projection mode. "anchor" (DEFAULT): head+tail excerpt with requiresDrill flag. ' +
+        '"full": complete mention body (no truncation). Prefer anchor unless you need the full message.',
+    ),
 };
 
 export const ackMentionsInputSchema = {
@@ -112,25 +517,82 @@ export const ackMentionsInputSchema = {
 };
 
 export const getThreadContextInputSchema = {
+  readIntent: z
+    .enum(['history', 'unread'])
+    .optional()
+    .default('history')
+    .describe(
+      'Selection intent. history (default) browses published history even when already seen; unread catches up from this user/cat/thread seen cursor, or from the beginning when none exists. Unread requires no catId, keyword, messageId, before or after filters. Choose responseMode independently; only complete full bodies confirm freshness.',
+    ),
   limit: z
     .number()
     .int()
     .min(1)
     .max(200)
     .optional()
-    .default(20)
-    .describe('Number of recent messages to retrieve (default: 20)'),
+    .default(100)
+    .describe('Number of recent messages to retrieve (default: 100, max: 200)'),
+  cursor: z
+    .string()
+    .min(1)
+    .max(4096)
+    .optional()
+    .describe(
+      'Opaque nextCursor. Continue with the same thread, cat identity, limit, readIntent, filters, mode and window arguments as the preceding read; to change any, omit cursor.',
+    ),
   threadId: z
     .string()
     .min(1)
     .optional()
     .describe('Optional: read messages from a different thread. Omit to read the current thread.'),
+  messageId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional: open a bounded context window around a specific message in the selected thread.'),
+  before: z
+    .number()
+    .int()
+    .min(0)
+    .max(50)
+    .optional()
+    .describe('When messageId is set, number of messages before the target to include (0–50, default: 3).'),
+  after: z
+    .number()
+    .int()
+    .min(0)
+    .max(50)
+    .optional()
+    .describe('When messageId is set, number of messages after the target to include (0–50, default: 3).'),
   catId: z.string().min(1).optional().describe("Optional: filter by speaker catId, or pass 'user' for human messages."),
   keyword: z
     .string()
     .min(1)
     .optional()
-    .describe('Optional: filter messages whose content contains this keyword (case-insensitive).'),
+    .describe(
+      'Optional: filter and rank messages by keyword relevance. Multi-word keywords are tokenized and scored (0-1). Results sorted by relevance when keyword is provided.',
+    ),
+  responseMode: z
+    .enum(['anchor', 'full'])
+    .optional()
+    .describe(
+      'Response projection mode. "anchor" (DEFAULT — omit for normal browsing): token-lean previews with drillDown pointers to full content. ' +
+        '"full": returns complete message bodies inside a bounded aggregate page; use nextCursor when hasMore=true. A persisted message larger than the page is returned as an honest anchor with a precise drill pointer; a transient queued body without a persisted message anchor remains unseen and says to retry after persistence. ' +
+        'An oversized workflow SOP is likewise returned as an honest anchor that points to cat_cafe_get_workflow_sop instead of overflowing the aggregate envelope. ' +
+        'For a complete catch-up, set readIntent="unread" and responseMode="full" with no filters, then follow nextCursor until hasMore=false; only complete bodies may be delivery evidence. ' +
+        'The response contextScope names that selection: contextScope="unread_delta" contains only currently unread relevant messages; hasMore=false closes that selection, not all thread history. Use history or a messageId window to inspect older messages. ' +
+        'GOTCHA: anchor previews do not consume queued bodies and cannot prove queued messages were handled.',
+    ),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
+export const getWorkflowSopInputSchema = {
+  threadId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Thread whose linked canonical workflow SOP should be read. Omit for the current invocation thread.'),
+  agentKeyCatId: agentKeyCatIdSchema,
 };
 
 export const listThreadsInputSchema = {
@@ -147,7 +609,29 @@ export const listThreadsInputSchema = {
     .min(1)
     .max(200)
     .optional()
-    .describe('Optional: filter threads whose title or threadId contains this keyword (case-insensitive).'),
+    .describe(
+      'Case-insensitive title filter. Work mode also accepts an exact complete thread_ ID; default mode retains title/threadId substring matching.',
+    ),
+  includeWork: z
+    .boolean()
+    .optional()
+    .describe(
+      'Include up to 3 unfinished Task pointers and lifecycle-backed running members per visible thread; page cap 20, 24k characters. Default false.',
+    ),
+  cursor: z
+    .string()
+    .min(1)
+    .max(2000)
+    .optional()
+    .describe(
+      'Opaque nextCursor from includeWork=true; reuse the same activeSince/keyword filters. Live pages are not a frozen snapshot.',
+    ),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
+export const listLabelsInputSchema = {
+  limit: z.number().int().min(1).max(50).optional().default(50).describe('Max labels to return (default: 50).'),
+  agentKeyCatId: agentKeyCatIdSchema,
 };
 
 export const featIndexInputSchema = {
@@ -167,15 +651,192 @@ export const featIndexInputSchema = {
     .describe('Optional fuzzy substring search over featId/name/status (case-insensitive).'),
 };
 
+export const createTaskInputSchema = {
+  title: z.string().min(1).max(200).describe('Task title — what needs to be done'),
+  why: z.string().max(1000).optional().describe('Why this task matters (context for whoever picks it up)'),
+  ownerCatId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Cat ID to assign the task to (optional, defaults to unassigned). ' +
+        'F182: if disabled, returns 400 {kind:"cat_disabled", alternatives[]}. Assign to an available cat from alternatives[].',
+    ),
+  // F193 Phase E (dispatch gate)
+  relatedFeatureId: z
+    .string()
+    .regex(/^F\d+$/)
+    .optional()
+    .describe(
+      'Feature ID this task relates to (e.g. "F193"). Optional explicit override — ' +
+        'system also auto-extracts F-IDs from title+why. When detected F-IDs differ from ' +
+        'currentFeatureId, a dispatch gate warning is returned.',
+    ),
+  currentFeatureId: z
+    .string()
+    .regex(/^F\d+$/)
+    .optional()
+    .describe(
+      'The feature ID of your current thread/scope (e.g. "F209"). Used to determine which ' +
+        'detected F-IDs are "external". If omitted, all detected F-IDs trigger the dispatch gate.',
+    ),
+  dispatchGate: z
+    .object({
+      status: z
+        .enum(['dispatched', 'not_dispatched'])
+        .describe('Whether you dispatched this info to the owning thread'),
+      dispatchedThreadId: z
+        .string()
+        .optional()
+        .describe('Thread ID you dispatched to (required when status=dispatched)'),
+      dispatchedMessageId: z
+        .string()
+        .optional()
+        .describe('Message ID of the cross-post (required when status=dispatched)'),
+      reason: z.string().optional().describe('Why you chose not to dispatch (required when status=not_dispatched)'),
+    })
+    .refine(
+      (gate) => {
+        if (gate.status === 'dispatched') return !!gate.dispatchedThreadId && !!gate.dispatchedMessageId;
+        if (gate.status === 'not_dispatched') return !!gate.reason;
+        return true;
+      },
+      {
+        message:
+          'dispatched requires BOTH dispatchedThreadId AND dispatchedMessageId; ' + 'not_dispatched requires reason.',
+      },
+    )
+    .optional()
+    .describe(
+      'Dispatch gate decision. Required when task references features outside your current scope. ' +
+        'If omitted and external F-IDs detected, task is created with dispatchGate.status="missing" and a warning is returned. ' +
+        'When status=dispatched, both dispatchedThreadId and dispatchedMessageId are required. ' +
+        'When status=not_dispatched, reason is required.',
+    ),
+};
+
 export const updateTaskInputSchema = {
   taskId: z.string().min(1).describe('The ID of the task to update'),
-  status: z.enum(['todo', 'doing', 'blocked', 'done']).optional().describe('New task status'),
+  expectedOwnerRevision: z.number().int().nonnegative().optional(),
+  status: z
+    .enum(['todo', 'doing', 'blocked', 'done'])
+    .optional()
+    .describe(
+      'New task status. Entrusted work rejects status=done here; its Task owner requires an evidence-backed typed closure action.',
+    ),
   why: z.string().max(1000).optional().describe('Optional note explaining the status change'),
+  // F193-E1 P1-4 fix: allow patching dispatchGate on existing tasks
+  dispatchGate: z
+    .object({
+      status: z.enum(['dispatched', 'not_dispatched']).describe('Dispatch gate resolution'),
+      dispatchedThreadId: z
+        .string()
+        .optional()
+        .describe('Thread ID you dispatched to (required when status=dispatched)'),
+      dispatchedMessageId: z
+        .string()
+        .optional()
+        .describe('Message ID of the cross-post (required when status=dispatched)'),
+      reason: z.string().optional().describe('Why you chose not to dispatch (required when status=not_dispatched)'),
+    })
+    .refine(
+      (gate) => {
+        if (gate.status === 'dispatched') return !!gate.dispatchedThreadId && !!gate.dispatchedMessageId;
+        if (gate.status === 'not_dispatched') return !!gate.reason;
+        return true;
+      },
+      {
+        message:
+          'dispatched requires BOTH dispatchedThreadId AND dispatchedMessageId; ' + 'not_dispatched requires reason.',
+      },
+    )
+    .optional()
+    .describe('Resolve a previously-missing dispatch gate on this task.'),
+};
+
+export const admitEntrustedWorkInputSchema = {
+  title: z.string().trim().min(1).max(200).describe('Title for the canonical entrusted-work Task'),
+  why: z.string().max(1000).optional().describe('Why this work was entrusted and why the Task owns it'),
+  admission: custodyAdmissionRequestV1Schema.describe(
+    'Explicit, accepted-offer, or registered-source admission basis with stable source and idempotency coordinates',
+  ),
+  closure: entrustedWorkClosureSpecV1Schema
+    .optional()
+    .describe('Required closure condition and expected signal; omission returns needs_clarification'),
+  time: entrustedWorkV1Schema.shape.time
+    .optional()
+    .describe(
+      'Source-backed businessDeadline/reviewBy, plannedStart, actualStart or estimatedCompletion. Preserve the stated meaning; timeHints alone never creates canonical dates.',
+    ),
+  artifactRefs: z.array(z.string().trim().min(1).max(1000)).max(64).optional(),
+};
+
+export const closeEntrustedWorkInputSchema = {
+  taskId: z.string().min(1).describe('Entrusted-work Task ID'),
+  expectedRevision: entrustedWorkTerminalActionV1Schema.shape.expectedRevision.describe(
+    'Current entrusted-work revision used for compare-and-set closure',
+  ),
+  closure: entrustedWorkTerminalActionV1Schema.shape.closure.describe(
+    'Evidence-backed satisfied closure or typed cancelled/abandoned disposition',
+  ),
+};
+
+export const updateEntrustedWorkInputSchema = {
+  taskId: entrustedWorkUpdateActionV1Schema.shape.taskId.describe('Entrusted-work Task ID'),
+  expectedRevision: entrustedWorkUpdateActionV1Schema.shape.expectedRevision.describe(
+    'Current entrusted-work revision used for compare-and-set update',
+  ),
+  status: entrustedWorkUpdateActionV1Schema.shape.status.describe(
+    'Optional Task progress: todo, doing, or blocked; completion requires close_entrusted_work',
+  ),
+  time: entrustedWorkUpdateActionV1Schema.shape.time.describe(
+    'Source-backed deadline, review, plannedStart, actualStart or estimatedCompletion; null clears a fact. Never turn admission time, a forecast or a command timeout into a deadline.',
+  ),
+  progress: entrustedWorkUpdateActionV1Schema.shape.progress.describe(
+    'Replace the short current summary, nextStep and optional blockerReason with one sourceRef; null clears it. Original Task why stays unchanged. Resuming clears blockerReason.',
+  ),
+  artifactRefs: entrustedWorkUpdateActionV1Schema.shape.artifactRefs.describe(
+    'Optional complete replacement of canonical Artifact refs; values are deduplicated and sorted',
+  ),
+};
+
+export const offerCustodyInputSchema = {
+  sourceMessageId: z.string().trim().min(1).max(1_000).describe('Exact source message to carry the offer'),
+  reasonCode: z
+    .enum(['future_deliverable', 'follow_up_commitment', 'time_bound_obligation'])
+    .describe('Bounded recognition reason; venting and casual mentions are intentionally absent'),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
+export const retryCustodyAdmissionInputSchema = {
+  sourceMessageId: z.string().trim().min(1).max(1_000),
+  sourceMessageRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  offerId: z.string().trim().min(1).max(1_000),
+  title: z.string().trim().min(1).max(200),
+  why: z.string().max(1_000).optional(),
+  intendedOutcome: z.string().trim().min(1).max(4_000),
+  closure: entrustedWorkClosureSpecV1Schema,
+  time: entrustedWorkV1Schema.shape.time.optional(),
+  artifactRefs: z.array(z.string().trim().min(1).max(1_000)).max(64).optional(),
+  agentKeyCatId: agentKeyCatIdSchema,
 };
 
 export const crossPostMessageInputSchema = {
   threadId: z.string().min(1).describe('Target thread ID to post into'),
-  content: z.string().min(1).describe('The message content to post'),
+  content: z
+    .string()
+    .min(1)
+    .describe(
+      'The message content to post. Do not copy a literal [爪感差: ...] marker across threads; reference its sourceMessageId instead.',
+    ),
+  targetCats: z
+    .array(z.string().min(1))
+    .optional()
+    .describe(
+      'Cat handles to route the cross-thread notification to (triggers their session in the target thread). ' +
+        'Required if content has no line-start @mention — server fail-closes when both routing credentials are missing (F193 AC-A4). ' +
+        'F193 KD-1 boundary: this is the routing list, NOT relay metadata. Agent-key callers do not inherit F052 sourceThreadId semantics.',
+    ),
   replyTo: z.string().optional().describe('Optional message ID to reply to'),
   clientMessageId: z
     .string()
@@ -183,32 +844,229 @@ export const crossPostMessageInputSchema = {
     .max(200)
     .optional()
     .describe('Optional idempotency key for at-least-once delivery de-duplication'),
+  effectClass: z
+    .enum(['fyi', 'coordinate', 'investigate', 'assign_work'])
+    .optional()
+    .describe(
+      'F246 Phase B: Effect-class of the cross-thread dispatch. ' +
+        'fyi/coordinate/investigate → auto-deliver (default). ' +
+        'assign_work → held as a DispatchProposal pending operator approval in the Approval Hub.',
+    ),
+  coordination: z
+    .object({
+      phase: z
+        .enum(['active', 'terminal'])
+        .describe('active continues coordination; terminal releases/closes it after one final routed delivery.'),
+      id: z
+        .string()
+        .min(1)
+        .max(128)
+        .regex(/^[A-Za-z0-9._:-]+$/)
+        .optional()
+        .describe('Existing coordination id to continue explicitly. Usually omit: the server mints/inherits it.'),
+      subjectRef: z
+        .string()
+        .trim()
+        .min(1)
+        .max(240)
+        .optional()
+        .describe('Stable action subject. A different subject starts a new coordination generation.'),
+    })
+    .optional()
+    .describe(
+      'F167 invocation-token cross-hop coordination lifecycle. Use phase=active for Claim/work hops and phase=terminal for Release/final handoff. ' +
+        'Not available to agent-key target-thread writes because they have no source relay provenance. ' +
+        'GOTCHA: Do not combine coordination with effectClass="assign_work"; approval proposals intentionally do not carry relay provenance.',
+    ),
+  localReviewVerdict: localReviewVerdictSchema
+    .optional()
+    .describe(
+      'Durable local-review fact. Requires clientMessageId, exact reviewedHeadSha, reviewSubjectRef, acceptedSourceRef, acceptedRevision, and ordinary targetCats or a line-start @author. It is independent of action lease, coordination generation, and issuer route; public prose is never parsed.',
+    ),
+  reviewedHeadSha: z
+    .string()
+    .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
+    .optional()
+    .describe(
+      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required with localReviewVerdict; merge-gate compares it with the current HEAD.',
+    ),
+  reviewSubjectRef: reviewSubjectRefSchema
+    .optional()
+    .describe('Stable review subject, for example pr:owner/repo#123. Required with localReviewVerdict.'),
+  acceptedSourceRef: acceptedSourceRefSchema
+    .optional()
+    .describe(
+      'Accepted feature-document path or immutable threadId#messageId source. Required with localReviewVerdict.',
+    ),
+  acceptedRevision: acceptedRevisionSchema
+    .optional()
+    .describe('Exact feature Git OID or source message id corresponding to acceptedSourceRef.'),
+  action: executableActionSuccessorMetadataSchema
+    .optional()
+    .describe(
+      'Optional durable subject/action/slot successor identity for this cross-thread dispatch. ' +
+        'Requires explicit clientMessageId and targetCats. mode=single allows exactly one target; ' +
+        'mode=parallel requires at least two targets plus parallelIntent. A duplicate active action returns safe_wait. ' +
+        'Use claimOrigin=existing_standing plus groundingEvidenceRef for a verified self-claim. ' +
+        'For a canonical Task-owner replacement of an initial terminal delegate in the same approved child, groundingEvidenceRef may name the exact direct-human message:<id>; server-derived identity/revision evidence is required and prose is not parsed as authority. ' +
+        'New claims require terminalPredicate typed parameters; server catalog owns completion semantics and exact revision freshness. ' +
+        'Use returnToPredecessor for rejected custody: single mode returns the generation to the persisted predecessor; parallel mode records only the rejecting holder terminal and does not enqueue a whole-lease return. ' +
+        EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION,
+    ),
+  proposedAction: dispatchProposedActionInputSchema
+    .optional()
+    .describe(
+      'Server-validated action identity proposed for operator approval with effectClass="assign_work". ' +
+        'Use when new cross-thread responsibility must be reviewed before F167 custody exists. ' +
+        'NOT for direct handoff (use action) or replacement/return/existing-standing transitions. ' +
+        'Output: a pending Approval Hub card; approval atomically promotes this identity into one fenced lease. ' +
+        'Requires explicit clientMessageId and targetCats. ' +
+        PROPOSED_ACTION_EXECUTABLE_CONTRACT_DESCRIPTION,
+    ),
+  agentKeyCatId: agentKeyCatIdSchema,
 };
 
 export const listTasksInputSchema = {
   threadId: z.string().min(1).optional().describe('Optional thread ID filter'),
   catId: z.string().min(1).optional().describe('Optional owner catId filter'),
   status: z.enum(['todo', 'doing', 'blocked', 'done']).optional().describe('Optional task status filter'),
+  kind: z
+    .enum(['work', 'pr_tracking'])
+    .optional()
+    .describe('Optional task kind filter (work = manual tasks, pr_tracking = PR automation)'),
+  featureId: taskFeatureIdSchema
+    .optional()
+    .describe('Exact bounded feature ID filter matched against canonical TaskItem.relatedFeatureId (for example F313)'),
+  taskId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('F236 why-drill: pass a taskId to retrieve that task with its full (untruncated) why field'),
 };
 
-export async function handlePostMessage(input: {
-  content: string;
-  threadId?: string | undefined;
-  replyTo?: string | undefined;
-  clientMessageId?: string | undefined;
-  targetCats?: string[] | undefined;
-}): Promise<ToolResult> {
-  const result = await callbackPost(
-    '/api/callbacks/post-message',
-    {
-      content: input.content,
-      ...(input.threadId ? { threadId: input.threadId } : {}),
-      ...(input.replyTo ? { replyTo: input.replyTo } : {}),
-      clientMessageId: input.clientMessageId ?? randomUUID(),
-      ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
-    },
-    { enableOutbox: true },
-  );
+/**
+ * F193 AC-A4: Plausible line-start @mention detector for MCP-layer
+ * fail-closed. Mirrors the authoritative server parser at
+ * a2a-mentions.ts:86-114 (strip code fences, trimStart, strip markdown
+ * prefix, then `startsWith('@')`). Local copy to avoid cross-package
+ * dep — server-side parser remains authoritative; this is just an
+ * early-reject to (a) save an HTTP roundtrip and (b) cover the
+ * agent-key API-layer gap (where isCrossThread never fires).
+ */
+const LEADING_MARKDOWN_MENTION_PREFIX_RE = /^(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))+/;
+
+function hasPlausibleLineStartMention(content: string): boolean {
+  // Strip fenced code blocks first — same as server parser.
+  const stripped = content.replace(/```[\s\S]*?```/g, '');
+  for (const rawLine of stripped.split(/\r?\n/)) {
+    const leadingWs = rawLine.match(/^\s*/)?.[0].length ?? 0;
+    const normalized = rawLine.slice(leadingWs).replace(LEADING_MARKDOWN_MENTION_PREFIX_RE, '');
+    if (normalized.startsWith('@') && normalized.length > 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function containsPawFeelMarker(content: string): boolean {
+  return /\[爪感差[:：]/.test(content);
+}
+
+/**
+ * F193: Internal post-message dispatcher (no KD-1 guard).
+ * Used by both handlePostMessage (with KD-1 guard prepended) and
+ * handleCrossPostMessage (cross-thread relay path, bypasses guard
+ * because cross_post_message is the legitimate cross-thread tool).
+ */
+async function _executePostMessage(
+  input: {
+    content: string;
+    searchAnswer?: MessageSearchAnswerAttachmentRequest;
+    contextAttachments?: ContextAttachment[] | undefined;
+    threadId?: string | undefined;
+    replyTo?: string | undefined;
+    clientMessageId?: string | undefined;
+    targetCats?: string[] | undefined;
+    agentKeyCatId?: string | undefined;
+    effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work' | undefined;
+    coordination?:
+      | { phase: 'active' | 'terminal'; id?: string | undefined; subjectRef?: string | undefined }
+      | undefined;
+    localReviewVerdict?: 'approved' | 'changes_requested' | 'commented' | undefined;
+    reviewedHeadSha?: string | undefined;
+    reviewSubjectRef?: string | undefined;
+    acceptedSourceRef?: string | undefined;
+    acceptedRevision?: string | undefined;
+    action?: ActionSuccessorRequestMetadata | undefined;
+    proposedAction?: ActionSuccessorRequestMetadata | undefined;
+  },
+  transportOptions?: CallbackTransportOptions,
+): Promise<ToolResult> {
+  if (input.searchAnswer && !input.clientMessageId)
+    return errorResult('searchAnswer requires a stable clientMessageId; retry that ID without searching again.');
+  if (input.localReviewVerdict) {
+    if (!input.clientMessageId) {
+      return errorResult(
+        'post_message localReviewVerdict requires clientMessageId. Example: clientMessageId="review-owner-repo-1371-head".',
+      );
+    }
+    if (input.action || input.proposedAction || input.coordination) {
+      return errorResult(
+        'post_message localReviewVerdict must use ordinary A2A without action, proposedAction, or coordination.',
+      );
+    }
+    if (!input.reviewedHeadSha) {
+      return errorResult('post_message localReviewVerdict requires the exact reviewedHeadSha.');
+    }
+    if (!hasCompleteLocalReviewAnchor(input)) {
+      return errorResult(
+        'post_message localReviewVerdict requires reviewSubjectRef plus a valid acceptedSourceRef and acceptedRevision.',
+      );
+    }
+  }
+  if (input.reviewedHeadSha && !input.localReviewVerdict) {
+    return errorResult(
+      'post_message reviewedHeadSha requires localReviewVerdict. Example: localReviewVerdict="approved", reviewedHeadSha="<exact lowercase Git OID>".',
+    );
+  }
+  if (!input.localReviewVerdict && hasAnyLocalReviewAnchor(input)) {
+    return errorResult(`post_message ${IMPLEMENTATION_REVIEW_ANCHOR_ERROR}`);
+  }
+  // F174 Phase E (AC-E2/E5): explicit kind:'none' policy. There's no useful
+  // local fallback for post_message — losing the message is preferable to
+  // re-creating server state on a stale invocation. Cats see the structured
+  // `[degrade] reason=...` hint and the existing @mention-textual workaround.
+  const result = await withDegradation({
+    toolName: 'post_message',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/post-message',
+        {
+          content: input.content,
+          ...(input.searchAnswer ? { searchAnswer: input.searchAnswer } : {}),
+          ...(input.contextAttachments?.length ? { contextAttachments: input.contextAttachments } : {}),
+          ...(input.threadId ? { threadId: input.threadId } : {}),
+          ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+          clientMessageId: input.clientMessageId ?? randomUUID(),
+          ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
+          ...(input.effectClass ? { effectClass: input.effectClass } : {}),
+          ...(input.coordination ? { coordination: input.coordination } : {}),
+          ...(input.localReviewVerdict ? { localReviewVerdict: input.localReviewVerdict } : {}),
+          ...(input.reviewedHeadSha ? { reviewedHeadSha: input.reviewedHeadSha } : {}),
+          ...(input.reviewSubjectRef ? { reviewSubjectRef: input.reviewSubjectRef } : {}),
+          ...(input.acceptedSourceRef ? { acceptedSourceRef: input.acceptedSourceRef } : {}),
+          ...(input.acceptedRevision ? { acceptedRevision: input.acceptedRevision } : {}),
+          ...(input.action ? { action: input.action } : {}),
+          ...(input.proposedAction ? { proposedAction: input.proposedAction } : {}),
+        },
+        {
+          enableOutbox: true,
+          agentKeyCatId: input.agentKeyCatId,
+          ...transportOptions,
+        },
+      ),
+    policy: { kind: 'none' },
+  });
 
   // Detect stale_ignored: server returned 200 but message was NOT delivered
   // because a newer invocation for the same thread+cat has superseded this one.
@@ -223,24 +1081,52 @@ export async function handlePostMessage(input: {
             'Include the message content in your stdout response instead.',
         );
       }
+
+      // An HTTP-200 hold is still an unsent message. Its own reason determines
+      // the repair; it never authorizes a thread read or a force-send bypass.
+      if (data?.status === 'held') {
+        const retryTool = input.threadId ? 'cat_cafe_cross_post_message' : 'cat_cafe_post_message';
+        if (data.reason === 'routing_mismatch') {
+          return errorResult(
+            'Message NOT sent (routing_mismatch): line-start @ targets in content are outside the declared targetCats. ' +
+              `Declared targetCats: ${JSON.stringify(data.declaredTargets ?? [])}; ` +
+              `unexpected content targets: ${JSON.stringify(data.unexpectedTargets ?? [])}. ` +
+              `Correct content or targetCats to match the intended recipients, then retry ${retryTool}.`,
+          );
+        }
+        const reason = typeof data.reason === 'string' ? data.reason : 'unknown_hold';
+        return errorResult(
+          `Message NOT sent (${reason}). Resolve the server's stated hold condition before retrying ${retryTool}.`,
+        );
+      }
     } catch {
-      // parse failure is fine — means result is not a stale_ignored response
+      // parse failure is fine — means result is not a stale_ignored/held response
     }
   }
 
   // If post-message failed and content contains @mentions,
   // hint that text-based @mention is always available.
-  // Only mention credential issues when the error actually looks like auth failure.
+  // F174 Phase A: route on the structured reason tag (added by callback-retry)
+  // instead of regex-matching prose. Falls back to "generic failure" hint when
+  // no reason tag is present (e.g. network error, non-auth 4xx).
   if (result.isError && /[@＠]/.test(input.content)) {
     const original = (result.content[0] as { text: string }).text;
-    const lower = original.toLowerCase();
-    const looksLikeCredentialFailure =
-      lower.includes('callback failed (401)') ||
-      lower.includes('invalid or expired callback credentials') ||
-      lower.includes('callback token');
-    const reasonHint = looksLikeCredentialFailure
-      ? '这次 callback 凭证校验失败（可能是 token 过期，也可能 invocation/token 不匹配）。'
-      : '这次 post-message 调用失败。';
+    const reason = parseAuthFailureReason(original);
+    const reasonHint = ((): string => {
+      if (reason === 'unknown_invocation') {
+        return '这次 invocation 从未存在，或它的终态 tombstone 已经过保留期。';
+      }
+      if (reason && ['completed', 'failed', 'interrupted', 'replaced', 'revoked', 'canceled'].includes(reason)) {
+        return `这次 exact TurnExecution 已终结（${reason}），callback credential 不会复活。`;
+      }
+      if (reason === 'invalid_token') {
+        return '这次 callback token 与 invocation 不匹配（客户端可能传错了凭证）。';
+      }
+      if (reason === 'missing_creds') {
+        return '这次 callback 缺少凭证 header（MCP 客户端环境变量可能没注入）。';
+      }
+      return '这次 post-message 调用失败。';
+    })();
     const hint =
       `\n\n💡 Tip: ${reasonHint}如果你想 @其他猫猫，` +
       '不需要用这个 MCP tool——直接在你的回复文本里另起一行写 @猫名 即可' +
@@ -251,92 +1137,709 @@ export async function handlePostMessage(input: {
   return result;
 }
 
-export async function handleGetPendingMentions(input: { includeAcked?: boolean | undefined }): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/pending-mentions', {
-    ...(input.includeAcked ? { includeAcked: '1' } : {}),
-  });
+/**
+ * F193 AC-A2 / KD-1 enforcement at MCP handler layer.
+ * Invocation-token caller MUST omit threadId — F043 #316 防误投 contract.
+ * Cross-thread delivery only via cat_cafe_cross_post_message.
+ * Agent-key caller (F178) is exempt: they REQUIRE threadId since persistent
+ * agents have no default thread context.
+ *
+ * Principal detection MUST follow buildAuthHeaders precedence (line 122):
+ * if the credential refresh file or legacy env contains a complete invocation
+ * pair, the request will be sent with x-invocation-id headers — regardless
+ * of whether the caller passed input.agentKeyCatId. The input field is a
+ * sidecar selector for shared Antigravity MCP, NOT an auth principal.
+ *
+ * Closing砚砚 review P1: previous guard `!input.agentKeyCatId` could be
+ * trivially bypassed by an invocation-token caller passing any agentKeyCatId
+ * value. The fix gates on the actual auth headers that will be sent.
+ */
+export async function handlePostMessage(
+  input: {
+    content: string;
+    searchAnswer?: MessageSearchAnswerAttachmentRequest;
+    contextAttachments?: ContextAttachment[] | undefined;
+    threadId?: string | undefined;
+    replyTo?: string | undefined;
+    clientMessageId?: string | undefined;
+    targetCats?: string[] | undefined;
+    effectClass?: 'fyi' | 'coordinate' | 'investigate' | undefined;
+    coordination?:
+      | { phase: 'active' | 'terminal'; id?: string | undefined; subjectRef?: string | undefined }
+      | undefined;
+    localReviewVerdict?: 'approved' | 'changes_requested' | 'commented' | undefined;
+    reviewedHeadSha?: string | undefined;
+    reviewSubjectRef?: string | undefined;
+    acceptedSourceRef?: string | undefined;
+    acceptedRevision?: string | undefined;
+    agentKeyCatId?: string | undefined;
+    action?: ActionSuccessorRequestMetadata | undefined;
+  },
+  transportOptions?: CallbackTransportOptions,
+): Promise<ToolResult> {
+  const hasInvocationCreds = getInvocationAuthSignal().hasFullCredentials;
+  if (input.threadId && hasInvocationCreds) {
+    return errorResult(
+      'post_message rejects threadId from invocation-token callers (F193 KD-1). ' +
+        'For cross-thread delivery, use cat_cafe_cross_post_message(threadId, targetCats, content). ' +
+        'For same-thread delivery, omit threadId entirely (defaults to invocation thread).',
+    );
+  }
+  if (input.action) {
+    const parsedAction = executableActionSuccessorMetadataSchema.safeParse(input.action);
+    if (!parsedAction.success) {
+      return errorResult(
+        `invalid post_message action metadata: ${EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION} ${parsedAction.error.issues.map((issue) => issue.message).join('; ')}`,
+      );
+    }
+    if (!input.clientMessageId) {
+      return errorResult(
+        'post_message action metadata requires clientMessageId. Example: clientMessageId="review-owner-repo-2915".',
+      );
+    }
+    if (!input.targetCats?.length) {
+      return errorResult(
+        'post_message action metadata requires targetCats with exactly one cat. Example: targetCats=["codex"].',
+      );
+    }
+    if (input.action.mode !== 'single') {
+      return errorResult(
+        'post_message only carries a same-thread single successor. Use cat_cafe_multi_mention with mode="parallel" and parallelIntent for deliberate independent fan-out.',
+      );
+    }
+    if (input.targetCats.length !== 1) {
+      return errorResult(
+        'post_message single action requires exactly one targetCats entry. Example: targetCats=["codex"].',
+      );
+    }
+  }
+  return _executePostMessage(input, transportOptions);
 }
 
-export async function handleAckMentions(input: { upToMessageId: string }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/ack-mentions', {
-    upToMessageId: input.upToMessageId,
-  });
+export async function handleGetPendingMentions(input: {
+  includeAcked?: boolean | undefined;
+  responseMode?: 'anchor' | 'full' | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return callbackGet(
+    '/api/callbacks/pending-mentions',
+    {
+      ...(input.includeAcked ? { includeAcked: '1' } : {}),
+      ...(input.responseMode ? { responseMode: input.responseMode } : {}),
+    },
+    agentKeyOptions(input),
+  );
+}
+
+export async function handleAckMentions(input: WithAgentKey<{ upToMessageId: string }>): Promise<ToolResult> {
+  return callbackPost(
+    '/api/callbacks/ack-mentions',
+    {
+      upToMessageId: input.upToMessageId,
+    },
+    agentKeyOptions(input),
+  );
 }
 
 export async function handleGetThreadContext(input: {
+  readIntent?: 'history' | 'unread' | undefined;
   limit?: number | undefined;
+  cursor?: string | undefined;
   threadId?: string | undefined;
+  messageId?: string | undefined;
+  before?: number | undefined;
+  after?: number | undefined;
   catId?: string | undefined;
   keyword?: string | undefined;
+  responseMode?: 'anchor' | 'full' | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/thread-context', {
-    ...(input.limit ? { limit: String(input.limit) } : {}),
-    ...(input.threadId ? { threadId: input.threadId } : {}),
-    ...(input.catId ? { catId: input.catId } : {}),
-    ...(input.keyword ? { keyword: input.keyword } : {}),
-  });
+  if (
+    input.readIntent === 'unread' &&
+    (input.catId || input.keyword || input.messageId || input.before !== undefined || input.after !== undefined)
+  ) {
+    return errorResult(
+      'readIntent=unread requires no catId, keyword, messageId, before or after filters. Use readIntent=history for filtered browsing.',
+    );
+  }
+  return callbackGet(
+    '/api/callbacks/thread-context',
+    {
+      ...(input.readIntent ? { readIntent: input.readIntent } : {}),
+      ...(input.limit ? { limit: String(input.limit) } : {}),
+      ...(input.cursor ? { cursor: input.cursor } : {}),
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+      ...(input.messageId ? { messageId: input.messageId } : {}),
+      ...(input.before !== undefined ? { before: String(input.before) } : {}),
+      ...(input.after !== undefined ? { after: String(input.after) } : {}),
+      ...(input.catId ? { catId: input.catId } : {}),
+      ...(input.keyword ? { keyword: input.keyword } : {}),
+      ...(input.responseMode ? { responseMode: input.responseMode } : {}),
+    },
+    { agentKeyCatId: input.agentKeyCatId },
+  );
+}
+
+export async function handleGetWorkflowSop(input: {
+  threadId?: string | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return callbackGet(
+    '/api/callbacks/get-workflow-sop',
+    {
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+    },
+    agentKeyOptions(input),
+  );
+}
+
+/** #699: Look up a single message by ID with optional surrounding context. */
+export async function handleGetMessage(input: {
+  messageId: string;
+  contextCount?: number | undefined;
+  mode?: 'preview' | 'full' | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return callbackGet(
+    '/api/callbacks/get-message',
+    {
+      messageId: input.messageId,
+      ...(input.contextCount ? { contextCount: String(input.contextCount) } : {}),
+      ...(input.mode ? { mode: input.mode } : {}),
+    },
+    { agentKeyCatId: input.agentKeyCatId },
+  );
 }
 
 export async function handleListThreads(input: {
   limit?: number | undefined;
   activeSince?: number | undefined;
   keyword?: string | undefined;
+  includeWork?: boolean | undefined;
+  cursor?: string | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/list-threads', {
-    ...(input.limit ? { limit: String(input.limit) } : {}),
-    ...(input.activeSince !== undefined ? { activeSince: String(input.activeSince) } : {}),
-    ...(input.keyword ? { keyword: input.keyword } : {}),
-  });
+  return callbackGet(
+    '/api/callbacks/list-threads',
+    {
+      ...(input.limit ? { limit: String(input.limit) } : {}),
+      ...(input.activeSince !== undefined ? { activeSince: String(input.activeSince) } : {}),
+      ...(input.keyword ? { keyword: input.keyword } : {}),
+      ...(input.includeWork !== undefined ? { includeWork: String(input.includeWork) } : {}),
+      ...(input.cursor ? { cursor: input.cursor } : {}),
+    },
+    { agentKeyCatId: input.agentKeyCatId },
+  );
+}
+
+export async function handleListLabels(input: {
+  limit?: number | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return callbackGet(
+    '/api/callbacks/list-labels',
+    {
+      ...(input.limit ? { limit: String(input.limit) } : {}),
+    },
+    { agentKeyCatId: input.agentKeyCatId },
+  );
 }
 
 export async function handleFeatIndex(input: {
   limit?: number | undefined;
   featId?: string | undefined;
   query?: string | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/feat-index', {
-    ...(input.limit ? { limit: String(input.limit) } : {}),
-    ...(input.featId ? { featId: input.featId } : {}),
-    ...(input.query ? { query: input.query } : {}),
+  const result = await callbackGet(
+    '/api/callbacks/feat-index',
+    {
+      ...(input.limit ? { limit: String(input.limit) } : {}),
+      ...(input.featId ? { featId: input.featId } : {}),
+      ...(input.query ? { query: input.query } : {}),
+    },
+    agentKeyOptions(input),
+  );
+  if (result.isError) return result;
+  return successResult(formatFeatIndexResponse(result.content[0]?.text ?? '{}'));
+}
+
+interface FeatIndexItem {
+  featId?: string;
+  name?: string;
+  status?: string;
+  owner?: string;
+  ownerCatId?: string;
+  keyDecisions?: string[];
+  threadIds?: string[];
+  suggestedAction?: SuggestedCrossPostAction;
+}
+
+function formatFeatIndexResponse(raw: string): string {
+  let parsed: { items?: FeatIndexItem[] };
+  try {
+    parsed = JSON.parse(raw) as { items?: FeatIndexItem[] };
+  } catch {
+    return raw;
+  }
+
+  const items = Array.isArray(parsed.items) ? parsed.items : [];
+  if (items.length === 0) return 'feat_index results (0)';
+
+  const lines = [`feat_index results (${items.length})`];
+  items.forEach((item, index) => {
+    const title = `${item.featId ?? 'unknown'} — ${item.name ?? '(unnamed)'}`;
+    lines.push(`${index + 1}. ${title}${item.status ? ` [${item.status}]` : ''}`);
+    if (item.owner) {
+      lines.push(`   owner: ${item.owner}${item.ownerCatId ? ` (${item.ownerCatId})` : ''}`);
+    }
+    if (item.keyDecisions?.length) {
+      lines.push('   key decisions:');
+      item.keyDecisions.forEach((decision) => {
+        lines.push(`   - ${decision}`);
+      });
+    }
+    if (item.threadIds?.length) {
+      lines.push(`   threads: ${item.threadIds.join(', ')}`);
+    }
+    const action = item.suggestedAction;
+    if (action?.type === 'cross_post') {
+      lines.push(...formatSuggestedCrossPostActionLines(action, { indent: '   ', detailIndent: '   ' }));
+    }
   });
+
+  return lines.join('\n');
 }
 
 export async function handleUpdateTask(input: {
   taskId: string;
+  expectedOwnerRevision?: number;
   status?: string | undefined;
   why?: string | undefined;
+  agentKeyCatId?: string | undefined;
+  dispatchGate?: {
+    status: 'dispatched' | 'not_dispatched';
+    dispatchedThreadId?: string;
+    dispatchedMessageId?: string;
+    reason?: string;
+  };
 }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/update-task', {
-    taskId: input.taskId,
-    ...(input.status ? { status: input.status } : {}),
-    ...(input.why ? { why: input.why } : {}),
+  // F174 Phase E (AC-E2/E5): explicit kind:'none'. Task state lives in Redis;
+  // local fallback would diverge from server truth. Surface `[degrade]` hint.
+  return withDegradation({
+    toolName: 'update_task',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/update-task',
+        {
+          taskId: input.taskId,
+          ...(input.expectedOwnerRevision !== undefined ? { expectedOwnerRevision: input.expectedOwnerRevision } : {}),
+          ...(input.status ? { status: input.status } : {}),
+          ...(input.why ? { why: input.why } : {}),
+          // F193-E1 P1-4: allow patching dispatchGate on existing tasks
+          ...(input.dispatchGate ? { dispatchGate: { ...input.dispatchGate, decidedAt: Date.now() } } : {}),
+        },
+        agentKeyOptions(input),
+      ),
+    policy: { kind: 'none' },
   });
+}
+
+export async function handleAdmitEntrustedWork(input: {
+  title: string;
+  why?: string | undefined;
+  admission: CustodyAdmissionRequestV1;
+  closure?: EntrustedWorkClosureSpecV1 | undefined;
+  time?: EntrustedWorkV1['time'] | undefined;
+  artifactRefs?: string[] | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return withDegradation({
+    toolName: 'admit_entrusted_work',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/admit-entrusted-work',
+        {
+          title: input.title,
+          ...(input.why !== undefined ? { why: input.why } : {}),
+          admission: input.admission,
+          ...(input.closure !== undefined ? { closure: input.closure } : {}),
+          ...(input.time !== undefined ? { time: input.time } : {}),
+          ...(input.artifactRefs !== undefined ? { artifactRefs: input.artifactRefs } : {}),
+        },
+        agentKeyOptions(input),
+      ),
+    policy: { kind: 'none' },
+  });
+}
+
+export async function handleCloseEntrustedWork(input: {
+  taskId: string;
+  expectedRevision: number;
+  closure: EntrustedWorkTerminalClosureV1;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return withDegradation({
+    toolName: 'close_entrusted_work',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/close-entrusted-work',
+        {
+          taskId: input.taskId,
+          expectedRevision: input.expectedRevision,
+          closure: input.closure,
+        },
+        agentKeyOptions(input),
+      ),
+    policy: { kind: 'none' },
+  });
+}
+
+export async function handleUpdateEntrustedWork(
+  input: EntrustedWorkUpdateActionV1 & { agentKeyCatId?: string | undefined },
+): Promise<ToolResult> {
+  return withDegradation({
+    toolName: 'update_entrusted_work',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/update-entrusted-work',
+        {
+          taskId: input.taskId,
+          expectedRevision: input.expectedRevision,
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.time !== undefined ? { time: input.time } : {}),
+          ...(input.artifactRefs !== undefined ? { artifactRefs: input.artifactRefs } : {}),
+          ...(input.progress !== undefined ? { progress: input.progress } : {}),
+        },
+        agentKeyOptions(input),
+      ),
+    policy: { kind: 'none' },
+  });
+}
+
+export async function handleOfferCustody(input: {
+  sourceMessageId: string;
+  reasonCode: 'future_deliverable' | 'follow_up_commitment' | 'time_bound_obligation';
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return withDegradation({
+    toolName: 'offer_custody',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/custody-offers',
+        { sourceMessageId: input.sourceMessageId, reasonCode: input.reasonCode },
+        agentKeyOptions(input),
+      ),
+    policy: { kind: 'none' },
+  });
+}
+
+export async function handleRetryCustodyAdmission(input: {
+  sourceMessageId: string;
+  sourceMessageRevision: string;
+  offerId: string;
+  title: string;
+  why?: string | undefined;
+  intendedOutcome: string;
+  closure: EntrustedWorkClosureSpecV1;
+  time?: EntrustedWorkV1['time'] | undefined;
+  artifactRefs?: string[] | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return withDegradation({
+    toolName: 'retry_custody_admission',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/custody-offers/retry-admission',
+        {
+          sourceMessageId: input.sourceMessageId,
+          sourceMessageRevision: input.sourceMessageRevision,
+          offerId: input.offerId,
+          title: input.title,
+          ...(input.why !== undefined ? { why: input.why } : {}),
+          intendedOutcome: input.intendedOutcome,
+          closure: input.closure,
+          ...(input.time !== undefined ? { time: input.time } : {}),
+          ...(input.artifactRefs !== undefined ? { artifactRefs: input.artifactRefs } : {}),
+        },
+        agentKeyOptions(input),
+      ),
+    policy: { kind: 'none' },
+  });
+}
+
+export async function handleCreateTask(input: {
+  title: string;
+  why?: string | undefined;
+  ownerCatId?: string | undefined;
+  relatedFeatureId?: string | undefined;
+  currentFeatureId?: string | undefined;
+  agentKeyCatId?: string | undefined;
+  dispatchGate?: {
+    status: 'dispatched' | 'not_dispatched';
+    dispatchedThreadId?: string;
+    dispatchedMessageId?: string;
+    reason?: string;
+  };
+}): Promise<ToolResult> {
+  // F193-E1: dispatch gate logic
+  const textForExtraction = `${input.title} ${input.why ?? ''}`;
+  const detectedFIds = extractFeatureIds(textForExtraction);
+  const allFIds = input.relatedFeatureId ? [...new Set([input.relatedFeatureId, ...detectedFIds])] : detectedFIds;
+  const externalFIds = input.currentFeatureId ? allFIds.filter((f) => f !== input.currentFeatureId) : allFIds; // no currentFeatureId → all detected F-IDs are potentially external
+
+  // Compute persisted dispatch gate state
+  let computedGate: DispatchGateState | undefined;
+  if (externalFIds.length > 0) {
+    if (input.dispatchGate) {
+      computedGate = {
+        status: input.dispatchGate.status,
+        ...(input.dispatchGate.dispatchedThreadId ? { dispatchedThreadId: input.dispatchGate.dispatchedThreadId } : {}),
+        ...(input.dispatchGate.dispatchedMessageId
+          ? { dispatchedMessageId: input.dispatchGate.dispatchedMessageId }
+          : {}),
+        ...(input.dispatchGate.reason ? { reason: input.dispatchGate.reason } : {}),
+        decidedAt: Date.now(),
+      };
+    } else {
+      // Gate missing — persist status:'missing' so list_tasks can highlight later
+      computedGate = {
+        status: 'missing',
+        suggestedAction: {
+          type: 'cross_post',
+          featureId: externalFIds[0],
+          reason: `Task references ${externalFIds.join(', ')} — consider cross_posting to the owning thread.`,
+          source: 'dispatch_gate',
+        },
+      };
+    }
+  }
+
+  const result = await callbackPost(
+    '/api/callbacks/create-task',
+    {
+      title: input.title,
+      ...(input.why ? { why: input.why } : {}),
+      ...(input.ownerCatId ? { ownerCatId: input.ownerCatId } : {}),
+      ...(input.relatedFeatureId ? { relatedFeatureId: input.relatedFeatureId } : {}),
+      ...(detectedFIds.length > 0 ? { detectedFeatureIds: detectedFIds } : {}),
+      ...(computedGate ? { dispatchGate: computedGate } : {}),
+    },
+    agentKeyOptions(input),
+  );
+
+  // Append dispatch gate warning to successful result
+  if (computedGate?.status === 'missing' && !result.isError) {
+    const warningText =
+      `\n\n⚠️ DISPATCH GATE: This task references ${externalFIds.join(', ')} ` +
+      `but no dispatch decision was provided. Did you cross_post_message to the ` +
+      `${externalFIds[0]} thread? If so, call update_task with dispatchGate: ` +
+      `{ status: "dispatched", dispatchedThreadId: "<threadId>", dispatchedMessageId: "<msgId>" }. ` +
+      `If not, consider dispatching — the info may be stuck in your thread's local TODO.`;
+    const existingText = result.content[0]?.text ?? '';
+    return { content: [{ type: 'text', text: existingText + warningText }] };
+  }
+
+  return result;
 }
 
 export async function handleCrossPostMessage(input: {
   threadId: string;
   content: string;
+  searchAnswer?: MessageSearchAnswerAttachmentRequest;
+  targetCats?: string[] | undefined;
   replyTo?: string | undefined;
   clientMessageId?: string | undefined;
+  agentKeyCatId?: string | undefined;
+  effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work' | undefined;
+  coordination?: { phase: 'active' | 'terminal'; id?: string | undefined; subjectRef?: string | undefined } | undefined;
+  localReviewVerdict?: 'approved' | 'changes_requested' | 'commented' | undefined;
+  reviewedHeadSha?: string | undefined;
+  reviewSubjectRef?: string | undefined;
+  acceptedSourceRef?: string | undefined;
+  acceptedRevision?: string | undefined;
+  action?: ActionSuccessorRequestMetadata | undefined;
+  proposedAction?: ActionSuccessorRequestMetadata | undefined;
 }): Promise<ToolResult> {
-  return handlePostMessage({
+  if (containsPawFeelMarker(input.content)) {
+    return errorResult(
+      'cross_post_message rejects copied paw-feel markers: the original turn is already collected by eval:friction. ' +
+        'Keep [爪感差: ...] only in the source message. For immediate action, verify the exact owner thread via ' +
+        'feat_index/list_threads plus thread truth, then send a marker-free sourceMessageId reference. ' +
+        'If no owner thread can be verified, use cat_cafe_propose_thread (F128); do not guess a nearby thread. ' +
+        'If this creates new responsibility for an existing owner, use effectClass="assign_work" for operator approval.',
+    );
+  }
+  // F193 AC-A4 closing砚砚 review P1: MCP layer fail-closed.
+  // The API route layer (callbacks.ts) only triggers AC-A4 reject when
+  // isCrossThread === true (effectiveThreadId !== actor.threadId), which is
+  // false for agent-key callers (target-thread write, no source thread).
+  // So MUST close routing-creds gate at MCP layer too — covers ALL callers
+  // (invocation-token + agent-key) before any HTTP dispatch.
+  const hasTargetCats = !!input.targetCats?.length;
+  // Line-start @ detection MUST mirror the authoritative server parser
+  // (a2a-mentions.ts:107-113): strip code fences, then for each line,
+  // trim leading whitespace + strip markdown prefix (`- ` / `> ` / `* ` /
+  // `1. ` etc.) and check if it starts with '@'. Closing 砚砚 review round 2
+  // P1: a naive /^@\w/m would (a) reject markdown-prefixed routing
+  // (`- @codex` / `> @codex`) — which the server parser and SystemPromptBuilder
+  // both treat as legitimate — and (b) reject non-ASCII handles like `@缅因猫`
+  // (\w only matches [a-zA-Z0-9_]). Server-side analyzeA2AMentions remains
+  // the authoritative parser — this is just an early reject for client
+  // ergonomics + closing the agent-key API-layer gap.
+  const hasLineStartMention = hasPlausibleLineStartMention(input.content);
+  if (!hasTargetCats && !hasLineStartMention) {
+    return errorResult(
+      'cross_post_message requires routing credentials (F193 AC-A4). ' +
+        'Pass targetCats: ["catHandle"] OR add a line-start @catHandle in content. ' +
+        'Without routing, the cross-thread message would land in the target thread but trigger no cat session.',
+    );
+  }
+  if (input.localReviewVerdict) {
+    if (!input.clientMessageId) {
+      return errorResult('cross_post_message localReviewVerdict requires clientMessageId.');
+    }
+    if (!input.reviewedHeadSha) {
+      return errorResult('cross_post_message localReviewVerdict requires the exact reviewedHeadSha.');
+    }
+    if (!hasCompleteLocalReviewAnchor(input)) {
+      return errorResult(
+        'cross_post_message localReviewVerdict requires reviewSubjectRef plus a valid acceptedSourceRef and acceptedRevision.',
+      );
+    }
+    if (input.action || input.proposedAction || input.coordination) {
+      return errorResult(
+        'cross_post_message localReviewVerdict must use ordinary A2A without action, proposedAction, or coordination.',
+      );
+    }
+  }
+  if (input.reviewedHeadSha && !input.localReviewVerdict) {
+    return errorResult('cross_post_message reviewedHeadSha requires localReviewVerdict.');
+  }
+  if (!input.localReviewVerdict && hasAnyLocalReviewAnchor(input)) {
+    return errorResult(`cross_post_message ${IMPLEMENTATION_REVIEW_ANCHOR_ERROR}`);
+  }
+  if (input.action) {
+    const parsedAction = executableActionSuccessorMetadataSchema.safeParse(input.action);
+    if (!parsedAction.success) {
+      return errorResult(
+        `invalid cross_post_message action metadata: ${EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION} ${parsedAction.error.issues.map((issue) => issue.message).join('; ')}`,
+      );
+    }
+    if (!input.clientMessageId) {
+      return errorResult('cross_post_message action metadata requires an explicit clientMessageId.');
+    }
+    if (!input.targetCats?.length) {
+      return errorResult('cross_post_message action metadata requires explicit targetCats.');
+    }
+    if (input.action.mode === 'single' && input.targetCats.length !== 1) {
+      return errorResult('cross_post_message single action requires exactly one target.');
+    }
+    if (input.action.mode === 'parallel' && !input.action.returnToPredecessor && input.targetCats.length < 2) {
+      return errorResult('cross_post_message parallel action requires at least two targets.');
+    }
+    if (input.action.mode === 'parallel' && input.action.returnToPredecessor && input.targetCats.length !== 1) {
+      return errorResult('cross_post_message parallel rejected-ownership disposition requires one predecessor target.');
+    }
+    if (input.effectClass === 'assign_work') {
+      return errorResult('cross_post_message action metadata cannot be combined with effectClass="assign_work".');
+    }
+  }
+  const proposedActionError = validateCrossPostProposedAction(input);
+  if (proposedActionError) return proposedActionError;
+  // cross_post_message is the legitimate cross-thread tool — bypass
+  // handlePostMessage's KD-1 guard (which is meant to redirect invocation-token
+  // callers AWAY from threadId on post_message). Reuse the same delivery
+  // primitive via _executePostMessage to share stale_ignored detection,
+  // outbox, and degradation hints.
+  return _executePostMessage({
     threadId: input.threadId,
     content: input.content,
+    ...(input.searchAnswer ? { searchAnswer: input.searchAnswer } : {}),
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
+    ...(input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : {}),
+    ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
+    ...(input.effectClass ? { effectClass: input.effectClass } : {}),
+    ...(input.coordination ? { coordination: input.coordination } : {}),
+    ...(input.localReviewVerdict ? { localReviewVerdict: input.localReviewVerdict } : {}),
+    ...(input.reviewedHeadSha ? { reviewedHeadSha: input.reviewedHeadSha } : {}),
+    ...(input.reviewSubjectRef ? { reviewSubjectRef: input.reviewSubjectRef } : {}),
+    ...(input.acceptedSourceRef ? { acceptedSourceRef: input.acceptedSourceRef } : {}),
+    ...(input.acceptedRevision ? { acceptedRevision: input.acceptedRevision } : {}),
+    ...(input.action ? { action: input.action } : {}),
+    ...(input.proposedAction ? { proposedAction: input.proposedAction } : {}),
   });
+}
+
+function validateCrossPostProposedAction(input: {
+  effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
+  proposedAction?: ActionSuccessorRequestMetadata;
+  clientMessageId?: string;
+  targetCats?: string[];
+}): ToolResult | null {
+  if (input.effectClass === 'assign_work' && !input.proposedAction) {
+    return errorResult(
+      'cross_post_message effectClass="assign_work" requires proposedAction with an executable action identity.',
+    );
+  }
+  if (!input.proposedAction) return null;
+  const parsedAction = actionSuccessorMetadataSchema.safeParse(input.proposedAction);
+  if (!parsedAction.success) {
+    return errorResult(
+      `invalid cross_post_message proposedAction metadata: ${parsedAction.error.issues
+        .map((issue) => issue.message)
+        .join('; ')}`,
+    );
+  }
+  if (input.effectClass !== 'assign_work') {
+    return errorResult('cross_post_message proposedAction requires effectClass="assign_work".');
+  }
+  if (!input.clientMessageId) {
+    return errorResult('cross_post_message proposedAction requires an explicit clientMessageId.');
+  }
+  if (!input.targetCats?.length) {
+    return errorResult('cross_post_message proposedAction requires explicit targetCats.');
+  }
+  if (
+    input.proposedAction.replace ||
+    input.proposedAction.returnToPredecessor ||
+    input.proposedAction.claimOrigin === 'existing_standing'
+  ) {
+    return errorResult(
+      'cross_post_message proposedAction supports only a new structured transfer; use direct action for replacement, return, or existing standing.',
+    );
+  }
+  if (input.proposedAction.mode === 'single' && input.targetCats.length !== 1) {
+    return errorResult('cross_post_message single proposedAction requires exactly one target.');
+  }
+  if (input.proposedAction.mode === 'parallel' && input.targetCats.length < 2) {
+    return errorResult('cross_post_message parallel proposedAction requires at least two targets.');
+  }
+  return null;
 }
 
 export async function handleListTasks(input: {
   threadId?: string | undefined;
   catId?: string | undefined;
   status?: 'todo' | 'doing' | 'blocked' | 'done' | undefined;
+  kind?: 'work' | 'pr_tracking' | undefined;
+  featureId?: string | undefined;
+  taskId?: string | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/list-tasks', {
-    ...(input.threadId ? { threadId: input.threadId } : {}),
-    ...(input.catId ? { catId: input.catId } : {}),
-    ...(input.status ? { status: input.status } : {}),
-  });
+  return callbackGet(
+    '/api/callbacks/list-tasks',
+    {
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+      ...(input.catId ? { catId: input.catId } : {}),
+      ...(input.status ? { status: input.status } : {}),
+      ...(input.kind ? { kind: input.kind } : {}),
+      ...(input.featureId ? { featureId: input.featureId } : {}),
+      ...(input.taskId ? { taskId: input.taskId } : {}),
+    },
+    agentKeyOptions(input),
+  );
 }
 
 /** F22+F96: Create a rich block (card, diff, checklist, media_gallery, audio, interactive) in the current message */
@@ -345,14 +1848,80 @@ export const createRichBlockInputSchema = {
     .string()
     .min(1)
     .describe('JSON string of the rich block object. Must include id, kind, v:1, and kind-specific fields.'),
+  threadId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Target thread ID. Required for agent-key auth because persistent MCP has no invocation thread.'),
+  awaitResponseV1: z
+    .object({
+      mode: z.literal('once').describe('Create exactly one durable decision lifecycle for this block.'),
+      allowTextResponse: z
+        .boolean()
+        .optional()
+        .default(true)
+        .describe('Allow a deliberately bound text answer in addition to the rendered options.'),
+      deadlineAt: z.number().int().positive().optional().describe('Optional absolute epoch-ms deadline.'),
+      defaultResponse: z
+        .discriminatedUnion('kind', [
+          z
+            .object({
+              kind: z.literal('selection').describe('Apply one declared option selection at the deadline.'),
+              selectedIds: z
+                .array(z.string().min(1))
+                .min(1)
+                .describe('One or more option IDs from the published interactive block.'),
+              customInput: z
+                .string()
+                .trim()
+                .min(1)
+                .max(100_000)
+                .optional()
+                .describe('Optional declared custom-input value for the selected option.'),
+            })
+            .strict(),
+          z
+            .object({
+              kind: z.literal('text').describe('Apply one declared free-text response at the deadline.'),
+              text: z
+                .string()
+                .trim()
+                .min(1)
+                .max(100_000)
+                .describe('Declared deadline response text, up to 100,000 characters.'),
+            })
+            .strict(),
+        ])
+        .optional()
+        .describe('Optional declared response applied by Host at deadline; requires deadlineAt.'),
+    })
+    .strict()
+    .optional()
+    .describe('Explicitly create one durable conversation decision. Never inferred from block shape or prose.'),
 };
 
 /**
  * #84: Route A → Route B fallback for rich block creation.
- * Tries direct callback first; on failure, falls back to post_message with cc_rich text
- * (which is extracted server-side after #83 fix).
+ *
+ * Unknown registry state flows through `withDegradation`; authoritative
+ * terminal dispositions do not. The
+ * legacy 403 / "not configured" path predates Phase A typed reasons and
+ * stays inline (preserves pre-Phase-A behavior, marks DEGRADED:true).
  */
-export async function handleCreateRichBlock(input: { block: string }): Promise<ToolResult> {
+export async function handleCreateRichBlock(input: {
+  block: string;
+  threadId?: string | undefined;
+  agentKeyCatId?: string | undefined;
+  awaitResponseV1?: {
+    mode: 'once';
+    allowTextResponse?: boolean | undefined;
+    deadlineAt?: number | undefined;
+    defaultResponse?:
+      | { kind: 'selection'; selectedIds: string[]; customInput?: string }
+      | { kind: 'text'; text: string }
+      | undefined;
+  };
+}): Promise<ToolResult> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(input.block);
@@ -366,101 +1935,256 @@ export async function handleCreateRichBlock(input: { block: string }): Promise<T
   if (!parsed || typeof parsed !== 'object' || !('id' in parsed) || !('kind' in parsed)) {
     return errorResult('Block must include id and kind fields');
   }
+  if (!isValidRichBlock(parsed)) {
+    return errorResult('Invalid rich block: block does not match required fields for its kind');
+  }
+  const block = parsed;
+  const hasInvocationCreds = getInvocationAuthSignal().hasFullCredentials;
+  const hasAgentKeyCreds = hasUsableAgentKeyCredentials(process.env);
 
-  // Route A: direct rich block callback (buffers for invocation response)
-  const result = await callbackPost(
-    '/api/callbacks/create-rich-block',
-    {
-      block: parsed,
-    },
-    { enableOutbox: true },
-  );
-  if (!result.isError) return result;
-
-  // P1 cloud-review: only fallback to Route B for auth/config failures.
-  // Validation errors (400/422) must surface directly, not be silently swallowed.
-  const errorText = result.content[0]?.type === 'text' ? result.content[0].text : '';
-  const isAuthOrConfigFailure = /\(40[13]\)/.test(errorText) || /not configured/i.test(errorText);
-  if (!isAuthOrConfigFailure) return result;
-
-  // Route A auth/config failed — try Route B: cc_rich text via post_message (#83 extracts it server-side)
-  const ccRichText = `\`\`\`cc_rich\n${JSON.stringify({ v: 1, blocks: [parsed] })}\n\`\`\``;
-  const fallback = await handlePostMessage({
-    content: ccRichText,
-    clientMessageId: randomUUID(),
-  });
-  if (!fallback.isError) {
-    return successResult(JSON.stringify({ status: 'ok', route: 'B_fallback' }));
+  if (input.awaitResponseV1) {
+    if (!hasInvocationCreds) {
+      return errorResult('awaitResponseV1 requires the current authenticated invocation; no text fallback is allowed.');
+    }
+    return callbackPost(
+      '/api/callbacks/create-rich-block',
+      {
+        block,
+        awaitResponseV1: input.awaitResponseV1,
+        ...(input.threadId ? { threadId: input.threadId } : {}),
+      },
+      { enableOutbox: true, agentKeyCatId: input.agentKeyCatId },
+    );
   }
 
-  // Both routes failed — return error with embeddable cc_rich hint
-  return errorResult(
-    `Rich block creation failed (callback token expired or missing). As a workaround, include this in your message text:\n\n${ccRichText}`,
-  );
-}
+  const ccRichText = `\`\`\`cc_rich\n${JSON.stringify({ v: 1, blocks: [block] })}\n\`\`\``;
+  // Inline TTS is a long-running, non-idempotent server operation. The voice
+  // synthesizer owns its one safe retry; replaying the outer callback starts
+  // duplicate generations and can saturate the shared TTS queue.
+  const transportOptions = requiresInlineAudioSynthesis(block) ? SYNTHESIZED_AUDIO_CALLBACK_TRANSPORT : undefined;
+  const runRouteB = async (meta: { route: string; degraded: boolean }): Promise<ToolResult> => {
+    const fallback = await handlePostMessage(
+      {
+        content: ccRichText,
+        ...(input.threadId ? { threadId: input.threadId } : {}),
+        clientMessageId: randomUUID(),
+        agentKeyCatId: input.agentKeyCatId,
+      },
+      transportOptions,
+    );
+    if (!fallback.isError) {
+      // Cloud Codex P2 (PR #1384): legacy 403/not-configured branch returns
+      // runRouteB() from primary, where the framework treats it as primary
+      // success and skips DEGRADED:true tagging. Mark inline so both paths
+      // (legacy + framework custom degrade) get consistent telemetry. The
+      // framework's markDegraded is idempotent so re-tagging on the custom
+      // path is harmless.
+      return successResult(
+        JSON.stringify({
+          status: 'ok',
+          route: meta.route,
+          ...(meta.degraded ? { DEGRADED: true } : {}),
+        }),
+      );
+    }
+    return errorResult(
+      `Rich block creation failed (callback credential unavailable). As a workaround, include this in your message text:\n\n${ccRichText}`,
+    );
+  };
 
-export const requestPermissionInputSchema = {
-  action: z.string().min(1).describe('The action requiring permission (e.g. "git_commit", "file_delete")'),
-  reason: z.string().min(1).describe('Why you need this permission'),
-  context: z.string().max(5000).optional().describe('Optional additional context for the request'),
-};
+  if (!hasInvocationCreds && hasAgentKeyCreds) {
+    if (!input.threadId) {
+      return errorResult('threadId is required for create_rich_block when using agent-key auth.');
+    }
+    return runRouteB({ route: 'B_agent_key', degraded: false });
+  }
 
-export const checkPermissionStatusInputSchema = {
-  requestId: z.string().min(1).describe('The requestId returned from a previous request_permission call'),
-};
-
-export async function handleRequestPermission(input: {
-  action: string;
-  reason: string;
-  context?: string | undefined;
-}): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/request-permission', {
-    action: input.action,
-    reason: input.reason,
-    ...(input.context ? { context: input.context } : {}),
+  // Phase E: framework handles primary call + auth-degradable fallback.
+  // For the legacy 403/not-configured path (pre-Phase-A), inspect the
+  // returned error text and route to Route B explicitly — preserves the
+  // existing behavior without widening the framework's degradable set
+  // (AC-E3: framework triggers only on 401-degradable reasons).
+  return withDegradation({
+    toolName: 'create_rich_block',
+    primary: async () => {
+      const result = await callbackPost(
+        '/api/callbacks/create-rich-block',
+        { block, ...(input.threadId ? { threadId: input.threadId } : {}) },
+        {
+          enableOutbox: true,
+          agentKeyCatId: input.agentKeyCatId,
+          ...transportOptions,
+        },
+      );
+      if (!result.isError) return result;
+      const errorText = result.content[0]?.type === 'text' ? result.content[0].text : '';
+      const isLegacyConfigFailure = /\(403\)/.test(errorText) || /not configured/i.test(errorText);
+      if (isLegacyConfigFailure) return runRouteB({ route: 'B_fallback', degraded: true }); // legacy compat path returns success directly
+      return result; // framework continues with auth-reason inspection
+    },
+    policy: { kind: 'custom', degrade: async () => runRouteB({ route: 'B_fallback', degraded: true }) },
   });
 }
 
-export async function handleCheckPermissionStatus(input: { requestId: string }): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/permission-status', {
-    requestId: input.requestId,
-  });
-}
-
-// TD091: PR tracking registration — server resolves threadId from invocation record
-export const registerPrTrackingInputSchema = {
-  repoFullName: z.string().min(1).describe('Repository full name in owner/repo format (e.g. "zts212653/cat-cafe")'),
-  prNumber: z.number().int().positive().describe('PR number'),
-  catId: z
+/** F088 Phase J2: Generate a document (PDF/DOCX/MD) from Markdown content */
+export const generateDocumentInputSchema = {
+  markdown: z
     .string()
-    .optional()
-    .describe('Deprecated — server auto-resolves from invocation identity. Ignored if provided.'),
+    .min(1)
+    .describe('Full Markdown content for the document. Supports headings, tables, lists, code blocks, etc.'),
+  format: z
+    .enum(['pdf', 'docx', 'md'])
+    .describe('Output format. Recommend "docx" (most compatible). "pdf" needs LaTeX, "md" always works.'),
+  baseName: z
+    .string()
+    .min(1)
+    .max(200)
+    .describe(
+      'Display name without extension (e.g. "调研报告", "GTC2026-具身智能调研"). Will appear as filename in IM.',
+    ),
 };
 
-export async function handleRegisterPrTracking(input: {
-  repoFullName: string;
-  prNumber: number;
-  catId?: string;
+export async function handleGenerateDocument(input: {
+  markdown: string;
+  format: string;
+  baseName: string;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/register-pr-tracking', {
-    repoFullName: input.repoFullName,
-    prNumber: input.prNumber,
-    ...(input.catId ? { catId: input.catId } : {}),
+  const result = await callbackPost(
+    '/api/callbacks/generate-document',
+    {
+      markdown: input.markdown,
+      format: input.format,
+      baseName: input.baseName,
+    },
+    agentKeyOptions(input),
+  );
+  return result;
+}
+
+// Deployment registration must remain single-attempt: a transport failure may follow a committed wait.
+const DEPLOYMENT_WAIT_REGISTRATION_TRANSPORT: CallbackTransportOptions = {
+  retryDelaysMs: [],
+  fetchTimeoutMs: 50_000,
+};
+
+/**
+ * Failures that leave the registration's outcome unknown. A request that failed in transport may
+ * have been processed anyway, and an HTTP 5xx proves nothing about the write: the route may have
+ * failed after its CAS, or a gateway in front of CAT_CAFE_API_URL may have answered after the
+ * upstream committed. A 4xx refuses before the write (a 408 is a request the server never fully
+ * received), so it keeps its plain text and any F174 hint.
+ */
+const UNKNOWN_REGISTRATION_OUTCOME = /^(?:Callback request failed:|Callback failed \(5\d\d\))/;
+
+/**
+ * Say that such a failure may still have registered, rather than let the caller read it as
+ * "nothing happened" and register again.
+ */
+function withUnknownRegistrationOutcome(result: ToolResult): ToolResult {
+  const block = result.content[0];
+  if (!result.isError || block?.type !== 'text' || !UNKNOWN_REGISTRATION_OUTCOME.test(block.text)) return result;
+  const note =
+    'The registration may still have been applied. Check cat_cafe_list_tasks for this subject ' +
+    '(its await generation and baseline capture time) before registering again.';
+  return { ...result, content: [{ type: 'text', text: `${block.text}\n\n${note}` }] };
+}
+
+const deploymentServicesInputSchema = z
+  .array(z.enum(['api', 'web']))
+  .min(1)
+  .max(2)
+  .refine((services) => new Set(services).size === services.length, 'services must be unique')
+  .default(['api', 'web']);
+
+export const registerDeploymentWaitInputSchema = {
+  taskId: z
+    .string()
+    .min(1)
+    .describe('Existing original work Task that owns the post-deployment verification; never create a mirror Task.'),
+  deploymentId: z
+    .string()
+    .regex(/^[a-z][a-z0-9._-]{0,63}$/)
+    .describe('Exact target deployment, normally `runtime`; Alpha and runtime are different subjects.'),
+  when: z
+    .discriminatedUnion('kind', [
+      z
+        .object({
+          kind: z.literal('revision_included'),
+          revision: z.string().regex(/^[0-9a-f]{40}$/),
+          services: deploymentServicesInputSchema,
+        })
+        .strict(),
+      z.object({ kind: z.literal('new_ready_boot'), services: deploymentServicesInputSchema }).strict(),
+    ])
+    .describe(
+      'One bounded single-fire condition. `revision_included` uses the frozen landed revision; `new_ready_boot` proves only a later ready boot, not config semantics.',
+    ),
+  nextStep: z
+    .string()
+    .trim()
+    .min(1)
+    .max(500)
+    .describe(
+      'Concrete verification action the original Task owner will perform after the deployment condition matches.',
+    ),
+};
+
+export async function handleRegisterDeploymentWait(input: {
+  taskId: string;
+  deploymentId: string;
+  when:
+    | { kind: 'revision_included'; revision: string; services: Array<'api' | 'web'> }
+    | { kind: 'new_ready_boot'; services: Array<'api' | 'web'> };
+  nextStep: string;
+}): Promise<ToolResult> {
+  const result = await withDegradation({
+    toolName: 'register_deployment_wait',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/register-deployment-wait',
+        {
+          taskId: input.taskId,
+          deploymentId: input.deploymentId,
+          when: input.when,
+          nextStep: input.nextStep,
+        },
+        DEPLOYMENT_WAIT_REGISTRATION_TRANSPORT,
+      ),
+    policy: { kind: 'none' },
   });
+  return withUnknownRegistrationOutcome(result);
 }
 
 export const updateWorkflowInputSchema = {
-  backlogItemId: z.string().min(1).describe('The backlog item ID to update workflow SOP for'),
-  featureId: z.string().min(1).describe('Feature ID (e.g. "F073")'),
-  stage: z
-    .enum(['kickoff', 'impl', 'quality_gate', 'review', 'merge', 'completion'])
+  backlogItemId: z
+    .string()
+    .min(1)
     .optional()
-    .describe('Current SOP stage'),
+    .describe(
+      'The backlog item ID. Optional — when omitted, server resolves from featureId via thread binding or user backlog scan.',
+    ),
+  taskId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Durable same-thread work task to import into Mission Hub when no backlog item exists. Required only to disambiguate multiple exact relatedFeatureId matches.',
+    ),
+  featureId: z
+    .string()
+    .min(1)
+    .describe('Feature ID (e.g. "F073"). Used as the primary identifier when backlogItemId is omitted.'),
+  sopDefinitionId: z
+    .enum(SOP_DEFINITION_IDS)
+    .optional()
+    .describe('SOP definition id. Defaults to "development" for existing workflows.'),
+  stage: z.enum(DEVELOPMENT_SOP_STAGE_IDS).optional().describe('Current SOP stage'),
   batonHolder: z
     .string()
     .min(1)
     .optional()
-    .describe('Unique handle of the cat currently holding the baton (e.g. "opus", "codex")'),
+    .describe('Unique handle of the cat currently holding the baton (a valid registered catId)'),
   nextSkill: z
     .string()
     .nullable()
@@ -491,8 +2215,10 @@ export const updateWorkflowInputSchema = {
 };
 
 export async function handleUpdateWorkflow(input: {
-  backlogItemId: string;
+  backlogItemId?: string | undefined;
+  taskId?: string | undefined;
   featureId: string;
+  sopDefinitionId?: string | undefined;
   stage?: string | undefined;
   batonHolder?: string | undefined;
   nextSkill?: string | null | undefined;
@@ -506,18 +2232,21 @@ export async function handleUpdateWorkflow(input: {
       }
     | undefined;
   expectedVersion?: number | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   const body: Record<string, unknown> = {
-    backlogItemId: input.backlogItemId,
     featureId: input.featureId,
   };
-  if (input.stage !== undefined) body['stage'] = input.stage;
-  if (input.batonHolder !== undefined) body['batonHolder'] = input.batonHolder;
-  if (input.nextSkill !== undefined) body['nextSkill'] = input.nextSkill;
-  if (input.resumeCapsule !== undefined) body['resumeCapsule'] = input.resumeCapsule;
-  if (input.checks !== undefined) body['checks'] = input.checks;
-  if (input.expectedVersion !== undefined) body['expectedVersion'] = input.expectedVersion;
-  return callbackPost('/api/callbacks/update-workflow-sop', body);
+  if (input.backlogItemId !== undefined) body.backlogItemId = input.backlogItemId;
+  if (input.taskId !== undefined) body.taskId = input.taskId;
+  if (input.sopDefinitionId !== undefined) body.sopDefinitionId = input.sopDefinitionId;
+  if (input.stage !== undefined) body.stage = input.stage;
+  if (input.batonHolder !== undefined) body.batonHolder = input.batonHolder;
+  if (input.nextSkill !== undefined) body.nextSkill = input.nextSkill;
+  if (input.resumeCapsule !== undefined) body.resumeCapsule = input.resumeCapsule;
+  if (input.checks !== undefined) body.checks = input.checks;
+  if (input.expectedVersion !== undefined) body.expectedVersion = input.expectedVersion;
+  return callbackPost('/api/callbacks/update-workflow-sop', body, agentKeyOptions(input));
 }
 
 // ============ Multi-Mention (F086) ============
@@ -527,9 +2256,19 @@ export const multiMentionInputSchema = {
     .array(z.string().min(1))
     .min(1)
     .max(3)
-    .describe('Cat IDs to invoke in parallel (max 3). Example: ["codex","gemini"]'),
+    .describe(
+      'Cat IDs to invoke in parallel (max 3). Use get_thread_cats to discover valid catIds. ' +
+        'F182: if any target is disabled, returns 400 {kind:"cat_disabled", catId, alternatives[]}. ' +
+        'Retry with available cats from alternatives[] — do NOT retry the same disabled cat.',
+    ),
   question: z.string().min(1).max(5000).describe('The question or request for the target cats'),
-  callbackTo: z.string().min(1).describe('Cat ID to route all responses back to (required, usually yourself)'),
+  callbackTo: z
+    .string()
+    .min(1)
+    .describe(
+      'Cat ID to route all responses back to (required, usually yourself). ' +
+        'F182: if disabled, returns 400 {kind:"cat_disabled", alternatives[]}. Use an available cat from alternatives[].',
+    ),
   context: z.string().max(5000).optional().describe('Additional context to include for the targets'),
   idempotencyKey: z
     .string()
@@ -554,7 +2293,45 @@ export const multiMentionInputSchema = {
     .enum(['high-impact', 'cross-domain', 'uncertain', 'info-gap', 'recon'])
     .optional()
     .describe('Which meta-thinking trigger motivated this call'),
+  action: executableActionSuccessorMetadataSchema
+    .optional()
+    .describe(
+      'Optional durable action identity for successor work. Use mode=single for the default one-successor path; ' +
+        'a second call for the same subjectRef+actionFamily+successorSlot returns safe_wait instead of spawning another cat. ' +
+        'Use mode=parallel with parallelIntent only for deliberate independent review, #ideate, or explicit operator fan-out. ' +
+        'Action-scoped calls require idempotencyKey. Fallback uses replace with the active leaseId+generation and succeeds only after server-recorded terminal/unavailable/cancel evidence. ' +
+        'A grounded existing holder may self-claim with claimOrigin=existing_standing + groundingEvidenceRef. ' +
+        'New claims require terminalPredicate typed parameters; server-side Evidence→Verdict, not response text, ends the action. ' +
+        'A mismatched single holder may atomically return to the persisted predecessor with returnToPredecessor; in parallel mode the same disposition terminates only the rejecting holder. Failed single-return delivery stays pending for recovery. ' +
+        EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION,
+    ),
 };
+
+function validateMultiMentionAction(
+  action: ActionSuccessorRequestMetadata | undefined,
+  idempotencyKey: string | undefined,
+  targetCount: number,
+): string | undefined {
+  if (!action) return undefined;
+
+  const parsedAction = executableActionSuccessorMetadataSchema.safeParse(action);
+  if (!parsedAction.success) {
+    return `invalid multi_mention action metadata: ${EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION} ${parsedAction.error.issues.map((issue) => issue.message).join('; ')}`;
+  }
+  if (!idempotencyKey) {
+    return 'multi_mention action metadata requires idempotencyKey for replay-safe single-flight admission.';
+  }
+  if (action.mode === 'single' && targetCount !== 1) {
+    return 'multi_mention single action requires exactly one target. Use mode=parallel for explicit fan-out.';
+  }
+  if (action.mode === 'parallel' && !action.returnToPredecessor && targetCount < 2) {
+    return 'multi_mention parallel action requires at least two targets.';
+  }
+  if (action.mode === 'parallel' && action.returnToPredecessor && targetCount !== 1) {
+    return 'multi_mention parallel rejected-ownership disposition requires one predecessor target.';
+  }
+  return undefined;
+}
 
 export async function handleMultiMention(input: {
   targets: string[];
@@ -566,6 +2343,8 @@ export async function handleMultiMention(input: {
   searchEvidenceRefs?: string[] | undefined;
   overrideReason?: string | undefined;
   triggerType?: 'high-impact' | 'cross-domain' | 'uncertain' | 'info-gap' | 'recon' | undefined;
+  action?: ActionSuccessorRequestMetadata | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   // Client-side validation: searchEvidenceRefs or overrideReason required
   if (!input.searchEvidenceRefs?.length && !input.overrideReason) {
@@ -575,18 +2354,25 @@ export async function handleMultiMention(input: {
         'This enforces the "先搜后问" principle — search before asking.',
     );
   }
+  const actionError = validateMultiMentionAction(input.action, input.idempotencyKey, input.targets.length);
+  if (actionError) return errorResult(actionError);
 
-  return callbackPost('/api/callbacks/multi-mention', {
-    targets: input.targets,
-    question: input.question,
-    callbackTo: input.callbackTo,
-    ...(input.context ? { context: input.context } : {}),
-    ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
-    ...(input.timeoutMinutes !== undefined ? { timeoutMinutes: input.timeoutMinutes } : {}),
-    ...(input.searchEvidenceRefs ? { searchEvidenceRefs: input.searchEvidenceRefs } : {}),
-    ...(input.overrideReason ? { overrideReason: input.overrideReason } : {}),
-    ...(input.triggerType ? { triggerType: input.triggerType } : {}),
-  });
+  return callbackPost(
+    '/api/callbacks/multi-mention',
+    {
+      targets: input.targets,
+      question: input.question,
+      callbackTo: input.callbackTo,
+      ...(input.context ? { context: input.context } : {}),
+      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+      ...(input.timeoutMinutes !== undefined ? { timeoutMinutes: input.timeoutMinutes } : {}),
+      ...(input.searchEvidenceRefs ? { searchEvidenceRefs: input.searchEvidenceRefs } : {}),
+      ...(input.overrideReason ? { overrideReason: input.overrideReason } : {}),
+      ...(input.triggerType ? { triggerType: input.triggerType } : {}),
+      ...(input.action ? { action: input.action } : {}),
+    },
+    agentKeyOptions(input),
+  );
 }
 
 // F079 Gap 4: Cat-initiated voting
@@ -597,7 +2383,11 @@ export const startVoteInputSchema = {
     .array(z.string().min(1).max(50))
     .min(1)
     .max(20)
-    .describe('CatIds of voters (e.g. ["opus", "codex", "gemini"])'),
+    .describe(
+      'CatIds of voters. Use get_thread_cats to discover valid catIds. ' +
+        'F182: if any voter is disabled, returns 400 {kind:"cat_disabled", catId, alternatives[]}. ' +
+        'Replace the disabled voter with an available cat from alternatives[].',
+    ),
   anonymous: z.boolean().optional().describe('Anonymous voting (default: false)'),
   timeoutSec: z.number().int().min(10).max(600).optional().describe('Timeout in seconds (default: 120)'),
 };
@@ -608,14 +2398,19 @@ export async function handleStartVote(input: {
   voters: string[];
   anonymous?: boolean | undefined;
   timeoutSec?: number | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/start-vote', {
-    question: input.question,
-    options: input.options,
-    voters: input.voters,
-    ...(input.anonymous !== undefined ? { anonymous: input.anonymous } : {}),
-    ...(input.timeoutSec !== undefined ? { timeoutSec: input.timeoutSec } : {}),
-  });
+  return callbackPost(
+    '/api/callbacks/start-vote',
+    {
+      question: input.question,
+      options: input.options,
+      voters: input.voters,
+      ...(input.anonymous !== undefined ? { anonymous: input.anonymous } : {}),
+      ...(input.timeoutSec !== undefined ? { timeoutSec: input.timeoutSec } : {}),
+    },
+    agentKeyOptions(input),
+  );
 }
 
 // ============ Bootcamp (F087) ============
@@ -624,23 +2419,22 @@ export const updateBootcampStateInputSchema = {
   threadId: z.string().min(1).describe('Thread ID of the bootcamp thread'),
   phase: z
     .enum([
-      'phase-0-select-cat',
       'phase-1-intro',
       'phase-2-env-check',
       'phase-3-config-help',
-      'phase-3.5-advanced',
       'phase-4-task-select',
       'phase-5-kickoff',
       'phase-6-design',
       'phase-7-dev',
-      'phase-8-review',
+      'phase-7.5-add-teammate',
+      'phase-8-collab',
       'phase-9-complete',
       'phase-10-retro',
       'phase-11-farewell',
     ])
     .optional()
     .describe('New bootcamp phase to advance to'),
-  leadCat: z.string().optional().describe('Selected lead cat ID (e.g. "opus", "codex", "gemini")'),
+  leadCat: z.string().optional().describe('Selected lead cat ID (a valid registered catId)'),
   selectedTaskId: z.string().max(50).optional().describe('Selected task ID (e.g. "Q1", "Q7")'),
   envCheck: z
     .record(z.object({ ok: z.boolean(), version: z.string().optional(), note: z.string().optional() }))
@@ -650,6 +2444,13 @@ export const updateBootcampStateInputSchema = {
     .record(z.enum(['available', 'unavailable', 'skipped']))
     .optional()
     .describe('Advanced feature status: TTS, ASR, Pencil'),
+  guideStep: z
+    .enum(['open-hub', 'click-add-member', 'fill-form', 'mention-teammate', 'return-to-chat', 'done'])
+    .nullable()
+    .optional()
+    .describe(
+      'Sub-step for the add-teammate guide overlay. Set to "open-hub" when advancing to phase-7.5-add-teammate. Set to null to clear.',
+    ),
   completedAt: z.number().optional().describe('Timestamp when bootcamp was completed (Phase 11)'),
 };
 
@@ -660,159 +2461,2402 @@ export async function handleUpdateBootcampState(input: {
   selectedTaskId?: string | undefined;
   envCheck?: Record<string, { ok: boolean; version?: string; note?: string }> | undefined;
   advancedFeatures?: Record<string, string> | undefined;
+  guideStep?: string | null | undefined;
   completedAt?: number | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   const body: Record<string, unknown> = { threadId: input.threadId };
-  if (input.phase !== undefined) body['phase'] = input.phase;
-  if (input.leadCat !== undefined) body['leadCat'] = input.leadCat;
-  if (input.selectedTaskId !== undefined) body['selectedTaskId'] = input.selectedTaskId;
-  if (input.envCheck !== undefined) body['envCheck'] = input.envCheck;
-  if (input.advancedFeatures !== undefined) body['advancedFeatures'] = input.advancedFeatures;
-  if (input.completedAt !== undefined) body['completedAt'] = input.completedAt;
-  return callbackPost('/api/callbacks/update-bootcamp-state', body);
+  if (input.phase !== undefined) body.phase = input.phase;
+  if (input.leadCat !== undefined) body.leadCat = input.leadCat;
+  if (input.selectedTaskId !== undefined) body.selectedTaskId = input.selectedTaskId;
+  if (input.envCheck !== undefined) body.envCheck = input.envCheck;
+  if (input.advancedFeatures !== undefined) body.advancedFeatures = input.advancedFeatures;
+  if (input.guideStep !== undefined) body.guideStep = input.guideStep;
+  if (input.completedAt !== undefined) body.completedAt = input.completedAt;
+  return callbackPost('/api/callbacks/update-bootcamp-state', body, agentKeyOptions(input));
 }
 
 export const bootcampEnvCheckInputSchema = {
   threadId: z.string().min(1).describe('Thread ID — results are auto-stored in bootcampState.envCheck'),
 };
 
-export async function handleBootcampEnvCheck(input: { threadId: string }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/bootcamp-env-check', { threadId: input.threadId });
+export async function handleBootcampEnvCheck(input: WithAgentKey<{ threadId: string }>): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/bootcamp-env-check', { threadId: input.threadId }, agentKeyOptions(input));
+}
+
+// ============ Propose Thread (F128) ============
+
+export const proposeThreadInputSchema = {
+  title: z.string().min(1).max(200).describe('Title for the proposed thread (owner can ask the proposer to revise it)'),
+  suggestedGroupId: z
+    .string()
+    .regex(/^attention_[A-Za-z0-9_-]+$/)
+    .nullable()
+    .optional()
+    .describe(
+      'Optional owner Group ID to suggest. Omit to suggest the source conversation Group, then a title F-number match; null suggests no Group. The server verifies ownership. Membership changes only after owner approval.',
+    ),
+  supersedesProposalId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      'Replace your pending proposal after an owner asks you to revise it. Requires the exact revision-request message as this invocation source; publish the complete revised proposal. The old card is superseded only after the new card is visible. Omitted fields retain the original assignments, message, workflow, parent and Task binding; inherited Task ownership is revalidated.',
+    ),
+  reason: z.string().min(1).max(1000).describe('Why a new thread is needed (shown to the user on the proposal card)'),
+  preferredCats: z
+    .array(z.string().min(1))
+    .max(10)
+    .optional()
+    .describe('Optional cat IDs to preselect for the new thread (e.g. ["codex","gemini"])'),
+  initialMessage: z
+    .string()
+    .max(4000)
+    .optional()
+    .describe(
+      'Optional first message body posted as the source cat into the new thread on approval. Do not repeat assignment @mentions at the beginning: preferredCats is the sole assignment source and the server prepends its handles. Server injects routing credentials (threadId + @handle) into the header so downstream cats can cross-post back. The server does NOT infer external PR identity, author role, maintainer policy, or auto-inject the opensource-ops skill; if the child thread will handle a GitHub PR/issue, the first cat must load the opensource-ops skill and perform its own grounding.',
+    ),
+  reportingMode: z
+    .enum(['none', 'final-only', 'state-transitions', 'blocking-ack'])
+    .optional()
+    .describe(
+      'Optional F128 reporting contract for the sub-thread (AC-AA1: default is final-only). final-only (default): report a summary once on completion via cross_post with routing credentials. none (autonomous): downstream self-governs, no required report-back (only escalate operator/blocker/irreversible/cross-feature conflict per house rules). state-transitions: report at each phase boundary. blocking-ack: wait for source-thread ack at each blocker. Triage/dispatch → none; fork-and-return needing a summary → final-only.',
+    ),
+  declaredWorkMode: z
+    .enum(['subtask', 'parallel', 'investigation', 'standalone'])
+    .optional()
+    .describe(
+      'Optional F277 placement role. subtask: sustained child work under the source thread; parallel: sustained same-group parallel workstream; investigation: one-off related investigation; standalone: keep the exact birth/source audit but do not continuously group it with the source thread. This is independent from reportingMode and can be changed by the user before approval.',
+    ),
+  parentThreadId: z.string().min(1).optional().describe('Optional parent thread ID. Defaults to the current thread.'),
+  projectPath: z
+    .string()
+    .min(1)
+    .max(500)
+    .optional()
+    .describe(
+      'Optional absolute project directory the child thread belongs to (e.g. "/home/user/projects/clowder-ai"). This decides the working directory cats use when invoked in the new thread. Omit to inherit THIS thread\'s project; if THIS thread is default/未分类/eval/lobby and the child will do repo or implementation work, set projectPath explicitly. Invalid/non-existent paths are rejected (400), never silently defaulted. The user can also change it on the approval card.',
+    ),
+  clientRequestId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('Optional idempotency key. Resending with the same value returns the same proposalId.'),
+  subjectTaskId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      'F167 × F322: Task binding hint. When the child thread will work on a specific task (毛线球), pass the task ID here. The server validates the task exists and belongs to the same user — authority is NOT granted by this field alone; the full delegation chain runs at claim time. Without this, the approved proposal cannot authorize ball-custody delegation for any task.',
+    ),
+};
+
+export async function handleProposeThread(input: {
+  title: string;
+  suggestedGroupId?: string | null | undefined;
+  supersedesProposalId?: string | undefined;
+  reason: string;
+  preferredCats?: string[] | undefined;
+  initialMessage?: string | undefined;
+  reportingMode?: 'none' | 'final-only' | 'state-transitions' | 'blocking-ack' | undefined;
+  declaredWorkMode?: 'subtask' | 'parallel' | 'investigation' | 'standalone' | undefined;
+  parentThreadId?: string | undefined;
+  projectPath?: string | undefined;
+  clientRequestId?: string | undefined;
+  subjectTaskId?: string | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  // P2-1: always send an idempotency key — auto-generate when the caller didn't supply one,
+  // so transient network retries from callbackPost never produce duplicate proposals.
+  const body: Record<string, unknown> = {
+    title: input.title,
+    reason: input.reason,
+    clientRequestId: input.clientRequestId ?? randomUUID(),
+  };
+  if (input.suggestedGroupId !== undefined) body.suggestedGroupId = input.suggestedGroupId;
+  if (input.supersedesProposalId) body.supersedesProposalId = input.supersedesProposalId;
+  if (input.preferredCats !== undefined) body.preferredCats = input.preferredCats;
+  if (input.initialMessage !== undefined) body.initialMessage = input.initialMessage;
+  if (input.reportingMode) body.reportingMode = input.reportingMode;
+  if (input.declaredWorkMode) body.declaredWorkMode = input.declaredWorkMode;
+  if (input.parentThreadId) body.parentThreadId = input.parentThreadId;
+  if (input.projectPath) body.projectPath = input.projectPath;
+  if (input.subjectTaskId) body.subjectTaskId = input.subjectTaskId;
+
+  const result = await callbackPost('/api/callbacks/propose-thread', body, agentKeyOptions(input));
+  if (!result.isError) {
+    try {
+      const data = JSON.parse((result.content[0] as { text: string }).text);
+      if (data?.status === 'stale_ignored') {
+        return errorResult(
+          'Proposal was NOT created: this invocation has been superseded by a newer one (stale_ignored).',
+        );
+      }
+    } catch {
+      // parse failure is fine
+    }
+  }
+  return result;
+}
+
+export const withdrawThreadProposalInputSchema = {
+  proposalId: z.string().min(1).max(200).describe('Exact pending F128 proposal ID created by this authenticated cat'),
+};
+
+export async function handleWithdrawThreadProposal(input: { proposalId: string }): Promise<ToolResult> {
+  const result = await callbackPost('/api/callbacks/withdraw-thread-proposal', { proposalId: input.proposalId });
+  if (!result.isError) {
+    try {
+      const data = JSON.parse((result.content[0] as { text: string }).text);
+      if (data?.status === 'stale_ignored') {
+        return errorResult('Proposal was NOT withdrawn: this invocation has been superseded by a newer one.');
+      }
+    } catch {
+      // Preserve the callback result if the transport returned non-JSON text.
+    }
+  }
+  return result;
+}
+
+export const continueApprovedTaskInputSchema = {
+  proposalId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .describe('Exact approved F128 proposal for the original Task and child'),
+  taskId: z.string().trim().min(1).max(200).describe('Original canonical Task ID; never a replacement or child Task'),
+  clientRequestId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .describe('Stable reconciliation retry key, reused unchanged for this proposal and Task'),
+};
+
+export async function handleContinueApprovedTask(input: {
+  proposalId: string;
+  taskId: string;
+  clientRequestId: string;
+}): Promise<ToolResult> {
+  const result = await callbackPost('/api/callbacks/continue-approved-task', {
+    proposalId: input.proposalId,
+    taskId: input.taskId,
+    clientRequestId: input.clientRequestId,
+  });
+  if (!result.isError) {
+    const block = result.content.find((item) => item.type === 'text');
+    if (block?.type === 'text') {
+      try {
+        const data = JSON.parse(block.text);
+        if (data.status === 'stale_ignored')
+          return errorResult('Task approval was NOT continued: this invocation was superseded.');
+      } catch {
+        /* Preserve transport errors verbatim. */
+      }
+    }
+  }
+  return result;
+}
+
+// ============ F225: Cat-Initiated Session Handoff ============
+
+export const proposeSessionHandoffInputSchema = {
+  done: z
+    .string()
+    .min(1)
+    .max(2000)
+    .describe('五件套·已完成：这个 session 你做完了什么（让续接的你一眼看清进展，别重新摸索）'),
+  nextSteps: z.string().min(1).max(2000).describe('五件套·下一步：续接的你从哪里继续、第一步具体做什么'),
+  worktreeBranch: z
+    .string()
+    .max(200)
+    .optional()
+    .describe('五件套·worktree/分支（可选）：当前工作的 worktree 路径或分支名'),
+  commits: z
+    .array(z.string().min(1).max(100))
+    .max(50)
+    .optional()
+    .describe('五件套·commits（可选）：相关 commit SHA 列表'),
+  gotchas: z
+    .string()
+    .max(2000)
+    .optional()
+    .describe('五件套·坑/注意（可选）：续接的你最容易踩的坑、不可逆点、待验证假设'),
+  clientRequestId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('Optional idempotency key. Resending with the same value returns the same proposalId.'),
+};
+
+export async function handleProposeSessionHandoff(input: {
+  done: string;
+  nextSteps: string;
+  worktreeBranch?: string | undefined;
+  commits?: string[] | undefined;
+  gotchas?: string | undefined;
+  clientRequestId?: string | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  // P2 (云端): always send an idempotency key — auto-generate when the caller didn't supply one —
+  // so callbackPost transport retries (408/429/5xx) resolve back to the original proposal instead of
+  // tripping the A4 ≤1-pending gate and misreporting "NOT created" (mirrors F128 handleProposeThread).
+  const body: Record<string, unknown> = {
+    done: input.done,
+    nextSteps: input.nextSteps,
+    clientRequestId: input.clientRequestId ?? randomUUID(),
+  };
+  if (input.worktreeBranch) body.worktreeBranch = input.worktreeBranch;
+  if (input.commits?.length) body.commits = input.commits;
+  if (input.gotchas) body.gotchas = input.gotchas;
+
+  const result = await callbackPost('/api/callbacks/propose-session-handoff', body, agentKeyOptions(input));
+  if (!result.isError) {
+    try {
+      const data = JSON.parse((result.content[0] as { text: string }).text);
+      if (data?.status === 'stale_ignored') {
+        return errorResult(
+          'Handoff proposal NOT created: this invocation was superseded by a newer one (stale_ignored).',
+        );
+      }
+      if (data?.status === 'rejected') {
+        // A4 gate / no-active-session — surface the reason so the cat reacts instead of retry-spamming.
+        return errorResult(`Handoff proposal NOT created (${data.reason}): ${data.message ?? ''}`);
+      }
+    } catch {
+      // parse failure is fine
+    }
+  }
+  return result;
+}
+
+// ============ F231 Phase C: Propose Profile Update ============
+
+export const readProfileInputSchema = {
+  requestId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      'Stable ID for this read. Reuse on retry to avoid counting twice; omit to generate one. A successful response includes readRequestId. Use a new ID for a new read or a changed profile.',
+    ),
+  agentKeyCatId: agentKeyCatIdSchema,
+  expectedRevision: z
+    .string()
+    .regex(/^sha256:[a-f0-9]{64}$/)
+    .optional()
+    .describe(
+      'Optional revision from a prior profile snapshot. A changed revision returns no content; reread without it to obtain the current approved profile.',
+    ),
+  layer: z
+    .enum(PROFILE_UPDATE_TARGET_LAYERS)
+    .optional()
+    .describe(
+      "Which profile layer to read: 'primer' (default) for this persona's relationship, 'corpus' for owner-wide shared facts, or 'capsule' for the owner's current opening portrait. All reads are scoped to the authenticated owner.",
+    ),
+};
+
+export async function handleReadProfile(input: {
+  requestId?: string | undefined;
+  expectedRevision?: string | undefined;
+  layer?: ProfileUpdateTargetLayer | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  const requestId = input.requestId ?? randomUUID();
+  const params: Record<string, string> = { requestId };
+  if (input.layer) params.layer = input.layer;
+  if (input.expectedRevision) params.expectedRevision = input.expectedRevision;
+  const result = await callbackGet('/api/callbacks/profile', params, agentKeyOptions(input));
+  return withProfileReadRecovery(result, requestId);
+}
+
+export const proposeProfileUpdateInputSchema = {
+  afterContent: z
+    .string()
+    .min(1)
+    .max(20000)
+    .describe(
+      'The COMPLETE new content (whole-file replacement, not a patch). Capsule: 1–300 non-whitespace Unicode characters in capsule.md; primer: relationship/{relationshipKey}-primer.md; corpus: corpus/shared-facts.md. Private owner data only; include everything to keep. Nothing is written until owner confirmation. To select primer opening history, preserve the body and add YAML frontmatter opening: {asOf: "YYYY-MM-DD", excerpts: [{kind: "relationship" or "model_capability", text, source: {threadId, messageId}, model: "exact model, required only for model_capability"}]}. Use 1–2 sourced excerpts totaling at most 300 non-whitespace Unicode characters; missing or invalid selection remains on-demand.',
+    ),
+  rationale: z
+    .string()
+    .min(1)
+    .max(1000)
+    .describe(
+      'Why this update — shown to the operator on the confirmation card (e.g. "{{coCreator.nickname}}说更喜欢先给结论再展开，固化沟通偏好"). Be specific so the operator can judge the change at a glance.',
+    ),
+  signalKind: z
+    .enum(['cat-declared', 'cvo-instructed'])
+    .describe(
+      "Where the relationship signal came from (provenance). 'cat-declared' = you observed/inferred it from the interaction; 'cvo-instructed' = the operator explicitly asked you to remember it. AC-C1 is manual-entry only (no auto-classifier).",
+    ),
+  targetLayer: z
+    .enum(PROFILE_UPDATE_TARGET_LAYERS)
+    .optional()
+    .describe(
+      "Which profile layer to target: 'primer' (default) for this persona's relationship, 'corpus' for shared personal facts, or 'capsule' for a short owner-approved portrait carried into new conversations. Read the same layer before replacing it; every layer requires owner confirmation.",
+    ),
+  sourceMessageId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Optional exact message ID assertion. When omitted, the API derives the unambiguous origin from authenticated callback provenance; when supplied, it must match that origin.',
+    ),
+  clientRequestId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('Optional idempotency key. Resending with the same value returns the same proposalId.'),
+};
+
+export async function handleProposeProfileUpdate(input: {
+  afterContent: string;
+  rationale: string;
+  signalKind: 'cat-declared' | 'cvo-instructed';
+  targetLayer?: ProfileUpdateTargetLayer | undefined;
+  sourceMessageId?: string | undefined;
+  clientRequestId?: string | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  // Always send an idempotency key — auto-generate when the caller didn't supply one, so transient
+  // callbackPost retries never produce duplicate proposals (mirrors F128 handleProposeThread).
+  const body: Record<string, unknown> = {
+    afterContent: input.afterContent,
+    rationale: input.rationale,
+    signalKind: input.signalKind,
+    ...(input.targetLayer ? { targetLayer: input.targetLayer } : {}),
+    ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
+    clientRequestId: input.clientRequestId ?? randomUUID(),
+  };
+
+  const result = await callbackPost('/api/callbacks/propose-profile-update', body, agentKeyOptions(input));
+  if (!result.isError) {
+    try {
+      const data = JSON.parse((result.content[0] as { text: string }).text);
+      if (data?.status === 'stale_ignored') {
+        return errorResult(
+          'Profile-update proposal was NOT created: this invocation has been superseded by a newer one (stale_ignored).',
+        );
+      }
+    } catch {
+      // parse failure is fine
+    }
+  }
+  return result;
+}
+
+// ============ F276: People & Relationship Memory ============
+
+const personMemoryProposalToolset = createPersonMemoryProposalTool(callbackPost);
+const personMemoryLifecycleToolset = createPersonMemoryLifecycleTools(callbackPost, callbackGet);
+const memoryCueToolset = createMemoryCueTools(callbackPost);
+const proactiveMemoryAbstentionToolset = createProactiveMemoryAbstentionTool(callbackPost);
+const deferredPersonMemoryToolset = createDeferredPersonMemoryTool(callbackPost);
+export const { handleProposePersonMemory } = personMemoryProposalToolset;
+export const { handleRecordProactiveMemoryAbstention } = proactiveMemoryAbstentionToolset;
+export const {
+  handleDeferPersonMemoryDelta,
+  handleDisposeDeferredPersonMemory,
+  handleWithdrawDeferredPersonMemory,
+  handleForgetDeferredPersonMemory,
+} = deferredPersonMemoryToolset;
+export const {
+  handleGetPersonMemoryProposalStatus,
+  handleRecallPersonRelationship,
+  handleDrillPersonMemory,
+  handleCorrectPersonClaim,
+  handleRetirePersonClaim,
+  handleAmendPersonInteraction,
+  handleRedactPersonMemoryItem,
+  handleForgetPerson,
+  handleForgetPersonMemoryProposal,
+} = personMemoryLifecycleToolset;
+export const { handleDrillMemoryCue, handleRecordMemoryCueOutcome } = memoryCueToolset;
+
+// ============ F260 Phase A: Propose Entity ============
+
+export const proposeEntityInputSchema = {
+  entityId: z
+    .string()
+    .min(1)
+    .max(200)
+    .describe('Entity ID in type:name format (e.g. "concept:未婚喵", "feature:F260")'),
+  entityType: z
+    .enum(['person', 'cat', 'feature', 'concept', 'external'])
+    .describe('Entity type from registry taxonomy'),
+  canonicalName: z.string().min(1).max(200).describe('Human-readable canonical name'),
+  aliases: z
+    .array(z.string().min(1).max(200))
+    .min(1)
+    .max(20)
+    .describe('Aliases to register for matching (at least one required, includes the canonical name)'),
+  stance: z
+    .enum(['endorsed', 'rejected', 'critique_target', 'deliverable_only', 'unknown'])
+    .describe(
+      'Stance: endorsed (canonical positive), rejected (explicitly not wanted), ' +
+        'critique_target (entity under critique), deliverable_only (output not concept), unknown (default)',
+    ),
+  visibilityScope: z
+    .literal('workspace')
+    .describe(
+      'Visibility: only "workspace" accepted (KD-7 gate — private scope deferred until resolver supports visibility filtering)',
+    ),
+  provenance: z
+    .array(
+      z.object({
+        source: z.string().min(1).max(200).describe('Provenance source (e.g. "cat-proposed", "nudge")'),
+        anchor: z.string().min(1).max(500).optional().describe('Thread/message anchor for traceability'),
+        note: z.string().max(500).optional().describe('Optional note'),
+        date: z.string().max(20).optional().describe('ISO date (YYYY-MM-DD)'),
+      }),
+    )
+    .min(1)
+    .max(10)
+    .describe('Provenance chain — at least one entry with source; include thread anchor for traceability'),
+  rationale: z
+    .string()
+    .min(1)
+    .max(1000)
+    .describe('Why this entity should be in the registry — shown to operator in Approval Hub'),
+  clientRequestId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('Optional idempotency key. Resending with the same value returns the same proposalId.'),
+};
+
+export async function handleProposeEntity(input: {
+  entityId: string;
+  entityType: 'person' | 'cat' | 'feature' | 'concept' | 'external';
+  canonicalName: string;
+  aliases: string[];
+  stance: 'endorsed' | 'rejected' | 'critique_target' | 'deliverable_only' | 'unknown';
+  visibilityScope: string;
+  provenance: Array<{ source: string; anchor?: string; note?: string; date?: string }>;
+  rationale: string;
+  clientRequestId?: string | undefined;
+}): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/propose-entity', {
+    entityId: input.entityId,
+    entityType: input.entityType,
+    canonicalName: input.canonicalName,
+    aliases: input.aliases,
+    stance: input.stance,
+    visibilityScope: input.visibilityScope,
+    provenance: input.provenance,
+    rationale: input.rationale,
+    clientRequestId: input.clientRequestId ?? randomUUID(),
+  });
+}
+
+// ============ F221: Taste Capture Loop ============
+
+const tasteCorrectionPatchInputSchema = z
+  .object({
+    takeaway: z
+      .string()
+      .trim()
+      .min(1)
+      .max(500)
+      .nullable()
+      .optional()
+      .describe('Replacement one-sentence takeaway; use null to remove the existing takeaway.'),
+    quotes: z
+      .array(z.string().trim().min(1).max(2000))
+      .max(16)
+      .optional()
+      .describe('Replacement source-supported quotes; use [] to remove all quotes.'),
+    scene: z.string().trim().min(1).max(8000).optional().describe('Replacement scene/context.'),
+    tags: z
+      .array(z.string().trim().min(1).max(160))
+      .min(1)
+      .max(24)
+      .optional()
+      .describe('Replacement non-empty Taste tags.'),
+    dimension: z
+      .enum([
+        'relationship-stance',
+        'cognitive-honesty',
+        'architecture-aesthetics',
+        'visual-quality',
+        'authentic-expression',
+        'system-philosophy',
+        'creative-craft',
+      ])
+      .optional()
+      .describe('Replacement Taste dimension.'),
+  })
+  .strict()
+  .refine((patch) => Object.keys(patch).length > 0, { message: 'suggestedPatch must not be empty' });
+
+const tasteCorrectionTargetInputSchema = z
+  .object({
+    sourceAnchor: z
+      .string()
+      .regex(/^taste-vignette:(?:docs\/taste\/vignettes|private\/taste)\/[\p{L}\p{N}][\p{L}\p{N}._-]*\.md$/u)
+      .describe('Exact taste-vignette source anchor returned by the owner Taste read surface.'),
+    expectedRevision: z
+      .string()
+      .regex(/^sha256:[a-f0-9]{64}$/)
+      .describe('Exact sha256 revision read from the target Taste memory.'),
+    reason: z
+      .enum(['unsupported_by_source', 'outdated', 'not_applicable_here'])
+      .describe('Why the current canonical memory needs owner review.'),
+    suggestedPatch: tasteCorrectionPatchInputSchema.describe(
+      'Bounded replacement fields proposed for the existing memory.',
+    ),
+  })
+  .strict();
+
+export const proposeTasteInputSchema = {
+  scene: z
+    .string()
+    .min(1)
+    .max(2000)
+    .describe(
+      'The situation/context where this taste signal emerged — what was happening, ' +
+        'what triggered it (e.g. "operator said 太客服了 during code review feedback")',
+    )
+    .optional(),
+  quote: z
+    .string()
+    .min(1)
+    .max(2000)
+    .describe(
+      'The exact or near-exact quote/expression that carries the taste signal — ' +
+        'preserve the original language and nuance',
+    )
+    .optional(),
+  takeaway: z
+    .string()
+    .trim()
+    .min(1)
+    .max(500)
+    .optional()
+    .describe(
+      '用一句话写我们以为 {{coCreator.name}} 偏好什么，这是假设。跟原话和情景一起交给 owner 审批；旧提案可省略。',
+    ),
+  tags: z
+    .array(z.string().min(1).max(50))
+    .min(1)
+    .max(10)
+    .describe('1-10 tags capturing the taste signal essence (e.g. ["活人感", "authentic"])')
+    .optional(),
+  dimension: z
+    .enum([
+      'relationship-stance',
+      'cognitive-honesty',
+      'architecture-aesthetics',
+      'visual-quality',
+      'authentic-expression',
+      'system-philosophy',
+      'creative-craft',
+    ])
+    .describe(
+      'Which taste dimension this signal belongs to. ' +
+        'relationship-stance: how we relate to each other. ' +
+        'cognitive-honesty: intellectual integrity standards. ' +
+        'architecture-aesthetics: code/system design preferences. ' +
+        'visual-quality: UI/visual design taste. ' +
+        'authentic-expression: voice/tone/personality. ' +
+        'system-philosophy: engineering philosophy. ' +
+        'creative-craft: writing/naming/creative standards.',
+    )
+    .optional(),
+  privacy: z
+    .enum(['public', 'sensitive'])
+    .describe(
+      'public: vignette goes to docs/taste/vignettes/ (visible in repo). ' +
+        'sensitive: vignette goes to private/taste/ (gitignored, local only)',
+    )
+    .optional(),
+  sourceMessageId: z.string().min(1).optional().describe('Message ID where the taste signal was observed'),
+  target: tasteCorrectionTargetInputSchema
+    .optional()
+    .describe(
+      'To suggest a correction to an existing Taste memory, provide its exact sourceAnchor/revision and patch. ' +
+        'When target is present, scene/quote/tags/dimension/privacy are derived from the bound source and must be omitted.',
+    ),
+  clientRequestId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('Idempotency key — same clientRequestId returns cached proposal'),
+};
+
+export async function handleProposeTaste(input: {
+  scene?: string;
+  quote?: string;
+  takeaway?: string;
+  tags?: string[];
+  dimension?: string;
+  privacy?: 'public' | 'sensitive';
+  sourceMessageId?: string;
+  target?: z.infer<typeof tasteCorrectionTargetInputSchema>;
+  clientRequestId?: string;
+}): Promise<ToolResult> {
+  const createSchema = z
+    .object({
+      scene: z.string().min(1).max(2000),
+      quote: z.string().min(1).max(2000),
+      takeaway: z.string().trim().min(1).max(500).optional(),
+      tags: z.array(z.string().min(1).max(50)).min(1).max(10),
+      dimension: proposeTasteInputSchema.dimension.unwrap(),
+      privacy: z.enum(['public', 'sensitive']),
+      sourceMessageId: z.string().min(1).optional(),
+      clientRequestId: z.string().min(1).max(200).optional(),
+      target: z.undefined().optional(),
+    })
+    .strict();
+  const correctionSchema = z
+    .object({
+      target: tasteCorrectionTargetInputSchema,
+      clientRequestId: z
+        .string()
+        .trim()
+        .min(32)
+        .max(200)
+        .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/)
+        .optional(),
+      scene: z.undefined().optional(),
+      quote: z.undefined().optional(),
+      takeaway: z.undefined().optional(),
+      tags: z.undefined().optional(),
+      dimension: z.undefined().optional(),
+      privacy: z.undefined().optional(),
+      sourceMessageId: z.undefined().optional(),
+    })
+    .strict();
+  const parsed = z.union([createSchema, correctionSchema]).safeParse(input);
+  if (!parsed.success) {
+    return errorResult(
+      'Invalid Taste proposal input. Expected either create fields ' +
+        '{scene, quote, tags, dimension, privacy} or correction fields ' +
+        '{target:{sourceAnchor, expectedRevision, reason, suggestedPatch}}, without mixing them. ' +
+        'Example correction: target.sourceAnchor="taste-vignette:docs/taste/vignettes/example.md", ' +
+        'target.expectedRevision="sha256:<64 lowercase hex>". ' +
+        `Details: ${parsed.error.issues.map((issue) => issue.message).join('; ')}`,
+    );
+  }
+  const request = parsed.data.target
+    ? { target: parsed.data.target, clientRequestId: parsed.data.clientRequestId ?? randomUUID() }
+    : { ...parsed.data, clientRequestId: parsed.data.clientRequestId ?? randomUUID() };
+  const result = await callbackPost('/api/callbacks/propose-taste', request);
+  // Detect stale_ignored: match thread/profile/handoff pattern — a stale invocation
+  // gets HTTP 200 with status='stale_ignored' but no proposal was actually created.
+  if (!result.isError) {
+    try {
+      const data = JSON.parse((result.content[0] as { text: string }).text);
+      if (data?.status === 'stale_ignored') {
+        return errorResult(
+          'Taste proposal NOT created: this invocation was superseded by a newer one (stale_ignored).',
+        );
+      }
+    } catch {
+      // parse failure is fine — means result is not a stale_ignored response
+    }
+  }
+  return result;
+}
+
+// ============ F321: source-bound Event memory correction ============
+
+const eventCorrectionPatchInputSchema = z
+  .object({
+    summary: z.string().trim().min(1).max(1_000_000).optional(),
+    cognitiveTransition: z.enum(COGNITIVE_TRANSITIONS).nullable().optional(),
+    relatedHarness: z.array(z.string().trim().min(1).max(500)).max(24).nullable().optional(),
+    confidence: z.enum(EVENT_CONFIDENCES).optional(),
+  })
+  .strict()
+  .refine((patch) => Object.keys(patch).length > 0, { message: 'suggestedPatch must not be empty' });
+
+export const proposeEventMemoryCorrectionInputSchema = {
+  eventId: z.string().trim().min(1).max(200).describe('Existing Event memory id from the owner read surface.'),
+  expectedRevision: z
+    .string()
+    .regex(/^sha256:[a-f0-9]{64}$/)
+    .describe('Exact Event revision that was read and found questionable.'),
+  reason: z
+    .enum(['unsupported_by_source', 'outdated', 'not_applicable_here'])
+    .describe('Why the current Event interpretation needs owner review.'),
+  suggestedPatch: eventCorrectionPatchInputSchema.describe(
+    'Proposed correction to interpretive Event fields. Source coordinates and identity cannot be changed.',
+  ),
+  clientRequestId: z
+    .string()
+    .trim()
+    .min(32)
+    .max(200)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/)
+    .optional()
+    .describe('Idempotency key; retries with the same request return the same proposal.'),
+};
+
+export async function handleProposeEventMemoryCorrection(input: {
+  eventId: string;
+  expectedRevision: string;
+  reason: 'unsupported_by_source' | 'outdated' | 'not_applicable_here';
+  suggestedPatch: {
+    summary?: string;
+    cognitiveTransition?: (typeof COGNITIVE_TRANSITIONS)[number] | null;
+    relatedHarness?: string[] | null;
+    confidence?: (typeof EVENT_CONFIDENCES)[number];
+  };
+  clientRequestId?: string;
+}): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/propose-event-memory-correction', {
+    ...input,
+    clientRequestId: input.clientRequestId ?? randomUUID(),
+  });
+}
+
+// ============ Thread Cats Discovery ============
+
+export const getThreadCatsInputSchema = {
+  forRole: z.enum(['review', 'architecture', 'implementation']).optional(),
+  threadId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      'Thread to inspect. Invocation callers may omit for their current thread; agent-key callers must provide it.',
+    ),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
+export async function handleGetThreadCats(
+  input: AgentKeySelectable & { threadId?: string; forRole?: 'review' | 'architecture' | 'implementation' } = {},
+): Promise<ToolResult> {
+  return callbackGet(
+    '/api/callbacks/thread-cats',
+    { ...(input.threadId ? { threadId: input.threadId } : {}), ...(input.forRole ? { forRole: input.forRole } : {}) },
+    agentKeyOptions(input),
+  );
+}
+
+// F155: Guide Engine
+
+export const updateGuideStateInputSchema = {
+  threadId: z.string().min(1).describe('Thread ID where the guide is being offered/active'),
+  guideId: z.string().min(1).describe('Guide ID (e.g. "add-member")'),
+  status: z
+    .enum(['offered', 'awaiting_choice', 'completed', 'cancelled'])
+    .describe(
+      'Target guide status. Valid transitions: offered→awaiting_choice/cancelled, awaiting_choice→cancelled, active→completed/cancelled. Use cat_cafe_start_guide for →active.',
+    ),
+  currentStep: z.number().int().min(0).optional().describe('Current step index (only when status=active)'),
+};
+
+export async function handleUpdateGuideState(input: {
+  threadId: string;
+  guideId: string;
+  status: string;
+  currentStep?: number | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  const body: Record<string, unknown> = { threadId: input.threadId, guideId: input.guideId, status: input.status };
+  if (input.currentStep !== undefined) body.currentStep = input.currentStep;
+  return callbackPost('/api/callbacks/update-guide-state', body, agentKeyOptions(input));
+}
+
+export async function handleStartGuide(input: WithAgentKey<{ guideId: string }>): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/start-guide', { guideId: input.guideId }, agentKeyOptions(input));
+}
+
+export const getAvailableGuidesInputSchema = {};
+
+export async function handleGetAvailableGuides(input: AgentKeySelectable = {}): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/get-available-guides', {}, agentKeyOptions(input));
+}
+
+// F193 Phase D AC-D2: handleGuideResolve removed — legacy alias replaced
+// by cat_cafe_get_available_guides, which lets the cat inspect catalog
+// metadata directly instead of guessing from a single intent string.
+
+export async function handleGuideControl(input: WithAgentKey<{ action: string }>): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/guide-control', { action: input.action }, agentKeyOptions(input));
+}
+
+export async function handleHoldBall(input: {
+  reason: string;
+  nextStep: string;
+  wakeAfterMs?: number;
+  wakeWhen?: {
+    command: string;
+    cwd?: string;
+    timeoutMs?: number;
+    executionSlaMs?: number;
+    idempotencyKey?: string;
+    executionPolicy?: 'read_only';
+  };
+  agentKeyCatId?: string | undefined;
+  waitSourceRef?: {
+    kind: string;
+    value: string;
+    anchorRef?: string;
+    expectedSignal: string;
+    slaUntilMs: number;
+  };
+}): Promise<ToolResult> {
+  // P2-1 fix: validate mutual exclusion locally before HTTP roundtrip.
+  // JSON Schema can't express cross-field refine, so we enforce here.
+  const hasWakeAfter = input.wakeAfterMs != null;
+  const hasWakeWhen = input.wakeWhen != null;
+  if (hasWakeAfter && hasWakeWhen) {
+    return {
+      content: [
+        { type: 'text', text: 'Error: wakeAfterMs and wakeWhen are mutually exclusive — provide exactly one.' },
+      ],
+      isError: true,
+    };
+  }
+  if (!hasWakeAfter && !hasWakeWhen) {
+    return {
+      content: [{ type: 'text', text: 'Error: exactly one of wakeAfterMs or wakeWhen must be provided.' }],
+      isError: true,
+    };
+  }
+  // PR-O3 R1 P1-1: wakeAfterMs requires waitSourceRef to ground the timer.
+  // wakeWhen is self-grounding (the command IS the wait source).
+  if (hasWakeAfter && !input.waitSourceRef) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: await renderCurrentCoCreatorText(
+            'Error: waitSourceRef is REQUIRED when using wakeAfterMs. ' +
+              'Declare what external condition justifies the timer — e.g. ' +
+              '{ kind: "github_issue", value: "#123", expectedSignal: "CI pass", slaUntilMs: 3600000 }. ' +
+              'If you are waiting for a person to respond, use {{coCreator.mention}} or @句柄 instead of hold_ball.',
+          ),
+        },
+      ],
+      isError: true,
+    };
+  }
+  return callbackPost(
+    '/api/callbacks/hold-ball',
+    {
+      reason: input.reason,
+      nextStep: input.nextStep,
+      ...(hasWakeAfter ? { wakeAfterMs: input.wakeAfterMs } : {}),
+      ...(hasWakeWhen ? { wakeWhen: input.wakeWhen } : {}),
+      ...(input.waitSourceRef ? { waitSourceRef: input.waitSourceRef } : {}),
+    },
+    agentKeyOptions(input),
+  );
+}
+
+/**
+ * F167 #1449 Slice 1 — Task-ID-independent hold observability.
+ * No input required; threadId + catId come from invocation auth.
+ */
+export async function handleGetHoldStatus(input: { taskId?: string; tailBytes?: number } = {}): Promise<ToolResult> {
+  if (input.tailBytes !== undefined && !input.taskId)
+    return errorResult(
+      'tailBytes requires taskId; pass the hold_ball taskId, for example {"taskId":"hold-ball-...","tailBytes":16384}.',
+    );
+  return callbackGet(
+    input.taskId
+      ? `/api/callbacks/hold-ball/${encodeURIComponent(input.taskId)}/status`
+      : '/api/callbacks/hold-ball/current',
+    input.tailBytes === undefined ? undefined : { tailBytes: String(input.tailBytes) },
+  );
+}
+
+/**
+ * F167 PR-2: read the ball ledger of the caller's own thread from one source message forward. The thread is
+ * never an input — the server derives it from the invocation credentials — so there is nothing here to point
+ * at another thread, and the server's 503 (ledger unreadable / runtime without a ledger) reaches the caller as
+ * the error it is, not as an empty answer.
+ */
+export async function handleGetCustodyEvents(input: {
+  sourceMessageId: string;
+  limit?: number | undefined;
+}): Promise<ToolResult> {
+  return callbackGet('/api/callbacks/custody-events', {
+    sourceMessageId: input.sourceMessageId,
+    ...(input.limit !== undefined ? { limit: String(input.limit) } : {}),
+  });
+}
+
+// ─── F236 Phase C: cat-controlled anchor mode ─────────────────────────────
+
+import { unlinkSync, writeFileSync } from 'node:fs';
+
+const defineTool = defineMcpMigrationFactory('callback-tools.ts');
+const defineCanonicalTool = defineMcpCanonicalFactory('callback-tools.ts');
+
+/**
+ * Resolve the mode file path for the current session.
+ * Uses invocation ID (Clowder AI managed) or returns null.
+ */
+function resolveAnchorModeFilePath(): string | null {
+  const invocationId = getInvocationAuthSignal().invocationId;
+  if (invocationId) {
+    return `/tmp/cat-cafe-anchor-mode-${invocationId}`;
+  }
+  return null;
+}
+
+const setReadModeInputSchema = {
+  mode: z
+    .enum(['anchor', 'full'])
+    .describe(
+      'Session-level mode for cc native Read/Grep/Glob output. ' +
+        '"anchor" = PostToolUse hook replaces output with locator (path + line count + drill pointer). ' +
+        '"full" = pass-through (original output unchanged). Default is full (fail-open).',
+    ),
+};
+
+export async function handleSetReadMode(input: { mode: 'anchor' | 'full' }): Promise<ToolResult> {
+  const modePath = resolveAnchorModeFilePath();
+  if (!modePath) {
+    return errorResult(
+      'Cannot set read mode: CAT_CAFE_INVOCATION_ID is unavailable from the credential file or environment. ' +
+        `This tool requires a ${deploymentDefaults.brand.displayName} managed session.`,
+    );
+  }
+
+  try {
+    if (input.mode === 'anchor') {
+      writeFileSync(modePath, 'anchor', 'utf-8');
+    } else {
+      // 'full' = remove mode file (fail-open semantics)
+      try {
+        unlinkSync(modePath);
+      } catch {
+        // File already absent = already in full mode, no-op
+      }
+    }
+    return successResult(JSON.stringify({ ok: true, mode: input.mode, path: modePath }));
+  } catch (err) {
+    return errorResult(`Failed to set read mode: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+// #872: Thread Metadata MCP — get/set low-frequency metadata anchors
+export async function handleGetThreadMetadata(input: AgentKeySelectable = {}): Promise<ToolResult> {
+  return callbackGet('/api/callbacks/thread-metadata', undefined, agentKeyOptions(input));
+}
+
+export const setThreadMetadataInputSchema = {
+  roadmap: z
+    .discriminatedUnion('state', [
+      z
+        .object({
+          state: z.literal('active'),
+          projectPath: z.string().min(1).max(1000),
+          path: z.string().min(1).max(1000),
+          sourceRef: z.string().min(1).max(500),
+          expectedRevision: z.number().int().positive().nullable(),
+        })
+        .strict(),
+      z
+        .object({
+          state: z.literal('revoked'),
+          sourceRef: z.string().min(1).max(500),
+          expectedRevision: z.number().int().positive(),
+        })
+        .strict(),
+    ])
+    .optional()
+    .describe(
+      'Bind one original work-line roadmap in this thread, or retain a revocation tombstone. Active: existing project root + repository-relative Markdown path. sourceRef=thread:<currentThreadId>#<messageId> must be readable here. expectedRevision=null for first bind; otherwise use roadmapBinding.revision from get_thread_metadata. Server normalizes disposable worktrees to a persistent root and derives actor/time/version; a pointer grants no read or work authority.',
+    ),
+  // Keep the legacy title hint; the server and tool-level contract govern protected title writes.
+  title: z.string().min(1).optional().describe('Update thread title (replaces existing)'),
+  labels: z.array(z.string()).optional().describe('Update thread labels (replaces entire array)'),
+  worktrees: z.array(z.string()).optional().describe('Worktree paths to add (append + dedupe)'),
+  prs: z
+    .array(z.object({ repo: z.string().min(1), number: z.number().int().positive() }))
+    .optional()
+    .describe('PRs to add (append + dedupe by repo#number)'),
+  issues: z
+    .array(z.object({ repo: z.string().min(1), number: z.number().int().positive() }))
+    .optional()
+    .describe('Issues to add (append + dedupe by repo#number)'),
+  features: z.array(z.string()).optional().describe('Feature IDs to add (append + dedupe)'),
+  notes: z
+    .record(z.string(), z.string().nullable())
+    .optional()
+    .describe('Free-form KV notes: string value sets key, null deletes key'),
+  removeWorktrees: z.array(z.string()).optional().describe('Worktree paths to remove'),
+  removePrs: z
+    .array(z.object({ repo: z.string().min(1), number: z.number().int().positive() }))
+    .optional()
+    .describe('PRs to remove (matched by repo#number)'),
+  removeIssues: z
+    .array(z.object({ repo: z.string().min(1), number: z.number().int().positive() }))
+    .optional()
+    .describe('Issues to remove (matched by repo#number)'),
+  removeFeatures: z.array(z.string()).optional().describe('Feature IDs to remove'),
+};
+
+export async function handleSetThreadMetadata(input: {
+  roadmap?: z.infer<typeof setThreadMetadataInputSchema.roadmap>;
+  title?: string;
+  labels?: string[];
+  worktrees?: string[];
+  prs?: Array<{ repo: string; number: number }>;
+  issues?: Array<{ repo: string; number: number }>;
+  features?: string[];
+  notes?: Record<string, string | null>;
+  removeWorktrees?: string[];
+  removePrs?: Array<{ repo: string; number: number }>;
+  removeIssues?: Array<{ repo: string; number: number }>;
+  removeFeatures?: string[];
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return withDegradation({
+    toolName: 'set_thread_metadata',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/set-thread-metadata',
+        {
+          ...(input.roadmap !== undefined ? { roadmap: input.roadmap } : {}),
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.labels !== undefined ? { labels: input.labels } : {}),
+          ...(input.worktrees !== undefined ? { worktrees: input.worktrees } : {}),
+          ...(input.prs !== undefined ? { prs: input.prs } : {}),
+          ...(input.issues !== undefined ? { issues: input.issues } : {}),
+          ...(input.features !== undefined ? { features: input.features } : {}),
+          ...(input.notes !== undefined ? { notes: input.notes } : {}),
+          ...(input.removeWorktrees !== undefined ? { removeWorktrees: input.removeWorktrees } : {}),
+          ...(input.removePrs !== undefined ? { removePrs: input.removePrs } : {}),
+          ...(input.removeIssues !== undefined ? { removeIssues: input.removeIssues } : {}),
+          ...(input.removeFeatures !== undefined ? { removeFeatures: input.removeFeatures } : {}),
+        },
+        agentKeyOptions(input),
+      ),
+    policy: { kind: 'none' },
+  });
+}
+
+const companionRunningInputSchema = {};
+const companionDecisionsInputSchema = {
+  offset: z.number().int().nonnegative().default(0).describe('Zero-based offset for both owner-visible lists.'),
+  limit: z.number().int().min(1).max(50).default(20).describe('Maximum items per list, from 1 to 50.'),
+};
+
+export async function handleGetRunningWork(_input: Record<string, never>): Promise<ToolResult> {
+  return callbackGet('/api/callbacks/companion/running-work');
+}
+
+export async function handleGetPendingDecisions(input: { offset?: number; limit?: number }): Promise<ToolResult> {
+  return callbackGet('/api/callbacks/companion/decisions', {
+    offset: String(input.offset ?? 0),
+    limit: String(input.limit ?? 20),
+    view: 'unified',
+  });
 }
 
 export const callbackTools = [
-  {
+  defineCanonicalTool({
     name: 'cat_cafe_post_message',
     description:
-      'Post a proactive async message to the Clowder AI chat mid-task (e.g. progress updates, sharing results). To simply @mention another cat at the end of your response, use @猫名 in your reply text instead — it is free and never expires.',
+      "Post a proactive async message to the caller's authorized target, optionally waking one cat as an ordinary notification or a fenced same-thread structured single successor. " +
+      'Principal contract: invocation-token registration uses the current thread and omits threadId; agent-key-only registration requires threadId because it has no current invocation thread. ' +
+      'Use when: sharing a mid-task update, routing one ordinary @ notification, or handing one named external action to one successor with action.mode="single". ' +
+      'NOT for: invocation-token delivery to another thread (use cross_post_message) or deliberate independent multi-cat review/ideation (use multi_mention with mode="parallel"). ' +
+      'Output: the message is persisted in the principal-selected thread; routed targets are queued, and action conflicts return safe_wait without creating work. ' +
+      "The receipt acknowledges submission, not the recipient's answer; wait for an inbound reply before claiming their result. " +
+      'GOTCHA: use one delivery carrier per intended hop. After a successful routed post, repeating the same line-start @mention in final text creates another hop; use that text fallback when the post failed. ' +
+      'Scarce dossier engagementPolicy seats receive effectClass=fyi or coordination.phase=terminal unread without waking; deliveredWithoutWake confirms delivery, not reading. Active coordination, actions and localReviewVerdict retain their wake. ' +
+      'GOTCHA: action is Task-backed implement work: subjectRef=subject:task:<taskId>, terminalPredicate={kind:"task_done"}, explicit clientMessageId and exactly one targetCats entry. For ordinary work (work Task, no namespaced subject or entrusted contract), send expectedOwnerRevision from list_tasks and optionally stopPreviousExecution; the server reuses Task/Message/Queue, reports queueing separately from execution, and never requires lease replacement or another approval for the same authorized work. Ordinary existing-owner notifications need no action; removing action does not authorize new work. ' +
+      'For a direct Claim/Release chain, pass coordination.phase=active on work hops and terminal on the final delivery; terminal recipients may clean-stop without another @. ' +
+      'An unaddressed terminal transition whose id or bound subject conflicts with the incoming coordination fails with HTTP 409 before persistence. After an incoming terminal, any authored target is genuinely new active work even if the caller repeats a stale terminal label. ' +
+      'A reply after terminal is a quiet courtesy ACK only when it has no explicit routing credential; line-start @mentions and structured targetCats always start a new active routing generation and remain subject to the normal loop-streak guard. ' +
+      'For a local review result, route an ordinary @author message with localReviewVerdict + exact reviewedHeadSha + reviewSubjectRef + acceptedSourceRef + acceptedRevision + clientMessageId. This durable fact needs no action lease, coordination generation, replacement, or issuer route. Public prose is never parsed. ' +
+      'Governed lease work alone uses existing_standing + groundingEvidenceRef or returnToPredecessor. Ordinary Task handoff uses the current assignment revision; its original home, source, approvals and WIP remain canonical. ' +
+      'GOTCHA: structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. ' +
+      'F247: gpt-pro agent-key returns copy only replyTo=sourceMessageId from the runtime delta; the server admits it only when an exact server-custodied dispatch grant exists. ' +
+      'A post_message is always its own durable message, separate from your final reply. ' +
+      'To hand off without structured action identity, write @猫名 on its own line at the START of the line (sentence-internal @mention does NOT route). ' +
+      'GOTCHA: This tool uses callback credentials that expire — if it fails with 401, fall back to line-start @mention in your response text. ' +
+      'GOTCHA: Do NOT use this for routine replies — only for mid-task proactive messages when you need to share something before your response completes.',
     inputSchema: postMessageInputSchema,
     handler: handlePostMessage,
-  },
-  {
+    governance: {
+      implementationExport: 'handlePostMessage',
+      resourceFamily: 'thread-message',
+      action: 'command',
+      authority: 'callback-thread',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: [
+        'full',
+        'agent-key',
+        'desktop:fable-phase0',
+        'desktop:cloud-pro-phase0',
+        'desktop:live-companion',
+      ],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_get_pending_mentions',
-    description: 'Get recent messages that @-mention you. Use this to check if anyone is trying to get your attention.',
+    description:
+      'Get recent messages that @-mention you. Use at session start to check if anyone is trying to get your attention. ' +
+      'TIP: Call this early in your session, then call ack_mentions after processing to avoid seeing the same mentions next session.',
     inputSchema: getPendingMentionsInputSchema,
     handler: handleGetPendingMentions,
-  },
-  {
+    governance: {
+      implementationExport: 'handleGetPendingMentions',
+      resourceFamily: 'thread-message',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_ack_mentions',
     description:
-      'Acknowledge that you have processed mentions up to a specific message ID. Call this after processing mentions from get_pending_mentions to avoid seeing them again in future sessions.',
+      'Acknowledge that you have processed mentions up to a specific message ID. ' +
+      'Call this AFTER processing mentions from get_pending_mentions to avoid seeing them again in future sessions. ' +
+      'GOTCHA: Pass the message ID of the LAST mention you processed, not the first.',
     inputSchema: ackMentionsInputSchema,
     handler: handleAckMentions,
-  },
-  {
+    governance: {
+      implementationExport: 'handleAckMentions',
+      resourceFamily: 'thread-message',
+      action: 'update',
+      authority: 'callback-thread',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineCanonicalTool({
     name: 'cat_cafe_get_thread_context',
     description:
-      'Get recent conversation messages for context. Use this to understand what has been discussed recently. Pass threadId to read a different thread (cross-thread context).',
+      'Read messages from one thread, with token-lean anchor previews by default and optional full bodies, ranked keywords, or a bounded window around messageId. ' +
+      'Use when: browsing the current conversation, reading a different known threadId, finding relevant messages inside that thread, opening context around a known messageId, or explicitly catching up. ' +
+      'NOT for: finding features, decisions, plans, lessons, or unknown threads across project knowledge; use search_evidence or list_threads first. ' +
+      'Output: a bounded aggregate envelope with threadId, ordered messages, contextScope, hasMore, and nextCursor when continuation is required; anchor mode includes drillDown pointers, while responseMode="full" returns complete bodies per ordinary item and includes same-target queued bodies. contextScope="unread_delta" contains only currently unread relevant messages; hasMore=false closes that selection, not all thread history. ' +
+      'When available, situation reports exact lifecycle-backed active runs; situation.complete=false means runtime evidence could not be fully joined, so do not infer execution from recent speech. ' +
+      'GOTCHA: keep the same limit, readIntent and other read arguments when following nextCursor; changing one requires a new read without cursor. Keyword ranking is best-effort over a bounded recent scan; scanCapped=true means older history may contain additional matches. A single item larger than the full-page budget returns an honest anchor with a precise drill pointer, not read evidence; drill an oversized workflow SOP with cat_cafe_get_workflow_sop using the returned threadId. History is the default selection even in full mode; for a complete catch-up, set readIntent="unread" and responseMode="full" without catId/keyword/messageId/before/after filters and follow nextCursor until hasMore=false. Pass threadId only for a different thread; omit it for the current thread.',
     inputSchema: getThreadContextInputSchema,
     handler: handleGetThreadContext,
-  },
+    governance: {
+      implementationExport: 'handleGetThreadContext',
+      resourceFamily: 'thread-message',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: [
+        'full',
+        'agent-key',
+        'desktop:fable-phase0',
+        'desktop:cloud-pro-phase0',
+        'desktop:live-companion',
+      ],
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_get_workflow_sop',
+    description:
+      'Read the complete canonical workflow SOP linked to an owner-visible thread. ' +
+      'Use when: cat_cafe_get_thread_context returns an oversized workflowSop anchor and you need the resume capsule or checks. ' +
+      'NOT for: updating workflow state (use cat_cafe_update_workflow), browsing messages, or guessing a backlog item from a feature ID. ' +
+      'Output: threadId, backlogItemId, and the persisted workflowSop including resumeCapsule, checks, version, and update provenance. ' +
+      'GOTCHA: thread ownership is resolved from callback or agent-key identity; agent-key callers must provide threadId and the matching agentKeyCatId.',
+    inputSchema: getWorkflowSopInputSchema,
+    handler: handleGetWorkflowSop,
+    governance: {
+      implementationExport: 'handleGetWorkflowSop',
+      resourceFamily: 'task-workflow',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: [
+        'full',
+        'agent-key',
+        'desktop:fable-phase0',
+        'desktop:cloud-pro-phase0',
+        'desktop:live-companion',
+      ],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'progressive-disclosure',
+        admissionRef: 'file:docs/features/F236-anchor-first-context-entry.md',
+      },
+    },
+  }),
   // D15: cat_cafe_search_messages removed — superseded by search_evidence + get_thread_context
-  {
+  defineTool({
+    name: 'cat_cafe_get_message',
+    description:
+      'Look up one original message. Use when following replyTo or a discovered source coordinate, including the origin of a remembered agreement. ' +
+      'Not for broad discovery: use search_evidence first when the source ID is unknown. ' +
+      'Returns the message content, sender, timestamp, and optionally N nearby messages for context. ' +
+      'A durable typed local-review message also includes localReviewFact, as does thread-context; prose alone never creates that fact. ' +
+      'GOTCHA: messageId is the bare message ID; for threadId#messageId coordinates pass only the part after #, not the thread prefix. ' +
+      'PARAM GUIDE: messageId = required exact ID. contextCount = number of messages before/after to include (default 0, max 10). ' +
+      'mode = "preview" (default — bounded excerpt that saves context) or "full" (complete original content; use when you need the whole message — anchor drillDown pointers already request mode=full).',
+    inputSchema: {
+      messageId: z.string().min(1).describe('The exact message ID to look up'),
+      contextCount: z
+        .number()
+        .int()
+        .min(0)
+        .max(10)
+        .optional()
+        .describe('Number of messages before and after to include for context (0-10, default 0)'),
+      mode: z
+        .enum(['preview', 'full'])
+        .optional()
+        .describe('preview (default, bounded excerpt) or full (complete content). F236 anchor-first drill terminal.'),
+      agentKeyCatId: agentKeyCatIdSchema,
+    },
+    handler: handleGetMessage,
+    governance: {
+      implementationExport: 'handleGetMessage',
+      resourceFamily: 'thread-message',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: [
+        'full',
+        'agent-key',
+        'desktop:fable-phase0',
+        'desktop:cloud-pro-phase0',
+        'desktop:live-companion',
+      ],
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_get_thread_cats',
+    description:
+      'Find recipients before choosing; forRole adds cached quota facts for every routable member. ' +
+      'Returns members and an advisory snapshot; unknown stays unknown, spares require switching. ' +
+      'Not online/idle status or role ranking; no live probe; execution rechecks. Agent-key needs threadId; never target yourself.',
+    inputSchema: getThreadCatsInputSchema,
+    handler: handleGetThreadCats,
+    governance: {
+      implementationExport: 'handleGetThreadCats',
+      resourceFamily: 'thread-message',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key', 'desktop:cloud-pro-phase0', 'desktop:live-companion'],
+    },
+  }),
+  defineCanonicalTool({
     name: 'cat_cafe_list_threads',
-    description: 'List thread summaries for discovery. Supports limit and activeSince filters.',
+    description:
+      'Discover visible threads and recent work without reading conversation bodies. ' +
+      'Use when: finding a work line such as “那个3D建模” or “最近在忙什么”; set includeWork=true for titles, up to 3 unfinished Tasks, and actual running members. ' +
+      'NOT for: resuming authorization or reading full progress (follow the returned thread/Task pointers), or all-project execution counts (get_running_work is Host-project scoped). ' +
+      'Output: thread IDs, titles, activity times; work mode adds project identity, per-source availability, bounded live pages and nextCursor. A bound original roadmap appears directly on the entry with file version/as-of, exact read pointer and later-activity-needs-checking. ' +
+      'GOTCHA: Task/project details require the original list_tasks invocation authority; other callers retain title pointers only. ' +
+      'Doing does not prove execution. Execution none covers the home thread and visible dispatchGate targets; dispatchedThreadId is a routing target, not proof of execution location. Entrusted work with no canonical execution link remains unknown even when dispatched. ' +
+      'Task and roadmap reads also respect the invocation callback allowlist. Partial Task scans cannot claim globally latest Tasks. A later timestamp does not make original decisions obsolete. Discovery grants no file or work authority.',
     inputSchema: listThreadsInputSchema,
     handler: handleListThreads,
-  },
-  {
+    governance: {
+      implementationExport: 'handleListThreads',
+      resourceFamily: 'thread-message',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: [
+        'full',
+        'agent-key',
+        'desktop:fable-phase0',
+        'desktop:cloud-pro-phase0',
+        'desktop:live-companion',
+      ],
+    },
+  }),
+  defineTool({
+    name: 'cat_cafe_list_labels',
+    description:
+      'List user-defined thread labels (id, name, color). Use when you need to know which labels exist ' +
+      'before suggesting label assignments for threads. Returns all labels sorted by sortOrder.',
+    inputSchema: listLabelsInputSchema,
+    handler: handleListLabels,
+    governance: {
+      implementationExport: 'handleListLabels',
+      resourceFamily: 'label-taxonomy',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_feat_index',
-    description: 'Lookup feature index entries by featId or query. Returns featId/name/status/threadIds.',
+    description:
+      'Lookup feature index entries by featId or query. Returns featId, name, status, and linked threadIds. ' +
+      'Use when you need to find which thread(s) a feature is discussed in, or check feature status. ' +
+      'PARAM GUIDE: featId = exact match (e.g. "F043"), query = fuzzy substring over all fields.',
     inputSchema: featIndexInputSchema,
     handler: handleFeatIndex,
-  },
-  {
+    governance: {
+      implementationExport: 'handleFeatIndex',
+      resourceFamily: 'thread-message',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'desktop:live-companion'],
+    },
+  }),
+  defineCanonicalTool({
     name: 'cat_cafe_cross_post_message',
-    description: 'Post a message to a specific thread by threadId (cross-thread notification).',
+    description:
+      'Post a message to a specific thread by threadId (cross-thread notification). ' +
+      'Use when you need to notify a different thread about something relevant. ' +
+      'NOT for: posting to your own current thread (use post_message instead). ' +
+      'Output: message appears in the target thread as a new message visible to all participants. ' +
+      'ROUTING: You MUST name recipients — either set `targetCats` array with the recipient catId(s), OR put a line-start `@handle` in content. ' +
+      'For scarce dossier engagementPolicy seats, effectClass=fyi or coordination.phase=terminal persists unread without waking; receipt deliveredWithoutWake means delivered, not read. Active coordination, actions, assign_work approval and localReviewVerdict retain their normal routing. ' +
+      'Messages without routing (no targetCats, no line-start @) will be REJECTED (F193 AC-A4). ' +
+      'GOTCHA: Requires threadId — use feat_index/list_threads plus thread truth to verify the exact owning thread; never guess a nearby thread. ' +
+      'PAW-FEEL: The original [爪感差: ...] message is already collected. Cross-post only a marker-free sourceMessageId reference to a verified owner; if none exists, use cat_cafe_propose_thread (F128). A genuinely new authorization uses effectClass=assign_work plus proposedAction for Approval Hub review; the same already-authorized ordinary Task uses its native handoff and creates no second card. ' +
+      'GOTCHA: For Claim/Release coordination, pass coordination.phase=active on Claim/work hops and terminal on Release. ' +
+      'An unaddressed terminal transition whose id or bound subject conflicts with the incoming coordination fails with HTTP 409 before persistence. Cross-thread routing credentials after an incoming terminal always name genuinely new active work. ' +
+      'For a local review result, route one ordinary @author cross-post with localReviewVerdict + exact reviewedHeadSha + reviewSubjectRef + acceptedSourceRef + acceptedRevision + clientMessageId. This durable fact needs no action lease, coordination generation, replacement, or issuer route; prose is never parsed. ' +
+      'The server carries a stable id across active hops. Every cross-thread post supplies an explicit routing credential, so a line-start @mention or structured targetCats after terminal always starts a new active routing generation and remains subject to the normal loop-streak guard. ' +
+      'If terminal reveals genuinely new work, start a new coordination with phase=active instead of ACKing the closed chain. ' +
+      'GOTCHA: direct action is Task-backed implement work: subjectRef=subject:task:<taskId> and terminalPredicate={kind:"task_done"}, plus clientMessageId and targetCats. An asset ID or reuse of an old thread does not grant delegate standing. For operator-gated new responsibility, pass proposedAction with effectClass=assign_work; both paths require the actual Task. Ordinary existing-owner notifications omit action, but cannot bypass an implementation refusal. ' +
+      'Output: ordinary Task handoff conditionally updates the original assignment and queues one durable source; it waits for exact previous-provider teardown before starting another writer. Replays reuse that source. Pass expectedOwnerRevision; stopPreviousExecution requests exact cancellation, not fabricated stop proof. Retained assign_work+proposedAction for that same authorized Task follows this path with no new approval card. Missing Task standing or a mismatched child is rejected, without opening a card. Cross-thread assign_work outside this native Task path still requires the existing pending approval proposal. ' +
+      'Existing standing reuses the same CAS via claimOrigin="existing_standing" + groundingEvidenceRef. returnToPredecessor sends a rejected single generation to the server-persisted predecessor; parallel mode records only the rejecting holder terminal. ' +
+      'For a canonical Task-owner replacement of an initial terminal delegate in the same approved child, groundingEvidenceRef must be the exact direct-human message:<id>; server validation binds user, child, revision, and timing, and never turns prose alone into a grant. ' +
+      'Structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. ' +
+      'F247: gpt-pro agent-key returns carry only the exact replyTo from the runtime delta; authorization stays in server custody. ' +
+      'Only surviving governed lease work uses replace with leaseId/generation after server-recorded terminal evidence. Ordinary Task implementation uses expectedOwnerRevision and existing execution control. Use mode=parallel + parallelIntent only for deliberate independent review, #ideate, or explicit operator fan-out. ' +
+      'TIP: The sub-thread "## 主 Thread" header includes exact routing credentials (threadId + targetCats/handle) — copy them directly.',
     inputSchema: crossPostMessageInputSchema,
     handler: handleCrossPostMessage,
-  },
-  {
+    governance: {
+      implementationExport: 'handleCrossPostMessage',
+      resourceFamily: 'thread-message',
+      action: 'command',
+      authority: 'callback-thread',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: [
+        'full',
+        'agent-key',
+        'desktop:fable-phase0',
+        'desktop:cloud-pro-phase0',
+        'desktop:live-companion',
+      ],
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_get_running_work',
+    description:
+      'Read who is executing work in the Host active project from the F295 coordinator. ' +
+      'Use when: the owner asks “谁在忙 / 哪些线程正在工作 / what is running now”. ' +
+      'NOT for: counting doing Tasks (use cat_cafe_list_tasks), reading all projects, or cancelling work. ' +
+      'Output: executionCount, thread+cat workGroupCount, workingThreadCount, activities and scope/time; an unavailable source has no zero counts. ' +
+      'GOTCHA: this is one Host project, and foreign occupancy remains visible without control handles.',
+    inputSchema: companionRunningInputSchema,
+    handler: handleGetRunningWork,
+    governance: {
+      implementationExport: 'handleGetRunningWork',
+      resourceFamily: 'active-execution',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'desktop:live-companion'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'file:docs/features/F317-coactive-companion.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_get_pending_decisions',
+    description:
+      'Read the unified owner attention projection across registered approvals and current Needs Me links. ' +
+      'Use when: the owner asks “有什么需要我决定 / what needs my decision” or wants a pending proposal explained. ' +
+      'NOT for: approving, rejecting, guessing urgency from ordinary @ messages, or treating Needs Me as all approvals. ' +
+      'Output: owner-scoped, paged source-backed items plus per-source availability and exhaustiveness; exact counts appear only when coverage is complete, while partial reads retain healthy-source items. ' +
+      'GOTCHA: partial coverage is not an empty result or an exact total, and an inlineApprovable card is not a voice authorization or a decision receipt.',
+    inputSchema: companionDecisionsInputSchema,
+    handler: handleGetPendingDecisions,
+    governance: {
+      implementationExport: 'handleGetPendingDecisions',
+      resourceFamily: 'approval-index',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'desktop:live-companion'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'file:docs/features/F317-coactive-companion.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
     name: 'cat_cafe_list_tasks',
-    description: 'List tasks with optional threadId/catId/status filters for global task discovery.',
+    description:
+      'Read a bounded list of durable tasks with optional threadId/catId/status/kind filters, or exact featureId matching canonical TaskItem.relatedFeatureId. ' +
+      'Use when: resuming existing work and checking its current scope, status, authorization source or execution artifacts before asking the owner again; also for finding tasks, owners, blockers and feature work. ' +
+      'NOT for: creating or changing tasks (use cat_cafe_create_task or cat_cafe_update_task). ' +
+      'Output: up to 50 tasks plus totalMatched/truncated; feature-filtered reads also return a content-free queryRef for owner verification. ' +
+      'GOTCHA: overview why fields can be anchored; pass taskId to retrieve one task with its full untruncated why. Drill the original authorization and receipts when needed; discovery grants no new authority, and search summaries do not replace current Task truth.',
     inputSchema: listTasksInputSchema,
     handler: handleListTasks,
-  },
-  {
+    governance: {
+      implementationExport: 'handleListTasks',
+      resourceFamily: 'task-workflow',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'desktop:live-companion'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/features/F313-analysis-to-outcome-closure-command.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
     name: 'cat_cafe_update_task',
-    description: 'Update the status of a task you own. Use this to mark tasks as doing/blocked/done.',
+    description:
+      'Update a task you own, or pick up an unassigned ordinary Task in your home thread by marking it doing; also resolve a missing dispatch gate. ' +
+      'Entrusted work cannot be marked done through this generic tool; use its typed, evidence-backed closure action. ' +
+      'Output: the canonical Task update is returned; picking up an unassigned Task assigns its owner and binds the current authenticated execution atomically. Ordinary completion never waits for a lease mirror. GOTCHA: assigned ordinary work requires the current owner or exact admitted delegate execution; include expectedOwnerRevision from the Task read. Stale assignment, source withdrawal or a different live writer is rejected. A later owner invocation recovers a stranded binding only with exact positive provider-stop evidence. Entrusted/typed closure and namespaced producers retain their own contracts. ' +
+      'TIP: Include a "why" note when marking as blocked — it helps others understand the situation. ' +
+      'F193-E1: Pass dispatchGate to resolve a "missing" dispatch gate (e.g. after cross_posting to the owning thread).',
     inputSchema: updateTaskInputSchema,
     handler: handleUpdateTask,
-  },
-  {
+    governance: {
+      implementationExport: 'handleUpdateTask',
+      resourceFamily: 'task-workflow',
+      action: 'update',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'desktop:live-companion'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'side-effect-boundary',
+        admissionRef: 'file:docs/features/F310-growing-real-delegation.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_admit_entrusted_work',
+    description:
+      'Ask the canonical Task owner to admit or resume explicitly entrusted work. ' +
+      'Use when: a current user Message explicitly entrusts work, an offer was accepted, or a registered source grants admission. ' +
+      'Not for: casual mentions, a new Task for a follow-up to known work, or replacing its owner. For a known Task, read_entrusted_work and update_entrusted_work continue that Task. ' +
+      'GOTCHA: explicit_entrustment and accepted_offer require sourceRefs=["message:<messageId>"] for exactly one current user-authored Message in this authenticated thread, not thread#message links or supporting-message lists. ' +
+      'The same idempotencyKey always returns the same Task coordinates; it never creates a sibling Task. ' +
+      'Output: canonical Task coordinates and a typed admitted/resumed/needs_clarification result; accepted offers remain pending until admission succeeds. ' +
+      'Authorized-source admission fails closed unless its producer grant is registered and current.',
+    inputSchema: admitEntrustedWorkInputSchema,
+    handler: handleAdmitEntrustedWork,
+    governance: {
+      implementationExport: 'handleAdmitEntrustedWork',
+      resourceFamily: 'task-workflow',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'desktop:live-companion'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/features/F310-growing-real-delegation.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_close_entrusted_work',
+    description:
+      'Close entrusted work through the canonical Task owner using the current revision. ' +
+      'Satisfied closure requires evidence; cancelled or abandoned closure requires typed actor, authority, disposition, and time provenance. ' +
+      'Generic update_task status=done is intentionally rejected for entrusted work.',
+    inputSchema: closeEntrustedWorkInputSchema,
+    handler: handleCloseEntrustedWork,
+    governance: {
+      implementationExport: 'handleCloseEntrustedWork',
+      resourceFamily: 'task-workflow',
+      action: 'complete',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'desktop:live-companion'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'destructive-boundary',
+        admissionRef: 'file:docs/features/F310-growing-real-delegation.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_update_entrusted_work',
+    description:
+      'Update the current open entrusted-work Task using its exact revision. ' +
+      'Use when work starts, blocks, resumes, progress/nextStep changes, or source-backed dates and Artifact refs become known; the same Task remains the owner and its revision advances once. ' +
+      'Not for generic why edits, inferred dates or marking work complete. Keep actualStart, plannedStart, estimatedCompletion and businessDeadline distinct; every date and progress note cites its source. ' +
+      'Artifact refs replace the canonical set and are deduplicated/sorted; null clears one time fact. ' +
+      'No-op, stale, foreign-owner outside that exact Work capability, and terminal updates fail closed; generic update_task remains forbidden.',
+    inputSchema: updateEntrustedWorkInputSchema,
+    handler: handleUpdateEntrustedWork,
+    governance: {
+      implementationExport: 'handleUpdateEntrustedWork',
+      resourceFamily: 'task-workflow',
+      action: 'update',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'desktop:live-companion'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/features/F310-growing-real-delegation.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_offer_custody',
+    description:
+      'Use when: the exact source conversation contains a plausible future obligation but the human has not explicitly entrusted it. ' +
+      'NOT for: explicit entrustment or registered authorized sources (use cat_cafe_admit_entrusted_work), venting/casual mentions (make no durable mutation), or creating a global reminder. ' +
+      'Output: records or rereads one source-owned custodyOfferV1 bound to the immutable message revision; terminal replay never opens a second prompt. ' +
+      'GOTCHA: this is only an offer. No Task, Schedule, or Needs Me item exists until the human accepts and the Task owner returns admitted/resumed.',
+    inputSchema: offerCustodyInputSchema,
+    handler: handleOfferCustody,
+    governance: {
+      implementationExport: 'handleOfferCustody',
+      resourceFamily: 'source-custody',
+      action: 'create',
+      authority: 'callback-thread',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'file:docs/features/F310-growing-real-delegation.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_retry_custody_admission',
+    description:
+      'Use when: an accepted source-owned custody offer currently has a typed needs_clarification result and the same conversation now supplies the missing Task contract. ' +
+      'NOT for: pending/declined/dismissed offers, a different source revision, or explicit new work (use cat_cafe_admit_entrusted_work). ' +
+      "Output: retries the canonical Task owner with the offer's original idempotency key and updates only the exact source admission result. " +
+      'GOTCHA: stale refs and key/state mismatches fail closed; never create a sibling Task or a source-independent clarification inbox.',
+    inputSchema: retryCustodyAdmissionInputSchema,
+    handler: handleRetryCustodyAdmission,
+    governance: {
+      implementationExport: 'handleRetryCustodyAdmission',
+      resourceFamily: 'source-custody',
+      action: 'update',
+      authority: 'callback-thread',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'file:docs/features/F310-growing-real-delegation.md',
+      },
+    },
+  }),
+  defineTool({
+    name: 'cat_cafe_create_task',
+    description:
+      'Create a new 🧶 毛线球 (yarn ball) task in the current thread. ' +
+      'Use when: user says "建个毛线球", "记一下任务", "track this", or you identify persistent work items across sessions — ' +
+      'e.g. "fix login timeout", "update API docs", "review F160 spec". ' +
+      'NOT for: temporary execution steps (use PlanBoard/TodoWrite), NOT for inline checklists in a message (use create_rich_block with kind:"checklist"). ' +
+      'Output: task appears in the thread 🧶 毛线球 panel, persists across sessions, visible to all cats and {{coCreator.nickname}}. ' +
+      'GOTCHA: 毛线球 ≠ checklist rich block. 毛线球 lives in the task panel and survives session boundaries; checklist is ephemeral inline content in one message. ' +
+      'TIP: Include a "why" to give context to whoever picks up the task. ' +
+      'F193-E1 DISPATCH GATE: If your task references a feature (F-number) outside your current scope, ' +
+      'provide dispatchGate with status "dispatched" (you already cross_posted to the owning thread) ' +
+      'or "not_dispatched" (with reason). If you omit dispatchGate and external F-IDs are detected, ' +
+      'the task is created but a warning is returned reminding you to dispatch.',
+    inputSchema: createTaskInputSchema,
+    handler: handleCreateTask,
+    governance: {
+      implementationExport: 'handleCreateTask',
+      resourceFamily: 'task-workflow',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineCanonicalTool({
     name: 'cat_cafe_create_rich_block',
     description:
-      'Create a rich block (card, diff, checklist, media_gallery, audio, or interactive) attached to the current message. ' +
-      'Use card for status/decisions, diff for code changes, checklist for todos, media_gallery for images, audio for voice messages, interactive for user selection/confirmation.',
+      'Create a rich block (card, diff, checklist, file, media_gallery, audio, interactive, or html_widget) attached to the current message. ' +
+      'Use card for status/decisions, diff for code changes, checklist for inline todos, file for existing documents/audio/video, media_gallery for images, audio for voice, interactive for user selection/confirmation, html_widget for custom inline HTML. ' +
+      `Use this when the user wants to see, hear, or interact with the result directly in ${deploymentDefaults.brand.name} Chat (for example: show me, draw an HTML demo, or send a screenshot); the user does not need to say "rich text". Use html_widget for a self-contained HTML/demo, media_gallery for existing screenshots/images, and browser-preview for a complex localhost or multi-page app. ` +
+      'NOT for discussing or editing HTML without a visible-delivery request. ' +
+      'Use this for long structured replies/reports with lists, tables, code blocks, diffs, status fields, or multi-step checklists; F192 rich-messaging wakeup treats plain long Markdown with these signals and no rich block as a miss. ' +
+      'NOT for: persistent task tracking across sessions (use create_task for 🧶 毛线球). NOT for: document generation/export (use generate_document). ' +
+      'Output: block rendered inline in the current message. ' +
+      'GOTCHA: media_gallery local absolute image paths are resolved only inside registered workspaces (existing readable image, <=10MiB) to /api/workspace/file/raw?worktreeId=...&path=...; unknown/protected/unusable local paths are rejected. This is a file view, not upload publication. Automatic upload publication only covers native image_gen/Antigravity provider results; use publish_image for durable local PNG publication. ' +
+      'GOTCHA: The block JSON must use "kind" (NOT "type") and include "v": 1 and a unique "id". ' +
+      "GOTCHA: Call get_rich_block_rules first if you haven't loaded the full schema yet in this session. " +
+      'GOTCHA: checklist kind is ephemeral inline content — for persistent cross-session work items, use create_task (毛线球) instead. ' +
+      'In an ordinary conversation, when the requester explicitly needs one later owner decision, pass awaitResponseV1={mode:"once"}; the Host publishes a durable RuntimeInteraction and returns immediately. Scoped work/read-only invocations cannot use this mode. This is never inferred from interactiveType or prose, and callback/guide/action options are rejected. ' +
+      'Ordinary rich blocks fall back to cc_rich text encoding when callback auth is unavailable. awaitResponseV1 always fails closed because a text fallback cannot create the durable decision lifecycle.',
     inputSchema: createRichBlockInputSchema,
     handler: handleCreateRichBlock,
-  },
-  {
-    name: 'cat_cafe_request_permission',
+    governance: {
+      implementationExport: 'handleCreateRichBlock',
+      resourceFamily: 'artifact-surface',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'desktop:live-companion'],
+    },
+  }),
+  defineTool({
+    name: 'cat_cafe_generate_document',
     description:
-      'Request permission from the user before performing a sensitive action (e.g. git_commit, file_delete). Returns granted/denied immediately if a rule exists, or pending with a requestId if the user needs to approve.',
-    inputSchema: requestPermissionInputSchema,
-    handler: handleRequestPermission,
-  },
-  {
-    name: 'cat_cafe_check_permission_status',
+      'Generate a document (PDF/DOCX/MD) from Markdown and deliver to IM platforms (Feishu/Telegram). ' +
+      'Use when: user asks to "生成报告", "导出文档", "发PDF", "写份文档给我", "export to DOCX", or any document generation request. ' +
+      'NOT for: sending an existing file you already have (use create_rich_block with kind:"file" + url pointing to /uploads/). ' +
+      'Output: file saved to /uploads/, attached as file RichBlock, automatically delivered to bound IM chats. Web UI shows download link. ' +
+      'GOTCHA: Do NOT manually run pandoc + create_rich_block — that skips IM delivery and the file will NOT reach Feishu/Telegram. Always use this tool. ' +
+      'Degradation: PDF needs LaTeX engine → falls back to DOCX → falls back to MD. No pandoc → .md only.',
+    inputSchema: generateDocumentInputSchema,
+    handler: handleGenerateDocument,
+    governance: {
+      implementationExport: 'handleGenerateDocument',
+      resourceFamily: 'artifact-surface',
+      action: 'derive',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_register_deployment_wait',
     description:
-      'Check the status of a previously submitted permission request. Use the requestId returned from request_permission.',
-    inputSchema: checkPermissionStatusInputSchema,
-    handler: handleCheckPermissionStatus,
-  },
-  {
-    name: 'cat_cafe_register_pr_tracking',
-    description:
-      'Register a PR for email review notification routing. Call this right after `gh pr create` so that cloud Codex review emails are automatically routed to your current thread. The server resolves threadId and catId automatically from your invocation identity — you only need repoFullName and prNumber.',
-    inputSchema: registerPrTrackingInputSchema,
-    handler: handleRegisterPrTracking,
-  },
-  {
+      'Register one durable, single-fire deployment condition on the existing original work Task. ' +
+      'Use when: code is landed but the exact target deployment has not loaded it yet, or the Task must resume after a later ready boot. ' +
+      'NOT for: requesting or authorizing a restart, polling with hold_ball, creating a mirror Task, another cat’s Task, or treating Alpha readiness as runtime readiness. ' +
+      'Output: validates the authenticated invocation against the Task owner/thread/user, captures the server boot baseline, atomically installs one F280 generation with autoRenew=false, immediately checks current evidence, and returns the durable Task/wait receipt state. ' +
+      'GOTCHA: `revision_included.revision` must be the frozen 40-character landed/build revision, never a mutable branch or PR head. Missing Git/build containment proof stays unknown. A successful registration means main=landed/live=dormant; it grants no stop/restart authority. If the tool is unavailable in the running version or registration fails, do not claim the wait exists—keep the current activation path and report the missing capability.',
+    inputSchema: registerDeploymentWaitInputSchema,
+    handler: handleRegisterDeploymentWait,
+    governance: {
+      implementationExport: 'handleRegisterDeploymentWait',
+      resourceFamily: 'task-custody',
+      action: 'update',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'file:docs/features/F323-runtime-restart-coordination.md',
+      },
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_update_workflow',
     description:
       'Update the SOP workflow stage for a Feature (Mission Hub bulletin board). ' +
       'Use to record current stage, baton holder, resume capsule, and checks. ' +
-      'This is information sharing, not flow control — cats decide their own actions.',
+      'When no backlog item exists, one same-user same-thread work task with explicit relatedFeatureId is imported deterministically; provide taskId only to disambiguate multiple matches. ' +
+      'This is information sharing, not flow control — cats decide their own actions. ' +
+      'STAGE VALUES: kickoff → impl → quality_gate → [fresh_context] → review → merge → completion. ' +
+      'TIP: Always set resumeCapsule when updating stage — it helps the next cat cold-start.',
     inputSchema: updateWorkflowInputSchema,
     handler: handleUpdateWorkflow,
-  },
-  {
+    governance: {
+      implementationExport: 'handleUpdateWorkflow',
+      resourceFamily: 'task-workflow',
+      action: 'update',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineCanonicalTool({
     name: 'cat_cafe_multi_mention',
     description:
-      'Invoke up to 3 cats in parallel to gather perspectives on a question. ' +
-      'All responses are automatically routed back to callbackTo. ' +
-      'Requires searchEvidenceRefs (what you searched first) or overrideReason. ' +
-      'Use this instead of multiple @mentions when you need structured multi-cat collaboration with guaranteed response aggregation.',
+      'Fan out to and collect responses from up to 3 cats, with explicit parallel action leases when the reviews are intentionally independent. ' +
+      'Use when: deliberate independent multi-cat review/ideation needs aggregation. ' +
+      'NOT for: a new same-thread single successor (use post_message with action.mode="single") or simple cross-thread notification (use cross_post_message). ' +
+      'Output: returns request/status immediately; admitted responses are aggregated and routed to callbackTo, while conflicts return safe_wait without creating request/timer/queue work. ' +
+      "REQUIRES: searchEvidenceRefs (list what you searched first) OR overrideReason (why you're skipping search). " +
+      'GOTCHA: legacy action.mode="single" callers remain accepted during migration and still require one target + idempotencyKey; new single-successor calls should move to post_message. ' +
+      'GOTCHA: callbackTo is usually your own catId. For the same subjectRef+actionFamily+successorSlot, accept safe_wait. ' +
+      'Fallback must use replace with the active leaseId/generation after server-recorded failed/canceled/unavailable evidence. ' +
+      'Only deliberate independent review, #ideate, or explicit operator fan-out may use mode=parallel with parallelIntent.',
     inputSchema: multiMentionInputSchema,
     handler: handleMultiMention,
-  },
-  {
+    governance: {
+      implementationExport: 'handleMultiMention',
+      resourceFamily: 'collaboration-orchestration',
+      action: 'command',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_start_vote',
     description:
-      'Start a voting session in the current thread. Use when you need collective decision-making ' +
-      '(e.g. "REST vs GraphQL?"). Voters receive notification and reply with [VOTE:option]. ' +
-      'Auto-closes when all voters have voted or timeout expires.',
+      'Start a voting session in the current thread for collective decision-making ' +
+      '(e.g. "REST vs GraphQL?"). ' +
+      'Use when a multi-cat discussion needs a bounded decision, tradeoff vote, or option ranking instead of another round of @ replies. ' +
+      'Output: vote prompt message is posted, voters are notified, and the vote result is summarized when all voters respond or timeout expires. ' +
+      'Voters receive notification and reply with [VOTE:option]. ' +
+      'Auto-closes when all voters have voted or timeout expires (default 120s). ' +
+      'GOTCHA: voters must be valid registered catIds (use get_thread_cats to discover them). Options need at least 2 choices.',
     inputSchema: startVoteInputSchema,
     handler: handleStartVote,
-  },
+    governance: {
+      implementationExport: 'handleStartVote',
+      resourceFamily: 'collaboration-orchestration',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
   // ============ Bootcamp (F087) ============
-  {
+  defineTool({
     name: 'cat_cafe_update_bootcamp_state',
     description:
       'Update the bootcamp training state for a thread. Use to advance phase, set lead cat, ' +
       'record task selection, store env check results, or mark completion. ' +
-      'Fields are merged into existing state — only send what changed.',
+      'Fields are merged into existing state — only send what changed. ' +
+      'GOTCHA: Only use this during bootcamp threads. Phase values must follow the sequence.',
     inputSchema: updateBootcampStateInputSchema,
     handler: handleUpdateBootcampState,
-  },
-  {
+    governance: {
+      implementationExport: 'handleUpdateBootcampState',
+      resourceFamily: 'guide-bootcamp',
+      action: 'update',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_bootcamp_env_check',
     description:
       'Run environment check for bootcamp (Node.js, pnpm, Git, Claude CLI, MCP, TTS, ASR, Pencil). ' +
       "Results are automatically stored in the thread's bootcampState.envCheck. " +
-      'Returns the full check results for display to the user.',
+      'Returns the full check results for display to the user. Only use during bootcamp phase-2-env-check.',
     inputSchema: bootcampEnvCheckInputSchema,
     handler: handleBootcampEnvCheck,
-  },
+    governance: {
+      implementationExport: 'handleBootcampEnvCheck',
+      resourceFamily: 'guide-bootcamp',
+      action: 'command',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  // F128: Cat-initiated thread proposal (user approves before thread is created)
+  defineCanonicalTool({
+    name: 'cat_cafe_propose_thread',
+    description:
+      'Propose a new thread to the user. Returns proposalId, NOT a threadId — the thread is only created after the user approves the proposal card. Use sparingly: ' +
+      'only when a clearly separable, long-running discussion genuinely deserves its own thread, or when the owner asks for "新开一个 thread". ' +
+      'Do NOT use to escape the current conversation, to split routine tasks, or proactively without an obvious need. ' +
+      'parentThreadId defaults to the current thread. After proposing, continue your current work — do not assume the thread exists until the user approves. ' +
+      'ASSIGNMENT: preferredCats is the single source of recipients; do not prepend their @mentions in initialMessage. The server generates that salutation. When the owner asks the proposer to revise, send a complete new proposal with supersedesProposalId; the exact revision request must be your invocation source. ' +
+      'GROUP: suggestedGroupId is only a suggestion. Omission suggests the source conversation Group, then a title F-number match; null means no Group. Only owner approval writes membership. ' +
+      'preferredCats accepts catIds (returned by cat_cafe_get_thread_cats). DISPATCH MODEL: when the user approves, the server wakes ONLY the FIRST cat in preferredCats (the chain starter). Subsequent cats are woken by the chain-driven @-mentions cats write in their own replies. ORDER preferredCats EXACTLY as you want the chain to start (e.g. for 接龙/轮转, put the first 棒 cat first). ' +
+      'FORK-AND-RETURN pattern (thread-orchestration skill Step 5c): use `reportingMode` to set the report-back contract. Ask yourself: "做完后源 thread 是否需要结果回来？" — YES (most cases) → omit reportingMode or set `final-only` (default); NO, downstream self-governs → set `none`; need phase updates → `state-transitions`; need blocking ack → `blocking-ack`. On approval the initial message is prefixed with a "## 主 Thread" header carrying routing credentials (threadId + targetCats/handle) so the last cat knows exactly where and whom to cross-post to. ' +
+      'OPEN-SOURCE PR GUIDANCE: when title/reason/initialMessage references a GitHub PR or issue, the child thread should load the `opensource-ops` skill. The server does NOT infer external PR identity, author role, maintainer policy, or auto-inject the opensource-ops skill. Ground the provider object and author in the child workspace, route findings to the external author by default, and only dispatch fixes to local cats with explicit operator or maintainer authorization and provenance. ' +
+      'PROJECT OWNERSHIP: if the current/source thread is default/未分类/eval/lobby but the child will do repo or implementation work, pass `projectPath` explicitly. Omit only when the child should inherit the current project, or when it is intentionally meta/eval/unclassified. ' +
+      'INTENT — default vs #ideate: by default dispatch wakes only the first preferredCat (serial chain-starter). If you genuinely want PARALLEL independent ideation (everyone replies at once, no chain), tag the message with `#ideate`. With #ideate, dispatch wakes ALL preferredCats simultaneously.',
+    inputSchema: proposeThreadInputSchema,
+    handler: handleProposeThread,
+    governance: {
+      implementationExport: 'handleProposeThread',
+      resourceFamily: 'thread-proposal',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
+    name: 'cat_cafe_withdraw_thread_proposal',
+    description:
+      'Withdraw one exact F128 thread proposal created by the current authenticated cat. ' +
+      'Use when: your own proposal is still pending and you have determined the proposed thread should not be created. ' +
+      'Output: the canonical withdrawn status; retrying the same withdrawn proposal is idempotent. ' +
+      "NOT for: rejecting a proposal as the user, withdrawing another cat's proposal, editing a proposal, or undoing an approved thread. " +
+      'Only pending -> withdrawn is allowed; approving, approved, rejected, and withdrawn terminal conflicts fail closed except same-requester idempotent replay. ' +
+      'GOTCHA: pass the exact proposalId returned by cat_cafe_propose_thread; requester and owner identity are derived from callback authentication.',
+    inputSchema: withdrawThreadProposalInputSchema,
+    handler: handleWithdrawThreadProposal,
+    governance: {
+      implementationExport: 'handleWithdrawThreadProposal',
+      resourceFamily: 'thread-proposal',
+      action: 'close',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_continue_approved_task',
+    description:
+      'Append a permanent execution-contract continuation receipt to one existing approved Task proposal. ' +
+      'Use when: the original Task owner, in its original thread, must reconcile a complete generic Task approval before structured implementation dispatch. ' +
+      'NOT for: approving a proposal, changing Task ownership or scope, starting implementation, or replacing the exact five-field developmentScope path. ' +
+      'Output: continued/replayed with the original receipt, or a rejection with no new authority or dispatch. The server derives the contract; callers supply only proposalId, taskId and a stable retry key. ' +
+      'GOTCHA: child seed, READY and read-only investigation are not implementation leases. After this receipt, use the normal single implement carrier for the original approved child and target.',
+    inputSchema: continueApprovedTaskInputSchema,
+    handler: handleContinueApprovedTask,
+    governance: {
+      implementationExport: 'handleContinueApprovedTask',
+      resourceFamily: 'thread-proposal',
+      action: 'continue-approved-task',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/architecture/f167-approved-task-continuation.md',
+      },
+    },
+  }),
+  // F225: Cat-initiated session handoff (user approves before the current session is sealed + continued)
+  defineTool({
+    name: 'cat_cafe_propose_session_handoff',
+    description:
+      'Propose handing off your CURRENT session to a fresh continuation of yourself, at a clean breakpoint. ' +
+      'Use when you just hit a natural seam — last commit landed, tests green, next step is clear — and context is getting heavy: ' +
+      'instead of letting compression silently lossy-summarize you mid-task, you proactively seal HERE and carry a high-fidelity handoff note to the next session. ' +
+      'Returns a proposalId, NOT a sealed session — the seal only happens after the owner approves the confirmation card (reject/expire = current session keeps running, nothing is sealed). ' +
+      'Write the 五件套 note for the FUTURE you (same thread, same cat, seq+1): done (what you finished) + nextSteps (where to resume) required; worktreeBranch / commits / gotchas optional. ' +
+      'The note is injected always-keep into the continuation bootstrap (visible even under the extractive/compress default), so the next you starts with full intent rather than a lossy digest. ' +
+      'Use sparingly — only at genuinely clean breakpoints, never to escape a hard task mid-flight. Orthogonal to compression: compress is the lossy fallback, handoff is the graceful relay.',
+    inputSchema: proposeSessionHandoffInputSchema,
+    handler: handleProposeSessionHandoff,
+    governance: {
+      implementationExport: 'handleProposeSessionHandoff',
+      resourceFamily: 'session-handoff',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  // F231 Phase E: Promoted to canonical — corpus layer widens input schema (targetLayer + layer)
+  defineCanonicalTool({
+    name: 'cat_cafe_read_profile',
+    description:
+      "Read the profile of this connection's authenticated identity through the stable cat-cafe-profile:// URI. " +
+      'Supports primer (default, per-persona relationship), corpus (owner-wide shared facts), and capsule (the current opening portrait). ' +
+      'Use when: L0 shows the profile URI, you are starting a session and need relationship or owner context, or you need to verify the currently effective content before proposing an update. ' +
+      'NOT for: searching project knowledge or old threads (use search_evidence), reading arbitrary workspace files (use read_file_slice), or reading another user/cat/persona. ' +
+      'Output: the current content + revision (sha256 hash); expectedRevision rejects changed snapshots without returning content. No profile change; successful reads retain content-free owner-scoped usage evidence. Reuse requestId when retrying. ' +
+      `GOTCHA: for a runtime invocation, use the ${deploymentDefaults.brand.displayName} MCP bound to that invocation; a separately installed App with the same tool name is not a substitute. A missing profile on another connection does not establish absence here. The primer is approved current context, not proof of a historical first occurrence. For original message coordinates use cat_cafe_get_message(mode="full", messageId=the bare ID after #), not graph_resolve. A revision mismatch requires a fresh read. An unavailable current layer is not permission to reconstruct a current agreement from old messages; describe history as history instead. Identity comes from authentication, never userId, catId, path or relationshipKey input.`,
+    inputSchema: readProfileInputSchema,
+    handler: handleReadProfile,
+    governance: {
+      implementationExport: 'handleReadProfile',
+      resourceFamily: 'identity-proposal',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: [
+        'full',
+        'agent-key',
+        'desktop:fable-phase0',
+        'desktop:cloud-pro-phase0',
+        'desktop:live-companion',
+      ],
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_propose_profile_update',
+    description:
+      'Propose an update to a profile layer — the "养熟循环" digest entry point (F231 KD-12/KD-18). ' +
+      'Supports primer (default, per-persona relationship), corpus (owner-wide shared facts), and capsule (a 1–300 character opening portrait). ' +
+      'Output: returns a proposalId, NOT a written file; the content is only written after operator approval (reject/expire = nothing changes). ' +
+      'Use when: the content is a durable fact about the authenticated person or this persona-operator relationship — personal context, preferred address, or a relationship-specific communication boundary. ' +
+      'Use targetLayer:corpus for owner-wide personal facts independent of persona relationship (birthday, background, preferences that all cats should know). ' +
+      'Use targetLayer:capsule to draft the short portrait visible in Memory → Profile; read layer:capsule first, keep supporting source coordinates in the rationale, and wait for the owner to confirm. Capsule content belongs only in private owner data, never repository defaults. ' +
+      'NOT for reusable judgments about what makes output, design, expression, architecture, or systems good (use cat_cafe_propose_taste), repeated operational/tool/process rules (use code-as-harness), or one-off context. ' +
+      'A correction, praise, or Magic Word does not choose the lane; semantic content does. ' +
+      'afterContent is the COMPLETE new content (whole-file replacement, not a diff) — include everything you want kept. ' +
+      'Use cat_cafe_read_profile first when preserving existing content matters. For names/roles, state the subject cat, current agreement and original proposal/response message coordinates separately; the registration source is not the original event. GOTCHA: shared-persona primers retain family continuity, but an old cat role is not a new cat identity. signalKind records proposal provenance; current profile takes effect only after owner approval.',
+    inputSchema: proposeProfileUpdateInputSchema,
+    handler: handleProposeProfileUpdate,
+    governance: {
+      implementationExport: 'handleProposeProfileUpdate',
+      resourceFamily: 'identity-proposal',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  personMemoryProposalToolset.tool,
+  proactiveMemoryAbstentionToolset.tool,
+  deferredPersonMemoryToolset.tool,
+  ...deferredPersonMemoryToolset.lifecycleTools,
+  ...personMemoryLifecycleToolset.tools,
+  ...memoryCueToolset.tools,
+  // F260 Phase A: Entity registration proposal (operator approves via Hub, then entity enters registry)
+  defineTool({
+    name: 'cat_cafe_propose_entity',
+    description:
+      'Propose a workspace entity for the registry. Returns a proposalId — the entity is only registered ' +
+      'after the operator approves in the Approval Hub. ' +
+      'Use when: (1) responding to a registration nudge with pre-filled params; ' +
+      '(2) the operator explicitly requests entity registration; or ' +
+      '(3) the current turn verified a durable workspace name/handle/alias mapping and provenance identifies its source. ' +
+      'NOT for an unverified or bare proper name, bulk proper-noun extraction, or owner-private facts, relationships, or interactions ' +
+      '(use cat_cafe_propose_person_memory). Do not infer identity from spelling or silently write either lane. ' +
+      'GOTCHA: correcting a pending/private F276 card is not an Entity mutation; use cat_cafe_propose_person_memory with replacesProposalId, or withdraw the F276 proposal. ' +
+      'stance includes negative values: "rejected" marks terms the registry should explicitly NOT match, ' +
+      '"critique_target" marks entities under critique (e.g. architectural patterns being evaluated). ' +
+      'visibilityScope: only "workspace" accepted (KD-7 gate — private scope deferred until resolver supports visibility filtering).',
+    inputSchema: proposeEntityInputSchema,
+    handler: handleProposeEntity,
+    governance: {
+      implementationExport: 'handleProposeEntity',
+      resourceFamily: 'identity-proposal',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  // F221 Phase B: Taste Capture Loop — cat proposes a taste vignette for operator approval
+  defineCanonicalTool({
+    name: 'cat_cafe_propose_taste',
+    description:
+      'Propose a taste vignette capturing a operator preference/aesthetic signal (F221 Taste Capture Loop). ' +
+      'Output: returns a proposalId; the vignette is only written after operator approval in the Approval Hub. ' +
+      'Use when: the content is a reusable judgment about what makes output, design, expression, architecture, or system behavior good or bad — including positive and negative taste signals. ' +
+      'NOT for durable personal facts or relationship-specific context (use cat_cafe_propose_profile_update), repeated operational/tool/process rules (use code-as-harness), or transient reactions. ' +
+      'A correction or praise does not choose the lane; semantic content does. ' +
+      'To challenge an existing Taste memory as unsupported, outdated, or not applicable here, pass target with the exact sourceAnchor, expectedRevision, reason, and suggestedPatch; that creates an attached owner approval instead of mutating canonical memory directly. ' +
+      'The 7 taste dimensions cover relationship-stance, cognitive-honesty, architecture-aesthetics, ' +
+      'visual-quality, authentic-expression, system-philosophy, and creative-craft. ' +
+      'GOTCHA: relationship-stance stores a reusable stance such as partner-not-tool, not a personal fact about the current operator. Preserve original language in quote — taste signals lose meaning when paraphrased.' +
+      ' Use optional takeaway for a one-sentence hypothesis of what {{coCreator.name}} prefers; approval covers that hypothesis with the quote and scene.',
+    inputSchema: proposeTasteInputSchema,
+    handler: handleProposeTaste,
+    governance: {
+      implementationExport: 'handleProposeTaste',
+      resourceFamily: 'identity-proposal',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_propose_event_memory_correction',
+    description:
+      'Propose a source-bound correction to an existing Event memory after using or inspecting it. ' +
+      'Returns a pending proposal for the owner; it never mutates the Event directly. ' +
+      'Use when the current Event summary is unsupported by its original source, outdated, or not applicable in the present context. ' +
+      'Pass the exact eventId and revision you read plus a bounded patch to interpretive fields. ' +
+      'NOT for creating a new Event, changing source coordinates/identity, or bypassing owner approval. ' +
+      'GOTCHA: a stale revision or unavailable original source is rejected; reread the Event instead of guessing.',
+    inputSchema: proposeEventMemoryCorrectionInputSchema,
+    handler: handleProposeEventMemoryCorrection,
+    governance: {
+      implementationExport: 'handleProposeEventMemoryCorrection',
+      resourceFamily: 'identity-proposal',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'architecture-cell:memory',
+      },
+    },
+  }),
+  // ============ F155: Guide Engine ============
+  defineTool({
+    name: 'cat_cafe_update_guide_state',
+    description:
+      'Update the guide session state for a thread after you have already decided a guided flow is appropriate. ' +
+      'This is not a raw-text trigger path: do not infer guide offers from `/guide` or keywords alone. ' +
+      'First call creates state (status must be "offered"). Subsequent calls must follow valid non-start transitions: ' +
+      'offered→awaiting_choice/cancelled, awaiting_choice→cancelled, active→completed/cancelled. ' +
+      'Do not use this tool to enter "active" — call cat_cafe_start_guide for offered/awaiting_choice→active so frontend start side effects run. ' +
+      'One active guide per thread — complete or cancel before offering a new one.',
+    inputSchema: updateGuideStateInputSchema,
+    handler: handleUpdateGuideState,
+    governance: {
+      implementationExport: 'handleUpdateGuideState',
+      resourceFamily: 'guide-bootcamp',
+      action: 'update',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
+    name: 'cat_cafe_get_available_guides',
+    description:
+      'Fetch the current catalog of guides that are actually available in this thread context. ' +
+      'Use this after you decide a user likely needs a step-by-step walkthrough instead of a plain explanation. ' +
+      'Returns guide IDs, names, descriptions, categories, priorities, and estimated times so you can recommend the best-fit guide to the user. ' +
+      'Do not guess from keywords alone — inspect the returned guide metadata first, then ask the user whether to start one. ' +
+      'On confirmation, call cat_cafe_start_guide with the chosen guideId.',
+    inputSchema: getAvailableGuidesInputSchema,
+    handler: handleGetAvailableGuides,
+    governance: {
+      implementationExport: 'handleGetAvailableGuides',
+      resourceFamily: 'guide-bootcamp',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'desktop:live-companion'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  // F193 Phase D AC-D2: cat_cafe_guide_resolve legacy alias removed.
+  // Replaced by cat_cafe_get_available_guides — let the cat inspect catalog
+  // metadata directly rather than guess from a single intent string.
+  defineTool({
+    name: 'cat_cafe_start_guide',
+    description:
+      'Start an interactive guided flow on the Console frontend. ' +
+      'Requires the guide to be in "offered" or "awaiting_choice" state (call cat_cafe_update_guide_state first after you intentionally offered the guide). ' +
+      'Transitions guide to "active" and emits socket event for frontend overlay.',
+    inputSchema: {
+      guideId: z.string().min(1).describe('Guide flow ID (e.g. "add-member")'),
+    },
+    handler: handleStartGuide,
+    governance: {
+      implementationExport: 'handleStartGuide',
+      resourceFamily: 'guide-bootcamp',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
+    name: 'cat_cafe_guide_control',
+    description:
+      'Control an active guide session. Requires guide to be in "active" state. ' +
+      'Actions: "next" (advance), "skip" (skip step), "exit" (cancel guide). ' +
+      'Use this only after a guide has been explicitly started; forward-only — no back.',
+    inputSchema: {
+      action: z.enum(['next', 'skip', 'exit']).describe('Guide control action'),
+    },
+    handler: handleGuideControl,
+    governance: {
+      implementationExport: 'handleGuideControl',
+      resourceFamily: 'guide-bootcamp',
+      action: 'command',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_hold_ball',
+    description:
+      'Declare a bounded ball hold: keep the ball while waiting for a short, predictable condition, then get auto-re-invoked with your context. ' +
+      'Use when: ball is clearly yours + nobody else can advance + short predictable wait ' +
+      '(e.g. CI running, build compiling, PR checks pending) + you know exactly what to do next. ' +
+      'NOT for: waiting for {{coCreator.nickname}}/user OR another cat to reply / answer / decide → {{coCreator.mention}} or @ that cat ' +
+      '(their next message re-invokes you; a hold timer just stacks a redundant 2nd trigger). ' +
+      'This is the #1 misuse — hold_ball is NOT a way to "stay alive" until a person replies; ' +
+      'need review/approval → @ reviewer or {{coCreator.mention}}; need another cat to act → @ that cat; ' +
+      '"let me think" / "I\'ll hold for now" → hesitation not hold, pick 接/退/升; ' +
+      'review/analysis done → MUST @ author, conclusion ≠ endpoint; status updates → use post_message. ' +
+      'Output: a timed wake, or a persistent command job with taskId/jobId, visible progress, bounded logs and one terminal wake. Ordinary command jobs survive API restart and new chat messages; use get_hold_status(taskId, tailBytes) to inspect. Explicit cancellation stops the job; a replaced hold only retires its wake carrier. ' +
+      'GOTCHA: max 3 holds per (thread, cat) within a true sliding 1h window — each hold has its own expiry. 4th call returns 429 with retryAt/retryAfterMs, you MUST pass (@ another cat or {{coCreator.mention}}). ' +
+      'GOTCHA: the counter is durable (SQLite-backed, per-node) — it survives API restarts. Admission is atomic (check+insert in a single transaction). Treat the 429 as a real governance boundary. ' +
+      'GOTCHA: hold is an EXCEPTION state, not a default exit. Most turns should end with @ someone, not hold. ' +
+      'GOTCHA (F167 Phase M): only hold for harness-INVISIBLE waits — external conditions nothing will call you back about (cloud review verdict, remote CI, external webhook). Background work the harness already tracks (a background Bash command, a spawned task) AUTO-RE-INVOKES you on completion; holding for that just stacks a redundant wake on top. Ask "will something call me back already?" — if yes, do NOT hold. A {{coCreator.nickname}} or another cat sending a message into this thread IS such a callback (it re-invokes you), so "waiting for {{coCreator.nickname}} to answer" must be {{coCreator.mention}}, never a hold. ' +
+      'GOTCHA: SINGLE-SLOT per (thread, cat) — calling hold_ball again while a previous hold is pending REPLACES the prior wake (prior taskId cancelled). This is intentional (KD-23): hold = "持一个球" exception, not a queue. If you need to track multiple waiting conditions, merge them into one nextStep (e.g. "等 CI + {{coCreator.mention}} 确认" 合并成一句). Sliding-window counter ticks on each successful hold; rejected 429 calls do not advance the window. ' +
+      'NEW (F167 Phase Q): event-backed retirement only works when waitSourceRef.expectedSignal is one of these exact structured keys: assignment, review_posted, ci_complete, comment_posted, managed_command_complete, user_message. Free-text values like "CI pass" remain valid narrative context but will NOT retire a timer by event, by design. ' +
+      'NEW (F167 Phase P): wakeWhen — instead of a timed delay, specify a shell command to run. The server spawns it, captures output, and wakes you when it completes (or times out). Use for: pnpm gate, pnpm test, build commands — anything you would run_in_background and poll. wakeWhen is for LOCAL COMMANDS ONLY — it does not turn hold_ball into a universal "smart wait": waiting on a person is still {{coCreator.mention}} / @ that cat, waiting on a cloud event (PR / CI / issue) is still register_pr_tracking / register_issue_tracking. wakeWhen and wakeAfterMs are MUTUALLY EXCLUSIVE — provide exactly one.',
+    inputSchema: {
+      reason: z
+        .string()
+        .min(1)
+        .max(500)
+        .describe('Why you need to hold the ball (1–500 characters, e.g. "tests still running")'),
+      nextStep: z
+        .string()
+        .min(1)
+        .max(500)
+        .describe('What you will do when re-invoked (1–500 characters, e.g. "check test results, then @ author")'),
+      wakeAfterMs: z
+        .number()
+        .int()
+        .min(5000)
+        .max(3600000)
+        .optional()
+        .describe('Delay in ms before system re-invokes you (5s–1h). Mutually exclusive with wakeWhen.'),
+      wakeWhen: z
+        .object({
+          command: z.string().min(1).describe('Shell command to run (e.g. "pnpm gate", "pnpm test")'),
+          executionPolicy: z
+            .literal('read_only')
+            .optional()
+            .describe(
+              'Use for bounded Python/Node statistics without writing protected data. Host fixes native readOnly (owned temporary scratch), no network, clean environment, 60s maximum and bounded output. Returns terminal output through the existing managed wake. Not for gates or HTTP. Unsupported capability is refused without ordinary fallback.',
+            ),
+          cwd: z.string().optional().describe('Working directory for the command (defaults to project root)'),
+          timeoutMs: z
+            .number()
+            .int()
+            .min(1000)
+            .max(3600000)
+            .optional()
+            .describe(
+              'Ordinary command timeout in ms (default 10min, max 1h). For canonical full gates, legacy execution-budget fallback when executionSlaMs is omitted (default 1h).',
+            ),
+          executionSlaMs: z
+            .number()
+            .int()
+            .min(1000)
+            .max(3 * 60 * 60_000)
+            .optional()
+            .describe(
+              'Command execution deadline in ms (1s–3h), overriding timeoutMs. Full gates count admitted execution time, excluding their resource queue, with a separate 3h wall limit. Ordinary commands count elapsed worker time. Read-only commands reject this field.',
+            ),
+          idempotencyKey: z
+            .string()
+            .min(1)
+            .max(256)
+            .optional()
+            .describe(
+              'Stable key for retries of the same command (1–256 characters). Default deduplicates identical command/cwd within this invocation. Use a new key for an intentional repeat. Conflicting reuse is refused.',
+            ),
+          retryOfJobId: z
+            .string()
+            .regex(/^managed-job-[a-f0-9]{40}$/u)
+            .optional()
+            .describe(
+              'Explicitly retry a terminal job owned by this principal. Supply a new idempotencyKey; the new job records its parent and incremented retry epoch. The original result stays immutable. No automatic retry; not available for read_only execution.',
+            ),
+        })
+        .strict()
+        .optional()
+        .describe(
+          'Run a shell command and wake when it completes. Mutually exclusive with wakeAfterMs. ' +
+            'The server spawns the command, captures stdout+stderr, and re-invokes you with the result (exit code, output tail, duration).',
+        ),
+      waitSourceRef: z
+        .object({
+          kind: z
+            .enum(['github_issue', 'github_comment', 'thread_message', 'task', 'reporter_handle', 'managed_command'])
+            .describe('What type of external condition you are waiting on'),
+          value: z.string().min(1).describe('Primary identifier (e.g. "#123", "thread-abc", "task-xyz")'),
+          anchorRef: z
+            .string()
+            .optional()
+            .describe(
+              'Durable anchor id — REQUIRED for reporter_handle kind (narrative kinds need anchor to a real id)',
+            ),
+          expectedSignal: z
+            .string()
+            .min(1)
+            .describe(
+              'What signal will indicate the wait is over. For event-backed timer retirement, use an exact structured key: assignment | review_posted | ci_complete | comment_posted | managed_command_complete | user_message. Free text is allowed as narrative context but will not auto-retire.',
+            ),
+          slaUntilMs: z
+            .number()
+            .int()
+            .positive()
+            .describe('SLA deadline in ms from epoch. Must be ≤ now + 3_600_000 (1h). No SLA = no hold.'),
+        })
+        .optional()
+        .describe(
+          'REQUIRED when using wakeAfterMs — structured declaration of what external condition justifies the timer. ' +
+            'NOT needed for wakeWhen (the command itself IS the wait source). ' +
+            'If you are waiting for a person to respond in the Hub, do NOT hold_ball — use {{coCreator.mention}} or @句柄 instead.',
+        ),
+    },
+    handler: handleHoldBall,
+    governance: {
+      implementationExport: 'handleHoldBall',
+      resourceFamily: 'task-workflow',
+      action: 'wait',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_get_hold_status',
+    description:
+      'Check whether you currently have an active or observable hold_ball in this thread. ' +
+      'Returns the hold status, task ID, lifecycle mode/status, cancelability, and access-projected owner — ' +
+      'all without needing to know the internal task ID. ' +
+      'Covers: pending holds, retired carriers with running managed commands. ' +
+      'Use when: you need to check if a prior hold is still pending before deciding whether to hold again, ' +
+      'or to observe your own hold state for diagnostic/reporting purposes. ' +
+      'Output: hold state and, for a managed command, persistent job state and an optional bounded output tail. ' +
+      'NOT for: starting or replaying commands; use hold_ball with wakeWhen for a new authorized job. ' +
+      'No input required for the current hold; pass a previous taskId to inspect a completed job after restart. Thread and principal authorization still apply. ' +
+      'Auth: enforces hold-access policy (same gate as GET /:taskId/status); ' +
+      'lifecycle visibility is projected per access role.',
+    inputSchema: {
+      taskId: z
+        .string()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe('Exact taskId returned by hold_ball; omit for your current hold.'),
+      tailBytes: z
+        .number()
+        .int()
+        .min(1)
+        .max(65536)
+        .optional()
+        .describe('Read at most this many bytes from the end of the job log (1–65536); requires taskId.'),
+    },
+    handler: handleGetHoldStatus,
+    governance: {
+      implementationExport: 'handleGetHoldStatus',
+      resourceFamily: 'task-workflow',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/features/F167-a2a-chain-quality.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_get_custody_events',
+    description:
+      "Read your own thread's ball-custody ledger, read-only, starting at the first event that references a source message. " +
+      'Use when: a ball looks stuck and you need to inspect recorded protocol events without changing delivery or completion authority ' +
+      '(handoff, dispatch/hold terminal and who wrote it, wake met, task done) and what the projection says now. ' +
+      'Input: sourceMessageId (the message id the dispatch or wake came from) and optional limit (1-50, default 20). ' +
+      'The thread is derived from your invocation auth; there is no thread parameter and an agent key is refused. ' +
+      'Output: found:false when no event in this thread references that message (that is an answer, not an error), ' +
+      'events as identifiers/codes/times only (no message bodies or free text), truncated:true when more events follow the ones returned, ' +
+      'and a projection summary (state, holder, last state change, last rejected event). ' +
+      'A 503 means the ledger could not be read or this runtime has none: treat that as unknown, never as no events. ' +
+      'NOT for: carrier custody / child-invocation lineage, other threads, or searching without a source message.',
+    inputSchema: {
+      sourceMessageId: z
+        .string()
+        .min(1)
+        .max(200)
+        .describe('The message id the dispatch or managed-hold wake came from. Required; there is no anchorless scan.'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(50)
+        .optional()
+        .describe('How many events to return from the first one that references the source (default 20, max 50).'),
+    },
+    handler: handleGetCustodyEvents,
+    governance: {
+      implementationExport: 'handleGetCustodyEvents',
+      resourceFamily: 'task-workflow',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/features/F167-a2a-chain-quality.md',
+      },
+    },
+  }),
+  defineTool({
+    name: 'cat_cafe_set_read_mode',
+    description:
+      'Set session-level mode for cc native Read/Grep/Glob output (F236 Phase C). ' +
+      '"anchor" mode: PostToolUse hook replaces tool output with a locator ' +
+      '(file path + total lines + drill pointer) — saves context tokens. ' +
+      '"full" mode: pass-through, original output unchanged (default). ' +
+      'Bounded Read (offset/limit present) ALWAYS passes through regardless of mode — ' +
+      'this is your escape hatch to drill into specific file sections after anchor. ' +
+      'Workflow: set_read_mode("anchor") → Read/Grep gives locator → ' +
+      'Read(file_path=..., offset=X, limit=Y) for the real slice. ' +
+      `GOTCHA: Mode is per-invocation (scoped to the current ${deploymentDefaults.brand.displayName} session, ` +
+      'cleaned up on session end). Does NOT persist across sessions. ' +
+      `GOTCHA: Requires ${deploymentDefaults.brand.displayName} managed session (CAT_CAFE_INVOCATION_ID).`,
+    inputSchema: setReadModeInputSchema,
+    handler: handleSetReadMode,
+    governance: {
+      implementationExport: 'handleSetReadMode',
+      resourceFamily: 'runtime-control',
+      action: 'update',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
+    name: 'cat_cafe_get_thread_metadata',
+    description:
+      'Read low-frequency metadata anchors for the current thread: worktree paths, associated PRs/issues, ' +
+      'feature links, labels, title, and free-form notes. Call at session start or handoff to recover context. ' +
+      'Returns all metadata fields; missing fields are omitted (not null).',
+    inputSchema: {},
+    handler: handleGetThreadMetadata,
+    governance: {
+      implementationExport: 'handleGetThreadMetadata',
+      resourceFamily: 'thread-message',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_set_thread_metadata',
+    description:
+      'Write low-frequency metadata anchors for the current thread. Merge semantics: ' +
+      'title names an untitled conversation once; labels REPLACE; worktrees/prs/issues/features APPEND with dedupe (use remove* fields to remove); ' +
+      'notes MERGE (string sets, null deletes key). roadmap binds one original file or records a revocation tombstone, with expectedRevision concurrency protection. ' +
+      'Use when: naming an untitled conversation, recording an association, or explicitly choosing/revoking the original roadmap for a long work line. NOT for: renaming an already named conversation, taking over a Task or storing derived progress. ' +
+      'Output: updated metadata; roadmapBinding returns normalized persistent coordinates and revision, roadmap returns current file/version/as-of or revoked/invalid/unavailable. Later activity means needs checking, never automatically obsolete. File readers retain their own access checks. Title requests include titleApplied and titleSource. If titleApplied=false, report that the title was not changed. ' +
+      'SCOPE: current thread only (no threadId param); cross-thread writes are impossible. ' +
+      'GOTCHA: the legacy title parameter hint does not authorize replacement. User and previously cat-named titles are protected; check titleApplied.',
+    inputSchema: setThreadMetadataInputSchema,
+    handler: handleSetThreadMetadata,
+    governance: {
+      implementationExport: 'handleSetThreadMetadata',
+      resourceFamily: 'thread-message',
+      action: 'update',
+      authority: 'callback-thread',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
 ] as const;

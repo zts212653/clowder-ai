@@ -6,6 +6,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { resolveSharedInvocationContext } from '../tools/invocation-auth.js';
 import { findDeepestExistingPath, isWithinPath, resolveAbsolutePath, tryRealpathSync } from './path-utils.js';
 
 /**
@@ -26,6 +27,15 @@ const CAT_CAFE_SUBDIRS = ['chat', 'memory', 'workspace', 'assets', '.state'] as 
  * 从环境变量读取配置，若未设置则使用默认值
  */
 export function getDefaultConfig(): PathConfig {
+  const shared = resolveSharedInvocationContext();
+  if (shared)
+    return {
+      catCafeDir: shared.dataDir,
+      allowedDirs:
+        shared.desktopMode === 'live-companion'
+          ? [...shared.allowedWorkspaceDirs]
+          : [shared.dataDir, ...shared.allowedWorkspaceDirs],
+    };
   const homeDir = os.homedir();
   const defaultCatCafeDir = path.join(homeDir, '.cat-cafe');
 
@@ -40,8 +50,10 @@ export function getDefaultConfig(): PathConfig {
         .filter(Boolean)
     : [];
 
-  // 默认允许 cat-cafe 目录和额外配置的目录
-  const allowedDirs = [catCafeDir, ...additionalDirs];
+  // Live's installed role is not permission to read private runtime/config data.
+  // Its Host supplies approved document roots explicitly; ordinary callers retain legacy scope.
+  const allowedDirs =
+    process.env.CAT_CAFE_DESKTOP_MODE?.trim() === 'live-companion' ? additionalDirs : [catCafeDir, ...additionalDirs];
 
   return {
     catCafeDir,
@@ -62,12 +74,6 @@ export function isPathAllowed(targetPath: string, config?: PathConfig): boolean 
   const resolvedPath = resolveAbsolutePath(targetPath);
 
   const resolvedAllowedDirs = allowedDirs.map(resolveAbsolutePath);
-
-  // Quick reject using pure path prefix check
-  const prefixAllowed = resolvedAllowedDirs.some((allowedDir) => isWithinPath(resolvedPath, allowedDir));
-  if (!prefixAllowed) {
-    return false;
-  }
 
   const realAllowedDirs = resolvedAllowedDirs.map((allowedDir) => tryRealpathSync(allowedDir) ?? allowedDir);
 

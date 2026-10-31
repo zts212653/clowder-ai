@@ -1,41 +1,46 @@
 ---
 feature_ids: [F061]
-related_features: [F050, F032, F041, F043, F045, F060]
+tips_exempt: "The September 29 change records F325 ownership and the legacy execution retirement plan; it neither activates a new AGY carrier nor removes existing history or shared consumers."
+related_features: [F050, F032, F041, F043, F045, F060, F172, F174, F178, F325]
 topics: [antigravity, bengal-cat, cdp, external-agent, image-generation, evidence-chain, multi-model]
-doc_kind: phase-1-done
+doc_kind: spec
 created: 2026-03-04
 ---
 
-# F061: Antigravity 接入 — 孟加拉猫（混血家族）
+# F061: Antigravity 接入 — Bengal（混血家族）
 
-> **Status**: phase-1-done | **Owner**: Ragdoll Opus 4.6
-> **Created**: 2026-03-04
+> **Status**: done | **Owner**: Ragdoll Opus 4.6（Phase 2a/2b） · Ragdoll Opus 4.7（Phase 2c · 猫猫工具平权 + Bug-F UX + binary/workspace 分离）
+
+> **Created**: 2026-03-04 | **Completed**: 2026-04-26
+>
+> **Evolved to**: [F178](./F178-persistent-mcp-agent-key-auth.md) (Bug-H persistent MCP write-path auth follow-up)
+> **R2 closed via**: [F172 Phase C](./F172-generated-image-publication.md) (Antigravity 图片产物接 publication contract)
 
 ---
 
 ## Why
 
-Cat Cafe 现有三大纯血家族（Ragdoll/Maine Coon/Siamese）各自对应一个 CLI agent。但 Google Antigravity 是一个独特的存在：
+Clowder AI 现有三大纯血家族（Ragdoll/Maine Coon/Siamese）各自对应一个 CLI agent。但 Google Antigravity 是一个独特的存在：
 
 1. **多模型 IDE agent** — 可切换 Gemini 3.1 Pro、Gemini 3 Flash、Claude Sonnet 4.6、Claude Opus 4.6
-2. **图片生成能力** — Gemini CLI 没有，Antigravity 有（team lead一直想要的能力）
+2. **图片生成能力** — Gemini CLI 没有，Antigravity 有（operator一直想要的能力）
 3. **证据链能力** — 内置截图、录视频，与 F045 NDJSON Observability 方向高度契合
 4. **Browser Agent** — 内置 CDP 驱动的浏览器自动化（通过 Jetski 子代理）
 
 Antigravity 不是任何现有家族的替代品——它是**混血**的：底层可跑多家模型，agent 能力由 Antigravity 自身编排，不受单一模型限制。
 
-team lead定性：**孟加拉猫**（Bengal）——最著名的混血猫种（亚洲豹猫 x 家猫），花纹华丽，精力旺盛。
+operator定性：**Bengal**（Bengal）——最著名的混血猫种（亚洲豹猫 x 家猫），花纹华丽，精力旺盛。
 
 ---
 
 ## What
 
-通过 CDP（Chrome DevTools Protocol）桥接方案，将 Antigravity 作为独立家族（孟加拉猫）接入 Cat Cafe。
+通过 CDP（Chrome DevTools Protocol）桥接方案，将 Antigravity 作为独立家族（Bengal）接入 Clowder AI。
 
 ### 核心架构
 
 ```
-Cat Cafe AgentRouter
+Clowder AI AgentRouter
   → AntigravityAgentService (新 provider)
     → HTTP Bridge Server (CDP 桥)
       → CDP (port 9000)
@@ -44,7 +49,7 @@ Cat Cafe AgentRouter
 
 ### 接入方式对比
 
-| 维度 | DARE/狸花猫 (F050 Phase 1) | Antigravity/孟加拉猫 (F061) |
+| 维度 | DARE/狸花猫 (F050 Phase 1) | Antigravity/Bengal (F061) |
 |------|---------------------------|------------------------------|
 | 通信层 | CLI spawn + stdout NDJSON | CDP 桥 + HTTP API |
 | 事件流 | headless envelope v1 | DOM snapshot + WebSocket |
@@ -71,42 +76,151 @@ Cat Cafe AgentRouter
 - [x] AC-2: 桥服务能通过 CDP 注入消息并获取回复 DOM
 - [x] AC-3: 回复内容可解析为纯文本/markdown（从 HTML DOM）
 
-### Phase 1: Cat Cafe L1 接入 ✅ COMPLETE
-- [x] AC-4: `cat-config.json` 可注册孟加拉猫（provider: `antigravity`）— CatProvider 类型 + Zod enum + switch case
+### Phase 1: Clowder AI L1 接入 ✅ COMPLETE (CDP)
+- [x] AC-4: `cat-config.json` 可注册Bengal（provider: `antigravity`）— CatProvider 类型 + Zod enum + switch case
 - [x] AC-5: `AntigravityAgentService` 实现 `AgentService` 接口 — mock CDP 注入 + 6 tests
 - [x] AC-6: AgentRouter 可路由消息到 Antigravity 并获取流式回复 — registration test 验证通过
-- [ ] AC-7: 图片生成结果可在 Hub 前端展示（F060 rich block 联动）
+- [x] AC-7: 图片生成结果可在 Hub 前端展示（F060 rich block 联动）— **F172 Phase C 实现**（`scanAndPublishAntigravityBrainImages` 接 publication contract → `/uploads/...` + `media_gallery`）
 
-### Phase 2: 证据链 + 高级能力
-- [ ] AC-8: Antigravity 截图/录屏可作为证据附件回传
-- [ ] AC-9: 多模型切换可通过 Cat Cafe 配置控制
+### Phase 1.5: ConnectRPC Bridge 架构替换 ✅ COMPLETE
+- [x] AC-B1: 用 ConnectRPC/gRPC 协议替换 CDP DOM hack（LanguageServerService RPC）
+- [x] AC-B2: Bridge-owned writeback（方案 D）：Bridge 读回响应并写入 thread，Antigravity MCP 只读
+- [x] AC-B3: CAT_CAFE_READONLY 白名单（11 tools）过滤所有写操作工具
+- [x] AC-B4: cat-config 移除 antigravity variants 的 `cli` 块（bridge 不需要）
+- [x] AC-B5: 删除全部 CDP 代码（AntigravityCdpClient、cdp-dom-scripts、cdp-target-selection）
+- [x] AC-B6: 20 tests 覆盖（event-transformer 7 + agent-service 9 + registration 1 + whitelist 3）
+
+### Architecture Review — Ragdoll × Maine Coon联合诊断 (2026-04-12)
+
+#### 当日修复（3 commits）
+
+| Bug | 根因 | 修复 | Commit |
+|-----|------|------|--------|
+| @antig-opus 无回复 | LS proto 期望 string enum (`MODEL_PLACEHOLDER_M26`)，numeric ID 被静默丢弃 → plannerConfig 空 → planner 不启动 | MODEL_ID_MAP 改为 string enum | `de2a2b84f` |
+| 第二条消息挂起 | pollForResponse 用 `numTotalSteps > 1` 判断完成，复用 cascade 时旧 steps 满足条件 | 引入 `stepsBefore` baseline，每轮 slice 新 steps | `98eeaaaa0` |
+| 固定超时不够 | 90s 固定 deadline，工具链长的 cascade 必超时 | F149 活动式空闲超时：每个新 step 重置 60s idle deadline | `eba94450c` |
+
+#### Gap Analysis（讨论后定稿 11 项，含operator 2026-04-12 21:52 追加 G0）
+
+| # | Gap | 优先级 | 说明 |
+|---|-----|--------|------|
+| **G0** | **无 Resume / 上下文连续性** | **P-1 最高** | Bengal每次被 @ 都新建 cascade，丢失所有对话历史。根因：`sessionMap`（threadId → cascadeId）是内存 Map，runtime 重启即丢失 → 每次 `startCascade()` 新建。Antigravity cascade 自身维护完整对话历史，**正确做法是 resume 已有 cascade（类比 Claude Code 用 session ID resume）而非重建上下文**。修复：持久化 threadId → cascadeId 映射（Redis/文件），`getOrCreateSession` 优先复用已有 cascade |
+| G1 | Step 类型未编目 | **P0 前置** | transformer 只处理 PLANNER_RESPONSE / ERROR_MESSAGE 两种。**v1 scope**：采 4 类真实 trajectory（纯文本/search_evidence/图片生成/长工具链），分 6 桶（terminal_output / partial_output / thinking / tool_pending / tool_error / unknown_activity）。unknown_activity 允许存在，只要求被记录、被计数、能回放 |
+| G2 | 批量交付 → 流式交付 | P1 | pollForResponse 等 IDLE 后一次返回所有 steps。长 cascade 延迟用户反馈。应改为 async generator 逐步 yield |
+| G3 | MCP 工具错误静默吞没 | P1 | transformer 忽略 MCP_TOOL_CALL 类 step，工具失败对用户不可见 |
+| G4 | 无活跃度信号 | P1 | cascade 执行期间用户无进度提示。中间 step 应映射为 system_info（"在查知识库"、"在等工具返回"） |
+| G5 | MODEL_ID_MAP 硬编码 | P2 | 4 模型 string enum 写死。应从 GetUserStatus.cascadeModelConfigData 动态发现 |
+| G6 | 无连接自愈 | P2 | LS 重启 → bridge 永久失效。需指数退避重连 + session 恢复 |
+| G7 | AbortSignal 不穿透 poll | P2 | signal 仅在 send 前后检查，polling 期间无法取消 |
+| G8a | DeliveryCursor | **P1** | `stepsBefore` 已是隐形 cursor，G2 async generator 不配正式 cursor → duplicate/missing events 立刻复现。定义 `baselineStepCount / lastDeliveredStepCount / terminalSeen / lastActivityAt` |
+| G8b | Durable TurnLedger | P3 | 跨重启持久化、补偿恢复、审计回放。G8a 上线稳定后再做 |
+| G9 | 无 LS 选择策略 | P3 | 双 LS 进程（workspace / non-workspace），当前取首个发现的 |
+| **G10** | **Model Capacity Resilience** | **P1** | IDE 天然低并发+人工节奏+可能有内建重试，bridge 三件事都没有。operator @ Bengal连续 high traffic 但 IDE 直接用正常。**P1-1 ✅**: `model_capacity` error classification（PR #1181）。**P1-2 ❌ rejected**: same-cascade retry 无幂等保证，Maine Coon review 退回（需 LS idempotency 证据或新 cascade 路径）。P2: 观测增强。P2: per-cat 并发闸门 |
+
+> **讨论记录**：G1 scope 和 G8 拆分由Maine Coon(GPT-5.4) 2026-04-12 review 提出，Ragdoll同意采纳。
+> G1 原版"采集全量 step type"过宽，收窄为 v1 分类框架。
+> G8 原版放 P3 过晚——DeliveryCursor 是 G2 流式交付的地基，必须同波上线。
+> G10 由Maine Coon(GPT-5.4) 2026-04-15 诊断提出，Ragdoll同意优先级调整（并发闸门 P1→P2，先做分类+安全重试）。
+> 约束：不盲重发 sendMessage（无 idempotency 证明），只在 fatal+无副作用时重试。
+
+#### 演进依赖图
+
+```
+G0 Resume（最高优先）
+  └→ 持久化 threadId → cascadeId 映射，复用已有 cascade session
+G1 Step taxonomy v1（前置）
+  ├→ G2 流式交付 + G8a DeliveryCursor（必须同波）
+  ├→ G3 工具错误可见化
+  └→ G4 活跃度信号
+G5 动态模型发现
+G6 连接自愈
+G7 AbortSignal 穿透
+G8b Durable TurnLedger ← G8a 稳定后
+G9 LS 选择策略
+G10 Model Capacity Resilience ← G1 分类框架 + Bug-7 fatal dedup 基础上
+```
+
+### Phase 2: Bridge 演进 + 证据链 + 高级能力
+
+#### Phase 2a: Bridge 健壮性（架构 Gap 驱动） ✅ COMPLETE (2026-04-13, PR #1137)
+- [x] AC-C0: 持久化 threadId → cascadeId 映射，`getOrCreateSession` 优先 resume 已有 cascade 而非新建（G0）
+- [x] AC-C1: v1 Step taxonomy — 4 类 trajectory 采样 → 6 桶分类框架 + unknown_activity 观测闭环（记录、计数、可回放）（G1）
+- [x] AC-C2: pollForResponse 改为 async generator `pollForSteps`，新 step 立即 yield（G2）
+- [x] AC-C2b: DeliveryCursor 正式化 — baseline/delivered/terminal/lastActivity 四字段（G8a，与 G2 同波）
+- [x] AC-C3: transformer 处理 MCP_TOOL 类 step，工具失败可见（G3）
+- [x] AC-C4: 中间 step 映射为 system_info 活跃度信号（G4）
+- [x] AC-C5: 连接时从 GetUserStatus 动态发现 model → enum 映射（G5）
+- [x] AC-C6: LS 断连后指数退避重连（G6）
+- [x] AC-C7: poll 循环内检查 AbortSignal（G7）
+
+#### Phase 2b: 证据链 + 高级能力 + 长期演进
+- [x] AC-8: Antigravity 截图/录屏可作为证据附件回传 — **复用现有 rich block 体系**（`cat_cafe_create_rich_block` 发 `media_gallery` / `image`，与其他猫一致；operator 2026-04-26 拍板"和你们一样上传就行"）
+- [ ] AC-9: 多模型切换可通过 Clowder AI 配置控制（由 AC-C5 动态发现支撑）
 - [ ] AC-10: 与现有三猫回归测试共跑通过
+- [ ] AC-C8: Durable TurnLedger — 跨重启持久化 turn 状态 + 补偿恢复 + 审计回放（G8b，G8a 稳定后）
+
+#### Phase 2c: 猫猫工具平权（Tool Parity） — 原生工具执行 ✅ v1 完成 (2026-04-17) + v2 实测证伪 (2026-04-23, close as no-op)
+
+**价值观基底**（feedback_agent_tool_parity，2026-04-16 operator纠偏）：
+> 「你都是全工具为什么 你要限制其他猫猫！」
+
+@opus 在 Claude Code 里有 Bash/Edit/Write/Read/Grep 全套 + MCP。@antig-opus 接入 Clowder AI 后如果只能用 MCP，是 provider 单方面剥夺了她的原生能力。设计 Bridge/Adapter 的**第一性问题**是：**如何让这只猫在 Clowder AI 里和在她原生宿主里能力对等**。不是"如何限制她"。
+
+**根因发现**（2026-04-16 夜，opus-47 诊断）：Bridge 缺失原生工具执行器 → cascade 发出 `CORTEX_STEP_TYPE_RUN_COMMAND` step 后永远卡在 `WAITING`，因为没有任何代码把 tool result 回推给 LS。@antig-opus 每次被 @ 做需要命令行的任务（例如 `git log --oneline -5`）都会在原生工具首次调用处冻死，触发 60s idle 超时。详见 Known Bugs / Bug-8。
+
+**三阶段结构**（R → D → I）：
+
+##### Phase 2c-R: 研究 — Tool-Result 回推协议逆向
+
+- [x] AC-2cR1: 枚举 `exa.language_server_pb.LanguageServerService` 所有可用 RPC 方法（probe LS 二进制或 proto），确认除已知 7 个方法外是否存在 `SendToolResult` / `SubmitToolResult` / `HandleCascadeToolResult` 等候选 — 实测 189 个 RPC 方法，无 SendToolResult 类候选
+- [x] AC-2cR2: 验证 `HandleCascadeUserInteraction` 的 `interaction` payload schema — 是否支持 `{ toolResult: {...} }` 形状；通过构造最小 payload 对实际 LS 发起探测 — 结果：LS 不接受 toolResult 形状
+- [x] AC-2cR3: 确认哪个方法能让 `CORTEX_STEP_TYPE_RUN_COMMAND` 从 `WAITING` 推进到 `DONE/COMPLETED` 并让 cascade 继续生成下一 step — 方案：`CancelCascadeSteps` 结束 WAITING step + `sendMessage` 注入合成 user message（Bridge-owned writeback）
+- [x] AC-2cR4: 采集 RUN_COMMAND 之外的工具步 step shape — **实测证伪前提**。2026-04-21 @antig-opus 真实环境验证 `grep_search` / `view_file` / `list_dir` 全部 LS 内部执行无 WAITING step；2026-04-23 @antig-opus 新 cascade 补测 `write_to_file` / `replace_file_content` (edit_file) / `multi_replace_file_content` 同样全部 LS 内部搞定、无 WAITING。唯一在 trajectory 出现的文件类 step 是 `CORTEX_STEP_TYPE_VIEW_FILE (status=DONE)` —— 已是完成态，不需要 Bridge 代执行。Antigravity LS 进程有完整 workspace 文件系统权限，文件读/写/改/搜全自闭环，v2 扩展执行器的**前提不成立**
+- [x] AC-2cR5: 输出《F061 Phase 2c-R research note》，包含 step shape 目录、回推 RPC 方法、最小可复现 probe 脚本 — 见 commit 9ba57d86c `docs(F061): Phase 2c-R probe results`
+
+##### Phase 2c-D: 设计 — 执行器架构 + 工具集边界
+
+- [x] AC-2cD1: 定义 `AntigravityToolExecutor` 接口 — `canHandle(step) → boolean`、`execute(step) → Promise<ToolResult>`、`pushResult(bridge, cascadeId, stepId, result) → Promise<void>` — 落地：`executors/AntigravityToolExecutor.ts` + `ExecutorRegistry`
+- [x] AC-2cD2: 工具集 scope 决策 — v1 至少覆盖 `run_command`；v2 扩展到 `read_file` / `write_file` / `edit_file` / `grep_search` / `file_glob`（与 @opus 在 Claude Code 的工具面对齐）— v1 scope 落地为 `RunCommandExecutor`；v2 follow-up（AC-2cI6）
+- [x] AC-2cD3: 安全边界定义 — 审计日志（记录每个 executed command + cwd + duration + exitCode），**不做限制**（平权原则）；Redis production Redis (sacred)仍不可触碰，但那是运行时物理边界，不是 cat-level 限制 — 落地：`AuditLogger` 写 JSONL 到 `data/antigravity-audit/`
+- [x] AC-2cD4: 环境变量开关 `ANTIGRAVITY_NATIVE_EXECUTOR=1` 用于 rollout 期的 kill switch（Maine Coon review 惯例）；开关默认开（平权原则要求默认全开）— 落地：`ANTIGRAVITY_NATIVE_EXECUTOR=0` 禁用，其他值（含未设置）默认启用
+- [x] AC-2cD5: Error path — 工具执行失败如何回推（`ToolResult.success=false + error string`）；LS 对失败结果的响应行为需在 2cR 阶段观测 — 落地：`ExecutorResult.status = 'success' | 'error' | 'refused'`，`formatToolResult` 分支渲染
+
+##### Phase 2c-I: 实现 — 执行器 + 端到端测试
+
+- [x] AC-2cI1: `NativeToolExecutor` 骨架 + `RunCommandExecutor`（`child_process.spawn` + stdout/stderr 捕获 + exitCode + duration）— commit 642d92bd0；走 LS `RunCommand` RPC 而非 `child_process.spawn`（复用 Antigravity 已有 safe-harness）
+- [x] AC-2cI2: Bridge 新增 `pushToolResult(cascadeId, stepId, result)` 方法（调用 2cR3 确定的 RPC）— commit 34cd61ef5；Bridge-owned writeback: `CancelCascadeSteps` + `sendMessage` 注入合成 user message
+- [x] AC-2cI3: `AntigravityAgentService` 在 pollForSteps batch 处理中识别 `CORTEX_STEP_TYPE_RUN_COMMAND` + `WAITING` → 调 executor → 调 pushToolResult；确保 executor 执行期间不触发 idle stall — commit d88e29e84；去重通过 `handledToolCallIds` per-invoke set
+- [x] AC-2cI4: 审计日志入口 — 所有 native 工具调用落 `antigravity-native-tool-audit` logger，字段：catId、cascadeId、stepId、toolName、cwd、commandLine、exitCode、duration、stdoutBytes、stderrBytes — commit c700fbe47；`AuditLogger` 写 JSONL
+- [ ] AC-2cI5: 端到端复现测试 — 重现今夜 stuck `grep 'z.enum' packages/mcp-server/src/tools/signals-tools.ts`，验证 RUN_COMMAND → DONE → planner 续发下一 step — follow-up（单测 147/147 绿但未跑真实 LS 端到端）
+- [x] AC-2cI6: v2 扩展执行器 — **no-op close**：AC-2cR4 实测证伪了 v2 scope 的前提。原 AC-2cD2 列的 `read_file` / `write_file` / `edit_file` / `grep_search` / `file_glob` 是当时"与 Claude Code 工具面对齐"的 symmetry 愿望清单——真实 Antigravity 的等价工具（`view_file` / `write_to_file` / `replace_file_content` / `multi_replace_file_content` / `grep_search` / `list_dir`）**全部 LS 内部执行**，不发 WAITING step。tool parity 的真实路径是 LS 自带全套文件能力；只有 `run_command`（shell/PTY 必须 IDE 外执行）才需要 Bridge executor，Phase 2c v1 已覆盖
+- [x] AC-2cI7: 回归测试 — YOLO auto-approve 与 native executor 协同时不互相踩脚（approve 路径走 `HandleCascadeUserInteraction(permission)`，executor 路径走 `pushToolResult`）— 单测覆盖：`antigravity-agent-service.test.js` 三条新测试验证 dispatch + auto-attach + toolCallId 去重，与 waiting-approval 路径隔离
 
 ---
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "他是独立的！人家还有两只Ragdoll可以用呢" — 独立家族，不是Siamese替代 | AC-4 | cat-config 注册验证 | [x] |
-| R2 | "antigravity 他的猫猫是真的能够生成图片的，这才是我一直想要接入的原因" | AC-7 | 图片生成 → Hub 展示 e2e | [ ] |
-| R3 | "他能够录视频 截图" — 证据链能力 | AC-8 | 截图/录屏回传验证 | [ ] |
+| R2 | "antigravity 他的猫猫是真的能够生成图片的，这才是我一直想要接入的原因" | AC-7 | 图片生成 → Hub 展示 e2e | [x] **F172 Phase C 实现** — Antigravity 图片产物接同一个 generated-image publication contract（`scanAndPublishAntigravityBrainImages` 扫 `~/.gemini/antigravity/brain/<cascadeId>/`），与Maine Coon生图统一走 `/uploads/...` + `media_gallery` rich block 落 thread |
+| R3 | "他能够录视频 截图" — 证据链能力 | AC-8 | 截图/录屏回传验证 | [x] **复用现有富文本体系** — Bengal 在 invocation 内通过 `cat_cafe_create_rich_block` 发 `media_gallery`/`image` 上传截图录屏，与其他猫一致；operator 2026-04-26 拍板"和你们一样上传就行"无需独立证据链通道 |
 | R4 | CDP 桥可行性（社区已验证） | AC-1, AC-2, AC-3 | spike 验证 | [x] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
 - [x] 每个 AC 都有验证方式
-- [ ] 前端需求已准备需求→证据映射表（Phase 1 时补）
+- [x] R2/R3 通过 F172（图片）+ 现有 rich block 体系闭环（2026-04-26 operator确认）
 
 ---
 
 ## Key Decisions
 
-1. **家族定位：孟加拉猫（Bengal）** — 混血（多模型）、独立家族、不归属任何现有纯血家族
+1. **家族定位：Bengal（Bengal）** — 混血（多模型）、独立家族、不归属任何现有纯血家族
 2. **接入通道：CDP 桥（非 CLI spawn）** — Antigravity 是 Electron 应用，没有 headless CLI 模式
 3. **遵循 F050 External Agent Contract v1** — 但通信层用 CDP 桥替代 CLI adapter
 4. **图片生成为核心差异化能力** — 这是现有三猫都不具备的
-5. **catId: `antigravity`** — mentionPatterns: `@antigravity` / `@孟加拉猫` / `@孟加拉` / `@bengal`
+5. **catId: `antigravity`** — mentionPatterns: `@antigravity` / `@Bengal` / `@孟加拉` / `@bengal`
 6. **双 Variant** — `antigravity-gemini`（默认，Gemini 3.1 Pro）+ `antigravity-claude`（Claude Opus 4.6），换代只改 `defaultModel` 一行
 7. **昵称留空** — 等 Antigravity 接入后让他自取名（遵循三猫命名传统）
 8. **配色：琥珀色** — Primary `#D4853A` / Secondary `#FAEBDB`（区别于狸花猫的土金色 `#D4A76A`）
@@ -191,7 +305,7 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 | 测试 | 发送消息 | 模型响应 | 响应延迟 | 结果 |
 |------|----------|----------|----------|------|
 | 测试 1 | "Reply with just the word meow" | "喵。" | ~3s (含 Thought for 1s) | ✅ 完美 |
-| 测试 2 | "Say hello" | "喵哈喽！team lead好呀～ 今天有什么新鲜好玩的事情要一起搞吗？" | ~2s (含 Thought for <1s) | ✅ 完美 |
+| 测试 2 | "Say hello" | "喵哈喽！operator好呀～ 今天有什么新鲜好玩的事情要一起搞吗？" | ~2s (含 Thought for <1s) | ✅ 完美 |
 
 #### 回复读取方案
 
@@ -222,72 +336,7 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 
 **可用模型列表（实测枚举）：**
 1. Gemini 3.1 Pro (High) ← 默认
-2. Gemini 3.1 Pro (Low) — 标记 "New"
-3. Gemini 3 Flash
-4. Claude Sonnet 4.6 (Thinking)
-5. Claude Opus 4.6 (Thinking)
-6. GPT-OSS 120B (Medium)
-
-**注意：实际可选模型远多于注册的 variant。** 与Ragdoll只注册 opus-45/opus-46/sonnet（实际 Claude 可用模型更多）类似，cat-config.json 只注册需要的 variant 即可，无需穷举。
-
-**获取完整模型列表的 CDP 方法：**
-```javascript
-// 点击底部 model selector → 读取 dropdown 内容
-await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: selectorX, y: selectorY, ... });
-const models = await cdp('Runtime.evaluate', {
-  expression: `[...document.querySelectorAll('[class*="px-2"][class*="py-1"][class*="cursor-pointer"]')]
-    .filter(e => e.offsetParent !== null && e.offsetHeight < 40)
-    .map(e => e.textContent?.trim())`
-});
-```
-
-**聊天面板 UI 结构（CDP 操作参考）：**
-
-```
-Chat Header: [Title] [+新建] [🕐历史] [...更多] [X关闭]
-  - 更多菜单: Customization | MCP Servers | Export
-Chat Area: .overflow-y-auto → 对话 turns
-  - User turn: .whitespace-pre-wrap
-  - Assistant thinking: button "Thought for Xs"
-  - Assistant response: <p> elements
-Footer:
-  - 附件按钮区: [文件] [代码] [图片] [链接]
-  - 输入框: [role="textbox"][contenteditable="true"] (Lexical)
-  - 工具栏: [+] [Planning] [Model Selector] [🎙️] [Send→]
-```
-
-#### 跨项目派遣能力（F070 Portable Governance 适配）
-
-Antigravity **原生按 project/workspace 隔离对话**：Past Conversations 面板分组为 "Running in {project}" / "Recent in {project}" / "Other Conversations"。
-
-| F070 需求 | Antigravity 能力 | 满足度 |
-|-----------|-----------------|--------|
-| 项目级对话隔离 | Past Conversations 按 project 分组 | ✅ 原生 |
-| 在指定 project 开新对话 | `+` 按钮在当前 workspace 下新建 | ✅ |
-| 切换到外部项目 | 多窗口：`open -a Antigravity /path/to/project` | ✅ 新 CDP target |
-| 回到猫咖对话 | Past Conversations → "Recent in cat-cafe" | ✅ |
-| 任务态上下文注入 | 首条消息 execCommand 注入 AC/链接 | ✅ |
-| MCP 工具跨项目可用 | `~/.gemini/antigravity/mcp_config.json` 全局生效 | ✅ |
-
-**多窗口策略**：猫咖窗口保持开着，派遣到外部项目时 `open -a Antigravity /other/project` 开新窗口。CDP `/json` 返回所有窗口 target，按 `title` 区分项目。
-
-#### 冷启动 vs CLI 延迟对比
-
-| 阶段 | CLI spawn (DARE 等) | CDP 桥 (Antigravity) |
-|------|---------------------|---------------------|
-| 冷启动 | 2-10s（spawn + 加载） | ~0ms（IDE 已运行，WebSocket 持久） |
-| 消息注入 | stdin 即时 | execCommand 即时 |
-| 模型首 token | 取决于模型 API | 取决于模型 API |
-| 回复获取 | stdout NDJSON 实时 | DOM polling ~1-3s（可用 MutationObserver 降到 ~100ms） |
-| **多轮对话** | 保持进程 or 重新 spawn | **始终复用同一 WebSocket** |
-
-### 修正后的推荐策略
-
-~~双通道混合~~ → **CDP 桥是唯一安全可行路线**（已端到端验证）
-
-- **Phase 1**: CDP 桥接入 — `execCommand` 注入 + DOM polling 回复 → AgentService 适配
-- **Phase 1+**: MCP browser tools 组合 — 端口 62051 的 25 个浏览器工具同时可用
-- **Phase 2**: 图片生成回传 + 截图/录屏证据链
+2. Gemini 3.1 Pro (…39 tokens truncated…Phase 2**: 图片生成回传 + 截图/录屏证据链
 
 ### 各维度可行性判定（最终版）
 
@@ -303,9 +352,9 @@ Antigravity **原生按 project/workspace 隔离对话**：Past Conversations �
 | 新建/恢复对话 | ✅ **已验证** | `+` 新建 / 🕐 历史面板 / 点击恢复，全部可用 |
 | MCP 工具 | ✅ 可行 | Antigravity 原生支持，配置在 `~/.gemini/antigravity/mcp_config.json` |
 
-### 能力覆盖对比：现有猫猫 vs 孟加拉猫
+### 能力覆盖对比：现有猫猫 vs Bengal
 
-| 能力 | Ragdoll | Maine Coon | Siamese | 狸花猫 | **孟加拉猫** |
+| 能力 | Ragdoll | Maine Coon | Siamese | 狸花猫 | **Bengal** |
 |------|--------|--------|--------|--------|-------------|
 | 对话/推理 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 代码生成 | ✅ | ✅ | ❌ | ✅ | ✅ |
@@ -319,7 +368,7 @@ Antigravity **原生按 project/workspace 隔离对话**：Past Conversations �
 | 审计追踪 | ❌ | ❌ | ❌ | ✅ | ⚠️ (有截图但无结构化审计) |
 | 视觉设计顾问 | ❌ | ❌ | ✅ | ❌ | ⚠️ (能生成图但不是设计师) |
 
-**结论：可行，且比预期更好。** 孟加拉猫带来 3 个独有能力（图片生成、截图录屏、browser automation），这是现有四猫都没有的。接入价值明确。
+**结论：可行，且比预期更好。** Bengal带来 3 个独有能力（图片生成、截图录屏、browser automation），这是现有四猫都没有的。接入价值明确。
 
 ### 调研来源
 
@@ -337,7 +386,7 @@ Antigravity **原生按 project/workspace 隔离对话**：Past Conversations �
 - **F050**: External Agent Contract v1（接入契约，已定稿）
 - **F032**: Agent Plugin Architecture（provider 扩展机制）
 - **F060**: output_image 富文本渲染（图片展示基础设施）
-- **Antigravity**: Google Antigravity IDE（需要team lead本地安装）
+- **Antigravity**: Google Antigravity IDE（需要operator本地安装）
 - **Evolved from**: F050（第二个外部 agent 接入用例）
 
 ---
@@ -362,15 +411,293 @@ Antigravity **原生按 project/workspace 隔离对话**：Past Conversations �
 1. **CDP 稳定性** — DOM 结构随 Antigravity 版本更新可能变化，桥服务需要适配
 2. **Antigravity 更新节奏** — Google 产品更新频繁，CDP 端口支持可能变动
 3. **混血身份哲学问题** — Antigravity 切到 Claude Opus 时，它和Ragdoll的边界在哪？（先按"不同个体"处理）
-4. **Antigravity 必须运行** — 与 CLI spawn 不同，CDP 桥需要 Antigravity IDE 保持运行；若team lead关闭则断联
+4. **Antigravity 必须运行** — 与 CLI spawn 不同，CDP 桥需要 Antigravity IDE 保持运行；若operator关闭则断联
 
 ---
 
+## Issue Snapshot（2026-04-23 更新）
+
+### 已修：MCP / 接入链路 / 正文渲染
+
+| 状态 | 问题 | 修复 | 结果 |
+|------|------|------|------|
+| [x] | Antigravity 被误注入 HTTP callback 指令，触发 invalid tool call | PR #1145 | `needsMcpInjection` 对 `clientId='antigravity'` 返回 false；不再诱导 LS 调用拿不到 callback 凭证的工具 |
+| [x] | managed `cat-cafe*` MCP 路径会钉死到已删除 worktree，导致 Antigravity MCP read/write 链路飘到错误 repo root | PR #1317 | capability orchestrator / capabilities routes 会把 managed MCP command path 自动回正到 stable main repo root；删除 feature worktree 后不会把全局 provider 配置留在死路径 |
+| [x] | Native MCP config / env 没被 Clowder AI 正确接管 | PR #1307 | 全局 `mcp_config.json` 纳管、readonly env 锁定、homedir discovery 对齐 writer、`serverUrl` 远程项保留 |
+| [x] | thread context / 回贴能力缺失，fatal 后更容易“重新认人” | PR #1299 | breed 级 `sessionChain` 重新打开，provider 补 callback fallback instructions，thread context / 回贴主路径恢复 |
+| [x] | Bengal CLI 整段正文重复（non-prefix rewrite 被当全量 replay） | PR #1337 | `textMode='append'\|'replace'` 协议贯通 provider → bridge → transformer → 前端 active/background + server 聚合；多猫 cascade per-turn 隔离不覆盖前猫文本 |
+| [x] | 同一 invocation 落成两条 bubble 稳定共存（reconnect/preempt/reuse 导致身份错绑或 finalize 丢失） | PR #1350 | `isStaleTerminalEvent` 分层 resolver：slot-fresh override + bubble binding ground truth + direct/bubble-scan fallback，覆盖 17 轮 push back 里所有 preempt/hydrated/orphan/reuse/reconnect 场景；done + error 共用 helper + 全副作用/全局 teardown 都在 stale 下跳过；catInvocations.direct 在 stale 条件下仍 conditional cleanup |
+| [x] | `run_command` 带参数的命令参数被 LS 吞掉（`git log --oneline -3` → git usage） | PR #1351 | Antigravity LS 的 `RunCommand` RPC 把 `command + args` 空格 join 交 outer shell（非 execvp 语义），旧 payload `{ command: '/bin/sh', args: ['-c', cmd] }` 被拼成 `sh -c cmd` 让 outer shell 只消费第一 token；修法把完整 commandLine 直接作为 `command`，outer shell verbatim 解析（pipes / redirects / `&&` 全支持）|
+| [x] | fatal error 后 continuity regression 缺 test lock（G0/G10 follow-up） | PR #1353 | 在 `antigravity-agent-service-fatal-errors.test.js` 加回归：第一轮 capacity fatal → 第二轮同 callbackEnv → 断言 `bridge.sendMessage` 两次都携带 `[Clowder AI callback fallback]` + invocationId + callbackToken + 新 prompt body。锁死 "service 在 invoke 之间无状态" 不变量，防止未来缓存优化意外切断 fallback 注入 |
+| [x] | `provider_signal` capacity warning 被前端静默丢弃 | PR #1354 | `useAgentMessages` 加 `provider_signal` 分支，走和 `system_info` 同一个 `formatVisibleSystemInfo` 管线；backend emit 的 capacity warning 现在会渲染成 `⚠️ 上游模型服务端容量不足，系统将在 20s 后自动重试（1/3）` 风格的 system bubble。用户不再看到 bubble 莫名 hang |
+
+### 未修：已排期 / 待调查
+
+| 状态 | 问题 | 当前判断 | 排期 |
+|------|------|----------|------|
+| [x] | `run_command` 多数命令被 Antigravity permission gate 拦截（`user denied permission`） | 2026-05-16 复验确认没有可用 approval UI，不能要求operator点击。Clowder AI 侧改为默认 YOLO native execution：即使 `SafeToAutoRun=false/missing` 也执行 `RunCommand` 并回写 tool result；危险命令仍由本地 hard refusal 先拦，`ANTIGRAVITY_YOLO_RUN_COMMAND=false` 保留紧急回退。 | F061 Bug-F closed：approval bypass / stream writeback 已落地 |
+| [~] | retry 经常只 retry 1 次然后直接挂住 | 已确认“只 retry 1 次然后挂住”不是 retry 预算天然只有 1 次，而是旧实现会在 capacity retry 后落到 v2 尚未支持的 WAITING tool step（如 `grep_search`）并静默 stall。PR #1318 已把这条路径改成 fail-fast 显式报 `unsupported_waiting_tool`；PR #1320 补上 quota-style capacity classifier；PR #1330 进一步把 retry 收窄到“未 dispatch + 只读 + `SafeToAutoRun=true`”，并补齐 `failureLayer / dispatchState / executionJournal` 诊断，避免把 approval-gated / 已执行 / 已完成 tool step 误当成可安全重试。剩余还是 v2 executors / telemetry / 实机复验 | **G10 follow-up（P1）**：剩余继续跟 Phase 2c v2 / telemetry / 实机复验 |
+| [ ] | Antigravity 原生 MCP 只能读不能写 | PR #1307 边界是 `CAT_CAFE_READONLY=true`；`post_message` / `get_thread_context` 等写操作仍然走 per-invocation callback token。持久进程无法在会话外主动写回 thread | **Bug-H**：persistent MCP write-path auth（会话外鉴权模型，例如 agent-key；需产品决策"原生 MCP 是否应该有写权"） |
+| [~] | 上游 `⚠️ 模型服务端容量不足` UX polish | PR #1354 已修"provider_signal 被前端静默丢弃"的根因（frontend 现在能显示 `⚠️ 上游模型服务端容量不足，系统将在 20s 后自动重试（1/3）` 这类警告）。剩余 follow-up：retry in-flight 倒计时 badge + hard-limit 软降级模型切换建议，属于 UX redesign scope | **Bug-J follow-up**：倒计时 badge / 模型切换建议（UX，低优） |
+
+---
+
+## Next Reliability Queue（2026-04-22）
+
+围绕 `run_command` 的 approval / dispatch / capacity 脆弱性，后续修复顺序先收敛为 4 条：
+
+1. **[x] P0 — execution journal + layer-tagged errors**
+   - `failureLayer / dispatchState / executionJournal / retrySuppressedBy` 已在 PR #1330 落地
+2. **[x] P1 — approval correlation validation**
+   - approval failures 已细分为 `approval_gate.denied|timeout`，且 `RUN_COMMAND:ERROR` 与缺 `toolCall.name` 形状都已覆盖
+3. **[x] P2 — safe retry for undispatched read-only commands**
+   - PR #1330 已把 retry 严格收窄到“未 dispatch + 只读 + `SafeToAutoRun=true`”，并挡住 quoted `--output` / shell substitutions / var expansion / 历史 resolved tool step 等重放风险
+4. **[x] P3 — approval bypass / stream writeback**
+   - 2026-05-16 实机证据确认 Antigravity 没有可用 approval UI；Clowder AI 侧默认 YOLO native `RunCommand` + `pushToolResult`，并保留 `ANTIGRAVITY_YOLO_RUN_COMMAND=false` 回退开关
+
+---
+
+## Known Bugs（活跃）
+
+### Bug-D: Native file/code tool parity 的错误归因已澄清 ✅ CLOSED (2026-04-23)
+
+**原现象**（2026-04-20 截图 field report）：Bengal“能读文件/搜代码”，但写文件、改代码、复杂命令链不稳定，体感上像“写代码不稳”。
+
+**2026-04-23 Bengal 两轮实测证伪了 parity 归因**：
+
+| 工具 | 状态 | 验证日期 |
+|------|------|----------|
+| `grep_search` | ✅ LS 内部搞定无 WAITING | 2026-04-21 |
+| `view_file` | ✅ LS 内部搞定无 WAITING | 2026-04-21 |
+| `list_dir` | ✅ LS 内部搞定无 WAITING | 2026-04-21 |
+| `write_to_file` | ✅ LS 内部搞定无 WAITING | 2026-04-23 |
+| `replace_file_content` (edit_file) | ✅ LS 内部搞定无 WAITING | 2026-04-23 |
+| `multi_replace_file_content` | ✅ LS 内部搞定无 WAITING | 2026-04-23 |
+
+**结论**：
+- AC-2cD2 列的 `read_file / write_file / edit_file / grep_search / file_glob` 是 Claude Code 工具面 symmetry 的愿望清单——Antigravity LS 进程直接拥有 workspace 文件系统权限，文件类工具全部 LS 内部闭环，**不需要 Bridge executor**
+- 原"写文件不稳"截图里的真实问题只出在 `run_command` 单条链路（permission gate + context canceled），不是 file tool parity
+- AC-2cR4 + AC-2cI6 close as no-op
+- `run_command` 的 approval / dispatch 链路已由 2026-05-16 YOLO native execution 收口，后续只保留实机回归观察
+
+### Bug-F: retry 后 unsupported WAITING step 不再静默挂死；2026-05-16 YOLO native `run_command` 闭环 ✅ CLOSED
+
+**现象**（2026-04-20 operator新报告）：Bengal“经常只 retry 1 次然后又直接挂了”。
+
+**当前判断（2026-04-21 合并后）**：
+- `invoke-single-cat.ts` 的 `maxAttempts = 2` 只约束 **外层 session/CLI self-heal**；它不是 Antigravity provider 内层 `model_capacity` bounded retry 的唯一预算
+- `AntigravityAgentService` 内层 `model_capacity` retry 状态机本身已验证可连续跑多轮 fresh cascade，不是“天然只能 retry 1 次”
+- 已定位的一条真实挂点是：**旧实现里，第一次 capacity retry 成功切到 fresh cascade 后，如果新 cascade 发出 v2 尚未支持的 `WAITING` tool step（例如 `grep_search`），bridge 不会执行它，也不会立即报错，而是原地等到 stall timeout**
+- 这正好解释了operator体感里的“先看到 1 次 retry，再挂住”；这条路径现已被 PR #1318 改成显式失败
+- 之前浮出的 quota-style capacity gap（`You have exhausted your capacity on this model. Your quota will reset after 0s.`）已经在 PR #1320 补进 classifier，并新增回归测试锁住 fresh-cascade retry + callback fallback 保持不丢
+
+**已合入修复（PR #1318, `0ae31c30d`）**：
+- 把这类 `unsupported WAITING tool step` 从“60s 后 stall”改成**立即显式失败**
+- 新错误码：`unsupported_waiting_tool`
+- 覆盖场景：`model_capacity` retry → fresh cascade → unsupported `grep_search` WAITING step → **立刻终止，不再挂到 stall timeout**
+- `nativeExecuteAndPush` 明确区分 `true` / `'approval_pending'` / `'no_executor'` / `false` 四种返回值，fail-fast 只在 `'no_executor'` 时触发
+- kill-switch（`ANTIGRAVITY_NATIVE_EXECUTOR=0`）与无 registry 路径继续返回 `false`，不再被误报成 `unsupported_waiting_tool`
+
+**剩余未闭环**：
+- 这次修的是 **symptom fix / terminalization**——让 `unsupported_waiting_tool` 不再静默挂死
+- 2026-04-23 Bengal 两轮实测后：`grep_search / view_file / list_dir / write_to_file / replace_file_content / multi_replace_file_content` 全部 LS 内部搞定无 WAITING（见 Bug-D 收尾），Phase 2c v2 close as no-op——retry 之后"掉进 unsupported WAITING tool"这条路径在实践中几乎不可达
+- quota-style capacity 文案的分类与回归已在 PR #1320 补上，但还需要真实 Antigravity 环境再打一次，确认这条 provider 限流路径在实机上确实会走进现有 retry/backoff
+
+**2026-04-24 run_command 实机复验（Bengal 5 条命令对照矩阵）**：
+
+| # | 命令 | SafeToAutoRun | Antigravity `run_command` | Native Executor | 判定 |
+|---|------|:---:|:---:|:---:|------|
+| 1 | `pwd` | true | ❌ `user denied permission` | ✅ success (5ms) | permission gate 拦截 |
+| 2 | `git log --oneline -3` | true | ❌ `user denied permission` | ✅ success (12ms) | permission gate 拦截 |
+| 3 | `git status --short` | true | ❌ `user denied permission` | ✅ success (63ms) | permission gate 拦截 |
+| 4 | `ls packages/` | true | ✅ **success (instant)** | — | permission gate **放行** |
+| 5 | `git branch` | true | ❌ `user denied permission` | ✅ success | permission gate 拦截 |
+
+**三个钉实结论**：
+1. **PR #1321 permission guard 前置生效**——错误精度从 `context canceled` 提升为 `user denied permission`，诊断链更清晰，失败归因不再模糊
+2. **5 条命令样本上观察到 allowlist-like behavior**——`ls` 放行，`pwd` / `git *` 拒绝；`SafeToAutoRun` 是 Clowder AI 侧标记，从本次样本看对 Antigravity UI permission 决策无影响（未做穷举验证）
+3. **当时的 Clowder AI 侧诊断已做到位，但写通道仍未闭环**——这条历史判断已由 2026-05-16 YOLO native execution 取代；现在不再依赖 Antigravity UI approval
+
+**2026-05-16 收口**：
+- Clowder AI 不再依赖 Antigravity approval UI：`run_command` 默认 YOLO native execution + tool-result writeback（PR #1711）
+- 本地 hard refusal 仍先于执行：Redis 6399 / recursive root delete / fork bomb 不会被 YOLO 绕过；云端 Codex 追加的 `rm -rf -- /`、`/.`、`/tmp/..`、`/bin/rm`、`RM` 等绕过形态均已补 Red→Green 回归
+- 紧急回退：`ANTIGRAVITY_YOLO_RUN_COMMAND=false` 恢复旧 `approval_pending` 行为；`ANTIGRAVITY_NATIVE_EXECUTOR=0` 仍可关闭 native executor
+- 真实写路径验收目标：Bengal 能创建 worktree、写文件、删除 worktree，不再卡在 approval prompt
+
+### Bug-H: Antigravity 原生 MCP 只能读不能写 ⚠️ OPEN（架构 debt）
+
+**现象**：Clowder AI 已经把 Antigravity 原生 MCP 纳管（PR #1307），但边界是 `CAT_CAFE_READONLY=true`。Bengal可以通过原生 MCP 读 thread 上下文、list tasks、search evidence 等；但 `post_message` / `create_task` / `update_task` / `get_thread_context` 这类写操作仍然走 **per-invocation callback token**（会话外 token 会过期）。
+
+**当前判断（PR #1307 body 显式 deferred）**：
+- 技术原因：持久 MCP 进程不能吃 per-invocation callback token（进程生命期 >> invocation 生命期）
+- 产品后果：Bengal作为持久 agent，不能在 invocation 结束后主动写回 thread（例如自己发现 bug 后自己 post 一个提醒消息）
+- PR #1307 原话：「如果以后要让原生 MCP 直接写回 thread，需要另开 PR 设计持久 auth（agent-key 或别的会话外鉴权模型）」
+
+**排期**：Bug-H，**产品决策先行**——先确认"原生 MCP 读 + callback 写"是否是永久边界，还是要引入 agent-key / 会话外鉴权。
+
+### Bug-J: capacity UX polish ⚠️ PARTIAL — provider_signal 可见化完成，倒计时 badge / 软降级提示另起
+
+**已修（PR #1354）**：`useAgentMessages` 加 `provider_signal` 分支，前端现在能收到并显示 capacity retry warning（`⚠️ 上游模型服务端容量不足，系统将在 20s 后自动重试（1/3）`）。原症状 "backend emit 了但 frontend 静默丢弃" 已解。
+
+**剩余 follow-up**：
+- retry in-flight 倒计时 badge（ThreadExecutionBar 显示 "重试中 1/3，15s 后"）
+- hard-limit 软降级提示（retry 耗尽后建议切模型或等待具体时间）
+
+这两部分是更大 UX redesign scope，拆开做。
+
 ## Known Bugs（已修复）
+
+### Bug-E: fatal 后 continuity regression lock ✅ FIXED (PR #1353)
+
+**Field report**（2026-04-20 截图）：Bengal"出 bug 炸了之后整个 conversation 记忆清零，下轮重新认人"。
+
+**诊断**：G0 resume（PR #1135）+ Continuity fallback recovery（PR #1299）已经把**主路径** continuity 拉回来了。没有一条专门的 regression 锁 "fatal error / stream_error / model_capacity 之后，下一轮 invocation 仍保留 callback fallback 注入" 的不变量。
+
+**修法（PR #1353）**：在 `antigravity-agent-service-fatal-errors.test.js` 加回归用例——第一轮 capacity fatal（retry disabled）→ 第二轮同 callbackEnv → 断言 `bridge.sendMessage` 两次都携带 `[Clowder AI callback fallback]` + invocationId + callbackToken + 新 prompt body。
+
+不变量：AntigravityAgentService 在 `.invoke()` 之间**无状态**——callbackEnv 通过 options 独立注入。未来 continuity 优化（比如加 session 级缓存）如果意外破坏这一点，测试会红。
+
+**Credit**：opus-47 scoping + 写。gpt52 peer review clean；云端 codex clean ("Didn't find any major issues 👍")。
+
+### Bug-I: `run_command` args dropped by LS ✅ FIXED (PR #1351)
+
+**现象**（Bengal 实测 2026-04-23）：`pwd` 工作；`git log --oneline -3` / `git status --short` / `curl --help` 全部输出 usage help，说明 flags/args 被吞掉了。
+
+**根因**：Antigravity LS 的 `RunCommand` RPC 把 `command + args` 字段**空格 join 成字符串**后交给 outer shell，不是 `execvp(command, args...)` 语义。旧 payload `{ command: '/bin/sh', args: ['-c', 'git log --oneline -3'] }` → LS 拼成 `/bin/sh -c git log --oneline -3` → outer shell 解析为 `/bin/sh -c git`（sh -c 只消费第一个 word），位置参数 `log --oneline -3` 被 sh 丢弃 → 裸 `git` 运行 → usage help。复合命令 `echo X && git log ...` 意外成功是因为 `&&` 在 outer shell 先解析，后半段 `git log ...` 直接在 outer shell 执行绕过了 `sh -c` 丢参。
+
+Proto descriptor 从 `language_server_macos_arm` binary 挖出验证：`RunCommandRequest { command, args, timeout_ms }`，**无 `cwd` / `working_directory` 字段**（之前传的 cwd 一直被默默丢弃）。
+
+**修法（PR #1351，2 行代码）**：把完整 commandLine 直接作为 `command`，不传 `args`。outer shell 会 verbatim 解析整个字符串。
+
+```diff
+- command: '/bin/sh',
+- args: ['-c', input.commandLine],
++ command: input.commandLine,
+  cwd: input.cwd,
+```
+
+**Credit**：Bengal (@antig-opus) 实测 + 根因定位 + payload 修改建议；Ragdoll (Opus-47) proto descriptor 验证 + commit + 测试修正；Maine Coon (gpt52) 退回过时研究文档 P2 + 形式 review；云端 codex 两轮 clean。
+
+**注**：此修复并非 Bug-I 原始描述的 "YOLO 审批路径"——实测 `terminalAutoExecutionPolicy=3 (EAGER)` 已经生效，IDE 不再弹窗而是静默拒绝；真正的阻塞是 LS RunCommand 的 args-dropping bug。
+
+### Bug-G: 同一 invocation 落成两条 bubble 稳定共存 ✅ FIXED (PR #1350)
+
+**现象**：同一 invocationId 在前端落成两条独立 bubble 并列持久存在（与 PR #1337 修的"同 bubble 内正文重复"不同——这条是身份层面的双 bubble）。
+
+**根因**：`done`/`error` 终态分支的副作用（`setStreaming=false` / `activeRefs.delete` / `finalizedStreamRef.set` / `setCatInvocation` / global teardown / addMessage 等）在 stale terminal 到达时会误终止活 bubble 或错绑身份；`isStaleTerminalEvent` 的 resolver 需要同时处理 preempt / reconnect hydration / 多猫 slot 格式 / hydrated 合成 key / 陈旧 direct lag / reused bubble stale binding 等 7-8 类并存场景。
+
+**修复（PR #1350，17 轮 review iteration 收敛）**：
+- `isStaleTerminalEvent` 分层 resolver：`slot-fresh override → activeBubble binding → realActiveSlot → direct → any streaming bubble binding → 默认 not-stale`
+- `done` 和 `error` 共用 helper，所有 cat+bubble 副作用 + isFinal global teardown + hydrated-orphan cleanup 都 gate 在 `!isStale*` 下
+- `catInvocations.direct` 在 stale 条件下仍做 **conditional cleanup**（只在 `direct === msg.invocationId` 时清，避免 clobber 新 invocation 的 direct）
+- multi-cat slot key 格式 `${invocationId}-${catId}` normalization
+- hydrated 合成 key 在 resolver 里被显式降级
+- `pendingTimeoutDiagRef` leak 无条件 cleanup
+- 19 条定向回归测试锁 preempt / reconnect / hydrated / 多猫 / lag / reused 所有分支
+
+**云端 Review 总结**：4 轮（R1 back-fill 出发）到 17 轮（R17 slot-fresh override）的每一轮都捕捉到真 regression / edge case，包括 Maine Coon 4 轮 peer review（含 R4 stale-done guard / R8 bubble-identity fallback / R10 hydrated slot 保留）+ 云端 codex 10+ 轮 P1（R13/R14/R15/R16 等 lag/orphan/hydrated/isFinal/slot-fresh）。resolver 最终形态是所有 contradiction 得到妥善分层。
+
+### Bug-8: `CORTEX_STEP_TYPE_RUN_COMMAND` 永卡 `WAITING` — Bridge 无原生工具执行器 ✅ FIXED (v1, PR #1230)
+
+**现象**（2026-04-16 夜，opus-47 诊断，4.6 + gpt-5.4 此前尝试一周未解）：operator @ Bengal做任意需要命令行的任务（示例：`grep 'z.enum' packages/mcp-server/src/tools/signals-tools.ts`），@antig-opus 规划后发出一个 `CORTEX_STEP_TYPE_RUN_COMMAND` step，前端显示"思考中"后冻死；18 秒后 `rawLength` 稳定在 658,407 字节不再增长，60 秒 idle stall 超时触发。
+
+**根因**：Bridge 无原生工具执行器 → WAITING step 永远不被回推 → cascade 卡死。
+
+**修复**：Phase 2c `RunCommandExecutor` + Bridge-owned writeback（`CancelCascadeSteps` + synthetic user message）。152/152 tests，4 P1 修复（terminalAbort gate / stepIndex guard / SafeToAutoRun / Redis 6399 全覆盖）。
+
+### Bug-C: Gemini 拒绝数值 enum 的 tier 参数 — INVALID_ARGUMENT 400 ✅
+
+**现象**（2026-04-15 Maine Coon从 runtime 日志发现）：Bengal切换到 Gemini 模型时，MCP 信号工具（`signal_list_inbox`、`signal_search`）的 `tier` 参数使用数值 enum（`1|2|3|4`），Gemini function declaration schema 只允许 `STRING` 类型的 enum，导致 `INVALID_ARGUMENT 400` 拒绝。
+
+**根因**：`signals-tools.ts` 的 Zod schema 用 `z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)])` 生成了 `type: number + enum: [1,2,3,4]` 的 JSON Schema，Gemini 只接受 `type: string + enum: ["1","2","3","4"]`。
+
+**修复**（PR #1198, `9dfeb81b5`）：
+- `tier` 改为 `z.enum(['1', '2', '3', '4'])`（字符串 enum）
+- Handler 类型签名同步更新：`tier?: 1 | 2 | 3 | 4` → `tier?: '1' | '2' | '3' | '4'`
+- URL param 构造无需改动（`String(input.tier)` 对字符串和数值结果一致）
+- 新增 2 个测试：string tier URL param 验证 + Zod schema 拒绝无效值（"5"/"0"/"high"）
+
+### Bug-A: upstream_error 误中断 poll loop — 模型无法自我纠正 ✅
+
+**现象**（2026-04-15 operator报告）：Bengal"说五个字就出问题"，`The model produced an invalid tool call` 后直接中断，在 Antigravity IDE 里从不发生。
+
+**根因**：PR #1157（Bug-5 fix）的 `fatalSeen → break` 把 `upstream_error`（包括 invalid tool call）当成终止条件。但在 Antigravity LS 中，这类错误是可恢复的——模型会在后续 step 自我纠正。Bridge 的激进 abort 切断了自我纠正路径。
+
+**修复**（PR #1196, `1c86939fe`）：
+- 将 `fatalSeen` 拆为两个独立信号：`fatalSeen`（抑制 empty_response）+ `terminalAbort`（终止 poll loop）
+- 5-case 终止矩阵：
+  - `model_capacity` → 始终终止（服务端过载，无法自我纠正）
+  - `stream_error` alone → 终止（连接断开）
+  - `stream_error + upstream_error` → 不终止（stream_error 是噪音，已被抑制）
+  - `upstream_error` alone → 不终止（模型可自我纠正）
+  - `model_capacity + upstream_error` → 终止（model_capacity 优先级高于自我纠正）
+- Maine Coon review：0 P1 / 0 P2 放行
+- remote review：2 轮 P1（mixed-batch 边界条件）→ fix → 0 P1/P2
+
+### Bug-7: Invalid tool call 无诊断 + 双红条重复展示 ✅
+
+**现象**（2026-04-15 operator报告）：Bengal在 F160 线程执行任务时，直接报 `The model produced an invalid tool call.`，且**同一条红错出现两次**。
+
+**根因**（2 层）：
+1. **诊断缺失** — transformer 只产出人类可读的 `userErrorMessage`，没有把 `modelErrorMessage` / step type / tool name / payload 写入服务端日志
+2. **同 batch 去重缺失** — 同一个 batch 内如果 LS 连发两个 `CORTEX_STEP_TYPE_ERROR_MESSAGE`，service 层会把两条都 yield 给前端
+
+**修复**（PR #1175, `af5322d88`）：
+- P1 诊断日志：transformer `tool_error` 分支新增 `log.warn`（stepType + userErrorMessage + modelErrorMessage）
+- P2 同批次去重：改为 `(errorCode, error)` 元组去重（同 code + 同文案才压）+ `upstream_error` 优先于 `stream_error`
+- Maine Coon review：首轮 P1（位置敏感去重会吞更具体的 upstream_error）→ 改为 content-aware dedup → 放行
+- 自动重试单开下一张票（需要日志证据确认 invalid tool call 发生时确实无 side effect）
+
+### Bug-6: Waiting approval 被误判成 stall ✅
+
+**现象**（2026-04-14 operator报告）：Bengal触发浏览器权限审批后，cascade 仍是 `CASCADE_RUN_STATUS_RUNNING`，但 bridge 在 60 秒后报 `Antigravity stall: no activity`；重启 runtime 后仍可稳定复现。
+
+**根因**：
+1. **Bridge 不识别 `awaitingUserInput`** — `pollForSteps` 只区分「有新 step」「terminal idle」「idle timeout」，没有把“等待权限批准”的 RUNNING 态单独翻译出来
+2. **等待批准被落进 stall 分支** — 审批暂停期间 step 数不增长，于是被误判成「RUNNING 但无活动」，60 秒后抛假性 stall
+
+**修复**（PR #1163, `26f1300de`）：
+- `CascadeTrajectory` / `DeliveryCursor` 增加 `awaitingUserInput` 语义
+- Bridge 在 `awaitingUserInput === true` 时抑制 stall timeout，并只发一次等待批准游标
+- Service 将等待批准游标翻译成 `liveness_signal`，前端显示“Antigravity 正在等待权限批准”
+- 真正的 stall / fatal error 路径保持不变；这次只修假性 stall，不包含 auto-approve / permission mediation
+
+### Bug-5: Live-run stall — 上游 fatal error 后 bridge 傻等 60s ✅
+
+**现象**（2026-04-14 operator报告）：重启后新线程的Bengal仍报 `Antigravity stall: no activity`，且同一条红错出现两次。
+
+**根因**（3 层）：
+1. **error-aware early abort 缺失** — `pollForSteps` 只检查 `IDLE` 和 idle timeout。上游已出 ERROR_MESSAGE 但 status 仍 RUNNING 时，bridge 继续傻等到 60s timeout，把真实错误升级成 stall
+2. **RUNNING 态无 heartbeat** — 长 thinking / 长工具阶段没有 step 增长时，前端无"还活着"信号（增强项，未来工作）
+3. **stall error dedupe 缺失** — 同一 stall 错误被重复端出两次（增强项，未来工作）
+
+**修复**（PR #1157, `fa5c9383`）：
+- Layer 1 fixed: ERROR_MESSAGE → `errorCode: 'upstream_error'`（transformer 层）
+- Service `fatalSeen` flag：upstream_error/stream_error 触发 poll loop `break`，不再傻等
+- `fatalSeen` 时跳过 `empty_response` 兜底（避免双报错）
+- 架构（Maine Coon提议）：fatal 判定在 transformer，abort 决策在 service，bridge 不背业务语义
+- ⚠️ **后续修正（Bug-A, PR #1196）**：此 PR 的 `fatalSeen → break` 过于激进，upstream_error 也触发了 abort，导致模型无法自我纠正。Bug-A 将 `fatalSeen` 拆为 `fatalSeen`（仅抑制 empty_response）+ `terminalAbort`（仅 model_capacity / stream_error-alone 终止 poll loop）
+
+### Bug-4: Step taxonomy v2 — 3 类 step 泄漏原始 JSON 到前端 ✅
+
+**现象**（2026-04-13 线上截图）：Bengal对话中出现蓝底 raw JSON：
+- `{"type":"unknown_activity","stepType":"CORTEX_STEP_TYPE_USER_INPUT",...}`
+- `{"type":"unknown_activity","stepType":"CORTEX_STEP_TYPE_PLANNER_RESPONSE",...}`
+- `{"type":"unknown_activity","stepType":"CORTEX_STEP_TYPE_GREP_SEARCH",...}`
+
+**根因**（3 层）：
+1. **USER_INPUT 未映射** — 用户输入回声，应静默跳过（当前掉进 unknown_activity）
+2. **PLANNER_RESPONSE 空响应穿透** — `classifyStep` 要求 `step.plannerResponse` 存在且含 response/thinking/stopReason，否则穿透到 unknown_activity。线上证明空 plannerResponse 存在
+3. **GREP_SEARCH 等原生工具类型未映射** — LS 内置 grep/file_edit/terminal 等工具，type 前缀都是 `CORTEX_STEP_TYPE_*` 但不在我们枚举里
+
+**修复**（PR #1154, `b9c83136`）：
+- USER_INPUT/空 PLANNER_RESPONSE → checkpoint 静默分支
+- 原生工具类型 → 基于 step 数据形状 fallback（有 toolCall/toolResult → tool_pending，否则 → unknown_activity）
+- unknown_activity 保留分类（AC-C1 观测链）+ `log.debug` 留痕，不再发 system_info 到前端
 
 ### Bug-1: pollResponse 稳定性误判 — 模型暂停时提前截断 ✅
 
-**现象**：@ 孟加拉猫选 Opus 模型后，回复在 "Thinking..." 处被截断，后续内容丢失。
+**现象**：@ Bengal选 Opus 模型后，回复在 "Thinking..." 处被截断，后续内容丢失。
 
 **根因**：`stablePollCount=2` 在模型 thinking/image generation 暂停期（2-5s）误触发完成判定。
 
@@ -379,7 +706,7 @@ Antigravity **原生按 project/workspace 隔离对话**：Past Conversations �
 - 新增 stop button 检测（chat-scoped），按钮可见时阻止 stable count 累加
 - `hasInlineLoading` 已有的保护继续生效
 
-### Bug-2: 模型切换未实现 — Cat Café 选 variant 后 Antigravity 仍用默认模型 ✅
+### Bug-2: 模型切换未实现 — Clowder AI 选 variant 后 Antigravity 仍用默认模型 ✅
 
 **现象**：选了 "Claude Opus" 变体但 Antigravity 仍用 Gemini 3.1 Pro。
 
@@ -393,9 +720,9 @@ Antigravity **原生按 project/workspace 隔离对话**：Past Conversations �
 
 ### Bug-3: Thinking DOM 不识别 — Antigravity 用自定义 thinking 结构 ✅
 
-**现象**：孟加拉猫抓回来的内容有重复，包含 thinking 文本和 CSS 垃圾。
+**现象**：Bengal抓回来的内容有重复，包含 thinking 文本和 CSS 垃圾。
 
-**根因**：`POLL_RESPONSE_JS` 只认 `<details>` / `[class*="thinking"]`，但 Antigravity 用 `<button>Thought for 16s</button>` + `<div class="max-h-0 opacity-0">` 折叠容器。`extractBlockText` 直接取 `textContent` 不过滤隐藏元素。
+**根因**：`POLL_RESPONSE_JS` 只认 `<details>` / `[class*=\"thinking\"]`，但 Antigravity 用 `<button>Thought for 16s</button>` + `<div class=\"max-h-0 opacity-0\">` 折叠容器。`extractBlockText` 直接取 `textContent` 不过滤隐藏元素。
 
 **修复** (PR #330, `e7e00b37`):
 - 扩展 thinking 检测：匹配 "Thought for Xs" 按钮 + 遍历折叠 sibling 容器

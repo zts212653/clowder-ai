@@ -1,0 +1,629 @@
+import assert from 'node:assert/strict';
+import childProcess, { execFileSync, spawn } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, test } from 'node:test';
+
+import {
+  captureProcessIdentity,
+  DaemonStateError,
+  daemonStatePaths,
+  inspectDaemonState,
+  migrateLegacyDaemonState,
+  stopDaemon,
+  writeDaemonState,
+} from './lib/daemon-state.mjs';
+import {
+  captureReadableIdentity,
+  compareStableBirth,
+  compareStoredIdentity,
+  PROCESS_START_TIME_FORMAT,
+} from './lib/process-identity.mjs';
+
+/**
+ * F300 daemon identity: an unreadable argv is "unknown", never "a different
+ * process" and never "the process is gone".
+ *
+ * macOS ps(1): "If the arguments are unavailable ... the value for the ucomm
+ * keyword is appended to the arguments in parentheses"; arguments that cannot
+ * be located print in square brackets. A gate observed the same PID read as
+ * '(node)' and then as its full argv. The identity code took '(node)' at face
+ * value: it reported a mismatch when writing state, and - the dangerous
+ * direction - it let a stop conclude the daemon had exited, delete the state
+ * file and record "terminated" while the process could still be alive.
+ *
+ * Every process here is this test's own child and every path a temp dir. The
+ * unreadable reads are injected, so nothing depends on reproducing the race.
+ */
+
+const tempRoots = new Set();
+const children = new Set();
+/** Forked PID -> the shell that launched it, which reaps it; the PID is ours only while that shell lives. */
+const forkedPids = new Map();
+
+afterEach(async () => {
+  for (const [pid, shell] of forkedPids) {
+    if (shell.exitCode !== null || shell.signalCode !== null) continue;
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {}
+  }
+  forkedPids.clear();
+  for (const child of children) {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+      await new Promise((resolve) => child.once('exit', resolve));
+    }
+  }
+  children.clear();
+  for (const root of tempRoots) rmSync(root, { recursive: true, force: true });
+  tempRoots.clear();
+});
+
+function createFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'cat-cafe-daemon-argv-'));
+  const homeDir = join(root, 'home');
+  const runtimeRoot = join(root, 'cat-cafe-runtime');
+  mkdirSync(homeDir, { recursive: true });
+  mkdirSync(runtimeRoot, { recursive: true });
+  tempRoots.add(root);
+  return { homeDir, runtimeRoot };
+}
+
+/**
+ * `ignoreSigterm` keeps the daemon alive after a polite stop. Without it the
+ * child exits on SIGTERM, the real capture then throws "no such process", and a
+ * stop would correctly conclude it is gone - which says nothing about what an
+ * unreadable argv on a still-running process does.
+ */
+async function spawnFakeDaemon(projectRoot, launchToken, { ignoreSigterm = false } = {}) {
+  const body = ignoreSigterm
+    ? 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000); process.send("ready")'
+    : 'setInterval(() => {}, 1000); process.send("ready")';
+  const child = spawn(process.execPath, ['-e', body, '--', `--cat-cafe-daemon-token=${launchToken}`], {
+    cwd: projectRoot,
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+  });
+  children.add(child);
+  await new Promise((resolve, reject) => {
+    child.once('message', resolve);
+    child.once('error', reject);
+  });
+  return child;
+}
+
+/** A real ps reader, so only the field under test is replaced. */
+function realPs(pid, field, env) {
+  return execFileSync('ps', ['-ww', '-p', String(pid), '-o', `${field}=`], {
+    encoding: 'utf8',
+    env: env ?? process.env,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim();
+}
+
+/** Real identity, but with the argv replaced by what ps prints when it cannot read it. */
+function unreadable(identity, shown = '(node)') {
+  return { ...identity, command: shown, argvAvailable: false };
+}
+
+function writeState({ homeDir, runtimeRoot, child, launchToken, captureIdentity }) {
+  const paths = daemonStatePaths({ homeDir, projectRoot: runtimeRoot, deploymentId: 'runtime' });
+  writeDaemonState({
+    paths,
+    pid: child.pid,
+    projectRoot: runtimeRoot,
+    deploymentId: 'runtime',
+    launchToken,
+    logFile: join(runtimeRoot, 'cat-cafe-daemon.log'),
+    ports: {},
+    ...(captureIdentity ? { captureIdentity } : {}),
+  });
+  return paths;
+}
+
+test('capture reports an unreadable argv as unavailable rather than as a command', async () => {
+  const { runtimeRoot } = createFixture();
+  const child = await spawnFakeDaemon(runtimeRoot, 'capture-token');
+
+  for (const shown of ['(node)', '[kworker/0:1]']) {
+    const identity = captureProcessIdentity(child.pid, {
+      runPs: (pid, field, env) => (field === 'command' ? shown : realPs(pid, field, env)),
+    });
+    assert.equal(identity.argvAvailable, false, `${shown} must be flagged unavailable`);
+  }
+
+  const readable = captureReadableIdentity(child.pid);
+  assert.equal(readable.argvAvailable, true);
+  assert.match(readable.command, /--cat-cafe-daemon-token=capture-token/);
+  assert.equal(typeof readable.ucomm, 'string');
+});
+
+const STABLE_MARKER_TOKEN = '--cat-cafe-daemon-token=stable-marker-token';
+
+function stableMarkerFixture(overrides = {}) {
+  return {
+    startedAt: 'Tue Oct 20 16:01:27 2026',
+    startedAtEpochMs: 1792512087000,
+    startedAtFormat: PROCESS_START_TIME_FORMAT,
+    command: `node daemon.js ${STABLE_MARKER_TOKEN}`,
+    cwd: '/runtime',
+    argvAvailable: true,
+    procStartTicks: 123456,
+    bootId: 'boot-a',
+    ...overrides,
+  };
+}
+
+test('a stable /proc birth marker takes precedence over a shifted wall-clock lstart', () => {
+  const state = {
+    process: {
+      ...stableMarkerFixture({ startedAt: 'Tue Oct 20 00:36:57 2026', startedAtEpochMs: 1792456617000 }),
+      launchToken: 'stable-marker-token',
+    },
+  };
+  const live = stableMarkerFixture({ startedAt: 'Tue Oct 20 16:01:27 2026' });
+
+  assert.equal(compareStoredIdentity(state, live), 'match');
+});
+
+test('a different stable birth marker remains a conclusive mismatch', () => {
+  const state = {
+    process: {
+      ...stableMarkerFixture({ startedAt: 'Tue Oct 20 00:36:57 2026', procStartTicks: 999999 }),
+      launchToken: 'stable-marker-token',
+    },
+  };
+  const live = stableMarkerFixture();
+
+  assert.equal(compareStoredIdentity(state, live), 'mismatch');
+});
+
+test('an unreadable argv with a matching stable marker stays unknown, not mismatched', () => {
+  const state = {
+    process: {
+      ...stableMarkerFixture({ startedAt: 'Tue Oct 20 00:36:57 2026' }),
+      launchToken: 'stable-marker-token',
+    },
+  };
+  const live = stableMarkerFixture({ command: '(node)', argvAvailable: false });
+
+  assert.equal(compareStoredIdentity(state, live), 'unknown');
+});
+
+test('an incomplete Linux marker cannot override the frozen wall-clock fallback', () => {
+  const stored = stableMarkerFixture();
+  for (const partial of [{ bootId: undefined }, { bootId: '' }, { procStartTicks: -1 }]) {
+    assert.equal(compareStableBirth(stored, { ...stored, ...partial }), undefined);
+  }
+  assert.equal(compareStableBirth(stored, { ...stored, bootId: 'another-boot' }), false);
+});
+
+test('an unreadable pre-marker process stays unknown when only its wall-clock birth changes', () => {
+  const stored = stableMarkerFixture({ procStartTicks: undefined, bootId: undefined });
+  const live = unreadable({ ...stored, startedAtEpochMs: stored.startedAtEpochMs + 24_420_000 });
+  assert.equal(compareStoredIdentity({ process: { ...stored, launchToken: 'stable-marker-token' } }, live), 'unknown');
+});
+
+test('writing state re-reads a transiently unreadable argv instead of calling it a mismatch', async () => {
+  const fixture = createFixture();
+  const launchToken = 'retry-token';
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken);
+  let calls = 0;
+  const paths = writeState({
+    ...fixture,
+    child,
+    launchToken,
+    captureIdentity: (pid) => {
+      calls += 1;
+      const identity = captureProcessIdentity(pid);
+      return calls <= 2 ? unreadable(identity) : identity;
+    },
+  });
+  assert.ok(calls >= 3, 'the unreadable reads must be retried');
+  assert.equal(existsSync(paths.stateFile), true);
+});
+
+test('writing state fails with a distinct reason when the argv never becomes readable', async () => {
+  const fixture = createFixture();
+  const launchToken = 'never-readable-token';
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken);
+  assert.throws(
+    () =>
+      writeState({
+        ...fixture,
+        child,
+        launchToken,
+        captureIdentity: (pid) => unreadable(captureProcessIdentity(pid)),
+      }),
+    (error) => error instanceof DaemonStateError && error.reason === 'spawned-process-argv-unavailable',
+  );
+});
+
+test('a readable argv without the launch token is still an identity mismatch, with its readings', async () => {
+  const fixture = createFixture();
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, 'actual-token');
+  assert.throws(
+    () => writeState({ ...fixture, child, launchToken: 'claimed-token' }),
+    (error) =>
+      error instanceof DaemonStateError &&
+      error.reason === 'spawned-process-identity-mismatch' &&
+      error.details?.tokenPresent === false &&
+      typeof error.details?.observedCwd === 'string',
+  );
+});
+
+/**
+ * start-dev.sh launches the daemon with `nohup ... --cat-cafe-daemon-token=T &`.
+ * Until the forked child execs, it is a copy of the launching shell: ps shows
+ * the shell's own argv - readable, in the right cwd, without the token. Here the
+ * child sleeps before its exec so the state write lands inside that window.
+ */
+async function forkDaemonWithDelayedExec(projectRoot, launchToken, delaySeconds) {
+  const script = [
+    `{ sleep ${delaySeconds}; exec nohup "$NODE_BIN" -e 'setInterval(() => {}, 1000)' -- "--cat-cafe-daemon-token=$LAUNCH_TOKEN"; } &`,
+    'echo "$!"',
+    'wait',
+  ].join('\n');
+  const shell = spawn('/bin/bash', ['-c', script], {
+    cwd: projectRoot,
+    env: { ...process.env, NODE_BIN: process.execPath, LAUNCH_TOKEN: launchToken },
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  children.add(shell);
+  const pid = await new Promise((resolve, reject) => {
+    shell.stdout.once('data', (chunk) => resolve(Number.parseInt(String(chunk), 10)));
+    shell.once('error', reject);
+  });
+  forkedPids.set(pid, shell);
+  return { pid };
+}
+
+function inspectRuntime({ homeDir, runtimeRoot }) {
+  return inspectDaemonState({
+    stateFile: daemonStatePaths({ homeDir, projectRoot: runtimeRoot, deploymentId: 'runtime' }).stateFile,
+    expectedProjectRoot: runtimeRoot,
+    expectedDeploymentId: 'runtime',
+  });
+}
+
+test('writing state waits out the fork-to-exec window instead of reading the launcher argv as a mismatch', async () => {
+  const fixture = createFixture();
+  const launchToken = 'delayed-exec-token';
+  const child = await forkDaemonWithDelayedExec(fixture.runtimeRoot, launchToken, 0.5);
+
+  const paths = writeState({ ...fixture, child, launchToken });
+
+  const state = JSON.parse(readFileSync(paths.stateFile, 'utf8'));
+  assert.equal(state.pid, child.pid);
+  assert.match(state.process.command, new RegExp(`--cat-cafe-daemon-token=${launchToken}`));
+  assert.equal(inspectRuntime(fixture).kind, 'running', 'the recorded identity must keep matching the daemon');
+});
+
+/**
+ * The full launch chain, read by read: the fork (launcher argv, no token), nohup
+ * (token, but about to exec), then the daemon. The nohup stage normally lasts
+ * about a millisecond, so it is injected rather than raced for.
+ */
+test('writing state records the daemon, never the nohup stage that already carries the token', async () => {
+  const fixture = createFixture();
+  const launchToken = 'nohup-stage-token';
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken);
+  const stages = [
+    (identity) => ({ ...identity, command: '/bin/bash ./scripts/start-dev.sh --daemon' }),
+    (identity) => ({ ...identity, command: `nohup ${identity.command}` }),
+  ];
+  let calls = 0;
+  const paths = writeState({
+    ...fixture,
+    child,
+    launchToken,
+    captureIdentity: (pid) => {
+      const identity = captureProcessIdentity(pid);
+      calls += 1;
+      return calls <= stages.length ? stages[calls - 1](identity) : identity;
+    },
+  });
+
+  const state = JSON.parse(readFileSync(paths.stateFile, 'utf8'));
+  assert.equal(state.process.command, captureProcessIdentity(child.pid).command);
+  assert.equal(inspectRuntime(fixture).kind, 'running');
+});
+
+test('a child that never gets past nohup is refused with its own reason and nothing is recorded', async () => {
+  const fixture = createFixture();
+  const launchToken = 'stuck-nohup-token';
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken);
+  const paths = daemonStatePaths({ ...fixture, projectRoot: fixture.runtimeRoot, deploymentId: 'runtime' });
+  assert.throws(
+    () =>
+      writeState({
+        ...fixture,
+        child,
+        launchToken,
+        captureIdentity: (pid) => {
+          const identity = captureProcessIdentity(pid);
+          return { ...identity, command: `nohup ${identity.command}` };
+        },
+      }),
+    (error) =>
+      error instanceof DaemonStateError &&
+      error.reason === 'spawned-process-exec-unsettled' &&
+      !error.message.includes(launchToken),
+  );
+  assert.equal(existsSync(paths.stateFile), false);
+});
+
+test('a spawned process in another cwd is refused at once, naming what was observed', async () => {
+  const fixture = createFixture();
+  const elsewhere = createFixture().runtimeRoot;
+  const child = await spawnFakeDaemon(elsewhere, 'elsewhere-token');
+  const startedAt = Date.now();
+  assert.throws(
+    () => writeState({ ...fixture, child, launchToken: 'elsewhere-token' }),
+    (error) =>
+      error instanceof DaemonStateError &&
+      error.reason === 'spawned-process-identity-mismatch' &&
+      error.message.includes(`cwd ${error.details.observedCwd}`),
+  );
+  assert.ok(Date.now() - startedAt < 1_000, 'a different cwd is conclusive and must not wait');
+});
+
+test('inspection gives an unreadable argv its own fail-closed reason', async () => {
+  const fixture = createFixture();
+  const launchToken = 'inspect-token';
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken);
+  const paths = writeState({ ...fixture, child, launchToken });
+
+  const inspection = inspectDaemonState({
+    stateFile: paths.stateFile,
+    expectedProjectRoot: fixture.runtimeRoot,
+    expectedDeploymentId: 'runtime',
+    captureIdentity: (pid) => unreadable(captureProcessIdentity(pid)),
+  });
+  assert.equal(inspection.kind, 'mismatch');
+  assert.equal(inspection.reason, 'process-argv-unavailable');
+});
+
+for (const clockJump of [false, true]) {
+  test(`a stop never records "terminated" on unreadable argv${clockJump ? ' after a pre-marker clock jump' : ''}`, async () => {
+    const fixture = createFixture();
+    const launchToken = 'stop-token';
+    const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken, { ignoreSigterm: true });
+    const paths = writeState({ ...fixture, child, launchToken });
+    if (clockJump) {
+      const state = JSON.parse(readFileSync(paths.stateFile, 'utf8'));
+      delete state.process.procStartTicks;
+      delete state.process.bootId;
+      writeFileSync(paths.stateFile, `${JSON.stringify(state)}\n`);
+    }
+
+    // The first read is readable, so the stop really opens against a running
+    // daemon and signals it. Every later read cannot see the argv - exactly the
+    // window in which the old code decided the daemon was gone.
+    let calls = 0;
+    const captureIdentity = (pid) => {
+      calls += 1;
+      const identity = calls === 1 ? captureReadableIdentity(pid) : captureProcessIdentity(pid);
+      return calls === 1
+        ? identity
+        : unreadable({
+            ...identity,
+            ...(clockJump ? { startedAtEpochMs: identity.startedAtEpochMs + 24_420_000 } : {}),
+          });
+    };
+
+    await assert.rejects(
+      stopDaemon({
+        paths,
+        expectedProjectRoot: fixture.runtimeRoot,
+        expectedDeploymentId: 'runtime',
+        graceMs: 200,
+        captureIdentity,
+      }),
+      (error) => error instanceof DaemonStateError && error.reason === 'stop-outcome-unknown',
+    );
+    assert.equal(existsSync(paths.stateFile), true, 'state must survive an unverifiable stop');
+    const audit = existsSync(paths.auditFile) ? readFileSync(paths.auditFile, 'utf8') : '';
+    assert.doesNotMatch(audit, /"outcome":"terminated"/);
+  });
+}
+
+function unreadableField(field, empty = false) {
+  return (pid) =>
+    captureProcessIdentity(pid, {
+      runPs: (target, requested, env) => {
+        if (requested !== field) return realPs(target, requested, env);
+        if (empty) return '';
+        throw Object.assign(new Error(`Cannot read ${field}`), { code: 'EACCES' });
+      },
+    });
+}
+
+for (const [label, read] of [
+  ['ucomm permission failure', unreadableField('ucomm')],
+  ['empty command', unreadableField('command', true)],
+  ['unreadable start time', unreadableField('lstart', true)],
+]) {
+  test(`${label} cannot make an executing daemon stale or terminated`, async () => {
+    const fixture = createFixture();
+    const launchToken = 'read-failure-token';
+    const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken, { ignoreSigterm: true });
+    const paths = writeState({ ...fixture, child, launchToken });
+    const options = { paths, expectedProjectRoot: fixture.runtimeRoot, expectedDeploymentId: 'runtime' };
+    const inspection = inspectDaemonState({ ...options, stateFile: paths.stateFile, captureIdentity: read });
+    assert.equal(inspection.reason, 'process-identity-unreadable');
+    let calls = 0;
+    await assert.rejects(
+      stopDaemon({
+        ...options,
+        graceMs: 100,
+        captureIdentity: (pid) => (++calls === 1 ? captureReadableIdentity(pid) : read(pid)),
+      }),
+      (error) => error.reason === 'stop-outcome-unknown',
+    );
+    assert.equal(existsSync(paths.stateFile), true);
+    process.kill(child.pid, 0);
+    assert.doesNotMatch(readFileSync(paths.auditFile, 'utf8'), /"outcome":"terminated"/);
+  });
+}
+
+test('spawn retries transient read errors and keeps persistent errors distinct from absence', async () => {
+  const fixture = createFixture();
+  const launchToken = 'spawn-read-failure-token';
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken);
+  const read = unreadableField('ucomm');
+  let calls = 0;
+  writeState({
+    ...fixture,
+    child,
+    launchToken,
+    captureIdentity: (pid) => (++calls < 3 ? read(pid) : captureReadableIdentity(pid)),
+  });
+  assert.equal(calls, 3);
+  assert.throws(
+    () => writeState({ ...fixture, child, launchToken, captureIdentity: read }),
+    (error) => error instanceof DaemonStateError && error.reason === 'spawned-process-identity-unreadable',
+  );
+});
+
+test('a forced signal without observed exit does not authorize record cleanup', async () => {
+  const fixture = createFixture();
+  const launchToken = 'post-signal-observation-token';
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken, { ignoreSigterm: true });
+  const paths = writeState({ ...fixture, child, launchToken });
+  // This deliberate frozen observer must start from a verified native reading,
+  // not freeze a second, potentially unreadable ps sample forever.
+  const frozen = JSON.parse(readFileSync(paths.stateFile, 'utf8')).process;
+  assert.equal(frozen.argvAvailable, true);
+  // The observer never reports absence, even after the force signal.
+  await assert.rejects(
+    stopDaemon({
+      paths,
+      expectedProjectRoot: fixture.runtimeRoot,
+      expectedDeploymentId: 'runtime',
+      graceMs: 30,
+      captureIdentity: () => frozen,
+    }),
+    (error) => error.reason === 'stop-outcome-unknown',
+  );
+  assert.equal(existsSync(paths.stateFile), true);
+  assert.doesNotMatch(readFileSync(paths.auditFile, 'utf8'), /"outcome":"terminated"/);
+});
+
+test('legacy migration keeps unreadable argv distinct from a readable wrong command', async () => {
+  const { homeDir, runtimeRoot } = createFixture();
+  const child = await spawnFakeDaemon(runtimeRoot, 'legacy-unreadable');
+  const paths = daemonStatePaths({ homeDir, projectRoot: runtimeRoot, deploymentId: 'runtime' });
+  const legacyPidFile = join(homeDir, 'daemon.pid');
+  const legacyLogPathFile = join(homeDir, 'daemon.log-path');
+  writeFileSync(legacyPidFile, `${child.pid}\n`);
+  writeFileSync(legacyLogPathFile, 'legacy-log\n');
+  const options = {
+    paths,
+    legacyPidFile,
+    legacyLogPathFile,
+    expectedProjectRoot: runtimeRoot,
+    expectedDeploymentId: 'runtime',
+  };
+  const original = childProcess.execFileSync;
+  try {
+    for (const shown of ['(node)', '[node]', '', null]) {
+      childProcess.execFileSync = (command, args, ...rest) => {
+        if (command !== 'ps' || !args.includes('command=')) return original(command, args, ...rest);
+        if (shown === null) throw new Error('injected ps permission error');
+        return `${shown}\n`;
+      };
+      syncBuiltinESMExports();
+      assert.deepEqual(migrateLegacyDaemonState(options), {
+        outcome: 'skipped',
+        reason: 'legacy-process-identity-unreadable',
+      });
+      assert.equal(readFileSync(legacyPidFile, 'utf8'), `${child.pid}\n`);
+      assert.equal(readFileSync(legacyLogPathFile, 'utf8'), 'legacy-log\n');
+      assert.equal(existsSync(paths.stateFile), false);
+      assert.equal(existsSync(paths.auditFile), false, 'unknown must not leave a false mismatch audit');
+    }
+    let readableCommandReads = 0;
+    childProcess.execFileSync = (command, args, ...rest) => {
+      if (command !== 'ps' || !args.includes('command=')) return original(command, args, ...rest);
+      readableCommandReads += 1;
+      return 'node unrelated-command\n';
+    };
+    syncBuiltinESMExports();
+    assert.equal(migrateLegacyDaemonState(options).reason, 'legacy-command-mismatch');
+    assert.equal(readableCommandReads, 1, 'the mismatch must come from the injected readable command');
+  } finally {
+    childProcess.execFileSync = original;
+    syncBuiltinESMExports();
+  }
+});
+
+test('inspection re-observes transient uncertainty but never retries a proved mismatch into a match', async () => {
+  const fixture = createFixture();
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, 'inspection-observation');
+  const paths = writeState({ ...fixture, child, launchToken: 'inspection-observation' });
+  const identity = JSON.parse(readFileSync(paths.stateFile, 'utf8')).process;
+  assert.equal(identity.argvAvailable, true);
+  const options = {
+    stateFile: paths.stateFile,
+    expectedProjectRoot: fixture.runtimeRoot,
+    expectedDeploymentId: 'runtime',
+  };
+  for (const first of ['argv', 'read-error']) {
+    let calls = 0;
+    const inspection = inspectDaemonState({
+      ...options,
+      captureIdentity: () => {
+        if (++calls > 1) return identity;
+        if (first === 'read-error') throw new Error('transient identity read');
+        return unreadable(identity);
+      },
+    });
+    assert.equal(inspection.kind, 'running', first);
+    assert.equal(calls, 2, 'success must come from the new complete observation');
+  }
+  let calls = 0;
+  const mismatch = inspectDaemonState({
+    ...options,
+    captureIdentity: () => {
+      calls += 1;
+      return calls === 1 ? { ...identity, command: 'another-process' } : identity;
+    },
+  });
+  assert.equal(mismatch.reason, 'process-identity-mismatch');
+  assert.equal(calls, 1, 'a conclusive refusal must not be retried into permission');
+});
+
+test('inspection bounds persistent uncertainty and refuses an identity change after an unreadable sample', async () => {
+  const fixture = createFixture();
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, 'inspection-refusal');
+  const paths = writeState({ ...fixture, child, launchToken: 'inspection-refusal' });
+  const identity = JSON.parse(readFileSync(paths.stateFile, 'utf8')).process;
+  assert.equal(identity.argvAvailable, true);
+  const options = {
+    stateFile: paths.stateFile,
+    expectedProjectRoot: fixture.runtimeRoot,
+    expectedDeploymentId: 'runtime',
+  };
+  let calls = 0;
+  const unknown = inspectDaemonState({
+    ...options,
+    captureIdentity: () => {
+      calls += 1;
+      assert.ok(calls <= 10, 'observation budget must terminate');
+      return unreadable(identity);
+    },
+  });
+  assert.equal(unknown.reason, 'process-argv-unavailable');
+  assert.ok(calls > 1);
+  calls = 0;
+  const changed = inspectDaemonState({
+    ...options,
+    captureIdentity: () =>
+      ++calls === 1 ? unreadable(identity) : { ...identity, command: 'replacement-without-token' },
+  });
+  assert.equal(changed.reason, 'process-identity-mismatch');
+  assert.equal(calls, 2);
+});

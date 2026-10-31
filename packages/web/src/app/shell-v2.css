@@ -1,0 +1,240 @@
+@import "@cat-cafe/ui/styles.css";
+
+/*
+ * F322 Stage 1 — Café 1.6 shell role tokens.
+ *
+ * Scope: [data-shell="v2"] is set on <html> only while the new presentation is on,
+ * so classic UI is untouched when the switch is off (DESIGN.md / roadmap "同一开关").
+ * The shared member dialog opts into this same role map inside its form, including
+ * when opened from the classic shell; it does not change the shell preference.
+ *
+ * These are ROLE aliases onto the existing theme tokens. The active theme
+ * (themeStore → ThemeApplier → buildCSS, built-in light/dark + custom themes)
+ * keeps driving every value; nothing here hard-codes the T1 sample HEX.
+ *
+ * Light: 外框 (rail + sidebar) < 工作面 (chat) < 纸面 (cards / inputs); 选中 = 最深一档。
+ * Dark follows the DESIGN.md "Dark mode" rule: map by light/dark relationship, not by token name
+ * (外框最暗 → 工作面 → 纸面 → 选中最亮).
+ */
+/* Chat chrome responds to its own pane, including narrow desktop split views.
+ * Keep navigation and work actions intact instead of overflowing the shared
+ * scroll host, which lets keyboard focus pan the entire conversation sideways. */
+[data-shell-header="v2"] {
+  container: chat-header / inline-size;
+}
+
+/* Use the chat pane's available width, including desktop split panes. */
+[data-thread-chat-full-v2] {
+  container: thread-chat / inline-size;
+}
+
+@container thread-chat (max-width: 420px) {
+  /* 28px latest target + 2px edge + 10px reading gap; both columns inherit this one budget. */
+  [data-thread-chat-full-v2] > [data-thread-chat-history],
+  [data-thread-chat-full-v2] [data-thread-chat-footer] {
+    --thread-chat-inset-end: 2.5rem;
+  }
+
+  /* Stack the existing targets: latest is 12px from the bottom, 28px high, with an 8px gap. */
+  [data-thread-chat-full-v2] > [data-thread-chat-history] > [data-message-piano] {
+    bottom: 3rem;
+  }
+
+  [data-thread-chat-full-v2] > [data-thread-chat-history] [data-thread-scroll-placement="rail"] {
+    right: 0.125rem;
+  }
+}
+
+@container chat-header (max-width: 420px) {
+  .shell-chat-header-layout {
+    height: auto;
+    min-height: 52px;
+    flex-wrap: nowrap;
+    padding: 8px 12px;
+    gap: 4px;
+  }
+
+  .shell-chat-header-navigation {
+    flex: 1 1 0;
+    min-width: 0;
+    gap: 2px;
+  }
+  /* The menu already truncates its label; let its wrapper yield space to the
+   * fixed controls instead of painting over search in a narrow English pane. */
+  .shell-chat-header-navigation [data-testid="conversation-view-control"] {
+    flex: 0 1 auto;
+    min-width: 28px;
+  }
+  .shell-chat-header-navigation [data-testid="conversation-view-menu-toggle"] {
+    max-width: 100%;
+    padding-inline: 4px;
+    gap: 2px;
+  }
+  .shell-chat-header-navigation [data-testid="conversation-view-menu-toggle"] > span[aria-hidden="true"] {
+    display: none;
+  }
+  .shell-chat-header-actions {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    gap: 2px;
+  }
+  .shell-chat-header-actions button {
+    min-width: 28px;
+    padding-inline: 6px;
+    gap: 3px;
+  }
+  /* Accessible names and real counts remain on the existing controls. */
+  .shell-chat-header-actions [data-testid="header-works"] > span:nth-child(2),
+  .shell-chat-header-actions [data-testid="header-tasks"] > span:nth-child(2) {
+    display: none;
+  }
+}
+
+/* DESIGN.md switches: both states have a visible round thumb, scoped to the new shell. */
+[data-shell="v2"] .settings-resource-toggle {
+  width: 26px;
+  height: 16px;
+  border: 1px solid var(--shell-muted);
+  background: var(--shell-paper);
+}
+
+[data-shell="v2"] .settings-resource-toggle-thumb {
+  width: 12px;
+  height: 12px;
+  top: 1px;
+  left: 1px;
+  background: var(--shell-muted);
+}
+
+[data-shell="v2"] .settings-resource-toggle[data-enabled="true"] {
+  border-color: var(--shell-ink);
+  background: var(--shell-ink);
+}
+
+[data-shell="v2"] .settings-resource-toggle[data-enabled="true"] .settings-resource-toggle-thumb {
+  left: 11px;
+  background: var(--shell-paper);
+}
+
+/* One focus ring for every shell control: external 2px solid ring + 2px gap (DESIGN.md Elevation). */
+[data-shell="v2"] .shell-focusable:focus-visible {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 2px;
+}
+
+[data-shell="v2"] .shell-rail-item {
+  transition: background-color 120ms ease;
+}
+
+[data-shell="v2"] .shell-rail-item:hover:not([aria-current="page"]):not([data-selected="true"]) {
+  background: color-mix(in srgb, var(--shell-selected) 55%, transparent);
+}
+
+[data-shell="v2"] .shell-nav-row:hover:not([data-selected="true"]) {
+  background: color-mix(in srgb, var(--shell-selected) 55%, transparent);
+}
+
+@keyframes shell-slide-in {
+  from {
+    transform: translateX(-12px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* A panel that docks beside the rail (待办): it eases out of the rail instead of appearing. */
+[data-shell="v2"] .shell-slide-in {
+  animation: shell-slide-in 140ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-shell="v2"] .shell-rail-item {
+    transition: none;
+  }
+
+  [data-shell="v2"] .shell-slide-in {
+    animation: none;
+  }
+}
+
+/*
+ * Composer (ChatInput) — presentation only. The row becomes ONE paper card centred on the reading column;
+ * every control inside keeps its handler, draft, focus and shortcut behaviour (nothing here touches ChatInput logic).
+ * The card takes the focus ring so keyboard focus on the field stays visible after the textarea's own ring is dropped.
+ */
+[data-shell="v2"] div:has(> [data-testid="chat-input-composer-row"]) {
+  background: var(--shell-work);
+}
+
+/* The landing composer overlaps the hero fade; its host must not paint a rectangular work-surface behind the card. */
+[data-shell="v2"] [data-testid="new-conversation-page"] div:has(> [data-testid="chat-input-composer-row"]) {
+  background: transparent;
+}
+
+[data-shell="v2"] [data-testid="chat-input-composer-row"] {
+  width: calc(100% - 32px);
+  max-width: 720px;
+  margin: 0 auto 16px;
+  padding: 6px 8px;
+  align-items: flex-end;
+  background: var(--shell-paper);
+  border: 1px solid var(--shell-hairline-strong);
+  border-radius: 16px;
+}
+
+[data-shell="v2"] [data-testid="chat-input-composer-row"]:focus-within {
+  border-color: color-mix(in srgb, var(--shell-hairline-strong) 65%, var(--shell-body) 35%);
+}
+
+[data-shell="v2"] [data-testid="chat-input-composer-row"][data-composer-keyboard-focus="true"] {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 2px;
+}
+
+/*
+ * The one execution row (F322 original-B) — presentation only. Same column as the composer card below it
+ * (centred, 720px max), so the row, its ■ and the panel that pops up from it line up with the field.
+ */
+[data-shell="v2"] [data-testid="execution-row"] {
+  width: calc(100% - 32px);
+  max-width: 720px;
+  margin: 8px auto 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+[data-shell="v2"] [data-testid="chat-input-composer-row"] textarea {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+[data-shell="v2"] [data-testid="chat-input-composer-row"] textarea:focus {
+  background: transparent;
+  box-shadow: none;
+}
+
+[data-shell="v2"] [data-testid="chat-input-composer-row"] textarea:focus-visible {
+  outline: none;
+}
+
+/* The Client sidebar uses its own viewport. Match that iframe width through the existing Host container. */
+.collective-private-page {
+  width: calc(100% - 300px);
+}
+@container collective-host (max-width: 1540px) {
+  .collective-private-page {
+    width: calc(100% - 280px);
+  }
+}
+@container collective-host (max-width: 820px) {
+  .collective-private-page {
+    width: 100%;
+  }
+}

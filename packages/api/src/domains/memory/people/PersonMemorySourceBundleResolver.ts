@@ -1,0 +1,432 @@
+import { createHash } from 'node:crypto';
+import {
+  type CandidateClaimDraftId,
+  type PersonMemoryResolvedSourceBundle,
+  type PersonMemorySourceBundleInput,
+  type PersonMemorySourceInput,
+  personMemoryResolvedSourceBundleSchema,
+  type ResolvedPersonMemorySource,
+} from '@cat-cafe/shared';
+import { messageFrom } from '../../cats/services/stores/message-from.js';
+import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
+import { isDelivered } from '../../cats/services/stores/ports/MessageStore.js';
+import { canViewMessage } from '../../cats/services/stores/visibility.js';
+import {
+  normalizeOwnerMessageText,
+  ownerMessageTextDigestMaterial,
+  ownerMessageTextSegments,
+  resolveOwnerMessageExcerptSegment,
+} from './owner-message-text-projection.js';
+
+export interface PersonMemorySourceAuth {
+  ownerUserId: string;
+}
+
+export interface PersonMemoryAssertionTargetResolution {
+  claimDraftIds: CandidateClaimDraftId[];
+  relationshipDraftId?: CandidateClaimDraftId;
+  interactionDraftId?: CandidateClaimDraftId;
+}
+
+export interface OwnerPrivateArtifactResolution {
+  digest: string;
+  boundedText: string;
+}
+
+export interface OwnerPrivateArtifactResolver {
+  resolve(ownerUserId: string, artifactLocator: string): Promise<OwnerPrivateArtifactResolution | null>;
+}
+
+export type PersonMemorySourceResolution =
+  | { status: 'resolved'; bundle: PersonMemoryResolvedSourceBundle; bundleDigest: string }
+  | { status: 'invalid'; error: string };
+
+export type PersonMemoryResolvedSourceRevalidation =
+  | { status: 'resolved'; bundle: PersonMemoryResolvedSourceBundle }
+  | { status: 'invalid'; error: string };
+
+interface ResolverDeps {
+  messageStore: Pick<IMessageStore, 'getById'>;
+  ownerPrivateArtifactResolver?: OwnerPrivateArtifactResolver;
+}
+
+export function normalizePersonMemorySourceText(value: string): string {
+  return normalizeOwnerMessageText(value);
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export function digestPersonMemorySourceMaterial(value: unknown): string {
+  const material = typeof value === 'string' ? normalizePersonMemorySourceText(value) : stableJson(value);
+  return createHash('sha256').update(material).digest('hex');
+}
+
+export function digestPersonMemoryResolvedBundle(bundle: PersonMemoryResolvedSourceBundle): string {
+  return digestPersonMemorySourceMaterial({
+    sources: bundle.sources.map((source) => ({
+      sourceId: source.sourceId,
+      kind: source.kind,
+      resolvedDigest: source.resolvedDigest,
+    })),
+    assertionBindings: bundle.assertionBindings,
+  });
+}
+
+export function eligibleOwnerMessage(
+  message: StoredMessage | null,
+  auth: PersonMemorySourceAuth,
+): message is StoredMessage {
+  return Boolean(
+    message &&
+      message.userId === auth.ownerUserId &&
+      messageFrom(message).kind === 'user' &&
+      message.deletedAt === undefined &&
+      message._tombstone !== true &&
+      isDelivered(message) &&
+      canViewMessage(message, { type: 'user' }),
+  );
+}
+
+export function explicitlyConfirmsAccuracy(message: StoredMessage): boolean {
+  const ownerSegments = ownerMessageTextSegments(message).map((segment) => segment.text);
+  if (ownerSegments.some((content) => /(?:不对|不准确|未确认|not correct|inaccurate)/iu.test(content))) {
+    return false;
+  }
+  return ownerSegments.some((content) =>
+    /(?:^|[\s，,。.!！])(?:对|是的|没错)(?:[\s，,。.!！]|$)|(?:转写|记录|内容).{0,24}(?:准确|没错|已确认)|\bconfirm(?:ed)?\b/iu.test(
+      content,
+    ),
+  );
+}
+
+export function ownerMessageSourceRef(message: StoredMessage) {
+  return { kind: 'message' as const, threadId: message.threadId, messageId: message.id };
+}
+
+export function ownerMessageAttachmentBlock(
+  message: StoredMessage,
+  input: { attachmentLocator: { surface: 'content_block' | 'rich_block'; index: number } },
+) {
+  const index = input.attachmentLocator.index;
+  if (input.attachmentLocator.surface === 'content_block') {
+    return message.contentBlocks?.[index] ?? null;
+  }
+  return message.extra?.rich?.blocks[index] ?? null;
+}
+
+export function ownerMessageAttachmentTranscript(block: unknown): string {
+  if (!block || typeof block !== 'object') return '';
+  const value = block as Record<string, unknown>;
+  if (value.type === 'text' && typeof value.text === 'string') return value.text;
+  if (value.type === 'code' && typeof value.code === 'string') return value.code;
+  if (value.type === 'image' && typeof value.alt === 'string') return value.alt;
+  if (value.kind === 'media_gallery' && Array.isArray(value.items)) {
+    return value.items
+      .flatMap((item) => {
+        if (!item || typeof item !== 'object') return [];
+        const media = item as Record<string, unknown>;
+        return [media.alt, media.caption].filter((part): part is string => typeof part === 'string');
+      })
+      .join('\n');
+  }
+  if (value.kind === 'audio' && typeof value.text === 'string') return value.text;
+  if (value.kind === 'file' && typeof value.fileName === 'string') return value.fileName;
+  return '';
+}
+
+function invalid(error: string): { status: 'invalid'; error: string } {
+  return { status: 'invalid', error };
+}
+
+export class PersonMemorySourceBundleResolver {
+  constructor(private readonly deps: ResolverDeps) {}
+
+  async resolve(
+    input: PersonMemorySourceBundleInput,
+    auth: PersonMemorySourceAuth,
+    targets: PersonMemoryAssertionTargetResolution,
+  ): Promise<PersonMemorySourceResolution> {
+    const sources: ResolvedPersonMemorySource[] = [];
+    for (const source of input.sources) {
+      const resolved = await this.resolveSource(source, auth);
+      if (resolved.status === 'invalid') return resolved;
+      sources.push(resolved.source);
+    }
+    const assertionBindings = input.assertionBindings.map((binding) => {
+      if (binding.target.kind === 'claim') {
+        const draftId = targets.claimDraftIds[binding.target.index];
+        if (!draftId) throw new Error(`claim target index ${binding.target.index} is not present`);
+        return { ...binding, target: { kind: 'claim' as const, draftId } };
+      }
+      if (binding.target.kind === 'relationship') {
+        if (!targets.relationshipDraftId) throw new Error('relationship target is not present');
+        return { ...binding, target: { ...binding.target, draftId: targets.relationshipDraftId } };
+      }
+      if (!targets.interactionDraftId) throw new Error('interaction target is not present');
+      return { ...binding, target: { ...binding.target, draftId: targets.interactionDraftId } };
+    });
+    const bundle = personMemoryResolvedSourceBundleSchema.parse({
+      sources,
+      assertionBindings,
+    });
+    return {
+      status: 'resolved',
+      bundle,
+      bundleDigest: digestPersonMemoryResolvedBundle(bundle),
+    };
+  }
+
+  async revalidate(
+    input: PersonMemorySourceBundleInput,
+    auth: PersonMemorySourceAuth,
+    targets: PersonMemoryAssertionTargetResolution,
+    expectedBundleDigest: string,
+  ): Promise<PersonMemorySourceResolution> {
+    const current = await this.resolve(input, auth, targets);
+    if (current.status === 'invalid') return current;
+    if (current.bundleDigest !== expectedBundleDigest) return invalid('source_drift');
+    return current;
+  }
+
+  /**
+   * Revalidate stored canonical provenance for an owner read. This consumes the
+   * resolved bundle already attached to the person item and never accepts new
+   * source coordinates or source text from the browser caller.
+   */
+  async revalidateResolvedBundle(
+    bundle: PersonMemoryResolvedSourceBundle,
+    auth: PersonMemorySourceAuth,
+  ): Promise<PersonMemoryResolvedSourceRevalidation> {
+    const sources: ResolvedPersonMemorySource[] = [];
+    for (const source of bundle.sources) {
+      if (source.ownerUserId !== auth.ownerUserId) return invalid('invalid_source_owner');
+      const current = await this.revalidateResolvedSource(source, auth);
+      if (current.status === 'invalid') return current;
+      if (stableJson(current.source) !== stableJson(source)) return invalid('source_drift');
+      sources.push(current.source);
+    }
+    return {
+      status: 'resolved',
+      bundle: personMemoryResolvedSourceBundleSchema.parse({ ...bundle, sources }),
+    };
+  }
+
+  private async revalidateResolvedSource(
+    source: ResolvedPersonMemorySource,
+    auth: PersonMemorySourceAuth,
+  ): Promise<{ status: 'resolved'; source: ResolvedPersonMemorySource } | { status: 'invalid'; error: string }> {
+    if (source.kind === 'message_text') {
+      return this.resolveMessageText(
+        {
+          sourceId: source.sourceId,
+          kind: source.kind,
+          messageId: source.sourceRef.messageId,
+          expectedDigest: source.resolvedDigest,
+          excerpt: source.excerpt,
+        },
+        auth,
+      );
+    }
+    if (source.kind === 'message_attachment') {
+      return this.resolveMessageAttachment(
+        {
+          sourceId: source.sourceId,
+          kind: source.kind,
+          messageId: source.sourceRef.messageId,
+          attachmentLocator: source.attachmentLocator,
+          expectedDigest: source.resolvedDigest,
+          boundedTranscript: source.boundedTranscript,
+        },
+        auth,
+      );
+    }
+    if (source.kind === 'owner_confirmed_transcript') {
+      return this.resolveConfirmedTranscript(
+        {
+          sourceId: source.sourceId,
+          kind: source.kind,
+          transcript: source.transcript,
+          transcriptDigest: digestPersonMemorySourceMaterial(source.transcript),
+          confirmationMessageId: source.confirmationSourceRef.messageId,
+          confirmationScope: source.confirmationScope,
+        },
+        auth,
+      );
+    }
+    const confirmation = await this.deps.messageStore.getById(source.confirmationSourceRef.messageId);
+    if (
+      !eligibleOwnerMessage(confirmation, auth) ||
+      confirmation.threadId !== source.confirmationSourceRef.threadId ||
+      !explicitlyConfirmsAccuracy(confirmation)
+    ) {
+      return invalid('invalid_artifact_confirmation');
+    }
+    const artifact = await this.deps.ownerPrivateArtifactResolver?.resolve(auth.ownerUserId, source.artifactLocator);
+    if (
+      !artifact ||
+      !normalizePersonMemorySourceText(artifact.boundedText).includes(
+        normalizePersonMemorySourceText(source.boundedExcerpt),
+      )
+    ) {
+      return invalid('invalid_private_artifact');
+    }
+    const resolvedDigest = digestPersonMemorySourceMaterial({
+      artifactDigest: artifact.digest,
+      confirmation: ownerMessageTextDigestMaterial(confirmation),
+    });
+    if (resolvedDigest !== source.resolvedDigest) return invalid('source_drift');
+    return {
+      status: 'resolved',
+      source: {
+        ...source,
+        confirmationSourceRef: ownerMessageSourceRef(confirmation),
+        resolvedDigest,
+      },
+    };
+  }
+
+  private async resolveSource(
+    input: PersonMemorySourceInput,
+    auth: PersonMemorySourceAuth,
+  ): Promise<{ status: 'resolved'; source: ResolvedPersonMemorySource } | { status: 'invalid'; error: string }> {
+    if (input.kind === 'message_text') return this.resolveMessageText(input, auth);
+    if (input.kind === 'message_attachment') return this.resolveMessageAttachment(input, auth);
+    if (input.kind === 'owner_confirmed_transcript') return this.resolveConfirmedTranscript(input, auth);
+    return this.resolvePrivateArtifact(input, auth);
+  }
+
+  private async resolveMessageText(
+    input: Extract<PersonMemorySourceInput, { kind: 'message_text' }>,
+    auth: PersonMemorySourceAuth,
+  ) {
+    const message = await this.deps.messageStore.getById(input.messageId);
+    if (!eligibleOwnerMessage(message, auth)) return { status: 'invalid' as const, error: 'invalid_message_source' };
+    if (!resolveOwnerMessageExcerptSegment(message, input.excerpt)) {
+      return { status: 'invalid' as const, error: 'source_excerpt_mismatch' };
+    }
+    const resolvedDigest = digestPersonMemorySourceMaterial(ownerMessageTextDigestMaterial(message));
+    if (input.expectedDigest && input.expectedDigest !== resolvedDigest) {
+      return { status: 'invalid' as const, error: 'source_digest_mismatch' };
+    }
+    return {
+      status: 'resolved' as const,
+      source: {
+        sourceId: input.sourceId,
+        kind: input.kind,
+        sourceRef: ownerMessageSourceRef(message),
+        ownerUserId: auth.ownerUserId,
+        resolvedDigest,
+        excerpt: input.excerpt,
+      },
+    };
+  }
+
+  private async resolveMessageAttachment(
+    input: Extract<PersonMemorySourceInput, { kind: 'message_attachment' }>,
+    auth: PersonMemorySourceAuth,
+  ) {
+    const message = await this.deps.messageStore.getById(input.messageId);
+    if (!eligibleOwnerMessage(message, auth)) {
+      return { status: 'invalid' as const, error: 'invalid_attachment_source' };
+    }
+    const block = ownerMessageAttachmentBlock(message, input);
+    const transcript = ownerMessageAttachmentTranscript(block);
+    if (
+      !block ||
+      !normalizePersonMemorySourceText(transcript).includes(normalizePersonMemorySourceText(input.boundedTranscript))
+    ) {
+      return { status: 'invalid' as const, error: 'attachment_transcript_mismatch' };
+    }
+    const resolvedDigest = digestPersonMemorySourceMaterial(block);
+    if (input.expectedDigest !== resolvedDigest) {
+      return { status: 'invalid' as const, error: 'source_digest_mismatch' };
+    }
+    return {
+      status: 'resolved' as const,
+      source: {
+        sourceId: input.sourceId,
+        kind: input.kind,
+        sourceRef: ownerMessageSourceRef(message),
+        ownerUserId: auth.ownerUserId,
+        attachmentLocator: input.attachmentLocator,
+        resolvedDigest,
+        boundedTranscript: input.boundedTranscript,
+      },
+    };
+  }
+
+  private async resolveConfirmedTranscript(
+    input: Extract<PersonMemorySourceInput, { kind: 'owner_confirmed_transcript' }>,
+    auth: PersonMemorySourceAuth,
+  ) {
+    if (digestPersonMemorySourceMaterial(input.transcript) !== input.transcriptDigest) {
+      return { status: 'invalid' as const, error: 'source_digest_mismatch' };
+    }
+    const confirmation = await this.deps.messageStore.getById(input.confirmationMessageId);
+    if (!eligibleOwnerMessage(confirmation, auth) || !explicitlyConfirmsAccuracy(confirmation)) {
+      return { status: 'invalid' as const, error: 'invalid_transcript_confirmation' };
+    }
+    const resolvedDigest = digestPersonMemorySourceMaterial({
+      transcript: normalizePersonMemorySourceText(input.transcript),
+      confirmation: ownerMessageTextDigestMaterial(confirmation),
+    });
+    return {
+      status: 'resolved' as const,
+      source: {
+        sourceId: input.sourceId,
+        kind: input.kind,
+        confirmationSourceRef: ownerMessageSourceRef(confirmation),
+        ownerUserId: auth.ownerUserId,
+        resolvedDigest,
+        transcript: input.transcript,
+        confirmationScope: input.confirmationScope,
+      },
+    };
+  }
+
+  private async resolvePrivateArtifact(
+    input: Extract<PersonMemorySourceInput, { kind: 'owner_private_artifact' }>,
+    auth: PersonMemorySourceAuth,
+  ) {
+    const confirmation = await this.deps.messageStore.getById(input.confirmationMessageId);
+    if (!eligibleOwnerMessage(confirmation, auth) || !explicitlyConfirmsAccuracy(confirmation)) {
+      return { status: 'invalid' as const, error: 'invalid_artifact_confirmation' };
+    }
+    const artifact = await this.deps.ownerPrivateArtifactResolver?.resolve(auth.ownerUserId, input.artifactLocator);
+    if (
+      !artifact ||
+      artifact.digest !== input.expectedDigest ||
+      !normalizePersonMemorySourceText(artifact.boundedText).includes(
+        normalizePersonMemorySourceText(input.boundedExcerpt),
+      )
+    ) {
+      return { status: 'invalid' as const, error: 'invalid_private_artifact' };
+    }
+    const resolvedDigest = digestPersonMemorySourceMaterial({
+      artifactDigest: artifact.digest,
+      confirmation: ownerMessageTextDigestMaterial(confirmation),
+    });
+    return {
+      status: 'resolved' as const,
+      source: {
+        sourceId: input.sourceId,
+        kind: input.kind,
+        artifactLocator: input.artifactLocator,
+        confirmationSourceRef: ownerMessageSourceRef(confirmation),
+        ownerUserId: auth.ownerUserId,
+        resolvedDigest,
+        boundedExcerpt: input.boundedExcerpt,
+      },
+    };
+  }
+}

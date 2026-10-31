@@ -7,14 +7,13 @@ const CAT_BG_COLORS: Record<string, string> = {
   opus: 'var(--color-opus-primary)',
   codex: 'var(--color-codex-primary)',
   gemini: 'var(--color-gemini-primary)',
-  // Variant-specific shades (same family, different tones)
-  gpt52: '#66BB6A',
-  'opus-45': '#7E57C2',
-  sonnet: '#B39DDB',
+  gpt52: 'var(--color-gpt52-primary)',
+  'opus-45': 'var(--color-opus-45-primary)',
+  sonnet: 'var(--color-sonnet-primary)',
 };
 
-const WARN_COLOR = '#f59e0b'; // amber-500
-const DANGER_COLOR = '#ef4444'; // red-500
+const WARN_COLOR = 'var(--semantic-warning)';
+const DANGER_COLOR = 'var(--semantic-critical)';
 
 export interface ContextHealthBarProps {
   catId: string;
@@ -29,6 +28,14 @@ function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
   return String(n);
+}
+
+function describeContextHealthSource(health: ContextHealthData): string {
+  if (health.usedFrom === 'context') return 'Current context fill reported by the active carrier';
+  if (health.usedFrom === 'last_turn') return 'Current context fill';
+  if (health.usedFrom === 'input') return 'Input-token fallback for context health; may be cumulative';
+  if (health.usedFrom === 'total') return 'Total-token fallback estimate for context health';
+  return health.source === 'approx' ? 'Estimated context fill' : 'Current context fill';
 }
 
 /**
@@ -63,14 +70,14 @@ export function ContextHealthBar({
     barColor = CAT_BG_COLORS[catId] ?? CAT_BG_COLORS.opus;
   }
 
-  const approxPrefix = health.source === 'approx' ? '~' : '';
+  const approxPrefix = health.source === 'approx' || health.usedFrom === 'total' ? '~' : '';
   const percent = Math.round(health.fillRatio * 100);
-  const tooltip = `Context: ${approxPrefix}${percent}% (${formatTokenCount(health.usedTokens)} / ${formatTokenCount(health.windowTokens)} tokens)`;
+  const tooltip = `${describeContextHealthSource(health)}: ${approxPrefix}${percent}% (${formatTokenCount(health.usedTokens)} / ${formatTokenCount(health.windowTokens)} tokens)`;
 
   return (
     <div className="mt-1" title={tooltip} data-testid={`context-health-${catId}`}>
       <div className="flex items-center gap-1.5">
-        <div className="flex-1 h-[3px] rounded-full bg-gray-200 overflow-hidden">
+        <div className="flex-1 h-[3px] rounded-full bg-cafe-surface overflow-hidden">
           <div
             className={`h-full rounded-full ${isDanger ? 'animate-pulse' : ''}`}
             style={{
@@ -80,7 +87,7 @@ export function ContextHealthBar({
             }}
           />
         </div>
-        <span className="text-[10px] text-gray-400 tabular-nums w-8 text-right">
+        <span className="text-micro text-cafe-muted tabular-nums w-8 text-right">
           {approxPrefix}
           {percent}%
         </span>

@@ -2,24 +2,27 @@
 
 interface IconProps {
   className?: string;
+  /** Fixed icon color — defaults to a dark value for light avatar backgrounds.
+   *  Avoids `currentColor` which flips in dark mode and becomes invisible. */
+  color?: string;
 }
 
 /** GitHub octocat silhouette — monoline SVG, 24x24 */
-export function GitHubIcon({ className = 'w-5 h-5' }: IconProps) {
+export function GitHubIcon({ className = 'w-5 h-5', color = '#24292f' }: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+    <svg viewBox="0 0 24 24" fill={color} className={className}>
       <path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.17 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.604-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.464-1.11-1.464-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836a9.59 9.59 0 0 1 2.504.337c1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.167 22 16.418 22 12c0-5.523-4.477-10-10-10z" />
     </svg>
   );
 }
 
 /** Settings gear — monoline SVG, 24x24, currentColor */
-export function SettingsIcon({ className = 'w-5 h-5' }: IconProps) {
+export function SettingsIcon({ className = 'w-5 h-5', color = '#374151' }: IconProps) {
   return (
     <svg
       viewBox="0 0 24 24"
       fill="none"
-      stroke="currentColor"
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -32,12 +35,12 @@ export function SettingsIcon({ className = 'w-5 h-5' }: IconProps) {
 }
 
 /** Users group — monoline SVG, 24x24, currentColor */
-export function UsersIcon({ className = 'w-5 h-5' }: IconProps) {
+export function UsersIcon({ className = 'w-5 h-5', color = '#374151' }: IconProps) {
   return (
     <svg
       viewBox="0 0 24 24"
       fill="none"
-      stroke="currentColor"
+      stroke={color}
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -51,7 +54,146 @@ export function UsersIcon({ className = 'w-5 h-5' }: IconProps) {
   );
 }
 
+/** Scheduler clock — monoline SVG, 24x24, currentColor */
+export function SchedulerIcon({ className = 'w-5 h-5', color = '#374151' }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15 15" />
+      <path d="M5 3L2 6" />
+      <path d="M19 3l3 3" />
+    </svg>
+  );
+}
+
+/** Hold-ball pause — circle with pause bars, monoline SVG, 24x24 */
+export function HoldBallIcon({ className = 'w-5 h-5', color = '#374151' }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="12" cy="12" r="9" />
+      <line x1="10" y1="8" x2="10" y2="16" />
+      <line x1="14" y1="8" x2="14" y2="16" />
+    </svg>
+  );
+}
+
+/** Development result returning to its original owner, monoline SVG. */
+export function ReturnArrowIcon({ className = 'w-5 h-5', color = '#374151' }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="m9 5-5 5 5 5" />
+      <path d="M4 10h11a5 5 0 0 1 0 10h-3" />
+    </svg>
+  );
+}
+
+/** Deployment ready — clockwise refresh arrows, monoline SVG. */
+export function RefreshCwIcon({ className = 'w-5 h-5', color = '#374151' }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M3 21v-5h5" />
+    </svg>
+  );
+}
+
+/** Auth key — key silhouette, monoline SVG, 24x24 */
+export function AuthKeyIcon({ className = 'w-5 h-5', color = '#374151' }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="8" cy="15" r="5" />
+      <path d="M11.7 11.3L15.5 7.5" />
+      <path d="M15.5 7.5l3 3" />
+      <path d="M15.5 7.5L20 3" />
+    </svg>
+  );
+}
+
+/** Search — monoline SVG, 24x24 */
+export function SearchIcon({ className = 'w-5 h-5', color = '#374151' }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="11" cy="11" r="6" />
+      <path d="m20 20-4.35-4.35" />
+    </svg>
+  );
+}
+
+/** Physical limb robot — monoline SVG, 24x24 */
+export function RobotIcon({ className = 'w-5 h-5', color = '#374151' }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M12 3v3" />
+      <circle cx="12" cy="2.5" r="0.5" fill={color} stroke="none" />
+      <rect x="4" y="6" width="16" height="13" rx="3" />
+      <circle cx="9" cy="12" r="1" fill={color} stroke="none" />
+      <circle cx="15" cy="12" r="1" fill={color} stroke="none" />
+      <path d="M9 16h6" />
+    </svg>
+  );
+}
+
 /** Connector icon image — renders a designed PNG icon for IM platforms */
 export function ConnectorImage({ src, alt, className = 'w-5 h-5' }: { src: string; alt: string; className?: string }) {
+  // eslint-disable-next-line @next/next/no-img-element
   return <img src={src} alt={alt} className={`${className} rounded object-cover`} />;
 }

@@ -147,18 +147,23 @@ describe('Issue #586 Bug 3: Ack-driven unread suppression', () => {
           intentMode: null,
           targetCats: [],
           catStatuses: {},
+          catStatusDetails: {},
           catInvocations: {},
-          currentGame: null,
           unreadCount: 5,
           hasUserMention: false,
           lastActivity: Date.now(),
           queue: [],
-          queuePaused: false,
           queueFull: false,
+          workspaceWorktreeId: null,
+          workspaceOpenTabs: [],
+          workspaceOpenFilePath: null,
+          workspaceOpenFileLine: null,
         },
       },
       _unreadSuppressedUntil: {},
       _pendingAckCount: {},
+      _unreadAckRollback: {},
+      _unreadAckHadFailure: {},
     });
   });
 
@@ -190,6 +195,47 @@ describe('Issue #586 Bug 3: Ack-driven unread suppression', () => {
 
     store.initThreadUnread('thread-B', 2, false);
     expect(useChatStore.getState().threadStates['thread-B']?.unreadCount).toBe(2);
+  });
+
+  it('caughtUp=false settles the request, releases suppression, and restores the optimistic badge', () => {
+    const store = useChatStore.getState();
+    store.clearUnread('thread-B');
+    store.armUnreadSuppression('thread-B');
+
+    store.settleUnreadAck('thread-B', false);
+
+    const state = useChatStore.getState();
+    expect(state._pendingAckCount['thread-B']).toBe(0);
+    expect(state._unreadSuppressedUntil['thread-B']).toBeUndefined();
+    expect(state.threadStates['thread-B']?.unreadCount).toBe(5);
+  });
+
+  it('caughtUp=true settles the request without rolling back the cleared badge', () => {
+    const store = useChatStore.getState();
+    store.clearUnread('thread-B');
+    store.armUnreadSuppression('thread-B');
+
+    store.settleUnreadAck('thread-B', true);
+
+    const state = useChatStore.getState();
+    expect(state._pendingAckCount['thread-B']).toBe(0);
+    expect(state._unreadSuppressedUntil['thread-B']).toBeUndefined();
+    expect(state.threadStates['thread-B']?.unreadCount).toBe(0);
+  });
+
+  it('overlapping acks keep suppression until all settle and roll back if any did not catch up', () => {
+    const store = useChatStore.getState();
+    store.clearUnread('thread-B');
+    store.armUnreadSuppression('thread-B');
+    store.armUnreadSuppression('thread-B');
+
+    store.settleUnreadAck('thread-B', false);
+    expect(useChatStore.getState()._unreadSuppressedUntil['thread-B']).toBe(Infinity);
+
+    store.settleUnreadAck('thread-B', true);
+    const state = useChatStore.getState();
+    expect(state._unreadSuppressedUntil['thread-B']).toBeUndefined();
+    expect(state.threadStates['thread-B']?.unreadCount).toBe(5);
   });
 
   it('overlapping acks: suppression holds until ALL resolve (pending count)', () => {
@@ -257,14 +303,17 @@ describe('Issue #586 Review P1-1: clearAllUnread uses finite suppression', () =>
           intentMode: null,
           targetCats: [],
           catStatuses: {},
+          catStatusDetails: {},
           catInvocations: {},
-          currentGame: null,
           unreadCount: 3,
           hasUserMention: false,
           lastActivity: Date.now(),
           queue: [],
-          queuePaused: false,
           queueFull: false,
+          workspaceWorktreeId: null,
+          workspaceOpenTabs: [],
+          workspaceOpenFilePath: null,
+          workspaceOpenFileLine: null,
         },
         'thread-C': {
           messages: [],
@@ -276,17 +325,23 @@ describe('Issue #586 Review P1-1: clearAllUnread uses finite suppression', () =>
           intentMode: null,
           targetCats: [],
           catStatuses: {},
+          catStatusDetails: {},
           catInvocations: {},
-          currentGame: null,
           unreadCount: 5,
           hasUserMention: true,
           lastActivity: Date.now(),
           queue: [],
-          queuePaused: false,
           queueFull: false,
+          workspaceWorktreeId: null,
+          workspaceOpenTabs: [],
+          workspaceOpenFilePath: null,
+          workspaceOpenFileLine: null,
         },
       },
       _unreadSuppressedUntil: {},
+      _pendingAckCount: {},
+      _unreadAckRollback: {},
+      _unreadAckHadFailure: {},
     });
   });
 

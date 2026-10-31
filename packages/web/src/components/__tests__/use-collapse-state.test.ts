@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   collapseAllGroups,
   expandAllGroups,
+  expandGroupsForSearch,
   findGroupKeyForThread,
   initCollapsedSet,
   readCollapsedGroups,
@@ -99,24 +100,23 @@ describe('persistence round-trip', () => {
 // ── shouldCollapse ────────────────────────────────────
 
 describe('shouldCollapse', () => {
-  // AC-A5: Search forces all groups expanded
-  it('returns false for all groups when searchQuery is non-empty', () => {
+  it('respects stored collapsed state even when search is active', () => {
     const collapsed = new Set(ALL_KEYS);
     for (const key of ALL_KEYS) {
-      expect(shouldCollapse(key, collapsed, 'cat')).toBe(false);
+      expect(shouldCollapse(key, collapsed)).toBe(true);
     }
   });
 
   it('returns true for collapsed groups when no search', () => {
     const collapsed = new Set(['pinned', '/proj/dare']);
-    expect(shouldCollapse('pinned', collapsed, '')).toBe(true);
-    expect(shouldCollapse('/proj/dare', collapsed, '')).toBe(true);
-    expect(shouldCollapse('/proj/cat-cafe', collapsed, '')).toBe(false);
+    expect(shouldCollapse('pinned', collapsed)).toBe(true);
+    expect(shouldCollapse('/proj/dare', collapsed)).toBe(true);
+    expect(shouldCollapse('/proj/cat-cafe', collapsed)).toBe(false);
   });
 
   it('returns false for groups not in collapsed set', () => {
     const collapsed = new Set<string>();
-    expect(shouldCollapse('pinned', collapsed, '')).toBe(false);
+    expect(shouldCollapse('pinned', collapsed)).toBe(false);
   });
 });
 
@@ -202,26 +202,41 @@ describe('shouldCollapseBeforeInit', () => {
 // ── Cloud review: search overrides pre-init default (resolveCollapse) ──
 
 describe('resolveCollapse (hook-equivalent logic)', () => {
-  it('returns false (expanded) when search is active, even before init', () => {
-    // Pre-init + active search: search must win over default-collapsed
-    // This exercises the exact code path in the hook's isCollapsed callback
+  it('returns true (collapsed) before init even when search is active', () => {
     for (const key of ALL_KEYS) {
-      expect(resolveCollapse(key, new Set(), 'cat', false)).toBe(false);
+      expect(resolveCollapse(key, new Set(), false)).toBe(true);
     }
   });
 
   it('returns true (collapsed) before init when no search', () => {
     for (const key of ALL_KEYS) {
-      expect(resolveCollapse(key, new Set(), '', false)).toBe(true);
+      expect(resolveCollapse(key, new Set(), false)).toBe(true);
     }
   });
 
   it('delegates to shouldCollapse after init', () => {
     const collapsed = new Set(['pinned']);
-    expect(resolveCollapse('pinned', collapsed, '', true)).toBe(true);
-    expect(resolveCollapse('/proj/cat-cafe', collapsed, '', true)).toBe(false);
-    // search still wins post-init
-    expect(resolveCollapse('pinned', collapsed, 'cat', true)).toBe(false);
+    expect(resolveCollapse('pinned', collapsed, true)).toBe(true);
+    expect(resolveCollapse('/proj/cat-cafe', collapsed, true)).toBe(false);
+  });
+});
+
+describe('expandGroupsForSearch', () => {
+  it('expands visible search result groups once without clearing hidden groups', () => {
+    const collapsed = new Set(ALL_KEYS);
+    const result = expandGroupsForSearch(collapsed, ['pinned', '/proj/cat-cafe']);
+
+    expect(result.has('pinned')).toBe(false);
+    expect(result.has('/proj/cat-cafe')).toBe(false);
+    expect(result.has('/proj/dare')).toBe(true);
+    expect(result.has('favorites')).toBe(true);
+  });
+
+  it('returns the same set when no visible groups are collapsed', () => {
+    const collapsed = new Set(['/proj/dare']);
+    const result = expandGroupsForSearch(collapsed, ['pinned', '/proj/cat-cafe']);
+
+    expect(result).toBe(collapsed);
   });
 });
 

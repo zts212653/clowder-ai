@@ -1,34 +1,144 @@
 'use client';
 
+import { type ActiveExecutionListResponse, SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
+import { closestCenter, DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { arrayMove, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useCallback, useMemo, useState } from 'react';
+import { useCatData } from '@/hooks/useCatData';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
-import { type QueueEntry, useChatStore } from '@/stores/chatStore';
+import { useThreadLiveness, useThreadMessages } from '@/hooks/useThreadScopedSelectors';
+import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
-import { type SteerMode, SteerQueuedEntryModal } from './SteerQueuedEntryModal';
+import { composerInsertFromRecall, requestTrueRecall, TrueRecallRequestError } from '@/utils/true-recall';
+import { scopedQueue } from './execution-row/thread-queue';
+import { deliveredTargetIdsFromHistory, SortableQueueEntryRow } from './QueueEntryRow';
+import { QueueSteerDialog } from './QueueSteerDialog';
+import { useQueueActionConvergence } from './useQueueActionConvergence';
+
+const COLLAPSE_THRESHOLD = 4;
+const EMPTY_TARGET_IDS: readonly string[] = [];
+
+const PRIORITY_RANK: Record<string, number> = { urgent: 0, normal: 1 };
+
+function queueClearFailureCopy(data: { code?: unknown; error?: unknown }) {
+  const partial = data.code === 'QUEUE_WITHDRAWAL_PARTIAL';
+  return {
+    title: partial ? '已停止部分消息' : '停止失败',
+    message: typeof data.error === 'string' ? `执行已停止；${data.error}` : '执行已停止，但待处理队列未能清空，请重试',
+  };
+}
+
+export function compareQueueEntries(
+  a: { position?: number; priority?: string; createdAt: number },
+  b: { position?: number; priority?: string; createdAt: number },
+): number {
+  const aHasPos = a.position !== undefined;
+  const bHasPos = b.position !== undefined;
+  if (aHasPos && !bHasPos) return -1;
+  if (!aHasPos && bHasPos) return 1;
+  if (aHasPos && bHasPos) return a.position! - b.position!;
+  const pDiff = (PRIORITY_RANK[a.priority ?? 'normal'] ?? 1) - (PRIORITY_RANK[b.priority ?? 'normal'] ?? 1);
+  if (pDiff !== 0) return pDiff;
+  return a.createdAt - b.createdAt;
+}
+
+/** Format an elapsed duration (ms) as a compact label: `45s` / `12m` / `1h03m`. */
+export function formatElapsed(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  if (totalSec < 60) return `${totalSec}s`;
+  const totalMin = Math.floor(totalSec / 60);
+  if (totalMin < 60) return `${totalMin}m`;
+  const h = Math.floor(totalMin / 60);
+  return `${h}h${String(totalMin % 60).padStart(2, '0')}m`;
+}
+
+export type QueueWaitInfo =
+  | { kind: 'active_turn'; catId: string; elapsedLabel: string | null }
+  | { kind: 'target_dispatch'; catIds: string[] };
+
+/**
+ * Derive queue wait truth from both the queued work's explicit targets and live invocation slots.
+ *
+ * Explicit targets are authoritative: if none of those cats is active, the work is waiting for
+ * target dispatch. An unrelated active cat must never be borrowed as the queue's blocker. Only
+ * broadcast work (no explicit targets) may describe the oldest thread-level active turn.
+ *
+ * Pure: `now` injected for testing.
+ */
+export function computeQueueWaitInfo(
+  activeInvocations: Record<string, { catId: string; mode?: string; startedAt?: number }> | undefined,
+  queuedTargetCatIds: Iterable<string> = [],
+  now: number = Date.now(),
+): QueueWaitInfo | null {
+  const slots = Object.values(activeInvocations ?? {});
+  const targetCatIds = [...new Set(queuedTargetCatIds)];
+  const targets = new Set(targetCatIds);
+  const targeted = targetCatIds.length > 0 ? slots.filter((slot) => targets.has(slot.catId)) : [];
+
+  if (targetCatIds.length > 0 && targeted.length === 0) {
+    return { kind: 'target_dispatch', catIds: targetCatIds };
+  }
+
+  const candidates = targeted.length > 0 ? targeted : slots;
+  if (candidates.length === 0) return null;
+  let oldest = candidates[0];
+  for (const s of candidates) {
+    if ((s.startedAt ?? Number.POSITIVE_INFINITY) < (oldest.startedAt ?? Number.POSITIVE_INFINITY)) oldest = s;
+  }
+  return {
+    kind: 'active_turn',
+    catId: oldest.catId,
+    elapsedLabel: oldest.startedAt ? formatElapsed(Math.max(0, now - oldest.startedAt)) : null,
+  };
+}
 
 interface QueuePanelProps {
   threadId: string;
 }
 
-/**
- * F39: Queue management panel — displayed between messages and ChatInput
- * when there are queued messages. Shows queue entries with reorder/withdraw
- * controls, plus continue/clear actions when paused.
- */
 export function QueuePanel({ threadId }: QueuePanelProps) {
   const coCreator = useCoCreatorConfig();
-  const rawQueue = useChatStore((s) => s.queue);
+  const { cats } = useCatData();
+  const resolveCatName = useCatNameResolver();
+  const catAvatarById = useMemo(() => new Map(cats.map((cat) => [cat.id, cat.avatar])), [cats]);
+  const rawQueue = useChatStore((s) => scopedQueue(s, threadId));
   const queue = useMemo(() => rawQueue ?? [], [rawQueue]);
-  const queuePaused = useChatStore((s) => s.queuePaused) ?? false;
-  const queuePauseReason = useChatStore((s) => s.queuePauseReason);
-  const messages = useChatStore((s) => s.messages);
+  const timelineMessages = useThreadMessages(threadId);
   const setQueue = useChatStore((s) => s.setQueue);
+  const { activeInvocations } = useThreadLiveness(threadId);
+  const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const addToast = useToastStore((s) => s.addToast);
 
-  const [steerEntryId, setSteerEntryId] = useState<string | null>(null);
-  const [steerMode, setSteerMode] = useState<SteerMode>('immediate');
+  const { steerEntryId, handleSteerConfirm, handleSteerOpen, handleSteerCancel } = useQueueActionConvergence(threadId);
+  const [collapsed, setCollapsed] = useState<boolean | null>(null);
 
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const visibleEntries = useMemo(
+    () =>
+      queue
+        .filter(
+          (e) =>
+            e.status === 'queued' &&
+            !(e.sourceCategory === 'scheduled' && e.content.startsWith(SCHEDULER_TRIGGER_PREFIX)),
+        )
+        .sort(compareQueueEntries),
+    [queue],
+  );
+
+  // A2A queue visibility: explain WHY entries are queued (waiting behind the active turn) so the
+  // user can tell "waiting for the current turn" apart from "stuck". Passes the visible queued
+  // entries' target cats so the wait reason attributes the RIGHT cat (per-cat slot), not just the
+  // oldest active turn. Recomputed when activeInvocations/visibleEntries change; elapsed reflects
+  // the last store update (acceptable for v1 — no per-second tick).
+  const waitInfo = useMemo(() => {
+    const dispatchTargetCatIds = visibleEntries.flatMap((entry) => entry.targetCats);
+    const hasBroadcastEntry = visibleEntries.some((entry) => entry.targetCats.length === 0);
+    if (dispatchTargetCatIds.length === 0 && !hasBroadcastEntry) return null;
+    return computeQueueWaitInfo(activeInvocations, dispatchTargetCatIds);
+  }, [activeInvocations, visibleEntries]);
   const handleRemove = useCallback(
     async (entryId: string) => {
       const prevQueue = queue;
@@ -40,12 +150,11 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
         const res = await apiFetch(`/api/threads/${threadId}/queue/${entryId}`, { method: 'DELETE' });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          const msg = data?.error ?? '撤回失败，请重试';
           setQueue(threadId, prevQueue);
           addToast({
             type: 'error',
-            title: '撤回失败',
-            message: msg,
+            title: '停止失败',
+            message: data?.error ?? '停止后续处理失败，请重试',
             threadId,
             duration: 5000,
           });
@@ -53,17 +162,17 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
         }
         addToast({
           type: 'success',
-          title: '已取消',
-          message: '已从队列撤回',
+          title: '已停止后续处理',
+          message: '原消息与已经发生的投递事实仍保留在历史中',
           threadId,
-          duration: 2500,
+          duration: 3000,
         });
       } catch {
         setQueue(threadId, prevQueue);
         addToast({
           type: 'error',
-          title: '撤回失败',
-          message: '撤回失败，请重试',
+          title: '停止失败',
+          message: '停止后续处理失败，请重试',
           threadId,
           duration: 5000,
         });
@@ -72,300 +181,257 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
     [addToast, queue, setQueue, threadId],
   );
 
-  const handleMove = useCallback(
-    async (entryId: string, direction: 'up' | 'down') => {
-      await apiFetch(`/api/threads/${threadId}/queue/${entryId}/move`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ direction }),
-      });
-    },
-    [threadId],
-  );
-
-  const handleContinue = useCallback(async () => {
-    await apiFetch(`/api/threads/${threadId}/queue/next`, { method: 'POST' });
-  }, [threadId]);
-
-  const handleClear = useCallback(async () => {
-    await apiFetch(`/api/threads/${threadId}/queue`, { method: 'DELETE' });
-  }, [threadId]);
-
-  const selectedSteerEntry = useMemo(
-    () => (steerEntryId ? (queue.find((e) => e.id === steerEntryId) ?? null) : null),
-    [queue, steerEntryId],
-  );
-
-  const handleSteerOpen = useCallback((entryId: string) => {
-    setSteerMode('immediate');
-    setSteerEntryId(entryId);
-  }, []);
-
-  const handleSteerCancel = useCallback(() => {
-    setSteerEntryId(null);
-  }, []);
-
-  const handleSteerConfirm = useCallback(async () => {
-    if (!steerEntryId) return;
-    try {
-      const res = await apiFetch(`/api/threads/${threadId}/queue/${steerEntryId}/steer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: steerMode }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const msg =
-          data?.code === 'ENTRY_PROCESSING' ? '该消息正在处理，无法 steer' : (data?.error ?? 'Steer 失败，请重试');
+  const handleRecallEdit = useCallback(
+    async (entryId: string) => {
+      const entry = queue.find((e) => e.id === entryId);
+      if (!entry) return;
+      if (!entry.messageId) {
         addToast({
           type: 'error',
-          title: 'Steer 失败',
-          message: msg,
+          title: '无法撤回这条消息',
+          message: '缺少原消息身份；可以改用“停止后续处理”。',
           threadId,
           duration: 5000,
         });
         return;
       }
-      setSteerEntryId(null);
+
+      try {
+        const result = await requestTrueRecall({
+          threadId,
+          messageId: entry.messageId,
+          confirmAppend: () => window.confirm('输入框已有草稿。撤回正文会空一行追加到当前草稿末尾，是否继续？'),
+        });
+        if (!result) return;
+        setQueue(threadId, result.queue);
+        const insert = composerInsertFromRecall(result);
+        if (insert) setPendingChatInsert(insert);
+        addToast({
+          type: result.verdict === 'exposed' ? 'info' : 'success',
+          title: result.verdict === 'exposed' ? '正文已撤回 · 曾投递' : '已撤回并回填输入框',
+          message:
+            result.verdict === 'exposed'
+              ? '未投递目标已停止后续处理；正在处理的回合不会被普通撤回中断。'
+              : '正文已从消息历史转移到持久草稿，可修改后重新发送。',
+          threadId,
+          duration: 4000,
+        });
+      } catch (error) {
+        const conflict = error instanceof TrueRecallRequestError && error.code === 'DRAFT_REVISION_MISMATCH';
+        addToast({
+          type: 'error',
+          title: conflict ? '草稿已在别处更新' : '撤回并重新编辑失败',
+          message: conflict ? '原消息和两份草稿都没有改变；刷新输入框后再试。' : (error as Error).message,
+          threadId,
+          duration: 5000,
+        });
+      }
+    },
+    [addToast, queue, setPendingChatInsert, setQueue, threadId],
+  );
+
+  const handleClear = useCallback(async () => {
+    try {
+      const activeResponse = await apiFetch(`/api/threads/${threadId}/executions/active`);
+      if (!activeResponse.ok) throw new Error('active execution projection unavailable');
+      const active = (await activeResponse.json()) as ActiveExecutionListResponse;
+      const stopTargets = active.executions.filter(
+        (execution) =>
+          execution.threadId === threadId &&
+          execution.kind === 'live_invocation' &&
+          execution.cancelability.state === 'cancelable',
+      );
+      for (const execution of stopTargets) {
+        const target = execution.cancelability.state === 'cancelable' ? execution.cancelability.target : undefined;
+        if (!target || target.kind !== 'live_invocation') continue;
+        const stopped = await apiFetch(
+          `/api/threads/${threadId}/executions/live/${encodeURIComponent(target.executionId)}/cancel`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ catId: target.catId }),
+          },
+        );
+        if (!stopped.ok) throw new Error('active execution stop failed');
+      }
+      const res = await apiFetch(`/api/threads/${threadId}/queue`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (Array.isArray(data?.queue)) setQueue(threadId, data.queue);
+        const failure = queueClearFailureCopy(data);
+        addToast({
+          type: 'error',
+          title: failure.title,
+          message: failure.message,
+          threadId,
+          duration: 5000,
+        });
+        return;
+      }
+      setQueue(threadId, []);
+      addToast({
+        type: 'success',
+        title: '已全部停止',
+        message: '运行中的执行已停止，待处理队列已清空；原消息与投递事实仍保留',
+        threadId,
+        duration: 3000,
+      });
     } catch {
       addToast({
         type: 'error',
-        title: 'Steer 失败',
-        message: 'Steer 失败，请重试',
+        title: '停止失败',
+        message: '停止后续处理失败，请重试',
         threadId,
         duration: 5000,
       });
     }
-  }, [addToast, steerEntryId, steerMode, threadId]);
+  }, [addToast, setQueue, threadId]);
 
-  // Don't render when queue is empty
-  if (queue.length === 0) return null;
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
 
-  // Only show queued entries — processing entries are already executing and visible in chat
-  const visibleEntries = queue.filter((e) => e.status === 'queued');
-  if (visibleEntries.length === 0 && !queuePaused) return null;
+      const oldIndex = visibleEntries.findIndex((e) => e.id === active.id);
+      const newIndex = visibleEntries.findIndex((e) => e.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
 
-  const pauseLabel = queuePauseReason === 'canceled' ? '当前调用已取消' : '当前调用失败';
+      const reordered = arrayMove(visibleEntries, oldIndex, newIndex);
+      const positions = reordered.map((e, i) => ({ entryId: e.id, position: i }));
+
+      const prevQueue = queue;
+      setQueue(
+        threadId,
+        queue.map((e) => {
+          const pos = positions.find((p) => p.entryId === e.id);
+          return pos ? { ...e, position: pos.position } : e;
+        }),
+      );
+
+      try {
+        const res = await apiFetch(`/api/threads/${threadId}/queue/reorder`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ positions }),
+        });
+        if (!res.ok) {
+          setQueue(threadId, prevQueue);
+          addToast({ type: 'error', title: '排序失败', message: '排序失败，请重试', threadId, duration: 5000 });
+        }
+      } catch {
+        setQueue(threadId, prevQueue);
+        addToast({ type: 'error', title: '排序失败', message: '排序失败，请重试', threadId, duration: 5000 });
+      }
+    },
+    [addToast, queue, setQueue, threadId, visibleEntries],
+  );
+
+  if (visibleEntries.length === 0) return null;
+
+  const isCollapsed = collapsed ?? visibleEntries.length >= COLLAPSE_THRESHOLD;
+  const entryIds = visibleEntries.map((e) => e.id);
+
+  const selectedSteerEntry = steerEntryId ? (queue.find((e) => e.id === steerEntryId) ?? null) : null;
 
   return (
     <div
-      className={`border-t mx-4 mb-1 rounded-xl overflow-hidden ${
-        queuePaused ? 'border-amber-200 bg-amber-50/50' : 'border-[#9B7EBD]/20 bg-[#9B7EBD]/5'
-      }`}
+      className="border-t mx-4 mb-1 rounded-xl overflow-hidden"
+      style={{
+        borderColor: 'color-mix(in oklch, var(--color-cocreator-primary) 20%, transparent)',
+        backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 5%, transparent)',
+      }}
     >
       {/* Header */}
       <div
-        className={`flex items-center justify-between px-3 py-2 ${queuePaused ? 'bg-amber-100/60' : 'bg-[#9B7EBD]/10'}`}
+        className="flex items-center justify-between px-3 py-2"
+        style={{ backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 10%, transparent)' }}
       >
         <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+          <svg aria-hidden="true" className="w-4 h-4 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
             <path d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" />
           </svg>
-          <span className="text-xs font-medium text-gray-600">{queuePaused ? '队列已暂停' : '排队中'}</span>
+          <span className="text-xs font-medium text-cafe-secondary">排队等待中</span>
           <span
-            className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-              queuePaused ? 'bg-amber-200 text-amber-700' : 'bg-[#9B7EBD]/20 text-[#9B7EBD]'
-            }`}
+            className="text-xs px-1.5 py-0.5 rounded-full font-medium text-[var(--color-cocreator-primary)]"
+            style={{ backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 20%, transparent)' }}
           >
             {visibleEntries.length}
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {queuePaused && (
-            <button
-              onClick={handleContinue}
-              className="text-xs px-2 py-1 rounded-md bg-emerald-500 text-white hover:bg-emerald-600 transition-colors"
-            >
-              继续
-            </button>
-          )}
-          <button onClick={handleClear} className="text-xs text-gray-400 hover:text-red-500 transition-colors">
-            清空
+          <button
+            type="button"
+            onClick={() => setCollapsed(!isCollapsed)}
+            className="text-xs text-cafe-muted hover:text-cafe-secondary transition-colors"
+          >
+            {isCollapsed ? '展开' : '收起'}
+          </button>
+          <button
+            type="button"
+            onClick={handleClear}
+            title="停止正在运行的回复，并清空排队；保留原消息"
+            className="text-xs text-cafe-muted hover:text-conn-red-text transition-colors"
+          >
+            停止回复并清空排队
           </button>
         </div>
       </div>
 
-      {/* Pause reason */}
-      {queuePaused && (
-        <div className="px-3 py-1.5 text-xs text-amber-600 border-b border-amber-200/60">{pauseLabel}</div>
+      {waitInfo?.kind === 'target_dispatch' && visibleEntries.length > 0 && (
+        <div
+          className="px-3 py-1.5 text-xs text-cafe-muted border-b"
+          style={{ borderColor: 'color-mix(in oklch, var(--color-cocreator-primary) 10%, transparent)' }}
+        >
+          等待{' '}
+          <span className="font-medium text-cafe-secondary">
+            {waitInfo.catIds.map((catId) => resolveCatName(catId)).join('、')}
+          </span>{' '}
+          调度
+        </div>
       )}
 
-      {/* Queue entries */}
-      <div className="max-h-40 overflow-y-auto">
-        {visibleEntries.map((entry, idx) => {
-          // Count images from primary + merged messages (Cloud R2 P2)
-          const allMsgIds = [entry.messageId, ...entry.mergedMessageIds].filter(Boolean) as string[];
-          const imageCount = allMsgIds.reduce((count, msgId) => {
-            const msg = messages.find((m) => m.id === msgId);
-            return count + (msg?.contentBlocks?.filter((b) => b.type === 'image').length ?? 0);
-          }, 0);
-          return (
-            <QueueEntryRow
-              key={entry.id}
-              entry={entry}
-              index={idx}
-              isFirst={idx === 0}
-              isLast={idx === visibleEntries.length - 1}
-              isPaused={queuePaused}
-              imageCount={imageCount}
-              ownerName={coCreator.name}
-              onRemove={handleRemove}
-              onMove={handleMove}
-              onSteer={handleSteerOpen}
-            />
-          );
-        })}
-      </div>
+      {!isCollapsed && (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={entryIds} strategy={verticalListSortingStrategy}>
+            <div className="max-h-40 overflow-y-auto flex flex-col gap-0.5 p-1">
+              {visibleEntries.map((entry, idx) => {
+                // #706: Compute image count from server-enriched messagePreview
+                const imageCount = entry.messagePreview?.contentBlocks?.filter((b) => b.type === 'image').length ?? 0;
+                const deliveredTargetIds = entry.messageId
+                  ? deliveredTargetIdsFromHistory(entry.messageId, timelineMessages)
+                  : EMPTY_TARGET_IDS;
+                return (
+                  <SortableQueueEntryRow
+                    key={entry.id}
+                    entry={entry}
+                    index={idx}
+                    imageCount={imageCount}
+                    ownerName={coCreator.name}
+                    ownerAvatar={coCreator.avatar}
+                    deliveredTargetIds={deliveredTargetIds}
+                    resolveCatName={resolveCatName}
+                    resolveCatAvatar={(catId) => catAvatarById.get(catId)}
+                    onRemove={handleRemove}
+                    onRecallEdit={handleRecallEdit}
+                    onSteer={handleSteerOpen}
+                  />
+                );
+              })}
+            </div>
+          </SortableContext>
+        </DndContext>
+      )}
 
       {selectedSteerEntry && selectedSteerEntry.status === 'queued' && (
-        <SteerQueuedEntryModal
-          mode={steerMode}
-          onModeChange={setSteerMode}
+        <QueueSteerDialog
+          key={`${threadId}:${selectedSteerEntry.id}`}
+          threadId={threadId}
+          entry={selectedSteerEntry}
+          queue={queue}
           onCancel={handleSteerCancel}
           onConfirm={handleSteerConfirm}
         />
       )}
-    </div>
-  );
-}
-
-/** Single queue entry row with reorder/remove controls (F122: processing entries get distinct UI) */
-function QueueEntryRow({
-  entry,
-  index,
-  isFirst,
-  isLast,
-  isPaused,
-  imageCount,
-  ownerName,
-  onRemove,
-  onMove,
-  onSteer,
-}: {
-  entry: QueueEntry;
-  index: number;
-  isFirst: boolean;
-  isLast: boolean;
-  isPaused: boolean;
-  imageCount: number;
-  ownerName: string;
-  onRemove: (id: string) => void;
-  onMove: (id: string, direction: 'up' | 'down') => void;
-  onSteer: (id: string) => void;
-}) {
-  const isAgent = entry.source === 'agent';
-  const sourceLabel = isAgent
-    ? `${entry.callerCatId ?? '猫猫'} → ${entry.targetCats[0] ?? '猫猫'}`
-    : entry.source === 'connector'
-      ? 'Connector'
-      : ownerName;
-
-  return (
-    <div
-      className={`flex items-center gap-2 px-3 py-2 border-b last:border-b-0 ${
-        isPaused ? 'border-amber-100' : 'border-[#9B7EBD]/10'
-      } ${isAgent ? 'bg-[#F3EEFA]' : ''}`}
-    >
-      {/* Number */}
-      <span className="text-xs text-gray-400 w-5 text-center shrink-0">{index + 1}</span>
-
-      {/* Content preview */}
-      <div className="flex-1 min-w-0">
-        <p className="text-sm text-gray-700 truncate">{entry.content}</p>
-        <div className="flex items-center gap-1 mt-0.5">
-          {isAgent ? (
-            <svg className="w-2.5 h-2.5 text-[#9B7EBD]" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M4.5 11.5c-.28 0-.5-.22-.5-.5 0-1.93.76-3.74 2.13-5.1C7.5 4.52 9.31 3.76 11.24 3.76c.28 0 .5.22.5.5s-.22.5-.5.5c-1.66 0-3.22.65-4.4 1.82A6.18 6.18 0 005.02 11c0 .28-.22.5-.5.5zM8.02 20.25a1.25 1.25 0 01-1.18-1.63l1.12-3.36A4.01 4.01 0 014.1 11.5c0-2.2 1.79-3.99 3.99-3.99h7.82c2.2 0 3.99 1.79 3.99 3.99a4.01 4.01 0 01-3.86 3.76l1.12 3.36a1.25 1.25 0 01-1.18 1.63H8.02z" />
-            </svg>
-          ) : (
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#9B7EBD]" />
-          )}
-          <span className={`text-xs ${isAgent ? 'text-[#9B7EBD] font-medium' : 'text-gray-400'}`}>{sourceLabel}</span>
-          {isAgent && entry.autoExecute && (
-            <span className="text-[9px] px-1 py-px rounded bg-[#9B7EBD]/15 text-[#9B7EBD] font-medium">自动</span>
-          )}
-          {imageCount > 0 && (
-            <span className="flex items-center gap-0.5 text-xs text-gray-400 ml-1">
-              <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
-                <path
-                  fillRule="evenodd"
-                  d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              {imageCount}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Reorder + action buttons (only queued entries reach here) */}
-      {
-        <>
-          {/* Reorder buttons */}
-          <div className="flex flex-col gap-0.5 shrink-0">
-            {!isFirst && (
-              <button
-                onClick={() => onMove(entry.id, 'up')}
-                className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
-                title="上移"
-                aria-label="Move up"
-              >
-                <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
-                  <path
-                    fillRule="evenodd"
-                    d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </button>
-            )}
-            {!isLast && (
-              <button
-                onClick={() => onMove(entry.id, 'down')}
-                className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
-                title="下移"
-                aria-label="Move down"
-              >
-                <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
-                  <path
-                    fillRule="evenodd"
-                    d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </button>
-            )}
-          </div>
-
-          {/* Steer button (F047) */}
-          <button
-            type="button"
-            data-testid={`steer-${entry.id}`}
-            onClick={() => onSteer(entry.id)}
-            className="text-xs px-3 py-1 rounded-full bg-[#9B7EBD] text-white hover:bg-[#8B6FAE] transition-colors shrink-0"
-            aria-label="Steer"
-          >
-            Steer
-          </button>
-
-          {/* Remove button */}
-          <button
-            onClick={() => onRemove(entry.id)}
-            className="p-1 text-gray-400 hover:text-red-500 transition-colors shrink-0"
-            title="撤回"
-            aria-label="撤回"
-          >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </button>
-        </>
-      }
     </div>
   );
 }

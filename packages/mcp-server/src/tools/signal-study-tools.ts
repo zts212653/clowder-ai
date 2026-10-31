@@ -1,9 +1,15 @@
+import { deploymentDefaults } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { invocationFetch, resolveInvocationEnv, resolveInvocationUserId } from './invocation-auth.js';
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
-const SIGNAL_USER = process.env['CAT_CAFE_SIGNAL_USER']?.trim() || 'codex';
+const defineTool = defineMcpMigrationFactory('signal-study-tools.ts', undefined, { authority: 'local-runtime' });
+
+function resolveApiUrl(): string {
+  return resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiBaseUrl;
+}
 
 async function apiJson(
   path: string,
@@ -11,11 +17,11 @@ async function apiJson(
 ): Promise<{ ok: true; data: unknown } | { ok: false; error: string }> {
   try {
     const headers = new Headers(init?.headers);
-    headers.set('X-Cat-Cafe-User', SIGNAL_USER);
+    headers.set('X-Cat-Cafe-User', resolveInvocationUserId(process.env.CAT_CAFE_SIGNAL_USER?.trim() || 'codex'));
     if (init?.body && !headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/json');
     }
-    const response = await fetch(`${API_URL}${path}`, { ...init, headers });
+    const response = await invocationFetch(`${resolveApiUrl()}${path}`, { ...init, headers });
     if (!response.ok) {
       return { ok: false, error: `API failed (${response.status}): ${await response.text()}` };
     }
@@ -27,7 +33,7 @@ async function apiJson(
 
 // --- Handlers ---
 
-async function handleUpdateArticle(input: {
+export async function handleUpdateArticle(input: {
   id: string;
   status?: string;
   tags?: string[];
@@ -42,7 +48,7 @@ async function handleUpdateArticle(input: {
   return successResult(`Updated article ${id}: ${JSON.stringify(fields)}`);
 }
 
-async function handleDeleteArticle(input: { ids: string[] }): Promise<ToolResult> {
+export async function handleDeleteArticle(input: { ids: string[] }): Promise<ToolResult> {
   const result = await apiJson('/api/signals/articles/batch', {
     method: 'POST',
     body: JSON.stringify({ ids: input.ids, action: 'delete' }),
@@ -52,7 +58,11 @@ async function handleDeleteArticle(input: { ids: string[] }): Promise<ToolResult
   return successResult(`Soft-deleted ${data.affected ?? 0} article(s).`);
 }
 
-async function handleLinkThread(input: { articleId: string; threadId: string; action?: string }): Promise<ToolResult> {
+export async function handleLinkThread(input: {
+  articleId: string;
+  threadId: string;
+  action?: string;
+}): Promise<ToolResult> {
   if (input.action === 'unlink') {
     const path = `/api/signals/articles/${encodeURIComponent(input.articleId)}/threads/${encodeURIComponent(input.threadId)}`;
     const result = await apiJson(path, { method: 'DELETE' });
@@ -67,7 +77,7 @@ async function handleLinkThread(input: { articleId: string; threadId: string; ac
   return successResult(`Linked thread ${input.threadId} to article ${input.articleId}`);
 }
 
-async function handleStartStudy(input: { articleId: string; threadId?: string }): Promise<ToolResult> {
+export async function handleStartStudy(input: { articleId: string; threadId?: string }): Promise<ToolResult> {
   // Fetch article content for context
   const articleResult = await apiJson(`/api/signals/articles/${encodeURIComponent(input.articleId)}`);
   if (!articleResult.ok) return errorResult(articleResult.error);
@@ -95,7 +105,7 @@ async function handleStartStudy(input: { articleId: string; threadId?: string })
   return successResult(lines.join('\n'));
 }
 
-async function handleSaveNotes(input: {
+export async function handleSaveNotes(input: {
   articleId: string;
   notes: string;
   participants?: string[];
@@ -118,7 +128,11 @@ async function handleSaveNotes(input: {
   );
 }
 
-async function handleListStudies(input: { articleId?: string; kind?: string; limit?: number }): Promise<ToolResult> {
+export async function handleListStudies(input: {
+  articleId?: string;
+  kind?: string;
+  limit?: number;
+}): Promise<ToolResult> {
   if (input.articleId) {
     const result = await apiJson(`/api/signals/articles/${encodeURIComponent(input.articleId)}/study`);
     if (!result.ok) return errorResult(result.error);
@@ -137,7 +151,7 @@ async function handleListStudies(input: { articleId?: string; kind?: string; lim
   return successResult('List all studies: not yet implemented (requires article ID for now).');
 }
 
-async function handleGeneratePodcast(input: {
+export async function handleGeneratePodcast(input: {
   articleId: string;
   mode: string;
   speakers?: string[];
@@ -167,7 +181,7 @@ export const signalUpdateArticleInputSchema = {
   id: z.string().min(1).describe('Article ID'),
   status: z.enum(['inbox', 'read', 'archived', 'starred']).optional().describe('New status'),
   tags: z.array(z.string()).optional().describe('Replace tags'),
-  note: z.string().optional().describe('铲屎官个人备注'),
+  note: z.string().optional().describe('co-creator个人备注'),
 };
 
 export const signalDeleteArticleInputSchema = {
@@ -204,47 +218,120 @@ export const signalGeneratePodcastInputSchema = {
 };
 
 export const signalStudyTools = [
-  {
+  defineTool({
     name: 'signal_update_article',
-    description: 'Update article fields: status, tags, or note. Use for managing articles from chat.',
+    description:
+      'Update article fields: status, tags, or note. Use for managing articles from chat. ' +
+      'STATUS VALUES: inbox (unread), read, starred (important), archived (done). ' +
+      'TIP: Use tags for categorization (e.g. ["ai", "infrastructure"]) and note for co-creator personal remarks.',
     inputSchema: signalUpdateArticleInputSchema,
     handler: handleUpdateArticle,
-  },
-  {
+    governance: {
+      implementationExport: 'handleUpdateArticle',
+      resourceFamily: 'signal-article',
+      action: 'update',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'signal_delete_article',
-    description: 'Soft-delete one or more articles. Use when 铲屎官 wants to clean up garbage signals.',
+    description:
+      'Soft-delete one or more articles. Use when co-creator wants to clean up garbage or irrelevant signals. ' +
+      'Accepts multiple IDs for batch deletion. Articles are soft-deleted (recoverable).',
     inputSchema: signalDeleteArticleInputSchema,
     handler: handleDeleteArticle,
-  },
-  {
+    governance: {
+      implementationExport: 'handleDeleteArticle',
+      resourceFamily: 'signal-article',
+      action: 'close',
+      risk: { level: 'destructive', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'signal_link_thread',
-    description: 'Link or unlink a Signal article to/from a thread for Study association.',
+    description:
+      'Link or unlink a Signal article to/from a thread for Study association. ' +
+      'Use when starting to discuss an article in a specific thread, so the study context is trackable. ' +
+      'Default action is "link"; pass action="unlink" to remove the association.',
     inputSchema: signalLinkThreadInputSchema,
     handler: handleLinkThread,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLinkThread',
+      resourceFamily: 'signal-article',
+      action: 'update',
+      risk: { level: 'destructive', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'signal_start_study',
     description:
-      'Start studying a Signal article. Returns article content for context injection and optionally links a thread.',
+      'Start studying a Signal article. Returns full article content for context injection and optionally links a thread. ' +
+      'WORKFLOW: start_study → read and discuss → save_notes → optionally generate_podcast. ' +
+      'Use this as the entry point for deep-diving into an article.',
     inputSchema: signalStartStudyInputSchema,
     handler: handleStartStudy,
-  },
-  {
+    governance: {
+      implementationExport: 'handleStartStudy',
+      resourceFamily: 'signal-study',
+      action: 'create',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'signal_save_notes',
-    description: 'Save study notes for an article. Notes include insights, reflections, open questions.',
+    description:
+      'Save study notes for an article. Notes should include insights, reflections, and open questions from the study session. ' +
+      'Use after discussing/analyzing an article. Include participants array to credit who studied it.',
     inputSchema: signalSaveNotesInputSchema,
     handler: handleSaveNotes,
-  },
-  {
+    governance: {
+      implementationExport: 'handleSaveNotes',
+      resourceFamily: 'signal-study',
+      action: 'update',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'signal_list_studies',
-    description: 'List study artifacts (notes, podcasts, reports) for an article.',
+    description:
+      'List study artifacts (notes, podcasts, research reports) for an article. ' +
+      'Use to check what study work has already been done on an article. ' +
+      'TIP: Pass articleId to narrow results to a specific article; omit to list studies across all articles.',
     inputSchema: signalListStudiesInputSchema,
     handler: handleListStudies,
-  },
-  {
+    governance: {
+      implementationExport: 'handleListStudies',
+      resourceFamily: 'signal-article',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'signal_generate_podcast',
-    description: 'Generate podcast from article study. Two modes: essence (2-3 min) or deep (10 min).',
+    description:
+      'Generate a podcast from an article study. ' +
+      'MODE SELECTION: essence = 2-3 min quick overview, deep = 10 min thorough analysis. ' +
+      'Optional speakers param takes cat IDs for voice assignments (1-3 speakers). ' +
+      'Returns an artifact ID and state (queued → processing → complete).',
     inputSchema: signalGeneratePodcastInputSchema,
     handler: handleGeneratePodcast,
-  },
+    governance: {
+      implementationExport: 'handleGeneratePodcast',
+      resourceFamily: 'signal-study',
+      action: 'derive',
+      risk: { level: 'write', openWorld: true },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
 ] as const;

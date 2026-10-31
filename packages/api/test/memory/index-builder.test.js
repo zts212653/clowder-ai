@@ -120,6 +120,101 @@ doc_kind: spec
     assert.equal((await store.getByAnchor('F042')).title, 'F042: Updated Title');
   });
 
+  it('incrementalUpdate refreshes frontmatter supersedes graph edges', async () => {
+    const filePath = join(docsDir, 'decisions', '010-cache-v2.md');
+    writeFileSync(
+      filePath,
+      `---
+decision_id: ADR-010
+doc_kind: decision
+supersedes: ADR-001
+---
+
+# ADR-010: Cache v2
+`,
+    );
+    await builder.rebuild();
+
+    let related = await store.getRelated('ADR-010');
+    assert.ok(
+      related.some((edge) => edge.anchor === 'ADR-001' && edge.relation === 'supersedes'),
+      'rebuild should create initial supersedes edge',
+    );
+
+    writeFileSync(
+      filePath,
+      `---
+decision_id: ADR-010
+doc_kind: decision
+supersedes: ADR-002
+---
+
+# ADR-010: Cache v2
+`,
+    );
+    await builder.incrementalUpdate([filePath]);
+
+    related = await store.getRelated('ADR-010');
+    assert.ok(
+      !related.some((edge) => edge.anchor === 'ADR-001' && edge.relation === 'supersedes'),
+      'incrementalUpdate should remove stale supersedes edge',
+    );
+    assert.ok(
+      related.some((edge) => edge.anchor === 'ADR-002' && edge.relation === 'supersedes'),
+      'incrementalUpdate should create updated supersedes edge',
+    );
+
+    writeFileSync(
+      filePath,
+      `---
+decision_id: ADR-010
+doc_kind: decision
+---
+
+# ADR-010: Cache v2
+`,
+    );
+    await builder.incrementalUpdate([filePath]);
+
+    related = await store.getRelated('ADR-010');
+    assert.ok(
+      !related.some((edge) => edge.relation === 'supersedes'),
+      'incrementalUpdate should remove supersedes edges when frontmatter drops supersedes',
+    );
+  });
+
+  it('incrementalUpdate clears frontmatter supersedes graph edges when a doc is deleted', async () => {
+    const filePath = join(docsDir, 'decisions', '011-cache-v3.md');
+    writeFileSync(
+      filePath,
+      `---
+decision_id: ADR-011
+doc_kind: decision
+supersedes: ADR-003
+---
+
+# ADR-011: Cache v3
+`,
+    );
+    await builder.rebuild();
+
+    let related = await store.getRelated('ADR-011');
+    assert.ok(
+      related.some((edge) => edge.anchor === 'ADR-003' && edge.relation === 'supersedes'),
+      'rebuild should create initial frontmatter supersedes edge',
+    );
+
+    unlinkSync(filePath);
+    await builder.incrementalUpdate([filePath]);
+
+    assert.equal(await store.getByAnchor('ADR-011'), null, 'deleted doc anchor should be removed');
+    related = await store.getRelated('ADR-011');
+    assert.ok(
+      !related.some((edge) => edge.anchor === 'ADR-003' && edge.relation === 'supersedes'),
+      'incremental delete should remove frontmatter supersedes edges from the deleted anchor',
+    );
+  });
+
   it('checkConsistency reports ok when fts matches docs', async () => {
     writeFileSync(
       join(docsDir, 'features', 'F001.md'),
@@ -259,7 +354,7 @@ doc_kind: spec
     assert.equal(upper.anchor, lower.anchor);
   });
 
-  it('feature spec wins anchor collision over plan/lesson with same feature_ids', async () => {
+  it('non-feature docs with feature_ids get their own anchors (no collision)', async () => {
     mkdirSync(join(docsDir, 'plans'), { recursive: true });
     mkdirSync(join(docsDir, 'lessons'), { recursive: true });
 
@@ -275,7 +370,7 @@ doc_kind: spec
 `,
     );
 
-    // Plan that also references F042 (scanned after features)
+    // Plan that references F042 — should get its own anchor
     writeFileSync(
       join(docsDir, 'plans', 'plan-f042.md'),
       `---
@@ -287,7 +382,7 @@ doc_kind: plan
 `,
     );
 
-    // Lesson that also references F042 (scanned last)
+    // Lesson that references F042 — should get its own anchor
     writeFileSync(
       join(docsDir, 'lessons', 'lesson-f042.md'),
       `---
@@ -301,14 +396,24 @@ doc_kind: lesson
 
     await builder.rebuild({ force: true });
 
-    const item = await store.getByAnchor('F042');
-    assert.ok(item, 'F042 should exist');
-    // Feature spec should win over plan/lesson
-    assert.equal(item.kind, 'feature', 'Feature spec should win anchor collision');
-    assert.ok(item.sourcePath.includes('features/'), `Source should be features/ dir, got: ${item.sourcePath}`);
+    // Feature doc owns F042 anchor
+    const feature = await store.getByAnchor('F042');
+    assert.ok(feature, 'F042 should exist');
+    assert.equal(feature.kind, 'feature');
+    assert.ok(feature.sourcePath.includes('features/'));
+
+    // Plan gets its own path-based anchor (no collision)
+    const plan = await store.getByAnchor('doc:plans/plan-f042');
+    assert.ok(plan, 'Plan should exist with its own path-based anchor');
+    assert.equal(plan.kind, 'plan');
+
+    // Lesson gets its own path-based anchor (no collision)
+    const lesson = await store.getByAnchor('doc:lessons/lesson-f042');
+    assert.ok(lesson, 'Lesson should exist with its own path-based anchor');
+    assert.equal(lesson.kind, 'lesson');
   });
 
-  it('incrementalUpdate does not let plan overwrite feature spec anchor', async () => {
+  it('incrementalUpdate: plan with feature_ids keeps its own anchor, feature unaffected', async () => {
     mkdirSync(join(docsDir, 'plans'), { recursive: true });
 
     const featurePath = join(docsDir, 'features', 'F042-prompt.md');
@@ -335,19 +440,33 @@ doc_kind: plan
 `,
     );
 
-    // First rebuild — feature wins
     await builder.rebuild({ force: true });
-    const before = await store.getByAnchor('F042');
-    assert.equal(before.kind, 'feature', 'Feature should own anchor after rebuild');
+    assert.equal((await store.getByAnchor('F042')).kind, 'feature', 'Feature should own F042');
+    assert.ok(await store.getByAnchor('doc:plans/plan-f042'), 'Plan should have own anchor');
 
-    // Now incrementally update the plan file — should NOT overwrite feature
+    // Incrementally update the plan — should update its own anchor, not touch feature
+    writeFileSync(
+      planPath,
+      planPath.endsWith('.md')
+        ? `---
+feature_ids: [F042]
+doc_kind: plan
+---
+
+# Plan for F042 Implementation (updated)
+`
+        : '',
+    );
     await builder.incrementalUpdate([planPath]);
-    const after = await store.getByAnchor('F042');
-    assert.equal(after.kind, 'feature', 'Feature should still own anchor after plan incrementalUpdate');
-    assert.ok(after.sourcePath.includes('features/'), `Source should remain features/, got: ${after.sourcePath}`);
+
+    const feature = await store.getByAnchor('F042');
+    assert.equal(feature.kind, 'feature', 'Feature should still own F042 after plan update');
+    const plan = await store.getByAnchor('doc:plans/plan-f042');
+    assert.ok(plan, 'Plan should still exist with its own anchor');
+    assert.ok(plan.title.includes('updated'), 'Plan should be updated');
   });
 
-  it('incrementalUpdate: deleted feature + updated plan in same batch promotes plan', async () => {
+  it('incrementalUpdate: deleted feature removes anchor, plan keeps its own', async () => {
     mkdirSync(join(docsDir, 'plans'), { recursive: true });
 
     const featurePath = join(docsDir, 'features', 'F042-prompt.md');
@@ -374,22 +493,26 @@ doc_kind: plan
 `,
     );
 
-    // Rebuild — feature wins
+    // Rebuild — feature owns F042, plan has its own anchor
     await builder.rebuild({ force: true });
     assert.equal((await store.getByAnchor('F042')).kind, 'feature');
+    assert.ok(await store.getByAnchor('doc:plans/plan-f042'), 'Plan has its own anchor');
 
     // Delete the feature file
     unlinkSync(featurePath);
 
-    // incrementalUpdate with plan first, deleted feature second (worst-case ordering)
+    // incrementalUpdate — feature is removed, plan is unaffected
     await builder.incrementalUpdate([planPath, featurePath]);
 
-    const after = await store.getByAnchor('F042');
-    assert.ok(after, 'F042 should still exist — plan should take over after feature deletion');
-    assert.equal(after.kind, 'plan', 'Plan should own anchor after feature is deleted');
+    const featureGone = await store.getByAnchor('F042');
+    assert.equal(featureGone, null, 'F042 anchor should be removed when feature file is deleted');
+
+    const plan = await store.getByAnchor('doc:plans/plan-f042');
+    assert.ok(plan, 'Plan should still exist with its own anchor');
+    assert.equal(plan.kind, 'plan');
   });
 
-  it('P1-1: rebuild migrates anchor to lower-priority doc when higher-priority owner is deleted', async () => {
+  it('P1-1: rebuild removes feature anchor when spec file deleted, plan keeps own anchor', async () => {
     mkdirSync(join(docsDir, 'plans'), { recursive: true });
 
     const featurePath = join(docsDir, 'features', 'F042-prompt.md');
@@ -416,22 +539,26 @@ doc_kind: plan
 `,
     );
 
-    // First rebuild — feature wins
+    // First rebuild — feature owns F042, plan has path-based anchor
     await builder.rebuild({ force: true });
-    const before = await store.getByAnchor('F042');
-    assert.equal(before.kind, 'feature', 'Feature should own anchor initially');
+    assert.equal((await store.getByAnchor('F042')).kind, 'feature');
+    assert.ok(await store.getByAnchor('doc:plans/plan-f042'), 'Plan has own anchor');
 
     // Delete the feature file, plan still exists
     unlinkSync(featurePath);
     await builder.rebuild();
 
-    const after = await store.getByAnchor('F042');
-    assert.ok(after, 'F042 should still exist — plan should take over');
-    assert.equal(after.kind, 'plan', 'Plan should own anchor after feature deletion');
-    assert.ok(after.sourcePath.includes('plans/'), `Source should be plans/, got: ${after.sourcePath}`);
+    // Feature anchor is gone (file deleted, no other claimant)
+    const featureGone = await store.getByAnchor('F042');
+    assert.equal(featureGone, null, 'F042 anchor should be removed when spec is deleted');
+
+    // Plan survives with its own anchor
+    const plan = await store.getByAnchor('doc:plans/plan-f042');
+    assert.ok(plan, 'Plan should still exist with path-based anchor');
+    assert.equal(plan.kind, 'plan');
   });
 
-  it('P1-2: incrementalUpdate backfills anchor from candidate doc when only delete event received', async () => {
+  it('P1-2: incrementalUpdate removes feature anchor cleanly when spec deleted', async () => {
     mkdirSync(join(docsDir, 'plans'), { recursive: true });
 
     const featurePath = join(docsDir, 'features', 'F042-prompt.md');
@@ -458,17 +585,21 @@ doc_kind: plan
 `,
     );
 
-    // Rebuild — feature wins
+    // Rebuild — feature owns F042, plan has path-based anchor
     await builder.rebuild({ force: true });
     assert.equal((await store.getByAnchor('F042')).kind, 'feature');
+    assert.ok(await store.getByAnchor('doc:plans/plan-f042'), 'Plan indexed with own anchor');
 
-    // Delete feature file, but plan is NOT in changedPaths (only the delete)
+    // Delete feature file (only the delete in changedPaths)
     unlinkSync(featurePath);
     await builder.incrementalUpdate([featurePath]);
 
-    const after = await store.getByAnchor('F042');
-    assert.ok(after, 'F042 should still exist — plan should backfill after feature-only delete');
-    assert.equal(after.kind, 'plan', 'Plan should own anchor after feature-only delete');
+    // Feature anchor removed, plan unaffected
+    const featureGone = await store.getByAnchor('F042');
+    assert.equal(featureGone, null, 'F042 should be removed when spec file deleted');
+
+    const plan = await store.getByAnchor('doc:plans/plan-f042');
+    assert.ok(plan, 'Plan should still exist with own anchor after feature deletion');
   });
 
   it('incrementalUpdate deletes anchor when file no longer exists', async () => {
@@ -492,6 +623,138 @@ doc_kind: spec
 
     const stale = await store.getByAnchor('F099');
     assert.equal(stale, null, 'F099 should be removed after incremental update');
+  });
+
+  // ── Ghost bug: non-feature docs with feature_ids should NOT steal feature anchor ──
+
+  it('architecture doc with feature_ids gets path-based anchor, not feature anchor', async () => {
+    mkdirSync(join(docsDir, 'architecture'), { recursive: true });
+
+    // Feature spec for F102
+    writeFileSync(
+      join(docsDir, 'features', 'F102.md'),
+      `---
+feature_ids: [F102]
+doc_kind: spec
+---
+
+# F102: Memory System
+`,
+    );
+
+    // Architecture doc that REFERENCES F102 (should NOT steal anchor)
+    writeFileSync(
+      join(docsDir, 'architecture', 'overview.md'),
+      `---
+feature_ids: [F102, F163]
+---
+
+# Architecture Overview
+
+The memory system architecture.
+`,
+    );
+
+    await builder.rebuild({ force: true });
+
+    // Feature doc should own F102 anchor
+    const feature = await store.getByAnchor('F102');
+    assert.ok(feature, 'F102 feature doc should exist');
+    assert.equal(feature.kind, 'feature', 'F102 should be feature kind');
+    assert.ok(feature.sourcePath.includes('features/'), `Source should be features/, got: ${feature.sourcePath}`);
+
+    // Architecture doc should have its OWN path-based anchor, not F102
+    const archDoc = await store.getByAnchor('doc:architecture/overview');
+    assert.ok(archDoc, 'Architecture doc should exist with path-based anchor (not ghost)');
+    assert.ok(archDoc.title.includes('Architecture'), `Title should be about architecture, got: ${archDoc.title}`);
+  });
+
+  it('feature assets with feature_ids do not replace the canonical feature spec anchor', async () => {
+    mkdirSync(join(docsDir, 'features', 'assets', 'F088'), { recursive: true });
+
+    writeFileSync(
+      join(docsDir, 'features', 'F088-chat-gateway.md'),
+      `---
+feature_ids: [F088]
+doc_kind: spec
+---
+
+# F088 Multi-Platform Chat Gateway
+`,
+    );
+
+    writeFileSync(
+      join(docsDir, 'features', 'assets', 'F088', 'platform-selection.md'),
+      `---
+feature_ids: [F088]
+doc_kind: spec
+---
+
+# F088 Platform Selection Notes
+`,
+    );
+
+    await builder.rebuild({ force: true });
+
+    const feature = await store.getByAnchor('F088');
+    assert.ok(feature, 'F088 feature doc should exist');
+    assert.equal(feature.sourcePath, 'features/F088-chat-gateway.md');
+
+    const asset = await store.getByAnchor('doc:features/assets/F088/platform-selection');
+    assert.ok(asset, 'feature asset should remain searchable under a path-based anchor');
+    assert.ok(asset.keywords?.includes('F088'), 'feature asset should retain F088 as a discovery keyword');
+  });
+
+  it('non-feature doc feature_ids become keywords, not anchor', async () => {
+    mkdirSync(join(docsDir, 'architecture'), { recursive: true });
+
+    writeFileSync(
+      join(docsDir, 'architecture', 'deep-dive.md'),
+      `---
+feature_ids: [F102, F163, F186]
+---
+
+# Memory Deep Dive
+
+Detailed analysis.
+`,
+    );
+
+    await builder.rebuild({ force: true });
+
+    // Should get path-based anchor
+    const doc = await store.getByAnchor('doc:architecture/deep-dive');
+    assert.ok(doc, 'Should exist with path-based anchor');
+
+    // feature_ids should be in keywords for discoverability
+    assert.ok(doc.keywords?.includes('F102'), 'F102 should be in keywords');
+    assert.ok(doc.keywords?.includes('F163'), 'F163 should be in keywords');
+    assert.ok(doc.keywords?.includes('F186'), 'F186 should be in keywords');
+  });
+
+  it('decision with feature_ids and decision_id uses decision_id as anchor', async () => {
+    writeFileSync(
+      join(docsDir, 'decisions', 'ADR-042.md'),
+      `---
+decision_id: ADR-042
+feature_ids: [F159]
+doc_kind: decision
+---
+
+# ADR-042: Agent Invocation Approach
+`,
+    );
+
+    await builder.rebuild({ force: true });
+
+    // Should use decision_id, NOT feature_ids[0]
+    const decision = await store.getByAnchor('ADR-042');
+    assert.ok(decision, 'Decision should exist with decision_id anchor');
+    assert.equal(decision.kind, 'decision');
+
+    // F159 should NOT be the anchor (would collide with real F159)
+    // It should be findable via the decision_id anchor
+    assert.equal(decision.anchor.toLowerCase(), 'adr-042');
   });
 });
 
@@ -549,7 +812,8 @@ describe('IndexBuilder with session digests (D6)', () => {
     assert.ok(result.docsIndexed >= 1, 'should index at least the session digest');
 
     // Search for it
-    const items = await store.search('Edit Bash', { scope: 'threads' });
+    // P1 fix: scope='threads' now maps to kind='thread', use scope='sessions' to find session digests
+    const items = await store.search('Edit Bash', { scope: 'sessions' });
     assert.ok(items.length >= 1, 'should find session by tool names');
     assert.equal(items[0].kind, 'session');
     assert.ok(items[0].anchor.startsWith('session-'));
@@ -636,6 +900,7 @@ describe('IndexBuilder with embedding', () => {
     embedCallCount = 0;
     mockEmbedding = {
       isReady: () => true,
+      reprobeIfNeeded: async () => {},
       embed: async (texts) => {
         embedCallCount++;
         return texts.map(() => new Float32Array([0.5, 0.5, 0.5, 0.5]));
@@ -683,6 +948,9 @@ Another feature for embedding.
     const result = await builder.rebuild();
     assert.equal(result.docsIndexed, 2);
     assert.equal(vectorStore.count(), 2, 'should have 2 vectors');
+    const firstEmbedCalls = embedCallCount;
+    assert.equal((await builder.embedMissingDocumentVectors()).docsEmbedded, 0);
+    assert.equal(embedCallCount, firstEmbedCalls, 'ready catch-up must skip current vectors');
     // Meta should be written
     const meta = vectorStore.getMeta();
     assert.equal(meta.embedding_model_id, 'test-model');
@@ -736,10 +1004,44 @@ Some content.
       getModelInfo: () => ({ modelId: 'model-B', modelRev: 'v2', dim: 4 }),
     };
     const builder2 = new IndexBuilder(store, docsDir, { embedding: modelB, vectorStore });
-    // Force rebuild so the doc gets re-indexed even though hash hasn't changed
-    await builder2.rebuild({ force: true });
+    const priorIndexVersion = vectorStore.getMeta().indexing_version;
+    const priorSourceClaims = vectorStore.getMeta().document_source_claims;
+    assert.ok(priorSourceClaims, 'successful rebuild persists scanner source claims');
+    assert.equal((await builder2.embedMissingDocumentVectors()).docsEmbedded, 1);
     assert.equal(vectorStore.count(), 1, 'still 1 vector after re-embed');
     assert.equal(vectorStore.getMeta().embedding_model_id, 'model-B', 'meta updated to model-B');
+    assert.equal(
+      vectorStore.getMeta().indexing_version,
+      priorIndexVersion,
+      'model switch must preserve scanner version',
+    );
+    assert.equal(
+      vectorStore.getMeta().document_source_claims,
+      priorSourceClaims,
+      'model switch must preserve source identity history',
+    );
+  });
+
+  it('adopts current legacy vectors on first upgrade but embeds docs changed while the model was off', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+    const path = join(docsDir, 'features', 'F001.md');
+    writeFileSync(path, '---\nfeature_ids: [F001]\ndoc_kind: spec\n---\n# Original\n');
+    const first = new IndexBuilder(store, docsDir, { embedding: mockEmbedding, vectorStore });
+    await first.rebuild();
+    const initialCalls = embedCallCount;
+    store.getDb().prepare('DELETE FROM document_vector_sources').run(); // simulated V48 vector store
+
+    const restarted = new IndexBuilder(store, docsDir);
+    await restarted.rebuild();
+    restarted.setEmbedDeps({ embedding: mockEmbedding, vectorStore });
+    assert.equal((await restarted.embedMissingDocumentVectors()).docsEmbedded, 0);
+    assert.equal(embedCallCount, initialCalls, 'unchanged legacy vectors must be reused on the first upgrade');
+
+    restarted.setEmbedDeps(undefined);
+    writeFileSync(path, '---\nfeature_ids: [F001]\ndoc_kind: spec\n---\n# Revised\n');
+    await restarted.rebuild();
+    restarted.setEmbedDeps({ embedding: mockEmbedding, vectorStore });
+    assert.equal((await restarted.embedMissingDocumentVectors()).docsEmbedded, 1);
   });
 
   it('incrementalUpdate deletes stale vectors when doc removed (P1)', async () => {
@@ -866,6 +1168,32 @@ describe('IndexBuilder thread summary (E1/E2)', () => {
     assert.ok(item.summary.includes('Redis keyPrefix'));
   });
 
+  it('E1: rebuild updates a thread title even when summary is unchanged', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    let title = 'Old thread title';
+    const mockThreads = [
+      {
+        id: 'thread_rename',
+        title,
+        participants: ['opus'],
+        threadMemory: { summary: 'Stable discussion summary.' },
+        lastActiveAt: 1710000000000,
+      },
+    ];
+
+    const builder = new IndexBuilder(store, docsDir, undefined, undefined, () => mockThreads);
+    await builder.rebuild();
+    assert.equal((await store.getByAnchor('thread-thread_rename')).title, 'Old thread title');
+
+    title = 'New thread title';
+    mockThreads[0].title = title;
+    const result = await builder.rebuild();
+
+    assert.equal(result.docsIndexed, 1, 'title-only changes must re-index the thread evidence row');
+    assert.equal((await store.getByAnchor('thread-thread_rename')).title, 'New thread title');
+  });
+
   it('E1: threadListFn error does not delete existing thread anchors', async () => {
     const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
 
@@ -920,6 +1248,33 @@ describe('IndexBuilder thread summary (E1/E2)', () => {
 
     const after = await store.getByAnchor('thread-thread_dirty');
     assert.ok(after.summary.includes('v2'), 'summary should be updated to v2');
+  });
+
+  it('E2: flushDirtyThreads updates a thread title even when summary is unchanged', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    let title = 'Original searchable title';
+    const mockThreads = [
+      {
+        id: 'thread_dirty_title',
+        title,
+        participants: ['codex'],
+        threadMemory: { summary: 'Stable thread summary.' },
+        lastActiveAt: 1710000000000,
+      },
+    ];
+    const builder = new IndexBuilder(store, docsDir, undefined, undefined, () => mockThreads);
+
+    await builder.rebuild();
+    assert.equal((await store.getByAnchor('thread-thread_dirty_title')).title, 'Original searchable title');
+
+    title = 'Renamed searchable title';
+    mockThreads[0].title = title;
+    builder.markThreadDirty('thread_dirty_title');
+    const flushed = await builder.flushDirtyThreads();
+
+    assert.equal(flushed, 1, 'title-only dirty threads must be flushed');
+    assert.equal((await store.getByAnchor('thread-thread_dirty_title')).title, 'Renamed searchable title');
   });
 });
 
@@ -1056,5 +1411,1271 @@ describe('IndexBuilder passage indexing (E3/E4/E5)', () => {
     assert.ok(results.length >= 1, 'depth=raw search should find thread docs');
     const threadResult = results.find((r) => r.anchor === 'thread-thread_search1');
     assert.ok(threadResult, 'should find the thread doc (via summary or passage match)');
+  });
+
+  it('indexes image contentBlocks and media_gallery alt/caption text into thread passages', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const mockThreads = [
+      {
+        id: 'thread_visual1',
+        title: 'Visual artifact memory',
+        participants: ['codex'],
+        threadMemory: { summary: '' },
+        lastActiveAt: Date.now(),
+      },
+    ];
+
+    const mockMessages = [
+      {
+        id: 'msg_visual1',
+        content: '',
+        contentBlocks: [{ type: 'image', url: '/uploads/topology.png', alt: 'declarative queue topology' }],
+        richBlocks: [
+          {
+            kind: 'media_gallery',
+            title: 'Architecture diagram',
+            items: [{ url: '/uploads/topology.png', caption: 'Redis stream route lanes' }],
+          },
+        ],
+        catId: 'codex',
+        threadId: 'thread_visual1',
+        timestamp: Date.now(),
+      },
+    ];
+
+    const builder = new IndexBuilder(
+      store,
+      docsDir,
+      undefined,
+      undefined,
+      () => mockThreads,
+      (tid) => {
+        if (tid === 'thread_visual1') return mockMessages;
+        return [];
+      },
+    );
+    await builder.rebuild();
+
+    const passages = store.searchPassages('declarative queue topology');
+    assert.ok(passages.length >= 1, 'image alt text should be searchable as passage content');
+    assert.equal(passages[0].docAnchor, 'thread-thread_visual1');
+
+    const galleryPassages = store.searchPassages('Redis stream route lanes');
+    assert.ok(galleryPassages.length >= 1, 'media_gallery caption text should be searchable as passage content');
+  });
+
+  it('updates existing message passages when visual block text becomes available', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const mockThreads = [
+      {
+        id: 'thread_visual_backfill',
+        title: 'Visual artifact backfill',
+        participants: ['codex'],
+        threadMemory: { summary: '' },
+        lastActiveAt: Date.now(),
+      },
+    ];
+
+    const baseMessage = {
+      id: 'msg_visual_backfill',
+      content: 'Existing diagram message',
+      catId: 'codex',
+      threadId: 'thread_visual_backfill',
+      timestamp: Date.now(),
+    };
+    let currentMessages = [baseMessage];
+
+    const builder = new IndexBuilder(
+      store,
+      docsDir,
+      undefined,
+      undefined,
+      () => mockThreads,
+      (tid) => {
+        if (tid === 'thread_visual_backfill') return currentMessages;
+        return [];
+      },
+    );
+
+    await builder.rebuild();
+    assert.equal(store.searchPassages('late visual alt text').length, 0, 'initial passage has no visual text');
+
+    currentMessages = [
+      {
+        ...baseMessage,
+        contentBlocks: [{ type: 'image', url: '/uploads/late.png', alt: 'late visual alt text' }],
+        richBlocks: [
+          {
+            kind: 'media_gallery',
+            items: [{ url: '/uploads/late.png', caption: 'late visual caption text' }],
+          },
+        ],
+      },
+    ];
+    await builder.rebuild();
+
+    const passages = store.searchPassages('late visual alt text');
+    assert.ok(passages.length >= 1, 'visual alt text should replace the existing passage content');
+    assert.equal(passages[0].docAnchor, 'thread-thread_visual_backfill');
+
+    const row = store
+      .getDb()
+      .prepare('SELECT content FROM evidence_passages WHERE doc_anchor = ? AND passage_id = ?')
+      .get('thread-thread_visual_backfill', 'msg-msg_visual_backfill');
+    assert.match(row.content, /late visual alt text/);
+    assert.match(row.content, /late visual caption text/);
+  });
+
+  it('I2: rebuild does not delete existing passages when Redis returns fewer messages', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const mockThreads = [
+      {
+        id: 'thread_perm1',
+        title: 'Permanence test',
+        participants: ['opus'],
+        threadMemory: { summary: 'Testing passage permanence.' },
+        lastActiveAt: Date.now(),
+      },
+    ];
+
+    const allMessages = [
+      {
+        id: 'perm_001',
+        content: 'First message that will expire from Redis',
+        catId: 'opus',
+        threadId: 'thread_perm1',
+        timestamp: Date.now() - 3000,
+      },
+      {
+        id: 'perm_002',
+        content: 'Second message still in Redis',
+        catId: 'opus',
+        threadId: 'thread_perm1',
+        timestamp: Date.now() - 2000,
+      },
+      {
+        id: 'perm_003',
+        content: 'Third message still in Redis',
+        catId: 'user',
+        threadId: 'thread_perm1',
+        timestamp: Date.now() - 1000,
+      },
+    ];
+
+    // First rebuild: all 3 messages available
+    let currentMessages = allMessages;
+    const messageListFn = (threadId) => {
+      if (threadId === 'thread_perm1') return currentMessages;
+      return [];
+    };
+
+    const builder = new IndexBuilder(store, docsDir, undefined, undefined, () => mockThreads, messageListFn);
+    await builder.rebuild();
+
+    const db = store.getDb();
+    const passagesAfterFirst = db
+      .prepare('SELECT * FROM evidence_passages WHERE doc_anchor = ? ORDER BY position')
+      .all('thread-thread_perm1');
+    assert.equal(passagesAfterFirst.length, 3, 'first rebuild: should have 3 passages');
+
+    // Simulate Redis expiry: only 1 message remains
+    currentMessages = [allMessages[1]];
+    await builder.rebuild();
+
+    const passagesAfterSecond = db
+      .prepare('SELECT * FROM evidence_passages WHERE doc_anchor = ? ORDER BY position')
+      .all('thread-thread_perm1');
+    assert.equal(passagesAfterSecond.length, 3, 'second rebuild: all 3 passages must persist (AC-I2)');
+    assert.equal(passagesAfterSecond[0].passage_id, 'msg-perm_001', 'expired message passage still exists');
+  });
+
+  it('I2: rebuild preserves thread passages when a thread temporarily disappears from threadListFn', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const thread = {
+      id: 'thread_missing_once',
+      title: 'Transient thread absence',
+      participants: ['codex'],
+      threadMemory: { summary: 'Transient absence should not erase raw passages.' },
+      lastActiveAt: Date.now(),
+    };
+    const messages = [
+      {
+        id: 'missing_001',
+        content: 'transientabsencepassage should survive a missing thread list cycle',
+        catId: 'codex',
+        threadId: thread.id,
+        timestamp: Date.now(),
+      },
+    ];
+
+    let currentThreads = [thread];
+    const builder = new IndexBuilder(
+      store,
+      docsDir,
+      undefined,
+      undefined,
+      () => currentThreads,
+      (threadId) => (threadId === thread.id ? messages : []),
+    );
+    await builder.rebuild();
+    assert.equal(store.searchPassages('transientabsencepassage').length, 1);
+
+    currentThreads = [];
+    await builder.rebuild();
+
+    const passages = store
+      .getDb()
+      .prepare('SELECT * FROM evidence_passages WHERE doc_anchor = ?')
+      .all('thread-thread_missing_once');
+    assert.equal(passages.length, 1, 'thread raw passages must survive transient thread-list absence');
+    assert.equal(store.searchPassages('transientabsencepassage').length, 1);
+  });
+
+  it('I1: backfillPassagesFromTranscript adds passages from JSONL events', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const threadId = 'thread_bf1';
+    const catId = 'opus';
+    const sessionId = 'sess_001';
+
+    // Create JSONL transcript directory structure
+    const transcriptDir = join(tmpDir, 'transcripts');
+    const sessDir = join(transcriptDir, 'threads', threadId, catId, 'sessions', sessionId);
+    mkdirSync(sessDir, { recursive: true });
+
+    // Write events.jsonl with text events from two invocations
+    const events = [
+      {
+        v: 1,
+        t: Date.now() - 3000,
+        threadId,
+        catId,
+        sessionId,
+        invocationId: 'inv_001',
+        eventNo: 0,
+        event: { type: 'text', content: 'Hello from ' },
+      },
+      {
+        v: 1,
+        t: Date.now() - 2900,
+        threadId,
+        catId,
+        sessionId,
+        invocationId: 'inv_001',
+        eventNo: 1,
+        event: { type: 'text', content: 'first invocation.' },
+      },
+      {
+        v: 1,
+        t: Date.now() - 2000,
+        threadId,
+        catId,
+        sessionId,
+        invocationId: 'inv_002',
+        eventNo: 2,
+        event: { type: 'tool_use', name: 'Read' },
+      },
+      {
+        v: 1,
+        t: Date.now() - 1000,
+        threadId,
+        catId,
+        sessionId,
+        invocationId: 'inv_002',
+        eventNo: 3,
+        event: { type: 'text', content: 'Second invocation response.' },
+      },
+    ];
+    writeFileSync(join(sessDir, 'events.jsonl'), events.map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+    // Create builder with transcriptDataDir but no messageListFn
+    const builder = new IndexBuilder(store, docsDir, undefined, transcriptDir);
+
+    const added = await builder.backfillPassagesFromTranscript(threadId);
+    assert.equal(added, 2, 'should add 2 passages (one per invocation with text)');
+
+    const db = store.getDb();
+    const passages = db
+      .prepare('SELECT * FROM evidence_passages WHERE doc_anchor = ? ORDER BY position')
+      .all(`thread-${threadId}`);
+    assert.equal(passages.length, 2);
+    assert.equal(passages[0].passage_id, 'transcript-inv_001');
+    assert.equal(passages[0].content, 'Hello from first invocation.');
+    assert.equal(passages[0].speaker, 'opus');
+    assert.equal(passages[1].passage_id, 'transcript-inv_002');
+    assert.equal(passages[1].content, 'Second invocation response.');
+
+    // Idempotent: running again adds nothing
+    const addedAgain = await builder.backfillPassagesFromTranscript(threadId);
+    assert.equal(addedAgain, 0, 'second run should add 0 (INSERT OR IGNORE)');
+    const checkpoint = db
+      .prepare('SELECT fingerprint FROM transcript_backfill_files WHERE file_path = ?')
+      .get(`${threadId}/${catId}/${sessionId}/events.jsonl`);
+    assert.ok(checkpoint?.fingerprint, 'successful backfill must persist a file checkpoint');
+    writeFileSync(
+      join(sessDir, 'events.jsonl'),
+      [
+        ...events,
+        {
+          v: 1,
+          t: Date.now(),
+          threadId,
+          catId,
+          sessionId,
+          invocationId: 'inv_003',
+          eventNo: 4,
+          event: { type: 'text', content: 'New response.' },
+        },
+      ]
+        .map((event) => JSON.stringify(event))
+        .join('\n') + '\n',
+    );
+    assert.equal(await builder.backfillPassagesFromTranscript(threadId), 1, 'changed transcript must be revisited');
+  });
+
+  it('I3: rebuild runs transcript backfill after Redis-based passage indexing', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const threadId = 'thread_rebuild_bf';
+    const catId = 'opus';
+    const sessionId = 'sess_rb1';
+
+    const mockThreads = [
+      {
+        id: threadId,
+        title: 'Rebuild backfill test',
+        participants: ['opus'],
+        threadMemory: { summary: 'Testing rebuild with backfill.' },
+        lastActiveAt: Date.now(),
+      },
+    ];
+
+    // messageListFn returns empty (all Redis messages expired)
+    const messageListFn = () => [];
+
+    // Create JSONL transcript with text events
+    const transcriptDir = join(tmpDir, 'transcripts');
+    const sessDir = join(transcriptDir, 'threads', threadId, catId, 'sessions', sessionId);
+    mkdirSync(sessDir, { recursive: true });
+
+    const events = [
+      {
+        v: 1,
+        t: Date.now() - 2000,
+        threadId,
+        catId,
+        sessionId,
+        invocationId: 'inv_rb1',
+        eventNo: 0,
+        event: { type: 'text', content: 'Recovered from transcript.' },
+      },
+    ];
+    writeFileSync(join(sessDir, 'events.jsonl'), events.map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+    const builder = new IndexBuilder(store, docsDir, undefined, transcriptDir, () => mockThreads, messageListFn);
+    await builder.rebuild();
+
+    const db = store.getDb();
+    const passages = db
+      .prepare('SELECT * FROM evidence_passages WHERE doc_anchor = ? ORDER BY position')
+      .all(`thread-${threadId}`);
+    assert.ok(passages.length >= 1, 'rebuild should have backfilled passages from JSONL (AC-I3)');
+    assert.equal(passages[0].passage_id, 'transcript-inv_rb1');
+    assert.equal(passages[0].content, 'Recovered from transcript.');
+  });
+
+  it('I4: searchPassages filters by dateFrom/dateTo', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const threadId = 'thread_time1';
+    const mockThreads = [
+      {
+        id: threadId,
+        title: 'Time filter test',
+        participants: ['opus'],
+        threadMemory: { summary: 'Time filtering test.' },
+        lastActiveAt: Date.now(),
+      },
+    ];
+
+    // Insert messages with specific timestamps
+    const mockMessages = [
+      {
+        id: 'time_001',
+        content: 'Old message about architecture',
+        catId: 'opus',
+        threadId,
+        timestamp: new Date('2026-03-10T12:00:00Z').getTime(),
+      },
+      {
+        id: 'time_002',
+        content: 'Middle message about architecture',
+        catId: 'opus',
+        threadId,
+        timestamp: new Date('2026-03-18T12:00:00Z').getTime(),
+      },
+      {
+        id: 'time_003',
+        content: 'Recent message about architecture',
+        catId: 'opus',
+        threadId,
+        timestamp: new Date('2026-03-25T12:00:00Z').getTime(),
+      },
+    ];
+
+    const builder = new IndexBuilder(
+      store,
+      docsDir,
+      undefined,
+      undefined,
+      () => mockThreads,
+      () => mockMessages,
+    );
+    await builder.rebuild();
+
+    // Search with date range that only includes middle message
+    const filtered = store.searchPassages('architecture', 10, { dateFrom: '2026-03-15', dateTo: '2026-03-20' });
+    assert.equal(filtered.length, 1, 'should only find middle message within date range');
+    assert.equal(filtered[0].passageId, 'msg-time_002');
+
+    // Search without date filter returns all
+    const unfiltered = store.searchPassages('architecture', 10);
+    assert.equal(unfiltered.length, 3, 'without date filter should find all 3');
+  });
+});
+
+// ── F102 Phase F-2: Recursive fallback discovery ────────────────────
+
+describe('IndexBuilder recursive fallback (F-2)', () => {
+  let tmpDir;
+  let docsDir;
+  let store;
+  let builder;
+
+  beforeEach(async () => {
+    tmpDir = join(tmpdir(), `f102-f2-${randomUUID().slice(0, 8)}`);
+    docsDir = join(tmpDir, 'docs');
+    mkdirSync(docsDir, { recursive: true });
+
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    store = new SqliteEvidenceStore(':memory:');
+    await store.initialize();
+    builder = new IndexBuilder(store, docsDir);
+  });
+
+  afterEach(() => {
+    store.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('indexes .md files in non-standard directories', async () => {
+    mkdirSync(join(docsDir, 'custom-notes'), { recursive: true });
+    writeFileSync(
+      join(docsDir, 'custom-notes', 'meeting.md'),
+      '# Team Meeting Notes\n\nDiscussion about architecture.',
+    );
+
+    const result = await builder.rebuild();
+    assert.ok(result.docsIndexed >= 1, 'should index .md from non-standard dir');
+
+    const item = await store.getByAnchor('doc:custom-notes/meeting');
+    assert.ok(item, 'should have path-based anchor');
+    assert.equal(item.kind, 'plan'); // default kind for unknown dirs
+    assert.equal(item.title, 'Team Meeting Notes');
+  });
+
+  it('respects frontmatter doc_kind for non-standard dir files', async () => {
+    mkdirSync(join(docsDir, 'random'), { recursive: true });
+    writeFileSync(
+      join(docsDir, 'random', 'api-review.md'),
+      `---
+doc_kind: decision
+anchor: REVIEW-001
+---
+
+# API Review Decision
+
+We decided to use REST.
+`,
+    );
+
+    await builder.rebuild();
+    const item = await store.getByAnchor('REVIEW-001');
+    assert.ok(item, 'should index with explicit anchor');
+    assert.equal(item.kind, 'decision'); // from frontmatter, not path
+  });
+
+  it('excludes node_modules and .git from fallback scan', async () => {
+    mkdirSync(join(docsDir, 'node_modules', 'pkg'), { recursive: true });
+    writeFileSync(join(docsDir, 'node_modules', 'pkg', 'README.md'), '# Package\n');
+
+    mkdirSync(join(docsDir, '.git', 'info'), { recursive: true });
+    writeFileSync(join(docsDir, '.git', 'info', 'notes.md'), '# Git Notes\n');
+
+    mkdirSync(join(docsDir, 'misc'), { recursive: true });
+    writeFileSync(join(docsDir, 'misc', 'valid.md'), '# Valid Doc\n');
+
+    const result = await builder.rebuild();
+
+    const nodeModItem = await store.getByAnchor('doc:node_modules/pkg/README');
+    assert.equal(nodeModItem, null, 'should NOT index node_modules');
+
+    const gitItem = await store.getByAnchor('doc:.git/info/notes');
+    assert.equal(gitItem, null, 'should NOT index .git');
+
+    const validItem = await store.getByAnchor('doc:misc/valid');
+    assert.ok(validItem, 'should index valid misc dir');
+  });
+
+  it('excludes nested node_modules and .git from fallback scan', async () => {
+    mkdirSync(join(docsDir, 'misc', 'node_modules', 'pkg'), { recursive: true });
+    writeFileSync(join(docsDir, 'misc', 'node_modules', 'pkg', 'README.md'), '# Package\n');
+
+    mkdirSync(join(docsDir, 'misc', '.git', 'info'), { recursive: true });
+    writeFileSync(join(docsDir, 'misc', '.git', 'info', 'notes.md'), '# Git Notes\n');
+
+    mkdirSync(join(docsDir, 'misc', 'valid-sub'), { recursive: true });
+    writeFileSync(join(docsDir, 'misc', 'valid-sub', 'doc.md'), '# Valid Nested Doc\n');
+
+    await builder.rebuild();
+
+    const nestedNM = await store.getByAnchor('doc:misc/node_modules/pkg/README');
+    assert.equal(nestedNM, null, 'should NOT index nested node_modules');
+
+    const nestedGit = await store.getByAnchor('doc:misc/.git/info/notes');
+    assert.equal(nestedGit, null, 'should NOT index nested .git');
+
+    const validNested = await store.getByAnchor('doc:misc/valid-sub/doc');
+    assert.ok(validNested, 'should index valid nested subdirectory');
+  });
+
+  it('does not double-index files already found in KIND_DIRS', async () => {
+    // Create a file in a standard KIND_DIR
+    mkdirSync(join(docsDir, 'features'), { recursive: true });
+    writeFileSync(
+      join(docsDir, 'features', 'F099.md'),
+      `---
+feature_ids: [F099]
+doc_kind: spec
+---
+
+# F099: Test Feature
+`,
+    );
+
+    const result = await builder.rebuild();
+    assert.equal(result.docsIndexed, 1, 'should index exactly once');
+  });
+
+  it('recurses into nested non-standard subdirectories', async () => {
+    mkdirSync(join(docsDir, 'team', 'backend', 'notes'), { recursive: true });
+    writeFileSync(
+      join(docsDir, 'team', 'backend', 'notes', 'api-v3.md'),
+      '# API v3 Design\n\nNested doc about API design.',
+    );
+
+    await builder.rebuild();
+    const item = await store.getByAnchor('doc:team/backend/notes/api-v3');
+    assert.ok(item, 'should find deeply nested .md');
+    assert.equal(item.title, 'API v3 Design');
+  });
+
+  it('legacy project with no standard dirs: search finds docs after rebuild', async () => {
+    mkdirSync(join(docsDir, 'notes'), { recursive: true });
+    writeFileSync(
+      join(docsDir, 'notes', 'redis-setup.md'),
+      `---
+doc_kind: plan
+topics: [redis, setup]
+---
+
+# Redis Setup Guide
+
+How to configure Redis for production deployment.
+`,
+    );
+
+    await builder.rebuild();
+    const results = await store.search('redis setup', { limit: 5 });
+    assert.ok(results.length >= 1, 'should find redis doc via search');
+    assert.ok(
+      results.some((r) => r.title.includes('Redis')),
+      'result should include redis doc',
+    );
+  });
+});
+
+// ── F152 Phase A: CatCafeScanner ────────────────────────────────────
+
+describe('F152 Phase A: CatCafeScanner', () => {
+  let tmpDir;
+  let docsDir;
+
+  beforeEach(() => {
+    tmpDir = join(tmpdir(), `f152-scanner-${randomUUID().slice(0, 8)}`);
+    docsDir = join(tmpDir, 'docs');
+    mkdirSync(join(docsDir, 'features'), { recursive: true });
+    mkdirSync(join(docsDir, 'decisions'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('discover() returns ScannedEvidence with authoritative provenance', async () => {
+    writeFileSync(
+      join(docsDir, 'features', 'F099-test.md'),
+      `---
+feature_ids: [F099]
+topics: [test]
+doc_kind: spec
+---
+
+# F099: Test Feature
+
+Some test content.
+`,
+    );
+
+    const { CatCafeScanner } = await import('../../dist/domains/memory/CatCafeScanner.js');
+    const scanner = new CatCafeScanner();
+    const results = scanner.discover(docsDir);
+
+    const f099 = results.find((r) => r.item.anchor === 'F099');
+    assert.ok(f099, 'should discover F099');
+    assert.equal(f099.provenance.tier, 'authoritative');
+    assert.ok(f099.provenance.source.includes('features'));
+    assert.ok(f099.rawContent.includes('Test Feature'));
+    assert.equal(f099.item.kind, 'feature');
+  });
+
+  it('discover() handles files without frontmatter', async () => {
+    writeFileSync(join(docsDir, 'VISION.md'), '# Vision\n\nOur vision statement.');
+
+    const { CatCafeScanner } = await import('../../dist/domains/memory/CatCafeScanner.js');
+    const scanner = new CatCafeScanner();
+    const results = scanner.discover(docsDir);
+
+    const vision = results.find((r) => r.item.anchor === 'doc:VISION');
+    assert.ok(vision, 'should discover VISION.md');
+    assert.equal(vision.provenance.tier, 'authoritative');
+  });
+
+  it('discover() indexes text-bearing SVG architecture assets', async () => {
+    mkdirSync(join(docsDir, 'architecture', 'assets'), { recursive: true });
+    writeFileSync(
+      join(docsDir, 'architecture', 'assets', 'memory-map.svg'),
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400">
+  <title>Memory Recall Architecture</title>
+  <desc>Visual map for searchable diagram assets.</desc>
+  <text x="20" y="40">Capability Graph Resolver</text>
+  <text x="20" y="80"><tspan>Visual Artifact Index</tspan></text>
+</svg>
+`,
+    );
+
+    const { CatCafeScanner } = await import('../../dist/domains/memory/CatCafeScanner.js');
+    const scanner = new CatCafeScanner();
+    const results = scanner.discover(docsDir);
+
+    const svg = results.find((r) => r.item.anchor === 'doc:architecture/assets/memory-map');
+    assert.ok(svg, 'should discover SVG visual asset text');
+    assert.equal(svg.item.sourcePath, 'architecture/assets/memory-map.svg');
+    assert.ok(svg.item.summary.includes('Capability Graph Resolver'));
+    assert.ok(svg.item.summary.includes('Visual Artifact Index'));
+    assert.equal(svg.provenance.tier, 'derived');
+  });
+
+  it('discover() splits lessons-learned.md', async () => {
+    writeFileSync(
+      join(docsDir, 'lessons-learned.md'),
+      `---
+doc_kind: lesson
+---
+
+# Lessons Learned
+
+### LL-001: Test lesson
+Some lesson content.
+
+关联：Redis | testing
+
+### LL-002: Another lesson
+More content here.
+`,
+    );
+
+    const { CatCafeScanner } = await import('../../dist/domains/memory/CatCafeScanner.js');
+    const scanner = new CatCafeScanner();
+    const results = scanner.discover(docsDir);
+
+    const ll1 = results.find((r) => r.item.anchor === 'LL-001');
+    assert.ok(ll1, 'should split LL-001');
+    assert.equal(ll1.item.kind, 'lesson');
+    assert.equal(ll1.provenance.tier, 'authoritative');
+
+    const ll2 = results.find((r) => r.item.anchor === 'LL-002');
+    assert.ok(ll2, 'should split LL-002');
+  });
+
+  it('parseSingle() returns ScannedEvidence for one file', async () => {
+    writeFileSync(
+      join(docsDir, 'features', 'F100-single.md'),
+      `---
+feature_ids: [F100]
+topics: [parse]
+doc_kind: spec
+---
+
+# F100: Single Parse
+
+Content for single file parse.
+`,
+    );
+
+    const { CatCafeScanner } = await import('../../dist/domains/memory/CatCafeScanner.js');
+    const scanner = new CatCafeScanner();
+    const result = scanner.parseSingle(join(docsDir, 'features', 'F100-single.md'), docsDir);
+
+    assert.ok(result, 'should parse single file');
+    assert.equal(result.item.anchor, 'F100');
+    assert.equal(result.provenance.tier, 'authoritative');
+  });
+
+  it('discover() skips generated thread export dumps under discussion trees', async () => {
+    mkdirSync(join(docsDir, 'discussions', 'exported-threads'), { recursive: true });
+    mkdirSync(join(docsDir, 'archive', '2026-02', 'discussions', 'exported-threads'), { recursive: true });
+    writeFileSync(
+      join(docsDir, 'discussions', 'design-note.md'),
+      `---
+doc_kind: discussion
+---
+
+# Design Note
+
+Human-curated discussion content.
+`,
+    );
+    writeFileSync(
+      join(docsDir, 'discussions', 'exported-threads', 'thread-thread_abc.md'),
+      `# 对话记录: raw export
+
+- **ID**: thread_abc
+
+Raw generated transcript dump.
+`,
+    );
+    writeFileSync(
+      join(docsDir, 'archive', '2026-02', 'discussions', 'exported-threads', 'thread-thread_def.md'),
+      `# 对话记录: archived raw export
+
+- **ID**: thread_def
+
+Raw generated transcript dump.
+`,
+    );
+
+    const { CatCafeScanner } = await import('../../dist/domains/memory/CatCafeScanner.js');
+    const scanner = new CatCafeScanner();
+    const results = scanner.discover(docsDir);
+
+    assert.ok(
+      results.some((r) => r.item.sourcePath === 'discussions/design-note.md'),
+      'curated discussion docs should still be indexed',
+    );
+    assert.ok(
+      results.every((r) => !r.item.sourcePath?.includes('exported-threads/')),
+      'generated thread export dumps must not enter evidence docs',
+    );
+  });
+});
+
+// ── F152 Phase A: Auto-selection (AC-A3) ────────────────────────────
+
+describe('F152 Phase A: Auto-selection', () => {
+  it('auto-selects GenericRepoScanner for non-cat-cafe repos', async () => {
+    const genericDir = join(tmpdir(), `f152-auto-${randomUUID().slice(0, 8)}`);
+    mkdirSync(genericDir, { recursive: true });
+    writeFileSync(join(genericDir, 'README.md'), '# Generic Project\n\nA non-cat-cafe project.');
+    writeFileSync(
+      join(genericDir, 'package.json'),
+      JSON.stringify({ name: 'generic', version: '1.0.0', description: 'test' }),
+    );
+
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const genericStore = new SqliteEvidenceStore(':memory:');
+    await genericStore.initialize();
+    const genericBuilder = new IndexBuilder(genericStore, genericDir);
+
+    const result = await genericBuilder.rebuild();
+    assert.ok(result.docsIndexed >= 2, 'should index README + package.json');
+
+    // Key test: package.json should be 'derived' — only GenericRepoScanner does this
+    const pkg = await genericStore.getByAnchor('doc:package');
+    assert.ok(pkg, 'GenericRepoScanner should index package.json');
+    assert.equal(pkg.provenance?.tier, 'derived', 'package.json must be derived tier');
+
+    genericStore.close();
+    rmSync(genericDir, { recursive: true, force: true });
+  });
+
+  it('auto-selects CatCafeScanner when features/ dir exists', async () => {
+    const catDir = join(tmpdir(), `f152-cat-${randomUUID().slice(0, 8)}`);
+    mkdirSync(join(catDir, 'features'), { recursive: true });
+    writeFileSync(
+      join(catDir, 'features', 'F001-test.md'),
+      '---\nfeature_ids: [F001]\ntopics: [test]\ndoc_kind: spec\n---\n\n# F001: Test\n\nContent.\n',
+    );
+
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const catStore = new SqliteEvidenceStore(':memory:');
+    await catStore.initialize();
+    const catBuilder = new IndexBuilder(catStore, catDir);
+
+    const result = await catBuilder.rebuild();
+    const f001 = await catStore.getByAnchor('F001');
+    assert.ok(f001, 'CatCafeScanner should find F001');
+    assert.equal(f001.kind, 'feature');
+
+    catStore.close();
+    rmSync(catDir, { recursive: true, force: true });
+  });
+
+  it('auto-selects GenericRepoScanner when docsRoot is docs/ subdir (P1-1 fix)', async () => {
+    // Production layout: projectRoot/package.json + projectRoot/docs/ (passed as docsRoot)
+    const projectRoot = join(tmpdir(), `f152-prod-${randomUUID().slice(0, 8)}`);
+    const docsSubdir = join(projectRoot, 'docs');
+    mkdirSync(docsSubdir, { recursive: true });
+    writeFileSync(join(projectRoot, 'README.md'), '# External Project\n\nSome project.');
+    writeFileSync(
+      join(projectRoot, 'package.json'),
+      JSON.stringify({ name: 'external-app', version: '2.0.0', description: 'real app' }),
+    );
+    writeFileSync(join(docsSubdir, 'guide.md'), '# Dev Guide\n\nHow to develop.');
+
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const extStore = new SqliteEvidenceStore(':memory:');
+    await extStore.initialize();
+    // Pass docs/ subdir as docsRoot — just like production createMemoryServices
+    const extBuilder = new IndexBuilder(extStore, docsSubdir);
+
+    const result = await extBuilder.rebuild();
+    // GenericRepoScanner should detect manifest in parent dir and scan from project root
+    const pkg = await extStore.getByAnchor('doc:package');
+    assert.ok(pkg, 'should find package.json via parent-dir manifest detection');
+    assert.equal(pkg.provenance?.tier, 'derived', 'package.json must be derived tier');
+
+    const readme = await extStore.getByAnchor('doc:README');
+    assert.ok(readme, 'should find README.md at project root');
+    assert.equal(readme.provenance?.tier, 'authoritative');
+
+    extStore.close();
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  it('search finds GenericRepoScanner results via FTS5 (AC-A4)', async () => {
+    const genericDir = join(tmpdir(), `f152-search-${randomUUID().slice(0, 8)}`);
+    mkdirSync(join(genericDir, 'docs'), { recursive: true });
+    writeFileSync(join(genericDir, 'README.md'), '# Widget Factory\n\nBuilds amazing widgets.');
+    writeFileSync(join(genericDir, 'docs', 'setup.md'), '# Setup Guide\n\nHow to install widget factory.');
+
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const genericStore = new SqliteEvidenceStore(':memory:');
+    await genericStore.initialize();
+    const genericBuilder = new IndexBuilder(genericStore, genericDir);
+    await genericBuilder.rebuild();
+
+    const results = await genericStore.search('widget factory');
+    assert.ok(results.length >= 1, 'should find widget docs via FTS5');
+
+    genericStore.close();
+    rmSync(genericDir, { recursive: true, force: true });
+  });
+
+  it('incrementalUpdate works with GenericRepoScanner when docsRoot is docs/ subdir (P1-5 fix)', async () => {
+    // Production layout: projectRoot/docs/ passed as docsRoot, scanRoot resolves to projectRoot
+    const projectRoot = join(tmpdir(), `f152-incr-${randomUUID().slice(0, 8)}`);
+    const docsSubdir = join(projectRoot, 'docs');
+    mkdirSync(docsSubdir, { recursive: true });
+    writeFileSync(join(projectRoot, 'package.json'), '{"name":"incr-test"}');
+    writeFileSync(join(docsSubdir, 'guide.md'), '# Guide\n\nOld content.');
+
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const incrStore = new SqliteEvidenceStore(':memory:');
+    await incrStore.initialize();
+    const builder = new IndexBuilder(incrStore, docsSubdir);
+    await builder.rebuild();
+
+    // source_path should be relative to scanRoot (projectRoot), not docsRoot
+    const before = await incrStore.getByAnchor('doc:docs/guide');
+    assert.ok(before, 'should find guide after rebuild');
+    assert.equal(before.sourcePath, 'docs/guide.md', 'source_path relative to scanRoot');
+    assert.ok(before.summary?.includes('Old'), 'initial summary should contain Old');
+
+    // Modify the file and run incrementalUpdate
+    writeFileSync(join(docsSubdir, 'guide.md'), '# Guide\n\nNew updated content.');
+    await builder.incrementalUpdate([join(docsSubdir, 'guide.md')]);
+
+    const after = await incrStore.getByAnchor('doc:docs/guide');
+    assert.ok(after, 'should still find guide after incrementalUpdate');
+    assert.ok(after.summary?.includes('New'), `summary should be updated (got: ${after.summary})`);
+
+    incrStore.close();
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+});
+
+// ── F152 Phase A: Provenance ────────────────────────────────────────
+
+describe('F152 Phase A: Provenance', () => {
+  let store;
+
+  beforeEach(async () => {
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    store = new SqliteEvidenceStore(':memory:');
+    await store.initialize();
+  });
+
+  afterEach(() => {
+    store.close();
+  });
+
+  it('V10 migration adds provenance columns', () => {
+    const db = store.getDb();
+    const columns = db.pragma('table_info(evidence_docs)').map((c) => c.name);
+    assert.ok(columns.includes('provenance_tier'), 'should have provenance_tier column');
+    assert.ok(columns.includes('provenance_source'), 'should have provenance_source column');
+  });
+
+  it('upsert + getByAnchor round-trips provenance', async () => {
+    await store.upsert([
+      {
+        anchor: 'test-prov',
+        kind: 'research',
+        status: 'active',
+        title: 'Test provenance',
+        updatedAt: new Date().toISOString(),
+        provenance: { tier: 'derived', source: 'package.json' },
+      },
+    ]);
+    const item = await store.getByAnchor('test-prov');
+    assert.ok(item);
+    assert.deepStrictEqual(item.provenance, { tier: 'derived', source: 'package.json' });
+  });
+
+  it('search filters by provenanceTier (AC-A6)', async () => {
+    await store.upsert([
+      {
+        anchor: 'auth-doc',
+        kind: 'plan',
+        status: 'active',
+        title: 'Authoritative setup guide',
+        summary: 'How to set up the project',
+        updatedAt: new Date().toISOString(),
+        provenance: { tier: 'authoritative', source: 'README.md' },
+      },
+      {
+        anchor: 'derived-doc',
+        kind: 'research',
+        status: 'active',
+        title: 'Derived setup manifest',
+        summary: 'Package manifest with setup info',
+        updatedAt: new Date().toISOString(),
+        provenance: { tier: 'derived', source: 'package.json' },
+      },
+      {
+        anchor: 'soft-doc',
+        kind: 'lesson',
+        status: 'active',
+        title: 'Soft clue setup changelog',
+        summary: 'Changelog entry about setup',
+        updatedAt: new Date().toISOString(),
+        provenance: { tier: 'soft_clue', source: 'CHANGELOG.md' },
+      },
+    ]);
+
+    const authOnly = await store.search('setup', { provenanceTier: 'authoritative' });
+    assert.ok(authOnly.length >= 1, 'should find authoritative docs');
+    assert.ok(
+      authOnly.every((r) => r.provenance?.tier === 'authoritative'),
+      'all results should be authoritative',
+    );
+  });
+
+  it('search boosts authoritative results (AC-A6)', async () => {
+    await store.upsert([
+      {
+        anchor: 'soft-widget',
+        kind: 'lesson',
+        status: 'active',
+        title: 'Widget changelog',
+        summary: 'Widget release notes',
+        updatedAt: new Date().toISOString(),
+        provenance: { tier: 'soft_clue', source: 'CHANGELOG.md' },
+      },
+      {
+        anchor: 'auth-widget',
+        kind: 'plan',
+        status: 'active',
+        title: 'Widget architecture',
+        summary: 'Widget design document',
+        updatedAt: new Date().toISOString(),
+        provenance: { tier: 'authoritative', source: 'docs/widget.md' },
+      },
+    ]);
+
+    const results = await store.search('widget');
+    assert.ok(results.length >= 2, 'should find both widget docs');
+    // Authoritative should rank first when BM25 scores are similar
+    assert.equal(results[0].provenance?.tier, 'authoritative', 'authoritative should rank first');
+  });
+
+  it('NULL provenance does not sort above authoritative (P1-2 fix)', async () => {
+    // Pre-V10 data has NULL provenance. Authoritative must still rank above NULL.
+    await store.upsert([
+      {
+        anchor: 'old-gadget',
+        kind: 'plan',
+        status: 'active',
+        title: 'Gadget legacy doc',
+        summary: 'Old gadget documentation without provenance',
+        updatedAt: new Date().toISOString(),
+        // No provenance — simulates pre-V10 data
+      },
+      {
+        anchor: 'auth-gadget',
+        kind: 'plan',
+        status: 'active',
+        title: 'Gadget architecture',
+        summary: 'Authoritative gadget design document',
+        updatedAt: new Date().toISOString(),
+        provenance: { tier: 'authoritative', source: 'docs/gadget.md' },
+      },
+    ]);
+
+    const results = await store.search('gadget');
+    assert.ok(results.length >= 2, 'should find both gadget docs');
+    // NULL provenance must NOT rank above authoritative
+    const authIdx = results.findIndex((r) => r.provenance?.tier === 'authoritative');
+    const nullIdx = results.findIndex((r) => !r.provenance);
+    assert.ok(authIdx < nullIdx, 'authoritative must rank before NULL provenance');
+  });
+
+  it('rebuild backfills provenance for existing docs with same hash (P1-2 fix)', async () => {
+    const { createHash } = await import('node:crypto');
+    // Create a temp dir with README.md — scanner will discover it as anchor 'doc:README'
+    const bfDir = join(tmpdir(), `f152-backfill-${randomUUID().slice(0, 8)}`);
+    mkdirSync(bfDir, { recursive: true });
+    const readmeContent = '# Backfill test doc\n\nContent.';
+    writeFileSync(join(bfDir, 'README.md'), readmeContent);
+
+    // Compute the same hash the scanner would generate
+    const expectedHash = createHash('sha256').update(readmeContent).digest('hex').slice(0, 16);
+
+    // Pre-insert the SAME anchor with matching hash but NO provenance (simulates pre-V10 data)
+    await store.upsert([
+      {
+        anchor: 'doc:README',
+        kind: 'plan',
+        status: 'active',
+        title: 'Backfill test doc',
+        sourceHash: expectedHash,
+        updatedAt: new Date().toISOString(),
+        sourcePath: 'README.md',
+        // No provenance — simulates pre-V10 data
+      },
+    ]);
+    const before = await store.getByAnchor('doc:README');
+    assert.equal(before?.provenance, undefined, 'should start without provenance');
+
+    // Rebuild — same hash, but scanner provides provenance → should backfill
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+    const bfBuilder = new IndexBuilder(store, bfDir);
+    await bfBuilder.rebuild();
+
+    const after = await store.getByAnchor('doc:README');
+    assert.ok(after, 'should find README after rebuild');
+    assert.ok(after.provenance, 'provenance should be backfilled for same-hash doc');
+    assert.equal(after.provenance.tier, 'authoritative', 'README should be authoritative');
+  });
+
+  it('rebuild auto-skips soft clues for large repos (P2-4 fix)', async () => {
+    // Create a "large" repo with >200 top-level entries + a CHANGELOG
+    const largeDir = join(tmpdir(), `f152-large-${randomUUID().slice(0, 8)}`);
+    mkdirSync(largeDir, { recursive: true });
+    writeFileSync(join(largeDir, 'package.json'), '{"name":"large-repo"}');
+    writeFileSync(join(largeDir, 'README.md'), '# Large Repo');
+    writeFileSync(join(largeDir, 'CHANGELOG.md'), '# Changelog\n\n## v1.0\nInitial release.');
+    // Create 201 dummy files to trigger the threshold
+    for (let i = 0; i < 201; i++) {
+      writeFileSync(join(largeDir, `file-${i}.txt`), `dummy ${i}`);
+    }
+
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    const largeStore = new SqliteEvidenceStore(':memory:');
+    await largeStore.initialize();
+    const builder = new IndexBuilder(largeStore, largeDir);
+    await builder.rebuild();
+
+    // CHANGELOG.md should NOT be indexed because skipSoftClues was auto-enabled
+    const all = await largeStore.search('Changelog', { limit: 20 });
+    const softClues = all.filter((r) => r.provenance?.tier === 'soft_clue');
+    assert.equal(softClues.length, 0, 'large repo should auto-skip soft clues');
+
+    // But README should still be indexed
+    const readmeResults = await largeStore.search('Large Repo', { limit: 5 });
+    assert.ok(readmeResults.length > 0, 'README should still be indexed');
+    largeStore.close();
+  });
+
+  it('upsert without provenance keeps null (backward compat)', async () => {
+    await store.upsert([
+      {
+        anchor: 'no-prov',
+        kind: 'plan',
+        status: 'active',
+        title: 'No provenance',
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+    const item = await store.getByAnchor('no-prov');
+    assert.ok(item);
+    assert.equal(item.provenance, undefined);
+  });
+});
+
+// ── Indexing version auto-rebuild ─────────────────────────────────────
+describe('IndexBuilder indexing version auto-rebuild', () => {
+  let tmpDir;
+  let docsDir;
+  let store;
+
+  beforeEach(async () => {
+    tmpDir = join(tmpdir(), `f102-ver-${randomUUID().slice(0, 8)}`);
+    docsDir = join(tmpDir, 'docs');
+    mkdirSync(join(docsDir, 'features'), { recursive: true });
+
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    store = new SqliteEvidenceStore(':memory:');
+    await store.initialize();
+  });
+
+  afterEach(() => {
+    store.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('stays at or above 5 to backfill visual artifact searchable text', async () => {
+    const { INDEXING_VERSION } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    assert.ok(
+      INDEXING_VERSION >= 5,
+      'INDEXING_VERSION must stay at or above 5 so existing visual artifacts get searchable text backfilled',
+    );
+  });
+
+  it('stays at or above 10 to rebuild feature anchors after excluding feature assets', async () => {
+    const { INDEXING_VERSION } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    assert.ok(
+      INDEXING_VERSION >= 10,
+      'INDEXING_VERSION must stay at or above 10 so feature asset anchors are replaced by canonical feature specs',
+    );
+  });
+
+  it('stays at or above 11 to materialize approved Taste vignette payloads', async () => {
+    const { INDEXING_VERSION } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    assert.ok(
+      INDEXING_VERSION >= 11,
+      'INDEXING_VERSION must stay at or above 11 so frontmatter-only Taste vignettes gain complete decision passages',
+    );
+  });
+
+  it('stays at or above 12 to backfill external-knowledge kinds, authority, and tags', async () => {
+    const { INDEXING_VERSION } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    assert.ok(
+      INDEXING_VERSION >= 12,
+      'INDEXING_VERSION must stay at or above 12 so study and teardown metadata is re-indexed',
+    );
+  });
+
+  it('re-indexes unchanged files when INDEXING_VERSION increases', async () => {
+    const { IndexBuilder, INDEXING_VERSION } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    writeFileSync(
+      join(docsDir, 'features', 'F001.md'),
+      `---
+feature_ids: [F001]
+doc_kind: spec
+---
+
+# F001: Test Feature
+
+## Section Alpha
+Content here.
+`,
+    );
+
+    const builder = new IndexBuilder(store, docsDir);
+
+    // First rebuild — indexes file and stores version
+    const r1 = await builder.rebuild();
+    assert.equal(r1.docsIndexed, 1);
+
+    // Second rebuild — file unchanged, should skip
+    const r2 = await builder.rebuild();
+    assert.equal(r2.docsSkipped, 1, 'same version + same hash → skip');
+
+    // Simulate version bump by writing a lower version into embedding_meta
+    const db = store.getDb();
+    db.prepare("INSERT OR REPLACE INTO embedding_meta (key, value) VALUES ('indexing_version', ?)").run(
+      String(INDEXING_VERSION - 1),
+    );
+
+    // Third rebuild — version mismatch should force re-index
+    const r3 = await builder.rebuild();
+    assert.equal(r3.docsIndexed, 1, 'version mismatch → force re-index despite same hash');
+  });
+
+  it('stores INDEXING_VERSION after successful rebuild', async () => {
+    const { IndexBuilder, INDEXING_VERSION } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    writeFileSync(
+      join(docsDir, 'features', 'F001.md'),
+      `---
+feature_ids: [F001]
+doc_kind: spec
+---
+
+# F001: Test
+`,
+    );
+
+    const builder = new IndexBuilder(store, docsDir);
+    await builder.rebuild();
+
+    const db = store.getDb();
+    const row = db.prepare("SELECT value FROM embedding_meta WHERE key = 'indexing_version'").get();
+    assert.ok(row, 'indexing_version should be stored in embedding_meta');
+    assert.equal(row.value, String(INDEXING_VERSION), 'stored version should match current INDEXING_VERSION');
   });
 });

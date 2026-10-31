@@ -1,0 +1,683 @@
+import assert from 'node:assert/strict';
+import { after, before, beforeEach, describe, test } from 'node:test';
+import {
+  assertRedisIsolationOrThrow,
+  cleanupPrefixedRedisKeys,
+  redisIsolationSkipReason,
+} from './helpers/redis-test-helpers.js';
+
+const REDIS_URL = process.env.REDIS_URL;
+
+function runningInput(overrides = {}) {
+  return {
+    invocationId: 'redis-child-1',
+    parentInvocationId: 'redis-parent-1',
+    threadId: 'redis-thread-1',
+    userId: 'redis-user-1',
+    catId: 'codex-sol',
+    executionKind: 'ordinary',
+    startedAt: 100,
+    causal: { triggerMessageId: 'redis-msg-1' },
+    ...overrides,
+  };
+}
+
+describe('RedisTurnExecutionStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
+  let RedisTurnExecutionStore;
+  let createRedisClient;
+  let redis;
+  let store;
+  let connected = false;
+
+  before(async () => {
+    assertRedisIsolationOrThrow(REDIS_URL, 'RedisTurnExecutionStore');
+    ({ RedisTurnExecutionStore } = await import(
+      '../dist/domains/cats/services/stores/redis/RedisTurnExecutionStore.js'
+    ));
+    ({ createRedisClient } = await import('@cat-cafe/shared/utils'));
+    redis = createRedisClient({ url: REDIS_URL });
+    try {
+      await redis.ping();
+      connected = true;
+      store = new RedisTurnExecutionStore(redis);
+    } catch {
+      await redis.quit().catch(() => {});
+    }
+  });
+
+  after(async () => {
+    if (!connected) return;
+    await cleanupPrefixedRedisKeys(redis, ['turnexec:*', 'auth:inv:*', 'auth:latest:*']);
+    await redis.quit();
+  });
+
+  beforeEach(async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    await cleanupPrefixedRedisKeys(redis, ['turnexec:*', 'auth:inv:*', 'auth:latest:*']);
+    store = new RedisTurnExecutionStore(redis);
+  });
+
+  test('persists running child and parent index across store instances', async () => {
+    await store.createRunning(runningInput({ invocationId: 'later', startedAt: 200 }));
+    await store.createRunning(runningInput({ invocationId: 'earlier', startedAt: 100 }));
+
+    const restarted = new RedisTurnExecutionStore(redis);
+    assert.deepEqual(
+      (await restarted.listByParent('redis-parent-1')).map((record) => record.invocationId),
+      ['earlier', 'later'],
+    );
+    assert.equal((await restarted.get('earlier')).status, 'running');
+    assert.equal(await redis.ttl('turnexec:record:earlier'), -1, 'ledger records are TTL=0 persistent truth');
+  });
+
+  test('atomic create replays same identity and rejects child-id identity drift', async () => {
+    const input = runningInput();
+    assert.equal((await store.createRunning(input)).outcome, 'created');
+    assert.equal(
+      (await store.createRunning({ ...input, causal: { triggerMessageId: 'redis-msg-1' } })).outcome,
+      'replayed',
+    );
+    assert.equal((await store.createRunning({ ...input, executionKind: 'routing_guard' })).outcome, 'conflict');
+    assert.equal((await store.get(input.invocationId)).executionKind, 'ordinary');
+  });
+
+  test('atomic create canonicalizes causal field order', async () => {
+    const input = runningInput({
+      executionKind: 'routing_guard',
+      causal: { triggerMessageId: 'redis-msg-1', freshnessSupplementId: 'redis-supplement-1' },
+    });
+    assert.equal((await store.createRunning(input)).outcome, 'created');
+    assert.equal(
+      (
+        await store.createRunning({
+          ...input,
+          causal: { freshnessSupplementId: 'redis-supplement-1', triggerMessageId: 'redis-msg-1' },
+        })
+      ).outcome,
+      'replayed',
+    );
+  });
+
+  test('prompt coverage is an immutable causal set across Redis restart', async () => {
+    const input = runningInput({
+      causal: {
+        triggerMessageId: 'redis-msg-1',
+        coveredMessageIds: ['redis-msg-1', 'redis-context-1'],
+      },
+    });
+    assert.equal((await store.createRunning(input)).outcome, 'created');
+
+    const restarted = new RedisTurnExecutionStore(redis);
+    assert.equal(
+      (
+        await restarted.createRunning({
+          ...input,
+          causal: {
+            coveredMessageIds: ['redis-context-1', 'redis-msg-1'],
+            triggerMessageId: 'redis-msg-1',
+          },
+        })
+      ).outcome,
+      'replayed',
+    );
+    assert.equal(
+      (
+        await restarted.createRunning({
+          ...input,
+          causal: {
+            triggerMessageId: 'redis-msg-1',
+            coveredMessageIds: ['redis-msg-1', 'redis-other'],
+          },
+        })
+      ).outcome,
+      'conflict',
+    );
+    assert.deepEqual((await restarted.get(input.invocationId)).causal.coveredMessageIds, [
+      'redis-msg-1',
+      'redis-context-1',
+    ]);
+  });
+
+  test('atomically binds late prompt coverage across competing store instances', async () => {
+    const input = runningInput();
+    await store.createRunning(input);
+    const competitor = new RedisTurnExecutionStore(redis);
+    const [first, second] = await Promise.all([
+      store.bindCoveredMessageIds('redis-child-1', ['redis-msg-1', 'redis-context-1']),
+      competitor.bindCoveredMessageIds('redis-child-1', ['redis-msg-1', 'redis-context-1']),
+    ]);
+
+    assert.deepEqual([first.outcome, second.outcome].sort(), ['bound', 'replayed']);
+    assert.equal((await competitor.bindCoveredMessageIds('redis-child-1', ['redis-other'])).outcome, 'conflict');
+    assert.deepEqual((await competitor.get('redis-child-1')).causal.coveredMessageIds, [
+      'redis-msg-1',
+      'redis-context-1',
+    ]);
+    assert.equal(
+      (await competitor.bindCoveredMessageIds('redis-child-1', ['redis-context-1', 'redis-msg-1'])).outcome,
+      'replayed',
+    );
+    assert.equal((await competitor.createRunning(input)).outcome, 'replayed');
+  });
+
+  test('late prompt coverage preserves the legacy hash identity for mixed-version readers', async () => {
+    const input = runningInput();
+    await store.createRunning(input);
+    const recordKey = 'turnexec:record:redis-child-1';
+    const legacyCausal = await redis.hget(recordKey, 'causal');
+    const legacyIdentity = await redis.hget(recordKey, 'immutableIdentity');
+
+    assert.equal(
+      (await store.bindCoveredMessageIds(input.invocationId, ['redis-context-1', 'redis-msg-1'])).outcome,
+      'bound',
+    );
+
+    assert.equal(await redis.hget(recordKey, 'causal'), legacyCausal);
+    assert.equal(await redis.hget(recordKey, 'immutableIdentity'), legacyIdentity);
+    assert.equal(await redis.hget(recordKey, 'coveredMessageIds'), '["redis-context-1","redis-msg-1"]');
+    assert.ok(await redis.hget(recordKey, 'coveredMessageIdsIdentity'));
+  });
+
+  test('binds late prompt coverage when the admitted execution had no causal refs', async () => {
+    const input = runningInput({ causal: undefined });
+    await store.createRunning(input);
+
+    assert.equal((await store.bindCoveredMessageIds(input.invocationId, ['redis-msg-1'])).outcome, 'bound');
+    assert.deepEqual((await store.get(input.invocationId)).causal, { coveredMessageIds: ['redis-msg-1'] });
+    assert.equal((await store.createRunning(input)).outcome, 'replayed');
+  });
+
+  test('two store instances racing success and cancel produce one immutable terminal', async () => {
+    await store.createRunning(runningInput());
+    const competitor = new RedisTurnExecutionStore(redis);
+    const [success, canceled] = await Promise.all([
+      store.transitionTerminal('redis-child-1', { status: 'succeeded', endedAt: 300 }),
+      competitor.transitionTerminal('redis-child-1', {
+        status: 'canceled',
+        endedAt: 301,
+        terminalReason: 'user_cancel',
+      }),
+    ]);
+
+    assert.deepEqual([success.outcome, canceled.outcome].sort(), ['already_terminal', 'transitioned']);
+    const terminal = await store.get('redis-child-1');
+    const duplicate = await competitor.transitionTerminal('redis-child-1', {
+      status: terminal.status === 'succeeded' ? 'failed' : 'succeeded',
+      endedAt: 400,
+      ...(terminal.status === 'succeeded' ? { terminalReason: 'late_error' } : {}),
+    });
+    assert.equal(duplicate.outcome, 'already_terminal');
+    assert.deepEqual(await competitor.get('redis-child-1'), terminal);
+    assert.deepEqual(await redis.smembers('turnexec:running'), []);
+  });
+
+  test('auth cleanup does not delete child execution history', async () => {
+    await store.createRunning(runningInput());
+    await redis.hset('auth:inv:redis-child-1', { invocationId: 'redis-child-1', callbackToken: 'secret' });
+    await redis.set('auth:latest:redis-thread-1:codex-sol', 'redis-child-1');
+
+    await redis.del('auth:inv:redis-child-1', 'auth:latest:redis-thread-1:codex-sol');
+
+    assert.equal(await redis.exists('auth:inv:redis-child-1'), 0);
+    assert.equal((await store.get('redis-child-1')).invocationId, 'redis-child-1');
+    assert.deepEqual(
+      (await store.listByParent('redis-parent-1')).map((record) => record.invocationId),
+      ['redis-child-1'],
+    );
+  });
+
+  test('corrupt durable hashes fail explicitly instead of disappearing from glass-box truth', async () => {
+    await redis.hset('turnexec:record:corrupt-child', {
+      invocationId: 'corrupt-child',
+      parentInvocationId: 'redis-parent-1',
+      threadId: 'redis-thread-1',
+      userId: 'redis-user-1',
+      catId: 'codex-sol',
+      executionKind: 'guessed-from-log',
+      startedAt: 'not-a-number',
+      causal: '{}',
+      status: 'maybe-done',
+      endedAt: '',
+      terminalReason: '',
+    });
+
+    await assert.rejects(() => store.get('corrupt-child'), /corrupt turn execution record: corrupt-child/);
+  });
+
+  test('create rejects an existing partial hash instead of silently repairing child identity', async () => {
+    await redis.hset('turnexec:record:redis-child-1', { partialEvidence: 'preserve-me' });
+
+    await assert.rejects(
+      () => store.createRunning(runningInput()),
+      /corrupt turn execution record already exists: redis-child-1/,
+    );
+
+    assert.equal(await redis.hget('turnexec:record:redis-child-1', 'partialEvidence'), 'preserve-me');
+    assert.equal(await redis.hget('turnexec:record:redis-child-1', 'immutableIdentity'), null);
+    assert.deepEqual(await redis.smembers('turnexec:parent:redis-parent-1'), []);
+  });
+
+  test('immutable identity detects field tampering in direct and parent-index reads', async () => {
+    await store.createRunning(runningInput());
+    await redis.hset('turnexec:record:redis-child-1', 'executionKind', 'routing_guard');
+
+    await assert.rejects(() => store.get('redis-child-1'), /corrupt turn execution record: redis-child-1/);
+    await assert.rejects(() => store.listByParent('redis-parent-1'), /corrupt turn execution record: redis-child-1/);
+  });
+
+  test('late-bound coverage identity detects tampering without rewriting legacy causal identity', async () => {
+    await store.createRunning(runningInput());
+    await store.bindCoveredMessageIds('redis-child-1', ['redis-msg-1', 'redis-context-1']);
+    await redis.hset('turnexec:record:redis-child-1', 'coveredMessageIds', JSON.stringify(['redis-other']));
+
+    await assert.rejects(() => store.get('redis-child-1'), /corrupt turn execution record: redis-child-1/);
+  });
+
+  test('interruptRunningBefore is cutoff-safe and atomically removes running index members', async () => {
+    await store.createRunning(runningInput({ invocationId: 'old', startedAt: 99 }));
+    await store.createRunning(runningInput({ invocationId: 'boundary', startedAt: 100 }));
+    await store.createRunning(runningInput({ invocationId: 'new', startedAt: 101 }));
+
+    const interrupted = await store.interruptRunningBefore(101, {
+      endedAt: 200,
+      terminalReason: 'process_restart',
+    });
+
+    assert.deepEqual(
+      interrupted.map((record) => record.invocationId),
+      ['old', 'boundary'],
+    );
+    assert.equal((await store.get('old')).status, 'interrupted');
+    assert.equal((await store.get('boundary')).status, 'interrupted');
+    assert.equal((await store.get('new')).status, 'running');
+    assert.deepEqual(await redis.smembers('turnexec:running'), ['new']);
+  });
+
+  test('interruptRunningBefore preserves an exact externally-owned child', async () => {
+    await store.createRunning(runningInput({ invocationId: 'detached-live', startedAt: 90 }));
+    await store.createRunning(runningInput({ invocationId: 'lost-run', startedAt: 91 }));
+
+    const interrupted = await store.interruptRunningBefore(100, {
+      endedAt: 200,
+      terminalReason: 'process_restart',
+      excludedInvocationIds: ['detached-live'],
+    });
+
+    assert.deepEqual(
+      interrupted.map((record) => record.invocationId),
+      ['lost-run'],
+    );
+    assert.equal((await store.get('detached-live')).status, 'running');
+    assert.equal((await store.get('lost-run')).status, 'interrupted');
+  });
+
+  test('F297 P1-2: listRunningByUser scopes to owner, drops terminal, survives restart', async () => {
+    await store.createRunning(runningInput({ invocationId: 'mine-1', userId: 'alice', startedAt: 100 }));
+    await store.createRunning(
+      runningInput({ invocationId: 'mine-2', userId: 'alice', threadId: 'redis-thread-2', startedAt: 200 }),
+    );
+    await store.createRunning(runningInput({ invocationId: 'theirs', userId: 'bob', startedAt: 150 }));
+    await store.createRunning(runningInput({ invocationId: 'mine-done', userId: 'alice', startedAt: 50 }));
+    await store.transitionTerminal('mine-done', { status: 'succeeded', endedAt: 300 });
+
+    // 跨实例读：Sidebar 的 presence 查询走的是新连接，不是写入方的进程内状态。
+    const restarted = new RedisTurnExecutionStore(redis);
+    assert.deepEqual(
+      (await restarted.listRunningByUser('alice')).map((record) => record.invocationId),
+      ['mine-1', 'mine-2'],
+    );
+    assert.deepEqual(await restarted.listRunningByUser('carol'), []);
+  });
+
+  test('F297 P1-2: listRunningByUser reaches a child whose parent index is unreachable', async () => {
+    await store.createRunning(runningInput({ invocationId: 'orphan', parentInvocationId: 'redis-parent-absent' }));
+
+    const running = await store.listRunningByUser('redis-user-1');
+    assert.deepEqual(
+      running.map((record) => record.invocationId),
+      ['orphan'],
+      'the enumerator must not depend on a running parent record being reachable',
+    );
+  });
+
+  test('F297 P1-2: listRunningByUser is observational — it never terminalizes a stale member', async () => {
+    await store.createRunning(runningInput({ invocationId: 'stale', userId: 'alice' }));
+    // 模拟 record 被清掉但 running 集合残留：观测路径必须跳过，且不得改写任何状态。
+    await redis.del('turnexec:record:stale');
+
+    assert.deepEqual(await store.listRunningByUser('alice'), []);
+    assert.equal(
+      await redis.sismember('turnexec:running', 'stale'),
+      1,
+      'the observation path must not perform terminal cleanup writes',
+    );
+  });
+
+  test('F297 (cloud R9 P1): a missing pipeline reply is a read failure, not a stale member', async () => {
+    await store.createRunning(runningInput({ invocationId: 'short-1', userId: 'alice' }));
+
+    // 缺失/短回复既不是"空 hash"（stale 索引成员）也不是"在跑"——是未知。
+    // 静默 continue 会让真实 running child 消失，而方法仍正常 resolve：
+    // buildSnapshot 把 child 源记成 complete → sidebar 直接走终态回落 = false terminal。
+    const originalPipeline = redis.pipeline.bind(redis);
+    redis.pipeline = () => {
+      const p = originalPipeline();
+      p.exec = async () => []; // 候选 1 个，回复 0 条
+      return p;
+    };
+    try {
+      await assert.rejects(
+        () => store.listRunningByUser('alice'),
+        /reply missing/i,
+        'a missing pipeline entry must fail closed so completeness accounting can seal idle',
+      );
+    } finally {
+      redis.pipeline = originalPipeline;
+    }
+  });
+
+  test('F297 (cloud R9 P1): an explicit empty hash is still treated as a stale index member', async () => {
+    // fail-closed 不能过度扩张：running set 里指向已删记录的成员仍应被跳过，
+    // 否则一个正常的 GC 窗口就会让整个 sidebar 读路径抛错。
+    await redis.sadd('turnexec:running', 'ghost-child');
+    const records = await store.listRunningByUser('alice');
+    assert.deepEqual(
+      records.map((r) => r.invocationId),
+      [],
+      'an empty hash means the record is gone, which is authoritative — not a read failure',
+    );
+  });
+
+  test('F297 (local R10 P1): negative table — only an authoritative empty hash may mean "not running"', async () => {
+    // 判据单一来源 readAuthoritativeHash：
+    //   缺 entry / entry error / null / 非 plain object / 非空但不可 hydrate → throw（未知）
+    //   plain `{}` → 权威空（记录已删）
+    // 把未知降成「没在跑」就是 false terminal —— 本 PR 反复重犯的同一个失败模式。
+    await store.createRunning(runningInput({ invocationId: 'neg-child', userId: 'alice' }));
+
+    const originalPipeline = redis.pipeline.bind(redis);
+    const withReply = (reply) => {
+      redis.pipeline = () => {
+        const p = originalPipeline();
+        p.exec = async () => reply;
+        return p;
+      };
+    };
+
+    try {
+      const unknownReplies = [
+        ['short reply (missing entry)', []],
+        ['entry error', [[new Error('transient-read'), null]]],
+        ['null payload', [[null, null]]],
+        ['string payload', [[null, 'wrong-type']]],
+        ['array payload', [[null, []]]],
+        ['non-empty unhydratable hash', [[null, { foo: 'bar' }]]],
+      ];
+      for (const [label, reply] of unknownReplies) {
+        withReply(reply);
+        await assert.rejects(
+          () => store.listRunningByUser('alice'),
+          (err) => err instanceof Error,
+          `an unknown reply must fail closed, not resolve empty: ${label}`,
+        );
+      }
+
+      withReply([[null, {}]]);
+      assert.deepEqual(
+        await store.listRunningByUser('alice'),
+        [],
+        'an authoritative empty hash is the only legitimate "not running"',
+      );
+    } finally {
+      redis.pipeline = originalPipeline;
+    }
+  });
+  test('F117 KD-21: the response-pending ledger is entered atomically by every terminal write and persists', async () => {
+    await store.createRunning(runningInput({ invocationId: 'ended', startedAt: 100 }));
+    await store.createRunning(runningInput({ invocationId: 'interrupted', startedAt: 50 }));
+    await store.createRunning(runningInput({ invocationId: 'running', startedAt: 300 }));
+    assert.deepEqual(await store.listResponsePending(), [], 'a running turn has no response to settle yet');
+
+    await store.transitionTerminal('ended', { status: 'succeeded', endedAt: 150 });
+    await store.interruptRunningBefore(200, { endedAt: 250, terminalReason: 'process_restart' });
+
+    const restarted = new RedisTurnExecutionStore(redis);
+    assert.deepEqual(
+      (await restarted.listResponsePending()).map((record) => [record.invocationId, record.status]),
+      [
+        ['interrupted', 'interrupted'],
+        ['ended', 'succeeded'],
+      ],
+    );
+    assert.equal(await redis.ttl('turnexec:response-pending'), -1, 'the ledger is TTL=0 persistent truth');
+
+    await restarted.clearResponsePending('ended');
+    await restarted.clearResponsePending('never-pending');
+    const replay = await restarted.transitionTerminal('ended', {
+      status: 'failed',
+      endedAt: 160,
+      terminalReason: 'late',
+    });
+    assert.equal(replay.outcome, 'already_terminal');
+    assert.deepEqual(
+      (await restarted.listResponsePending()).map((record) => record.invocationId),
+      ['interrupted'],
+    );
+  });
+
+  test('F117 KD-21: a ledger member whose record is gone is skipped, a corrupt one fails loudly', async () => {
+    await redis.sadd('turnexec:response-pending', 'gone');
+    assert.deepEqual(await store.listResponsePending(), []);
+
+    await redis.hset('turnexec:record:corrupt', 'status', 'failed');
+    await redis.sadd('turnexec:response-pending', 'corrupt');
+    await assert.rejects(store.listResponsePending(), /corrupt: non-empty hash failed to hydrate/);
+  });
+
+  test('F117 KD-21: every child persists its fence; a gated fence only moves forward outside the identity', async () => {
+    await store.createRunning(runningInput({ invocationId: 'fenced', outputFence: 'gated' }));
+    await store.createRunning(runningInput({ invocationId: 'open' }));
+    assert.equal((await store.get('fenced')).outputFence, 'gated');
+    assert.equal((await store.get('open')).outputFence, 'open', 'an omitted fence is recorded open');
+    assert.equal(await redis.hget('turnexec:record:open', 'outputFence'), 'open');
+
+    assert.equal((await store.settleOutputFence('fenced', 'allowed')).outputFence, 'allowed');
+    assert.equal((await store.settleOutputFence('fenced', 'rejected')).outputFence, 'rejected');
+    assert.equal((await store.settleOutputFence('fenced', 'allowed')).outputFence, 'rejected', 'a rejection is final');
+    assert.equal((await store.settleOutputFence('open', 'rejected')).outputFence, 'open');
+    assert.equal(await store.settleOutputFence('missing', 'rejected'), null);
+
+    await store.transitionTerminal('fenced', { status: 'succeeded', endedAt: 150 });
+    const restarted = new RedisTurnExecutionStore(redis);
+    assert.equal((await restarted.get('fenced')).outputFence, 'rejected');
+    assert.deepEqual(
+      (await restarted.listResponsePending()).map((record) => [record.invocationId, record.outputFence]),
+      [['fenced', 'rejected']],
+    );
+    const replay = await restarted.createRunning(runningInput({ invocationId: 'fenced', outputFence: 'gated' }));
+    assert.equal(replay.outcome, 'replayed');
+    assert.equal(replay.record.outputFence, 'rejected');
+    await assert.rejects(
+      store.createRunning(runningInput({ invocationId: 'born-allowed', outputFence: 'allowed' })),
+      /can only be created open or gated/,
+    );
+
+    await redis.hset('turnexec:record:fenced', 'outputFence', 'bogus');
+    // An unreadable fence fails loudly rather than reading as open.
+    await assert.rejects(store.get('fenced'), /corrupt turn execution record: fenced/);
+    await assert.rejects(store.settleOutputFence('fenced', 'rejected'), /corrupt output fence/);
+  });
+
+  test('F117 KD-21: a record written before the fence existed hydrates without one and keeps it that way', async () => {
+    await store.createRunning(runningInput({ invocationId: 'legacy' }));
+    // The previous release wrote the same hash without the field.
+    await redis.hdel('turnexec:record:legacy', 'outputFence');
+
+    const restarted = new RedisTurnExecutionStore(redis);
+    const legacy = await restarted.get('legacy');
+    assert.equal(legacy.status, 'running');
+    assert.equal('outputFence' in legacy, false, 'no fence is invented for a legacy record');
+    assert.equal('outputFence' in (await restarted.settleOutputFence('legacy', 'allowed')), false);
+    assert.equal(await redis.hexists('turnexec:record:legacy', 'outputFence'), 0);
+  });
+});
+
+/**
+ * F117 KD-21 upgrade window: the previous release wrote turn records without an output fence. The
+ * first startup of this release interrupts the ones still running and settles their R. A turn of an
+ * action-fenced dispatch must not publish its unjudged draft; an ordinary one keeps its body.
+ * Real Redis turn store, real startup reconciler, real settlement.
+ */
+
+const USER = 'user-upgrade';
+const THREAD = 'thread-upgrade';
+
+describe(
+  'F117 KD-21 upgrade restart over turns the previous release wrote',
+  {
+    skip: redisIsolationSkipReason(REDIS_URL),
+  },
+  () => {
+    let RedisTurnExecutionStore;
+    let MessageStore;
+    let DraftStore;
+    let InvocationRecordStore;
+    let TurnExecutionStartupReconciler;
+    let settlement;
+    let redis;
+    let connected = false;
+
+    before(async () => {
+      assertRedisIsolationOrThrow(REDIS_URL, 'F117 KD-21 legacy output fence startup');
+      ({ RedisTurnExecutionStore } = await import(
+        '../dist/domains/cats/services/stores/redis/RedisTurnExecutionStore.js'
+      ));
+      ({ MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js'));
+      ({ DraftStore } = await import('../dist/domains/cats/services/stores/ports/DraftStore.js'));
+      ({ InvocationRecordStore } = await import('../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'));
+      ({ TurnExecutionStartupReconciler } = await import(
+        '../dist/domains/cats/services/agents/invocation/TurnExecutionStartupReconciler.js'
+      ));
+      settlement = await import('../dist/domains/cats/services/agents/invocation/response-draft-settlement.js');
+      const { createRedisClient } = await import('@cat-cafe/shared/utils');
+      redis = createRedisClient({ url: REDIS_URL });
+      try {
+        await redis.ping();
+        connected = true;
+      } catch {
+        await redis.quit().catch(() => {});
+      }
+    });
+
+    after(async () => {
+      if (!connected) return;
+      await cleanupPrefixedRedisKeys(redis, ['turnexec:*']);
+      await redis.quit();
+    });
+
+    beforeEach(async (t) => {
+      if (!connected) return t.skip('Redis not connected');
+      await cleanupPrefixedRedisKeys(redis, ['turnexec:*']);
+    });
+
+    /** A turn the previous release left running: its record has no fence, its R is processing. */
+    async function previousReleaseTurn({ turns, messages, drafts }, invocationId, parentInvocationId, body) {
+      await turns.createRunning({
+        invocationId,
+        parentInvocationId,
+        threadId: THREAD,
+        userId: USER,
+        catId: 'opus',
+        executionKind: 'ordinary',
+        startedAt: 10,
+      });
+      await redis.hdel(`turnexec:record:${invocationId}`, 'outputFence');
+      const response = await messages.append({
+        from: { kind: 'agent', catId: 'opus' },
+        userId: USER,
+        content: '',
+        mentions: [],
+        origin: 'stream',
+        timestamp: 10,
+        threadId: THREAD,
+        idempotencyKey: settlement.lifecycleResponseIdempotencyKey(invocationId),
+        lifecycle: {
+          kind: 'response',
+          orderKey: `10:${invocationId}`,
+          invocationId,
+          targetId: 'opus',
+          inputEntryIds: [],
+          inputMessageIds: [],
+          status: 'processing',
+          startedAt: 10,
+        },
+      });
+      await drafts.upsert({
+        userId: USER,
+        threadId: THREAD,
+        invocationId,
+        catId: 'opus',
+        content: body,
+        updatedAt: Date.now(),
+      });
+      return response.id;
+    }
+
+    test('a fenced dispatch’s draft stays unpublished and an ordinary one keeps its body', async () => {
+      const messages = new MessageStore();
+      const drafts = new DraftStore();
+      const records = new InvocationRecordStore();
+      const queueInvocation = (actionLeaseCarrier) =>
+        records.create({
+          threadId: THREAD,
+          userId: USER,
+          targetCats: ['opus'],
+          intent: 'execute',
+          idempotencyKey: `queue-entry-${actionLeaseCarrier.kind}:opus`,
+          actionLeaseCarrier,
+        }).invocationId;
+      const oldProcess = { turns: new RedisTurnExecutionStore(redis), messages, drafts };
+      const fencedResponse = await previousReleaseTurn(
+        oldProcess,
+        'turn-old-fenced',
+        queueInvocation({ kind: 'action_successor', leaseId: 'lease-1', generation: 1 }),
+        'HIDDEN_ACTION_OUTPUT',
+      );
+      const openResponse = await previousReleaseTurn(
+        oldProcess,
+        'turn-old-open',
+        queueInvocation({ kind: 'none' }),
+        'the ordinary answer',
+      );
+
+      // The upgraded process starts over the same Redis.
+      const turns = new RedisTurnExecutionStore(redis);
+      const result = await new TurnExecutionStartupReconciler({
+        store: turns,
+        settleEndedTurnResponse: (turn) =>
+          settlement.settleResponseFromDraft(
+            { messageStore: messages, draftStore: drafts, turnStore: turns, invocationRecords: records },
+            {
+              userId: turn.userId,
+              threadId: turn.threadId,
+              invocationId: turn.invocationId,
+              ...settlement.responseOutcomeForEndedTurn(turn),
+            },
+          ),
+      }).reconcile({ processStartedAt: 100 });
+
+      assert.equal(result.interruptedCount, 2);
+      assert.equal(result.settledResponseCount, 2);
+      assert.deepEqual(result.responseSettlementFailures, []);
+      const fenced = await messages.getById(fencedResponse);
+      assert.equal(fenced.lifecycle.status, 'interrupted');
+      assert.equal(fenced.lifecycle.reason, 'process_restart');
+      assert.equal(fenced.content, '', 'an unjudged fenced draft is never published');
+      const open = await messages.getById(openResponse);
+      assert.equal(open.lifecycle.status, 'interrupted');
+      assert.equal(open.content, 'the ordinary answer');
+      assert.deepEqual(await drafts.getByThread(USER, THREAD), []);
+      assert.deepEqual(await turns.listResponsePending(), []);
+    });
+  },
+);

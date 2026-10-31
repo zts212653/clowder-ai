@@ -5,16 +5,26 @@
 
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import { assertRedisIsolationOrThrow, cleanupPrefixedRedisKeys } from './helpers/redis-test-helpers.js';
+import {
+  assertRedisIsolationOrThrow,
+  cleanupPrefixedRedisKeys,
+  redisIsolationSkipReason,
+} from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
 
-describe('RedisThreadStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false }, () => {
+describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisThreadStore;
   let createRedisClient;
   let redis;
   let store;
   let connected = false;
+  const threadDetailKey = (threadId) => `thread:${threadId}`;
+  const threadParticipantsKey = (threadId) => `thread:${threadId}:participants`;
+  const threadActivityKey = (threadId) => `thread:${threadId}:activity`;
+  const userListKey = (userId) => `threads:user:${userId}`;
+  const messageDetailKey = (messageId) => `msg:${messageId}`;
+  const messageThreadKey = (threadId) => `msg:thread:${threadId}`;
 
   before(async () => {
     assertRedisIsolationOrThrow(REDIS_URL, 'RedisThreadStore');
@@ -38,14 +48,14 @@ describe('RedisThreadStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false },
 
   after(async () => {
     if (redis && connected) {
-      await cleanupPrefixedRedisKeys(redis, ['thread:*', 'threads:*']);
+      await cleanupPrefixedRedisKeys(redis, ['thread:*', 'threads:*', 'msg:*']);
       await redis.quit();
     }
   });
 
   beforeEach(async (t) => {
     if (!connected) return t.skip('Redis not connected');
-    await cleanupPrefixedRedisKeys(redis, ['thread:*', 'threads:*']);
+    await cleanupPrefixedRedisKeys(redis, ['thread:*', 'threads:*', 'msg:*']);
   });
 
   it('create() stores thread and returns it', async () => {
@@ -57,6 +67,38 @@ describe('RedisThreadStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false },
     assert.deepEqual(thread.participants, []);
   });
 
+  it('writes initial pin in the creation transaction and preserves it for a fresh reader without TTL', async () => {
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const created = await persistentStore.create(
+      'user1',
+      'Pinned at birth',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { pinned: true },
+    );
+    assert.equal(created.pinned, true);
+    assert.equal(typeof created.pinnedAt, 'number');
+    const stored = await redis.hgetall(threadDetailKey(created.id));
+    assert.equal(stored.pinned, 'true');
+    assert.equal(Number(stored.pinnedAt), created.pinnedAt);
+    assert.equal(await redis.ttl(threadDetailKey(created.id)), -1);
+    const freshReader = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    assert.equal((await freshReader.get(created.id)).pinned, true);
+    assert.equal((await freshReader.get(created.id)).pinnedAt, created.pinnedAt);
+    assert.equal((await freshReader.list('user1')).find((thread) => thread.id === created.id).pinned, true);
+    const plain = await persistentStore.create('user1', 'Default');
+    const unchecked = await persistentStore.create('user1', 'Unchecked', undefined, undefined, undefined, undefined, {
+      pinned: false,
+    });
+    for (const thread of [plain, unchecked]) {
+      const read = await freshReader.get(thread.id);
+      assert.equal(read.pinned, false);
+      assert.equal(read.pinnedAt, null);
+    }
+  });
+
   it('get() returns stored thread', async () => {
     const created = await store.create('user1', 'My Thread');
     const fetched = await store.get(created.id);
@@ -64,6 +106,174 @@ describe('RedisThreadStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false },
     assert.equal(fetched.id, created.id);
     assert.equal(fetched.title, 'My Thread');
     assert.equal(fetched.createdBy, 'user1');
+  });
+
+  it('persists generic plugin ownership without TTL and ignores malformed stored ownership', async () => {
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await persistentStore.create('user1', 'Plugin-owned thread');
+    const ownership = { v: 1, pluginInstanceId: 'pi_telegram' };
+
+    await persistentStore.updatePluginOwnership(thread.id, ownership);
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1, 'plugin ownership must not expire');
+    assert.deepEqual((await persistentStore.get(thread.id)).pluginOwnership, ownership);
+
+    await redis.hset(threadDetailKey(thread.id), 'pluginOwnership', JSON.stringify({ v: 1, pluginInstanceId: '' }));
+    assert.equal(
+      (await persistentStore.get(thread.id)).pluginOwnership,
+      undefined,
+      'malformed ownership must not grant a plugin authority over the thread',
+    );
+
+    await persistentStore.updatePluginOwnership(thread.id, null);
+    assert.equal(await redis.hget(threadDetailKey(thread.id), 'pluginOwnership'), null);
+
+    await assert.rejects(
+      () => persistentStore.updatePluginOwnership(thread.id, { v: 1, pluginInstanceId: 'pi_telegram', extra: true }),
+      /invalid plugin thread ownership/,
+    );
+    assert.equal(await redis.hget(threadDetailKey(thread.id), 'pluginOwnership'), null);
+
+    await persistentStore.delete(thread.id);
+    await persistentStore.updatePluginOwnership(thread.id, ownership);
+    assert.deepEqual(
+      await redis.hkeys(threadDetailKey(thread.id)),
+      [],
+      'late ownership writes must not recreate a thread',
+    );
+  });
+
+  it('persists goal intent without TTL and rejects stale provider reconciliation', async () => {
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await persistentStore.create('user1', 'Goal Thread');
+    const first = {
+      v: 1,
+      intent: 'set',
+      objective: 'Finish the provider-neutral goal journey',
+      status: 'active',
+      tokenBudget: 12_000,
+      revision: 1,
+      updatedAt: Date.now(),
+      sync: { state: 'syncing', source: 'cat_cafe', catId: 'codex' },
+    };
+
+    assert.equal(
+      await persistentStore.compareAndSetGoal(thread.id, null, { ...first, objective: '   ' }),
+      false,
+      'invalid provider observations must be rejected before Redis can retain a ghost revision',
+    );
+    assert.equal((await persistentStore.get(thread.id)).goal, undefined);
+
+    assert.equal(await persistentStore.compareAndSetGoal(thread.id, null, first), true);
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1, 'user goal truth must not expire');
+    assert.deepEqual((await persistentStore.get(thread.id)).goal, first);
+
+    const newer = { ...first, objective: 'Keep the newer owner intent', revision: 2 };
+    assert.equal(await persistentStore.compareAndSetGoal(thread.id, 1, newer), true);
+    assert.equal(
+      await persistentStore.compareAndSetGoal(thread.id, 1, {
+        ...first,
+        sync: { state: 'synced', source: 'codex_app_server' },
+      }),
+      false,
+    );
+    assert.deepEqual((await persistentStore.get(thread.id)).goal, newer);
+
+    const clearedAt = Date.now();
+    const clearFence = {
+      v: 1,
+      intent: 'clear',
+      revision: 3,
+      updatedAt: clearedAt,
+      clearedAt,
+      sync: {
+        state: 'synced',
+        source: 'codex_app_server',
+        catId: 'codex',
+        sessionId: 'native-goal-thread',
+        observedAt: clearedAt,
+      },
+    };
+    assert.equal(await persistentStore.compareAndSetGoal(thread.id, 2, clearFence), true);
+    assert.deepEqual((await persistentStore.get(thread.id)).goal, clearFence);
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1, 'clear fence must not expire');
+  });
+
+  it('atomically replaces a persisted goal that fails the current schema', async () => {
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await persistentStore.create('user1', 'Goal repair');
+    const malformed = JSON.stringify({
+      v: 1,
+      intent: 'set',
+      objective: '   ',
+      status: 'active',
+      revision: 41,
+      updatedAt: Date.now(),
+      sync: { state: 'synced', source: 'codex_app_server' },
+    });
+    await redis.hset(threadDetailKey(thread.id), 'goal', malformed);
+    assert.equal((await persistentStore.get(thread.id)).goal, undefined);
+
+    const repaired = {
+      v: 1,
+      intent: 'set',
+      objective: 'Recovered owner goal',
+      status: 'active',
+      tokenBudget: null,
+      revision: 1,
+      updatedAt: Date.now(),
+      sync: { state: 'syncing', source: 'cat_cafe' },
+    };
+    assert.equal(await persistentStore.compareAndSetGoal(thread.id, null, repaired), true);
+    assert.deepEqual((await persistentStore.get(thread.id)).goal, repaired);
+  });
+
+  it('resolves a user-indexed system thread through the canonical read policy', async () => {
+    const { resolveThreadAccess } = await import('../dist/domains/cats/services/session/thread-access-policy.js');
+    const thread = await store.ensureThread('thread_eval_friction', 'Eval friction');
+    await store.indexForUser(thread.id, 'owner-user');
+
+    const indexed = await resolveThreadAccess({
+      threadStore: store,
+      thread,
+      userId: 'owner-user',
+      request: { resource: 'invocations', action: 'read' },
+    });
+    const foreign = await resolveThreadAccess({
+      threadStore: store,
+      thread,
+      userId: 'other-user',
+      request: { resource: 'invocations', action: 'read' },
+    });
+
+    assert.equal(indexed.status, 200);
+    assert.equal(indexed.scope, 'user');
+    assert.equal(foreign.status, 403);
+  });
+
+  it('persists and hydrates the cat_bedroom system kind', async () => {
+    const created = await store.create('user1', 'codex-sol 的卧室');
+
+    await store.updateSystemKind(created.id, 'cat_bedroom');
+
+    const fetched = await store.get(created.id);
+    assert.equal(fetched.systemKind, 'cat_bedroom');
+  });
+
+  it('ensureExternalRuntimeAnchorThread stores a persistent hidden anchor', async () => {
+    const anchor = await store.ensureExternalRuntimeAnchorThread('antigravity-desktop', 'user1');
+    const again = await store.ensureExternalRuntimeAnchorThread('antigravity-desktop', 'user1');
+    const retrieved = await store.get(anchor.id);
+    const visible = await store.list('user1');
+
+    assert.equal(anchor.id, 'external-runtime:antigravity-desktop:user1');
+    assert.equal(again.id, anchor.id);
+    assert.equal(retrieved.externalRuntimeAnchorState.userId, 'user1');
+    assert.equal(retrieved.externalRuntimeAnchorState.runtime, 'antigravity-desktop');
+    assert.equal(
+      visible.some((thread) => thread.id === anchor.id),
+      false,
+      'anchor thread must not appear in the normal user thread list',
+    );
   });
 
   it('get("default") auto-creates default thread', async () => {
@@ -103,6 +313,56 @@ describe('RedisThreadStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false },
     assert.equal(participants.length, 2);
   });
 
+  it('updateCloudCatBinding() does not recreate detail hash for deleted thread (F247 AC-B1c-1 delete race, gpt52 R2 P1)', async () => {
+    // Pin the HSET_IF_HAS_ID_LUA guard added in R1 fix for the delete race:
+    // raw HSET would resurrect a deleted thread's detail hash with only
+    // cloudBinding:* fields. The Lua guard checks HEXISTS 'id' first and
+    // fails closed if the thread is gone.
+    const thread = await store.create('alice', 'Cloud Binding Test');
+    const deleted = await store.delete(thread.id);
+    assert.equal(deleted, true);
+    // Sanity: detail hash is gone after delete.
+    const idAfterDelete = await redis.hget(threadDetailKey(thread.id), 'id');
+    assert.equal(idAfterDelete, null, 'thread detail hash should be gone after delete');
+
+    // Race: caller invokes updateCloudCatBinding after delete.
+    await store.updateCloudCatBinding(thread.id, 'codex', 'https://chatgpt.com/c/abc-123');
+
+    // The guard must NOT resurrect the hash with cloudBinding:* fields.
+    const fieldsAfter = await redis.hkeys(threadDetailKey(thread.id));
+    assert.deepEqual(
+      fieldsAfter,
+      [],
+      `detail hash should remain empty after blocked write; saw fields: ${JSON.stringify(fieldsAfter)}`,
+    );
+    // And getCloudCatBindings on a deleted thread returns empty.
+    const bindings = await store.getCloudCatBindings(thread.id);
+    assert.deepEqual(bindings, {});
+  });
+
+  it('updateCloudCatBinding(null) on deleted thread is a safe no-op (no hash resurrection)', async () => {
+    const thread = await store.create('alice', 'Deleted Binding Clear');
+    await store.delete(thread.id);
+    // Should not throw, should not create the hash.
+    await store.updateCloudCatBinding(thread.id, 'codex', null);
+    const fieldsAfter = await redis.hkeys(threadDetailKey(thread.id));
+    assert.deepEqual(fieldsAfter, []);
+  });
+
+  it('getCloudCatBindings() returns only cloudBinding:* fields, not other hash members (orphan isolation)', async () => {
+    const thread = await store.create('alice', 'Multi Cat Bindings');
+    await store.updateCloudCatBinding(thread.id, 'codex', 'https://chatgpt.com/c/aaa');
+    await store.updateCloudCatBinding(thread.id, 'opus', 'https://chatgpt.com/c/bbb');
+    const bindings = await store.getCloudCatBindings(thread.id);
+    assert.deepEqual(bindings, {
+      codex: 'https://chatgpt.com/c/aaa',
+      opus: 'https://chatgpt.com/c/bbb',
+    });
+    // The .get() path must NOT hydrate cloudCatBindings (privacy by absence).
+    const fetched = await store.get(thread.id);
+    assert.equal(fetched.cloudCatBindings, undefined, 'cloudCatBindings should not be hydrated by .get()');
+  });
+
   it('addParticipants() does not recreate participants for deleted thread (delete race)', async () => {
     const thread = await store.create('user1', 'Deleted Chat');
     const deleted = await store.delete(thread.id);
@@ -124,6 +384,65 @@ describe('RedisThreadStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false },
     assert.ok(threads.length >= 2);
     const ids = threads.map((t) => t.id);
     assert.ok(ids.indexOf(t2.id) < ids.indexOf(t1.id));
+  });
+
+  it('list() rejects a wrong-type participants key paired with a missing thread detail', async () => {
+    await store.get('default');
+    await store.create('alice', 'Visible thread');
+    const orphanId = 'thread_batch_orphan';
+    await redis.zadd(userListKey('alice'), '1', orphanId);
+    await redis.set(threadParticipantsKey(orphanId), 'not a set');
+
+    await assert.rejects(store.list('alice'), /WRONGTYPE/);
+    assert.deepEqual(await redis.hgetall(threadDetailKey(orphanId)), {});
+  });
+
+  it('list() self-heals when the user thread index zset is fully lost', async () => {
+    const userId = 'self-heal-full';
+    const first = await store.create(userId, 'Thread A');
+    const second = await store.create(userId, 'Thread B');
+
+    await redis.del(userListKey(userId));
+    assert.deepEqual(await redis.zrange(userListKey(userId), 0, -1), []);
+
+    const threads = await store.list(userId);
+    const ids = threads.map((t) => t.id);
+
+    assert.ok(ids.includes(first.id), 'list() should recover the first thread');
+    assert.ok(ids.includes(second.id), 'list() should recover the second thread');
+  });
+
+  it('list() self-heals when the user thread index zset is partially lost', async () => {
+    const userId = 'self-heal-partial';
+    const first = await store.create(userId, 'Thread A');
+    const second = await store.create(userId, 'Thread B');
+
+    await redis.zrem(userListKey(userId), second.id);
+    const idsBefore = await redis.zrange(userListKey(userId), 0, -1);
+    assert.deepEqual(idsBefore, [first.id]);
+
+    const threads = await store.list(userId);
+    const ids = threads.map((t) => t.id);
+
+    assert.ok(ids.includes(first.id), 'list() should preserve the existing thread');
+    assert.ok(ids.includes(second.id), 'list() should restore the missing thread');
+  });
+
+  it('repairIndex() rebuilds missing zset members before startup consumers read the thread list', async () => {
+    const userId = 'repair-index';
+    const first = await store.create(userId, 'Thread A');
+    const second = await store.create(userId, 'Thread B');
+
+    await redis.zrem(userListKey(userId), second.id);
+    assert.deepEqual(await redis.zrange(userListKey(userId), 0, -1), [first.id]);
+
+    const result = await store.repairIndex();
+    assert.equal(result.repairedUsers, 1);
+    assert.equal(result.repairedMembers, 1);
+    const idsAfterRepair = await redis.zrange(userListKey(userId), 0, -1);
+    assert.equal(idsAfterRepair.length, 2);
+    assert.ok(idsAfterRepair.includes(first.id), 'repairIndex() should preserve the existing thread');
+    assert.ok(idsAfterRepair.includes(second.id), 'repairIndex() should restore the missing thread');
   });
 
   it('updateTitle() updates the title', async () => {
@@ -173,6 +492,14 @@ describe('RedisThreadStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false },
 
     const updated = await store.get(thread.id);
     assert.equal(updated?.backlogItemId, 'blg_123');
+  });
+
+  it('updateBacklogItem() can replace and clear the persisted reverse backlog reference', async () => {
+    const thread = await store.create('user1', 'Post-create feature');
+    await store.updateBacklogItem(thread.id, 'blg_123');
+    assert.equal((await store.get(thread.id))?.backlogItemId, 'blg_123');
+    await store.updateBacklogItem(thread.id, null);
+    assert.equal((await store.get(thread.id))?.backlogItemId, undefined);
   });
 
   it('set/consumeMentionRoutingFeedback() returns one-shot payload', async () => {
@@ -254,6 +581,352 @@ describe('RedisThreadStore', { skip: !REDIS_URL ? 'REDIS_URL not set' : false },
     activity = await store.getParticipantsWithActivity(threadId);
     assert.equal(activity.length, 0, 'Should not have orphaned activity data for deleted thread');
   });
+
+  // F297 AC-B3: Sidebar 列表规模下必须批量读；纯 in-memory route 测试测不到 Redis 行为
+  it('getParticipantsWithActivityBatch() matches the single-thread contract across threads', async () => {
+    const busy = await store.create('user1', 'Busy thread');
+    const quiet = await store.create('user1', 'Quiet thread');
+    const empty = await store.create('user1', 'No participants');
+
+    await store.updateParticipantActivity(busy.id, 'sonnet', false);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await store.updateParticipantActivity(busy.id, 'opus5', true);
+    await store.updateParticipantActivity(quiet.id, 'opus5', true);
+
+    const batch = await store.getParticipantsWithActivityBatch([busy.id, quiet.id, empty.id, 'thread_missing']);
+
+    // 降序契约：F297 的 done/error 取 [0] 当作"最近一次回应"，顺序错了会挑错猫
+    assert.equal(batch.get(busy.id)[0].catId, 'opus5', 'batch must sort by lastMessageAt desc');
+    assert.equal(batch.get(busy.id)[0].lastResponseHealthy, true);
+    assert.equal(batch.get(busy.id)[1].catId, 'sonnet');
+    assert.equal(batch.get(busy.id)[1].lastResponseHealthy, false);
+    assert.equal(batch.get(quiet.id).length, 1);
+    assert.deepEqual(batch.get(empty.id), []);
+    assert.deepEqual(batch.get('thread_missing'), [], 'unknown threads resolve to empty, not undefined');
+
+    // 与单条版本逐字段一致——批量不得是第二套语义
+    for (const threadId of [busy.id, quiet.id, empty.id]) {
+      assert.deepEqual(batch.get(threadId), await store.getParticipantsWithActivity(threadId));
+    }
+  });
+
+  it('getParticipantsWithActivityBatch() handles an empty request without touching Redis', async () => {
+    const batch = await store.getParticipantsWithActivityBatch([]);
+    assert.equal(batch.size, 0);
+  });
+
+  it('get() self-heals orphaned thread metadata from surviving message timeline', async () => {
+    const recoveredTitleSource = 'F100 Self-Evolution discussion kickoff';
+    const recoveredTitle =
+      recoveredTitleSource.length > 30 ? `${recoveredTitleSource.slice(0, 30)}...` : recoveredTitleSource;
+    const threadId = 'thread_recover_test';
+    const createdAt = 1710000000000;
+    const lastActiveAt = createdAt + 5000;
+    const firstMessageId = 'msg_recover_first';
+    const lastMessageId = 'msg_recover_last';
+
+    await redis.hset(threadDetailKey(threadId), {
+      id: threadId,
+      projectPath: 'default',
+      title: 'Original Title',
+      createdBy: 'user1',
+      lastActiveAt: String(lastActiveAt),
+      createdAt: String(createdAt),
+      pinned: 'false',
+      pinnedAt: '0',
+      favorited: 'false',
+      favoritedAt: '0',
+      thinkingMode: 'debug',
+    });
+    await redis.zadd(userListKey('user1'), String(lastActiveAt), threadId);
+    await redis.hset(messageDetailKey(firstMessageId), {
+      id: firstMessageId,
+      threadId,
+      userId: 'user1',
+      catId: '',
+      content: recoveredTitleSource,
+      mentions: '[]',
+      timestamp: String(createdAt),
+    });
+    await redis.hset(messageDetailKey(lastMessageId), {
+      id: lastMessageId,
+      threadId,
+      userId: 'user1',
+      catId: 'opus',
+      content: 'Final reply',
+      mentions: '[]',
+      timestamp: String(lastActiveAt),
+    });
+    await redis.zadd(messageThreadKey(threadId), String(createdAt), firstMessageId);
+    await redis.zadd(messageThreadKey(threadId), String(lastActiveAt), lastMessageId);
+    await redis.hset(threadActivityKey(threadId), {
+      'opus:lastMessageAt': String(lastActiveAt),
+      'opus:messageCount': '1',
+      'opus:healthy': '1',
+    });
+
+    await redis.del(threadDetailKey(threadId));
+    await redis.del(threadParticipantsKey(threadId));
+
+    const recovered = await store.get(threadId);
+
+    assert.ok(recovered);
+    assert.equal(recovered?.id, threadId);
+    assert.equal(recovered?.title, recoveredTitle);
+    assert.equal(recovered?.createdBy, 'user1');
+    assert.equal(recovered?.createdAt, createdAt);
+    assert.equal(recovered?.lastActiveAt, lastActiveAt);
+    assert.deepEqual(recovered?.participants, ['opus']);
+
+    const persisted = await redis.hgetall(threadDetailKey(threadId));
+    assert.equal(persisted.id, threadId);
+    assert.equal(persisted.title, recoveredTitle);
+    assert.equal(await redis.smembers(threadParticipantsKey(threadId)).then((members) => members[0]), 'opus');
+    assert.notEqual(await redis.zscore(userListKey('user1'), threadId), null);
+  });
+
+  it('delete() leaves tombstone that prevents self-healing resurrection', async () => {
+    const thread = await store.create('user1', 'Will be deleted');
+    const threadId = thread.id;
+
+    // Add a message so self-healing would have data to recover from
+    const msgId = 'msg-tombstone-test';
+    await redis.hset(messageDetailKey(msgId), {
+      id: msgId,
+      threadId,
+      userId: 'user1',
+      catId: 'opus',
+      content: 'Hello',
+      mentions: '[]',
+      timestamp: String(Date.now()),
+    });
+    await redis.zadd(messageThreadKey(threadId), String(Date.now()), msgId);
+
+    // Hard-delete the thread
+    const deleted = await store.delete(threadId);
+    assert.equal(deleted, true);
+
+    // get() should NOT resurrect the deleted thread
+    const result = await store.get(threadId);
+    assert.equal(result, null, 'Tombstone should prevent self-healing resurrection');
+
+    // Tombstone key should exist
+    assert.equal(await redis.get(`thread:${threadId}:tombstone`), '1');
+  });
+
+  it('delete() on nonexistent thread does not write tombstone (phantom ID)', async () => {
+    const phantomId = 'thread_phantom_ghost';
+
+    // delete() on a thread that never existed should return false
+    const deleted = await store.delete(phantomId);
+    assert.equal(deleted, false);
+
+    // No tombstone should exist — self-healing must remain possible
+    assert.equal(await redis.get(`thread:${phantomId}:tombstone`), null, 'Phantom delete must not write tombstone');
+
+    // Verify self-healing still works for this ID if messages appear later
+    const msgId = 'msg-phantom-test';
+    await redis.hset(messageDetailKey(msgId), {
+      id: msgId,
+      threadId: phantomId,
+      userId: 'user1',
+      catId: 'opus',
+      content: 'Post-phantom message',
+      mentions: '[]',
+      timestamp: String(Date.now()),
+    });
+    await redis.zadd(messageThreadKey(phantomId), String(Date.now()), msgId);
+
+    const recovered = await store.get(phantomId);
+    assert.ok(recovered, 'Self-healing should work after phantom delete');
+    assert.equal(recovered?.id, phantomId);
+  });
+
+  it('persistent mode clears legacy TTL from live thread keys on activity updates', async () => {
+    const expiringStore = new RedisThreadStore(redis, { ttlSeconds: 60 });
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await expiringStore.create('user1', 'Legacy TTL');
+
+    await expiringStore.addParticipants(thread.id, ['opus']);
+    await expiringStore.updateParticipantActivity(thread.id, 'opus');
+
+    assert.ok((await redis.ttl(threadDetailKey(thread.id))) > 0);
+    assert.ok((await redis.ttl(userListKey('user1'))) > 0);
+    assert.ok((await redis.ttl(threadParticipantsKey(thread.id))) > 0);
+    assert.ok((await redis.ttl(threadActivityKey(thread.id))) > 0);
+
+    await persistentStore.updateLastActive(thread.id);
+    await persistentStore.updateParticipantActivity(thread.id, 'opus');
+
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1);
+    assert.equal(await redis.ttl(userListKey('user1')), -1);
+    assert.equal(await redis.ttl(threadParticipantsKey(thread.id)), -1);
+    assert.equal(await redis.ttl(threadActivityKey(thread.id)), -1);
+  });
+
+  it('F262: stores member effort as isolated sidecar fields and bulk reads once', async () => {
+    const thread = await store.create('user1', 'Effort Overrides');
+
+    await store.updateMemberEffort(thread.id, 'codex-sol', 'max');
+    await store.updateMemberEffort(thread.id, 'opus', 'low');
+
+    assert.equal(await redis.hget(threadDetailKey(thread.id), 'memberEffort:codex-sol'), 'max');
+    assert.equal(await store.getMemberEffort(thread.id, 'codex-sol', 'user1'), 'max');
+    assert.deepEqual(await store.getMemberEfforts(thread.id, 'user1'), {
+      'codex-sol': 'max',
+      opus: 'low',
+    });
+    assert.equal((await store.get(thread.id)).memberEffortOverrides, undefined);
+  });
+
+  it('F262: clear, corrupt raw value, and deleted-thread writes fail closed', async () => {
+    const thread = await store.create('user1', 'Effort Safety');
+    await store.updateMemberEffort(thread.id, 'codex-sol', 'ultra');
+    await store.updateMemberEffort(thread.id, 'codex-sol', null);
+    assert.equal(await store.getMemberEffort(thread.id, 'codex-sol', 'user1'), undefined);
+
+    await redis.hset(threadDetailKey(thread.id), 'memberEffort:codex-sol', 'bogus');
+    assert.deepEqual(await store.getMemberEfforts(thread.id, 'user1'), {});
+
+    await store.delete(thread.id);
+    await store.updateMemberEffort(thread.id, 'codex-sol', 'max');
+    assert.deepEqual(await redis.hkeys(threadDetailKey(thread.id)), []);
+  });
+
+  it('F262: persistent effort mutation clears a legacy detail TTL', async () => {
+    const expiringStore = new RedisThreadStore(redis, { ttlSeconds: 60 });
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await expiringStore.create('user1', 'Effort TTL');
+    assert.ok((await redis.ttl(threadDetailKey(thread.id))) > 0);
+
+    await persistentStore.updateMemberEffort(thread.id, 'codex-sol', 'max');
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1);
+  });
+
+  it('F291: stores persistent member speed as isolated sidecar fields and rejects corrupt values', async () => {
+    const thread = await store.create('user1', 'Speed Overrides');
+
+    await store.updateMemberSpeed(thread.id, 'codex-sol', 'fast');
+    await store.updateMemberSpeed(thread.id, 'codex-terra', 'standard');
+
+    assert.equal(await redis.hget(threadDetailKey(thread.id), 'memberSpeed:codex-sol'), 'fast');
+    assert.equal(await store.getMemberSpeed(thread.id, 'codex-sol', 'user1'), 'fast');
+    assert.deepEqual(await store.getMemberSpeeds(thread.id, 'user1'), {
+      'codex-sol': 'fast',
+      'codex-terra': 'standard',
+    });
+
+    await store.updateMemberSpeed(thread.id, 'codex-sol', null);
+    assert.equal(await store.getMemberSpeed(thread.id, 'codex-sol', 'user1'), undefined);
+
+    await redis.hset(threadDetailKey(thread.id), 'memberSpeed:codex-sol', 'turbo');
+    assert.deepEqual(await store.getMemberSpeeds(thread.id, 'user1'), { 'codex-terra': 'standard' });
+
+    await store.delete(thread.id);
+    await store.updateMemberSpeed(thread.id, 'codex-sol', 'fast');
+    assert.deepEqual(await redis.hkeys(threadDetailKey(thread.id)), []);
+  });
+
+  it('F291: persistent speed mutation clears a legacy detail TTL', async () => {
+    const expiringStore = new RedisThreadStore(redis, { ttlSeconds: 60 });
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await expiringStore.create('user1', 'Speed TTL');
+    assert.ok((await redis.ttl(threadDetailKey(thread.id))) > 0);
+
+    await persistentStore.updateMemberSpeed(thread.id, 'codex-sol', 'fast');
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1);
+  });
+
+  it('persistent mode also clears legacy TTL on detail-only mutations', async () => {
+    const expiringStore = new RedisThreadStore(redis, { ttlSeconds: 60 });
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await expiringStore.create('user1', 'Legacy Detail TTL');
+
+    assert.ok((await redis.ttl(threadDetailKey(thread.id))) > 0);
+
+    await persistentStore.updateTitle(thread.id, 'Recovered Title');
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1);
+
+    await expiringStore.updateMentionActionabilityMode(thread.id, 'relaxed');
+    assert.ok((await redis.ttl(threadDetailKey(thread.id))) > 0);
+
+    await persistentStore.updateMentionActionabilityMode(thread.id, 'strict');
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1);
+  });
+
+  it('F297 (local R11 P1-2) — participants pipeline: unknown replies fail closed', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // 两段 pipeline 各自的失败链此前没有 durable regression：106/106 全绿也证明不了
+    // 短 reply / entry error / 非法 member 会抛。
+    const thread = await store.create('u-neg', 'neg thread');
+    await store.addParticipants(thread.id, ['opus5']);
+
+    const originalPipeline = redis.pipeline.bind(redis);
+    const withFirstReply = (reply) => {
+      let first = true;
+      redis.pipeline = () => {
+        const p = originalPipeline();
+        if (first) {
+          first = false;
+          p.exec = async () => reply;
+        }
+        return p;
+      };
+    };
+    try {
+      for (const [label, reply] of [
+        ['short reply', []],
+        ['entry error', [[new Error('transient-participants'), null]]],
+        ['non-array payload', [[null, 'not-a-set']]],
+        ['non-string member', [[null, [123]]]],
+      ]) {
+        withFirstReply(reply);
+        await assert.rejects(
+          () => store.getParticipantsWithActivityBatch([thread.id]),
+          (err) => err instanceof Error,
+          `participants stage must fail closed: ${label}`,
+        );
+      }
+    } finally {
+      redis.pipeline = originalPipeline;
+    }
+  });
+
+  it('F297 (local R11 P1-2) — activity pipeline: unknown replies fail closed', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    const thread = await store.create('u-neg2', 'neg thread 2');
+    await store.addParticipants(thread.id, ['opus5']);
+
+    const originalPipeline = redis.pipeline.bind(redis);
+    const withSecondReply = (reply) => {
+      let call = 0;
+      redis.pipeline = () => {
+        const p = originalPipeline();
+        call += 1;
+        if (call === 2) p.exec = async () => reply;
+        return p;
+      };
+    };
+    try {
+      for (const [label, reply] of [
+        ['short reply', []],
+        ['entry error', [[new Error('transient-activity'), null]]],
+        ['non-hash payload', [[null, 'not-a-hash']]],
+        ['non-string field', [[null, { 'opus5:lastMessageAt': 5 }]]],
+      ]) {
+        withSecondReply(reply);
+        await assert.rejects(
+          () => store.getParticipantsWithActivityBatch([thread.id]),
+          (err) => err instanceof Error,
+          `activity stage must fail closed: ${label}`,
+        );
+      }
+    } finally {
+      redis.pipeline = originalPipeline;
+    }
+  });
 });
 
 describe('ThreadStoreFactory', () => {
@@ -267,7 +940,7 @@ describe('ThreadStoreFactory', () => {
   it(
     'returns RedisThreadStore when redis provided',
     {
-      skip: !REDIS_URL ? 'REDIS_URL not set' : false,
+      skip: redisIsolationSkipReason(REDIS_URL),
     },
     async () => {
       assertRedisIsolationOrThrow(REDIS_URL, 'ThreadStoreFactory');

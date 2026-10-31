@@ -1,0 +1,312 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
+import { test } from 'node:test';
+import Fastify from 'fastify';
+import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
+import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import {
+  createDormantPluginRuntimeComposition,
+  EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS,
+  resolvePluginRuntimePersistencePaths,
+} from '../dist/domains/plugin/index.js';
+import { callbacksRoutes } from '../dist/routes/callbacks.js';
+import { assertHostListenLifecycle } from './helpers/plugin-host-listen-contract.js';
+import {
+  completeExternalHandshake,
+  EXTERNAL_PACKAGE_DIGEST,
+  externalCandidate,
+  externalManifest,
+  FakePluginProcessAdapter,
+} from './plugin-external-runtime-helpers.js';
+
+async function composition(projectRoot, processes = new FakePluginProcessAdapter(), packages) {
+  return {
+    processes,
+    runtime: createDormantPluginRuntimeComposition({
+      projectRoot,
+      messageStore: new MessageStore(),
+      processes,
+      ...(packages === undefined ? {} : { packages }),
+      now: () => 5_000,
+    }),
+  };
+}
+
+test('installed runtime persistence paths are explicit, project-scoped, and replaceable at one seam', async () => {
+  const projectRoot = await mkdtemp(resolve(tmpdir(), 'cat-cafe-k2d-composition-paths-'));
+
+  assert.deepEqual(resolvePluginRuntimePersistencePaths(projectRoot), {
+    inventorySnapshotPath: resolve(projectRoot, '.cat-cafe/plugin-host/inventory.json'),
+    brokerSnapshotPath: resolve(projectRoot, '.cat-cafe/plugin-host/broker.json'),
+    packagesRoot: resolve(projectRoot, '.cat-cafe/plugin-host/packages'),
+  });
+
+  const injected = {
+    inventorySnapshotPath: resolve(projectRoot, 'future/inventory.json'),
+    brokerSnapshotPath: resolve(projectRoot, 'future/broker.json'),
+    packagesRoot: resolve(projectRoot, 'future/packages'),
+  };
+  const runtime = createDormantPluginRuntimeComposition({
+    projectRoot,
+    paths: injected,
+    messageStore: new MessageStore(),
+  });
+  assert.deepEqual(runtime.paths, injected);
+  assert.equal(runtime.inventoryStore.path, injected.inventorySnapshotPath);
+  assert.equal(runtime.brokerStore.path, injected.brokerSnapshotPath);
+});
+
+test('composition recovers both durable stores and resumes enabled owner intent with fresh authority', async () => {
+  const projectRoot = await mkdtemp(resolve(tmpdir(), 'cat-cafe-k2d-composition-restart-'));
+  await mkdir(resolve(projectRoot, 'dist'), { recursive: true });
+  await writeFile(resolve(projectRoot, externalManifest().runtime.entrypoint), '');
+  const packages = {
+    async resolveInstalledPackage() {
+      return {
+        rootDir: projectRoot,
+        manifest: externalManifest(),
+        verifyIntegrity: async () => undefined,
+        release: async () => undefined,
+      };
+    },
+  };
+  const first = await composition(projectRoot);
+  const installed = await first.runtime.inventory.installPackage({
+    manifest: externalManifest(),
+    computedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
+    expectedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
+    packagePluginId: externalCandidate().pluginId,
+    signalSchemas: {
+      'schemas/external.signal.v1.schema.json': {
+        type: 'object',
+        properties: { payload: { type: 'object' }, source: { type: 'object' } },
+        required: ['payload', 'source'],
+      },
+    },
+  });
+  await first.runtime.inventoryStore.transaction((transaction) => {
+    const instance = transaction.instances.get(installed.pluginInstanceId);
+    transaction.instances.put({
+      ...instance,
+      configReadiness: 'ready',
+      activationState: 'enabled',
+      runtimeState: 'stopped',
+      updatedAt: 5_001,
+    });
+  });
+  const connection = await first.runtime.broker.openExternalConnection(installed.pluginInstanceId);
+  const binding = await connection.hello(externalCandidate());
+  await connection.ready({ bindingNonce: binding.bindingNonce });
+  assert.equal((await first.runtime.inventoryStore.snapshot()).instances[0].runtimeState, 'healthy');
+
+  const restarted = await composition(projectRoot, new FakePluginProcessAdapter(), packages);
+  const recovered = await restarted.runtime.recoverAfterRestart();
+
+  assert.deepEqual(recovered, { brokerSessions: 1, inventoryInstances: 0, resumeRequested: 1 });
+  const child = await restarted.processes.waitForProcess(0);
+  await completeExternalHandshake(child);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(restarted.processes.specs.length, 1);
+  const recoveredInstance = (await restarted.runtime.inventoryStore.snapshot()).instances[0];
+  assert.equal(recoveredInstance.activationState, 'enabled');
+  assert.equal(recoveredInstance.runtimeState, 'healthy');
+  assert.equal(recoveredInstance.lifecycleRevision, 1);
+  const broker = await restarted.runtime.brokerStore.snapshot();
+  assert.equal(broker.sessions[0].phase, 'closed');
+  assert.equal(broker.sessions[0].closeReason, 'host_restart');
+  assert.equal(broker.sessions[1].phase, 'active');
+  await restarted.runtime.shutdown();
+});
+
+test('dormant composition binds messaging routes to its single K-1 domain', async () => {
+  const projectRoot = await mkdtemp(resolve(tmpdir(), 'cat-cafe-m0-composition-messaging-'));
+  const manifest = externalManifest();
+  const runtime = createDormantPluginRuntimeComposition({
+    projectRoot,
+    messageStore: new MessageStore(),
+    now: () => 5_000,
+  });
+  const installed = await runtime.inventory.installPackage({
+    manifest,
+    computedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
+    expectedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
+    packagePluginId: externalCandidate().pluginId,
+    signalSchemas: {
+      'schemas/external.signal.v1.schema.json': {
+        type: 'object',
+        properties: { payload: { type: 'object' }, source: { type: 'object' } },
+        required: ['payload', 'source'],
+      },
+    },
+  });
+  await runtime.inventoryStore.transaction((transaction) => {
+    const instance = transaction.instances.get(installed.pluginInstanceId);
+    transaction.instances.put({
+      ...instance,
+      configReadiness: 'ready',
+      activationState: 'enabled',
+      runtimeState: 'stopped',
+      updatedAt: 5_001,
+    });
+  });
+  const connection = await runtime.broker.openExternalConnection(installed.pluginInstanceId);
+  const binding = await connection.hello(externalCandidate());
+  await connection.ready({ bindingNonce: binding.bindingNonce });
+  const { handleId } = await runtime.messaging.issueThreadHandle({
+    pluginInstanceId: installed.pluginInstanceId,
+    threadId: 'thread-1',
+    userId: 'user-1',
+    scope: { canSend: true, canSubscribe: true },
+  });
+
+  const subscription = await connection.call('messaging.subscribe', { handle: handleId });
+  const receipt = await connection.call('messaging.send', {
+    address: { kind: 'thread_handle', handle: handleId },
+    idempotencyKey: 'composition-send-1',
+    payload: {
+      provenance: { epistemicStatus: 'inference' },
+      elements: [{ elementId: 'element-1', kind: 'text', payload: { text: 'composition' } }],
+    },
+  });
+  assert.equal(typeof subscription.subscriptionId, 'string');
+  assert.equal(receipt.messageHandle.kind, 'message');
+  assert.equal((await runtime.brokerStore.snapshot()).calls.length, 0, 'K-1 owns messaging settlement');
+});
+
+test('production handshake policy covers verified external source readiness without budget drift', async () => {
+  const projectRoot = await mkdtemp(resolve(tmpdir(), 'cat-cafe-k2d-composition-readiness-'));
+  let now = 5_000;
+  const runtime = createDormantPluginRuntimeComposition({
+    projectRoot,
+    messageStore: new MessageStore(),
+    processes: new FakePluginProcessAdapter(),
+    now: () => now,
+  });
+  const installed = await runtime.inventory.installPackage({
+    manifest: externalManifest(),
+    computedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
+    expectedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
+    packagePluginId: externalCandidate().pluginId,
+    signalSchemas: {
+      'schemas/external.signal.v1.schema.json': {
+        type: 'object',
+        properties: { payload: { type: 'object' }, source: { type: 'object' } },
+        required: ['payload', 'source'],
+      },
+    },
+  });
+  await runtime.inventoryStore.transaction((transaction) => {
+    const instance = transaction.instances.get(installed.pluginInstanceId);
+    transaction.instances.put({
+      ...instance,
+      configReadiness: 'ready',
+      activationState: 'enabled',
+      runtimeState: 'stopped',
+      updatedAt: now,
+    });
+  });
+
+  const connection = await runtime.broker.openExternalConnection(installed.pluginInstanceId);
+  const binding = await connection.hello(externalCandidate());
+  now += 20_603;
+
+  assert.equal(await connection.ready({ bindingNonce: binding.bindingNonce }), null);
+  assert.equal(EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS, 4 * 60_000);
+  assert.equal(runtime.broker.preActiveTimeoutMs, EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS);
+  assert.equal(runtime.externalRuntime.handshakeTimeoutMs, EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS);
+  assert.ok(runtime.messaging, 'composition must expose the single K-1 messaging domain used by Broker routes');
+});
+
+test('production composition constructs and recovers K-2D but exposes no startup activation', async () => {
+  const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+  const catalogSource = readFileSync(
+    new URL('../src/domains/plugin/manager/host-official-catalog.ts', import.meta.url),
+    'utf8',
+  );
+
+  const cloudBinding = source.match(/const\s+([A-Za-z_$][\w$]*)\s*=\s*createCloudConversationComposition\(\{/);
+  assert.ok(cloudBinding, 'production must own one cloud conversation composition');
+  const runtimeFactory = `${cloudBinding[1]}.createRuntime`;
+  const runtimeCompositionIndex = source.indexOf(`${runtimeFactory}({`);
+  const managerCompositionIndex = source.indexOf('createPluginManagerRuntimeComposition({');
+
+  assert.ok(runtimeCompositionIndex >= 0, 'runtime must be created by the shared cloud composition');
+  const compositionSource = source.slice(runtimeCompositionIndex, managerCompositionIndex);
+  for (const seam of [
+    /messageStore,/,
+    /messagingStores,/,
+    /onMessagePublished: subscriptionDrainScheduler\.schedule,/,
+    /taskStore,/,
+    /\.\.\.\(redis \? \{ redis \} : \{\}\)/,
+  ]) {
+    assert.match(compositionSource, seam, 'production must share the publishing stores and subscription drain seam');
+  }
+  const runtimeBinding = source.match(
+    new RegExp(`const\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${cloudBinding[1]}\\.createRuntime\\(\\{`),
+  );
+  assert.ok(runtimeBinding, 'production must bind the dormant plugin runtime composition');
+  const runtimeName = runtimeBinding[1];
+  const recoveryCall = source.match(
+    new RegExp(
+      `await ${runtimeName}\\.recoverAfterRestart\\(\\{\\s*desktopWindowsAfter:\\s*([A-Za-z_$][\\w$]*)\\s*\\}\\)`,
+    ),
+  );
+  assert.ok(recoveryCall, 'restart recovery must hold desktop windows behind the Host listening gate');
+  const recoveryIndex = recoveryCall.index;
+  const gate = source.match(
+    new RegExp(
+      `const\\s+${recoveryCall[1]}\\s*=\\s*new Promise<void>\\(\\(resolve\\)\\s*=>\\s*\\{\\s*([A-Za-z_$][\\w$]*)\\s*=\\s*resolve;?\\s*\\}\\)`,
+    ),
+  );
+  assert.ok(gate, 'the desktop resume gate must be a Host-owned deferred promise');
+  await assertHostListenLifecycle(source, gate[1]);
+  assert.equal(source.split(`${gate[1]}()`).length - 1, 1, 'the gate has a single release point');
+  assert.ok(
+    managerCompositionIndex >= 0 && managerCompositionIndex < recoveryIndex,
+    'Plugin Manager state projection must be composed before durable instances resume',
+  );
+  assert.match(source, new RegExp(`registerPluginRuntimeShutdown\\(app, ${runtimeName}\\)`));
+  assert.match(source, /import\('\.\/routes\/plugin-runtime-shutdown\.js'\)/);
+  assert.match(source, /createPluginManagerRuntimeComposition\(\{/);
+  assert.match(source, /const pluginManagerCatalog = createHostOfficialPluginCatalog\(\)/);
+  assert.match(catalogSource, /new MachineOfficialPluginCatalog\(\{/);
+  assert.match(catalogSource, /validateCatalog: validatePluginCatalog/);
+  assert.match(catalogSource, /loadMachinePluginCatalog\(OFFICIAL_PLUGIN_CATALOG_URL\)/);
+  assert.doesNotMatch(source, /weixinMpHandlers/);
+  assert.doesNotMatch(source, /limbAdapterRegistry/);
+  const callbackRoutes = readFileSync(new URL('../src/routes/callbacks.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(callbackRoutes, /registerCallback(?:WeCom|Lark)ActionRoutes/);
+  assert.doesNotMatch(source, /repositoryPluginManagerCompatibility|resolveRepositoryReplacementPluginIds/);
+  assert.doesNotMatch(source, /ensureOfficialPluginSignalRoutes|OfficialPluginHistoryImportService/);
+  assert.match(source, /registerPluginManagerRoutes\(managerApp/);
+  assert.match(source, /contributions: pluginRuntime\.supervisor/);
+  assert.match(source, /register\(pluginManagerUploadRoutes/);
+  assert.doesNotMatch(source, /new OfficialPluginPackageInstaller\(/);
+  assert.doesNotMatch(source, new RegExp(`${runtimeName}\\.supervisor\\.start\\(`));
+});
+
+test('enterprise actions have no legacy callback route after moving to package tools', async () => {
+  const app = Fastify();
+  try {
+    await app.register(callbacksRoutes, {
+      registry: new InvocationRegistry(),
+      messageStore: new MessageStore(),
+      socketManager: {
+        broadcastAgentMessage() {},
+        getMessages() {
+          return [];
+        },
+      },
+    });
+    for (const provider of ['wecom', 'lark']) {
+      const url = `/api/callbacks/${provider}-action`;
+      assert.equal(app.hasRoute({ method: 'POST', url }), false);
+      assert.equal((await app.inject({ method: 'POST', url, payload: { action: 'create_doc' } })).statusCode, 404);
+    }
+  } finally {
+    await app.close();
+  }
+});

@@ -6,23 +6,23 @@ doc_kind: spec
 created: 2026-03-16
 ---
 
-# F126: 四肢控制面 — Cat Café Limb Control Plane
+# F126: 四肢控制面 — Clowder AI Limb Control Plane
 
 > **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
 
 ## Why
 
-team lead 2026-03-16 在三猫 OpenClaw Node 研讨中指出：
+operator 2026-03-16 在三猫 OpenClaw Node 研讨中指出：
 
 > "你们这群小笨蛋想浅了。他们会想要——如果你们这一群猫猫军团，你们要如何管理多个不同的四肢？你们如何在 Mac 上管理一堆其他的 Windows 节点？"
 
 > "你们这一群猫猫，类似于一个大脑，每只猫都是一个灵魂议会的议员！虽然有自己不同的看法，但是都住在猫咖这个大脑里。"
 
-**核心模型**：Cat Café = 一个大脑（灵魂议会，多猫议员）→ 需要管理 M 个四肢（外部设备/节点）。这是 OpenClaw `1 brain → N limbs` 的升级版：`1 brain (N cats) → M limbs`。
+**核心模型**：Clowder AI = 一个大脑（灵魂议会，多猫议员）→ 需要管理 M 个四肢（外部设备/节点）。这是 OpenClaw `1 brain → N limbs` 的升级版：`1 brain (N cats) → M limbs`。
 
 **猫猫是议员，不是 Node。** F126 聚焦**四肢侧**的抽象与管理，不重构现有猫 Provider 内部实现。
 
-**四个已确认的缺陷**（Ragdoll分析，team lead确认"完全都是我们需要优化的"）：
+**四个已确认的缺陷**（Ragdoll分析，operator确认"完全都是我们需要优化的"）：
 
 | # | 缺陷 | 现状 | 影响 |
 |---|------|------|------|
@@ -35,10 +35,10 @@ team lead 2026-03-16 在三猫 OpenClaw Node 研讨中指出：
 
 ## What
 
-### 正确模型（team lead定义）
+### 正确模型（operator定义）
 
 ```
-Cat Café（大脑 / 灵魂议会）
+Clowder AI（大脑 / 灵魂议会）
 ├── Ragdoll（议员：架构）
 ├── Maine Coon（议员：安全审查）
 ├── Siamese（议员：设计）
@@ -56,9 +56,9 @@ Cat Café（大脑 / 灵魂议会）
 
 **与 OpenClaw 的区别**：OpenClaw 是 1 agent × N nodes（简单，无竞争）。我们是 1 brain (N cats) × M limbs（多猫共享四肢，需要调度和仲裁）。N×M 编排是行业未解问题（OpenClaw/LangGraph/CrewAI/A2A 都未完整解决），我们做了会是独特贡献。
 
-### 三协议定位与 Cat Café 选型（KD-8/9 基线）
+### 三协议定位与 Clowder AI 选型（KD-8/9 基线）
 
-| 协议 | 全称 | 发起方 | 解决什么 | 类比 | Cat Café 需要？ |
+| 协议 | 全称 | 发起方 | 解决什么 | 类比 | Clowder AI 需要？ |
 |------|------|--------|---------|------|----------------|
 | **MCP** | Model Context Protocol | Anthropic (2024.11) | Agent ↔ 工具/数据 | USB-C | ✅ **已在用**（猫猫的工具全是 MCP） |
 | **A2A** | Agent-to-Agent Protocol | Google (2025.04) | Agent ↔ Agent | HTTP | ✅ **Phase C 必须**（猫猫指挥远程 Agent） |
@@ -120,7 +120,7 @@ Cat Café（大脑 / 灵魂议会）
    - **三级授权模型**：
      - `free`：低风险能力，无需审批（如查询设备状态）
      - `leased`：独占资源，自动租约管理
-     - `gated`：高风险能力，需team lead审批（如生产部署、删除数据）
+     - `gated`：高风险能力，需operator审批（如生产部署、删除数据）
    - 注：全局 per-cat tool policy（`group:fs/runtime/memory` 等 tool family allow/deny）独立于 F126 推进
 
 4. **Artifact/Action Log**（可审计的产物追踪）
@@ -135,7 +135,7 @@ Cat Café（大脑 / 灵魂议会）
 
 ### Phase C: 跨平台 Node 管理
 
-**目标**：Mac 上的 Cat Café 能管理远程 Windows/Linux/移动设备节点。
+**目标**：Mac 上的 Clowder AI 能管理远程 Windows/Linux/移动设备节点。
 
 1. **Remote Node Transport**
    - MCP over HTTP / WebSocket — 复用 MCP 标准协议（不造新轮子）
@@ -144,7 +144,7 @@ Cat Café（大脑 / 灵魂议会）
    - 猫只申请 capability，scheduler 决定派给哪条四肢
 
 2. **Node Pairing（设备配对）**
-   - 新节点连接 → 创建配对请求 → team lead审批
+   - 新节点连接 → 创建配对请求 → operator审批
    - 审批后签发 token，建立信任关系
    - 扩展 F088 ConnectorThreadBindingStore 为 Device Binding
    - 断线恢复 + 重连机制
@@ -163,7 +163,7 @@ Cat Café（大脑 / 灵魂议会）
 
 | # | 共识 |
 |---|------|
-| C1 | Cat Café = 一个大脑（灵魂议会），四肢是外部设备/节点，猫是议员不是 Node |
+| C1 | Clowder AI = 一个大脑（灵魂议会），四肢是外部设备/节点，猫是议员不是 Node |
 | C2 | 不抄 OpenClaw 自定义 WebSocket 协议，用 MCP 标准 |
 | C3 | Capability-based 能力声明和发现值得学 |
 | C4 | Memory lifecycle 补"pre-seal 自动写入"属于 F102 范围 |
@@ -212,13 +212,13 @@ Cat Café（大脑 / 灵魂议会）
 
 ### Phase C（跨平台 Node 管理）✅
 - [x] AC-C1: 远程节点可通过 MCP over HTTP 注册到控制面
-- [x] AC-C2: Node Pairing 审批流程可用（新节点连接 → team lead审批 → 建立信任）
+- [x] AC-C2: Node Pairing 审批流程可用（新节点连接 → operator审批 → 建立信任）
 - [x] AC-C3: 断线恢复 + 重连机制
 
 ### Phase D（F124 Apple 生态落地）
 - [ ] AC-D1: iPhone 作为 Limb Node 接入，暴露 camera/voice/location 能力
 - [ ] AC-D2: Apple Watch 作为 Limb Node 接入，暴露 haptic/presence 能力
-- [ ] AC-D3: team lead可通过 AirPods 语音与猫猫交互
+- [ ] AC-D3: operator可通过 AirPods 语音与猫猫交互
 
 ## Dependencies
 
@@ -248,29 +248,29 @@ Cat Café（大脑 / 灵魂议会）
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | 猫猫是议员不是 Node——Cat Café 是一个大脑（灵魂议会），四肢是外部设备 | team lead定义，多猫协作是核心价值 | 2026-03-16 |
+| KD-1 | 猫猫是议员不是 Node——Clowder AI 是一个大脑（灵魂议会），四肢是外部设备 | operator定义，多猫协作是核心价值 | 2026-03-16 |
 | KD-2 | 用 MCP 标准协议做设备接入，不抄 OpenClaw 的自定义 WebSocket 协议 | MCP 已成行业标准（Linux Foundation），不造新轮子 | 2026-03-16 |
 | KD-3 | F126 聚焦四肢侧抽象（ILimbNode），不重构猫 Provider（AgentService） | Maine Coon审阅纠偏：猫是议员不是四肢，scope 分离 | 2026-03-16 |
 | KD-4 | Phase 顺序：A（抽象+Registry+Presence）→ B（调度+权限+审计）→ C（跨平台）→ D（F124） | Maine Coon提议 + 三猫共识：每步终态基座 | 2026-03-16 |
 | KD-5 | 三级授权模型：free / leased / gated | 金渐层提案：每次审批太重，一次性授权太危险 | 2026-03-16 |
 | KD-6 | MCP tool 动态暴露四肢能力，不注入 system prompt | 金渐层提案：四肢动态上下线，prompt 是 session 级静态的 | 2026-03-16 |
 | KD-7 | Runtime 活状态不进 F102，只有 durable knowledge 走 materialize | Maine Coon提案：防止 runtime 噪音污染长期记忆 | 2026-03-16 |
-| KD-8 | 执行顺序：F126 A → B → F050 Phase 3（A2A/ACP）→ F126 C → F126 D（F124） | team lead拍板：远程 Agent 需要 A2A/ACP 协议，Phase C 前先做 F050 P3 | 2026-03-16 |
-| KD-9 | 哑四肢用 MCP，有脑四肢（远程 Agent）用 A2A/ACP — 两条协议路径 | team lead确认：Windows 上有 Agent 时 MCP 不够 | 2026-03-16 |
+| KD-8 | 执行顺序：F126 A → B → F050 Phase 3（A2A/ACP）→ F126 C → F126 D（F124） | operator拍板：远程 Agent 需要 A2A/ACP 协议，Phase C 前先做 F050 P3 | 2026-03-16 |
+| KD-9 | 哑四肢用 MCP，有脑四肢（远程 Agent）用 A2A/ACP — 两条协议路径 | operator确认：Windows 上有 Agent 时 MCP 不够 | 2026-03-16 |
 
 ## Review Gate
 
 - Phase A: 跨 family review（Maine Coon优先）+ F118 owner 确认 Presence 整合
 - Phase B: 跨 family review
-- Phase C: 架构级 → 猫猫讨论 + team lead拍板
+- Phase C: 架构级 → 猫猫讨论 + operator拍板
 - Phase D: 与 F124 合并 review
 
 ## 需求点 Checklist
 
 | 需求来源 | 需求点 | 覆盖到的 AC |
 |---------|--------|-----------|
-| team lead："管理多个不同的四肢" | 统一 Limb 抽象 + Registry | AC-A1, AC-A2 |
-| team lead："Mac 上管理 Windows 节点" | 跨平台远程 Node 管理 | AC-C1, AC-C2 |
+| operator："管理多个不同的四肢" | 统一 Limb 抽象 + Registry | AC-A1, AC-A2 |
+| operator："Mac 上管理 Windows 节点" | 跨平台远程 Node 管理 | AC-C1, AC-C2 |
 | Ragdoll：没有 Capability Registry | 动态能力注册与发现 | AC-A2, AC-A3 |
 | Ragdoll：没有 Presence 系统 | Basic Presence + 降级 | AC-A6, AC-A7 |
 | Ragdoll：没有统一 Node 抽象 | ILimbNode 接口 | AC-A1, AC-A4 |

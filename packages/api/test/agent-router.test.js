@@ -13,6 +13,9 @@ import { resolve } from 'node:path';
 import { after, describe, mock, test } from 'node:test';
 import { migrateRouterOpts } from './helpers/agent-registry-helpers.js';
 
+const previousDefaultCatId = process.env.DEFAULT_CAT_ID;
+process.env.DEFAULT_CAT_ID = 'opus';
+
 // Create mock dependencies for AgentRouter
 function createMockRegistry() {
   let counter = 0;
@@ -21,7 +24,7 @@ function createMockRegistry() {
       invocationId: `inv-${++counter}`,
       callbackToken: `tok-${counter}`,
     }),
-    verify: () => null,
+    verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
   };
 }
 
@@ -29,6 +32,10 @@ function createMockMessageStore() {
   const rows = [];
   let seq = 0;
 
+  // Redis 模型: thread sorted set 的 score = deliveredAt ?? timestamp（markDelivered 后 score 重打）。
+  // mock 也用 effective score 排序/过滤，让 R9 cross-page cursor bug 可复现。
+  const score = (m) => m.deliveredAt ?? m.timestamp;
+  const sortedByScore = () => rows.slice().sort((a, b) => score(a) - score(b) || a.id.localeCompare(b.id));
   const sorted = () => rows.slice().sort((a, b) => a.id.localeCompare(b.id));
   return {
     append: (msg) => {
@@ -40,6 +47,14 @@ function createMockMessageStore() {
       rows.push(stored);
       return stored;
     },
+    markDelivered: (id, deliveredAt) => {
+      const stored = rows.find((message) => message.id === id);
+      if (!stored) return null;
+      stored.deliveryStatus = 'delivered';
+      stored.deliveredAt = deliveredAt;
+      return stored;
+    },
+    getById: (id) => rows.find((m) => m.id === id) ?? null,
     getRecent: (limit = 50) => sorted().slice(-limit),
     getMentionsFor: (catId, limit = 50) =>
       sorted()
@@ -50,7 +65,7 @@ function createMockMessageStore() {
         .filter((m) => m.timestamp < timestamp)
         .slice(-limit),
     getByThread: (threadId, limit = 50) =>
-      sorted()
+      sortedByScore()
         .filter((m) => m.threadId === threadId)
         .slice(-limit),
     getByThreadAfter: (threadId, afterId, limit) => {
@@ -59,9 +74,9 @@ function createMockMessageStore() {
       return typeof limit === 'number' ? filtered.slice(0, limit) : filtered;
     },
     getByThreadBefore: (threadId, timestamp, limit = 50, beforeId) =>
-      sorted()
+      sortedByScore()
         .filter((m) => m.threadId === threadId)
-        .filter((m) => m.timestamp < timestamp || (m.timestamp === timestamp && (!beforeId || m.id < beforeId)))
+        .filter((m) => score(m) < timestamp || (score(m) === timestamp && (!beforeId || m.id < beforeId)))
         .slice(-limit),
     deleteByThread: (threadId) => {
       const before = rows.length;
@@ -79,6 +94,7 @@ function createMockThreadStore(
   threadProjectPaths = {},
   threadRoutingPolicies = {},
   threadPreferredCats = {},
+  threadKinds = {},
 ) {
   const participants = { ...initialParticipants };
   // F032 P1-2: Track activity timestamps for each participant
@@ -105,6 +121,7 @@ function createMockThreadStore(
       createdAt: Date.now(),
       routingPolicy: threadRoutingPolicies[threadId],
       preferredCats: threadPreferredCats[threadId],
+      threadKind: threadKinds[threadId],
     }),
     list: () => [],
     listByProject: () => [],
@@ -129,20 +146,30 @@ function createMockThreadStore(
         .map((catId) => {
           const key = `${threadId}:${catId}`;
           const data = activity[key] ?? { lastMessageAt: 0, messageCount: 0 };
-          return { catId, lastMessageAt: data.lastMessageAt, messageCount: data.messageCount };
+          return {
+            catId,
+            lastMessageAt: data.lastMessageAt,
+            messageCount: data.messageCount,
+            lastResponseHealthy: data.lastResponseHealthy,
+          };
         })
         .sort((a, b) => b.lastMessageAt - a.lastMessageAt);
     },
     consumeMentionRoutingFeedback: () => null,
     // F032 P1-2: Update participant activity on message
-    updateParticipantActivity: (threadId, catId) => {
+    // #267: healthy param tracks whether last response succeeded
+    updateParticipantActivity: (threadId, catId, healthy) => {
       if (!participants[threadId]) participants[threadId] = [];
       if (!participants[threadId].includes(catId)) {
         participants[threadId].push(catId);
       }
       const key = `${threadId}:${catId}`;
       const existing = activity[key] ?? { lastMessageAt: 0, messageCount: 0 };
-      activity[key] = { lastMessageAt: Date.now() + ++activitySeq, messageCount: existing.messageCount + 1 };
+      activity[key] = {
+        lastMessageAt: Date.now() + ++activitySeq,
+        messageCount: existing.messageCount + 1,
+        lastResponseHealthy: healthy,
+      };
     },
     updateLastActive: () => {},
     delete: () => true,
@@ -212,6 +239,81 @@ function createMockAgentService(catId, responseText = 'Hello from mock') {
 
 const tempProjectRoots = [];
 
+describe('F322 J3 retired chat-content issue detection', () => {
+  for (const entry of ['route', 'routeExecution']) {
+    for (const sample of [
+      { name: 'keyword', messages: ['@opus 不对，请检查', '@opus 还是不行，请继续检查'] },
+      { name: 'retry', messages: Array(3).fill('@opus 请把原消息定位功能接完') },
+    ]) {
+      test(`${entry} routes ${sample.name} messages without creating a problem card`, async () => {
+        const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+        const { InMemoryFrustrationIssueStore } = await import(
+          '../dist/domains/cats/services/stores/memory/InMemoryFrustrationIssueStore.js'
+        );
+        const { resetDedup } = await import('../dist/domains/cats/services/frustration/FrustrationDetector.js');
+        resetDedup();
+        const threadId = `j3-${entry}-${sample.name}`;
+        const messageStore = createMockMessageStore();
+        const issueStore = new InMemoryFrustrationIssueStore();
+        const create = mock.method(issueStore, 'create');
+        const service = createMockAgentService('opus');
+        const broadcastToRoom = mock.fn();
+        const router = new AgentRouter(
+          await migrateRouterOpts({
+            claudeService: service,
+            registry: createMockRegistry(),
+            messageStore,
+            threadStore: createMockThreadStore(),
+            frustrationIssueStore: issueStore,
+            socketManager: { broadcastToRoom },
+          }),
+        );
+        const inputs = entry === 'route' ? sample.messages.slice(0, -1) : sample.messages;
+        let source;
+        for (const [index, content] of inputs.entries())
+          source = messageStore.append({
+            userId: 'owner',
+            catId: null,
+            content,
+            mentions: ['opus'],
+            threadId,
+            timestamp: Date.now() + index,
+          });
+        const message = sample.messages.at(-1);
+        const { targetCats, intent } = await router.resolveTargetsAndIntent(message, threadId);
+        const stream =
+          entry === 'route'
+            ? router.route('owner', message, threadId)
+            : router.routeExecution('owner', message, threadId, source.id, targetCats, intent, {
+                ownerAuthProvenance: 'unknown',
+                humanDispositionInvocationOrigin: 'unknown',
+                onPromptMessagesExposed: async () => undefined,
+                frustrationAutoIssueEligible: true,
+              });
+        const output = [];
+        for await (const event of stream) output.push(event);
+        assert.equal(service.invoke.mock.callCount(), 1);
+        assert.ok(output.some((event) => event.type === 'text'));
+        assert.ok(output.some((event) => event.type === 'done'));
+        assert.equal(create.mock.callCount(), 0);
+        assert.deepEqual(await issueStore.listByThread(threadId), []);
+        assert.equal(
+          messageStore._rows.some((row) => row.source?.connector === 'frustration-auto-issue'),
+          false,
+        );
+        assert.equal(
+          broadcastToRoom.mock.calls.some(
+            (call) =>
+              call.arguments[1] === 'connector_message' &&
+              call.arguments[2]?.source?.connector === 'frustration-auto-issue',
+          ),
+          false,
+        );
+      });
+    }
+  }
+});
+
 function createAvailabilityConfigProject(availabilityOverrides = {}) {
   const projectRoot = mkdtempSync(resolve(tmpdir(), 'agent-router-availability-'));
   tempProjectRoots.push(projectRoot);
@@ -228,7 +330,7 @@ function createAvailabilityConfigProject(availabilityOverrides = {}) {
     variants: [
       {
         id: `${id}-default`,
-        provider,
+        clientId: provider,
         defaultModel,
         mcpSupport: true,
         cli: {
@@ -307,12 +409,189 @@ async function withAvailabilityConfig(availabilityOverrides, fn) {
 }
 
 after(() => {
+  if (previousDefaultCatId === undefined) delete process.env.DEFAULT_CAT_ID;
+  else process.env.DEFAULT_CAT_ID = previousDefaultCatId;
   for (const projectRoot of tempProjectRoots) {
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });
 
 describe('AgentRouter', () => {
+  for (const mode of ['serial', 'parallel'])
+    test(`${mode} releases pinned services when Host capacity preflight fails before launch`, async () => {
+      const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+      const pinned = ['opus', 'codex'].map((catId) => ({
+        ...createMockAgentService(catId, 'must not launch'),
+        contextCapability() {
+          throw new Error('pin capacity preflight refused');
+        },
+        releaseInvocation: mock.fn(async () => {}),
+      }));
+      const roots = pinned.map((view) => ({ forInvocation: mock.fn(() => view), invoke: view.invoke }));
+      const router = new AgentRouter(
+        await migrateRouterOpts({
+          claudeService: roots[0],
+          codexService: roots[1],
+          geminiService: createMockAgentService('gemini'),
+          registry: createMockRegistry(),
+          messageStore: createMockMessageStore(),
+          threadStore: createMockThreadStore(),
+        }),
+      );
+      await assert.rejects(async () => {
+        for await (const _ of router.route(
+          'owner',
+          `${mode === 'parallel' ? '#ideate' : '#execute'} @opus @codex blocked`,
+          `pin-refusal-${mode}`,
+        )) {
+        }
+      }, /pin capacity preflight refused/);
+      let selected = 0;
+      for (let i = 0; i < roots.length; i++) {
+        assert.equal(pinned[i].invoke.mock.callCount(), 0);
+        if (!roots[i].forInvocation.mock.callCount()) continue;
+        selected++;
+        assert.ok(
+          pinned[i].releaseInvocation.mock.callCount() > 0,
+          'every selected service releases even without an iterator',
+        );
+      }
+      assert.ok(selected > 0);
+    });
+
+  for (const mode of ['serial', 'parallel'])
+    test(`${mode} reads native L0 and launches from the same invocation view`, async () => {
+      const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+      let unpinnedL0Reads = 0;
+      const pinned = ['opus', 'codex'].map((catId) => ({
+        ...createMockAgentService(catId, 'pinned response'),
+        injectsL0Natively: mock.fn(() => true),
+      }));
+      const roots = pinned.map((view) => ({
+        forInvocation: mock.fn(() => view),
+        injectsL0Natively: () => {
+          unpinnedL0Reads++;
+          return false;
+        },
+        async *invoke() {
+          assert.fail('mutable root carrier was launched');
+        },
+      }));
+      const router = new AgentRouter(
+        await migrateRouterOpts({
+          claudeService: roots[0],
+          codexService: roots[1],
+          geminiService: createMockAgentService('gemini'),
+          registry: createMockRegistry(),
+          messageStore: createMockMessageStore(),
+          threadStore: createMockThreadStore(),
+        }),
+      );
+      const message = `${mode === 'parallel' ? '#ideate' : '#execute'} @opus @codex test snapshot`;
+      for await (const _event of router.route('user-1', message, `pinned-${mode}`)) {
+        /* consume real routing */
+      }
+      assert.equal(unpinnedL0Reads, 0, 'L0 assembly must not read the mutable root');
+      for (let i = 0; i < pinned.length; i++) {
+        assert.equal(roots[i].forInvocation.mock.callCount(), 1);
+        assert.ok(pinned[i].injectsL0Natively.mock.callCount() > 0);
+        assert.equal(pinned[i].invoke.mock.callCount(), 1);
+      }
+    });
+  test('routeExecution preserves lifecycle and active-run callbacks through the strategy boundary', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const lifecycleMessageStore = new MessageStore();
+    const lifecycleStarted = mock.fn(async (input) => {
+      const response = await lifecycleMessageStore.append({
+        from: { kind: 'agent', catId: input.catId },
+        userId: input.userId,
+        content: '',
+        mentions: [],
+        origin: 'stream',
+        timestamp: input.startedAt,
+        threadId: input.threadId,
+        lifecycle: {
+          kind: 'response',
+          orderKey: `${input.startedAt}:${input.invocationId}`,
+          invocationId: input.invocationId,
+          targetId: input.catId,
+          inputEntryIds: ['entry-1'],
+          inputMessageIds: ['source-1'],
+          status: 'processing',
+          startedAt: input.startedAt,
+        },
+      });
+      return {
+        responseMessageId: response.id,
+        priorFrontierMessageId: null,
+        activeRun: {
+          threadId: input.threadId,
+          targetId: input.catId,
+          invocationId: input.invocationId,
+          responseMessageId: response.id,
+          inputEntryIds: ['entry-1'],
+          inputMessageIds: ['source-1'],
+          privateInputEntryIds: [],
+          startedAt: input.startedAt,
+        },
+      };
+    });
+    const activeRunReady = mock.fn();
+    const opusService = {
+      invoke: mock.fn(async function* (_prompt, options) {
+        options.activeRunDispatch?.register({
+          invocationId: options.invocationId,
+          capabilities: { append: true, steer: true },
+          handle: { threadId: 'callback-thread', turnId: 'provider-turn-1' },
+          dispatch: async () => ({
+            accepted: true,
+            handle: { threadId: 'callback-thread', turnId: 'provider-turn-1' },
+          }),
+        });
+        yield { type: 'done', catId: 'opus', invocationId: options.invocationId, timestamp: Date.now() };
+      }),
+    };
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: opusService,
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: lifecycleMessageStore,
+        threadStore: createMockThreadStore({ 'callback-thread': ['opus'] }),
+      }),
+    );
+
+    const output = [];
+    for await (const message of router.routeExecution(
+      'user-1',
+      'source body',
+      'callback-thread',
+      'source-1',
+      ['opus'],
+      { intent: 'execute', promptTags: [] },
+      {
+        ownerAuthProvenance: 'strict',
+        humanDispositionInvocationOrigin: 'direct_owner',
+        parentInvocationId: 'parent-1',
+        onPromptMessagesExposed: async () => [],
+        onLifecycleInvocationStarted: lifecycleStarted,
+        onAgentClientActiveRunReady: activeRunReady,
+      },
+    )) {
+      output.push(message);
+    }
+
+    assert.equal(lifecycleStarted.mock.calls.length, 1);
+    assert.equal(activeRunReady.mock.calls.length, 1);
+    assert.equal(activeRunReady.mock.calls[0].arguments[0].catId, 'opus');
+    assert.equal(
+      output.some((message) => message.lifecycleResponseMessageId),
+      true,
+    );
+  });
+
   test('routingPolicy(review) avoids opus when default routing would pick opus', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
@@ -515,6 +794,34 @@ describe('AgentRouter', () => {
     assert.equal(mockGeminiService.invoke.mock.callCount(), 0);
   });
 
+  test('projects explicit ideate intent to the selected provider invocation', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    let invocationOptions;
+    const mockCodexService = {
+      invoke: mock.fn(async function* (_prompt, options) {
+        invocationOptions = options;
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      }),
+    };
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: mockCodexService,
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+      }),
+    );
+
+    for await (const _ of router.route('user-1', '#ideate @codex ask me one question before proceeding')) {
+      // consume
+    }
+
+    assert.equal(mockCodexService.invoke.mock.callCount(), 1);
+    assert.deepEqual(invocationOptions?.routeIntent, { intent: 'ideate', explicit: true });
+  });
+
   test('routes to opus when Chinese mention @布偶猫 is used', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
@@ -713,7 +1020,7 @@ describe('AgentRouter', () => {
       messages.push(msg);
     }
 
-    // In play mode, stream thinking is isolated between cats.
+    // Inside one serial route, play mode preserves independent first-pass reasoning.
     assert.ok(
       !codexReceivedPrompt.includes('Opus response'),
       'Codex prompt should NOT include Opus stream response in play mode',
@@ -1199,6 +1506,63 @@ describe('AgentRouter', () => {
     assert.equal(result.targetCats.length, 1, 'F078: only last replier, not all participants');
   });
 
+  test('#267: never-responded cat excluded from healthy replier fallback', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const mockClaudeService = createMockAgentService('opus');
+    const mockCodexService = createMockAgentService('codex');
+    const mockGeminiService = createMockAgentService('gemini');
+
+    // codex is a participant but has never responded (messageCount=0)
+    // opus has responded and is healthy
+    const threadStore = createMockThreadStore({ t_never: ['codex', 'opus'] });
+    threadStore.updateParticipantActivity('t_never', 'opus'); // opus responded
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: mockClaudeService,
+        codexService: mockCodexService,
+        geminiService: mockGeminiService,
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('hello?', 't_never');
+    assert.equal(result.targetCats[0], 'opus', 'opus selected — codex never responded');
+    assert.equal(result.targetCats.length, 1);
+  });
+
+  test('#267: unhealthy last replier skipped, falls back to next healthy', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const mockClaudeService = createMockAgentService('opus');
+    const mockCodexService = createMockAgentService('codex');
+    const mockGeminiService = createMockAgentService('gemini');
+
+    // codex responded last but errored; opus responded earlier and is healthy
+    const threadStore = createMockThreadStore({ t_err: ['opus', 'codex'] });
+    threadStore.updateParticipantActivity('t_err', 'opus');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_err', 'codex', false); // unhealthy
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: mockClaudeService,
+        codexService: mockCodexService,
+        geminiService: mockGeminiService,
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('what happened?', 't_err');
+    assert.equal(result.targetCats[0], 'opus', 'opus selected — codex was unhealthy');
+    assert.equal(result.targetCats.length, 1);
+  });
+
   test('no @ mention + no participants defaults to opus', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
@@ -1227,7 +1591,7 @@ describe('AgentRouter', () => {
     assert.equal(mockGeminiService.invoke.mock.callCount(), 0);
   });
 
-  test('@three cats then no-@ routes to last replier only (F078)', async () => {
+  test('@three cats then no-@ routes to one cat from last user-message mentions (F078 superseded by F194 Z6 AC-Z16)', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
     const mockClaudeService = createMockAgentService('opus');
@@ -1255,17 +1619,18 @@ describe('AgentRouter', () => {
     assert.equal(mockCodexService.invoke.mock.callCount(), 1);
     assert.equal(mockGeminiService.invoke.mock.callCount(), 1);
 
-    // Second: no @ — F078: routes to last replier only (not all three)
-    // The last participant added was gemini (serial order: opus → codex → gemini)
+    // Second: no @
+    // F078 (旧语义): 路由到 last replier 的单只猫
+    // F194 Phase Z6 AC-Z16 (修正语义): 候选集来自上一条 user message 的 mentions，
+    // 但 no-@ fallback 只召唤一只确定的猫（first routable mention），不会把上一轮
+    // parallel ideate 的全量 targetCats 自动延续成新一轮并发。
     for await (const _ of router.route('user-1', 'what about this?', 'thread_x')) {
     }
 
-    // Only one cat should be called again (the most recent replier)
-    const totalSecondRound =
-      mockClaudeService.invoke.mock.callCount() +
-      mockCodexService.invoke.mock.callCount() +
-      mockGeminiService.invoke.mock.callCount();
-    assert.equal(totalSecondRound, 4, 'F078: 3 from first round + 1 from second (last replier only)');
+    // After Z6: only the first routable previous mention is called again.
+    assert.equal(mockClaudeService.invoke.mock.callCount(), 2);
+    assert.equal(mockCodexService.invoke.mock.callCount(), 1);
+    assert.equal(mockGeminiService.invoke.mock.callCount(), 1);
   });
 
   test('route with explicit threadId passes it to messageStore.append', async () => {
@@ -1399,7 +1764,12 @@ describe('AgentRouter', () => {
 
   test('passes workingDirectory when thread has non-default projectPath', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
-    const projectPath = resolve(process.cwd(), '..', '..');
+    const { findMonorepoRoot } = await import('../dist/utils/monorepo-root.js');
+    // Keep this path inside the host repo: this test covers workingDirectory
+    // propagation, not the external-project governance gate.
+    const projectPath = findMonorepoRoot();
+    const previousAllowedRoots = process.env.PROJECT_ALLOWED_ROOTS;
+    const previousAllowedRootsAppend = process.env.PROJECT_ALLOWED_ROOTS_APPEND;
 
     let receivedOptions = null;
     const mockClaudeService = {
@@ -1428,12 +1798,22 @@ describe('AgentRouter', () => {
       }),
     );
 
-    for await (const _ of router.route('user-1', '@opus hello', 'thread-proj')) {
-      // consume
-    }
+    process.env.PROJECT_ALLOWED_ROOTS = projectPath;
+    process.env.PROJECT_ALLOWED_ROOTS_APPEND = 'true';
+    try {
+      for await (const _ of router.route('user-1', '@opus hello', 'thread-proj')) {
+        // consume
+      }
 
-    assert.ok(receivedOptions);
-    assert.equal(receivedOptions.workingDirectory, projectPath);
+      assert.ok(receivedOptions);
+      assert.equal(receivedOptions.workingDirectory, projectPath);
+    } finally {
+      if (previousAllowedRoots === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
+      else process.env.PROJECT_ALLOWED_ROOTS = previousAllowedRoots;
+
+      if (previousAllowedRootsAppend === undefined) delete process.env.PROJECT_ALLOWED_ROOTS_APPEND;
+      else process.env.PROJECT_ALLOWED_ROOTS_APPEND = previousAllowedRootsAppend;
+    }
   });
 
   test('does NOT pass workingDirectory when thread has default projectPath', async () => {
@@ -1503,21 +1883,29 @@ describe('AgentRouter', () => {
     assert.ok(receivedOptions);
     assert.deepEqual(receivedOptions.auditContext, {
       invocationId: 'inv-1',
+      executionId: 'inv-1',
       threadId: 'thread-audit',
       userId: 'user-1',
       catId: 'opus',
     });
   });
 
-  test('identity injection: opus prompt contains 布偶猫', async () => {
+  test('F203 Phase C: provider WITHOUT native L0 still gets full static identity in user-message prompt', async () => {
+    // 云端 Codex P1-cloud-1: only providers that explicitly expose
+    // injectsL0Natively() inject L0 natively (--system-prompt-file / -c
+    // developer_instructions). Providers without that marker (GeminiAgentService,
+    // Antigravity, CatAgentService, A2A, OpenCode, Kimi…) still rely on the
+    // user-message `params.systemPrompt` prepend for identity/家规. The route
+    // layer must consult `service.injectsL0Natively?.()` and keep FULL static
+    // identity for non-native services — pack-only-everywhere would orphan
+    // 9 of 11 providers.
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
     let opusReceivedPrompt = '';
-    let _opusReceivedOptions;
     const mockClaudeService = {
-      invoke: mock.fn(async function* (prompt, options) {
+      // Intentionally NO injectsL0Natively — represents a non-native provider.
+      invoke: mock.fn(async function* (prompt) {
         opusReceivedPrompt = prompt;
-        _opusReceivedOptions = options;
         yield { type: 'text', catId: 'opus', content: 'hi', timestamp: Date.now() };
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
       }),
@@ -1537,10 +1925,78 @@ describe('AgentRouter', () => {
       // consume
     }
 
-    // Static identity (布偶猫, Anthropic) prepended to prompt by invoke-single-cat (new session)
-    assert.ok(opusReceivedPrompt.includes('布偶猫'), 'Opus prompt should contain 布偶猫');
-    assert.ok(opusReceivedPrompt.includes('Anthropic'), 'Opus prompt should mention Anthropic');
-    assert.ok(opusReceivedPrompt.includes('hello'), 'Opus prompt should contain original message');
+    // Provider has no native L0 path → static identity MUST ride user message.
+    assert.ok(
+      opusReceivedPrompt.includes('由 Anthropic 提供'),
+      'static provider/identity line MUST be in user-message prompt for non-native-L0 provider',
+    );
+    assert.ok(
+      opusReceivedPrompt.includes('## 协作\n'),
+      'static A2A collaboration section MUST be present for non-native-L0 provider',
+    );
+    assert.ok(
+      opusReceivedPrompt.includes('A2A 球权检查'),
+      'dynamic A2A long anchors MUST remain for non-native-L0 providers',
+    );
+    assert.ok(
+      opusReceivedPrompt.includes('下一棒传球决策树'),
+      'baton decision tree MUST remain for non-native-L0 providers',
+    );
+    assert.ok(opusReceivedPrompt.includes('Identity: 布偶猫'), 'dynamic invocation identity pin');
+    assert.ok(opusReceivedPrompt.includes('hello'), 'original message');
+  });
+
+  test('F203 Phase C: provider WITH injectsL0Natively=true gets pack-only (non-pack via native channel)', async () => {
+    // The intended behavior for ClaudeAgentService, ClaudeBgCarrierService,
+    // and CodexAgent: static identity travels via --system-prompt-file / -c
+    // developer_instructions, not via user message. Route layer detects via
+    // service.injectsL0Natively?.().
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    let opusReceivedPrompt = '';
+    const mockNativeL0Service = {
+      injectsL0Natively: () => true,
+      invoke: mock.fn(async function* (prompt) {
+        opusReceivedPrompt = prompt;
+        yield { type: 'text', catId: 'opus', content: 'hi', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      }),
+    };
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: mockNativeL0Service,
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+      }),
+    );
+
+    for await (const _ of router.route('user-1', '@opus hello')) {
+      // consume
+    }
+
+    // Provider injects L0 natively → user message must NOT carry static identity.
+    assert.ok(
+      !opusReceivedPrompt.includes('由 Anthropic 提供'),
+      'static provider/identity line must NOT duplicate in user message when provider injects natively',
+    );
+    assert.ok(
+      !opusReceivedPrompt.includes('## 协作\n'),
+      'static A2A section must NOT duplicate when provider injects natively',
+    );
+    assert.ok(
+      !opusReceivedPrompt.includes('A2A 球权检查'),
+      'dynamic A2A long anchors must NOT duplicate when provider injects natively',
+    );
+    assert.ok(
+      !opusReceivedPrompt.includes('下一棒传球决策树'),
+      'baton decision tree must NOT duplicate when provider injects natively',
+    );
+    // Dynamic pin + message still flow.
+    assert.ok(opusReceivedPrompt.includes('Identity: 布偶猫'));
+    assert.ok(opusReceivedPrompt.includes('hello'));
   });
 
   test('identity injection: codex prompt in serial chain contains 缅因猫 (#execute)', async () => {
@@ -1585,16 +2041,20 @@ describe('AgentRouter', () => {
 
     let opusPrompt = '';
     let codexPrompt = '';
+    let opusOptions;
+    let codexOptions;
     const mockClaudeService = {
-      invoke: mock.fn(async function* (prompt) {
+      invoke: mock.fn(async function* (prompt, options) {
         opusPrompt = prompt;
+        opusOptions = options;
         yield { type: 'text', catId: 'opus', content: 'Opus thinks', timestamp: Date.now() };
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
       }),
     };
     const mockCodexService = {
-      invoke: mock.fn(async function* (prompt) {
+      invoke: mock.fn(async function* (prompt, options) {
         codexPrompt = prompt;
+        codexOptions = options;
         yield { type: 'text', catId: 'codex', content: 'Codex thinks', timestamp: Date.now() };
         yield { type: 'done', catId: 'codex', timestamp: Date.now() };
       }),
@@ -1623,6 +2083,8 @@ describe('AgentRouter', () => {
     assert.ok(codexPrompt.includes('独立思考'), 'Codex should get parallel mode');
     assert.ok(!opusPrompt.includes('被召唤'), 'Opus should NOT have serial chain text');
     assert.ok(!codexPrompt.includes('被召唤'), 'Codex should NOT have serial chain text');
+    assert.deepEqual(opusOptions?.routeIntent, { intent: 'ideate', explicit: false });
+    assert.deepEqual(codexOptions?.routeIntent, { intent: 'ideate', explicit: false });
 
     // Both texts should be present
     const textMsgs = messages.filter((m) => m.type === 'text');
@@ -1776,7 +2238,9 @@ describe('AgentRouter', () => {
 
     // User message + 2 cat responses = 3 appends
     assert.equal(appendedMessages.length, 3);
-    const appendedCatIds = appendedMessages.map((m) => m.catId).filter(Boolean);
+    const appendedCatIds = appendedMessages
+      .filter((message) => message.from?.kind === 'agent')
+      .map((message) => message.from.catId);
     assert.ok(appendedCatIds.includes('opus'), 'Opus response should be stored');
     assert.ok(appendedCatIds.includes('codex'), 'Codex response should be stored');
   });
@@ -2152,6 +2616,30 @@ describe('F078: Group mentions', () => {
     assert.ok(targetCats.includes('gemini'));
   });
 
+  test('inline @all routes to all registered cats without a false unknown warning', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+      }),
+    );
+
+    const { targetCats, hasMentions, routing_warnings } = await router.resolveTargetsAndIntent(
+      '大家一起看看 @all',
+      't1',
+    );
+    assert.equal(hasMentions, true);
+    assert.ok(targetCats.includes('opus'));
+    assert.ok(targetCats.includes('codex'));
+    assert.ok(targetCats.includes('gemini'));
+    assert.deepStrictEqual(routing_warnings, []);
+  });
+
   test('@all skips unavailable cats', async () => {
     await withAvailabilityConfig({ codex: false }, async () => {
       const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
@@ -2275,6 +2763,30 @@ describe('F078: Group mentions', () => {
     assert.deepStrictEqual(new Set(targetCats), new Set(['opus', 'codex']));
   });
 
+  test('inline @thread routes to current thread participants without a false unknown warning', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore({ t1: ['opus', 'codex'] });
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats, hasMentions, routing_warnings } = await router.resolveTargetsAndIntent(
+      '大家一起看看 @thread',
+      't1',
+    );
+    assert.equal(hasMentions, true);
+    assert.deepStrictEqual(new Set(targetCats), new Set(['opus', 'codex']));
+    assert.deepStrictEqual(routing_warnings, []);
+  });
+
   test('@本帖 routes to thread participants', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
@@ -2373,6 +2885,24 @@ describe('F078: Group mentions', () => {
     assert.ok(!targetCats.includes('gemini'), '@allison should not broadcast to all cats');
   });
 
+  test('does not turn ordinary Chinese prose after a stray inline @ into one giant missing handle', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('你@一下缅因猫和狸花猫打个招呼我看看');
+
+    assert.deepEqual(result.routing_warnings, []);
+    assert.deepEqual(result.targetCats, ['opus'], 'ordinary prose keeps normal fallback routing');
+  });
+
   test('@threadsafe does NOT trigger @thread (token boundary)', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
@@ -2448,6 +2978,100 @@ describe('F078: Group mentions', () => {
     // 咪 is not a boundary char — should NOT match @全体布偶猫
     assert.equal(targetCats.length, 1, '@全体布偶猫咪 should not trigger breed group');
   });
+
+  test('@thread + explicit @gemini unions both (group mention does not short-circuit)', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    // Thread t1 has opus + codex as participants; gemini is NOT a participant
+    const threadStore = createMockThreadStore({ t1: ['opus', 'codex'] });
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('@thread @gemini 大家看看', 't1');
+    // Should include thread participants (opus, codex) AND the explicit @gemini
+    assert.ok(targetCats.includes('opus'), 'thread participant opus should be included');
+    assert.ok(targetCats.includes('codex'), 'thread participant codex should be included');
+    assert.ok(targetCats.includes('gemini'), 'explicitly mentioned @gemini should be included');
+    assert.equal(targetCats.length, 3, 'should have exactly 3 unique cats');
+  });
+
+  test('@gemini @thread respects message order (explicit mention before group)', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    // Thread t1 has opus + codex as participants; gemini is NOT a participant
+    const threadStore = createMockThreadStore({ t1: ['opus', 'codex'] });
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    // "@gemini" at position 0, "@thread" at position 9 — gemini should come FIRST
+    const { targetCats } = await router.resolveTargetsAndIntent('@gemini @thread 大家看看', 't1');
+    assert.equal(targetCats.length, 3, 'should have exactly 3 unique cats');
+    assert.equal(targetCats[0], 'gemini', 'gemini appears first in message → first in routing order');
+    // thread participants follow after gemini
+    assert.ok(targetCats.includes('opus'), 'thread participant opus should be included');
+    assert.ok(targetCats.includes('codex'), 'thread participant codex should be included');
+  });
+
+  test('@thread @gemini respects message order (group mention before explicit)', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore({ t1: ['opus', 'codex'] });
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    // "@thread" at position 0, "@gemini" at position 9 — thread participants first, then gemini
+    const { targetCats } = await router.resolveTargetsAndIntent('@thread @gemini 大家看看', 't1');
+    assert.equal(targetCats.length, 3);
+    // gemini (explicit, not in thread) should be LAST since @thread comes first
+    assert.equal(targetCats[targetCats.length - 1], 'gemini', 'gemini after group → last in routing order');
+    assert.ok(targetCats.indexOf('opus') < targetCats.indexOf('gemini'), 'thread participant opus before gemini');
+  });
+
+  test('@all + explicit @codex deduplicates (no duplicate entries)', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('@all @codex 大家好');
+    // @all already includes codex — explicit @codex should NOT create a duplicate
+    assert.ok(targetCats.includes('opus'));
+    assert.ok(targetCats.includes('codex'));
+    assert.ok(targetCats.includes('gemini'));
+    const codexCount = targetCats.filter((c) => c === 'codex').length;
+    assert.equal(codexCount, 1, '@codex should appear exactly once (dedup)');
+  });
 });
 
 // ────────────────────────────────────────────────────────────────
@@ -2483,7 +3107,7 @@ describe('#58: preferredCats candidate scope (not dispatch list)', () => {
     assert.deepStrictEqual(targetCats, ['codex'], 'should route to last replier, not all preferred cats');
   });
 
-  test('last replier NOT in preferred set → routes to first preferred cat only', async () => {
+  test('last replier NOT in preferred set → still routes to last replier (user mental model)', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
     const threadStore = createMockThreadStore(
@@ -2509,8 +3133,8 @@ describe('#58: preferredCats candidate scope (not dispatch list)', () => {
     const { targetCats } = await router.resolveTargetsAndIntent('hello', 't1');
     assert.deepStrictEqual(
       targetCats,
-      ['opus'],
-      'should route to first preferred cat when last replier is outside preferred set',
+      ['codex'],
+      'should route to last replier even when outside preferred set — user expects continuity',
     );
   });
 
@@ -2659,6 +3283,157 @@ describe('#58: preferredCats candidate scope (not dispatch list)', () => {
     assert.equal(targetCats.length, 1, 'without #ideate, should still route to single cat');
   });
 
+  for (const strategy of ['serial', 'parallel']) {
+    test(`${strategy} reports a known unavailable member's cause and clears it after registry recovery`, async () => {
+      const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+      const { AgentRegistry } = await import('../dist/domains/cats/services/agents/registry/AgentRegistry.js');
+      const registry = new AgentRegistry();
+      const healthyService = createMockAgentService('codex');
+      registry.register('codex', healthyService);
+      registry.markUnavailable('opus', {
+        code: 'rejected-account-binding',
+        message: 'account "fixture" has a torn credential without account metadata; reconcile before use',
+      });
+      const messageStore = createMockMessageStore();
+      const router = new AgentRouter({
+        agentRegistry: registry,
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore: createMockThreadStore(),
+      });
+      const message = `${strategy === 'parallel' ? '#ideate' : '#execute'} @opus @codex hello`;
+      const failures = [];
+      const done = [];
+      for await (const event of router.route('user-1', message, 'unavailable-test')) {
+        if (event.type === 'error') {
+          assert.equal(event.catId, 'opus');
+          failures.push(event.error ?? event.content);
+        }
+        if (event.type === 'done') done.push(event);
+      }
+      assert.match(failures.join('\n'), /opus.*rejected-account-binding.*torn credential without account metadata/);
+      assert.doesNotMatch(failures.join('\n'), /Unknown cat ID/);
+      assert.equal(registry.has('opus'), false, 'a diagnostic must not make a member routable');
+      assert.equal(healthyService.invoke.mock.callCount(), 1, 'unavailable members must not block healthy siblings');
+      assert.ok(
+        done.some((event) => event.catId === 'opus'),
+        'unavailable member must settle its stream',
+      );
+      assert.ok(
+        done.some((event) => event.isFinal),
+        'the batch must settle',
+      );
+      assert.ok(
+        messageStore
+          .getByThread('unavailable-test')
+          .some((row) => row.userId === 'system' && /rejected-account-binding.*torn credential/.test(row.content)),
+        'the cause must survive a page reload',
+      );
+
+      const fenceCalls = [];
+      const persistenceContext = { errors: [] };
+      const source = messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        threadId: 'unavailable-fenced',
+        content: message,
+        mentions: ['opus', 'codex'],
+        timestamp: Date.now(),
+      });
+      const { targetCats, intent } = await router.resolveTargetsAndIntent(message, 'unavailable-fenced');
+      for await (const _event of router.routeExecution(
+        'user-1',
+        message,
+        'unavailable-fenced',
+        source.id,
+        targetCats,
+        intent,
+        {
+          ownerAuthProvenance: 'unknown',
+          humanDispositionInvocationOrigin: 'unknown',
+          onPromptMessagesExposed: async () => undefined,
+          persistenceContext,
+          beforeOutputCommit: async (catId) => {
+            fenceCalls.push(catId);
+            return catId !== 'opus';
+          },
+        },
+      )) {
+      }
+      assert.equal(fenceCalls.filter((catId) => catId === 'opus').length, 1);
+      assert.equal(persistenceContext.actionOutputCommitRejected, true);
+      assert.equal(healthyService.invoke.mock.callCount(), 2, 'rejected output fence must not block a healthy sibling');
+      assert.equal(
+        messageStore
+          .getByThread('unavailable-fenced')
+          .some((row) => row.userId === 'system' && /rejected-account-binding/.test(row.content)),
+        false,
+        'a retired generation must not persist its diagnostic',
+      );
+
+      registry.reset();
+      const recovered = createMockAgentService('opus');
+      registry.register('opus', recovered);
+      registry.register('codex', healthyService);
+      router.refreshFromRegistry(registry);
+      for await (const event of router.route('user-1', '@opus hello', 'unavailable-recovered')) {
+        assert.notEqual(event.type, 'error', 'recovery must clear the old registration diagnosis');
+      }
+      assert.equal(recovered.invoke.mock.callCount(), 1);
+    });
+
+    test(`${strategy} preserves ordinary provider errors when the output fence rejects`, async () => {
+      const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+      const { AgentRegistry } = await import('../dist/domains/cats/services/agents/registry/AgentRegistry.js');
+      const registry = new AgentRegistry();
+      const healthyService = createMockAgentService('codex');
+      registry.register('codex', healthyService);
+      registry.register('opus', {
+        invoke: mock.fn(async function* () {
+          yield { type: 'error', catId: 'opus', error: 'fixture provider failure', timestamp: Date.now() };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        }),
+      });
+      const messageStore = createMockMessageStore();
+      const router = new AgentRouter({
+        agentRegistry: registry,
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore: createMockThreadStore(),
+      });
+      const threadId = 'provider-error-fenced';
+      const message = `${strategy === 'parallel' ? '#ideate' : '#execute'} @opus @codex hello`;
+      const source = messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        threadId,
+        content: message,
+        mentions: ['opus', 'codex'],
+        timestamp: Date.now(),
+      });
+      const { targetCats, intent } = await router.resolveTargetsAndIntent(message, threadId);
+      const fenceCalls = [];
+      for await (const _event of router.routeExecution('user-1', message, threadId, source.id, targetCats, intent, {
+        ownerAuthProvenance: 'unknown',
+        humanDispositionInvocationOrigin: 'unknown',
+        onPromptMessagesExposed: async () => undefined,
+        beforeOutputCommit: async (catId) => {
+          fenceCalls.push(catId);
+          return catId !== 'opus';
+        },
+      })) {
+      }
+      assert.equal(fenceCalls.filter((catId) => catId === 'opus').length, 1);
+      assert.equal(healthyService.invoke.mock.callCount(), 1);
+      assert.ok(
+        messageStore
+          .getByThread(threadId)
+          .some((row) => row.userId === 'system' && row.content === 'Error: fixture provider failure'),
+        'registration diagnostics must not change ordinary provider error persistence',
+      );
+    });
+  }
+
   test('refreshFromRegistry updates routable service set after runtime catalog changes', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
     const { AgentRegistry } = await import('../dist/domains/cats/services/agents/registry/AgentRegistry.js');
@@ -2688,4 +3463,814 @@ describe('#58: preferredCats candidate scope (not dispatch list)', () => {
     const after = await router.resolveTargetsAndIntent('@codex review this', 't1');
     assert.deepEqual(after.targetCats, ['codex'], 'codex should be routable after refresh');
   });
+
+  // F194 Phase Z5 AC-Z16: 无 @ fallback 优先用上一条 user message 的 mentions，
+  // 不让 thread 里其他猫的发言（如 vision guard）抢路由 fallback。
+  // co-creator alpha catch 2026-05-10 04:51："明明 at 的最后一只猫是 47 or 55 但是召唤出来的却是 46"
+  // user message 严格定义：userId !== null && catId === null（cat-to-cat handoff/vision guard 不计）
+  test('AC-Z16: no-mention msg falls back to PREVIOUS user message mentions, not thread activity', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const messageStore = createMockMessageStore();
+    const baseTs = Date.now() - 5000; // recent — within Z5 1h time window
+    // user msg1 @ codex + opus
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: '@codex @opus think about this',
+      mentions: ['codex', 'opus'],
+      timestamp: baseTs,
+      threadId: 't_z16',
+    });
+    // gemini (vision guard cat) replied — would normally win lastMessageAt
+    messageStore.append({
+      userId: null,
+      catId: 'gemini',
+      content: '愿景守护对照表 done',
+      mentions: [],
+      timestamp: baseTs + 100,
+      threadId: 't_z16',
+    });
+
+    const threadStore = createMockThreadStore({ t_z16: ['codex', 'opus', 'gemini'] });
+    threadStore.updateParticipantActivity('t_z16', 'codex');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_z16', 'opus');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_z16', 'gemini'); // gemini most recent → would win pre-Z5
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore,
+      }),
+    );
+
+    // user msg2 (current message under resolution) has no @
+    const result = await router.resolveTargetsAndIntent('继续刚才的讨论', 't_z16');
+    // GREEN after Z6: fallback picks one deterministic cat from prev user mentions [codex, opus].
+    // RED before Z5: gemini wins via lastMessageAt → wrong cat.
+    // RED in Z5: both codex+opus are invoked → over-broad parallel fallback.
+    assert.deepEqual(result.targetCats, ['codex']);
+    assert.ok(
+      !result.targetCats.includes('gemini'),
+      `gemini was vision guard cat, NOT user-mentioned — must not win fallback. got ${JSON.stringify(result.targetCats)}`,
+    );
+  });
+
+  test('AC-Z16: cat-to-cat handoff messages (catId-bearing) are NOT counted as user messages', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const messageStore = createMockMessageStore();
+    const baseTs = Date.now() - 5000; // recent — within Z5 1h time window
+    // user msg @ opus
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: '@opus do this',
+      mentions: ['opus'],
+      timestamp: baseTs,
+      threadId: 't_z16b',
+    });
+    // opus replied with @codex (A2A handoff) — has both userId AND catId, NOT a user message
+    messageStore.append({
+      userId: null,
+      catId: 'opus',
+      content: '@codex 你来 review',
+      mentions: ['codex'],
+      timestamp: baseTs + 100,
+      threadId: 't_z16b',
+    });
+
+    const threadStore = createMockThreadStore({ t_z16b: ['opus', 'codex'] });
+    threadStore.updateParticipantActivity('t_z16b', 'opus');
+    threadStore.updateParticipantActivity('t_z16b', 'codex');
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore,
+      }),
+    );
+
+    // user msg2 no @ — fallback should use prev USER msg's mentions [opus], NOT cat-to-cat A2A's mentions [codex]
+    const result = await router.resolveTargetsAndIntent('谢谢', 't_z16b');
+    assert.deepEqual(
+      result.targetCats,
+      ['opus'],
+      'fallback uses last user msg mentions [opus], ignores cat A2A mentions',
+    );
+  });
+
+  test('AC-Z16 R2: async messageStore (Redis-style) — getByThread returns Promise, must be awaited (砚砚 R1 P1#1)', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    // Async messageStore mock — mirror RedisMessageStore.getByThread Promise return
+    const userMsg = {
+      id: 'msg-async-1',
+      userId: 'user-1',
+      catId: null,
+      content: '@codex 来 review',
+      mentions: ['codex'],
+      timestamp: Date.now() - 5000, // recent — within Z5 1h time window
+      threadId: 't_async_z16',
+    };
+    const asyncMessageStore = {
+      append: () => userMsg,
+      getById: async () => userMsg,
+      getRecent: async () => [userMsg],
+      getMentionsFor: async () => [],
+      getBefore: async () => [],
+      getByThread: async () => [userMsg], // ← Promise return — Z5 R1 was missing await
+      getByThreadAfter: async () => [],
+      getByThreadBefore: async () => [],
+      deleteByThread: async () => 0,
+    };
+
+    const threadStore = createMockThreadStore({ t_async_z16: ['codex', 'opus', 'gemini'] });
+    threadStore.updateParticipantActivity('t_async_z16', 'opus');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_async_z16', 'gemini'); // gemini most recent → would抢上游 if fallback skipped
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: asyncMessageStore,
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('继续讨论', 't_async_z16');
+    // GREEN after R2 fix: await Promise → fallback returns [codex] (last user msg mentions)
+    // RED before R2 fix: Array.isArray(Promise) === false → fallback returns null → legacy
+    //   participantsWithActivity wins → gemini selected (wrong)
+    assert.deepEqual(
+      result.targetCats,
+      ['codex'],
+      'async messageStore.getByThread must be awaited; codex (last user mention) wins, not gemini (last activity)',
+    );
+  });
+
+  test('AC-Z16 R3: user @ + 6 cat/vision-guard messages between + no-@ → still finds user mention (砚砚 R2 P1)', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const messageStore = createMockMessageStore();
+    const baseTs = Date.now() - 10000; // recent enough to pass 1h window
+
+    // user msg @ codex
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: '@codex 这个怎么处理',
+      mentions: ['codex'],
+      timestamp: baseTs,
+      threadId: 't_z16_window',
+    });
+    // 6 cat/vision-guard messages between (would挤出 5-thread-message window if window 取 thread msgs)
+    for (let i = 0; i < 6; i += 1) {
+      messageStore.append({
+        userId: null,
+        catId: i % 2 === 0 ? 'gemini' : 'opus',
+        content: `cat msg ${i} (vision guard / handoff)`,
+        mentions: [],
+        timestamp: baseTs + (i + 1) * 100,
+        threadId: 't_z16_window',
+      });
+    }
+
+    const threadStore = createMockThreadStore({ t_z16_window: ['codex', 'opus', 'gemini'] });
+    threadStore.updateParticipantActivity('t_z16_window', 'codex');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_z16_window', 'opus');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_z16_window', 'gemini'); // gemini latest activity
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('继续刚才的', 't_z16_window');
+    // GREEN after R3 fix: window fetches 50 thread messages, counts up to 5 user messages,
+    //   finds first user msg with mentions → codex
+    // RED before R3 fix: window=5 thread messages = 6 cat messages full, no user msg seen →
+    //   fallback null → legacy participantsWithActivity → gemini selected (wrong)
+    assert.deepEqual(
+      result.targetCats,
+      ['codex'],
+      'window should count user messages not thread messages; cat dispatches between user @ and current msg should not push out user mention',
+    );
+  });
+
+  test('AC-Z16: the last Human mention remains the fallback after two hours', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const messageStore = createMockMessageStore();
+    const oldTs = Date.now() - 2 * 60 * 60 * 1000; // 2h ago — beyond window
+
+    // 远古 user msg @ codex
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: '@codex 老问题',
+      mentions: ['codex'],
+      timestamp: oldTs,
+      threadId: 't_z16_old',
+    });
+
+    const threadStore = createMockThreadStore({ t_z16_old: ['codex', 'opus'] });
+    threadStore.updateParticipantActivity('t_z16_old', 'opus'); // opus most recent
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('hi', 't_z16_old');
+    assert.deepEqual(result.targetCats, ['codex'], 'only a later Human mention changes the remembered recipient');
+  });
+
+  test('AC-Z16 R4: 51+ non-user messages between user @ and current → pagination still finds user mention (砚砚 R3 P1)', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const messageStore = createMockMessageStore();
+    const baseTs = Date.now() - 30000; // recent enough to pass 1h window
+
+    // user msg @ codex (oldest in thread)
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: '@codex 这个怎么处理',
+      mentions: ['codex'],
+      timestamp: baseTs,
+      threadId: 't_z16_pagination',
+    });
+    // 51 cat/vision-guard messages between — overflows any single-page lookback (50)
+    // R3's "fetch 50" still missed user mention because user @ would be page-2 territory.
+    for (let i = 0; i < 51; i += 1) {
+      messageStore.append({
+        userId: null,
+        catId: i % 2 === 0 ? 'gemini' : 'opus',
+        content: `cat msg ${i} (vision guard / handoff)`,
+        mentions: [],
+        timestamp: baseTs + (i + 1) * 10,
+        threadId: 't_z16_pagination',
+      });
+    }
+
+    const threadStore = createMockThreadStore({ t_z16_pagination: ['codex', 'opus', 'gemini'] });
+    threadStore.updateParticipantActivity('t_z16_pagination', 'codex');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_z16_pagination', 'opus');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_z16_pagination', 'gemini'); // gemini latest activity
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('继续刚才的', 't_z16_pagination');
+    // GREEN after R4: pagination loops with getByThreadBefore beyond first 50,
+    //   finds user @ codex on later page → returns ['codex']
+    // RED before R4: 50-message single-page lookback never reaches the user msg →
+    //   fallback null → legacy participantsWithActivity → gemini selected (wrong)
+    assert.deepEqual(
+      result.targetCats,
+      ['codex'],
+      'pagination should keep walking past one page of cat messages until user mention or 5 user msgs / 1h cutoff',
+    );
+  });
+
+  test('AC-Z16 R5: system notices (userId="system") must NOT count as user messages (cloud Codex P1)', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const messageStore = createMockMessageStore();
+    const baseTs = Date.now() - 30000;
+
+    // 真正的 user msg @ codex (oldest)
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: '@codex 这个怎么处理',
+      mentions: ['codex'],
+      timestamp: baseTs,
+      threadId: 't_z16_sys',
+    });
+    // 5 个 system 通知（route-serial.ts 持久化 system 注入用 userId='system', catId=null）
+    // 当前实现把它们也算 user message → 5 条 system 占满 user count limit → 找不到真正
+    // 的 user @ codex → fallback 退化到 participantsWithActivity (gemini)
+    for (let i = 0; i < 5; i += 1) {
+      messageStore.append({
+        userId: 'system',
+        catId: null,
+        content: `[SYS] 自动通知 #${i}`,
+        mentions: [],
+        timestamp: baseTs + (i + 1) * 100,
+        threadId: 't_z16_sys',
+      });
+    }
+
+    const threadStore = createMockThreadStore({ t_z16_sys: ['codex', 'opus', 'gemini'] });
+    threadStore.updateParticipantActivity('t_z16_sys', 'codex');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_z16_sys', 'opus');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_z16_sys', 'gemini'); // gemini latest activity
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('继续', 't_z16_sys');
+    // GREEN after R5: system notices excluded from user count → reaches真正的 user msg @ codex
+    // RED before R5: 5 system notices consume the count limit → fallback null → gemini wins (wrong)
+    assert.deepEqual(
+      result.targetCats,
+      ['codex'],
+      'system notices (userId=system, catId=null) must not count as user messages — they should not consume the 5-msg lookback limit',
+    );
+  });
+
+  test('AC-Z16 R10: 250+ non-user msgs do not cap fallback scan (cloud Codex round-6 P2)', async () => {
+    // Cloud Codex round-6 P2: R9 之前 Z5_MAX_PAGES=5 → 50*5=250 thread msgs 上限。
+    // 高流量 thread (vision-guard / handoff spam > 250 条) + 1h 内 user msg < 5
+    //   → page cap trip → return null → fallback 退化回 participantsWithActivity。
+    // Spec stop conditions only: 5 user msgs / 1h cutoff / no more history。无固定 page cap。
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const messageStore = createMockMessageStore();
+    const baseTs = Date.now();
+
+    // msg 1 (oldest): user @ codex within 1h (recent enough)
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: '@codex 这个怎么处理',
+      mentions: ['codex'],
+      timestamp: baseTs - 30 * 60 * 1000, // 30 min ago, within 1h cutoff
+      threadId: 't_z16_unbounded',
+    });
+    // 300 cat / vision-guard messages between (would trip Z5_MAX_PAGES * Z5_PAGE_SIZE = 250 cap)
+    for (let i = 0; i < 300; i += 1) {
+      messageStore.append({
+        userId: null,
+        catId: i % 2 === 0 ? 'gemini' : 'opus',
+        content: `vision-guard / handoff msg ${i}`,
+        mentions: [],
+        timestamp: baseTs - 25 * 60 * 1000 + i * 1000, // staggered ts in 25min..0s ago
+        threadId: 't_z16_unbounded',
+      });
+    }
+
+    const threadStore = createMockThreadStore({ t_z16_unbounded: ['codex', 'opus', 'gemini'] });
+    threadStore.updateParticipantActivity('t_z16_unbounded', 'codex');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_z16_unbounded', 'gemini');
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('继续', 't_z16_unbounded');
+    // GREEN after R10: pagination keeps walking past 250+ non-user msgs until找到 user @ codex (within 1h)
+    // RED before R10: Z5_MAX_PAGES=5 caps at 250 → user @ codex on page 7 → null → gemini wins
+    assert.deepEqual(
+      result.targetCats,
+      ['codex'],
+      'pagination must not impose fixed thread-msg cap — only spec stop conditions (5 user msgs / 1h cutoff / no more history) apply',
+    );
+  });
+
+  test('AC-Z16 R9: cross-page cursor uses effective score (deliveredAt ?? timestamp) (砚砚 R8 P1)', async () => {
+    // 砚砚 R8 review退回 1 P1: pagination cursor 用 oldest.timestamp（原 send-time），
+    // 不是 effective score = deliveredAt ?? timestamp。Redis markDelivered 把 thread zset
+    // 的 score 改成 deliveredAt 但 msg.timestamp 仍是 send-time。如果 page 1 boundary 落在
+    // 一条 re-delivered 老消息（timestamp << deliveredAt），cursor 跳到老 send-time，
+    // 整个 deliveredAt 排序的中间区间被跳过，真正的 user mention 在那段里就漏。
+    // 修法: cursor + cutoff 都用 effectiveOrderTime = deliveredAt ?? timestamp。
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const messageStore = createMockMessageStore();
+    const baseTs = Date.now();
+
+    // msg 1: 真正的 recent user @ codex (oldest by score in this scenario)
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: '@codex 这个怎么处理',
+      mentions: ['codex'],
+      timestamp: baseTs - 90 * 1000, // score = now-90s (oldest)
+      threadId: 't_z16_xpage',
+    });
+    // msg 2: re-delivered system msg — 落到 page 1 boundary (最旧 score in page 1).
+    // 关键: timestamp << deliveredAt 让 cursor=oldest.timestamp 跳到老 send-time。
+    const redelivered = messageStore.append({
+      userId: 'system',
+      catId: null,
+      content: '[Re-delivered] queued 2h ago, just delivered',
+      mentions: [],
+      timestamp: baseTs - 2 * 60 * 60 * 1000, // OLD send-time (2h ago)
+      deliveryStatus: 'queued',
+      threadId: 't_z16_xpage',
+    });
+    messageStore.markDelivered(redelivered.id, baseTs - 60 * 1000); // score = now-60s
+    // msg 3-51: 49 条 cat msgs，score 都比 msg 2 新 (now-50s..now-1s)。
+    // 让 page 1 (top 50 by score) = [msg2, msg3, ..., msg51]，page[0] = msg2 (re-delivered)。
+    for (let i = 0; i < 49; i += 1) {
+      messageStore.append({
+        userId: null,
+        catId: i % 2 === 0 ? 'gemini' : 'opus',
+        content: `cat msg ${i}`,
+        mentions: [],
+        timestamp: baseTs - 50 * 1000 + i * 1000, // ts in now-50s..now-2s
+        threadId: 't_z16_xpage',
+      });
+    }
+
+    const threadStore = createMockThreadStore({ t_z16_xpage: ['codex', 'opus', 'gemini'] });
+    threadStore.updateParticipantActivity('t_z16_xpage', 'codex');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_z16_xpage', 'gemini'); // gemini latest
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('继续', 't_z16_xpage');
+    // GREEN after R9: cursor 用 effectiveOrderTime = deliveredAt ?? timestamp
+    //   page 1 boundary effective = msg 2 effective ≈ now-30s → page 2 returns msg 1 (effective=now-1min < now-30s) → user @ codex found
+    // RED before R9: cursor = oldest.timestamp = msg 51's send-time (2h ago)
+    //   page 2 query returns msgs with score < 2h ago → 空 (msg 1 score=now-1min > 2h ago)
+    //   → 找不到 user mention → fallback null → gemini wins
+    assert.deepEqual(
+      result.targetCats,
+      ['codex'],
+      'pagination cursor must use effectiveOrderTime (deliveredAt ?? timestamp) — Redis markDelivered re-score breaks send-time-based cursor',
+    );
+  });
+
+  test('AC-Z16 R8: 1h cutoff only applies to USER messages (cloud Codex round-4 P1 — Redis markDelivered re-score)', async () => {
+    // Cloud Codex round-4 P1: Redis `markDelivered` 把 thread sorted set 的 score 改成
+    // deliveredAt，但 msg.timestamp 仍是原 send-time。一条原本 send-time 在 2h 前但
+    // 刚刚被 markDelivered 的 system/cat 消息会出现在 recent page 里。当前实现把 cutoff
+    // 应用在 EVERY message → 反序扫遇到这条老 ts 的非 user 消息直接 return null →
+    // 跳过同页里真正 recent 的 user mention → fallback 退化回 participantsWithActivity。
+    // 修法：cutoff 只应用在 user message 上（非 user msg 用 continue 跳过即可）。
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const messageStore = createMockMessageStore();
+    const baseTs = Date.now();
+
+    // msg 1 (id 0001): 真正的 recent user @ codex
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: '@codex 这个怎么处理',
+      mentions: ['codex'],
+      timestamp: baseTs - 30000, // recent (30s ago)
+      threadId: 't_z16_redeliver',
+    });
+    // msg 2 (id 0002): system 消息 — timestamp 老 (2h 前) 但被 markDelivered 后排到 recent slot
+    // 在 mock 里通过 id 顺序模拟「较新的 list 位置」（real Redis 用 score）。
+    messageStore.append({
+      userId: 'system',
+      catId: null,
+      content: '[Re-delivered] 老消息但刚被推给 user',
+      mentions: [],
+      timestamp: baseTs - 2 * 60 * 60 * 1000, // OLD timestamp (2h ago)
+      threadId: 't_z16_redeliver',
+    });
+
+    const threadStore = createMockThreadStore({ t_z16_redeliver: ['codex', 'opus', 'gemini'] });
+    threadStore.updateParticipantActivity('t_z16_redeliver', 'codex');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_z16_redeliver', 'gemini'); // gemini latest activity
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('继续', 't_z16_redeliver');
+    // GREEN after R8: cutoff 只应用在 user msg → 老 ts 的 system msg 走 isUserMessage
+    //   continue → 接着扫到 user @codex (recent) → 返回 ['codex']
+    // RED before R8: 反序扫先遇 system 老 ts → cutoff trip → return null → fallback gemini
+    assert.deepEqual(
+      result.targetCats,
+      ['codex'],
+      '1h cutoff must only apply to user messages — non-user old-ts msgs (Redis markDelivered re-score) must not trip return null',
+    );
+  });
+
+  test('AC-Z16 R6: scheduler notices (userId="scheduler") must NOT count as user messages (cloud Codex round-2 P1)', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const messageStore = createMockMessageStore();
+    const baseTs = Date.now() - 30000;
+
+    // 真正的 user msg @ codex (oldest)
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: '@codex 这个怎么处理',
+      mentions: ['codex'],
+      timestamp: baseTs,
+      threadId: 't_z16_sched',
+    });
+    // 5 个 scheduler 通知 — visibility.ts SYSTEM_USER_IDS = {'scheduler', 'system'}
+    // R5 只排除了 'system'，scheduler 仍被算进 user count → 真正 user mention 被挤出
+    for (let i = 0; i < 5; i += 1) {
+      messageStore.append({
+        userId: 'scheduler',
+        catId: null,
+        content: `[Scheduler] 任务触发 #${i}`,
+        mentions: [],
+        timestamp: baseTs + (i + 1) * 100,
+        threadId: 't_z16_sched',
+      });
+    }
+
+    const threadStore = createMockThreadStore({ t_z16_sched: ['codex', 'opus', 'gemini'] });
+    threadStore.updateParticipantActivity('t_z16_sched', 'codex');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_z16_sched', 'opus');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_z16_sched', 'gemini');
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('继续', 't_z16_sched');
+    // GREEN after R6: scheduler notices excluded (SYSTEM_USER_IDS predicate) → reaches user @ codex
+    // RED before R6: scheduler 5 条 consume count → fallback null → gemini wins (wrong)
+    assert.deepEqual(
+      result.targetCats,
+      ['codex'],
+      'scheduler notices must not count as user messages — use SYSTEM_USER_IDS predicate not just userId === system',
+    );
+  });
+
+  test('AC-Z16: when no recent user mentions exist, falls back to participantsWithActivity (legacy behavior)', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const messageStore = createMockMessageStore();
+    // No user messages with mentions in store (empty thread / first user message)
+
+    const threadStore = createMockThreadStore({ t_z16c: ['opus', 'codex'] });
+    threadStore.updateParticipantActivity('t_z16c', 'opus');
+    await new Promise((r) => setTimeout(r, 5));
+    threadStore.updateParticipantActivity('t_z16c', 'codex'); // codex most recent
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('first message', 't_z16c');
+    // No prev user mentions → falls back to legacy participantsWithActivity → codex (most recent)
+    assert.deepEqual(result.targetCats, ['codex'], 'no prev user mentions → falls back to legacy');
+  });
 });
+
+// ---------------------------------------------------------------------------
+// F229: Concierge thread routing bypass
+// ---------------------------------------------------------------------------
+// Concierge threads must ALWAYS route to the configured duty cat (preferredCats),
+// even when a previous cat already has conversation history in the thread.
+// The F078 healthyReplier rule ("last-replier takes absolute priority") must be
+// bypassed for threadKind='concierge' threads so that duty-cat config changes
+// take effect immediately.
+describe('F229: Concierge thread routing (duty-cat always takes priority)', () => {
+  test('concierge thread routes to preferredCats duty cat even when old cat has activity', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const mockClaudeService = createMockAgentService('opus'); // duty cat (new)
+    const mockCodexService = createMockAgentService('codex');
+    const mockGeminiService = createMockAgentService('gemini'); // old cat (has activity)
+
+    // Thread: threadKind='concierge', preferredCats=['opus'] (new duty cat)
+    // 'gemini' already has messageCount > 0 (was the previous duty cat)
+    const threadStore = createMockThreadStore(
+      { t_concierge: ['gemini'] }, // initialParticipants: gemini already in thread
+      {}, // threadProjectPaths
+      {}, // threadRoutingPolicies
+      { t_concierge: ['opus'] }, // threadPreferredCats: opus is new duty cat
+      { t_concierge: 'concierge' }, // threadKinds: this is a concierge thread
+    );
+    // Simulate gemini having replied before duty-cat change
+    threadStore.updateParticipantActivity('t_concierge', 'gemini');
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: mockClaudeService,
+        codexService: mockCodexService,
+        geminiService: mockGeminiService,
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('hello', 't_concierge');
+
+    // F229: concierge thread MUST route to duty cat (opus / preferredCats),
+    // NOT to gemini (healthyReplier) — F078 healthyReplier bypass.
+    assert.deepEqual(result.targetCats, ['opus'], 'concierge duty cat overrides last-replier');
+    assert.equal(mockClaudeService.invoke.mock.callCount(), 0, 'opus not invoked by resolveTargetsAndIntent');
+    assert.equal(mockGeminiService.invoke.mock.callCount(), 0, 'gemini not invoked');
+  });
+
+  test('normal thread (no threadKind) still applies F078 healthyReplier rule', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const mockClaudeService = createMockAgentService('opus');
+    const mockCodexService = createMockAgentService('codex');
+    const mockGeminiService = createMockAgentService('gemini');
+
+    // Normal thread (no threadKind): preferredCats=['opus'] but gemini has activity
+    const threadStore = createMockThreadStore(
+      { t_normal: ['gemini'] },
+      {},
+      {},
+      { t_normal: ['opus'] }, // preferredCats = opus
+      {}, // no threadKind
+    );
+    threadStore.updateParticipantActivity('t_normal', 'gemini');
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: mockClaudeService,
+        codexService: mockCodexService,
+        geminiService: mockGeminiService,
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('hello', 't_normal');
+
+    // F078: normal thread still uses healthyReplier (gemini has activity)
+    assert.deepEqual(result.targetCats, ['gemini'], 'normal thread: healthyReplier (gemini) takes priority');
+  });
+
+  test('concierge thread: duty cat takes priority over findRecentUserMentionFallback (prior @mention)', async () => {
+    // Scenario: user sent "@gemini hello" in a concierge thread, then sends a plain
+    // follow-up "thanks" with no @mention. findRecentUserMentionFallback would return
+    // ['gemini'] for the follow-up — but the F229 bypass must fire first so the duty
+    // cat (opus) handles the follow-up, not gemini.
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const mockClaudeService = createMockAgentService('opus'); // duty cat
+    const mockCodexService = createMockAgentService('codex');
+    const mockGeminiService = createMockAgentService('gemini'); // was previously @mentioned
+
+    const threadStore = createMockThreadStore(
+      {},
+      {},
+      {},
+      { t_concierge_mention: ['opus'] }, // preferredCats: opus is duty cat
+      { t_concierge_mention: 'concierge' }, // threadKind: concierge
+    );
+
+    // Simulate: previous user message had @gemini mention
+    const messageStore = createMockMessageStore();
+    messageStore.append({
+      threadId: 't_concierge_mention',
+      role: 'user',
+      content: '@gemini hello',
+      mentions: ['gemini'],
+      timestamp: Date.now() - 5000,
+    });
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: mockClaudeService,
+        codexService: mockCodexService,
+        geminiService: mockGeminiService,
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore,
+      }),
+    );
+
+    // Follow-up with NO @mention — must route to duty cat (opus), not gemini
+    const result = await router.resolveTargetsAndIntent('thanks', 't_concierge_mention');
+
+    assert.deepEqual(result.targetCats, ['opus'], 'concierge duty cat wins over prior user @mention fallback');
+  });
+});
+
+for (const [mode, text, targets] of [
+  ['serial', '@opus ordinary message', ['opus']],
+  ['parallel', '@opus @codex ordinary message', ['opus', 'codex']],
+]) {
+  test(`${mode}: ordinary delivery does not query the signal library`, async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+    const services = {
+      opus: createMockAgentService('opus', 'Opus response'),
+      codex: createMockAgentService('codex', 'Codex response'),
+      gemini: createMockAgentService('gemini', 'Gemini response'),
+    };
+    // Model a legacy injected dependency: normal delivery must not consult it,
+    // even if the library lookup would return content linked to this thread.
+    const lookup = mock.fn(async () => [
+      {
+        id: 'unrequested-article',
+        title: 'Unrequested article',
+        source: 'synthetic',
+        tier: 1,
+        contentSnippet: 'unrequested-library-content',
+      },
+    ]);
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: services.opus,
+        codexService: services.codex,
+        geminiService: services.gemini,
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        signalArticleLookup: lookup,
+      }),
+    );
+    const output = [];
+    for await (const message of router.route('user-1', text)) output.push(message);
+    for (const target of targets) {
+      assert.equal(services[target].invoke.mock.callCount(), 1);
+      assert.ok(output.some((message) => message.catId === target && message.type === 'done'));
+      assert.ok(!services[target].invoke.mock.calls[0].arguments[0].includes('unrequested-library-content'));
+    }
+    assert.equal(lookup.mock.callCount(), 0, 'normal delivery must perform no article lookup');
+  });
+}

@@ -1,9 +1,12 @@
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { _resetCachedConfig } from '../dist/config/cat-config-loader.js';
+import { AchievementStore } from '../dist/domains/leaderboard/achievement-store.js';
 import { configRoutes } from '../dist/routes/config.js';
 
 const tempDirs = [];
@@ -60,7 +63,12 @@ function makeTemplate() {
 function createProjectRoot() {
   const projectRoot = mkdtempSync(join(tmpdir(), 'config-owner-route-'));
   tempDirs.push(projectRoot);
-  writeFileSync(join(projectRoot, 'cat-template.json'), JSON.stringify(makeTemplate(), null, 2));
+  const template = makeTemplate();
+  writeFileSync(join(projectRoot, 'cat-template.json'), JSON.stringify(template, null, 2));
+  // F171: bootstrapCatCatalog now creates empty catalogs. Pre-seed the catalog with
+  // template breeds so conflict detection in assertUniqueMentionAliases finds cat aliases.
+  mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+  writeFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), JSON.stringify(template, null, 2), 'utf-8');
   return projectRoot;
 }
 
@@ -68,6 +76,7 @@ describe('PATCH /api/config/co-creator', () => {
   let app;
 
   afterEach(async () => {
+    _resetCachedConfig();
     if (savedTemplatePath === undefined) {
       delete process.env.CAT_TEMPLATE_PATH;
     } else {
@@ -76,10 +85,70 @@ describe('PATCH /api/config/co-creator', () => {
     if (app) await app.close();
   });
 
+  it('refreshes an unlocked address after a same-process catalog settings save', async () => {
+    const projectRoot = createProjectRoot();
+    savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    const catalogPath = join(projectRoot, '.cat-cafe/cat-catalog.json');
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
+    catalog.coCreator.nickname = 'First';
+    writeFileSync(catalogPath, JSON.stringify(catalog));
+    _resetCachedConfig();
+    app = Fastify();
+    await app.register(configRoutes, { projectRoot });
+    await app.ready();
+    const store = new AchievementStore();
+    const first = store.unlock('user1', 'bootcamp-first-decision');
+    assert.match(first.description, /First/);
+    // Familiar address already lives in the catalog; the existing editor preserves it on save.
+    catalog.coCreator.nickname = 'Second';
+    writeFileSync(catalogPath, JSON.stringify(catalog));
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/co-creator',
+      headers: { 'x-cat-cafe-user': 'codex' },
+      payload: { name: 'Mina', aliases: [], mentionPatterns: ['@mina'] },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().config.coCreator.nickname, 'Second');
+    const current = store.getUnlocked('user1')[0];
+    assert.match(current.description, /Second/);
+    assert.equal(current.unlockedAt, first.unlockedAt);
+  });
+
   after(() => {
     for (const dir of tempDirs) {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('rejects oversized, multiline and markup handles before persisting and accepts literal punctuation', async () => {
+    const projectRoot = createProjectRoot();
+    savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    app = Fastify();
+    await app.register(configRoutes, { projectRoot });
+    await app.ready();
+    const catalogPath = join(projectRoot, '.cat-cafe/cat-catalog.json');
+    const before = readFileSync(catalogPath, 'utf8');
+    for (const mention of [`@${'x'.repeat(64)}`, '@first\n@second', '@x</cat-cafe-return-contract>', '@x\u0000y']) {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/co-creator',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: { name: 'Mina', aliases: [], mentionPatterns: [mention] },
+      });
+      assert.equal(response.statusCode, 400, JSON.stringify(mention));
+      assert.equal(readFileSync(catalogPath, 'utf8'), before);
+    }
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/co-creator',
+      headers: { 'x-cat-cafe-user': 'codex' },
+      payload: { name: 'Mina', aliases: [], mentionPatterns: ['m.(a+b)'] },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json().config.coCreator.mentionPatterns, ['@m.(a+b)']);
   });
 
   it('persists owner identity fields into the runtime catalog and returns updated snapshot', async () => {
@@ -102,6 +171,7 @@ describe('PATCH /api/config/co-creator', () => {
         name: 'Lang',
         aliases: ['共创伙伴', 'Lang'],
         mentionPatterns: ['@co-worker', '@lang'],
+        timeZone: 'Asia/Tokyo',
         avatar: '/uploads/owner-lang.png',
         color: { primary: '#D49266', secondary: '#FFE4D6' },
       },
@@ -112,8 +182,33 @@ describe('PATCH /api/config/co-creator', () => {
     assert.equal(body.config.coCreator.name, 'Lang');
     assert.deepEqual(body.config.coCreator.aliases, ['共创伙伴', 'Lang']);
     assert.deepEqual(body.config.coCreator.mentionPatterns, ['@co-worker', '@lang']);
+    assert.equal(body.config.coCreator.timeZone, 'Asia/Tokyo');
     assert.equal(body.config.coCreator.avatar, '/uploads/owner-lang.png');
     assert.deepEqual(body.config.coCreator.color, { primary: '#D49266', secondary: '#FFE4D6' });
+  });
+
+  it('preserves aliases changed by another editor when the You form saves only its owned fields', async () => {
+    const projectRoot = createProjectRoot();
+    savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    app = Fastify();
+    await app.register(configRoutes, { projectRoot });
+    await app.ready();
+    const opened = (await app.inject({ method: 'GET', url: '/api/config' })).json().config.coCreator;
+    const patch = (payload) =>
+      app.inject({
+        method: 'PATCH',
+        url: '/api/config/co-creator',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload,
+      });
+    assert.equal((await patch({ ...opened, aliases: ['new alias from editor B'] })).statusCode, 200);
+    const saved = await patch({ name: 'Name from editor A', mentionPatterns: opened.mentionPatterns });
+    assert.equal(saved.statusCode, 200, saved.payload);
+    assert.deepEqual(saved.json().config.coCreator.aliases, ['new alias from editor B']);
+    const stored = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe/cat-catalog.json'), 'utf8'));
+    assert.equal(stored.coCreator.name, 'Name from editor A');
+    assert.deepEqual(stored.coCreator.aliases, ['new alias from editor B']);
   });
 
   it('rejects owner mention patterns that overlap cat aliases', async () => {
@@ -141,5 +236,35 @@ describe('PATCH /api/config/co-creator', () => {
 
     assert.equal(res.statusCode, 400);
     assert.match(res.json().error, /co-creator mention alias "@opus" conflicts with cat "opus"/);
+  });
+
+  it('rejects invalid owner timezone before writing runtime catalog', async () => {
+    const projectRoot = createProjectRoot();
+    savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    app = Fastify();
+    await app.register(configRoutes, { projectRoot });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/co-creator',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      payload: {
+        name: 'Co-worker',
+        aliases: ['共创伙伴'],
+        mentionPatterns: ['@co-worker', '@owner'],
+        timeZone: 'Mars/Base',
+      },
+    });
+
+    assert.equal(res.statusCode, 400);
+    const body = res.json();
+    assert.equal(body.error, 'Invalid request');
+    assert.equal(body.details[0].message, 'timeZone must be a valid IANA timezone');
   });
 });

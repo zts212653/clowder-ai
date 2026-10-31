@@ -1,0 +1,44 @@
+{
+  "spans": [
+    {
+      "traceId": "abcdef1234567890abcdef1234567890",
+      "spanId": "1234567890abcdef",
+      "name": "cat_cafe.invocation",
+      "kind": 1,
+      "startTimeMs": 1715300000000,
+      "endTimeMs": 1715300005000,
+      "durationMs": 5000,
+      "status": { "code": 0 },
+      "attributes": {
+        "agent.id": "opus",
+        "invocation.id": "hmac-abc123"
+      },
+      "events": [
+        {
+          "name": "tool_use",
+          "timeMs": 1715300002000,
+          "attributes": { "tool.name": "cat_cafe_hold_ball" }
+        }
+      ],
+      "storedAt": 1715300005100
+    },
+    {
+      "traceId": "abcdef1234567890abcdef1234567890",
+      "spanId": "abcdef1234567890",
+      "parentSpanId": "1234567890abcdef",
+      "name": "cat_cafe.route",
+      "kind": 1,
+      "startTimeMs": 1715300005100,
+      "endTimeMs": 1715300005200,
+      "durationMs": 100,
+      "status": { "code": 0 },
+      "attributes": {
+        "route.type": "serial",
+        "route.target": "codex"
+      },
+      "events": [],
+      "storedAt": 1715300005300
+    }
+  ],
+  "count": 2
+}

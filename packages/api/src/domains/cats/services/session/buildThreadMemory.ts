@@ -1,5 +1,5 @@
 /**
- * buildThreadMemory — F065 Phase B
+ * buildThreadMemory — F065 Phase B + F148 VG-3 + Phase G
  * Pure function: merges existing ThreadMemory with a new extractive digest,
  * producing an updated rolling summary. Rule-based (no LLM).
  *
@@ -8,51 +8,129 @@
  * 2. Prepend to existing summary
  * 3. Trim oldest lines from end if over maxTokens
  * 4. Increment sessionsIncorporated
+ * 5. VG-3: Merge DecisionSignals into structured decisions/openQuestions/artifacts
+ * 6. G1: Artifact ledger — append+dedup+cap (cumulative, not overwrite)
  */
 
 import { estimateTokens } from '../../../../utils/token-counter.js';
-import type { ThreadMemoryV1 } from '../stores/ports/ThreadStore.js';
+import { formatPromptTimeRange } from '../format-time.js';
+import type { ThreadMemorySourceRef, ThreadMemoryV1 } from '../stores/ports/ThreadStore.js';
+import type { DecisionSignals } from './extractDecisionSignals.js';
+import type { HomeSessionPosition } from './session-scope.js';
 import type { ExtractiveDigestV1 } from './TranscriptWriter.js';
 
-const MAX_TOOLS_DISPLAY = 10;
-const MAX_FILES_DISPLAY = 10;
+const MAX_FILES_PER_CATEGORY = 10;
 
-function formatTimeShort(epoch: number): string {
-  const d = new Date(epoch);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
+/** Op priority: create > edit > delete > read */
+const OP_PRIORITY: Record<string, number> = { create: 0, edit: 1, delete: 2, read: 3 };
+const OP_LABELS: Record<string, string> = { create: 'Created', edit: 'Modified', delete: 'Deleted', read: 'Read' };
+const OP_ORDER = ['create', 'edit', 'delete', 'read'];
 
 function formatSessionLine(digest: ExtractiveDigestV1, sessionNumber: number): string {
   const duration = Math.round((digest.time.sealedAt - digest.time.createdAt) / 60000);
-  const timeRange = `${formatTimeShort(digest.time.createdAt)}-${formatTimeShort(digest.time.sealedAt)}`;
+  const timeRange = formatPromptTimeRange(digest.time.createdAt, digest.time.sealedAt);
 
-  // Tools (deduplicated, capped)
-  const allTools = [...new Set(digest.invocations.flatMap((inv) => inv.toolNames ?? []))];
-  const toolsDisplay = allTools.slice(0, MAX_TOOLS_DISPLAY).join(', ');
-  const toolsExtra = allTools.length > MAX_TOOLS_DISPLAY ? ` +${allTools.length - MAX_TOOLS_DISPLAY} more` : '';
+  // Group files by highest-priority op
+  const groups = new Map<string, string[]>();
+  for (const file of digest.filesTouched) {
+    if (file.ops.length === 0) continue;
+    const bestOp = file.ops.reduce((a, b) => ((OP_PRIORITY[a] ?? 99) <= (OP_PRIORITY[b] ?? 99) ? a : b));
+    const list = groups.get(bestOp) ?? [];
+    list.push(file.path);
+    groups.set(bestOp, list);
+  }
 
-  // Files (capped)
-  const files = digest.filesTouched
-    .slice(0, MAX_FILES_DISPLAY)
-    .map((f) => f.path)
-    .join(', ');
-  const filesExtra =
-    digest.filesTouched.length > MAX_FILES_DISPLAY ? ` +${digest.filesTouched.length - MAX_FILES_DISPLAY} more` : '';
+  // Format each group in priority order
+  const parts: string[] = [];
+  for (const op of OP_ORDER) {
+    const files = groups.get(op);
+    if (!files || files.length === 0) continue;
+    const label = OP_LABELS[op] ?? op;
+    const display = files.slice(0, MAX_FILES_PER_CATEGORY).join(', ');
+    const extra = files.length > MAX_FILES_PER_CATEGORY ? ` +${files.length - MAX_FILES_PER_CATEGORY} more` : '';
+    parts.push(`${label}: ${display}${extra}`);
+  }
 
   // Errors
   const errorPart =
     digest.errors.length > 0 ? ` ${digest.errors.length} error${digest.errors.length > 1 ? 's' : ''}.` : '';
 
-  return `Session #${sessionNumber} (${timeRange}, ${duration}min): ${toolsDisplay}${toolsExtra}. Files: ${files}${filesExtra}.${errorPart}`;
+  const body = parts.length > 0 ? parts.join('. ') : 'No file ops';
+  return `Session #${sessionNumber} (${timeRange}, ${duration}min): ${body}.${errorPart}`;
+}
+
+const MAX_DECISIONS = 8;
+const MAX_OPEN_QUESTIONS = 5;
+const MAX_ARTIFACTS = 8;
+const MAX_LEDGER_ENTRIES = 20;
+
+type LedgerEntry = NonNullable<ThreadMemoryV1['recentArtifacts']>[number];
+
+function mergeArtifactLedger(
+  existing: ThreadMemoryV1['recentArtifacts'],
+  incoming: ThreadMemoryV1['recentArtifacts'],
+): LedgerEntry[] | undefined {
+  const existingArr = existing ?? [];
+  const incomingArr = incoming ?? [];
+  if (existingArr.length === 0 && incomingArr.length === 0) return undefined;
+
+  const byRef = new Map<string, LedgerEntry>();
+  for (const a of existingArr) byRef.set(a.ref, a);
+  for (const a of incomingArr) {
+    const prev = byRef.get(a.ref);
+    if (!prev || a.updatedAt >= prev.updatedAt) byRef.set(a.ref, a);
+  }
+
+  return [...byRef.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_LEDGER_ENTRIES);
+}
+
+/** Deduplicate strings by substring containment */
+function dedupStrings(items: string[]): string[] {
+  const result: string[] = [];
+  for (const item of items) {
+    const dominated = result.some((e) => (e.length <= item.length ? item.includes(e) : e.includes(item)));
+    if (!dominated) result.push(item);
+  }
+  return result;
+}
+
+function mergeReferencedSignals(
+  incoming: string[],
+  incomingRefs: Array<ThreadMemorySourceRef | null> | undefined,
+  existing: string[],
+  existingRefs: ThreadMemorySourceRef[] | undefined,
+  incomingFallback: ThreadMemorySourceRef,
+  existingFallback: ThreadMemorySourceRef,
+  limit: number,
+): { values: string[]; refs: ThreadMemorySourceRef[] } {
+  const candidates = [
+    ...incoming.map((value, index) => ({ value, ref: incomingRefs?.[index] ?? incomingFallback })),
+    ...existing.map((value, index) => ({ value, ref: existingRefs?.[index] ?? existingFallback })),
+  ];
+  const values: string[] = [];
+  const refs: ThreadMemorySourceRef[] = [];
+  for (const candidate of candidates) {
+    const dominated = values.some((value) =>
+      value.length <= candidate.value.length ? candidate.value.includes(value) : value.includes(candidate.value),
+    );
+    if (dominated) continue;
+    values.push(candidate.value);
+    refs.push(candidate.ref);
+    if (values.length >= limit) break;
+  }
+  return { values, refs };
 }
 
 export function buildThreadMemory(
   existing: ThreadMemoryV1 | null,
   newDigest: ExtractiveDigestV1,
-  maxTokens: number,
+  options: { maxTokens: number; homePosition: HomeSessionPosition },
+  signals?: DecisionSignals,
+  recentArtifacts?: ThreadMemoryV1['recentArtifacts'],
 ): ThreadMemoryV1 {
-  // R1 P1-1: session number comes from digest.seq (1-based display), not merge count
-  const sessionNumber = newDigest.seq + 1;
+  const { maxTokens, homePosition } = options;
+  // The producer must supply home coordinates; digest.seq is an archive reference.
+  const sessionNumber = homePosition.ordinal;
   const mergeCount = (existing?.sessionsIncorporated ?? 0) + 1;
   const newLine = formatSessionLine(newDigest, sessionNumber);
 
@@ -74,10 +152,75 @@ export function buildThreadMemory(
     summary = `${summary.slice(0, Math.floor(summary.length * ratio * 0.9))}...`;
   }
 
-  return {
+  // VG-3: Merge structured decision signals
+  const result: ThreadMemoryV1 = {
     v: 1,
     summary,
     sessionsIncorporated: mergeCount,
     updatedAt: Date.now(),
   };
+
+  if (signals) {
+    const existDecisions = Array.isArray(existing?.decisions) ? existing.decisions : [];
+    const existQuestions = Array.isArray(existing?.openQuestions) ? existing.openQuestions : [];
+    const existArtifacts = existing?.artifacts ?? [];
+
+    const incomingFallback: ThreadMemorySourceRef = {
+      threadId: newDigest.threadId,
+      sessionId: newDigest.sessionId,
+      ...(newDigest.invocations[0]?.invocationId ? { invocationId: newDigest.invocations[0].invocationId } : {}),
+    };
+    const existingFallback: ThreadMemorySourceRef = { threadId: newDigest.threadId };
+    const mergedDecisions = mergeReferencedSignals(
+      signals.decisions,
+      signals.decisionRefs,
+      existDecisions,
+      existing?.decisionRefs,
+      incomingFallback,
+      existingFallback,
+      MAX_DECISIONS,
+    );
+    const mergedQuestions = mergeReferencedSignals(
+      signals.openQuestions,
+      signals.openQuestionRefs,
+      existQuestions,
+      existing?.openQuestionRefs,
+      incomingFallback,
+      existingFallback,
+      MAX_OPEN_QUESTIONS,
+    );
+    const mergedArtifacts = dedupStrings([...signals.artifacts, ...existArtifacts]);
+
+    if (mergedDecisions.values.length > 0) {
+      result.decisions = mergedDecisions.values;
+      result.decisionRefs = mergedDecisions.refs;
+    }
+    if (mergedQuestions.values.length > 0) {
+      result.openQuestions = mergedQuestions.values;
+      result.openQuestionRefs = mergedQuestions.refs;
+    }
+    if (mergedArtifacts.length > 0) result.artifacts = mergedArtifacts.slice(0, MAX_ARTIFACTS);
+  } else if (existing) {
+    // P1-2 fix: carry forward existing decisions when signals extraction failed
+    // Cloud-P2 fix: re-apply caps; Cloud-R2-P1 fix: Array.isArray guard for malformed data
+    if (Array.isArray(existing.decisions) && existing.decisions.length > 0) {
+      result.decisions = existing.decisions.slice(0, MAX_DECISIONS);
+      result.decisionRefs = result.decisions.map(
+        (_, index) => existing.decisionRefs?.[index] ?? { threadId: newDigest.threadId },
+      );
+    }
+    if (Array.isArray(existing.openQuestions) && existing.openQuestions.length > 0) {
+      result.openQuestions = existing.openQuestions.slice(0, MAX_OPEN_QUESTIONS);
+      result.openQuestionRefs = result.openQuestions.map(
+        (_, index) => existing.openQuestionRefs?.[index] ?? { threadId: newDigest.threadId },
+      );
+    }
+    if (Array.isArray(existing.artifacts) && existing.artifacts.length > 0)
+      result.artifacts = existing.artifacts.slice(0, MAX_ARTIFACTS);
+  }
+
+  const ledger = mergeArtifactLedger(existing?.recentArtifacts, recentArtifacts);
+  if (ledger) result.recentArtifacts = ledger;
+
+  return result;
 }

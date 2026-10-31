@@ -6,9 +6,19 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { transformCodexEvent } = await import('../dist/domains/cats/services/agents/providers/codex-event-transform.js');
+const { finalizeCodexStream, transformCodexEvent } = await import(
+  '../dist/domains/cats/services/agents/providers/codex-event-transform.js'
+);
+const { mapCodexAppServerNotification } = await import(
+  '../dist/domains/cats/services/agents/providers/CodexAppServerEventMapper.js'
+);
 
 const CAT = 'codex';
+
+function completeAndFinalize(state) {
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+  return finalizeCodexStream(state, CAT);
+}
 
 // ── Existing behaviour (regression guard) ──
 
@@ -24,6 +34,92 @@ test('item.completed agent_message → text', () => {
   assert.equal(msg?.content, 'Hello');
 });
 
+test('app-server agentMessage deltas stream into the response and completed item is not duplicated', () => {
+  const state = { hadPriorTextTurn: false };
+  const first = mapCodexAppServerNotification({
+    method: 'item/agentMessage/delta',
+    params: { threadId: 'th-1', turnId: 'turn-1', itemId: 'item-1', delta: 'Hel' },
+  });
+  const second = mapCodexAppServerNotification({
+    method: 'item/agentMessage/delta',
+    params: { threadId: 'th-1', turnId: 'turn-1', itemId: 'item-1', delta: 'lo' },
+  });
+  assert.deepEqual(first, {
+    type: 'item.agent_message.delta',
+    item_id: 'item-1',
+    delta: 'Hel',
+    thread_id: 'th-1',
+    turn_id: 'turn-1',
+  });
+  assert.equal(transformCodexEvent(first, CAT, state)?.content, 'Hel');
+  assert.equal(transformCodexEvent(second, CAT, state)?.content, 'lo');
+  const completed = transformCodexEvent(
+    { type: 'item.completed', item: { id: 'item-1', type: 'agent_message', text: 'Hello' } },
+    CAT,
+    state,
+  );
+  assert.equal(completed?.type, 'text');
+  assert.equal(completed?.content, 'Hello');
+  assert.equal(completed?.textMode, 'replace');
+});
+
+test('streamed async question completion retains both response replacement and its controls', () => {
+  const state = { hadPriorTextTurn: false };
+  transformCodexEvent({ type: 'item.agent_message.delta', item_id: 'question-1', delta: 'Choose' }, CAT, state);
+  const result = transformCodexEvent(
+    {
+      type: 'item.completed',
+      item: {
+        id: 'question-1',
+        type: 'agent_message',
+        text: 'Choose a scope',
+        delivery: 'async',
+        questions: [{ title: 'Which scope?', options: ['Current task', 'All tasks'] }],
+      },
+    },
+    CAT,
+    state,
+  );
+  assert.ok(Array.isArray(result));
+  assert.equal(result[0].content, 'Choose a scope');
+  assert.equal(result[0].textMode, 'replace');
+  assert.equal(result.length, 2);
+  assert.equal(result[1].type, 'system_info');
+  assert.equal(JSON.parse(result[1].content).type, 'rich_block');
+});
+
+test('one invocation keeps multi-turn streamed text inside one response replacement boundary', () => {
+  const state = { hadPriorTextTurn: false };
+
+  assert.equal(
+    transformCodexEvent({ type: 'item.agent_message.delta', item_id: 'item-1', delta: 'turn one' }, CAT, state)
+      ?.content,
+    'turn one',
+  );
+  const firstCompleted = transformCodexEvent(
+    { type: 'item.completed', item: { id: 'item-1', type: 'agent_message', text: 'turn one done' } },
+    CAT,
+    state,
+  );
+  assert.equal(firstCompleted?.content, 'turn one done');
+  assert.equal(firstCompleted?.textMode, 'replace');
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+
+  const secondDelta = transformCodexEvent(
+    { type: 'item.agent_message.delta', item_id: 'item-2', delta: 'turn two' },
+    CAT,
+    state,
+  );
+  assert.equal(secondDelta?.content, '\n\nturn two');
+  const secondCompleted = transformCodexEvent(
+    { type: 'item.completed', item: { id: 'item-2', type: 'agent_message', text: 'turn two done' } },
+    CAT,
+    state,
+  );
+  assert.equal(secondCompleted?.content, 'turn one done\n\nturn two done');
+  assert.equal(secondCompleted?.textMode, 'replace');
+});
+
 test('item.started command_execution → tool_use', () => {
   const msg = transformCodexEvent(
     { type: 'item.started', item: { type: 'command_execution', command: 'ls -la' } },
@@ -31,6 +127,8 @@ test('item.started command_execution → tool_use', () => {
   );
   assert.equal(msg?.type, 'tool_use');
   assert.equal(msg?.toolName, 'command_execution');
+  assert.equal(msg?.toolSource, 'host_cli');
+  assert.equal(msg?.toolChannel, 'unknown');
   assert.deepEqual(msg?.toolInput, { command: 'ls -la' });
 });
 
@@ -49,6 +147,10 @@ test('item.completed command_execution → tool_result', () => {
     CAT,
   );
   assert.equal(msg?.type, 'tool_result');
+  assert.equal(msg?.toolName, 'command_execution');
+  assert.equal(msg?.toolSource, 'host_cli');
+  assert.equal(msg?.toolChannel, 'unknown');
+  assert.equal(msg?.toolResultStatus, 'ok');
   assert.ok(msg?.content?.includes('file.txt'));
 });
 
@@ -56,18 +158,223 @@ test('item.completed file_change → tool_use', () => {
   const msg = transformCodexEvent(
     {
       type: 'item.completed',
-      item: { type: 'file_change', status: 'completed', changes: ['a', 'b'] },
+      item: {
+        type: 'file_change',
+        status: 'completed',
+        changes: ['a', { path: 'b' }],
+      },
     },
     CAT,
   );
   assert.equal(msg?.type, 'tool_use');
   assert.equal(msg?.toolName, 'file_change');
+  assert.equal(msg?.toolSource, 'host_cli');
+  assert.deepEqual(msg?.toolInput, { status: 'completed', changes: ['a', { path: 'b' }] });
+  assert.equal(msg?.semanticEvent?.v, 1);
+  assert.match(msg?.semanticEvent?.id ?? '', /^diff:codex:/);
+  assert.equal(msg?.semanticEvent?.kind, 'diff');
+  assert.equal(typeof msg?.semanticEvent?.occurredAt, 'number');
+  assert.equal(msg?.semanticEvent?.stage, 'completed');
+  assert.equal(msg?.semanticEvent?.summary, '2 个文件变更');
+  assert.deepEqual(msg?.semanticEvent?.provenance, {
+    provider: 'codex',
+    carrier: 'app_server',
+    nativeType: 'item/completed:fileChange',
+  });
+});
+
+test('app-server plan is semantic while private reasoning stays in the thinking channel', () => {
+  const plan = transformCodexEvent(
+    {
+      type: 'turn.plan.updated',
+      explanation: '先验证再实现',
+      plan: [{ step: '写红测' }, { step: '实现' }],
+    },
+    CAT,
+  );
+  assert.equal(plan?.type, 'provider_signal');
+  assert.equal(plan?.semanticEvent?.kind, 'plan');
+  assert.equal(plan?.semanticEvent?.text, '先验证再实现');
+  assert.equal(plan?.semanticEvent?.provenance?.nativeType, 'turn/plan/updated');
+
+  const reasoning = transformCodexEvent(
+    {
+      type: 'item.completed',
+      item: { id: 'reason-1', type: 'reasoning', summary: [{ text: '需要保留 ThreadStore 真相。' }] },
+    },
+    CAT,
+  );
+  assert.equal(reasoning?.type, 'system_info');
+  assert.deepEqual(JSON.parse(reasoning?.content ?? '{}'), {
+    type: 'thinking',
+    catId: CAT,
+    text: '需要保留 ThreadStore 真相。',
+  });
+  assert.equal(reasoning?.semanticEvent, undefined);
+});
+
+test('app-server subexecution stays typed instead of becoming root text', () => {
+  const msg = transformCodexEvent(
+    {
+      type: 'app_server.subexecution',
+      event_id: 'subexecution:codex:child-1:message:msg-1',
+      occurred_at: 123,
+      stage: 'message',
+      subexecution_id: 'child-1',
+      root_execution_id: 'root-1',
+      parent_execution_id: 'root-1',
+      root_turn_id: 'root-turn-1',
+      parent_turn_id: 'root-turn-1',
+      turn_id: 'child-turn-1',
+      agent_path: '/root/reviewer',
+      nickname: 'Bohr',
+      depth: 1,
+      content: 'Approve from the child only',
+      message_phase: 'final_answer',
+    },
+    CAT,
+  );
+
+  assert.equal(msg?.type, 'provider_signal');
+  assert.deepEqual(msg?.semanticEvent, {
+    v: 1,
+    id: 'subexecution:codex:child-1:message:msg-1',
+    kind: 'subexecution',
+    occurredAt: 123,
+    stage: 'message',
+    subexecutionId: 'child-1',
+    rootExecutionId: 'root-1',
+    parentExecutionId: 'root-1',
+    rootTurnId: 'root-turn-1',
+    parentTurnId: 'root-turn-1',
+    turnId: 'child-turn-1',
+    agentPath: '/root/reviewer',
+    nickname: 'Bohr',
+    depth: 1,
+    content: 'Approve from the child only',
+    messagePhase: 'final_answer',
+    provenance: { provider: 'codex', carrier: 'app_server', nativeType: 'subAgentActivity' },
+  });
+});
+
+test('app-server mapper preserves envelope identity for downstream scope fences', () => {
+  assert.deepEqual(
+    mapCodexAppServerNotification({
+      method: 'item/completed',
+      params: {
+        threadId: 'child-1',
+        turnId: 'child-turn-1',
+        item: {
+          id: 'msg-1',
+          type: 'agentMessage',
+          text: 'child result',
+          delivery: 'async',
+          questions: [{ title: 'Continue?', options: ['Yes', 'No'] }],
+        },
+      },
+    }),
+    {
+      type: 'item.completed',
+      thread_id: 'child-1',
+      turn_id: 'child-turn-1',
+      item: {
+        id: 'msg-1',
+        type: 'agent_message',
+        text: 'child result',
+        delivery: 'async',
+        questions: [{ title: 'Continue?', options: ['Yes', 'No'] }],
+      },
+    },
+  );
+});
+
+test('Codex app-server ends goal notification wire types at the adapter boundary', () => {
+  const mappedUpdate = mapCodexAppServerNotification({
+    method: 'thread/goal/updated',
+    params: {
+      threadId: 'native-thread-1',
+      goal: {
+        threadId: 'native-thread-1',
+        objective: 'Ship Phase C',
+        status: 'paused',
+        tokenBudget: 20_000,
+        tokensUsed: 12,
+        timeUsedSeconds: 3,
+        createdAt: 100,
+        updatedAt: 102,
+      },
+    },
+  });
+  const updated = transformCodexEvent(mappedUpdate, CAT);
+  assert.equal(mappedUpdate?.type, 'thread.goal.updated');
+  assert.equal(updated?.type, 'provider_signal');
+  assert.deepEqual(updated?.nativeGoalObservation, {
+    state: 'updated',
+    runtimeSessionId: 'native-thread-1',
+    objective: 'Ship Phase C',
+    status: 'paused',
+    tokenBudget: 20_000,
+    providerUpdatedAt: 102,
+    source: 'codex_app_server',
+  });
+  assert.equal(updated?.semanticEvent, undefined);
+
+  const mappedClear = mapCodexAppServerNotification({
+    method: 'thread/goal/cleared',
+    params: { threadId: 'native-thread-1' },
+  });
+  const cleared = transformCodexEvent(mappedClear, CAT);
+  assert.deepEqual(cleared?.nativeGoalObservation, {
+    state: 'cleared',
+    runtimeSessionId: 'native-thread-1',
+    source: 'codex_app_server',
+  });
+  assert.equal(
+    mapCodexAppServerNotification({
+      method: 'thread/goal/updated',
+      params: { threadId: 'native-thread-1', goal: { threadId: 'other-thread' } },
+    }),
+    null,
+  );
+});
+
+test('Codex goal projection rejects adapter-bypassing malformed events', () => {
+  const updated = transformCodexEvent(
+    {
+      type: 'thread.goal.updated',
+      thread_id: 'native-thread-1',
+      goal: {
+        objective: 'Ship Phase C',
+        status: 'mystery',
+        updatedAt: 102,
+      },
+    },
+    CAT,
+  );
+  assert.equal(updated, null);
+  assert.equal(
+    transformCodexEvent(
+      {
+        type: 'thread.goal.updated',
+        thread_id: 'native-thread-1',
+        goal: { objective: '   ', status: 'active', updatedAt: 103 },
+      },
+      CAT,
+    ),
+    null,
+  );
 });
 
 test('Reconnecting error → system_info', () => {
   const msg = transformCodexEvent({ type: 'error', message: 'Reconnecting... (attempt 1)' }, CAT);
   assert.equal(msg?.type, 'system_info');
-  assert.ok(msg?.content?.startsWith('Reconnecting...'));
+  assert.deepEqual(JSON.parse(msg.content), {
+    type: 'provider_recovery',
+    provider: 'codex',
+    phase: 'reconnecting',
+    attempt: 1,
+    message: 'Reconnecting... (attempt 1)',
+  });
 });
 
 test('unknown event type → null', () => {
@@ -170,7 +477,7 @@ test('todo_list with empty items → system_info with tasks:[] (clears UI)', () 
   assert.deepEqual(payload.tasks, []);
 });
 
-// ── F045: reasoning → system_info(thinking) ──
+// ── F306/F045: reasoning remains private thinking ──
 
 test('item.completed reasoning → system_info(thinking)', () => {
   const event = {
@@ -182,9 +489,12 @@ test('item.completed reasoning → system_info(thinking)', () => {
   };
   const msg = transformCodexEvent(event, CAT);
   assert.equal(msg?.type, 'system_info');
-  const payload = JSON.parse(msg?.content ?? '{}');
-  assert.equal(payload.type, 'thinking');
-  assert.equal(payload.text, 'Let me think about this...\nThe user wants X.');
+  assert.deepEqual(JSON.parse(msg?.content ?? '{}'), {
+    type: 'thinking',
+    catId: CAT,
+    text: 'Let me think about this...\nThe user wants X.',
+  });
+  assert.equal(msg?.semanticEvent, undefined);
 });
 
 test('reasoning with empty text → null', () => {
@@ -210,6 +520,8 @@ test('item.started mcp_tool_call → tool_use', () => {
   const msg = transformCodexEvent(event, CAT);
   assert.equal(msg?.type, 'tool_use');
   assert.equal(msg?.toolName, 'mcp:cat-cafe/post_message');
+  assert.equal(msg?.toolSource, 'mcp');
+  assert.equal(msg?.toolChannel, 'unknown');
   assert.deepEqual(msg?.toolInput, { text: 'hello' });
 });
 
@@ -226,7 +538,70 @@ test('item.completed mcp_tool_call → tool_result', () => {
   };
   const msg = transformCodexEvent(event, CAT);
   assert.equal(msg?.type, 'tool_result');
+  assert.equal(msg?.toolSource, 'mcp');
+  assert.equal(msg?.toolChannel, 'unknown');
   assert.ok(msg?.content?.includes('mcp:cat-cafe/post_message'));
+});
+
+test('GitHub App approval failure without an interactive surface becomes confirmation_unavailable', () => {
+  const event = {
+    type: 'item.completed',
+    item: {
+      type: 'mcp_tool_call',
+      server: 'codex_apps',
+      tool: 'github.create_pull_request',
+      status: 'failed',
+      result: { Err: 'user rejected MCP tool call' },
+    },
+  };
+
+  const msg = transformCodexEvent(event, CAT, undefined, { approvalSurface: 'unavailable' });
+
+  assert.equal(msg?.type, 'tool_result');
+  assert.equal(msg?.toolResultStatus, 'error');
+  assert.equal(msg?.toolResultErrorCode, 'confirmation_unavailable');
+  assert.match(msg?.content ?? '', /\[confirmation_unavailable\]/);
+  assert.match(msg?.content ?? '', /gh.*merge-gate/i);
+  assert.doesNotMatch(msg?.content ?? '', /\[user_rejected\]/);
+});
+
+test('GitHub App approval failure with an interactive surface remains user_rejected', () => {
+  const event = {
+    type: 'item.completed',
+    item: {
+      type: 'mcp_tool_call',
+      server: 'codex_apps',
+      tool: 'github.create_pull_request',
+      status: 'failed',
+      result: { Err: 'user rejected MCP tool call' },
+    },
+  };
+
+  const msg = transformCodexEvent(event, CAT, undefined, { approvalSurface: 'interactive' });
+
+  assert.equal(msg?.type, 'tool_result');
+  assert.equal(msg?.toolResultErrorCode, 'user_rejected');
+  assert.match(msg?.content ?? '', /\[user_rejected\]/);
+  assert.doesNotMatch(msg?.content ?? '', /\[confirmation_unavailable\]/);
+});
+
+test('unrelated MCP Err payload stays unclassified and visible', () => {
+  const event = {
+    type: 'item.completed',
+    item: {
+      type: 'mcp_tool_call',
+      server: 'filesystem',
+      tool: 'write_file',
+      status: 'failed',
+      result: { Err: 'permission denied' },
+    },
+  };
+
+  const msg = transformCodexEvent(event, CAT, undefined, { approvalSurface: 'unavailable' });
+
+  assert.equal(msg?.type, 'tool_result');
+  assert.equal(msg?.toolResultErrorCode, undefined);
+  assert.match(msg?.content ?? '', /permission denied/);
 });
 
 // ── F045: web_search → system_info(web_search) ──
@@ -485,6 +860,506 @@ test('mcp_tool_call image at exactly 5MB → accepted', () => {
   assert.equal(payload.block.items.length, 1);
 });
 
+// ── Empty text suppression (empty bubble fix) ──
+
+test('item.completed agent_message with empty text → null', () => {
+  const msg = transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: '' } }, CAT);
+  assert.equal(msg, null, 'empty text should be suppressed to avoid empty bubbles');
+});
+
+test('item.completed agent_message with whitespace-only text → null', () => {
+  const msg = transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: '   \n\n  ' } }, CAT);
+  assert.equal(msg, null, 'whitespace-only text should be suppressed');
+});
+
+test('item.completed agent_message with empty text after prior turn → null (not newlines)', () => {
+  const state = { hadPriorTextTurn: true };
+  const msg = transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: '' } }, CAT, state);
+  assert.equal(msg, null, 'empty text after prior turn should not produce newline content');
+});
+
+test('#1272: completed Codex turns keep all prose but emit one canonical final signature', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const events = [
+    {
+      type: 'item.completed',
+      item: { type: 'agent_message', text: '第一段进度。 `[砚砚/GPT-5.6 Sol🐾]`' },
+    },
+    {
+      type: 'item.completed',
+      item: { type: 'agent_message', text: '第二段进度。\n\n[砚砚/gpt-5.6-sol🐾]' },
+    },
+    { type: 'turn.completed', usage: {} },
+  ];
+
+  const messages = events.flatMap((event) => {
+    const result = transformCodexEvent(event, CAT, state);
+    if (result === null) return [];
+    return Array.isArray(result) ? result : [result];
+  });
+  const text = [...messages, finalizeCodexStream(state, CAT)]
+    .filter((msg) => msg !== null)
+    .filter((msg) => msg.type === 'text')
+    .map((msg) => msg.content)
+    .join('');
+
+  assert.equal(text, '第一段进度。\n\n第二段进度。\n\n[砚砚/gpt-5.6-sol🐾]');
+});
+
+test('#1272 review P1: multiple completed turns keep the canonical signature at the real stream end', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const events = [
+    { type: 'item.completed', item: { type: 'agent_message', text: 'turn 1' } },
+    { type: 'turn.completed', usage: {} },
+    { type: 'item.completed', item: { type: 'agent_message', text: 'turn 2' } },
+    { type: 'turn.completed', usage: {} },
+  ];
+
+  const messages = events.flatMap((event) => {
+    const result = transformCodexEvent(event, CAT, state);
+    if (result === null) return [];
+    return Array.isArray(result) ? result : [result];
+  });
+  const text = [...messages, finalizeCodexStream(state, CAT)]
+    .filter((msg) => msg !== null)
+    .filter((msg) => msg.type === 'text')
+    .map((msg) => msg.content)
+    .join('');
+
+  assert.equal(text, 'turn 1\n\nturn 2\n\n[砚砚/gpt-5.6-sol🐾]');
+});
+
+test('#1272 review P1 negative control: failed final turn does not append a success signature', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: 'partial' } }, CAT, state);
+  transformCodexEvent({ type: 'turn.failed', error: { message: 'boom' } }, CAT, state);
+
+  assert.equal(finalizeCodexStream(state, CAT), null);
+});
+
+test('#1272 review R2 P1: interrupted app-server terminal does not append a success signature', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: 'partial' } }, CAT, state);
+  const interrupted = mapCodexAppServerNotification({
+    method: 'turn/completed',
+    params: { turn: { status: 'interrupted' } },
+  });
+  assert.deepEqual(interrupted, { type: 'turn.completed', status: 'interrupted' });
+  transformCodexEvent(interrupted, CAT, state);
+
+  assert.equal(finalizeCodexStream(state, CAT), null);
+});
+
+test('#1272 review R2 audit: unknown non-success terminal statuses fail closed', () => {
+  for (const status of ['cancelled', 'future_non_success']) {
+    const state = {
+      hadPriorTextTurn: false,
+      signatureIdentity: '砚砚',
+      canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+    };
+    transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: 'partial' } }, CAT, state);
+    transformCodexEvent({ type: 'turn.completed', status }, CAT, state);
+
+    assert.equal(finalizeCodexStream(state, CAT), null, status);
+  }
+});
+
+test('#1272 review P1 negative control: content after completion needs a newer terminal', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: 'turn 1' } }, CAT, state);
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+  transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: 'turn 2' } }, CAT, state);
+
+  assert.equal(finalizeCodexStream(state, CAT), null);
+});
+
+test('#1272: Codex finalization preserves quoted, fenced, and other-cat signature-like text', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const textWithExamples = [
+    '引用保持：',
+    '> [砚砚/GPT-5.6 Sol🐾]',
+    '',
+    '```text',
+    '[砚砚/GPT-5.6 Sol🐾]',
+    '```',
+    '',
+    '另一只猫：[宪宪/claude-opus-4-8🐾]',
+    '',
+    '[砚砚/GPT-5.6 Sol🐾]',
+  ].join('\n');
+
+  const first = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: textWithExamples } },
+    CAT,
+    state,
+  );
+  const done = completeAndFinalize(state);
+  const text = [first, done]
+    .flatMap((result) => (result === null ? [] : Array.isArray(result) ? result : [result]))
+    .filter((msg) => msg.type === 'text')
+    .map((msg) => msg.content)
+    .join('');
+
+  assert.equal(
+    text,
+    [
+      '引用保持：',
+      '> [砚砚/GPT-5.6 Sol🐾]',
+      '',
+      '```text',
+      '[砚砚/GPT-5.6 Sol🐾]',
+      '```',
+      '',
+      '另一只猫：[宪宪/claude-opus-4-8🐾]',
+      '',
+      '[砚砚/gpt-5.6-sol🐾]',
+    ].join('\n'),
+  );
+});
+
+test('#1272: unsigned Codex content receives one canonical signature at stream completion', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: '只有正文。' } },
+    CAT,
+    state,
+  );
+  const done = completeAndFinalize(state);
+
+  assert.equal(body?.content, '只有正文。');
+  assert.equal(done?.type, 'text');
+  assert.equal(done?.content, '\n\n[砚砚/gpt-5.6-sol🐾]');
+});
+
+test('#1272: a signature-only provider turn still finalizes to one canonical signature', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: '[砚砚/GPT-5.6 Sol🐾]' } },
+    CAT,
+    state,
+  );
+  const done = completeAndFinalize(state);
+
+  assert.equal(body, null);
+  assert.equal(done?.content, '\n\n[砚砚/gpt-5.6-sol🐾]');
+});
+
+test('#1272: one already-canonical Codex turn is byte-stable after finalization', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const original = '单回合正文。\n\n[砚砚/gpt-5.6-sol🐾]';
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: original } },
+    CAT,
+    state,
+  );
+  const done = completeAndFinalize(state);
+
+  assert.equal(`${body?.content}${done?.content}`, original);
+});
+
+test('#1398: an identity-annotated own signature is normalized instead of duplicated', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.3-codex-spark🐾]',
+  };
+  const original = ['收到，明白。已直接 @小狸花 打招呼。', '', '[砚砚/缅因猫 gpt-5.3-codex-spark🐾@cat-gmwmct57]'].join(
+    '\n',
+  );
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: original } },
+    'cat-gmwmct57',
+    state,
+  );
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, 'cat-gmwmct57', state);
+  const done = finalizeCodexStream(state, 'cat-gmwmct57');
+
+  assert.equal(
+    `${body?.content}${done?.content}`,
+    '收到，明白。已直接 @小狸花 打招呼。\n\n[砚砚/gpt-5.3-codex-spark🐾]',
+  );
+});
+
+test('#1398: a display-name signature is normalized to the nickname canonical signature', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '小狸花',
+    signatureIdentityAliases: ['狸花猫'],
+    canonicalSignature: '[小狸花/deepseek-chat🐾]',
+  };
+  const original = 'Hello～ 狸花猫在 🐾\n\n[狸花猫/deepseek-chat🐾]';
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: original } },
+    'cat-83srpa6h',
+    state,
+  );
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, 'cat-83srpa6h', state);
+  const done = finalizeCodexStream(state, 'cat-83srpa6h');
+
+  assert.equal(`${body?.content}${done?.content}`, 'Hello～ 狸花猫在 🐾\n\n[小狸花/deepseek-chat🐾]');
+});
+
+test('#1398 negative control: a display-name signature for another model remains content', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '小狸花',
+    signatureIdentityAliases: ['狸花猫'],
+    canonicalSignature: '[小狸花/deepseek-chat🐾]',
+  };
+  const original = '示例：\n\n[狸花猫/another-model🐾]';
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: original } },
+    'cat-83srpa6h',
+    state,
+  );
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, 'cat-83srpa6h', state);
+  const done = finalizeCodexStream(state, 'cat-83srpa6h');
+
+  assert.equal(`${body?.content}${done?.content}`, `${original}\n\n[小狸花/deepseek-chat🐾]`);
+});
+
+test('#1398 negative control: a mismatched identity annotation remains user content', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.3-codex-spark🐾]',
+  };
+  const sample = '引用：[砚砚/缅因猫 gpt-5.3-codex-spark🐾@cat-someone-else]';
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: sample } },
+    'cat-gmwmct57',
+    state,
+  );
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, 'cat-gmwmct57', state);
+  const done = finalizeCodexStream(state, 'cat-gmwmct57');
+
+  assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.3-codex-spark🐾]`);
+});
+
+test('#1272: terminal teammate and legacy signatures remain content beside one canonical signature', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const teammate = transformCodexEvent(
+    {
+      type: 'item.completed',
+      item: { type: 'agent_message', text: '引用另一只猫的签名： [宪宪/claude-opus-4-8🐾]' },
+    },
+    CAT,
+    state,
+  );
+  const legacy = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: '保留 legacy： [砚砚/Codex]' } },
+    CAT,
+    state,
+  );
+  const done = completeAndFinalize(state);
+
+  assert.equal(
+    `${teammate?.content}${legacy?.content}${done?.content}`,
+    '引用另一只猫的签名： [宪宪/claude-opus-4-8🐾]\n\n保留 legacy： [砚砚/Codex]\n\n[砚砚/gpt-5.6-sol🐾]',
+  );
+});
+
+test('#1272 cloud P1: non-canonical same-cat signature samples remain user content', () => {
+  const samples = [
+    '> 引用签名：[砚砚/example-model🐾]',
+    '- 示例签名：[砚砚/example-model🐾]',
+    '正文签名样例：[砚砚/example-model🐾]',
+  ];
+
+  for (const sample of samples) {
+    const state = {
+      hadPriorTextTurn: false,
+      signatureIdentity: '砚砚',
+      canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+    };
+    const body = transformCodexEvent(
+      { type: 'item.completed', item: { type: 'agent_message', text: sample } },
+      CAT,
+      state,
+    );
+    const done = completeAndFinalize(state);
+
+    assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.6-sol🐾]`);
+  }
+});
+
+test('#1272 cloud P1: canonical signature samples remain content inside prose blockquotes', () => {
+  const samples = [
+    '> 引用签名：[砚砚/GPT-5.6 Sol🐾]',
+    '- > 引用签名：[砚砚/GPT-5.6 Sol🐾]',
+    '1. > 有序列表引用：[砚砚/GPT-5.6 Sol🐾]',
+    '> > 嵌套引用：[砚砚/GPT-5.6 Sol🐾]',
+    '> - 引用内列表：[砚砚/GPT-5.6 Sol🐾]',
+    '- - > 嵌套列表引用：[砚砚/GPT-5.6 Sol🐾]',
+  ];
+
+  for (const sample of samples) {
+    const state = {
+      hadPriorTextTurn: false,
+      signatureIdentity: '砚砚',
+      canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+    };
+    const body = transformCodexEvent(
+      { type: 'item.completed', item: { type: 'agent_message', text: sample } },
+      CAT,
+      state,
+    );
+    const done = completeAndFinalize(state);
+
+    assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.6-sol🐾]`);
+  }
+});
+
+test('#1272 review P2: indented code and bare list signature samples remain content', () => {
+  const samples = [
+    '缩进代码：\n\n    [砚砚/GPT-5.6 Sol🐾]',
+    '制表符代码：\n\n\t[砚砚/GPT-5.6 Sol🐾]',
+    '一空格加制表符代码：\n\n \t[砚砚/GPT-5.6 Sol🐾]',
+    '三空格加制表符代码：\n\n   \t[砚砚/GPT-5.6 Sol🐾]',
+    '无序列表：\n\n- `[砚砚/GPT-5.6 Sol🐾]`',
+    '有序列表：\n\n1. [砚砚/GPT-5.6 Sol🐾]',
+    '任务列表：\n\n- [ ] [砚砚/GPT-5.6 Sol🐾]',
+    '列表内引用：\n\n- > [砚砚/GPT-5.6 Sol🐾]',
+    '有序列表内引用：\n\n1. > `[砚砚/GPT-5.6 Sol🐾]`',
+  ];
+
+  for (const sample of samples) {
+    const state = {
+      hadPriorTextTurn: false,
+      signatureIdentity: '砚砚',
+      canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+    };
+    const body = transformCodexEvent(
+      { type: 'item.completed', item: { type: 'agent_message', text: sample } },
+      CAT,
+      state,
+    );
+    const done = completeAndFinalize(state);
+
+    assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.6-sol🐾]`);
+  }
+});
+
+test('#1272 review P2 negative control: ordinary prose/list progress still strips its own terminal signature', () => {
+  const samples = [
+    ['- 正在检查。 `[砚砚/GPT-5.6 Sol🐾]`', '- 正在检查。'],
+    ['正文比较 A > B。 `[砚砚/GPT-5.6 Sol🐾]`', '正文比较 A > B。'],
+    ['- 正文比较 A > B。 `[砚砚/GPT-5.6 Sol🐾]`', '- 正文比较 A > B。'],
+  ];
+
+  for (const [sample, expectedBody] of samples) {
+    const state = {
+      hadPriorTextTurn: false,
+      signatureIdentity: '砚砚',
+      canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+    };
+    const body = transformCodexEvent(
+      { type: 'item.completed', item: { type: 'agent_message', text: sample } },
+      CAT,
+      state,
+    );
+    const done = completeAndFinalize(state);
+
+    assert.equal(`${body?.content}${done?.content}`, `${expectedBody}\n\n[砚砚/gpt-5.6-sol🐾]`);
+  }
+});
+
+test('#1272 cloud P1: open fences and nested bare lists preserve terminal signature samples', () => {
+  const samples = [
+    '反引号伪关闭：\n\n```text\n```not-a-close\n[砚砚/GPT-5.6 Sol🐾]',
+    '较短反引号：\n\n````text\n```\n[砚砚/GPT-5.6 Sol🐾]',
+    '较短波浪线：\n\n~~~~text\n~~~\n[砚砚/GPT-5.6 Sol🐾]',
+    '不同 closing marker：\n\n```text\n~~~\n[砚砚/GPT-5.6 Sol🐾]',
+    '嵌套无序列表：\n\n- - [砚砚/GPT-5.6 Sol🐾]',
+    '嵌套有序任务列表：\n\n1. - [ ] `[砚砚/GPT-5.6 Sol🐾]`',
+    '列表内开放 fence：\n\n- ````text\n  ```not-a-close\n  [砚砚/GPT-5.6 Sol🐾]',
+  ];
+
+  for (const sample of samples) {
+    const state = {
+      hadPriorTextTurn: false,
+      signatureIdentity: '砚砚',
+      canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+    };
+    const body = transformCodexEvent(
+      { type: 'item.completed', item: { type: 'agent_message', text: sample } },
+      CAT,
+      state,
+    );
+    const done = completeAndFinalize(state);
+
+    assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.6-sol🐾]`);
+  }
+});
+
+test('#1272 cloud P1 negative control: legal fence closes before a decorative signature', () => {
+  const samples = [
+    '````text\n正文\n`````',
+    '- ````text\n  正文\n  ````',
+    '~~~~text\n正文\n~~~~',
+    '```invalid`info\n正文',
+  ];
+
+  for (const sample of samples) {
+    const state = {
+      hadPriorTextTurn: false,
+      signatureIdentity: '砚砚',
+      canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+    };
+    const body = transformCodexEvent(
+      {
+        type: 'item.completed',
+        item: { type: 'agent_message', text: `${sample}\n[砚砚/GPT-5.6 Sol🐾]` },
+      },
+      CAT,
+      state,
+    );
+    const done = completeAndFinalize(state);
+
+    assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.6-sol🐾]`);
+  }
+});
+
 test('mcp_tool_call mixed valid/invalid images → only valid included', () => {
   const event = {
     type: 'item.completed',
@@ -509,4 +1384,66 @@ test('mcp_tool_call mixed valid/invalid images → only valid included', () => {
   assert.equal(payload.block.items.length, 2, 'only image/png and image/jpeg');
   assert.ok(payload.block.items[0].url.startsWith('data:image/png;base64,'));
   assert.ok(payload.block.items[1].url.startsWith('data:image/jpeg;base64,'));
+});
+
+// ── F055-fix: normalizeTaskStatus integration — Codex non-standard status values ──
+
+test('todo_list with status "done" → normalized to "completed"', () => {
+  const event = {
+    type: 'item.updated',
+    item: {
+      type: 'todo_list',
+      todo_items: [
+        { id: 't1', content: 'Fix the bug', status: 'done' },
+        { id: 't2', content: 'Write tests', status: 'doing' },
+      ],
+    },
+  };
+  const msg = transformCodexEvent(event, CAT);
+  const payload = JSON.parse(msg?.content ?? '{}');
+  assert.equal(payload.tasks[0].status, 'completed', '"done" should normalize to "completed"');
+  assert.equal(payload.tasks[1].status, 'in_progress', '"doing" should normalize to "in_progress"');
+});
+
+test('todo_list with status "finished" → normalized to "completed"', () => {
+  const event = {
+    type: 'item.completed',
+    item: {
+      type: 'todo_list',
+      todo_items: [{ id: 't1', content: 'Task', status: 'finished' }],
+    },
+  };
+  const msg = transformCodexEvent(event, CAT);
+  const payload = JSON.parse(msg?.content ?? '{}');
+  assert.equal(payload.tasks[0].status, 'completed');
+});
+
+test('todo_list with status "active"/"running" → normalized to "in_progress"', () => {
+  const event = {
+    type: 'item.started',
+    item: {
+      type: 'todo_list',
+      todo_items: [
+        { id: 't1', content: 'Active task', status: 'active' },
+        { id: 't2', content: 'Running task', status: 'running' },
+      ],
+    },
+  };
+  const msg = transformCodexEvent(event, CAT);
+  const payload = JSON.parse(msg?.content ?? '{}');
+  assert.equal(payload.tasks[0].status, 'in_progress');
+  assert.equal(payload.tasks[1].status, 'in_progress');
+});
+
+test('todo_list with unknown status → falls back to "pending"', () => {
+  const event = {
+    type: 'item.started',
+    item: {
+      type: 'todo_list',
+      todo_items: [{ id: 't1', content: 'Unknown task', status: 'cancelled' }],
+    },
+  };
+  const msg = transformCodexEvent(event, CAT);
+  const payload = JSON.parse(msg?.content ?? '{}');
+  assert.equal(payload.tasks[0].status, 'pending');
 });

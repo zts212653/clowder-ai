@@ -14,16 +14,7 @@ vi.mock('@/hooks/useVoiceInput', () => ({
   }),
 }));
 
-vi.mock('@/stores/chatStore', () => ({
-  useChatStore: () => ({
-    targetCats: ['codex', 'gemini'],
-    catStatuses: { codex: 'streaming', gemini: 'pending' },
-    catInvocations: {},
-  }),
-}));
-
 import { ChatInputActionButton } from '@/components/ChatInputActionButton';
-import { ParallelStatusBar } from '@/components/ParallelStatusBar';
 
 describe('Stop event payload regression', () => {
   let container: HTMLDivElement;
@@ -52,7 +43,7 @@ describe('Stop event payload regression', () => {
     container.remove();
   });
 
-  it('ChatInputActionButton stop click does not pass MouseEvent to onStop', () => {
+  it('ChatInputActionButton invokes canonical cancellation without a legacy socket intent', () => {
     const onStop = vi.fn();
 
     act(() => {
@@ -72,25 +63,7 @@ describe('Stop event payload regression', () => {
     expect(stopBtn).toBeTruthy();
 
     act(() => {
-      stopBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    expect(onStop).toHaveBeenCalledTimes(1);
-    expect(onStop.mock.calls[0]).toEqual([]);
-  });
-
-  it('ParallelStatusBar stop click does not pass MouseEvent to onStop', () => {
-    const onStop = vi.fn();
-
-    act(() => {
-      root.render(React.createElement(ParallelStatusBar, { onStop }));
-    });
-
-    const stopBtn = container.querySelector('[data-testid="parallel-stop-button"]');
-    expect(stopBtn).toBeTruthy();
-
-    act(() => {
-      stopBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      stopBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
     });
 
     expect(onStop).toHaveBeenCalledTimes(1);
