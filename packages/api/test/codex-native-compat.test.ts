@@ -215,13 +215,53 @@ test('managed env keeps only our own CODEX_* fields, whatever knobs a newer Code
   });
 });
 
-test('the unset provider field 0.164.0 serializes is accepted; a set value still conflicts', () => {
+test('provider fields a new Codex serializes as null are unset on any version; a set value still conflicts', () => {
   const owned = { name: 'OpenAI', wire_api: 'responses', requires_openai_auth: true, supports_websockets: false };
-  validateCodexOwnedProvider({ ...owned, capabilities: null });
-  assert.throws(
-    () => validateCodexOwnedProvider({ ...owned, capabilities: { web_search: true } }),
-    /codex_oauth_configuration_conflict:model_providers\.openai_https\.capabilities/,
-  );
+  // Verbatim config/read of the probe's owned provider on codex-cli 0.166.0 (2026-10-30), which added
+  // project_id/location/credential_file after 0.164.0 added capabilities.
+  validateCodexOwnedProvider({
+    name: 'OpenAI',
+    base_url: null,
+    model_catalog_url: null,
+    env_key: null,
+    env_key_instructions: null,
+    experimental_bearer_token: null,
+    auth: null,
+    gateway_oauth: null,
+    aws: null,
+    project_id: null,
+    location: null,
+    credential_file: null,
+    wire_api: 'responses',
+    capabilities: null,
+    query_params: null,
+    http_headers: null,
+    env_http_headers: null,
+    request_max_retries: null,
+    stream_max_retries: null,
+    stream_idle_timeout_ms: null,
+    websocket_connect_timeout_ms: null,
+    requires_openai_auth: true,
+    supports_websockets: false,
+    supports_standalone_web_search: false,
+  });
+  validateCodexOwnedProvider({ ...owned, a_field_from_a_later_release: null });
+  for (const [key, value] of [
+    ['capabilities', { web_search: true }],
+    ['project_id', 'foreign-project'],
+    ['location', 'us-central1'],
+    ['credential_file', '/tmp/foreign.json'],
+    ['a_field_from_a_later_release', 'set'],
+    // Our own fields stay required: null does not stand in for them.
+    ['name', null],
+    ['wire_api', null],
+    ['requires_openai_auth', null],
+    ['supports_websockets', null],
+  ] as const)
+    assert.throws(
+      () => validateCodexOwnedProvider({ ...owned, [key]: value }),
+      new RegExp(`codex_oauth_configuration_conflict:model_providers\\.openai_https\\.${key}$`),
+    );
   assert.throws(
     () => validateCodexOAuthConfig({ chatgpt_base_url: 'https://elsewhere.invalid/' }),
     /codex_oauth_configuration_conflict:chatgpt_base_url/,
