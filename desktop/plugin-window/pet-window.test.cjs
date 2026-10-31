@@ -28,6 +28,7 @@ function fixture(options = {}) {
       .sort((a, b) => a.distance - b.distance)[0].candidate;
   const host = createPetWindow({
     win: {
+      webContents: options.webContents,
       getBounds: () => bounds,
       setBounds: (value) => {
         bounds = value;
@@ -155,6 +156,26 @@ test('compact geometry keeps the whole top-corner badge inside the native hit ta
   f.host.tick();
   assert.equal(f.ignores.at(-1), false, 'the badge corner must receive clicks instead of passing through');
   assert.equal(f.host.setBallSize(42), false);
+});
+
+test('page zoom cannot shrink the renderer viewport behind native badge coordinates', (t) => {
+  let zoom = 1.25;
+  const f = fixture({
+    webContents: {
+      getZoomFactor: () => zoom,
+      setZoomFactor: (value) => {
+        zoom = value;
+      },
+    },
+  });
+  t.after(() => f.host.close());
+  f.host.setBallSize(89);
+  const reply = f.host.request({ kind: 'view.layout', panel: 'none', width: 120, height: 130 });
+  assert.equal(zoom, 1, 'layout uses the same CSS and native coordinate scale');
+  zoom = 1.25;
+  f.host.tick();
+  assert.equal(zoom, 1, 'a later menu/keyboard zoom cannot leave the badge clipped');
+  assert.ok(reply.pet.x + (120 * 89) / 72 <= f.bounds().width / zoom);
 });
 
 test('reset position moves the whole current layout without changing panel-relative geometry', (t) => {

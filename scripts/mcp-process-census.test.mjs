@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -10,6 +11,17 @@ test('labels the verified F193 inline SDK probe without archiving its source or 
     new URL('../packages/api/test/fixtures/f193-retired-probe-source.txt', import.meta.url),
     'utf8',
   );
+  // Test input only: verify this exact fixture transformation against the
+  // immutable published bytes; production recognizes complete hashes only.
+  const publicCode = code.replace(
+    /process\.chdir\("[^"\n]+"\);$/u,
+    'process.chdir("/home/user/cat-cafe/packages/api");',
+  );
+  assert.equal(
+    createHash('sha256').update(publicCode).digest('hex'),
+    '8ba14ed1c7bb943df1757fbb4bf6dc4dbddfe3cbbafb60dec691017c7c9d409d',
+  );
+  const thirdCwd = publicCode.replace('/home/user/cat-cafe/packages/api', '/opt/unrecognized-probe-api');
   const row = (pid, source) => ({
     pid,
     ppid: 1,
@@ -18,9 +30,16 @@ test('labels the verified F193 inline SDK probe without archiving its source or 
     elapsed: '00:10',
     command: `node --input-type=module --eval ${source}`,
   });
-  const census = projectProcessCensus([row(2, code), row(3, `${code} // user customization`)]);
+  const census = projectProcessCensus([
+    row(2, code),
+    row(3, `${code} // user customization`),
+    row(4, publicCode),
+    row(5, thirdCwd),
+  ]);
   assert.equal(census.processes[0].family, 'f193-retired-probe');
   assert.notEqual(census.processes[1].family, 'f193-retired-probe');
+  assert.equal(census.processes[2].family, 'f193-retired-probe');
+  assert.notEqual(census.processes[3].family, 'f193-retired-probe');
   assert.ok(!JSON.stringify(census).includes(code));
 });
 

@@ -8,7 +8,7 @@ description: "让开源团队仓成为共享代码的上游：家里和团队的
 description_source: human
 description_author: opus55
 description_updated_at: 2026-10-20T10:45:00Z
-tips_exempt: "2026-10-23 续核：本次补记 Phase B 的测试、构建、模板与文件归属验收，以及公开 compiler 的既有 edition 边界修复；名字仍沿用已有设置，维护者仍走原构建和同步入口。阶段收口记录不新增应用内操作或发现入口，也不表示 Phase C 发布流程已经启用。"
+tips_exempt: "2026-10-31 续核：本批启用 next 集成 / main 发布策略，改变维护者同步与贡献分支选择；双语 CONTRIBUTING 已说明既有 Git/PR 操作，无新增 Hub 用户操作或发现入口。此豁免只覆盖应用内提示；首次 next 往返、晋升与发版验收仍待真实回执。"
 ---
 
 # F330: 团队仓当上游
@@ -150,7 +150,7 @@ Phase A 的实际同步依赖已于 2026-10-21 23:37:36 UTC 满足。按原安�
 - [x] AC-B3: 两边本来就不同的每个文件都有写明的归属，并在隔离仓库实测四种情况（上游单边修改、上游删除、双方修改、全新 checkout）的结果符合预期；不以 `.gitattributes merge=ours` 作为保护
 
 ### Phase C（发布层）
-- [ ] AC-C1: next 快进到 main；next 上实际跑通与 main 相同的 CI（Linux 与 Windows）
+- [x] AC-C1: next 快进到 main；next 上实际跑通与 main 相同的 CI（Linux 与 Windows）
 - [ ] AC-C2: daily 同步的公开基线、PR base、目标新鲜度检查与 F251 基线 / 水位在同一次交付中改为 next，并有隔离副本中的验证记录
 - [ ] AC-C3: 走通一次完整旅程：团队 PR 进 next → 家里接入 → 家里下一轮同步没有冲掉它 → 固定候选经 Linux / Windows 与实际操作验收 → main 接受该候选并打 tag
 - [ ] AC-C4: main 的紧急修复有路径且至少演练一次，修复合回 next；默认分支与发版节奏按 operator 决定落实，并写进 CONTRIBUTING

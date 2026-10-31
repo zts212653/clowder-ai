@@ -2,7 +2,7 @@ name: macOS Preview Lifecycle
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, next]
   workflow_dispatch:
 
 permissions:

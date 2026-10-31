@@ -14,6 +14,11 @@ export const carriers = [
 
 const managedEntrypoint = /(?:^|\s)(\/[^\s]+\/mcp-package-v\d+)\/([^\s]+\.[cm]?js)(?:\s|$)/;
 const hash = (value) => createHash('sha256').update(value).digest('hex');
+const retiredProbeSources = new Set([
+  '3bfb1cdc8bdcca70024d5c19eaeef63bbbee241f7b38ef7ff9e5454922d0600c',
+  // Same exact canonical public export recognized by the owned migration.
+  '8ba14ed1c7bb943df1757fbb4bf6dc4dbddfe3cbbafb60dec691017c7c9d409d',
+]);
 
 /** Read only managed identity markers. A directory hash is never a plugin ID. */
 export function loadManagedMcpPackages(rows) {
@@ -61,7 +66,7 @@ export function classifyMcpProcess(command, managedPackages) {
   // Only label the exact observed F193 probe payload. This is census evidence,
   // not permission to terminate a process or retire arbitrary inline tools.
   const inlineModule = /(?:^|\s)--eval ([\s\S]+)$/.exec(command)?.[1];
-  if (inlineModule && hash(inlineModule) === '3bfb1cdc8bdcca70024d5c19eaeef63bbbee241f7b38ef7ff9e5454922d0600c')
+  if (inlineModule && retiredProbeSources.has(hash(inlineModule)))
     return { category: 'external_mcp', family: 'f193-retired-probe' };
   if (
     /(?:Google Chrome(?: Helper)?(?:\.app)?|chrome-headless-shell|\/Chromium|\/firefox(?: |$)|ms-playwright\/.*(?:chrome|headless))/i.test(

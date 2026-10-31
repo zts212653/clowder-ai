@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import {
   collectiveAccountabilityAttentionItemSchema,
+  collectiveProjectAttentionItemSchema,
   NEEDS_ME_PRODUCER_IDS,
   type UnifiedAttentionItemV1,
   type UnifiedAttentionReadV1,
@@ -9,6 +10,7 @@ import {
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { CompanionBridgeError } from '../../companion-owner-client.js';
+import { companionRuntimeInteractionSchema } from './companion-unified-runtime.js';
 
 const source = z.object({
   status: z.enum(['available', 'unavailable', 'unauthenticated', 'forbidden', 'invalid']),
@@ -26,6 +28,8 @@ const row = z.object({
   summary: z.string(),
   approval: z.record(z.unknown()).optional(),
   collectiveAccountabilityRequest: z.unknown().optional(),
+  collectiveProjectAttention: collectiveProjectAttentionItemSchema.optional(),
+  runtimeInteraction: companionRuntimeInteractionSchema.optional(),
   linkedNeedsMe: z.array(z.object({ ownerRead: z.unknown(), receipt: z.unknown() })),
 });
 const read = z.object({
@@ -38,6 +42,10 @@ const read = z.object({
     approvals: source,
     needsMe: source,
     collectiveAccountabilityRequests: collectiveAccountabilitySource.optional(),
+    collectiveProjectAttention: source
+      .extend({ coverage: z.literal('pending_f290_project_materials_and_dates') })
+      .optional(),
+    structuredChoices: source.extend({ coverage: z.literal('pending_f306_structured_choices') }).optional(),
   }),
   readWindow: z.object({
     startedAt: z.number(),
@@ -62,6 +70,21 @@ function item(raw: z.infer<typeof row>, ownerUserId: string): UnifiedAttentionIt
   const accountability = raw.collectiveAccountabilityRequest
     ? collectiveAccountabilityAttentionItemSchema.parse(raw.collectiveAccountabilityRequest)
     : undefined;
+  const project = raw.collectiveProjectAttention;
+  const runtime = raw.runtimeInteraction;
+  if (
+    (runtime &&
+      (raw.decisionRef !== `f306.runtime_interaction:${runtime.interactionId}` ||
+        (raw.kind !== 'judgment' &&
+          !(approval?.sourceFeatureId === 'F306' && approval.proposalId === runtime.interactionId)))) ||
+    (project &&
+      (approval ||
+        linkedNeedsMe.length > 0 ||
+        raw.kind !== 'judgment' ||
+        raw.decisionRef !== `${project.producerId}:${project.subjectRef}`)) ||
+    [accountability, project, runtime].filter(Boolean).length > 1
+  )
+    throw new CompanionBridgeError('unavailable');
   if (
     accountability &&
     (approval ||
@@ -74,6 +97,8 @@ function item(raw: z.infer<typeof row>, ownerUserId: string): UnifiedAttentionIt
   if (
     !approval &&
     !accountability &&
+    !project &&
+    !runtime &&
     (!linkedNeedsMe.length || linkedNeedsMe.some(({ receipt }) => receipt.kind !== raw.kind))
   )
     throw new CompanionBridgeError('unavailable');
@@ -83,6 +108,8 @@ function item(raw: z.infer<typeof row>, ownerUserId: string): UnifiedAttentionIt
     summary: raw.summary,
     ...(approval ? { approval } : {}),
     ...(accountability ? { collectiveAccountabilityRequest: accountability } : {}),
+    ...(project ? { collectiveProjectAttention: project } : {}),
+    ...(runtime ? { runtimeInteraction: runtime } : {}),
     linkedNeedsMe,
   };
 }
@@ -146,6 +173,8 @@ export function parseUnifiedCompanionSource(
         (value.approval && parsed.sources.approvals.status !== 'available') ||
         (value.collectiveAccountabilityRequest &&
           parsed.sources.collectiveAccountabilityRequests?.status !== 'available') ||
+        (value.collectiveProjectAttention && parsed.sources.collectiveProjectAttention?.status !== 'available') ||
+        (value.runtimeInteraction && parsed.sources.structuredChoices?.status !== 'available') ||
         (value.linkedNeedsMe.length > 0 && parsed.sources.needsMe.status !== 'available'),
     )
   )
