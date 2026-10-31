@@ -1,6 +1,7 @@
 'use client';
 
 import { type ReactNode, useCallback } from 'react';
+import { WorkContentBoundary } from '@/components/artifacts/WorkContentBoundary';
 import { EvolutionProgramSurface } from '@/components/capability-evolution/solution-gate/SolutionGateHost';
 import { ArtifactReviewSurface } from '@/components/content-review/ArtifactReviewSurface';
 import { TheaterReplayContent } from '@/components/story-player/TheaterReplayContent';
@@ -233,39 +234,50 @@ function F307OwnerSurfaceContent({
     }
     if (surface.ownerStateRef.owner === 'f138-publication') {
       const target = resolvePublicationTarget(surface);
+      const changeVersion = (ownerRevision: number) => {
+        if (!target) return;
+        onRefreshSurface({
+          ...surface,
+          ...createPublicationSurface({
+            ...target,
+            ownerRevision,
+            title: surface.title,
+            htmlWorkSourceThreadId: surface.htmlWorkSourceThreadId,
+            navigationOrigin: surface.navigationOrigin,
+          }),
+          ...(surface.returnTargetRef ? { returnTargetRef: surface.returnTargetRef } : {}),
+        });
+      };
       return target ? (
-        <PublicationLandingResolver
-          sourceSurface={surface}
-          target={target}
-          leadingAction={leadingAction}
+        <WorkContentBoundary
+          reference={target}
+          threadId={hostThreadId}
+          sourceThreadId={surface.htmlWorkSourceThreadId}
           onBack={returnToOrigin}
-          onResolved={(resolved) => resolveSurface(resolved)}
+          onVersionChange={changeVersion}
         >
-          <PublicationContentReviewSurface
-            {...target}
+          <PublicationLandingResolver
+            sourceSurface={surface}
+            target={target}
             leadingAction={leadingAction}
-            title={surface.title}
-            fullWindowAction={fullWindowAction}
-            navigationOrigin={surface.navigationOrigin}
-            onVersionChange={(ownerRevision) =>
-              onRefreshSurface({
-                ...surface,
-                ...createPublicationSurface({
-                  ...target,
-                  ownerRevision,
-                  title: surface.title,
-                  navigationOrigin: surface.navigationOrigin,
-                }),
-                ...(surface.returnTargetRef ? { returnTargetRef: surface.returnTargetRef } : {}),
-              })
-            }
-            onBack={() =>
-              surface.navigationOrigin && onReturnToFileOrigin
-                ? onReturnToFileOrigin(surface, surface.navigationOrigin)
-                : onRequestDetach()
-            }
-          />
-        </PublicationLandingResolver>
+            onBack={returnToOrigin}
+            onResolved={(resolved) => resolveSurface(resolved)}
+          >
+            <PublicationContentReviewSurface
+              {...target}
+              leadingAction={leadingAction}
+              title={surface.title}
+              fullWindowAction={fullWindowAction}
+              navigationOrigin={surface.navigationOrigin}
+              onVersionChange={changeVersion}
+              onBack={() =>
+                surface.navigationOrigin && onReturnToFileOrigin
+                  ? onReturnToFileOrigin(surface, surface.navigationOrigin)
+                  : onRequestDetach()
+              }
+            />
+          </PublicationLandingResolver>
+        </WorkContentBoundary>
       ) : (
         <OwnerUnavailable message="作品引用已不可用。" />
       );

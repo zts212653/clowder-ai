@@ -101,3 +101,27 @@ describe('canonical publication Workspace target', () => {
     ).toThrow();
   });
 });
+
+it('restores Work read context separately from the fixed owner identity and the Home return', () => {
+  const target = { contentRef: `work:${'d'.repeat(64)}`, ownerRevision: 2 };
+  const surface = createPublicationSurface({
+    ...target,
+    title: 'HTML',
+    htmlWorkSourceThreadId: 'actual-source',
+    navigationOrigin: {
+      kind: 'artifact-list',
+      threadId: 'default',
+      view: { scope: 'global', filter: 'all', query: '', grouping: 'time', catFilter: null, collapsed: [] },
+    },
+  });
+  const restore = (candidate: unknown) =>
+    restoreWorkbenchState(
+      { ...createInitialWorkbenchState(), surfaces: [candidate], activeSurfaceId: surface.id },
+      { isOwnerRefAvailable: isRealSurfaceOwnerAvailable },
+    );
+  const restored = restore(JSON.parse(JSON.stringify(surface))).surfaces[0];
+  expect(resolvePublicationTarget(restored)).toEqual(target);
+  expect(restored.htmlWorkSourceThreadId).toBe('actual-source');
+  expect(restored.navigationOrigin).toMatchObject({ threadId: 'default' });
+  expect(restore({ ...surface, htmlWorkSourceThreadId: 'bad\0source' }).surfaces).toEqual([]);
+});

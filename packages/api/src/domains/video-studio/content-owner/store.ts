@@ -116,10 +116,10 @@ export class ProjectContentOwnerStore {
   }
 
   /** Bounded manifest discovery only; callers must reauthorize every resulting publication. */
-  async listRetainedMedia(ownerUserId: string, after = '', limit = 30) {
+  async listRetainedMedia(ownerUserId: string, after = '', limit = 30, includeHtmlWorks = false) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 30) throw new TypeError('Invalid media page');
     const items: { contentRef: string; ownerRevision: number }[] = [];
-    for await (const head of this.retainedMediaHeads(ownerUserId)) {
+    for await (const head of this.retainedMediaHeads(ownerUserId, includeHtmlWorks)) {
       if (head.contentRef.localeCompare(after) <= 0) continue;
       items.push({ contentRef: head.contentRef, ownerRevision: head.ownerRevision });
       items.sort((a, b) => a.contentRef.localeCompare(b.contentRef));
@@ -132,9 +132,18 @@ export class ProjectContentOwnerStore {
   }
 
   /** One canonical manifest walk. The consumer bounds retention and freshly authorizes selected versions. */
-  async *retainedMediaHeads(ownerUserId: string): AsyncGenerator<RetainedMediaHead> {
+  async *retainedMediaHeads(ownerUserId: string, includeHtmlWorks = false): AsyncGenerator<RetainedMediaHead> {
     for await (const state of readOwnerManifests(this.rootDir)) {
-      if (state?.publicationScope?.ownerUserId !== ownerUserId || !['image/png', 'video/mp4'].includes(state.mediaType))
+      if (
+        state?.publicationScope?.ownerUserId !== ownerUserId ||
+        (!['image/png', 'video/mp4'].includes(state.mediaType) &&
+          !(
+            includeHtmlWorks &&
+            state.mediaType === 'text/html' &&
+            'kind' in state.publicationScope &&
+            state.publicationScope.kind === 'work'
+          ))
+      )
         continue;
       const revision = state.revisions[state.currentOwnerRevision - 1];
       if (!revision) throw new Error('Canonical current revision unavailable');

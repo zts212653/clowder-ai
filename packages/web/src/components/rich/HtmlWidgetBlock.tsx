@@ -21,6 +21,7 @@ import {
 } from './html-widget-layout-machine';
 import { resolveWidgetMeasurementError, resolveWidgetPresentation } from './html-widget-presentation';
 import { sanitizeWidgetHtml } from './sanitize-widget-html';
+import { WorkspaceHtmlWidgetBlock } from './WorkspaceHtmlWidgetBlock';
 
 function isExportSearch(search: string): boolean {
   const value = new URLSearchParams(search).get('export');
@@ -88,7 +89,7 @@ function resolveMeasuredViewportAnchor({
   };
 }
 
-export function HtmlWidgetBlock({ block, disclosureKey }: { block: RichHtmlWidgetBlock; disclosureKey?: string }) {
+function ChatHtmlWidgetBlock({ block, disclosureKey }: { block: RichHtmlWidgetBlock; disclosureKey?: string }) {
   const reactId = useId();
   const instanceId = `html-widget-${reactId}`;
   const iframeId = `${instanceId}-frame`;
@@ -282,5 +283,22 @@ export function HtmlWidgetBlock({ block, disclosureKey }: { block: RichHtmlWidge
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** One HTML entry: chat measures content; Works retains its existing independently scrolling viewport. */
+export function HtmlWidgetBlock({
+  block,
+  disclosureKey,
+  presentation = 'chat',
+}: {
+  block: RichHtmlWidgetBlock;
+  disclosureKey?: string;
+  presentation?: 'chat' | 'workspace';
+}) {
+  return presentation === 'workspace' ? (
+    <WorkspaceHtmlWidgetBlock block={block} />
+  ) : (
+    <ChatHtmlWidgetBlock block={block} disclosureKey={disclosureKey} />
   );
 }

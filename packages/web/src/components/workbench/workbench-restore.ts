@@ -6,7 +6,7 @@ import { resolveCommitChangesTarget } from './commit-changes-surface';
 import { resolveEvolutionMediaTarget } from './evolution-media-surface';
 import { parseFileNavigationOrigin } from './file-navigation-origin';
 import { resolveMessagePublicationSource } from './message-publication-surface';
-import { resolvePublicationTarget } from './publication-surface';
+import { htmlWorkSourceThreadIdSchema, resolvePublicationTarget } from './publication-surface';
 import { isPullRequestChangesSurfaceCandidate } from './pull-request-changes-surface';
 import {
   createEntrustedReturnFromRef,
@@ -141,6 +141,12 @@ function parseSurface(value: unknown, legacySchema: boolean): WorkspaceSurfaceDe
     if (!source.success) return null;
     messagePublicationSource = source.data;
   }
+  let htmlWorkSourceThreadId: string | undefined;
+  if (surface.htmlWorkSourceThreadId !== undefined) {
+    const source = htmlWorkSourceThreadIdSchema.safeParse(surface.htmlWorkSourceThreadId);
+    if (!source.success || ownerStateRef.owner !== 'f138-publication') return null;
+    htmlWorkSourceThreadId = source.data;
+  }
   let filesReveal: WorkspaceSurfaceDescriptor['filesReveal'];
   if (surface.filesReveal !== undefined) {
     const candidate = asRecord(surface.filesReveal);
@@ -173,6 +179,7 @@ function parseSurface(value: unknown, legacySchema: boolean): WorkspaceSurfaceDe
     ownerStateRef: { owner: ownerStateRef.owner, key: ownerStateRef.key },
     ...(resultTargetRef === undefined ? {} : { resultTargetRef }),
     ...(navigationOrigin === undefined ? {} : { navigationOrigin }),
+    ...(htmlWorkSourceThreadId ? { htmlWorkSourceThreadId } : {}),
     ...(messagePublicationSource ? { messagePublicationSource } : {}),
     ...(artifactFileSource ? { artifactFileSource } : {}),
     ...(rootSelection?.success ? { rootSelection: rootSelection.data } : {}),
@@ -224,6 +231,7 @@ function parseSurface(value: unknown, legacySchema: boolean): WorkspaceSurfaceDe
     return null;
   if ((filesReveal || filesRepoRoot) && resolveFilesTarget(parsed) === null) return null;
   if (ownerStateRef.owner === 'f138-publication' && resolvePublicationTarget(parsed) === null) return null;
+  if (htmlWorkSourceThreadId && !resolvePublicationTarget(parsed)?.contentRef.startsWith('work:')) return null;
   if (
     messagePublicationSource &&
     resolvePublicationTarget(parsed) === null &&

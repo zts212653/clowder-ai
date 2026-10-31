@@ -6,7 +6,12 @@ import { useContentOpen } from '../content-review/useContentOpen';
 
 type WorkCardSelection = { reference: WorkReference; title: string; navigationOrigin?: WorkspaceFileNavigationOrigin };
 /** A registered card supplies its exact owner/version; the common opener owns every transition. */
-export function useWorkCardOpen(reference: WorkReference | undefined, title: string, messageId?: string) {
+export function useWorkCardOpen(
+  reference: WorkReference | undefined,
+  title: string,
+  messageId?: string,
+  mediaType?: 'text/html',
+) {
   const opening = useContentOpen(undefined, JSON.stringify([reference?.contentRef, reference?.ownerRevision]));
   return {
     ...opening,
@@ -23,7 +28,15 @@ export function useWorkCardOpen(reference: WorkReference | undefined, title: str
         selected.navigationOrigin ??
         (threadId && messageId ? { kind: 'chat-file-link' as const, threadId, messageId } : undefined);
       return opening.openContent(
-        { kind: 'work', reference: selected.reference, title: selected.title, current, origin, expectedSurfaceKey },
+        {
+          kind: 'work',
+          reference: selected.reference,
+          title: selected.title,
+          current,
+          origin,
+          expectedSurfaceKey,
+          mediaType,
+        },
         mode,
       );
     },

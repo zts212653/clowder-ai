@@ -8,6 +8,7 @@ import { API_URL } from '@/utils/api-client';
 import { captureChatReadingBeforeLayoutChange } from '@/utils/chat-layout-change';
 import { createCollectiveDocumentSurface } from '../workbench/collective-document-surface';
 import { useF307ExperienceWorkbenchStore } from '../workbench/experience-workbench-store';
+import { createPublicationSurface } from '../workbench/publication-surface';
 import { useArtworkLightboxScope } from './ArtworkLightboxScope';
 import { type ContentOpenSource, contentOpenFacts, contentSourcePreview } from './content-open-source';
 import { contentFileUrl, workspaceFileSourceFromUrl } from './file-source';
@@ -96,6 +97,10 @@ export function useContentOpen(publication?: PublishedMessageCoordinate, sourceS
             {
               kind: 'work',
               reference,
+              threadId: source.coordinate.threadId,
+              ...(registered?.type === 'widget' || source.mime === 'text/html'
+                ? { mediaType: 'text/html' as const }
+                : {}),
               title: registered?.name ?? source.name,
               origin: source.origin,
               current: source.current,
@@ -153,16 +158,35 @@ export function useContentOpen(publication?: PublishedMessageCoordinate, sourceS
           scopeRef.current?.work?.surface?.ownerStateRef.key !== source.expectedSurfaceKey
         )
           return false;
-        const result = await readWorkCardDescription(source.reference, source.current ?? false);
-        if (!valid()) return false;
+        const result = await readWorkCardDescription(
+          source.reference,
+          source.current ?? false,
+          abort.signal,
+          source.mediaType === 'text/html' ? { threadId: source.threadId ?? host } : undefined,
+        );
+        if (
+          !valid() ||
+          (source.expectedSurfaceKey !== undefined &&
+            scopeRef.current?.work?.surface?.ownerStateRef.key !== source.expectedSurfaceKey)
+        )
+          return false;
         setDescription(result);
         const target = {
           kind: 'publication' as const,
           contentRef: source.reference.contentRef,
           ownerRevision: result.asset.ownerRevision,
           title: source.title,
+          ...(result.asset.mediaType === 'text/html' ? { htmlWorkSourceThreadId: source.threadId ?? host } : {}),
           ...(source.origin ? { navigationOrigin: source.origin } : {}),
         };
+        if (result.asset.mediaType === 'text/html') {
+          captureChatReadingBeforeLayoutChange();
+          const opened = source.attach
+            ? (source.attach(createPublicationSurface(target)), true)
+            : useChatStore.getState().openPublication(target, host, 'work-mode');
+          if (opened) scopeRef.current?.close();
+          return opened;
+        }
         const url = `${API_URL}/api/content-publications/${encodeURIComponent(target.contentRef)}/media/${target.ownerRevision}`;
         return show(
           {
@@ -183,6 +207,9 @@ export function useContentOpen(publication?: PublishedMessageCoordinate, sourceS
           {
             kind: 'work',
             reference: source.artifact.work,
+            threadId: source.threadId,
+            ...(source.artifact.type === 'widget' ? { mediaType: 'text/html' as const } : {}),
+            attach: source.attach,
             title: source.artifact.name,
             origin: source.origin,
             gallery: source.gallery,

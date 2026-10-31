@@ -2,7 +2,9 @@
 import { FEATURE_DEMOS, type WorkReference, workReferenceSchema } from '@cat-cafe/shared';
 import { useEffect, useState } from 'react';
 import { z } from 'zod';
+import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { readWorkMetadata } from './work-content-client';
 
 const descriptionSchema = z.object({
   asset: workReferenceSchema.extend({ mediaType: z.string(), blobDigest: z.string() }).passthrough(),
@@ -19,7 +21,24 @@ export function workVideoDemo(description: WorkCardDescription | null | undefine
   );
 }
 
-export async function readWorkCardDescription(reference: WorkReference, current = false, signal?: AbortSignal) {
+export async function readWorkCardDescription(
+  reference: WorkReference,
+  current = false,
+  signal?: AbortSignal,
+  html?: { threadId: string },
+) {
+  if (html) {
+    if (!html.threadId) throw new Error('原作品暂时无法打开，请保留这条引用后重试。');
+    const abort = signal ?? new AbortController().signal;
+    let info = await readWorkMetadata(reference, html.threadId, abort);
+    if (current && info.currentOwnerRevision !== reference.ownerRevision)
+      info = await readWorkMetadata({ ...reference, ownerRevision: info.currentOwnerRevision }, html.threadId, abort);
+    if (info.description.mediaType !== 'text/html') throw new Error('原作品格式暂时无法核对。');
+    return descriptionSchema.parse({
+      asset: { ...info.description, ...info.reference },
+      currentOwnerRevision: info.currentOwnerRevision,
+    });
+  }
   const query = current ? '' : `?ownerRevision=${reference.ownerRevision}`;
   const response = await apiFetch(`/api/content-publications/${encodeURIComponent(reference.contentRef)}${query}`, {
     signal,
@@ -36,15 +55,25 @@ export async function readWorkCardDescription(reference: WorkReference, current 
   return result;
 }
 
-export function useWorkCardDescription(reference: WorkReference | undefined, enabled: boolean) {
+export function useWorkCardDescription(
+  reference: WorkReference | undefined,
+  enabled: boolean,
+  mediaType?: 'text/html',
+) {
+  const threadId = useChatStore((state) => state.currentThreadId);
   const contentRef = reference?.contentRef;
   const ownerRevision = reference?.ownerRevision;
-  const key = contentRef ? JSON.stringify([contentRef, ownerRevision]) : '';
+  const key = contentRef ? JSON.stringify([contentRef, ownerRevision, mediaType, mediaType ? threadId : null]) : '';
   const [loaded, setLoaded] = useState<{ key: string; data: WorkCardDescription | null }>();
   useEffect(() => {
     if (!contentRef || !ownerRevision || !enabled) return;
     const abort = new AbortController();
-    void readWorkCardDescription({ contentRef, ownerRevision }, false, abort.signal)
+    void readWorkCardDescription(
+      { contentRef, ownerRevision },
+      false,
+      abort.signal,
+      mediaType ? { threadId } : undefined,
+    )
       .then((data) => {
         if (!abort.signal.aborted) setLoaded({ key, data });
       })
@@ -52,7 +81,7 @@ export function useWorkCardDescription(reference: WorkReference | undefined, ena
         if (!abort.signal.aborted) setLoaded({ key, data: null });
       });
     return () => abort.abort();
-  }, [key, contentRef, ownerRevision, enabled]);
+  }, [key, contentRef, ownerRevision, enabled, mediaType, threadId]);
   return {
     description: loaded?.key === key ? loaded.data : null,
     loading: !!reference && loaded?.key !== key,

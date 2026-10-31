@@ -851,6 +851,7 @@ export interface WorkspaceOpenRequest {
         /** The review a Host receipt is committed to: the work is entered in that review, or not at all. */
         reviewId?: string;
         title: string;
+        htmlWorkSourceThreadId?: string;
         messagePublicationSource?: MessageMediaPublicationSource;
         navigationOrigin?: WorkspaceFileNavigationOrigin;
       }

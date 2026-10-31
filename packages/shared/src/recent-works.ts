@@ -5,7 +5,12 @@ const RECENT_WORK_TYPES = new Set<GlobalArtifactDTO['type']>(['image', 'video', 
 
 /** F232 KD-9 / F322: the single work-admission predicate shared by the bounded API and its page. */
 export function isRecentWork(artifact: GlobalArtifactDTO): boolean {
-  return artifact.catId !== null && RECENT_WORK_TYPES.has(artifact.type) && artifact.fileLedgerRef === undefined;
+  const savedHtmlWork = artifact.type === 'widget' && artifact.work?.contentRef.startsWith('work:');
+  return (
+    artifact.catId !== null &&
+    (RECENT_WORK_TYPES.has(artifact.type) || savedHtmlWork === true) &&
+    artifact.fileLedgerRef === undefined
+  );
 }
 
 function publicationKey(artifact: GlobalArtifactDTO): string {

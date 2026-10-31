@@ -192,7 +192,13 @@ export function useContentMediaOpen({
                     current.contentRef !== result.target.contentRef ||
                     current.ownerRevision !== result.target.ownerRevision)
                   ? openContent(
-                      { kind: 'work', reference: current, title: selected.title, origin: actual?.navigationOrigin },
+                      {
+                        kind: 'work',
+                        reference: current,
+                        title: selected.title,
+                        origin: actual?.navigationOrigin,
+                        expectedSurfaceKey: actual?.ownerStateRef.key,
+                      },
                       'work-mode',
                     )
                   : show(selected, 'work-mode', selectedGroup);

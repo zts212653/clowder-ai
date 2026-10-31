@@ -26,7 +26,16 @@ export type ContentOpenSource = Origin & { gallery?: { items: readonly ContentOp
         attach?: (surface: WorkspaceSurfaceDescriptor) => void;
       }
     | ({ kind: 'collective' } & CollectiveDocumentHostTarget)
-    | { kind: 'work'; reference: WorkReference; title: string; current?: boolean; expectedSurfaceKey?: string }
+    | {
+        kind: 'work';
+        reference: WorkReference;
+        title: string;
+        current?: boolean;
+        expectedSurfaceKey?: string;
+        mediaType?: 'text/html';
+        threadId?: string;
+        attach?: (surface: WorkspaceSurfaceDescriptor) => void;
+      }
     | {
         kind: 'message-file';
         url: string;

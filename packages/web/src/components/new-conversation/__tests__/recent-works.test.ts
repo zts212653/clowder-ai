@@ -36,6 +36,38 @@ describe('F322 recent works projection', () => {
     expect(visible.map((item) => item.name).sort()).toEqual(['image', 'published file', 'video']);
   });
 
+  it('shows the latest saved HTML Work while excluding inline, human and ledger widgets', () => {
+    const html = artifact({
+      type: 'widget',
+      url: undefined,
+      work: { contentRef: 'work:html', ownerRevision: 1, currentOwnerRevision: 2 },
+    });
+    const visible = projectRecentWorks(
+      [
+        { ...html, name: 'original HTML', createdAt: 30 },
+        {
+          ...html,
+          name: 'continued HTML',
+          createdAt: 20,
+          work: { contentRef: 'work:html', ownerRevision: 2, currentOwnerRevision: 2 },
+        },
+        { ...html, name: 'human HTML', catId: null },
+        { ...html, name: 'ledger HTML', fileLedgerRef: 'ledger:1' },
+        { ...html, name: 'inline HTML', work: undefined },
+        {
+          ...html,
+          name: 'other owner',
+          work: { contentRef: 'artifact:html', ownerRevision: 1, currentOwnerRevision: 1 },
+        },
+      ],
+      'resolved',
+      12,
+    );
+    expect(visible.map((item) => [item.name, item.work?.ownerRevision, item.threadId])).toEqual([
+      ['continued HTML', 2, 'thread-a'],
+    ]);
+  });
+
   it('uses the accepted deterministic tie order and never guesses a family from the name', () => {
     const visible = projectRecentWorks(
       [

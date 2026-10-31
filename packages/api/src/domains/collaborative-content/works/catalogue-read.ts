@@ -171,7 +171,7 @@ async function visibleHeads(
 
 async function readHeads(owner: Dependencies['owner'], ownerUserId: string) {
   const heads: RetainedMediaHead[] = [];
-  for await (const head of owner.retainedMediaHeads(ownerUserId)) {
+  for await (const head of owner.retainedMediaHeads(ownerUserId, true)) {
     heads.push(head);
     if (heads.length > 10000) throw new MediaOwnerError('media_unavailable');
   }
