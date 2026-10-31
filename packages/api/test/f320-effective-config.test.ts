@@ -117,7 +117,7 @@ test('native CLI parses values separately from literal dotted keys, and tilde us
   assert.equal(descriptor.sqliteHome, join(f.cwd, 'state'));
 });
 
-test('native owned-provider serialized null defaults are inert; active and unknown fields are rejected', () => {
+test('native owned-provider serialized null defaults are inert; active and unknown set fields are rejected', () => {
   const owned = { name: 'OpenAI', wire_api: 'responses', requires_openai_auth: true, supports_websockets: false };
   assert.doesNotThrow(() =>
     validateCodexOwnedProvider({
@@ -134,7 +134,7 @@ test('native owned-provider serialized null defaults are inert; active and unkno
     { env_key: 'FOREIGN' },
     { auth: { command: 'foreign' } },
     { http_headers: { Authorization: 'foreign' } },
-    { unexpected_field: null },
+    { unexpected_field: 'set' },
     { supports_standalone_web_search: true },
   ])
     assert.throws(() => validateCodexOwnedProvider({ ...owned, ...extension }), /configuration_conflict/);

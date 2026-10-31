@@ -861,9 +861,50 @@ terminate_pid_tree_with_signal() {
     kill "-$signal" "$pid" 2>/dev/null || true
 }
 
+process_started_at() {
+    ps -p "$1" -o lstart= 2>/dev/null | awk '{ $1 = $1; print }' || true
+}
+
+# "<pid> <start time>" for every descendant of the given roots, from one read of the process table so
+# TERM is not delayed per process; the start time keeps a pid recycled during the grace from being signalled.
+list_descendant_identities() {
+    ps -A -o pid=,ppid=,lstart= 2>/dev/null | awk -v roots="$*" '
+        {
+            pid = $1
+            parent = $2
+            $1 = ""
+            $2 = ""
+            $0 = $0
+            $1 = $1
+            started[pid] = $0
+            children[parent] = children[parent] " " pid
+        }
+        END {
+            count = split(roots, queue, " ")
+            for (head = 1; head <= count; head++) {
+                found = split(children[queue[head]], kids, " ")
+                for (i = 1; i <= found; i++) {
+                    if (kids[i] in seen) continue
+                    seen[kids[i]] = 1
+                    print kids[i] " " started[kids[i]]
+                    queue[++count] = kids[i]
+                }
+            }
+        }
+    ' || true
+}
+
 terminate_managed_pids() {
     local pid
+    local started
+    local entry
     local signaled=false
+    local descendants=()
+    if [ "${#MANAGED_PIDS[@]}" -gt 0 ]; then
+        while IFS= read -r entry; do
+            descendants+=("$entry")
+        done < <(list_descendant_identities "${MANAGED_PIDS[@]}")
+    fi
     for pid in "${MANAGED_PIDS[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
             signaled=true
@@ -875,6 +916,15 @@ terminate_managed_pids() {
     fi
     for pid in "${MANAGED_PIDS[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
+            terminate_pid_tree_with_signal KILL "$pid"
+        fi
+    done
+    # A child still draining (next-server waiting on open browser connections) outlives a parent
+    # that exited on TERM; reparented to init, the walk above no longer reaches it.
+    for entry in ${descendants[@]+"${descendants[@]}"}; do
+        pid=${entry%% *}
+        started=${entry#* }
+        if [ "$(process_started_at "$pid")" = "$started" ]; then
             terminate_pid_tree_with_signal KILL "$pid"
         fi
     done
