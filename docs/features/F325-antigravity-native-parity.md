@@ -131,13 +131,13 @@ ACP 原生 L0 缺口已证；You 已选择保留个人 OAuth 与原生 L0，继�
 
 来源：You 验收请求 `private-source-id`、记入 F325 交Maine Coon逐个处理 `private-source-id`；印印（@agy-opus55，AGY 1.4.10，正式 boot62 / `a72e0ca0`）以本人真实调用为样本，报告见 `private-source-id`。未追加专门模型调用；下列为当轮实测证据，根因或修法未定的如实标注。Issue 4 已完成；按印印 source269 的交接继续 1 → 3 → 2 → 5。
 
-##### Open issue 1：Native 命令默认工作目录是 profile 沙盒，不是工作区 {#native-spawn-cwd}
+##### Resolved issue 1：Native 命令默认工作目录与缓存隔离 {#native-spawn-cwd}
 
 - 现象：同一轮两次 `run_command` 的 `pwd` 均返回 `~/.cat-cafe/agy-profiles/agy-opus55-native/cwd/230809973b9c83ac`；AGY 宿主提示的 Command Working Directory 与 Active Workspaces 第一项也是该沙盒。会话绑定 `workspaceRoot` 实为 cat-cafe 仓库。
 - 与现有依据冲突：[`resolveAgySpawnCwd`](../../packages/api/src/domains/cats/services/agents/providers/agy-profile-manager.ts) 注释引用 2026-06-03 旧版实测「`--add-dir` 后 AGY 工具 `pwd` 回工作区」，当前 1.4.10 不成立。
 - 影响：不带 `cd` 的 `git status` / `pnpm test` 在空目录执行；相对路径写入可能落进沙盒。Claude / Codex 猫启动即在项目目录，属平权缺口。
 - 期望：普通工具默认 cwd 为本轮工作区，同时保留 AGY cwd-relative cache 落沙盒的原隔离目的；先以零模型探针确认 1.4.10 的 cwd 与 cache 归属再选修法。
-- 保留边界：真实 linked-worktree 的 Git 命令因 CLI sandbox 拒绝工作区外的 common Git 元数据而 exit128；移除新增 hook 参数、旧接线手动 `cd` 的对照同样失败。cwd 正确与项目文件读取通过不替代 Git 旅程通过；原件在私有证据 `f325-native-cwd-sol61-20261029/real-service-01..04`，本 PR 没有放宽文件权限来掩盖这个既有边界。
+- 保留边界：真实 linked-worktree 的 Git 命令因 CLI sandbox 拒绝工作区外的 common Git 元数据而 exit128；移除新增 hook 参数、旧接线手动 `cd` 的对照同样失败。cwd 正确与项目文件读取通过不替代 Git 旅程通过；原件在私有证据 `f325-native-cwd-sol61-20261029/real-service-01..04`，本 PR 没有放宽文件权限来掩盖这个既有边界。该对照来自1.4.10；本次1.4.12未重测Git，项目读取通过不替代其Git旅程通过。
 
 ##### Open issue 2：仓库根 AGENTS.md / GEMINI.md 被 AGY 以最高优先级 user rules 注入 {#native-workspace-rules-injection}
 

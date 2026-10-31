@@ -37,6 +37,11 @@ function canonical(value: unknown): string {
 function destinations(item: UnifiedAttentionItemV1) {
   const targets: Partial<Record<CompanionDecisionNavigationTarget, CompanionDecisionDestination>> = {};
   const nav = item.approval?.navigation;
+  if (item.runtimeInteraction) {
+    const { threadId, messageId, blockId } = item.runtimeInteraction.cardRef;
+    targets.action = { threadId, messageId, blockId };
+    targets.origin = { threadId, messageId, blockId };
+  }
   if (nav?.state === 'anchored') {
     targets.approval_card = { ...nav.approvalCardRef };
     if (nav.originRef.kind === 'message')
@@ -77,6 +82,9 @@ export class CompanionUnifiedDecisions {
           kind: item.kind,
           summary: item.summary,
           approval: item.approval,
+          runtimeInteraction: item.runtimeInteraction,
+          collectiveProjectAttention: item.collectiveProjectAttention,
+          collectiveAccountabilityRequest: item.collectiveAccountabilityRequest,
           linked,
         }),
       )
@@ -127,6 +135,20 @@ export class CompanionUnifiedDecisions {
     throw new CompanionBridgeError('unavailable');
   }
   private publicRead(source: UnifiedAttentionReadV1, items: PublicUnifiedDecisions['items']): PublicUnifiedDecisions {
+    // The installed ABI has two source slots. Fold newer non-approval producers
+    // into Needs Me so a failed source remains visibly partial on old renderers.
+    const needsMeSources = Object.entries(source.sources)
+      .filter(([name]) => name !== 'approvals')
+      .map(([, value]) => value)
+      .filter((value) => value !== undefined);
+    const needsMe = {
+      status: needsMeSources.find((value) => value.status !== 'available')?.status ?? 'available',
+      coverage: needsMeSources.every((value) => value.exhaustiveness === 'complete')
+        ? ('complete' as const)
+        : needsMeSources.some((value) => value.exhaustiveness === 'partial')
+          ? ('partial' as const)
+          : ('unknown' as const),
+    };
     const complete =
       source.status === 'available' &&
       source.consistency.state === 'verified' &&
@@ -140,7 +162,7 @@ export class CompanionUnifiedDecisions {
       observedAt: source.observedAt,
       sources: {
         approvals: { status: source.sources.approvals.status, coverage: source.sources.approvals.exhaustiveness },
-        needsMe: { status: source.sources.needsMe.status, coverage: source.sources.needsMe.exhaustiveness },
+        needsMe,
       },
       items,
       ...(complete && source.totalCount !== undefined ? { totalCount: source.totalCount } : {}),

@@ -6,11 +6,13 @@ export function CollectiveWorkRequests({
   tasks,
   busy,
   mutate,
+  recoverReply,
 }: {
   readonly requests: ParticipationView['requests'];
   readonly tasks: ParticipationView['tasks'];
   readonly busy: boolean;
   readonly mutate: (path: string, body: Record<string, unknown>) => Promise<void>;
+  readonly recoverReply: (request: ParticipationView['requests'][number]) => Promise<boolean>;
   readonly control?: string;
 }) {
   if (!requests.length) return null;
@@ -27,6 +29,7 @@ export function CollectiveWorkRequests({
               task={tasks.find((item) => item.sourceRefs.includes(`message:${request.messageId}`))}
               busy={busy}
               mutate={mutate}
+              recoverReply={recoverReply}
             />
           ))}
       </div>
@@ -39,11 +42,13 @@ function RequestRow({
   task,
   busy,
   mutate,
+  recoverReply,
 }: {
   readonly request: ParticipationView['requests'][number];
   readonly task?: ParticipationView['tasks'][number];
   readonly busy: boolean;
   readonly mutate: (path: string, body: Record<string, unknown>) => Promise<void>;
+  readonly recoverReply: (request: ParticipationView['requests'][number]) => Promise<boolean>;
   readonly control?: string;
 }) {
   return (
@@ -54,9 +59,16 @@ function RequestRow({
         {task ? ` · ${task.closure === 'open' ? '已承接私人工作' : '工作已收口'}` : ''}
       </p>
       {request.privateThread && (
-        <a className="inline-block underline" href={`/thread/${encodeURIComponent(request.privateThread.id)}`}>
-          在家里查看
-        </a>
+        <div className="flex flex-wrap gap-3">
+          <a className="inline-block underline" href={`/thread/${encodeURIComponent(request.privateThread.id)}`}>
+            在家里查看
+          </a>
+          {!task && canRecoverPublicReply(request) && (
+            <button type="button" className="underline" disabled={busy} onClick={() => void recoverReply(request)}>
+              补交原回复
+            </button>
+          )}
+        </div>
       )}
       {task ? (
         <div className="flex flex-wrap gap-2">
@@ -81,6 +93,16 @@ function RequestRow({
         </div>
       ) : null}
     </article>
+  );
+}
+
+function canRecoverPublicReply(request: ParticipationView['requests'][number]) {
+  return (
+    !request.response &&
+    request.delivery === 'routed' &&
+    request.execution?.stage === 'ended' &&
+    Boolean(request.messageId) &&
+    request.event.recipient?.kind === 'agent'
   );
 }
 

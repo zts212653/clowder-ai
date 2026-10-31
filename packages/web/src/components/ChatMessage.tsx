@@ -288,7 +288,19 @@ function ChatMessageContent({
   const isSummary = message.type === 'summary';
   const isConnector =
     message.from?.kind === 'external' || message.from?.kind === 'plugin' || message.type === 'connector';
-  const cloudBindingRecovery = isUser ? projectCloudBindingRecovery(message, threadMessages) : undefined;
+  const cloudBindingRecovery =
+    isUser || (shellPresentation === 'v2' && message.from?.kind === 'agent')
+      ? projectCloudBindingRecovery(message, threadMessages, shellPresentation === 'v2')
+      : undefined;
+  const cloudBindingCard =
+    cloudBindingRecovery && renderThreadId ? (
+      <CloudBindingRecoveryCard
+        timelineMessages={threadMessages}
+        threadId={renderThreadId}
+        sourceMessageId={message.id}
+        {...cloudBindingRecovery}
+      />
+    ) : null;
   const projectedSystemContent = message.extra?.systemInfo
     ? (formatVisibleSystemInfo(message.extra.systemInfo.payload, (catId) => resolveCatDisplayName(catId, getCatById))
         ?.content ?? message.content)
@@ -466,6 +478,8 @@ function ChatMessageContent({
   }
 
   if (isSystem) {
+    if (shellPresentation === 'v2' && isLinkedCloudBindingRecoveryNotice(message, threadMessages))
+      return <div data-message-id={message.id} aria-hidden="true" className="h-0" />;
     const contentModificationReceipt = contentModificationReceiptOf(message.extra);
     if (contentModificationReceipt)
       return (
@@ -695,7 +709,9 @@ function ChatMessageContent({
               : 'human'
             : 'bubble'
         }
-        maxWidth={compact ? 'max-w-[86%]' : undefined}
+        maxWidth={
+          shellPresentation === 'v2' && cloudBindingCard ? 'w-full max-w-full' : compact ? 'max-w-[86%]' : undefined
+        }
         avatar={userAvatar}
         header={userHeader}
         footer={
@@ -703,6 +719,7 @@ function ChatMessageContent({
             {humanTime}
             {!humanTime ? dispatchLine : null}
             <RoutingWarningNotice warnings={message.extra?.routingWarnings} />
+            {shellPresentation === 'v2' ? cloudBindingCard : null}
           </>
         }
         wrapperClassName="group cat-persona-derived"
@@ -755,16 +772,7 @@ function ChatMessageContent({
         ) : (
           <CollapsibleMarkdown content={message.content} disclosureKey={bodyDisclosureKey} />
         )}
-        {cloudBindingRecovery && renderThreadId ? (
-          <CloudBindingRecoveryCard
-            timelineMessages={threadMessages}
-            threadId={renderThreadId}
-            sourceMessageId={message.id}
-            targetCatId={cloudBindingRecovery.targetCatId}
-            attemptId={cloudBindingRecovery.attemptId}
-            deliveryStatus={cloudBindingRecovery.deliveryStatus}
-          />
-        ) : null}
+        {shellPresentation !== 'v2' ? cloudBindingCard : null}
         {message.extra?.custodyOfferV1 ? (
           <CustodyOfferCard sourceMessageId={message.id} expectedOffer={message.extra.custodyOfferV1} />
         ) : null}
@@ -1070,7 +1078,13 @@ function ChatMessageContent({
         ) : null
       }
       header={catHeader}
-      maxWidth={isCrossThreadLetter ? 'w-full max-w-full' : compact ? 'max-w-[86%]' : undefined}
+      maxWidth={
+        isCrossThreadLetter || (shellPresentation === 'v2' && cloudBindingCard)
+          ? 'w-full max-w-full'
+          : compact
+            ? 'max-w-[86%]'
+            : undefined
+      }
       /* F056: always add cat-persona-derived so nested ThinkingContent/CliOutputBlock
        * have valid --cat-msg-{inset,inset-text,...} tokens even when catData is
        * undefined (e.g. stream messages without resolved catId). */
@@ -1114,6 +1128,7 @@ function ChatMessageContent({
           <AppendedInputReceipts response={message} timelineMessages={threadMessages} getCatById={getCatById} />
           <GenerationMessagesNotice response={message} threadId={renderThreadId} timelineMessages={threadMessages} />
           {dispatchLine}
+          {shellPresentation === 'v2' ? cloudBindingCard : null}
         </>
       }
     >
