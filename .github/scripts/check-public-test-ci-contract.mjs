@@ -3,6 +3,25 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 
 const workflow = parse(readFileSync(new URL('../workflows/ci.yml', import.meta.url), 'utf8'));
+for (const event of ['push', 'pull_request']) {
+  assert.deepEqual(
+    [...workflow.on[event].branches].sort(),
+    ['main', 'next'],
+    `public CI must cover both the stable and integration branches on ${event}`,
+  );
+}
+for (const filename of ['windows-smoke.yml', 'macos-preview-smoke.yml']) {
+  const nativeWorkflow = parse(readFileSync(new URL(`../workflows/${filename}`, import.meta.url), 'utf8'));
+  assert.deepEqual(
+    [...nativeWorkflow.on.pull_request.branches].sort(),
+    ['main', 'next'],
+    `${filename} must validate PRs for both branch roles`,
+  );
+  assert.ok(
+    Object.hasOwn(nativeWorkflow.on, 'workflow_dispatch'),
+    `${filename} must support checking the restored next head before ordinary PRs move there`,
+  );
+}
 const lintCheckout = workflow.jobs.lint.steps.find((step) => step.uses === 'actions/checkout@v4');
 assert.equal(
   lintCheckout?.with?.['fetch-depth'],
