@@ -61,6 +61,13 @@ function copyPanelRequest(command) {
 /** Own-window presentation only. Renderer never chooses a display, absolute
  * desktop coordinate, another window, or an unbounded drag lifetime. */
 function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}, now = Date.now }) {
+  // Native placement and hit testing use DIP coordinates. Page/pinch zoom must
+  // not silently shrink the CSS viewport; the persisted ballSize owns sizing.
+  void win.webContents?.setVisualZoomLevelLimits?.(1, 1);
+  const normalizePageScale = () => {
+    const zoom = win.webContents?.getZoomFactor?.();
+    if (zoom !== undefined && zoom !== 1) win.webContents.setZoomFactor(1);
+  };
   let anchor;
   let layout;
   let dragging;
@@ -92,6 +99,7 @@ function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}
         })
       : null;
   function apply(panel, pointer) {
+    normalizePageScale();
     const bounds = win.getBounds();
     const size = petMetrics(ballSize).pet;
     anchor ??= { x: bounds.x + (bounds.width - size.width) / 2, y: bounds.y + bounds.height - size.height - 8 };
@@ -185,6 +193,7 @@ function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}
   }
   function tick() {
     if (win.isDestroyed() || !layout) return;
+    normalizePageScale();
     const cursor = screen.getCursorScreenPoint();
     updateDrag(cursor);
     const ignore =

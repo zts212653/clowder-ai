@@ -65,6 +65,7 @@ import { resolveUserId } from '../utils/request-identity.js';
 import { type LiveExecutionCandidate, registerActiveExecutionRoutes } from './active-execution-routes.js';
 import { commitRecoveredFailedResponse } from './callback-a2a-trigger.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
+import { registerCollectiveReplyRecovery } from './collective-reply-recovery.js';
 import { resolveQueueAuthorIntentByCatId } from './message-disposition-admission.js';
 import { nativeControlReceiptHooks, nativeQueueControlCommand } from './native-control-receipts.js';
 import { registerQueueRoutingRecovery } from './queue-routing-recovery.js';
@@ -400,6 +401,9 @@ async function guardThreadOwnership(
 
 export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, opts) => {
   const { threadStore, invocationQueue, queueProcessor, invocationTracker, socketManager, messageStore } = opts;
+  registerCollectiveReplyRecovery(app, opts, (request, reply, threadId) =>
+    guardThreadOwnership(request, reply, threadStore, threadId),
+  );
   registerQueueRoutingRecovery(app, opts, (request, reply, threadId) =>
     guardThreadOwnership(request, reply, threadStore, threadId),
   );
