@@ -10,11 +10,7 @@ on:
       - 'assets/**'
   pull_request:
     branches: [main, next]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'designs/**'
-      - 'assets/**'
+    # Required checks must report for docs/assets-only PRs as well.
 
 concurrency:
   group: ci-${{ github.ref }}

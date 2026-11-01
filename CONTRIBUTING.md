@@ -19,6 +19,26 @@ Both `next` and `main` run Linux and Windows CI.
 Stable users should install a published release. Urgent stable fixes may target `main` when explicitly
 designated by a maintainer; the fix must also return to `next` and survive the next integration update.
 
+## Who reviews and merges `next` PRs
+
+Anyone may contribute review feedback. For an ordinary change within the accepted scope:
+
+1. The author and their agents complete the self-checks and provide verification evidence.
+2. A **different trusted maintainer** reviews it and submits **Approve** from their own GitHub account.
+   They may use their agents to help. A comment saying an agent reviewed it is not a GitHub approval;
+   another agent using the PR author's account cannot approve that author's PR.
+3. All required CI checks pass on an up-to-date branch, blocking findings are fixed, and review
+   conversations are resolved. New commits can dismiss earlier approvals, so recheck the current head.
+4. A maintainer with **Write or higher** access may merge the PR into `next`, without asking the
+   repository owner again for each ordinary change.
+
+The current trusted reviewers and protected paths are defined in [CODEOWNERS](CODEOWNERS).
+GitHub requires one eligible **non-author code owner** approval; an arbitrary contributor's approval
+does not satisfy that gate. Sensitive paths require the repository owner's approval. New features,
+architecture, security, data migration and CI/sync changes also require senior maintainer approval
+of the direction, even when their files are outside those paths; see [MAINTAINERS.md §4.3](MAINTAINERS.md#43-review-and-merge-authority).
+Promotion to `main` and releases remain subject to explicit repository-owner authorization.
+
 ## For Beta Testers (Internal Preview)
 
 You have **Write** access to this repo, but `next` and `main` are protected — all changes go through **Pull Requests**.
@@ -267,6 +287,23 @@ not another small deletion; record failed attempts as well as the final successf
 再发布版本；`next` 的 CI 通过本身不会发版。稳定使用请安装已发布版本。
 紧急稳定版修复经维护者明确指定可以直接面向 `main`，修复随后必须回到 `next`，
 并验证下一轮集成更新仍然保留它。
+
+## 谁来审查、谁能合入 `next`
+
+任何人都可以提出 review 意见。已接受范围内的普通改动按以下规则处理：
+
+1. 作者和自己的猫先完成自检，提供验证证据。
+2. **另一位受信任维护者**完成审查，用**自己的 GitHub 账号正式 Approve**。
+   维护者可以借助自己的猫；评论里写“猫已审”不等于 GitHub 批准，换一只猫但仍使用作者账号也不能自批。
+3. 分支已跟上目标分支、所有必需 CI 通过、阻塞意见修完、review 讨论全部解决。
+   新提交可能撤销旧批准，合入前须核对当前 HEAD 的审查状态。
+4. 满足以上条件后，具有 **Write 或以上权限**的维护者可自行合入 `next`，普通改动不必每次等仓库所有者。
+
+当前受信任审查者和受保护路径以 [CODEOWNERS](CODEOWNERS) 为准。
+GitHub 要求至少一位**非作者的代码负责人**批准，任意外部贡献者的批准不能替代它。
+敏感路径必须由仓库所有者批准；新功能、架构、安全、数据迁移及 CI／同步等改动，
+即使文件不在这些路径内，也须由高级维护者确认方向，详见 [MAINTAINERS.md 第 4.3 节](MAINTAINERS.md#43-审查与合入权限)。
+晋升 `main` 和正式发版仍须仓库所有者明确授权。
 
 ## 如何为 Clowder 贡献
 
