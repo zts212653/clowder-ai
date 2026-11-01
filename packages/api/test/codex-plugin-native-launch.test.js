@@ -470,7 +470,8 @@ test('a scoped member has the same hard tool fence with its own identity project
   const f = await fixture(t, {
     l0CompilerFn: async (input) => {
       compiled.push(input);
-      return 'Identity constant: @codex model=gpt-5.3-codex';
+      const { compileL0ViaSubprocess } = await import('../dist/domains/cats/services/agents/providers/l0-compiler.js');
+      return compileL0ViaSubprocess(input);
     },
   });
   f.options.pluginNativeLaunch.sandbox.kind = 'scoped-member';
@@ -481,7 +482,9 @@ test('a scoped member has the same hard tool fence with its own identity project
   );
   assert.equal(f.calls.length, 1);
   assert.equal(compiled[0].projection, 'scoped-member');
-  assert.equal(compiled[0].runtimeModel, 'gpt-5.3-codex');
+  assert.equal(compiled[0].frozenInput.projection, 'scoped-member');
+  assert.match(compiled[0].frozenInput.variables.MEMBER_IDENTITY, /model=gpt-5.3-codex/);
+  assert.equal(compiled[0].requireFrozenInput, true);
   assert.ok(f.calls[0].args.includes('--ephemeral'));
   assert.equal(f.calls[0].spec.command, process.execPath);
   assert.equal(f.calls[0].spec.default_tools_approval_mode, 'approve');

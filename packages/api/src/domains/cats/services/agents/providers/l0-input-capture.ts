@@ -15,6 +15,7 @@ export function captureInvocationL0Input(
     catId: string;
   } & (
     | { projection: 'public' }
+    | { projection: 'scoped-member'; catConfig: CatConfig; model: string }
     | {
         catConfig: CatConfig;
         userId: string;
@@ -33,6 +34,14 @@ export function captureInvocationL0Input(
   const installRoot = resolve(dirname(script), '..');
   if (input.projection === 'public')
     return captureFrozenL0Input({ catId: input.catId, projection: 'public', installRoot });
+  if (input.projection === 'scoped-member')
+    return captureFrozenL0Input({
+      catId: input.catId,
+      projection: 'scoped-member',
+      member: input.catConfig,
+      model: input.model,
+      installRoot,
+    });
   const catalog = loadResolvedCatConfig(resolveProjectTemplatePath(resolveActiveProjectRoot()));
   const configs = catRegistry.getAllConfigs();
   return captureFrozenL0Input({

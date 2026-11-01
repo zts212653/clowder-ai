@@ -904,6 +904,18 @@ async function buildCatCafeMcpArgs(
     cmdArgs = s.args;
     if (!isCatCafe) envEntries = s.plugin ? bindPluginMcpEnvironment(s.env ?? {}, callbackEnv) : s.env;
     if (!cmd) continue;
+    if (s.source === 'plugin' && callbackEnv.CAT_CAFE_MCP_TRANSPORT === 'shared') {
+      // Preserve the captured launch identity until Host nomination in private RPC.
+      privateServers[s.name] = {
+        command: cmd,
+        args: cmdArgs ?? [],
+        ...(envEntries ? { env: envEntries } : {}),
+        ...(workingDir ? { cwd: workingDir } : {}),
+        enabled: true,
+      };
+      enabledServers.push(s.name);
+      continue;
+    }
     if (envEntries) {
       // Pooled replacement hosts rebind session paths through server.env.
       // A frozen wrapper copy would override the newly bound credential file.
@@ -1534,6 +1546,11 @@ export class CodexAgentService implements AgentService {
       this.carrierMode,
       promptSource.kind === 'frozen',
       this.catId,
+      admittedOptions.callbackEnv?.CAT_CAFE_OPENAI_MODEL_OVERRIDE ??
+        admittedOptions.executionPreferences?.model ??
+        (catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool'
+          ? getCatModel(this.catId)
+          : this.model),
     );
     try {
       for await (const message of this.invokePrepared(promptSource, native.options, native)) {
@@ -1587,6 +1604,7 @@ export class CodexAgentService implements AgentService {
       options?.executionPreferences?.nativeAuthentication ??
       usesNativeToolConfiguration(catRegistry.tryGet(this.catId)?.config);
     const effectiveModel =
+      native?.model ??
       options?.callbackEnv?.CAT_CAFE_OPENAI_MODEL_OVERRIDE ??
       options?.executionPreferences?.model ??
       (nativeTool ? getCatModel(this.catId) : this.model);

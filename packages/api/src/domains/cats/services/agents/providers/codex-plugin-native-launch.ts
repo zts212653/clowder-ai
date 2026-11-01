@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
+import { catRegistry } from '@cat-cafe/shared';
 import { pluginMcpEnvironment } from '../../../../../config/capabilities/plugin-mcp-environment.js';
 import { finalizeCodexAccountEnvironment } from '../../../../../config/codex-account-environment.js';
 import { codexManagedLaunchArgs } from '../../../../../config/codex-managed-launch.js';
@@ -44,6 +45,7 @@ export function linkCodexPluginAuth(
 
 export interface PreparedCodexNativeLaunch {
   readonly kind: 'public' | 'scoped-member';
+  readonly model?: string;
   readonly options: AgentServiceOptions;
   readonly env: Record<string, string>;
   readonly args: readonly string[];
@@ -58,6 +60,7 @@ export async function prepareCodexNativeLaunch(
   carrier: string,
   frozenPrompt: boolean,
   catId: string,
+  model?: string,
 ): Promise<PreparedCodexNativeLaunch> {
   const port = options.pluginNativeLaunch;
   if (
@@ -123,7 +126,11 @@ export async function prepareCodexNativeLaunch(
   }
   const captured: AgentServiceOptions = {
     ...options,
-    frozenL0Input: captureInvocationL0Input({ catId, projection: 'public' }),
+    frozenL0Input: captureInvocationL0Input(
+      kind === 'scoped-member'
+        ? { catId, projection: kind, catConfig: catRegistry.getOrThrow(catId).config, model: model ?? '' }
+        : { catId, projection: 'public' },
+    ),
     signal,
     workingDirectory: canonicalWorkspace,
     callbackEnv,
@@ -240,6 +247,7 @@ export async function prepareCodexNativeLaunch(
     }
     return {
       kind,
+      model,
       options: captured,
       env,
       args: Object.freeze(normalizeCodexMcpConfigArgs(args)),

@@ -140,6 +140,11 @@ export function captureFrozenL0Input(
   } & (
     | { projection: 'public' }
     | {
+        projection: 'scoped-member';
+        member: Pick<CatConfig, 'displayName' | 'nickname' | 'roleDescription' | 'personality'>;
+        model: string;
+      }
+    | {
         member: CatConfig;
         model: string;
         teammates: readonly { catId: string; config: CatConfig; model: string }[];
@@ -164,6 +169,26 @@ export function captureFrozenL0Input(
       sections: {},
       variables: { PUBLIC_IDENTITY_BLOCK: `Identity constant: \`@${catId}\`` },
     });
+  if (projection === 'scoped-member') {
+    if (!input.model.trim()) throw new Error('scoped_member_identity_unavailable');
+    const member = input.member;
+    return freezeL0Input({
+      schemaVersion: 1,
+      compilerVersion: L0_COMPILER_VERSION,
+      catId,
+      projection,
+      template: readFileSync(resolve(templates, 'l0-scoped-member.md'), 'utf8'),
+      sections: {},
+      variables: {
+        MEMBER_IDENTITY: [
+          `你是 ${member.displayName || catId}${member.nickname ? ` / ${member.nickname}` : ''}。`,
+          ...(member.roleDescription ? [`角色：${member.roleDescription}`] : []),
+          ...(member.personality ? [`性格：${member.personality}`] : []),
+          `Identity constant: \`@${catId}\` model=${input.model}`,
+        ].join('\n'),
+      },
+    });
+  }
   if (!input.profileDir || input.governanceText === undefined)
     throw new Error('Owner L0 profile/governance sources are required');
   const config = input.member;

@@ -202,7 +202,9 @@ export async function compileL0ViaSubprocess(options: CompileL0Options): Promise
   const userId = options.userId ?? process.env.CAT_CAFE_USER_ID ?? DEFAULT_PROFILE_USER_ID;
   const projection = frozen?.projection ?? resolveProjection(options);
   const frozenKey = frozen ? `${frozen.compilerVersion}:${frozen.inputDigest}` : undefined;
-  const key = l0Cache.key(userId, catId, projection, frozenKey) + (!frozen && options.runtimeModel ? `\0${options.runtimeModel}` : '');
+  const key =
+    l0Cache.key(userId, catId, projection, frozenKey) +
+    (!frozen && options.runtimeModel ? `\0${options.runtimeModel}` : '');
   const cwd = options.cwd ?? process.cwd();
   const scriptPath = resolveL0CompilerScriptPath(cwd);
   const dependencySignature = frozenKey ?? (scriptPath ? refreshL0DependencySignature(cwd, scriptPath) : null);

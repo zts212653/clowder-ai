@@ -52,6 +52,14 @@ async function captureDiagnosticL0(options) {
   const context = await diagnosticContext();
   const entry = catRegistry.tryGet(catId);
   if (!entry) throw new Error(`compileL0: unknown catId "${catId}". Registered: ${catRegistry.getAllIds().join(', ')}`);
+  if (projection === 'scoped-member')
+    return captureFrozenL0Input({
+      catId,
+      projection,
+      member: entry.config,
+      model: options.runtimeModel || context.getCatModel(catId),
+      installRoot: REPO_ROOT,
+    });
   const all = catRegistry.getAllConfigs();
   const content = {
     catId,

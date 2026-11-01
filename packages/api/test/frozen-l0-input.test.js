@@ -33,6 +33,35 @@ function render(snapshot) {
   });
 }
 
+test('scoped member identity survives frozen capture without owner-only sources', async () => {
+  const { captureFrozenL0Input } = await import('@cat-cafe/shared/l0-input-capture');
+  const { compileScopedMemberPrompt } = await import('../../../scripts/scoped-member-prompt.mjs');
+  const member = {
+    displayName: 'Scoped fixture',
+    nickname: 'Local',
+    roleDescription: 'captured scoped role',
+    personality: 'precise',
+    accountRef: 'private-account-must-not-leak',
+    restrictions: ['private-owner-restriction'],
+  };
+  const expected = compileScopedMemberPrompt({ ...member, catId: 'scoped-fixture', model: 'frozen-model' });
+  const snapshot = captureFrozenL0Input({
+    catId: 'scoped-fixture',
+    projection: 'scoped-member',
+    member,
+    model: 'frozen-model',
+    installRoot: fileURLToPath(new URL('../../../', import.meta.url)),
+  });
+  member.roleDescription = 'later role';
+  const result = render(snapshot);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, expected);
+  assert.equal(snapshot.projection, 'scoped-member');
+  assert.equal(result.stdout.includes('private-'), false);
+  assert.equal(result.stdout.includes('later role'), false);
+  assert.match(result.stdout, /model=frozen-model/);
+});
+
 test('the real L0 child renders captured bytes without loading a live registry or owner profile', () => {
   const result = render(input());
   assert.equal(result.status, 0, result.stderr);
