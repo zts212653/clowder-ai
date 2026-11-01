@@ -26,6 +26,7 @@ import {
 } from '../../video-studio/content-owner/types.js';
 import { type WorkListReader, withWorkCatalogueRead } from './catalogue-read.js';
 import type { WorkCatalogueReadObserver } from './catalogue-read-timing.js';
+import { isHtmlWorkSource, openHtmlWorkSource, readHtmlWorkBody } from './html-source.js';
 import { resolveFileWork } from './resolve-file-work.js';
 import type { WorkReviewResponseService } from './review-response.js';
 import type { WorkAuthorizationInput, WorkPrincipal, WorkReadResult } from './types.js';
@@ -35,7 +36,7 @@ import type { WorkVersionStore } from './version-store.js';
 export type { WorkAuthorizationInput, WorkPrincipal } from './types.js';
 
 export interface OpenWorkSource extends ContentStream {
-  readonly mediaType: 'video/mp4';
+  readonly mediaType: 'video/mp4' | 'text/html';
   /** F063 probes the same frozen snapshot used by this stream; review admission must require this clock. */
   readonly media?: ImmutableMedia;
   readonly publication: ContentSourcePublicationV1;
@@ -92,6 +93,7 @@ export class LivingWorkService {
   private async commitVersion(raw: unknown, principal: WorkPrincipal) {
     const command = commitWorkSchema.parse(raw);
     const response = command.action === 'submit' ? command.reviewResponse : undefined;
+    if (response && isHtmlWorkSource(command.source)) throw new MediaOwnerError('invalid_media');
     if (response && !this.deps.responses) throw new MediaOwnerError('media_unavailable');
     await this.deps.authorize({ principal, permission: 'write' });
     const contentRef = command.action === 'submit' ? command.contentRef : createdWorkRef(command, principal);
@@ -130,8 +132,12 @@ export class LivingWorkService {
         command.expectedOwnerRevision,
         current?.currentOwnerRevision ?? 0,
       );
-    const opened = await this.deps.source.open({ source: command.source, principal, threadId: workScope.threadId });
+    const opened = isHtmlWorkSource(command.source)
+      ? openHtmlWorkSource(command.source)
+      : await this.deps.source.open({ source: command.source, principal, threadId: workScope.threadId });
     try {
+      if ((current && current.mediaType !== opened.mediaType) || (response && opened.mediaType !== 'video/mp4'))
+        throw new MediaOwnerError('invalid_media');
       if (command.action === 'submit' && current?.blobDigest === opened.blobDigest)
         throw new MediaOwnerError('publication_changed');
       const pending =
@@ -178,7 +184,7 @@ export class LivingWorkService {
     return this.deps.responses.resolve(command, principal);
   }
 
-  async read(raw: WorkReference, principal: WorkPrincipal): Promise<WorkReadResult> {
+  private async readWorkVersion(raw: WorkReference, principal: WorkPrincipal) {
     const reference = workReferenceSchema.parse(raw);
     const description = await this.deps.owner.describe(reference.contentRef, reference.ownerRevision);
     const scope = description.publicationScope;
@@ -186,20 +192,42 @@ export class LivingWorkService {
     await this.deps.authorize({ principal, permission: 'read', scope });
     const version = this.deps.versions.get(principal.userId, reference.contentRef, reference.ownerRevision);
     if (!version) throw new MediaOwnerError('media_unavailable');
+    return { reference, description, version, scope };
+  }
+
+  async read(raw: WorkReference, principal: WorkPrincipal): Promise<WorkReadResult> {
+    const { reference, description, version, scope } = await this.readWorkVersion(raw, principal);
     const revision = await this.deps.owner.describeRevision(reference.contentRef, reference.ownerRevision);
     await this.deps.authorize({ principal, permission: 'read', scope });
     return { reference, currentOwnerRevision: description.currentOwnerRevision, version, description, revision };
   }
 
+  async readBody(raw: WorkReference, principal: WorkPrincipal) {
+    // A missing fixed version and a forbidden one have the same content-free result at this new boundary.
+    try {
+      const { reference, description, scope } = await this.readWorkVersion(raw, principal);
+      const html = await readHtmlWorkBody(this.deps.owner, reference, description);
+      await this.deps.authorize({ principal, permission: 'read', scope });
+      return { reference, mediaType: 'text/html' as const, html };
+    } catch (error) {
+      if (error instanceof ContentOwnerNotFoundError) throw new MediaOwnerError('access_denied');
+      throw error;
+    }
+  }
+
   async reference(raw: WorkReference, principal: WorkPrincipal) {
-    const { reference, version } = await this.read(raw, principal);
+    const { reference, version, description } = await this.read(raw, principal);
     const block = workReferenceCardSchema.parse({
       id: `work-reference-${sha(JSON.stringify(reference)).slice(7, 31)}`,
       v: 1,
       kind: 'card',
       title: version.title,
       bodyMarkdown: version.changeSummary,
-      meta: { kind: 'work_reference', reference },
+      meta: {
+        kind: 'work_reference',
+        reference,
+        ...(description.mediaType === 'text/html' ? { mediaType: 'text/html' } : {}),
+      },
     });
     return { reference, block };
   }

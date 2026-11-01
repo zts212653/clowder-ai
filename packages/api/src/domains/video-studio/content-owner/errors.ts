@@ -33,3 +33,10 @@ export class ContentOwnerNotFoundError extends Error {
     this.name = 'ContentOwnerNotFoundError';
   }
 }
+
+export class ContentOwnerCapacityError extends Error {
+  constructor() {
+    super('HTML work capacity reached; no owner effect was committed');
+    this.name = 'ContentOwnerCapacityError';
+  }
+}

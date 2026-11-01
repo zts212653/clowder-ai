@@ -266,6 +266,9 @@ export function createArtifactSurface(input: {
     return createPublicationSurface({
       ...publication,
       title: input.artifact.name,
+      ...(input.artifact.type === 'widget'
+        ? { htmlWorkSourceThreadId: 'threadId' in input.artifact ? input.artifact.threadId : input.threadId }
+        : {}),
       navigationOrigin: input.navigationOrigin,
     });
   const ownerThreadId = 'threadId' in input.artifact ? input.artifact.threadId : input.threadId;

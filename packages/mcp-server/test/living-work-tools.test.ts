@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { MAX_HTML_WORK_BYTES } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { handleWorkCommand, workCommandInputSchema } from '../src/tools/work-tools.js';
 
@@ -167,4 +168,47 @@ test('explicit delivery attaches the exact owner card; reads stay silent and fai
     'snapshot drift never attaches a mixed card',
   );
   assert.equal(reference.ownerRevision, 1);
+});
+
+test('the common Work MCP entry forwards bounded HTML input and fixed body reads without a chat publication', async (t) => {
+  assert.match(
+    workCommandInputSchema.command.description ?? '',
+    /JSON escaping can lower the effective HTML size limit/,
+  );
+  const previous = { ...process.env },
+    fetcher = globalThis.fetch;
+  process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:1';
+  process.env.CAT_CAFE_INVOCATION_ID = 'html-production';
+  process.env.CAT_CAFE_CALLBACK_TOKEN = 'test-html-token';
+  delete process.env.CAT_CAFE_CREDENTIAL_FILE;
+  t.after(() => {
+    for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key];
+    Object.assign(process.env, previous);
+    globalThis.fetch = fetcher;
+  });
+  const calls: { url: string; body: unknown }[] = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+    return new Response(JSON.stringify({ json: '{"saved":true}', nextCursor: null }), { status: 200 });
+  };
+  const parse = (command: unknown) => z.object(workCommandInputSchema).strict().parse({ command });
+  const create = parse({
+    action: 'create',
+    operationId: 'html-v1',
+    title: '小工具',
+    changeSummary: '初版',
+    source: { kind: 'html', html: '<button>开始</button>' },
+  });
+  await handleWorkCommand(create);
+  const read = parse({ action: 'read-body', reference: { contentRef: 'work:html', ownerRevision: 1 } });
+  await handleWorkCommand(read);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(
+    calls.map((call) => call.body),
+    [create, read],
+  );
+  assert.ok(calls.every((call) => call.url.endsWith('/api/callbacks/work')));
+  assert.throws(() =>
+    parse({ ...create.command, source: { kind: 'html', html: '猫'.repeat(Math.floor(MAX_HTML_WORK_BYTES / 3) + 1) } }),
+  );
 });

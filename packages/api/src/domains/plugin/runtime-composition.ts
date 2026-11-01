@@ -139,6 +139,7 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly binaryProjectRoot?: string;
   readonly paths?: PluginRuntimePersistencePaths;
   readonly messageStore: IMessageStore;
+  readonly readMessageTargets?: (threadId: string, messageId: string) => Promise<readonly string[]>;
   readonly lifecyclePresentation?: LifecycleDeliveryDeps['presentation'];
   /** Trigger message id of an invocation, for a v2 subscription's `started.replyTo` (P1.3). */
   readonly lifecycleTriggerMessageId?: LifecycleDeliveryDeps['triggerMessageId'];
@@ -511,6 +512,7 @@ export function createDormantPluginRuntimeComposition(
       : {
           messaging: {
             messageStore: options.messageStore,
+            ...(options.readMessageTargets ? { readMessageTargets: options.readMessageTargets } : {}),
             service: messaging,
             delivery: subscriptionDelivery,
             threadStore: options.threadStore,

@@ -33,19 +33,24 @@ function FixedWorkCard({
   catId?: string;
 }) {
   const reference = block.meta.reference;
+  const mediaType = block.meta.mediaType;
   const { ref, near } = useNearWorkViewport<HTMLDivElement>();
-  const read = useWorkCardDescription(reference, near);
-  const opening = useWorkCardOpen(reference, block.title, messageId);
+  const read = useWorkCardDescription(reference, near, mediaType);
+  const opening = useWorkCardOpen(reference, block.title, messageId, mediaType);
   const description =
     read.description ??
     (opening.description?.asset.ownerRevision === reference.ownerRevision ? opening.description : null);
   const artifact: ThreadArtifactDTO = {
-    type: description?.asset.mediaType.startsWith('image/') ? 'image' : 'video',
+    type: mediaType === 'text/html' ? 'widget' : description?.asset.mediaType.startsWith('image/') ? 'image' : 'video',
     name: block.title,
     catId: description?.origin?.publisherCatId ?? catId ?? null,
     createdAt: 0,
     sourceMessageId: messageId ?? null,
-    url: `/api/content-publications/${encodeURIComponent(reference.contentRef)}/media/${reference.ownerRevision}`,
+    ...(mediaType
+      ? {}
+      : {
+          url: `/api/content-publications/${encodeURIComponent(reference.contentRef)}/media/${reference.ownerRevision}`,
+        }),
     work: {
       ...reference,
       currentOwnerRevision: Math.max(

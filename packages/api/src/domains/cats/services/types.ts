@@ -1068,7 +1068,7 @@ export interface AgentServiceOptions {
    * Never a plugin or SDK DTO. */
   pluginNativeLaunch?: {
     readonly server: import('../../plugin/declared/native-mcp-types.js').NativeMcpServer;
-    readonly sandbox: { readonly kind: 'public'; readonly workspaceRoot: string };
+    readonly sandbox: { readonly kind: 'public' | 'scoped-member'; readonly workspaceRoot: string };
     readonly assertCurrent: () => void | Promise<void>;
   };
   /** F317 Host-only continuous companion port; no model-supplied configuration. */

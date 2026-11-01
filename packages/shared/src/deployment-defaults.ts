@@ -20,7 +20,7 @@ export interface DeploymentProfile {
   l0Projections?: L0Projection[];
 }
 
-export type L0Projection = 'owner' | 'public' | 'collective-work';
+export type L0Projection = 'owner' | 'public' | 'collective-work' | 'scoped-member';
 
 export interface DeploymentPromptPolicy {
   coCreatorRole: string;
@@ -139,7 +139,7 @@ function l0Projections(value: unknown): L0Projection[] {
     value.length !== new Set(value).size ||
     !value.includes('owner') ||
     !value.includes('public') ||
-    !value.every((item) => ['owner', 'public', 'collective-work'].includes(item))
+    !value.every((item) => ['owner', 'public', 'collective-work', 'scoped-member'].includes(item))
   )
     throw new Error('Invalid deployment configuration: l0Projections must be a unique supported projection set');
   return [...value] as L0Projection[];

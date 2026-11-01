@@ -69,7 +69,7 @@ export interface HostSendOptions {
   readonly source: ConnectorSource;
   readonly contentBlocks?: readonly MessageContent[];
   readonly sender?: { readonly id: string; readonly name?: string };
-  readonly wake?: 'auto' | { readonly catId: string };
+  readonly wake?: import('./ingress-wake.js').PluginMessageWake;
 }
 
 /** D-4: validate the declared origin against handle-derived truth; return the stamped provenance. */

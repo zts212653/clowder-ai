@@ -1,7 +1,9 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ArtworkLightboxProvider, useArtworkLightboxScope } from '@/components/content-review/ArtworkLightboxScope';
+import { writeShellLanguage } from '@/components/shell/shell-language';
+import { writeShellPresentation } from '@/components/shell/shell-presentation';
 import { createPublicationSurface } from '@/components/workbench/publication-surface';
 import { useChatStore } from '@/stores/chatStore';
 import { LivingWorkCard } from '../LivingWorkCard';
@@ -21,7 +23,14 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => fetcher(...args),
 }));
 vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ getCatById: () => undefined }) }));
-afterEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  writeShellPresentation('v2');
+  writeShellLanguage('zh');
+});
+afterEach(() => {
+  vi.clearAllMocks();
+  writeShellPresentation('classic');
+});
 const description = (revision = 1) => ({
   asset: { ...reference, ownerRevision: revision, mediaType: 'video/mp4', blobDigest: `sha256:${'b'.repeat(64)}` },
   currentOwnerRevision: 3,
@@ -139,6 +148,56 @@ it('cover previews the fixed owner, Open enters work mode, and the newest badge 
     await act(async () => button('打开').click());
     expect(opened).not.toHaveBeenCalled();
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('暂时无法打开');
+  } finally {
+    await act(async () => root.unmount());
+    useChatStore.setState({ openPublication: originalOpen });
+  }
+});
+
+it('opens a saved HTML chat reference in its original publication owner, keeping the source card pinned', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const opened = vi.fn(() => true);
+  const originalOpen = useChatStore.getState().openPublication;
+  useChatStore.setState({ currentThreadId: 'host', openPublication: opened });
+  const htmlBlock = { ...block, title: 'HTML diagram', meta: { ...block.meta, mediaType: 'text/html' as const } };
+  fetcher.mockImplementation(async (path, init) => {
+    if (path !== '/api/works/command') return Response.json({}, { status: 400 });
+    const { command } = JSON.parse(init.body);
+    return Response.json({
+      reference: command.reference,
+      currentOwnerRevision: 3,
+      description: { mediaType: 'text/html', blobDigest: `sha256:${'c'.repeat(64)}` },
+      version: { title: 'HTML diagram' },
+    });
+  });
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<LivingWorkCard block={htmlBlock} messageId="html-message" />));
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>('[data-testid="workspace-home-artifact-card"]')?.click(),
+    );
+    expect(opened).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ...reference,
+        navigationOrigin: { kind: 'chat-file-link', threadId: 'host', messageId: 'html-message' },
+      }),
+      'host',
+      'work-mode',
+    );
+    const latest = [...host.querySelectorAll('button')].find((button) => button.textContent === '已有第 3 版');
+    expect(latest).toBeDefined();
+    await act(async () => latest!.click());
+    expect(opened).toHaveBeenLastCalledWith(
+      expect.objectContaining({ ...reference, ownerRevision: 3 }),
+      'host',
+      'work-mode',
+    );
+    expect(host.querySelector('[data-work-reference]')?.getAttribute('data-work-reference')).toContain(
+      '"ownerRevision":1',
+    );
+    expect(fetcher.mock.calls.every(([path]) => path === '/api/works/command')).toBe(true);
+    expect(host.querySelector('video')).toBeNull();
   } finally {
     await act(async () => root.unmount());
     useChatStore.setState({ openPublication: originalOpen });

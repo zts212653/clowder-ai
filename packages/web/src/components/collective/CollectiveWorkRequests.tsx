@@ -100,7 +100,7 @@ function canRecoverPublicReply(request: ParticipationView['requests'][number]) {
   return (
     !request.response &&
     request.delivery === 'routed' &&
-    request.execution?.stage === 'ended' &&
+    (request.execution?.stage === 'ended' || request.recovery?.status === 'recoverable') &&
     Boolean(request.messageId) &&
     request.event.recipient?.kind === 'agent'
   );
@@ -109,6 +109,7 @@ function canRecoverPublicReply(request: ParticipationView['requests'][number]) {
 export function requestStatus(request: ParticipationView['requests'][number]) {
   if (request.response) return '已回复';
   if (request.failure) return failedRequestStatus(request.failure.code);
+  if (request.recovery?.status === 'recoverable') return '做完了，还没回复';
   if (request.execution?.stage === 'failed') return '没做成，尚未回复';
   if (request.execution?.stage === 'ended') return '做完了，还没回复';
   if (request.execution?.stage === 'started') return '猫在家里做';

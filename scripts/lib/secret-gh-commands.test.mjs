@@ -122,3 +122,19 @@ test('preserves release and workflow downloads as inbound files, not upload payl
     /secret_content_detected/,
   );
 });
+
+test('preserves repository clones, local destinations and forwarded git arguments', async () => {
+  for (const args of [
+    ['repo', 'clone', 'fixture/project'],
+    ['repo', 'clone', 'https://github.com/fixture/project.git', '/tmp/clone-destination', '--no-upstream'],
+    ['repo', 'clone', 'git@github.com:fixture/project.git', 'local checkout', '--', '--depth=1', '--branch', 'main'],
+  ]) {
+    const prepared = await prepareSecretSafeSend('gh', args);
+    leases.push(prepared);
+    assert.deepEqual(prepared.args, args, 'clone receives repository data; its destination is not an upload file');
+  }
+  await assert.rejects(
+    prepareSecretSafeSend('gh', ['repo', 'clone', `https://${secret()}@github.com/fixture/project.git`]),
+    /secret_content_detected/,
+  );
+});

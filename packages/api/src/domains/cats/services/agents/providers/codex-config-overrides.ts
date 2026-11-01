@@ -8,13 +8,15 @@ import {
 export function codexNativeMcpThreadConfig(
   args: readonly string[],
   callback: Record<string, string>,
+  privateServers: Record<string, Record<string, unknown>> = {},
 ): Record<string, unknown> {
   const config = codexConfigObjectFromArgs(args);
   const servers = isCodexConfigObject(config.mcp_servers) ? config.mcp_servers : {};
   const records = Object.fromEntries(
     Object.entries(servers).filter(([, server]) => isCodexConfigObject(server)),
   ) as Record<string, Record<string, unknown>>;
-  const native = materializeNativeMcpHttp(records, callback);
+  // Raw plugin launches stay off argv and still pass the existing exact Host matcher.
+  const native = materializeNativeMcpHttp({ ...records, ...privateServers }, callback);
   return {
     mcp_servers: Object.fromEntries(
       Object.entries(native).map(([name, server]) => {

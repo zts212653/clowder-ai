@@ -92,7 +92,7 @@ export class CompanionUnifiedDecisions {
   }
   private async source(page: { offset: number; limit: number }) {
     const response = await this.options.client.requestResponse(
-      `/api/concierge/work/decisions?view=unified&offset=${page.offset}&limit=${page.limit}`,
+      `/api/concierge/work/decisions?view=unified&offset=${page.offset}&limit=${page.limit}&personalView=visible`,
     );
     if (response.statusCode === 401 || response.statusCode === 403)
       throw new CompanionBridgeError('permission_required');

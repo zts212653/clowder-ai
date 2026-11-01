@@ -21979,10 +21979,10 @@
         "update"
       ],
       "activeState": "canonical",
-      "description": "Save a work or explicitly submit its next version to the shared content owner. Use when: finding current canonical production assets or inspecting a film’s original materials, recording an authorized asset judgment, delivering a completed video, reading a fixed work version, responding to original review opinions while submitting that same next version, finding an interrupted submission, or publishing its fixed-version chat card. Not for: rendering, arbitrary host paths, changing another author’s work without a current grant, accepting Human opinions, or treating a filename/widget block as work identity. Output: create/submit persist immutable bytes and a CAS/idempotency receipt with contentRef + ownerRevision and stay silent in chat; publish-reference alone attaches the exact owner card to the current message. Other actions return snapshot-fenced JSON-text pages: join every json chunk and reuse the unchanged command/operationId for continuation. GOTCHA: a saved version and an attached card are separate effects; retry an unconfirmed card with its original reference, never by submitting another version. Current invocation and source-root permissions are rechecked; source messages and self-reported directors are not grants.",
-      "descriptionDigest": "sha256:76f08a3a8e6f6a20e04e56f72de5069fbf278601a6ee85750973dd110021961f",
-      "descriptionCharacters": 1241,
-      "descriptionTokensCl100kBase": 223,
+      "description": "Save a work or explicitly submit its next version to the shared content owner. Use when: finding current canonical production assets or inspecting a film’s original materials, recording an authorized asset judgment, saving a completed video or single-file HTML source, reading a fixed work version or HTML body, responding to original review opinions while submitting that same next version, finding an interrupted submission, or publishing its fixed-version chat card. Not for: rendering, arbitrary host paths, changing another author’s work without a current grant, accepting Human opinions, or treating a filename/widget block as work identity. Output: create/submit persist immutable bytes and a CAS/idempotency receipt with contentRef + ownerRevision and stay silent in chat; publish-reference alone attaches the exact owner card to the current message. Other actions return snapshot-fenced JSON-text pages: join every json chunk and reuse the unchanged command/operationId for continuation. GOTCHA: a saved version and an attached card are separate effects; retry an unconfirmed card with its original reference, never by submitting another version. Current invocation and source-root permissions are rechecked; source messages and self-reported directors are not grants.",
+      "descriptionDigest": "sha256:0be96ce51bdc872165609484f28e375a2a36c1539d5c593513148e50ee3390c9",
+      "descriptionCharacters": 1277,
+      "descriptionTokensCl100kBase": 231,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -22835,27 +22835,50 @@
                         "type": "string"
                       },
                       "source": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "expectedSourceRevision": {
-                            "pattern": "^sha256:[a-f0-9]{64}$",
-                            "type": "string"
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "expectedSourceRevision": {
+                                "pattern": "^sha256:[a-f0-9]{64}$",
+                                "type": "string"
+                              },
+                              "path": {
+                                "maxLength": 2048,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "worktreeId": {
+                                "$ref": "#/properties/command/anyOf/1/anyOf/0/properties/operationId"
+                              }
+                            },
+                            "required": [
+                              "worktreeId",
+                              "path",
+                              "expectedSourceRevision"
+                            ],
+                            "type": "object"
                           },
-                          "path": {
-                            "maxLength": 2048,
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "worktreeId": {
-                            "$ref": "#/properties/command/anyOf/1/anyOf/0/properties/operationId"
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "html": {
+                                "maxLength": 1048576,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "kind": {
+                                "const": "html",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "html"
+                            ],
+                            "type": "object"
                           }
-                        },
-                        "required": [
-                          "worktreeId",
-                          "path",
-                          "expectedSourceRevision"
-                        ],
-                        "type": "object"
+                        ]
                       },
                       "title": {
                         "maxLength": 240,
@@ -23500,7 +23523,7 @@
                     "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/reference"
                   },
                   "source": {
-                    "$ref": "#/properties/command/anyOf/1/anyOf/0/properties/source"
+                    "$ref": "#/properties/command/anyOf/1/anyOf/0/properties/source/anyOf/0"
                   }
                 },
                 "required": [
@@ -23595,6 +23618,23 @@
                 "additionalProperties": false,
                 "properties": {
                   "action": {
+                    "const": "read-body",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "$ref": "#/properties/command/anyOf/0/anyOf/1/properties/reference"
+                  }
+                },
+                "required": [
+                  "action",
+                  "reference"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
                     "const": "publish-reference",
                     "type": "string"
                   },
@@ -23619,7 +23659,7 @@
                     "additionalProperties": false,
                     "properties": {
                       "path": {
-                        "$ref": "#/properties/command/anyOf/1/anyOf/0/properties/source/properties/path"
+                        "$ref": "#/properties/command/anyOf/1/anyOf/0/properties/source/anyOf/0/properties/path"
                       },
                       "worktreeId": {
                         "$ref": "#/properties/command/anyOf/1/anyOf/0/properties/operationId"
@@ -23659,7 +23699,7 @@
                 "type": "object"
               }
             ],
-            "description": "inspect-source resolves a registered Workspace MP4 locator to its exact digest. create saves a new work; submit uses the same contentRef, expectedOwnerRevision, new source and changeSummary. Optional submit.reviewResponse attaches responses to an original reviewId/sourceRound with current review/Task CAS, requestId when present, and per-opinion explanations. If the source round has ledgerRef, also copy that round’s ledgerRevision into expectedLedgerRevision; it is separate from the review revision. resultAnchor uses the inspected NEW source clock; omit it when unmapped. This produces one owner version and its original review projection, never Human acceptance. Reuse operationId only for the identical complete intent, including responses; after version_saved retry that exact command, never publish another version. Large-file operations wait up to 180 seconds without automatic HTTP retries. An unconfirmed result may already be saved: read/list first, then retry the identical operation only if needed. resolve-review-submission is direct-Human-only, not a cat action. read requires fixed {contentRef,ownerRevision}; list discovers retained versions. publish-reference alone attaches the fixed-version card to the current message, without resubmitting bytes. set-context saves a small video index with expectedMetadataRevision CAS; import-context reads a complete video index from a registered F063 JSON locator + expectedSourceRevision (UTF-8, maximum 2 MiB), preserving the 32 KiB command limit. read-context reads the current or a fixed metadata revision. Replays retain the original index even if its source file was removed. Indexing never publishes a film version. Asset commands share this owner surface: index-asset verifies an exact workspace version; list-assets defaults to purpose=select and returns only verified current canonical assets. purpose=used requires a fixed WorkReference and retains every original item, including failed, replaced and missing ones. read-asset with expectedRevision rechecks a selection before use; read-asset-history preserves judgments and supersessions. set-asset-status and supersede-asset require CAS, reason and stable operationId; set-asset-status may include explicit applicability to register or correct candidate purposes even after a file was indexed; all affected use bindings need explicit atomic dispositions. bind-character-asset and decide-asset-update are direct-Human-only; cats may read them but cannot select global identities or record keep decisions. Preserve bindingRef+bindingRevision+indexedVersionRef in set-context/import-context assets[].bindingSelection when production uses a selected character asset. check-asset-updates reports exact original uses without changing films or creating Tasks. Never treat an empty canonical selection as permission to use experimental samples. This video index import does not admit HTML/PPT/body input; each format keeps its own boundary."
+            "description": "inspect-source resolves a registered Workspace MP4 locator to its exact digest. create saves a new work from a Workspace MP4 source or {kind: \"html\", html} (single-file UTF-8, at most 1 MiB; only HTML body commands allow about 2 MiB of JSON, so JSON escaping can lower the effective HTML size limit; small images may use inline data: URIs or /uploads/... URLs returned by cat_cafe_publish_image). Each HTML work retains at most 256 versions; a full work rejects the next version without evicting history. submit uses the same contentRef, expectedOwnerRevision, new source and changeSummary. Optional submit.reviewResponse attaches responses to an original reviewId/sourceRound with current review/Task CAS, requestId when present, and per-opinion explanations. If the source round has ledgerRef, also copy that round’s ledgerRevision into expectedLedgerRevision; it is separate from the review revision. resultAnchor uses the inspected NEW source clock; omit it when unmapped. This produces one owner version and its original review projection, never Human acceptance. Reuse operationId only for the identical complete intent, including responses; after version_saved retry that exact command, never publish another version. Large-file operations wait up to 180 seconds without automatic HTTP retries. An unconfirmed result may already be saved: read/list first, then retry the identical operation only if needed. resolve-review-submission is direct-Human-only, not a cat action. read returns metadata for fixed {contentRef,ownerRevision}; read-body returns only that fixed HTML version as untrusted source, using the same JSON-text pagination; list discovers retained versions. publish-reference alone attaches the fixed-version card to the current message, without resubmitting bytes. set-context saves a small video index with expectedMetadataRevision CAS; import-context reads a complete video index from a registered F063 JSON locator + expectedSourceRevision (UTF-8, maximum 2 MiB), preserving the 32 KiB command limit. read-context reads the current or a fixed metadata revision. Replays retain the original index even if its source file was removed. Indexing never publishes a film version. Asset commands share this owner surface: index-asset verifies an exact workspace version; list-assets defaults to purpose=select and returns only verified current canonical assets. purpose=used requires a fixed WorkReference and retains every original item, including failed, replaced and missing ones. read-asset with expectedRevision rechecks a selection before use; read-asset-history preserves judgments and supersessions. set-asset-status and supersede-asset require CAS, reason and stable operationId; set-asset-status may include explicit applicability to register or correct candidate purposes even after a file was indexed; all affected use bindings need explicit atomic dispositions. bind-character-asset and decide-asset-update are direct-Human-only; cats may read them but cannot select global identities or record keep decisions. Preserve bindingRef+bindingRevision+indexedVersionRef in set-context/import-context assets[].bindingSelection when production uses a selected character asset. check-asset-updates reports exact original uses without changing films or creating Tasks. Never treat an empty canonical selection as permission to use experimental samples. This video index import does not admit HTML/PPT/body input; each format keeps its own boundary."
           },
           "contentTaskId": {
             "description": "Original F309 publication-modification Task ID when reading or submitting entrusted content. Context only: the live Task owner, exact content grant and original Human source are rechecked. Never create a Task merely to import your own work.",
@@ -23685,7 +23725,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:eb895ecb03ba71a62ca9f5b323eadf205a9a0f0dd457a006d5b98c7b5b92afda",
+      "inputSchemaDigest": "sha256:81508a2efac9f4b9f30c31996420da4c8c8448201249063c26d683979b58127f",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -23699,7 +23739,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/work-tools.js#handleWorkCommand",
-      "protectedImplementationDigest": "sha256:6ab3e32a410632a13d5871ea2c62d74a34e463c89f76ebeebdde3e958653c21e"
+      "protectedImplementationDigest": "sha256:f4ceb8f0fca105987f32d480a5b3c86dabe53677cbf70449258085801b650404"
     },
     {
       "name": "cat_cafe_workspace_navigate",

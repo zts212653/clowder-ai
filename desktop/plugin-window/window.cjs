@@ -196,6 +196,7 @@ async function createManagedWindow(
     void pauseAppAssist(reason);
     controller.suspend(reason);
   };
+  let pendingSettings;
   const requestController = (command, activated) => {
     if (command.kind === 'view.resize') motion.revoke('resize');
     const preparing = command.kind === 'prepare' && activated === true && !controller.armed;
@@ -215,6 +216,7 @@ async function createManagedWindow(
         preferences.accept(ticket, result);
         return result;
       });
+    if (command.kind === 'settings.read') pendingSettings = reply;
     if (preparing) voice.prepare(reply);
     return reply;
   };
@@ -267,6 +269,16 @@ async function createManagedWindow(
     // A deliberate hide revokes media before the window disappears, even on
     // platforms where BrowserWindow does not emit a matching hide event.
     if (command.kind === 'view.hide' && activated === true) revokeMedia('hidden');
+    if (command.kind === 'view.layout') {
+      // The shipped renderer reads settings before its initial layout. Settle
+      // the newest read first so its CSS size and this reply share coordinates.
+      let observed;
+      do {
+        observed = pendingSettings;
+        await observed;
+      } while (observed !== pendingSettings);
+      if (!isSurface(event)) return { kind: 'error', code: 'permission_required' };
+    }
     const presentationReply = petWindow.request(command, activated === true);
     if (presentationReply) {
       preferences.presentation(command, presentationReply);

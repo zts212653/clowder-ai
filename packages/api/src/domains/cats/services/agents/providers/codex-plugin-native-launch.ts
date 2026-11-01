@@ -42,7 +42,7 @@ export function linkCodexPluginAuth(
 }
 
 export interface PreparedCodexNativeLaunch {
-  readonly kind: 'public';
+  readonly kind: 'public' | 'scoped-member';
   readonly options: AgentServiceOptions;
   readonly env: Record<string, string>;
   readonly args: readonly string[];
@@ -61,7 +61,7 @@ export async function prepareCodexNativeLaunch(
   if (
     !port ||
     typeof port.assertCurrent !== 'function' ||
-    port.sandbox?.kind !== 'public' ||
+    !['public', 'scoped-member'].includes(port.sandbox?.kind) ||
     options.toolExecutionPolicy?.mode !== 'plugin_native' ||
     carrier !== 'exec_json' ||
     !frozenPrompt ||
@@ -77,6 +77,7 @@ export async function prepareCodexNativeLaunch(
     throw new Error('plugin_native_launch_unavailable');
 
   const policy = normalizeToolExecutionPolicy(options.toolExecutionPolicy);
+  const kind = port.sandbox.kind;
   const attempt = new AbortController();
   const server = snapshotServer(port.server);
   const workspace = port.sandbox.workspaceRoot;
@@ -182,7 +183,7 @@ export async function prepareCodexNativeLaunch(
     )
       .filter((key) => !['HOME', 'PATH', 'TMPDIR', 'CODEX_HOME'].includes(key))
       .map((value) => JSON.stringify(value))
-      .join(',')}],enabled=true}}`;
+      .join(',')}],enabled=true,default_tools_approval_mode="approve"}}`;
     const args = [
       '--ignore-user-config',
       '--ignore-rules',
@@ -235,7 +236,7 @@ export async function prepareCodexNativeLaunch(
       }
     }
     return {
-      kind: 'public',
+      kind,
       options: captured,
       env,
       args: Object.freeze(normalizeCodexMcpConfigArgs(args)),
