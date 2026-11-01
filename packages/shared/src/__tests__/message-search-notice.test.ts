@@ -25,6 +25,23 @@ const explain = (
   });
 
 describe('one qualification explanation for cat and human consumers', () => {
+  it('round-trips optional notice fields through JSON without changing own keys', () => {
+    const notices = [
+      messageSearchNotice({ results: [] }),
+      explain(9, 0, 0, 0, 8, { started: 0, completed: 0, cancelled: 0, failed: 0 }),
+      explain(0, 0, 0, 1953),
+      explain(0, 0, 0, 1953, 0, { started: 1, completed: 0, cancelled: 0, failed: 0 }),
+      explain(0, 0, 0, 1953, 0, { started: 0, completed: 0, cancelled: 0, failed: 0 }),
+      explain(0, 0, 0, 1651, 0, { started: 2, completed: 0, cancelled: 2, failed: 0 }),
+    ];
+    for (const notice of notices) {
+      // Saved answer snapshots must equal the in-memory response, including absent optional keys.
+      expect(JSON.parse(JSON.stringify(notice))).toStrictEqual(notice);
+    }
+    expect(notices[4].execution).toContain('没有启动评估批次');
+    expect(notices[5].execution).toContain('取消 2');
+  });
+
   it('keeps the natural zero-start, cancelled and limited-assessment cases distinct without inferring a cause', () => {
     const zero = explain(0, 0, 0, 1953, 0, { started: 0, completed: 0, cancelled: 0, failed: 0 });
     expect(zero.summary).toContain('全部尚未评估');

@@ -62,10 +62,11 @@ export function messageSearchNotice(input: { results: readonly unknown[]; meta?:
   const meta = record(input.meta),
     q = record(meta.qualification);
   const counts = qualificationCounts(q);
+  const batchExecution = execution(q, counts);
   const notice: MessageSearchNotice = {
     summary: summary(counts, input.results.length),
     ...(counts ? { counts } : {}),
-    execution: execution(q, counts),
+    ...(batchExecution !== undefined ? { execution: batchExecution } : {}),
     coverage: '索引覆盖范围尚未确认。最近消息可能尚未入索引，延迟暂无法确认。',
     nextStep: input.results.length
       ? '可先打开已显示的原文，取其中的日期、对话或正文原词，再缩小查找范围。'
