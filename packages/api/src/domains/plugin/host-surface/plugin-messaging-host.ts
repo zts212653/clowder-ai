@@ -86,6 +86,8 @@ export interface PluginMessagingHostDeps extends PluginSentMessageReadServices {
   readonly threadStore: IThreadStore;
   readonly messageStore?: Pick<IMessageStore, 'getById'> & Partial<Pick<IMessageStore, 'getByIdempotencyKey'>>;
   readonly assertCurrent?: () => void;
+  /** Host-only execution lease check, consumed after asynchronous send preparation. */
+  readonly assertAdmissionCurrent?: () => Promise<void>;
   readonly messaging: MessagingService;
   readonly subscriptions?: PluginMessagingSubscriptionHost;
 }
@@ -260,6 +262,7 @@ export function createPluginMessagingHost(input: PluginMessagingHostDeps): Plugi
       const draft = { ...validated, address };
       const receipt = await input.messaging.sendFromHost({ pluginInstanceId: input.pluginInstanceId }, draft, {
         source,
+        ...(input.assertAdmissionCurrent ? { assertAdmissionCurrent: input.assertAdmissionCurrent } : {}),
         ...(parsedContentBlocks === undefined
           ? {}
           : { contentBlocks: parsedContentBlocks.data as readonly MessageContent[] }),

@@ -983,6 +983,13 @@ export interface PluginNativeActionTarget {
   readonly contributionId: string;
 }
 
+/** Host-issued lease coordinates. These restrict a native call; they grant no authority alone. */
+export interface MemberSessionExecutionScope {
+  readonly sessionId: string;
+  readonly generation: number;
+  readonly executionId: string;
+}
+
 export type ToolExecutionPolicy =
   | {
       readonly mode: 'read_only';
@@ -993,6 +1000,7 @@ export type ToolExecutionPolicy =
       readonly mode: 'plugin_native';
       readonly pluginInstanceId: string;
       readonly contributionId: string;
+      readonly memberSession?: MemberSessionExecutionScope;
     };
 
 /**
@@ -1331,6 +1339,8 @@ export interface AgentService {
 
   /** True only when this concrete carrier applies the requested policy before model launch. */
   supportsToolExecutionPolicy?(policy: ToolExecutionPolicy): boolean;
+  /** Reject unsupported scoped-native authentication before any Queue/model admission. */
+  assertScopedMemberAccount?(account: import('@cat-cafe/shared').ExecutionAccountSnapshot): void;
 
   /** F254 D2: effective carrier capability for this concrete service instance. */
   freshnessCarrierCapability?(

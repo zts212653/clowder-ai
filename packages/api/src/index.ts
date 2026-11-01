@@ -2758,7 +2758,23 @@ async function main(): Promise<void> {
       queueProcessor.requestDrain(threadId);
     },
   });
+  const { createRootMemberSessions } = await import('./domains/plugin/member-sessions/root.js');
+  const rootMemberSessions = redis
+    ? createRootMemberSessions({
+        redis,
+        ownerUserId: privateUserId,
+        projectRoot: resolveActiveProjectRoot(),
+        agents: agentRegistry,
+        threads: threadStore,
+        messages: messageStore,
+        turns: turnExecutionStore,
+        profiles: profileRepository,
+        pluginRuntime: () => pluginRuntime,
+        invocationDeps: () => router.getStrategyDeps().invocationDeps,
+      })
+    : undefined;
   router = new AgentRouter({
+    ...(rootMemberSessions ? { scopedMemberRouting: rootMemberSessions.routing } : {}),
     ordinaryTaskHandoffs,
     messageSearchAnswerService,
     ownedWaitStatusReader,
@@ -5307,6 +5323,7 @@ async function main(): Promise<void> {
     taskStore,
     ...(redis ? { redis } : {}),
     invokeTrigger: createPluginConversationDelivery({ messageStore, queue: invocationQueue, router }),
+    ...(rootMemberSessions ? { memberSessions: rootMemberSessions.forInstance } : {}),
     socketManager: { broadcastToRoom: (room, event, data) => socketManager?.broadcastToRoom(room, event, data) },
     threadStore,
     threadBindingStore: connectorBindingStore,
@@ -5447,6 +5464,7 @@ async function main(): Promise<void> {
   );
   const { pluginNativeActionRoutes } = await import('./routes/plugin-native-action-routes.js');
   await app.register(pluginNativeActionRoutes, {
+    ...(rootMemberSessions ? { assertMemberSessionCurrent: rootMemberSessions.assertCallback } : {}),
     actions: pluginRuntime.supervisor.nativeActions,
     registry,
     threadStore,

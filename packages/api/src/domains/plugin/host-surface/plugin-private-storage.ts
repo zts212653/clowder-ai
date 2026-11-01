@@ -97,10 +97,6 @@ export function createPluginStorageHost(input: {
   };
 }
 
-function storageHashKey(pluginId: string): string {
-  return `plugin-private-state:v1:${encodeURIComponent(pluginId)}`;
-}
-
 function assertStorageKey(key: string): void {
   if (key.length === 0 || key.length > MAX_STORAGE_KEY_LENGTH || key.trim() !== key) {
     throw new TypeError(`plugin storage key must be 1..${MAX_STORAGE_KEY_LENGTH} non-whitespace-trimmed characters`);
@@ -136,17 +132,25 @@ function decodeRecord(raw: string): PluginStorageEntry {
 
 /** Durable, plugin-id-scoped JSON records. No method in this adapter creates a TTL. */
 export class RedisPluginPrivateStorage implements PluginPrivateStoragePort {
-  constructor(private readonly redis: RedisClient) {}
+  /** keyPrefix is a Host composition choice; it is never part of the package facade. */
+  constructor(
+    private readonly redis: RedisClient,
+    private readonly keyPrefix = 'plugin-private-state:v1',
+  ) {}
+
+  private hashKey(pluginId: string): string {
+    return `${this.keyPrefix}:${encodeURIComponent(pluginId)}`;
+  }
 
   async get(pluginId: string, key: string): Promise<PluginStorageEntry | undefined> {
     assertStorageKey(key);
-    const raw = await this.redis.hget(storageHashKey(pluginId), key);
+    const raw = await this.redis.hget(this.hashKey(pluginId), key);
     if (raw === null) return undefined;
     return decodeRecord(raw);
   }
 
   async list(pluginId: string): Promise<Readonly<Record<string, PluginStorageEntry>>> {
-    const raw = await this.redis.hgetall(storageHashKey(pluginId));
+    const raw = await this.redis.hgetall(this.hashKey(pluginId));
     return Object.fromEntries(
       Object.entries(raw)
         .filter(([key]) => key !== REVISION_COUNTER_FIELD)
@@ -181,7 +185,7 @@ export class RedisPluginPrivateStorage implements PluginPrivateStoragePort {
       await this.redis.eval(
         DELETE_LUA,
         1,
-        storageHashKey(pluginId),
+        this.hashKey(pluginId),
         key,
         expectedRevision === undefined ? '*' : String(expectedRevision),
       ),
@@ -194,7 +198,7 @@ export class RedisPluginPrivateStorage implements PluginPrivateStoragePort {
   async #write(pluginId: string, key: string, expectedRevision: string, value: unknown): Promise<number> {
     assertStorageKey(key);
     const revision = Number(
-      await this.redis.eval(WRITE_LUA, 1, storageHashKey(pluginId), key, expectedRevision, encodeValue(value)),
+      await this.redis.eval(WRITE_LUA, 1, this.hashKey(pluginId), key, expectedRevision, encodeValue(value)),
     );
     if (!Number.isSafeInteger(revision) || revision < 0)
       throw new TypeError('plugin storage returned an invalid revision');

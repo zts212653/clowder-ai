@@ -11,11 +11,13 @@ import {
 import { createPluginMembersHost, type PluginMembersHost, type PluginMembersServices } from './plugin-members-host.js';
 
 export interface PluginNeutralHost {
+  readonly memberSessions?: import('../member-sessions/host.js').PluginMemberSessionsHost;
   readonly collectiveMaterialSource?: CollectiveMaterialSourcePort;
   readonly collectiveArtifactOwner?: CollectiveArtifactOwnerPort;
   readonly members: PluginMembersHost;
 }
 interface Deps {
+  readonly memberSessions?: (assertCurrent: () => Promise<void>) => PluginNeutralHost['memberSessions'];
   readonly collectiveMaterialSource?: CollectiveMaterialSourceHolder;
   readonly collectiveArtifactOwner?: CollectiveArtifactOwnerHolder;
   readonly activationSignal?: AbortSignal;
@@ -61,6 +63,7 @@ export async function createPluginNeutralHost(deps: Deps): Promise<PluginNeutral
   }
   const collective = pkg.pluginId === 'official.collective-connector' && instance.pluginId === pkg.pluginId;
   return Object.freeze({
+    ...(deps.memberSessions ? { memberSessions: deps.memberSessions(current) } : {}),
     ...(collective && deps.collectiveMaterialSource
       ? {
           collectiveMaterialSource: createCollectiveMaterialSourceProxy({
