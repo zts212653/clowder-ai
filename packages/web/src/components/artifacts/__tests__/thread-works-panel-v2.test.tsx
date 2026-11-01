@@ -573,3 +573,55 @@ it('opens homepage Works in all conversations because the landing page has no so
   expect(data.fetch.mock.calls.some(([path]) => path.includes('/threads/default/artifacts'))).toBe(false);
   expect(host.textContent).toContain('Delivered.md');
 });
+
+it.each([
+  'work-source',
+  'default',
+])('opens the fixed HTML source from a conversation or new-conversation host: %s', async (hostThreadId) => {
+  useChatStore.setState({ currentThreadId: hostThreadId });
+  const html: ThreadArtifactDTO = {
+    type: 'widget',
+    name: 'Owner HTML',
+    catId: 'codex61-sol',
+    createdAt: 1,
+    sourceMessageId: null,
+    ref: `work:${'d'.repeat(64)}`,
+    work: { contentRef: `work:${'d'.repeat(64)}`, ownerRevision: 2, currentOwnerRevision: 2 },
+  };
+  data.fetch.mockImplementation(async (path, init) => {
+    if (path === '/api/works/command') {
+      const { command, threadId } = JSON.parse(init.body);
+      if (threadId !== 'work-source') return Response.json({ error: 'access_denied' }, { status: 403 });
+      return Response.json({
+        reference: command.reference,
+        currentOwnerRevision: 2,
+        description: { mediaType: 'text/html', blobDigest: `sha256:${'e'.repeat(64)}` },
+        version: { title: html.name },
+      });
+    }
+    if (String(path).includes('/content-publications/')) return Response.json({}, { status: 400 });
+    return Response.json({
+      threadId: 'work-source',
+      artifacts: [{ ...html, threadId: 'work-source', threadTitle: 'Original source' }],
+      workLineage: 'resolved',
+      view: 'works',
+      complete: true,
+      pageTotal: 1,
+    });
+  });
+  await act(async () => root.render(<ThreadWorksPanelV2 threadId={hostThreadId} onSelectArtifact={open} />));
+  const card = host.querySelector<HTMLButtonElement>('[data-testid="workspace-home-artifact-card"]');
+  await act(async () => card?.click());
+  expect(open).toHaveBeenCalledWith(
+    expect.objectContaining({ work: html.work, sourceMessageId: null }),
+    expect.objectContaining({ kind: 'artifact-list' }),
+    expect.objectContaining({
+      htmlWorkSourceThreadId: 'work-source',
+      ownerStateRef: {
+        owner: 'f138-publication',
+        key: JSON.stringify({ contentRef: html.work!.contentRef, ownerRevision: 2 }),
+      },
+    }),
+  );
+  expect(data.fetch.mock.calls.some(([path]) => String(path).includes('/content-publications/'))).toBe(false);
+});

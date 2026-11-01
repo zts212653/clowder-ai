@@ -18,7 +18,7 @@ mcp_admission_claims:
 
 产品范围来自 Studio Human `private-source-id`（视频与其他活的作品对齐）及 `private-source-id`（已有片子接入、直接批注与集中查看素材），接受源为 [F326 spec](../features/F326-editing-desk.md) `a44251c1cab09a22b4ac5aeab95970990f7f940f`。共同入口由原 F326 执行责任在 #5799 串行定型；#1621 协同源 `private-source-id` 已确认没有并行 DTO。工具名和此资源边界属于上述已接受范围内的实施选择；本登记不代表独立审查、合入、HTML 写口或 C 验收已完成。
 
-`cat_cafe_work` 接同一 content owner，唯一作品坐标为 `contentRef + ownerRevision`；工具没有影片专用主身份、独立版本库或渲染执行权。共享 DTO 位于 `packages/shared/src/types/living-work.ts`。当前注册 MP4 的 F063 格式入口；HTML/PPT/文本仍须各自真实的载荷与安全准入，不能因为共享名字就绕过原边界。
+`cat_cafe_work` 接同一 content owner，唯一作品坐标为 `contentRef + ownerRevision`；工具没有影片专用主身份、独立版本库或渲染执行权。共享 DTO 位于 `packages/shared/src/types/living-work.ts`。当前注册 MP4 的 F063 格式入口及下述受限单文件 HTML 正文入口；PPT/其他文本仍须各自真实的载荷与安全准入，不能因为共享名字就绕过原边界。
 
 | 操作 | 输入和真实结果 |
 |---|---|
@@ -71,13 +71,32 @@ F309 原 `pending_versions` 封存完整接受命令、原 actor 和服务端验
 
 同一 PR 已接通确切结果的 Human 接受／重开、作品模式原意见与新位置、同 Work 续版回报及真实非实现猫的 MCP 使用。整阶段作者证据见 Phase C 自验 (internal)；它不代替非作者审查、合入后的具名 Alpha、原设计负责人最终实页验收或 You 的 C7 使用。
 
-## HTML 消费端的已知接缝
+## 单文件 HTML 内容版本（#1621，第 1 步）
 
-#1621 在 exact `38646ca2bfa9d213803219dafb5efca339aaa097` 的静态消费反馈确认：首批是工具直接提交的、无外部依赖的单文件 HTML，不要求 Workspace 导入。下述是共同入口后续格式适配必须兑现的边界；视频 C 本轮不假装已经提供 HTML 能力，也不要求 HTML 作者造临时文件绕过输入缺口。
+首批沿相同 `cat_cafe_work`、本人 HTTP 和 callback 接口，直接提交 HTML，不要求创建 Workspace 临时文件。
 
-- **输入与来源**：当前 `CommitWork.source`、逐版来源注释和 `WorkSourcePort` 只实现 F063 Workspace MP4。后续在同一入口扩有显式种类的受限正文载荷与真实来源元数据；Workspace locator、`video/mp4` 字面量不作为所有作品格式的永久合同。正文的大小、编码、资源引用和 HTML 沙盒由该格式独立准入；当前 32 KiB locator 命令体不全局抬高。
-- **固定版正文**：当前 read 返回版本坐标与说明。HTML 后续须从 F138 精确保留版读取有界正文，分清元数据读取与格式正文读取；不能拿旧消息或 widgetBlockId 的正文当 owner 版本，也不把任意媒体转换为整块内存读取。
-- **同一目录**：当前 owner `listRetainedMedia` 只收 PNG/MP4。HTML 注册后还须在原 owner 的格式准入与目录发现处接入，同一 Works 投影消费该 owner；没有独立 HTML registry 或另一张作品列表。
-- **会话与授权**：重启恢复不等于跨 thread 读取授权。公共 callback 已可携带原 `contentTaskId` 上下文，但跨 thread 猫读取仍须原 exact publication grant 和当前消息 custody；指定 Task 名字不代替授权。后续正文消费必须沿同一真实授权路径接入，不能用固定 ref、来源块、历史消息或“换会话”授予读写权，也不为 HTML 放宽生产、sharing 或 agent-key 边界。
+- `create/submit.source` 可为 `{kind: "html", html: "..."}`；原 Workspace locator 形状保留。标题、operationId、说明和显式 `contentRef + expectedOwnerRevision` 规则不变。同名不合并，改名不改 handle；不能把 MP4 与 HTML 互相替换成同一作品的新版本，HTML 不接受视频 reviewResponse。
+- 正文为非空、无 NUL、可无损编码的 UTF-8，最大 **1 MiB**；每件最多 **256 版**，不淘汰旧版。容量在原 owner 的提交锁内、CAS/重放后检查；满额重放仍返回原回执，下一版返回 `work_version_limit`。只有带 HTML 正文的 create/submit 命令放宽到约 **2 MiB**（2 × 正文上限 + 32 KiB）；其他命令仍为 **32 KiB**。JSON 转义可能更早触发 HTTP 413，不截断正文或全局提高 locator 限额。
+- 两个 HTTP 入口在完整 schema 校验前限制 HTML 非正文部分：将 `command.source.html` 计为空字符串，其余紧凑 JSON 最多 **32 KiB**；超限返回 `413/work_command_too_large`。HTML 元数据只能是标量，除 envelope、command、source 外的对象或数组，以及禁止的 `reviewResponse`，直接返回 `400/invalid_request`，不逐项校验。Work 的 Zod 错误固定返回 `{"error":"invalid_request"}`（27 字节），不展开 issues。此预算在 JSON 解析后执行，原始接收字节仍受命令硬上限约束。
+- 正文只在 F138 原 content owner 的 `text/html` blob 中保留；work scope/receipt 绑定真实 owner、thread、具名 actor。来源注释仅存 `{kind:"html"}`，原 sourcePublication 标明 `inline-html` 和字节 digest；它们不复制正文，也不是第二作品身份。
+- `read` 仍只返回固定版元数据；新增 `read-body` 接相同 `reference`，返回 `{reference,mediaType:"text/html",html}`。它只读取已授权的固定 HTML blob，有界校验长度、digest、UTF-8，返回前重新授权。callback 沿现有 snapshot-fenced JSON 文本分页，续页必须复制 snapshot、nextCursor。缺失或无权固定版均为内容无关 `access_denied`；不存在的 handle 不授予读取权。
+- 原文始终是不可信数据；存储/读取不执行脚本、不解析依赖、不抓取外部 URL。读取是 JSON、private/no-store，没有同源可执行 HTML/raw URL。提交不做 DOMPurify 转换，避免丢失续改源；后续预览必须复用 `sanitizeWidgetHtml` 与 `HtmlWidgetBlock` 的 iframe sandbox，不能据存储成功声称任意应用或外部资源可运行。内联事件策略不在此切片更改。
+- 权限继续由 `createWorkAuthorizer` / PublishedMediaAccess、strict active invocation、当前工具策略及原 exact publication Task grant 决定。作品来源 thread 隐藏、删除或撤权后，列表、读回、重放和提交都不能绕过；换会话不是跨 thread 授权。
+- 原 owner manifest 发现可显式纳入 work HTML，媒体选择器默认仍仅 PNG/MP4。同一 F232 WorkCatalogue 为未发聊天的 HTML 投影 `widget + work` 坐标，无正文、虚构消息或 raw URL。Works 的原查看区通过原 publication surface 打开目录给出的固定版；HTML 复用 HtmlWidgetBlock 的 workspace 展示模式、sanitizeWidgetHtml 与 allow-scripts iframe。版本下拉只调用 read/read-body；刷新版本目录保留当前固定版和 iframe 状态，不自动切换最新。换版、换 thread 或错误时卸载旧画面，响应坐标错配、损坏或无权不能退回另一版。
+- 沿原 owner lock/CAS/幂等回执与初版 staging；owner 成功、注释失败仍返回 `version_saved`，原完整请求恢复相同回执和注释，不提交第二版。追加版在 manifest 发布前失败可留下未引用的内容寻址 blob，沿既有 owner 行为，不暴露半版；不引入新的 GC。
 
-上述反馈是格式消费核对，不是本实现的 review verdict。HTML PR-A 保持只做已发布内容的展示；共同正文接口与安全适配只有在真实实现、验证后才对消费者声明可调用。
+维护者补完保留本切片的保守默认值：1 MiB 单版、256 版上限。这样原始正文和旧版都有明确存储上界，达到上限时明确拒绝，不删历史、不静默截断；不会通过配置旁路放宽 authority。验证见 `living-work-html*.test.ts`、`living-work-tools.test.ts` 与原 content-owner/living-work/F232 套件。指定版预览的 Web 验证见 work-content-boundary 与 F307OwnerSurfaceRenderer 套件；living-work-html-journey.test.ts 验证猫沿同一 handle 读回续版。没有编辑、分享或整个 F309 完成的声明。
+
+
+### HTML 与现行统一打开器的接缝
+
+Architecture cell: collaborative-content-plane, hub-action-surface, thread-chat-surface
+
+Map delta: none。HTML 是既有 Work 的格式入口；沿原 F138 内容锁、不可变字节、F309 注释、F232 目录和 F307 publication surface，没有第二 owner、版本头或权限账本。
+
+- 维护者移植兼容当前统一打开器。原视频／图片的 describe、媒体 URL 与浮窗路径保留；HTML 卡片由服务端附 `mediaType: text/html` 展示提示，聊天卡与目录共用同一打开器。
+- 展示提示不授予读取权，也不决定最终正文：统一打开器先从原 Work 服务核对固定坐标和实际格式，publication surface 再授权读取正文；错配、隐藏、删除、撤权和晚到响应都不换到其它作品或版本。
+- Chat 固定引用、Works 当前目录和版本下拉共用原 owner 坐标。HTML 的原读取 thread 通过 `htmlWorkSourceThreadId` 展示意图与当前展示／返回位置分别保存（不是新身份或授权）；新对话页尚无 thread 时不借用 `default` 作读取授权上下文，恢复页签仍保留原读取位置，切换展示 thread 继续取消晚到结果。刷新只发现新版本，不重置当前交互；切版显式重新挂载对应 iframe。既有媒体 publication 未附 HTML 意图时不增加 Work 元数据请求，仍由原媒体 owner 打开；媒体浮窗在异步展开期间换版时，原 surface key 围栏仍有效。
+- `read-body` 经 MCP 仍是有界 JSON 文本分页。大图内嵌文件可能需要多页；保留相同 command/snapshot，拼接所有 json 后解析。HTTP 查看器直接读原授权正文，不把分页内容误当半份 HTML。
+
+人类使用入口见 [HTML 作品保存与续改](../guides/html-works.md)。本切片不自动把每条聊天 widget 写成新的独立作品，也不迁移旧消息的身份。

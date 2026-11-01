@@ -1,5 +1,30 @@
 [
   {
+    "id": "feature-f309-html-work-versions",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/guides/html-works.md",
+      "anchor": "保存和继续修改 HTML 作品"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/artifacts/WorkContentBoundary.tsx",
+      "anchor": "WorkContentBoundary"
+    },
+    "bodySource": {
+      "path": "docs/guides/html-works.md",
+      "anchor": "接着改，并保留原版"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "想把 HTML 图解或小工具留着继续改？让猫“保存成可续改的作品，发一张固定版本卡片”。以后在同一件作品上续版，原卡片仍保留原版本；打开作品后用“作品版本”回看历史。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "保存这份 HTML 作品",
+      "draftPrompt": "把这份 HTML 图解保存成可续改的作品，保留完整源码，发一张固定版本卡片；以后继续修改时沿同一件作品续版。"
+    },
+    "owner": "codex61-sol"
+  },
+  {
     "id": "feature-f322-plugin-maintenance",
     "kind": "feature",
     "sourceRef": {

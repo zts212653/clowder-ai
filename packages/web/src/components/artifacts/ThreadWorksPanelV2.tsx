@@ -164,7 +164,8 @@ export function ThreadWorksPanelV2({ threadId, width, onClose, onSelectArtifact,
   };
   const select = (artifact: Work) => {
     setNotice(undefined);
-    if (artifact.type === 'widget' && !(artifact.sourceMessageId && artifact.widgetBlockId)) jump(artifact);
+    if (artifact.type === 'widget' && !artifact.work && !(artifact.sourceMessageId && artifact.widgetBlockId))
+      jump(artifact);
     else open(artifact);
   };
 
