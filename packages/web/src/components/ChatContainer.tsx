@@ -306,7 +306,8 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   const registeredWorkId = useRef<string | null>(null);
   const onRegisteredWorkChange = useCallback((id: string | null) => {
     if (registeredWorkId.current === id) return;
-    captureChatReadingBeforeLayoutChange();
+    // Work availability also changes during hydration and unmount. Those are
+    // passive layout changes, not user input that may revoke a pending return.
     registeredWorkId.current = id;
     setMediaComposerSurfaceId(id);
   }, []);

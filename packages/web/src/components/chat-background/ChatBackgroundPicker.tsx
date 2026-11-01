@@ -19,9 +19,12 @@ import { sampleBackgroundOpacity } from './background-sampling';
 import { useChatBackgroundPreferences } from './ChatBackgroundProvider';
 
 export const BACKGROUND_ART = [
-  { url: '/backgrounds/cafe-night.jpg', key: 'cafe', dark: true },
-  { url: '/backgrounds/main-planet-study.jpg', key: 'study', dark: true },
-  { url: '/backgrounds/sunset-clouds.jpg', key: 'sunset', dark: false },
+  { url: '/backgrounds/cafe-night.jpg', key: 'cafe' },
+  { url: '/backgrounds/main-planet-study.jpg', key: 'study' },
+  { url: '/backgrounds/sunset-clouds.jpg', key: 'sunset' },
+  { url: '/backgrounds/family-window-companions.webp', key: 'familyWindow' },
+  { url: '/backgrounds/family-cloud-day-off.webp', key: 'familyCloud' },
+  { url: '/backgrounds/family-nap-circle.webp', key: 'familyNap' },
 ] as const;
 
 export function ChatBackgroundPicker({ threadId }: { threadId?: string }) {
@@ -77,7 +80,7 @@ export function ChatBackgroundPicker({ threadId }: { threadId?: string }) {
       if (input.current) input.current.value = '';
     }
   };
-  const tile = (label: string, url: string | null, selected: boolean, onClick: () => void, hint?: string) => (
+  const tile = (label: string, url: string | null, selected: boolean, onClick: () => void) => (
     <button
       key={url ?? label}
       type="button"
@@ -95,11 +98,6 @@ export function ChatBackgroundPicker({ threadId }: { threadId?: string }) {
         )}
       </span>
       <span className="truncate">{label}</span>
-      {hint && (
-        <span className="text-micro" style={{ color: 'var(--shell-muted)' }}>
-          {hint}
-        </span>
-      )}
     </button>
   );
   return (
@@ -115,13 +113,7 @@ export function ChatBackgroundPicker({ threadId }: { threadId?: string }) {
       <fieldset className="chat-background-grid" aria-label={copy.title}>
         {tile(copy.none, null, current.kind === 'none', () => void persist(NO_CHAT_BACKGROUND))}
         {BACKGROUND_ART.map((art) =>
-          tile(
-            copy[art.key],
-            art.url,
-            image?.url === art.url,
-            () => void choose(art.url, copy[art.key]),
-            art.dark ? copy.dark : undefined,
-          ),
+          tile(copy[art.key], art.url, image?.url === art.url, () => void choose(art.url, copy[art.key])),
         )}
         {image &&
           !BACKGROUND_ART.some((art) => art.url === image.url) &&
@@ -184,7 +176,7 @@ export function ChatBackgroundPicker({ threadId }: { threadId?: string }) {
 
 export function backgroundName(
   background: ChatBackground,
-  copy: { none: string; cafe: string; study: string; sunset: string },
+  copy: Record<(typeof BACKGROUND_ART)[number]['key'] | 'none', string>,
 ) {
   if (background.kind === 'none') return copy.none;
   const art = BACKGROUND_ART.find((entry) => entry.url === background.url);

@@ -66,6 +66,8 @@ export interface MessageSearchResult {
 }
 
 export interface MessageSearchResponse {
+  /** Read before results; a projection of this request's counts, never historical coverage. */
+  notice?: MessageSearchNotice;
   searchId: string;
   query: string;
   results: MessageSearchResult[];
@@ -92,7 +94,24 @@ export interface MessageSearchResponse {
       rejected: number;
       indeterminate: number;
       unassessed: number;
+      /** Aggregate owner-observed runner outcomes; no provider inputs or inferred skip reasons. */
+      batches?: { started: number; completed: number; cancelled: number; failed: number };
     };
     response: { budgetChars: number; serializedChars: number; truncated: boolean; continuation: 'unavailable' };
   };
+}
+
+export interface MessageSearchNotice {
+  summary: string;
+  counts?: {
+    candidates: number;
+    assessed: number;
+    supported: number;
+    rejected: number;
+    indeterminate: number;
+    unassessed: number;
+  };
+  execution?: string;
+  coverage: string;
+  nextStep: string;
 }

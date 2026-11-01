@@ -44,18 +44,28 @@ export function captureNativeCallbackCurrentness(
     )
       throw expired();
   };
+  const verifyIdentityCurrent = async () => {
+    assertLive();
+    const current = await options.registry.verifyLatest(identity.invocationId, callbackToken);
+    assertLive();
+    if (!current.ok) throw expired();
+    assertIdentityCurrent(current.record);
+    return current.record;
+  };
   const assertRegistryCurrent = async () => {
     try {
       assertLive();
       if (await getDeletedCallbackThreadGuard(options.threadStore, identity.threadId))
         throw new NativePluginActionError(410, 'Thread is deleted');
-      assertLive();
-      const current = await options.registry.verifyLatest(identity.invocationId, callbackToken);
-      assertLive();
-      if (!current.ok) throw expired();
-      assertIdentityCurrent(current.record);
-      if (toolExecutionPolicyDenial(current.record.toolExecutionPolicy, 'POST /api/plugin-runtime/action', target))
+      const current = await verifyIdentityCurrent();
+      if (toolExecutionPolicyDenial(current.toolExecutionPolicy, 'POST /api/plugin-runtime/action', target))
         throw new NativePluginActionError(403, 'Invocation policy denies plugin action');
+      if (toolExecutionPolicy?.mode === 'plugin_native' && toolExecutionPolicy.memberSession) {
+        if (!options.assertMemberSessionCurrent)
+          throw new NativePluginActionError(503, 'Member execution guard is unavailable');
+        await options.assertMemberSessionCurrent(identity);
+        await verifyIdentityCurrent();
+      }
     } catch (error) {
       close();
       if (error instanceof NativePluginActionError) throw error;

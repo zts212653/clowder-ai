@@ -75,6 +75,7 @@ export interface ResolvedIngress {
   readonly deps: MessagingIngressWakeDeps;
   readonly source: ConnectorSource;
   readonly wake?: PluginMessageWake;
+  readonly assertAdmissionCurrent?: () => Promise<void>;
 }
 
 /**
@@ -131,6 +132,7 @@ export async function deliverIngressEffectsOnce(
     throw new MessagingError('RETRYABLE_INFLIGHT', 'ingress wake is owned by a concurrent attempt — retry');
 
   try {
+    await ingress.assertAdmissionCurrent?.();
     const outcome = await ingress.deps.invokeTrigger.trigger(
       input.threadId,
       ingress.wake === 'auto' ? undefined : (ingress.wake.catId as CatId),

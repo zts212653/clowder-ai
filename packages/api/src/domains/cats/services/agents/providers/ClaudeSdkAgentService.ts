@@ -19,6 +19,7 @@ import type {
 } from '../../types.js';
 import { resolveDefaultClaudeMcpServerPath } from './ClaudeAgentService.js';
 import { extractClaudeUsage, transformClaudeEvent } from './claude-ndjson-parser.js';
+import { captureClaudeMemberOptions } from './claude-scoped-native.js';
 import { sdkCompactionHooks } from './claude-sdk-compaction-hooks.js';
 import { prepareClaudeSdkLaunch } from './claude-sdk-launch.js';
 import { loadClaudeSdkQuery } from './claude-sdk-query.js';
@@ -110,7 +111,7 @@ export class ClaudeSdkAgentService implements AgentService {
   }
 
   supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
-    return policy.mode === 'read_only';
+    return policy.mode === 'read_only' || (policy.mode === 'plugin_native' && Boolean(policy.memberSession));
   }
 
   freshnessCarrierCapability(): AgentFreshnessCarrierCapability {
@@ -136,6 +137,8 @@ export class ClaudeSdkAgentService implements AgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const member = captureClaudeMemberOptions(options);
+    options = member ?? options;
     const abortController = new AbortController();
     const turnInputs = new ClaudeSdkTurnInputState();
     const inputReadCallbacks = new Map<string, () => Promise<void>>();
@@ -249,6 +252,7 @@ export class ClaudeSdkAgentService implements AgentService {
       sdkOptions.stderr = (data) => {
         stderrBuffer = sanitizeCliStderr(`${stderrBuffer}${data}`).slice(-MAX_SDK_STDERR_CHARS);
       };
+      await member?.pluginNativeLaunch?.assertCurrent();
       query = queryFn({ prompt: turnInputs.input, options: sdkOptions });
       turnInputs.push(createSdkUserMessage(prepared.prompt, activeSessionId, initialMessageId));
       archive({ type: 'sdk_input', kind: 'primary', uuid: initialMessageId });

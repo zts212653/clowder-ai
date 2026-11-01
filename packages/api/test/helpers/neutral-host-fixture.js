@@ -89,6 +89,7 @@ export async function neutralFixture(t, options = {}) {
     threadStore: threads,
     ...(options.threadProjections ? { threadProjections: options.threadProjections } : {}),
     ...(options.members ? { members: options.members } : {}),
+    ...(options.memberSessions ? { memberSessions: options.memberSessions } : {}),
     packages: {
       resolveInstalledPackage: async () => ({
         rootDir: packageRoot,
