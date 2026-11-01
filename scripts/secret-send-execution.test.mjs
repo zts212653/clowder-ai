@@ -149,6 +149,25 @@ test('the real curl can copy a local file without treating the copy as an upload
   assert.equal(readFileSync(destination, 'utf8'), 'safe local resource');
 });
 
+test('repo clone passes through the real wrapper while credential arguments never reach the delegate', () => {
+  const f = fixture('gh');
+  writeFileSync(
+    f.delegate,
+    `#!${process.execPath}\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(f.receipt)}, JSON.stringify(process.argv.slice(2)));\nprocess.stdout.write('clone delegate reached\\n');\n`,
+  );
+  const env = { ...f.env, HOME: f.dir };
+  const run = (args) => spawnSync(resolve('scripts/guarded-bin/gh'), args, { cwd: f.dir, env, encoding: 'utf8' });
+  const blocked = run(['repo', 'clone', `https://${secret()}@github.com/fixture/project.git`]);
+  assert.equal(blocked.status, 1);
+  assert.ok(!existsSync(f.receipt));
+  assert.ok(!`${blocked.stdout}${blocked.stderr}`.includes(secret()));
+  const args = ['repo', 'clone', 'fixture/project', join(f.dir, 'checkout'), '--', '--depth=1'];
+  const clean = run(args);
+  assert.equal(clean.status, 0, clean.stderr);
+  assert.deepEqual(JSON.parse(readFileSync(f.receipt, 'utf8')), args);
+  assert.equal(clean.stdout, 'clone delegate reached\n');
+});
+
 for (const group of ['release', 'run'])
   test(`${group} download writes a large artifact to disk without the stdout buffer`, () => {
     const f = fixture('gh');

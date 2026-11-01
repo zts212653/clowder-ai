@@ -82,6 +82,8 @@ export interface WorkspaceSurfaceDescriptor {
   filesRepoRoot?: string;
   /** Exact original message item for explicit publication reselection; reauthorized by the resolver, never a grant. */
   messagePublicationSource?: MessageMediaPublicationSource;
+  /** HTML entry intent/read context, separate from visiting host/return origin; never an identity or read grant. */
+  htmlWorkSourceThreadId?: string;
   /** Navigation edge captured when this Artifact is opened from one exact entrusted-work item. */
   returnTargetRef?: { owner: string; key: string };
   capabilities: {

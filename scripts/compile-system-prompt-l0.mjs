@@ -59,6 +59,7 @@ import {
   renderUserCapsuleSection,
 } from '@cat-cafe/shared/profile-contract';
 import YAML from 'yaml';
+import { compileScopedMemberPrompt } from './scoped-member-prompt.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -489,6 +490,9 @@ export async function compileL0(options) {
   // reading owner profiles, governance overlays, workflow overlays, teammate
   // routing, or the co-creator reference so none can become model-visible.
   if (projection === 'public') return compilePublicParticipationL0(catId);
+  if (projection === 'scoped-member') {
+    return compileScopedMemberPrompt({ ...config, model: runtimeModel || resolveModel(catId, config) });
+  }
 
   // Strip compiler-only annotation lines from the main template (same as
   // loadL0SectionTemplate does for L-section files). Allows rich source labels
@@ -567,12 +571,14 @@ if (isCliEntrypoint(import.meta.url, process.argv[1])) {
   const profileDir = profileDirIdx >= 0 ? args[profileDirIdx + 1] : undefined;
   const projectionIdx = args.indexOf('--projection');
   const projection = projectionIdx >= 0 ? args[projectionIdx + 1] : undefined;
+  const modelIdx = args.indexOf('--runtime-model');
+  const runtimeModel = modelIdx >= 0 ? args[modelIdx + 1] : undefined;
   const outIdx = args.indexOf('--out');
   if (outIdx >= 0 && args[outIdx + 1]) {
     const outPath = args[outIdx + 1];
-    await writeL0File({ catId, profileDir, projection }, outPath);
+    await writeL0File({ catId, profileDir, projection, runtimeModel }, outPath);
     console.error(`Wrote compiled L0 for ${catId} → ${outPath}`);
   } else {
-    process.stdout.write(await compileL0({ catId, profileDir, projection }));
+    process.stdout.write(await compileL0({ catId, profileDir, projection, runtimeModel }));
   }
 }

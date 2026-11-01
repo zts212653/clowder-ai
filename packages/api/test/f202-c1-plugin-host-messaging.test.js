@@ -147,12 +147,47 @@ async function fixture(options = {}) {
     threadStore: threads,
     messageStore: messages,
     bindingStore: bindings,
+    readMessageTargets: async (threadId, messageId) => {
+      const rows = await queue.getDurableEntriesForMessages(threadId, [messageId]);
+      return (rows.get(messageId) ?? []).flatMap((row) => row.targets);
+    },
     messaging,
   });
   return { host, messages, threads, bindings, messaging, wakes, broadcasts, router, queue, agents };
 }
 
 describe('F202 C1 — plugin Host messaging.send', () => {
+  test('exact wake holds the chosen recipient and durable lookup survives temporary ledger expiry', async () => {
+    const { host, messages, threads, wakes, queue, agents, router } = await fixture();
+    const thread = await threads.create(OWNER, 'Exact game request');
+    agents.markUnavailable('opus', { code: 'rejected-account-binding', message: 'unavailable fixture' });
+    router.refreshFromRegistry(agents);
+    const input = draft(thread.id, { wake: { catId: 'opus', exact: true } });
+    await assert.rejects(() => host.send(input), /explicit plugin recipient/);
+    assert.equal(wakes.length, 0);
+    assert.equal(queue.size(thread.id, OWNER), 0);
+    agents.register('opus', {
+      async *invoke() {
+        throw new Error('no provider IO');
+      },
+    });
+    router.refreshFromRegistry(agents);
+    const sent = await host.send(input);
+    assert.equal(wakes.length, 1);
+    assert.equal(wakes[0][1], 'opus');
+    assert.equal(messages.messages.length, 1);
+    const now = Date.now;
+    try {
+      Date.now = () => now() + 8 * 24 * 3600 * 1000;
+      const found = await host.findSent({ threadId: thread.id, idempotencyKey: input.idempotencyKey });
+      assert.equal(found.messageId, sent.messageId);
+      assert.deepEqual(found.routedCatIds, ['opus']);
+      assert.equal(found.content, 'hello');
+      assert.equal(wakes.length, 1);
+    } finally {
+      Date.now = now;
+    }
+  });
   for (const target of ['unknown-cat', 'removed-cat', 'disabled-cat']) {
     test(`${target} uses ordinary conversation routing to the recent healthy member`, async () => {
       const { host, messages, threads, wakes, broadcasts } = await fixture();

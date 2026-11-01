@@ -8,7 +8,7 @@ description: "让开源团队仓成为共享代码的上游：家里和团队的
 description_source: human
 description_author: opus55
 description_updated_at: 2026-10-20T10:45:00Z
-tips_exempt: "2026-10-31 续核：本批启用 next 集成 / main 发布策略，改变维护者同步与贡献分支选择；双语 CONTRIBUTING 已说明既有 Git/PR 操作，无新增 Hub 用户操作或发现入口。此豁免只覆盖应用内提示；首次 next 往返、晋升与发版验收仍待真实回执。"
+tips_exempt: "2026-10-31 续核：本批启用 next 集成 / main 发布策略，改变维护者同步与贡献分支选择；双语 CONTRIBUTING 已说明既有 Git/PR 操作，无新增 Hub 用户操作或发现入口。此豁免只覆盖应用内提示；Git、CI、往返与发版结果由本轮实际回执证明，不由豁免替代。"
 ---
 
 # F330: 团队仓当上游
@@ -81,7 +81,7 @@ Phase A 的实际同步依赖已于 2026-10-21 23:37:36 UTC 满足。按原安�
 
 ### Phase C: 发布层（next 汇流，main 发版）
 
-- 内容：next 快进恢复；daily 同步的公开基线、PR base、目标新鲜度检查，以及 F251 的基线与水位，在**同一次交付里**一起改为 next；团队与社区 PR 进 next；固定候选验收后进 main 并打 tag；main 允许为紧急修复更新，修复须合回 next。
+- 内容：next 保历史恢复；daily 同步的公开基线、PR base、目标新鲜度检查，以及 F251 的基线与水位，在**同一次交付里**一起改为 next；团队与社区 PR 进 next；固定候选验收后进 main 并打 tag；main 允许为紧急修复更新，修复须合回 next。
 - **可以先准备的**：在隔离副本里离线验证 next 的接线（CI 触发、同步目标、F251 水位）。这不改动公开仓，也不需要等默认分支的决定。
 - **必须串行的正式切换**：Phase A 合入并至少跑过一轮同步；泽丰 #1519 已处理；默认分支与发版节奏由 operator 决定（OQ-1）。
 - next 在 3 月停用，是因为当时几乎没有外部贡献，多一层分支只剩手续成本（OQ-4）。这次的前提是外部贡献已经存在（近 30 天 30 个外部 PR），并且发版这一步必须做得便宜。
@@ -150,10 +150,12 @@ Phase A 的实际同步依赖已于 2026-10-21 23:37:36 UTC 满足。按原安�
 - [x] AC-B3: 两边本来就不同的每个文件都有写明的归属，并在隔离仓库实测四种情况（上游单边修改、上游删除、双方修改、全新 checkout）的结果符合预期；不以 `.gitattributes merge=ours` 作为保护
 
 ### Phase C（发布层）
-- [x] AC-C1: next 快进到 main；next 上实际跑通与 main 相同的 CI（Linux 与 Windows）
-- [ ] AC-C2: daily 同步的公开基线、PR base、目标新鲜度检查与 F251 基线 / 水位在同一次交付中改为 next，并有隔离副本中的验证记录
-- [ ] AC-C3: 走通一次完整旅程：团队 PR 进 next → 家里接入 → 家里下一轮同步没有冲掉它 → 固定候选经 Linux / Windows 与实际操作验收 → main 接受该候选并打 tag
+- [x] AC-C1: next 保历史恢复到已定 main 基线；next 上实际跑通与 main 相同的 CI（Linux 与 Windows）。实际恢复按既有 GitHub 保护走 PR merge，没有 force 或丢弃主线历史
+- [x] AC-C2: daily 同步的公开基线、PR base、目标新鲜度检查与 F251 基线 / 水位在同一次交付中改为 next，并有隔离副本中的验证记录
+- [x] AC-C3: 走通一次完整旅程：团队 PR 进 next → 家里接入 → 家里下一轮同步没有冲掉它 → 固定候选经 Linux / Windows 与实际操作验收 → main 接受该候选并打 tag
 - [ ] AC-C4: main 的紧急修复有路径且至少演练一次，修复合回 next；默认分支与发版节奏按 operator 决定落实，并写进 CONTRIBUTING
+
+AC-C4 已完成部分：真实 main/next 拓扑的隔离 hotfix 回流与 F251 防回退演练通过，路径已写入 CONTRIBUTING 和已合入的 opensource-ops。OQ-1 的长期选择未冒称 operator 已决定，故此合并项保持未全勾；不影响052明确圈定的本轮三步委托与 skills 交付完成。
 
 ### Phase D（转组织仓）
 - [ ] AC-D1: 仓库转入组织，转前转后 star / fork 数对照无丢失

@@ -17,6 +17,13 @@ import { codexExecutionAccountSnapshot } from '../../../../../config/codex-execu
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
 import type { FrozenExecutionWorkspace } from './execution-workspace.js';
 
+/** A Host-admitted, execution-local choice. It never writes the member catalog. */
+export interface ExecutionAccountSelection {
+  readonly accountRef: string;
+  readonly authType: 'oauth' | 'api_key';
+  readonly expectedRevision?: string;
+}
+
 export interface FrozenExecutionBinding {
   readonly catConfig?: CatConfig;
   readonly workspace: FrozenExecutionWorkspace;
@@ -41,8 +48,26 @@ export function freezeExecutionAccountBinding(input: {
   catConfig?: CatConfig;
   model?: string;
   workspace: FrozenExecutionWorkspace;
+  accountSelection?: ExecutionAccountSelection;
 }): FrozenExecutionBinding {
-  const catConfig = input.catConfig ? deepFreeze(structuredClone(input.catConfig)) : undefined;
+  const selection = input.accountSelection ? { ...input.accountSelection } : undefined;
+  if (
+    selection &&
+    (!input.catConfig ||
+      typeof selection.accountRef !== 'string' ||
+      !selection.accountRef ||
+      selection.accountRef.length > 256 ||
+      selection.accountRef.trim() !== selection.accountRef ||
+      !['oauth', 'api_key'].includes(selection.authType) ||
+      (selection.expectedRevision !== undefined && !/^[a-f0-9]{64}$/.test(selection.expectedRevision)))
+  )
+    throw new Error('invalid execution account selection');
+  const catConfig = input.catConfig
+    ? deepFreeze({
+        ...structuredClone(input.catConfig),
+        ...(selection ? { accountRef: selection.accountRef, accountBindingMode: 'override' as const } : {}),
+      })
+    : undefined;
   const provider = catConfig?.clientId;
   const client = provider ? resolveBuiltinClientForProvider(provider) : null;
   const projectRoot = resolveActiveProjectRoot(process.cwd());
@@ -64,6 +89,8 @@ export function freezeExecutionAccountBinding(input: {
     )
       throw error;
   }
+  if (selection && (!account || account.syntheticNative || account.authType !== selection.authType))
+    throw new Error('selected account authentication is unavailable or changed');
   if (account?.authType === 'api_key' && !account.apiKey)
     throw new Error(
       `account "${account.id}" is configured as api_key but has no API key set — add the key in Hub > account settings`,
@@ -88,6 +115,8 @@ export function freezeExecutionAccountBinding(input: {
                 .digest('hex'),
             })
           : undefined;
+  if (selection?.expectedRevision !== undefined && selection.expectedRevision !== executionAccount?.accountRevision)
+    throw new Error('selected execution account revision changed');
   return Object.freeze({
     catConfig,
     workspace: input.workspace,

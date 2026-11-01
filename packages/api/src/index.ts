@@ -5292,6 +5292,10 @@ async function main(): Promise<void> {
     },
     messageStore,
     lifecyclePresentation: (threadId, catId) => deliveryPresentation(threadId, { kind: 'cat', id: catId }),
+    readMessageTargets: async (threadId, messageId) => {
+      const rows = await invocationQueue.getDurableEntriesForMessages(threadId, [messageId]);
+      return [...new Set((rows.get(messageId) ?? []).flatMap((row) => row.targets))];
+    },
     // P1.3: a v2 subscription's started names the message the invocation answers (origin, else A2A).
     lifecycleTriggerMessageId: async (invocationId) => {
       const record = await registry.getRecord(invocationId);

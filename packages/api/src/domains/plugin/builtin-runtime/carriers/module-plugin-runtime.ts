@@ -139,7 +139,8 @@ export interface ModulePluginRuntimeOptions {
     readonly projectPath: string;
   };
   readonly messaging?: {
-    readonly messageStore?: Pick<IMessageStore, 'getById'>;
+    readonly messageStore?: Pick<IMessageStore, 'getById'> & Partial<Pick<IMessageStore, 'getByIdempotencyKey'>>;
+    readonly readMessageTargets?: (threadId: string, messageId: string) => Promise<readonly string[]>;
     readonly service: MessagingService;
     readonly delivery: Pick<SubscriptionDelivery, 'register' | 'unregister'>;
     readonly threadStore: IThreadStore;
@@ -321,6 +322,9 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
       const messaging = this.options.messaging
         ? createPluginMessagingHost({
             messageStore: this.options.messaging.messageStore,
+            ...(this.options.messaging.readMessageTargets
+              ? { readMessageTargets: this.options.messaging.readMessageTargets }
+              : {}),
             pluginId: packageRecord.pluginId,
             pluginInstanceId,
             ownerUserId: this.options.messaging.ownerUserId,

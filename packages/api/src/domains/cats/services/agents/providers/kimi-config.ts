@@ -256,6 +256,10 @@ export function buildApiKeyEnv(model: string, callbackEnv?: Record<string, strin
   const baseUrl = normalizeKimiApiBaseUrl(callbackEnv?.CAT_CAFE_KIMI_BASE_URL || DEFAULT_KIMI_BASE_URL);
   const configuredModelName = model.trim();
   return {
+    // Current Kimi uses the explicit KIMI_MODEL_* provider channel. Keep the
+    // older aliases on the same selected credential/endpoint for older CLIs.
+    KIMI_MODEL_API_KEY: apiKey,
+    KIMI_MODEL_BASE_URL: baseUrl,
     KIMI_API_KEY: apiKey,
     KIMI_BASE_URL: baseUrl,
     KIMI_MODEL_NAME: configuredModelName,

@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
-import type { StoredMessage } from '../src/domains/cats/services/stores/ports/MessageStore.js';
-import { readCollectiveReplyRecoveryTarget } from '../src/routes/collective-reply-recovery.js';
+import {
+  assertMessageFromConsistent,
+  type StoredMessage,
+} from '../src/domains/cats/services/stores/ports/MessageStore.js';
+import { readPluginMessageExtra } from '../src/domains/messaging/envelope.js';
+import { readCollectiveReplyRecoveryTarget } from '../src/routes/collective-reply-recovery-target.js';
 import {
   BODY,
   CAT,
@@ -20,11 +24,42 @@ import {
 describe('Collective reply recovery', () => {
   it('extracts only the proven model-authored final body and excludes the Host signature', () => {
     const { source, response } = recoveryFixture();
+    assert.doesNotThrow(() => assertMessageFromConsistent(source));
+    assert.ok(readPluginMessageExtra(source));
+    assert.equal(source.source, undefined);
     const target = readCollectiveReplyRecoveryTarget(source, response, OWNER, CAT);
     assert.equal(target.body, BODY);
     assert.equal(target.bodySha256, createHash('sha256').update(BODY, 'utf8').digest('hex'));
     assert.equal(target.responseMessageId, RESPONSE_ID);
     assert.doesNotMatch(target.body, /gpt-6\.1-sol/);
+  });
+
+  it('keeps legacy external Collective rows recoverable through the same normalized source boundary', () => {
+    const { source, response } = recoveryFixture();
+    const presentation = source.extra?.pluginMessage?.presentation;
+    assert.ok(presentation);
+    source.from = { kind: 'external', connectorId: 'collective' };
+    source.source = presentation;
+    source.extra = undefined;
+    const target = readCollectiveReplyRecoveryTarget(source, response, OWNER, CAT);
+    assert.equal(target.body, BODY);
+  });
+
+  it('projects recoverability from the authoritative stored turn without queue effects', async () => {
+    const harness = await openRecoveryHarness();
+    try {
+      const result = await harness.probe();
+      assert.equal(result.statusCode, 200, result.body);
+      assert.deepEqual(result.json(), {
+        status: 'recoverable',
+        sourceMessageId: SOURCE_ID,
+        responseMessageId: RESPONSE_ID,
+      });
+      assert.equal(harness.queue.list(THREAD, OWNER).length, 0);
+      assert.equal(harness.requestDrain.mock.callCount(), 0);
+    } finally {
+      await harness.app.close();
+    }
   });
 
   it('preserves whitespace inside the proven final boundary instead of rewriting the reply', () => {

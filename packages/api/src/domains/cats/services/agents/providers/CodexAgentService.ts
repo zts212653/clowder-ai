@@ -840,11 +840,17 @@ function writeCodexMcpEnvWrapper(spec: {
 async function buildCatCafeMcpArgs(
   callbackEnv?: Record<string, string>,
   workingDirectory?: string,
-): Promise<{ args: string[]; bearerEnv: Record<string, string>; declaredServerNames?: readonly string[] }> {
+): Promise<{
+  args: string[];
+  bearerEnv: Record<string, string>;
+  declaredServerNames?: readonly string[];
+  privateServers?: Record<string, Record<string, unknown>>;
+}> {
   if (!callbackEnv) return { args: [], bearerEnv: {} };
 
   /** Bearer tokens extracted from headers — keyed by env var name, valued by token. */
   const bearerEnv: Record<string, string> = {};
+  const privateServers: Record<string, Record<string, unknown>> = {};
 
   const runtimeRoot = resolveBinaryRoot();
   const fileDir = dirname(fileURLToPath(import.meta.url));
@@ -1036,6 +1042,19 @@ async function buildCatCafeMcpArgs(
           envEntries = pluginMcpEnvironment(s, callbackEnv);
         }
         if (!cmd) continue;
+        if (s.source === 'plugin' && callbackEnv.CAT_CAFE_MCP_TRANSPORT === 'shared') {
+          // Preserve the launch identity until Host nomination runs in private RPC.
+          // Wrapping first erases command/args/action-token identity; argv cannot carry it.
+          privateServers[s.name] = {
+            command: cmd,
+            args: cmdArgs ?? [],
+            ...(envEntries ? { env: envEntries } : {}),
+            ...(workingDir ? { cwd: workingDir } : {}),
+            enabled: true,
+          };
+          enabledServers.push(s.name);
+          continue;
+        }
         if (envEntries) {
           // Pooled replacement hosts rebind session paths through server.env.
           // A frozen wrapper copy would override the newly bound credential file.
@@ -1124,6 +1143,7 @@ async function buildCatCafeMcpArgs(
   return {
     args: codexMcpConfigArgs(args, callbackEnv),
     bearerEnv,
+    privateServers,
     declaredServerNames: [...new Set(enabledServers)].sort(),
   };
 }
@@ -1246,7 +1266,7 @@ export class CodexAgentService implements AgentService {
     // app-server 0.144.4 exposes no equivalent ignore-user-config flag, so a
     // read-only supplement must fail before model launch instead of trusting
     // sandbox alone while user-configured MCP tools may still load.
-    return policy.mode === 'read_only' && this.carrierMode === 'exec_json';
+    return (policy.mode === 'read_only' || policy.mode === 'plugin_native') && this.carrierMode === 'exec_json';
   }
 
   freshnessCarrierCapability(
@@ -1614,10 +1634,15 @@ export class CodexAgentService implements AgentService {
   private async compileDeveloperInstructions(
     cliModel: string,
     userId?: string,
-    projection: 'owner' | 'public' = 'owner',
+    projection: 'owner' | 'public' | 'scoped-member' = 'owner',
   ): Promise<{ value: string } | { error: string; metadata: MessageMetadata }> {
     try {
-      const compiledL0 = await this.l0CompilerFn({ catId: this.catId as string, userId, projection });
+      const compiledL0 = await this.l0CompilerFn({
+        catId: this.catId as string,
+        userId,
+        projection,
+        ...(projection === 'scoped-member' ? { runtimeModel: cliModel } : {}),
+      });
       const separator = compiledL0.endsWith('\n') ? '\n' : '\n\n';
       const providerInstructions = `${compiledL0}${separator}${CODEX_SIGNATURE_BOUNDARY_INSTRUCTION}`;
       return { value: providerInstructions };
@@ -1788,14 +1813,16 @@ export class CodexAgentService implements AgentService {
       args: catCafeMcpArgs,
       bearerEnv: mcpBearerEnv,
       declaredServerNames: declaredMcpServerNames,
+      privateServers: privateMcpServers,
     } = native
-      ? { args: [], bearerEnv: {}, declaredServerNames: [native.serverName] }
+      ? { args: [], bearerEnv: {}, declaredServerNames: [native.serverName], privateServers: undefined }
       : readOnly
-        ? { args: [], bearerEnv: {}, declaredServerNames: [] as readonly string[] }
+        ? { args: [], bearerEnv: {}, declaredServerNames: [] as readonly string[], privateServers: undefined }
         : liveConfig
           ? {
               args: [],
               bearerEnv: {},
+              privateServers: undefined,
               declaredServerNames: Object.keys(
                 isCodexConfigObject(liveConfig.mcp_servers) ? liveConfig.mcp_servers : {},
               ),
@@ -1931,7 +1958,7 @@ export class CodexAgentService implements AgentService {
     const l0Result = await this.compileDeveloperInstructions(
       cliModel,
       native ? undefined : options?.callbackEnv?.CAT_CAFE_USER_ID,
-      native ? 'public' : 'owner',
+      native ? native.kind : 'owner',
     );
     if (native) await native.assertCurrent();
     if ('error' in l0Result) {
@@ -2108,7 +2135,7 @@ export class CodexAgentService implements AgentService {
         ? mergeCodexConfig(
             liveConfig ??
               (privateMcpRpc
-                ? codexNativeMcpThreadConfig(catCafeMcpArgs, mcpCallbackEnv!)
+                ? codexNativeMcpThreadConfig(catCafeMcpArgs, mcpCallbackEnv!, privateMcpServers)
                 : usePooledAppServer
                   ? codexConfigObjectFromArgs(catCafeMcpArgs)
                   : {}),

@@ -136,6 +136,8 @@ export interface CompileL0Options {
   userId?: string;
   /** Private Work retains home L0 without USER_CAPSULE; public uses its separate bounded projection. */
   projection?: L0Projection;
+  /** Frozen provider model for a bounded member invocation. */
+  runtimeModel?: string;
   /** Canonical data root test/config seam. Defaults to CAT_CAFE_DATA_DIR/~/.cat-cafe. */
   dataDir?: string;
   /**
@@ -156,7 +158,8 @@ type L0ProjectionContext =
 
 function resolveProjection(options: CompileL0Options): L0Projection {
   if (options.projection === undefined) return 'owner';
-  if (options.projection === 'owner' || options.projection === 'public') return options.projection;
+  if (options.projection === 'owner' || options.projection === 'public' || options.projection === 'scoped-member')
+    return options.projection;
   throw new Error(`Unsupported L0 projection: ${String(options.projection)}`);
 }
 
@@ -193,7 +196,7 @@ export async function compileL0ViaSubprocess(options: CompileL0Options): Promise
   const { catId, outPath } = options;
   const userId = options.userId ?? process.env.CAT_CAFE_USER_ID ?? DEFAULT_PROFILE_USER_ID;
   const projection = resolveProjection(options);
-  const key = l0Cache.key(userId, catId, projection);
+  const key = l0Cache.key(userId, catId, projection) + (options.runtimeModel ? `\0${options.runtimeModel}` : '');
   const cwd = options.cwd ?? process.cwd();
   const scriptPath = resolveL0CompilerScriptPath(cwd);
   const dependencySignature = scriptPath ? refreshL0DependencySignature(cwd, scriptPath) : null;
@@ -267,6 +270,7 @@ async function doCompileL0(
     scriptPath,
     '--cat',
     catId,
+    ...(options.runtimeModel ? ['--runtime-model', options.runtimeModel] : []),
     ...(projectionContext.projection !== 'owner'
       ? ['--projection', projectionContext.projection]
       : ['--profile-dir', projectionContext.profileDir]),

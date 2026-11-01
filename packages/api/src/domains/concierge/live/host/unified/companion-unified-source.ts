@@ -46,7 +46,9 @@ const read = z.object({
       .extend({ coverage: z.literal('pending_f290_project_materials_and_dates') })
       .optional(),
     structuredChoices: source.extend({ coverage: z.literal('pending_f306_structured_choices') }).optional(),
+    personalPreferences: source.extend({ coverage: z.literal('owner_personal_ignored_items') }),
   }),
+  personalView: z.object({ mode: z.literal('visible'), preferenceRevision: z.number().int().nonnegative().optional() }),
   readWindow: z.object({
     startedAt: z.number(),
     endedAt: z.number(),
@@ -167,6 +169,8 @@ export function parseUnifiedCompanionSource(
   )
     throw new CompanionBridgeError('unavailable');
   const items = parsed.items.map((value) => item(value, ownerUserId));
+  if (parsed.sources.personalPreferences.status !== 'available' && items.length > 0)
+    throw new CompanionBridgeError('unavailable');
   if (
     items.some(
       (value) =>

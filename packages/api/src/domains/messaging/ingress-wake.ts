@@ -2,6 +2,8 @@ import { type CatId, type ConnectorSource, getConnectorDefinition, type MessageC
 import { MessagingError } from './contract/host-types.js';
 import type { MessagingLedger } from './ledger.js';
 
+export type PluginMessageWake = 'auto' | { readonly catId: string; readonly exact?: true };
+
 /**
  * The Host collaborators an authenticated ingress needs. Offered at the `createMessagingDomain`
  * assembly point; conversation admission and routing stay in the ordinary queue.
@@ -72,7 +74,7 @@ export function broadcastIngress(
 export interface ResolvedIngress {
   readonly deps: MessagingIngressWakeDeps;
   readonly source: ConnectorSource;
-  readonly wake?: 'auto' | { readonly catId: string };
+  readonly wake?: PluginMessageWake;
 }
 
 /**
@@ -136,7 +138,7 @@ export async function deliverIngressEffectsOnce(
       input.content,
       input.messageId,
       input.contentBlocks,
-      undefined,
+      ingress.wake !== 'auto' && ingress.wake.exact === true ? { exactTarget: true } : undefined,
       input.sender,
     );
     if (outcome === 'full') {

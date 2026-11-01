@@ -27,20 +27,33 @@ export function recoveryFixture() {
     mentions: [CAT],
     timestamp: 1,
     deliveryStatus: 'delivered',
-    source: {
-      connector: 'collective',
-      label: 'Collective',
-      meta: {
-        participation: {
-          serviceInstanceId: 'svc_12345678',
-          collectiveId: 'col_12345678',
-          connectionId: 'con_12345678',
-          eventId: 'evt_12345678',
-          location: { channelId: 'general' },
-          catId: CAT,
-          participationRevision: 1,
-          actor: { kind: 'human', humanId: 'human_12345678', displayName: 'you' },
+    extra: {
+      pluginMessage: {
+        presentation: {
+          connector: 'collective',
+          label: 'Collective',
+          icon: 'collective',
+          meta: {
+            participation: {
+              serviceInstanceId: 'svc_12345678',
+              collectiveId: 'col_12345678',
+              connectionId: 'con_12345678',
+              eventId: 'evt_12345678',
+              location: { channelId: 'general' },
+              catId: CAT,
+              participationRevision: 1,
+              actor: { kind: 'human', humanId: 'human_12345678', displayName: 'you' },
+            },
+          },
         },
+        instanceId: 'pi_collective',
+        revision: 1,
+        provenance: {
+          origin: { kind: 'plugin', instanceId: 'pi_collective' },
+          epistemicStatus: 'observation',
+        },
+        elements: [{ elementId: 'source-text', kind: 'text', payload: { text: 'hi' } }],
+        appendOps: [],
       },
     },
     lifecycle: {
@@ -185,6 +198,12 @@ export async function openRecoveryHarness({
         url: `/api/threads/${THREAD}/messages/${SOURCE_ID}/collective-reply-recovery/${input.catId ?? CAT}`,
         headers: { 'x-cat-cafe-user': input.owner ?? OWNER },
         payload: { requestId: input.requestId ?? REQUEST_ID },
+      }),
+    probe: (input: { owner?: string; catId?: string } = {}) =>
+      app.inject({
+        method: 'GET',
+        url: `/api/threads/${THREAD}/messages/${SOURCE_ID}/collective-reply-recovery/${input.catId ?? CAT}`,
+        headers: { 'x-cat-cafe-user': input.owner ?? OWNER },
       }),
   };
 }

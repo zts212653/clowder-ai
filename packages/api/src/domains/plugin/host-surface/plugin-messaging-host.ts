@@ -16,6 +16,12 @@ import {
   createUnavailablePluginMessagingSubscriptionHost,
   type PluginMessagingSubscriptionHost,
 } from './plugin-messaging-subscription-host.js';
+import {
+  createPluginSentMessageReader,
+  type PluginSentMessage,
+  type PluginSentMessageLookup,
+  type PluginSentMessageReadServices,
+} from './plugin-sent-message-read.js';
 
 const SEND_KEYS = new Set([
   'threadId',
@@ -32,7 +38,7 @@ const SEND_KEYS = new Set([
 ]);
 export type PluginMessagingSendInput = Omit<MessageDraft, 'address'> & {
   readonly threadId: string;
-  readonly wake?: 'auto' | { readonly catId: string };
+  readonly wake?: import('../../messaging/ingress-wake.js').PluginMessageWake;
   readonly sender?: { readonly id: string; readonly name?: string };
   readonly contentBlocks?: readonly MessageContent[];
   readonly identity?: string;
@@ -68,16 +74,17 @@ export type PluginMessage = Pick<
 
 export interface PluginMessagingHost extends PluginMessagingSubscriptionHost {
   get(messageId: string): Promise<PluginMessage | null>;
+  findSent(input: PluginSentMessageLookup): Promise<PluginSentMessage | null>;
   send(input: PluginMessagingSendInput): Promise<SendReceipt>;
 }
 
-export interface PluginMessagingHostDeps {
+export interface PluginMessagingHostDeps extends PluginSentMessageReadServices {
   readonly pluginId: string;
   readonly pluginInstanceId: string;
   readonly ownerUserId: string;
   readonly manifest: PluginManifest;
   readonly threadStore: IThreadStore;
-  readonly messageStore?: Pick<IMessageStore, 'getById'>;
+  readonly messageStore?: Pick<IMessageStore, 'getById'> & Partial<Pick<IMessageStore, 'getByIdempotencyKey'>>;
   readonly assertCurrent?: () => void;
   readonly messaging: MessagingService;
   readonly subscriptions?: PluginMessagingSubscriptionHost;
@@ -89,6 +96,9 @@ export function createUnavailablePluginMessagingHost(): PluginMessagingHost {
     ...subscriptions,
     async get() {
       throw new MessagingError('PERMISSION', 'Host message read service is unavailable');
+    },
+    async findSent() {
+      throw new MessagingError('PERMISSION', 'Durable Host delivery lookup is unavailable');
     },
     async send() {
       throw new MessagingError('PERMISSION', 'Host messaging services are unavailable');
@@ -109,10 +119,17 @@ function wakeOf(value: unknown): PluginMessagingSendInput['wake'] {
     throw new MessagingError('VALIDATION', 'wake must be auto or { catId }');
   }
   const candidate = value as Record<string, unknown>;
-  if (Object.keys(candidate).length !== 1 || !Object.hasOwn(candidate, 'catId')) {
-    throw new MessagingError('VALIDATION', 'wake must contain only catId');
+  if (
+    Object.keys(candidate).some((key) => !['catId', 'exact'].includes(key)) ||
+    !Object.hasOwn(candidate, 'catId') ||
+    (candidate.exact !== undefined && candidate.exact !== true)
+  ) {
+    throw new MessagingError('VALIDATION', 'wake must contain catId and optional exact:true');
   }
-  return { catId: boundedString(candidate.catId, 'wake.catId', 200) };
+  return {
+    catId: boundedString(candidate.catId, 'wake.catId', 200),
+    ...(candidate.exact === true ? { exact: true as const } : {}),
+  };
 }
 
 function recordOf(input: PluginMessagingSendInput): Record<string, unknown> {
@@ -141,6 +158,7 @@ function isReadablePluginMessage(message: StoredMessage, ownerUserId: string): b
 
 export function createPluginMessagingHost(input: PluginMessagingHostDeps): PluginMessagingHost {
   return {
+    findSent: createPluginSentMessageReader(input),
     ...(input.subscriptions ?? createUnavailablePluginMessagingSubscriptionHost().host),
     async get(value) {
       input.assertCurrent?.();
