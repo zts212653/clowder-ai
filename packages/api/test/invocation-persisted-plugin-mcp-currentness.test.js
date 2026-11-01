@@ -87,7 +87,9 @@ for (const deployment of ['runtime', 'alpha']) {
       const capabilityId = `plugin:${f.pluginId}:native`;
       if (change === 'unchanged') {
         const binding = await prepare();
-        const selected = binding.providerOptions.frozenAcpMcpServers.find((item) => item.name === capabilityId);
+        const selected = binding.providerOptions.frozenAcpMcpServers.find(
+          (item) => item.name === capabilityId.replaceAll(':', '__'),
+        );
         const launch = await f.runtime.supervisor.resolveNativeMcpLaunch({
           mode: 'plugin_native',
           pluginInstanceId: f.installed.pluginInstanceId,
@@ -99,20 +101,23 @@ for (const deployment of ['runtime', 'alpha']) {
         assert.equal(directMcpContract(selected).upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN, token);
         const disabled = await prepare();
         assert.equal(
-          disabled.providerOptions.frozenAcpMcpServers.some((item) => item.name === capabilityId),
+          disabled.providerOptions.frozenAcpMcpServers.some((item) => item.name === capabilityId.replaceAll(':', '__')),
           false,
         );
         await f.mutate(true);
         const next = await prepare();
         assert.equal(
-          directMcpContract(next.providerOptions.frozenAcpMcpServers.find((item) => item.name === capabilityId))
-            .upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN,
+          directMcpContract(
+            next.providerOptions.frozenAcpMcpServers.find((item) => item.name === capabilityId.replaceAll(':', '__')),
+          ).upstream.env.CLOWDER_PLUGIN_ACTION_TOKEN,
           token,
         );
       } else {
         await assert.rejects(prepare(), ExecutionAdmissionConflict);
         const next = await prepare();
-        const selected = next.providerOptions.frozenAcpMcpServers.find((item) => item.name === capabilityId);
+        const selected = next.providerOptions.frozenAcpMcpServers.find(
+          (item) => item.name === capabilityId.replaceAll(':', '__'),
+        );
         assert.equal(Boolean(selected), change === 'refresh');
       }
     });

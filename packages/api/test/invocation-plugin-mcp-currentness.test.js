@@ -135,13 +135,17 @@ for (const change of ['refresh', 'disable', 'enable', 'generation-only', 'unchan
       });
     if (['unchanged', 'already-denied'].includes(change)) {
       const binding = await prepare();
-      const server = binding.providerOptions.frozenAcpMcpServers.find((item) => item.name === policy.id);
+      const server = binding.providerOptions.frozenAcpMcpServers.find(
+        (item) => item.name === policy.id.replaceAll(':', '__'),
+      );
       if (change === 'unchanged') assert.deepEqual(server.args, ['--before']);
       else assert.equal(server, undefined);
     } else {
       await assert.rejects(prepare(), ExecutionAdmissionConflict);
       const binding = await prepare();
-      const server = binding.providerOptions.frozenAcpMcpServers.find((item) => item.name === policy.id);
+      const server = binding.providerOptions.frozenAcpMcpServers.find(
+        (item) => item.name === policy.id.replaceAll(':', '__'),
+      );
       if (['refresh', 'enable'].includes(change)) assert.deepEqual(server.args, ['--after']);
       else assert.equal(server, undefined);
     }

@@ -142,13 +142,13 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
         );
         const shared = await this.#sharedFactories(admission, carrier);
         this.#nativeMcpLaunches.activate(admission, generation, launches, shared.factories, shared.unavailable);
-        this.ui.activate(admission);
       })());
     try {
       const result = await carrier.start(pluginInstanceId, admitContributions);
       // External and legacy carriers may not publish a separate Host-ready state.
       // Joining the same promise preserves one admission and its original rollback boundary.
       await admitContributions();
+      this.ui.activate(admission);
       return result;
     } catch (error) {
       if (!admitted) throw error;
