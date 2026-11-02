@@ -72,5 +72,12 @@ it('bounds the historical long-line attack through SecretScanner.scan', { timeou
   for (const prefix of ['['.repeat(100_000), '${'.repeat(50_000)]) {
     assert.deepEqual(SecretScanner.scan(`${prefix}: short`, 'x.md'), []);
   }
+  for (const prefix of ['='.repeat(100_000), 'key='.repeat(25_000)]) {
+    assert.deepEqual(SecretScanner.scan(prefix, 'x.md'), []);
+    assert.equal(SecretScanner.scan(`${prefix} token = "${value}"`, 'x.md').length, 1);
+  }
+  assert.equal(SecretScanner.scan(`${'key='.repeat(25_000)}${value}`, 'x.md').length, 1);
+  assert.equal(SecretScanner.scan(`key=xxxkey=token=${value}`, 'x.md').length, 1);
+  assert.deepEqual(SecretScanner.scan(`token=${value}xxxx`, 'x.md'), []);
   assert.ok(performance.now() - start < 1500, 'two million-character lines must finish within 1.5s');
 });

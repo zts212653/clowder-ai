@@ -48,7 +48,8 @@ function hasCredentialAssignment(line: string): boolean {
   const text = line.replace(/^[\s>*+\-•#|]*(?:\d+[.)]\s+|\[[ xX]\]\s+)*/, '');
   const tokens =
     /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\\.|(?:\[[\w.]+\])?\$(?:\{[\w:.-]+\}|[\w:.-]+)|[\w.-]+:[\w.-]+(?=\s*=)|[\w.-]+|[^\s]/g;
-  const valueAtOperator = /\s*["']?([A-Za-z0-9_\-/.+=]{32,})/y;
+  const valuePrefix = /\s*["']?/y;
+  const valueRun = /[A-Za-z0-9_\-/.+=]+/y;
   let target = '';
   let validPrefix = true;
   let declaration = false;
@@ -57,6 +58,10 @@ function hasCredentialAssignment(line: string): boolean {
   let valueStarted = false;
   let valueDepth = 0;
   let previousEnd = 0;
+  let candidateStart = 0;
+  let candidateEnd = 0;
+  let lastPlaceholder = -1;
+  const counts = new Map<string, number>();
 
   for (let token = tokens.exec(text); token; token = tokens.exec(text)) {
     const word = token[0];
@@ -83,16 +88,33 @@ function hasCredentialAssignment(line: string): boolean {
       const assignment = annotation ?? { target, validPrefix };
       // := is a single operator, not a type annotation followed by another assignment.
       const valueStart = tokens.lastIndex + (word === ':' && text[tokens.lastIndex] === '=' ? 1 : 0);
-      valueAtOperator.lastIndex = valueStart;
-      const value = valueAtOperator.exec(text)?.[1];
-      if (
-        assignment.validPrefix &&
-        CREDENTIAL_NAME_RE.test(assignment.target.replace(/["'}]$/, '')) &&
-        value &&
-        !PLACEHOLDER_RE.test(value) &&
-        shannonEntropy(value) > 3.5
-      )
-        return true;
+      if (assignment.validPrefix && CREDENTIAL_NAME_RE.test(assignment.target.replace(/["'}]$/, ''))) {
+        valuePrefix.lastIndex = valueStart;
+        valuePrefix.exec(text);
+        const start = valuePrefix.lastIndex;
+        if (start >= candidateEnd) {
+          valueRun.lastIndex = start;
+          const value = valueRun.exec(text)?.[0] ?? '';
+          candidateStart = start;
+          candidateEnd = start + value.length;
+          counts.clear();
+          for (const ch of value) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+          lastPlaceholder = -1;
+          // Lookahead also records overlapping placeholders (e.g. xxxx).
+          const placeholders = new RegExp(`(?=${PLACEHOLDER_RE.source})`, 'gi');
+          for (const placeholder of value.matchAll(placeholders)) lastPlaceholder = start + placeholder.index;
+        }
+        // Operators inside the same value run reuse its counts. Each character is
+        // added and removed once, including adversarial key=key=... suffixes.
+        while (candidateStart < start && candidateStart < candidateEnd) {
+          const ch = text[candidateStart++];
+          const count = counts.get(ch)! - 1;
+          if (count) counts.set(ch, count);
+          else counts.delete(ch);
+        }
+        const length = candidateEnd - start;
+        if (length >= 32 && lastPlaceholder < start && shannonEntropy(counts, length) > 3.5) return true;
+      }
       if (word === ':' && valueStart === tokens.lastIndex) {
         annotation ??= assignment;
       } else {
@@ -197,12 +219,10 @@ function maskSecret(line: string): string {
   );
 }
 
-function shannonEntropy(str: string): number {
-  const freq = new Map<string, number>();
-  for (const ch of str) freq.set(ch, (freq.get(ch) ?? 0) + 1);
+function shannonEntropy(freq: Map<string, number>, length: number): number {
   let entropy = 0;
   for (const count of freq.values()) {
-    const p = count / str.length;
+    const p = count / length;
     entropy -= p * Math.log2(p);
   }
   return entropy;
