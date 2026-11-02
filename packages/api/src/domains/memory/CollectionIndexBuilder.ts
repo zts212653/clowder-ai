@@ -130,7 +130,11 @@ export class CollectionIndexBuilder {
 
       if (!force) {
         const existing = await this.store.getByAnchor(anchor);
-        if (existing?.sourceHash === hash && existing.authority === this.manifest.reviewPolicy.authorityCeiling) {
+        if (
+          existing?.sourceHash === hash &&
+          existing.authority === this.manifest.reviewPolicy.authorityCeiling &&
+          existing.sourcePath === result.item.sourcePath
+        ) {
           skipped++;
           continue;
         }

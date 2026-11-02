@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import {
   type GraphQueryResolution,
@@ -148,11 +148,7 @@ function graphSourcePathForDrillDown(sourcePath: string, collectionId?: string):
   if (!collectionId || collectionId === LOCAL_PROJECT_COLLECTION_ID || sourcePath.startsWith(COLLECTION_URI_PREFIX)) {
     return sourcePath;
   }
-  const encodedPath = sourcePath
-    .split(/[\\/]+/)
-    .filter(Boolean)
-    .map(encodeURIComponent)
-    .join('/');
+  const encodedPath = sourcePath.split(sep).join('/').split('/').filter(Boolean).map(encodeURIComponent).join('/');
   return `${COLLECTION_URI_PREFIX}${encodeURIComponent(collectionId)}/${encodedPath}`;
 }
 

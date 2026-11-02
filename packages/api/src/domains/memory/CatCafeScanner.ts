@@ -2,7 +2,7 @@
 // Scans cat-cafe docs/ structure: KIND_DIRS + archive + top-level .md + fallback
 
 import { readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import {
   discoverFiles,
   GENERATED_DOC_DIRS,
@@ -75,8 +75,8 @@ export class CatCafeScanner implements RepoScanner {
   }
 
   private isExcluded(filePath: string, projectRoot: string): boolean {
-    const rel = relative(projectRoot, filePath);
-    if (rel.split(/[\\/]+/).some((segment) => GENERATED_DOC_DIRS.has(segment))) return true;
+    const rel = relative(projectRoot, filePath).split(sep).join('/');
+    if (rel.split('/').some((segment) => GENERATED_DOC_DIRS.has(segment))) return true;
     if (!this.exclude?.length) return false;
     return this.exclude.some((pattern) => matchGlob(pattern, rel));
   }
@@ -100,7 +100,7 @@ export class CatCafeScanner implements RepoScanner {
     }
 
     const frontmatter = extractFrontmatter(content);
-    const sourcePath = relative(projectRoot, filePath);
+    const sourcePath = relative(projectRoot, filePath).split(sep).join('/');
     const tasteMaterialization = materializePublicTasteVignette(sourcePath, content);
     if (tasteMaterialization === null) return null;
     const anchor =

@@ -3,7 +3,7 @@ import { deploymentDefaults } from '@cat-cafe/shared';
 
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { IEventMemoryStore } from './EventMemoryStore.js';
 import { EventMemoryStore } from './EventMemoryStore.js';
 import { loadEntitySeeds, shouldSkipProposalEntity } from './entity-seeds.js';
@@ -102,9 +102,9 @@ export function computeChildExcludes(parentRoot: string, children: Array<{ root:
   const excludes: string[] = [];
   for (const child of children) {
     const absChild = resolve(child.root);
-    if (absChild.startsWith(absParent + '/') && absChild !== absParent) {
-      const rel = relative(absParent, absChild);
-      excludes.push(`${rel}/**`);
+    const rel = relative(absParent, absChild);
+    if (rel && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) {
+      excludes.push(`${rel.split(sep).join('/')}/**`);
     }
   }
   return excludes;

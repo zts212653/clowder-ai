@@ -1,7 +1,7 @@
 // F186 Phase B: Level 0 scanner — indexes any markdown directory without structure assumptions
 
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
-import { basename, join, relative } from 'node:path';
+import { basename, join, relative, sep } from 'node:path';
 import type { RepoScanner, ScannedEvidence } from './interfaces.js';
 
 const SKIP_DIRS = new Set([
@@ -50,6 +50,7 @@ export class FlatScanner implements RepoScanner {
   }
 
   parseSingle(filePath: string, root: string): ScannedEvidence | null {
+    if (this.isExcluded(relative(root, filePath).split(sep).join('/'))) return null;
     return this.parseFile(filePath, root);
   }
 
@@ -69,10 +70,10 @@ export class FlatScanner implements RepoScanner {
         if (stat.isSymbolicLink()) continue;
         if (stat.isDirectory()) {
           if (SKIP_DIRS.has(entry)) continue;
-          if (this.isExcluded(relative(root, fullPath))) continue;
+          if (this.isExcluded(relative(root, fullPath).split(sep).join('/'))) continue;
           this.walkDir(fullPath, root, results, depth + 1);
         } else if (stat.isFile() && entry.endsWith('.md')) {
-          if (this.isExcluded(relative(root, fullPath))) continue;
+          if (this.isExcluded(relative(root, fullPath).split(sep).join('/'))) continue;
           const evidence = this.parseFile(fullPath, root);
           if (evidence) results.push(evidence);
         }
@@ -90,7 +91,7 @@ export class FlatScanner implements RepoScanner {
       return null;
     }
 
-    const rel = relative(root, filePath);
+    const rel = relative(root, filePath).split(sep).join('/');
     const stem = basename(filePath, '.md');
     const anchor = `${this.collectionId}:doc/${rel.replace(/\.md$/, '')}`;
     const title = extractTitle(content) ?? stem;
