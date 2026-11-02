@@ -5518,14 +5518,7 @@ async function main(): Promise<void> {
   registerAgentClientLibraryRoutes(app, {
     inventory: pluginRuntime.inventoryStore,
     registry: sessionImplementations,
-    configuration: {
-      readConfig: async (instanceId, key) => {
-        const snapshot = await pluginRuntime.inventoryStore.snapshot();
-        const instance = snapshot.instances.find((instance) => instance.pluginInstanceId === instanceId);
-        if (!instance) return undefined;
-        return (await pluginManagerRuntime.configuration.readActionInput(instance.pluginId))[key];
-      },
-    },
+    configuration: pluginRuntime.configuration,
   });
   registerPluginMarketplaceRoutes(app, marketplaceSources);
   const { PluginManagerBindings } = await import('./domains/plugin/manager/plugin-manager-bindings.js');

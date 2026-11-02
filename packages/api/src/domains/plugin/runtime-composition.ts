@@ -234,6 +234,8 @@ export interface DormantPluginRuntimeComposition {
   readonly inventoryStore: FilePluginInventoryStore;
   readonly brokerStore: FileHostBrokerStore;
   readonly inventory: HostInventoryControlPlane;
+  /** Stored values shared with execution; consumers apply manifest defaults themselves. */
+  readonly configuration: Pick<PluginRuntimeConfigurationPort, 'readConfig'>;
   readonly broker: HostBrokerControlPlane;
   readonly supervisor: PluginRuntimeCarrierRouter;
   /** The child-process carrier itself. Exposed so the Host's one pre-active budget
@@ -637,6 +639,7 @@ export function createDormantPluginRuntimeComposition(
     inventoryStore,
     brokerStore,
     inventory,
+    configuration,
     broker,
     supervisor,
     settingsInvocation: moduleRuntime.invokeSettings,
