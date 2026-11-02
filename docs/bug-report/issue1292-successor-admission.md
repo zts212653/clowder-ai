@@ -197,3 +197,18 @@ CI 的原三项 F202 检查保持不改，新增真实 plugin delivery 和中央
 已有 targetless settlement 测试原用 @opus 正文制造空目标；该正文现在是明确的成员身份。
 fixture 改用无 mention 的普通正文，仍原样验证 Memory/Redis 的退休故障、重启、重放与旧 claim
 不能退休新目标。没有放宽这些持久化断言；该 owned Unix-socket 文件由 Linux CI 验证。
+
+
+## 插件 wake 结算重试的接纳事实
+
+独立复审复现：Queue 已接纳但 wake effect 未确认时，重试提前重算 hint，配置变化使合法
+请求成为 identity conflict；退休后还可能尝试重建工作。仅在现有 plugin delivery 消费边界
+回读同 source 的 durable Queue 行与 History.kind=input。核对 owner、from、thread、messageId
+和 content；pending 行复用现有 adoptCommittedAdmission，只恢复缓存与普通 drain 通知。
+退休 source 直接 acknowledgement，不创建新 target、策略或 claim。exact 有原 target 证据时
+必须匹配；原行缩减后优先 requestedTargetCats，不把剩余 targets 当作原始快照。
+
+这是原消息的接纳回执，不是确认本轮 hint 已被执行。已退休且没有 dispatch refs 时，现有
+数据不能还原旧 hint/exact 模式；保持 Host 的同 source 首份 receipt 语义，不新增完整指纹
+冲突保证。没有首次接纳事实的已发布插件消息仍走首次解析。无新增持久字段、Store、缓存、
+迁移或路由系统；回退只撤销这段消费与聚焦测试。
