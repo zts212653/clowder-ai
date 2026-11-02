@@ -186,6 +186,7 @@ jobs:
       - name: Production first-run pages with real receipt and guide routes
         env:
           CAT_CAFE_ENTRY_EVIDENCE_DIR: ${{ github.workspace }}/.tmp/first-run-entry-ci
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
         run: |
           pnpm --filter @cat-cafe/web exec playwright install --with-deps chromium
           pnpm --filter @cat-cafe/web test:first-run-entry:production
@@ -196,6 +197,7 @@ jobs:
       - name: Plugin document direct-navigation origin isolation
         env:
           PLUGIN_ORIGIN_ARTIFACTS: ${{ github.workspace }}/.tmp/plugin-document-origin-ci
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
         run: >-
           pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
           --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 --env DEFAULT_OWNER_USER_ID=owner
