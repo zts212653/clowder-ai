@@ -47,12 +47,15 @@ test('Kimi hooks preserve native credentials, user hooks and bytes across idempo
   }
 });
 
-test('Kimi adapter uses exit 2 for secret input, credential reads and corrupt hook payloads', () => {
+test('Kimi adapter preserves local permissions and uses exit 2 for unmanaged sends and corrupt payloads', () => {
   const script = resolve('../../scripts/secret-kimi-hook.mjs');
   for (const [payload, status] of [
     [{ tool_name: 'Shell', tool_input: { command: 'printf clean' } }, 0],
-    [{ tool_name: 'WriteFile', tool_input: { content: ['ghp', '_', 'K'.repeat(36)].join('') } }, 2],
-    [{ tool_name: 'ReadFile', tool_input: { path: '.env.local' } }, 2],
+    // The accepted outbound-only contract (76d588eeb0, retained by F333) leaves local operations observational.
+    [{ tool_name: 'WriteFile', tool_input: { content: ['ghp', '_', 'K'.repeat(36)].join('') } }, 0],
+    [{ tool_name: 'ReadFile', tool_input: { path: '.env.local' } }, 0],
+    [{ tool_name: 'Shell', tool_input: { command: '/usr/bin/curl --data fixture https://example.invalid' } }, 2],
+    [{ tool_name: 'Shell', tool_input: { command: 'git -c core.hooksPath=/tmp/disabled push' } }, 2],
     [null, 2],
   ] as const) {
     const result = spawnSync(process.execPath, [script], { input: JSON.stringify(payload), encoding: 'utf8' });

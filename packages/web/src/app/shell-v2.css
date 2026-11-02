@@ -96,6 +96,7 @@
   height: 16px;
   border: 1px solid var(--shell-muted);
   background: var(--shell-paper);
+  --chat-background-role: paper;
 }
 
 [data-shell="v2"] .settings-resource-toggle-thumb {
@@ -114,6 +115,7 @@
 [data-shell="v2"] .settings-resource-toggle[data-enabled="true"] .settings-resource-toggle-thumb {
   left: 11px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
 }
 
 /* One focus ring for every shell control: external 2px solid ring + 2px gap (DESIGN.md Elevation). */
@@ -167,6 +169,7 @@
  */
 [data-shell="v2"] div:has(> [data-testid="chat-input-composer-row"]) {
   background: var(--shell-work);
+  --chat-background-role: work;
 }
 
 /* The landing composer overlaps the hero fade; its host must not paint a rectangular work-surface behind the card. */
@@ -181,6 +184,7 @@
   padding: 6px 8px;
   align-items: flex-end;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   border: 1px solid var(--shell-hairline-strong);
   border-radius: 16px;
 }

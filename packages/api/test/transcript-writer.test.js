@@ -163,6 +163,19 @@ describe('TranscriptWriter', () => {
   });
 
   describe('generateExtractiveDigest()', () => {
+    test('clipped visible messages and errors remain valid Unicode in the next-session digest', async () => {
+      const writer = await createWriter();
+      writer.appendEvent(SESSION_INFO, { type: 'text', content: `${'a'.repeat(1199)}😼tail` }, 'unicode-inv');
+      writer.appendEvent(SESSION_INFO, { type: 'error', error: `${'e'.repeat(499)}🐾tail` }, 'unicode-inv');
+      const digest = writer.generateExtractiveDigest(SESSION_INFO, { createdAt: 1000, sealedAt: 2000 });
+      assert.equal(digest.recentMessages.length, 1);
+      assert.ok(digest.recentMessages[0].content.isWellFormed());
+      assert.equal(digest.recentMessages[0].content, 'a'.repeat(1199));
+      assert.equal(digest.errors.length, 1);
+      assert.ok(digest.errors[0].message.isWellFormed());
+      assert.equal(digest.errors[0].message, 'e'.repeat(499));
+    });
+
     test('produces digest with basic session info', async () => {
       const writer = await createWriter();
 

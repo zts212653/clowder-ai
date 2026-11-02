@@ -137,6 +137,9 @@ export function createPluginMessagingSubscriptionSession(
         handles.set(input.threadId, handleId);
       },
       async unsubscribe(raw) {
+        // Host teardown already released this session. Package cleanup is a
+        // no-op; never withdraw a replacement activation's deterministic handle.
+        if (stopped && handles.size === 0) return;
         assertCurrent();
         if (
           !raw ||

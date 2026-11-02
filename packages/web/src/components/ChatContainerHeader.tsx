@@ -57,6 +57,7 @@ export function ChatContainerHeader({
     return (
       <header
         className="safe-area-top"
+        data-chat-background-surface="work"
         style={{ background: 'var(--shell-work)', borderBottom: '1px solid var(--shell-hairline)' }}
         data-shell-header="v2"
       >

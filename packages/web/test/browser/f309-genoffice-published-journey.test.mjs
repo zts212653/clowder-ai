@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
 import { MessageStore } from '../../../api/src/domains/cats/services/stores/ports/MessageStore.ts';
 import { createCollaborativeContentComposition } from '../../../api/src/domains/collaborative-content/runtime-composition.ts';
@@ -18,7 +19,6 @@ import { MemorySignalRouteStore } from '../../../api/src/domains/signal-intake/S
 import { registerCollaborativeContentRoutes } from '../../../api/src/routes/collaborative-content-routes.ts';
 import { registerOfficialPluginRoutes } from '../../../api/src/routes/plugin-official-routes.ts';
 import { registerWorkspaceContentEditorRoutes } from '../../../api/src/routes/workspace-content-editor-routes.ts';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { observeOfficePage } from './fixtures/f309-browser-observers.mjs';
 import { verifyDocxRoundTrip } from './fixtures/f309-docx-roundtrip.mjs';
 import { editorLayout } from './fixtures/f309-editor-layout.mjs';

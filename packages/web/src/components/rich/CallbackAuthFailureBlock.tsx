@@ -167,6 +167,7 @@ export function CallbackAuthFailureBlock({ block }: { block: RichCardBlock }) {
           onClick={handleOpenDetails}
           title="打开 HubObservabilityTab 的 Callback Auth 子 tab 看 24h 详情"
           className="rounded px-3 py-1 text-xs font-semibold border"
+          data-chat-background-surface="cafe"
           style={{
             backgroundColor: 'var(--cafe-surface)',
             color: 'var(--semantic-warning)',

@@ -60,6 +60,7 @@ export function AgentPaneListV2({ worktreeId, onSelectPane, selectedPaneId }: Ag
             key={pane.invocationId}
             type="button"
             onClick={() => onSelectPane(pane.paneId, { invocationId: pane.invocationId, catId })}
+            data-chat-background-surface={selectedPaneId === pane.paneId ? 'cafe-sunken' : undefined}
             style={{
               display: 'flex',
               alignItems: 'center',

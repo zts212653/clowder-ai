@@ -7,6 +7,7 @@
 
 .console-shell {
   background: var(--console-shell-bg);
+  --chat-background-role: console-shell;
   color: var(--cafe-text);
 }
 
@@ -47,6 +48,7 @@
 .console-status-panel,
 .console-activity-rail {
   background: var(--console-panel-bg);
+  --chat-background-role: console-panel;
 }
 
 .console-card {
@@ -60,44 +62,53 @@
 .console-shell-panel,
 .console-status-panel {
   background: var(--console-panel-bg);
+  --chat-background-role: console-panel;
 }
 
 .console-shell-panel-soft,
 .console-card-soft {
   background: var(--console-card-soft-bg);
+  --chat-background-role: console-soft;
 }
 
 .console-card,
 .console-section-shell {
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
 }
 
 .console-list-card {
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
 }
 
 .console-list-card[data-active="true"],
 .console-card[data-active="true"] {
   background: var(--console-active-bg);
+  --chat-background-role: console-active;
 }
 
 .console-list-card[data-guide-id^="connector."][data-active="true"] {
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
 }
 
 .console-code-pane,
 .console-table-shell {
   border: 1px solid var(--console-border-soft);
   background: var(--console-code-bg);
+  --chat-background-role: console-code;
 }
 
 .console-list-card[data-guide-id^="connector."] .console-code-pane {
   border-width: 0;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
 }
 
 .console-pill {
   background: var(--console-pill-bg);
+  --chat-background-role: console-pill;
   border-radius: 6px;
 }
 
@@ -149,10 +160,12 @@
 
 .console-nav-item[data-active="true"] {
   background: var(--console-active-bg);
+  --chat-background-role: console-active;
 }
 
 .console-nav-item[data-active="false"]:hover {
   background: var(--console-hover-bg);
+  --chat-background-role: console-hover;
 }
 
 .console-nav-icon {
@@ -168,6 +181,7 @@
 .console-search-field {
   border: 1px solid var(--console-border-soft);
   background: var(--console-card-soft-bg);
+  --chat-background-role: console-soft;
 }
 
 .console-search-field:focus-within {
@@ -179,6 +193,7 @@
 
 .console-activity-rail {
   background: var(--console-rail-bg);
+  --chat-background-role: console-rail;
   box-shadow: none;
   backdrop-filter: none;
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { runClaudeAccountJourney } from './f320-claude-accounts.journey.mjs';
 import { startFinalAccountPreview } from './f320-final-runtime.fixture.mjs';
 import { registerCodexStartupJourney } from './f320-startup-recovery.journey.mjs';

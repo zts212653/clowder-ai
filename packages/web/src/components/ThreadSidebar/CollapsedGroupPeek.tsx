@@ -39,6 +39,7 @@ export function CollapsedGroupPeek({
               aria-label={`${title} · ${label}`}
               onClick={() => onSelect(member.id)}
               className="shell-focusable flex min-h-7 w-full min-w-0 items-center gap-1 rounded-md text-left text-xs"
+              data-chat-background-surface={member.id === currentId ? 'selected' : undefined}
               style={{
                 color: 'var(--shell-body)',
                 background: member.id === currentId ? 'var(--shell-selected)' : undefined,

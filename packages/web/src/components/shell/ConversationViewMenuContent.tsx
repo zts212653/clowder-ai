@@ -86,6 +86,7 @@ export function ConversationViewOptions({
       aria-label={words.menuLabel}
       data-testid="conversation-view-menu"
       className="fixed left-3 right-3 top-[3.25rem] z-[60] max-h-[calc(100dvh-4rem)] w-auto overflow-y-auto overscroll-contain rounded-xl p-1.5 sm:absolute sm:left-auto sm:right-0 sm:top-9 sm:w-[min(18rem,calc(100vw-1.5rem))]"
+      data-chat-background-surface="paper"
       style={{
         background: 'var(--shell-paper)',
         border: '1px solid var(--shell-hairline-strong)',

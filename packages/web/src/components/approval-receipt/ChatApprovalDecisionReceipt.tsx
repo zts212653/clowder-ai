@@ -47,6 +47,7 @@ function ReceiptBubble({ children }: { children: ReactNode }) {
     <div data-testid="chat-approval-receipt" className="flex justify-end mb-3">
       <div
         className="max-w-full px-3 py-2 text-[13px] text-cafe-secondary"
+        data-chat-background-surface="cafe-sunken"
         style={{ background: 'var(--cafe-surface-sunken)', borderRadius: 10 }}
       >
         {children}

@@ -219,7 +219,7 @@ function AppShellContent({ children, pathname }: AppShellProps & { pathname: str
         <SettingsSourceReturnProvider pathname={livePathname} enabled={isV2}>
           <ThreadChatRuntimeProvider routeThreadId={routeThreadId}>
             <ThreadSettingsProvider routeThreadId={routeThreadId}>
-              <div className="console-shell flex h-screen h-dvh overflow-hidden">
+              <div className="console-shell flex h-screen h-dvh overflow-hidden" data-chat-background-surface="work">
                 {isV2 && (
                   <ChatBackgroundLayer threadId={isChatRoute && routeThreadId !== 'default' ? routeThreadId : null} />
                 )}
@@ -258,6 +258,7 @@ function AppShellContent({ children, pathname }: AppShellProps & { pathname: str
                 )}
                 <div
                   data-shell-work-host
+                  data-chat-background-surface="work"
                   className="flex-1 min-w-0 overflow-y-auto"
                   style={isV2 ? { background: 'var(--shell-work)' } : undefined}
                 >

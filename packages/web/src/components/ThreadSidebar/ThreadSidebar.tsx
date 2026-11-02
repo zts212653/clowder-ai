@@ -1681,6 +1681,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
         className={`${sidebarWidthClass} flex flex-col h-full ${isV2 ? '' : 'bg-[var(--console-panel-bg)]'}`}
         style={isV2 ? { background: 'var(--shell-frame)', borderRight: '1px solid var(--shell-hairline)' } : undefined}
         data-shell-sidebar={isV2 ? 'v2' : undefined}
+        data-chat-background-surface={isV2 ? 'frame' : undefined}
       >
         {isV2 ? (
           <ThreadSidebarV2Header

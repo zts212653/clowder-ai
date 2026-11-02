@@ -29,6 +29,7 @@ export function createPersistedQueueFixture(
     >;
     ledger?: InMemoryQueueLedgerStore;
     liveCompanionSessions?: QueueProcessorDeps['liveCompanionSessions'];
+    worktreeNoticeStartGuard?: QueueProcessorDeps['worktreeNoticeStartGuard'];
     onExecution?: (options: RouteExecutionOptions) => Promise<void>;
     onAdmitted?: (
       message?: import('../../dist/domains/cats/services/stores/ports/MessageStore.js').StoredMessage,
@@ -62,6 +63,7 @@ export function createPersistedQueueFixture(
   processor = new QueueProcessor({
     queue,
     liveCompanionSessions: settings.liveCompanionSessions,
+    worktreeNoticeStartGuard: settings.worktreeNoticeStartGuard,
     invocationTracker: tracker,
     messageStore: messages,
     turnExecutionStore: turns,
@@ -93,7 +95,6 @@ export function createPersistedQueueFixture(
           : undefined;
         const invocationId = auth?.invocationId ?? randomUUID();
         if (auth) credentials.set(invocationId, auth);
-        assert.ok(messageId, 'persisted Queue fixture requires a public source');
         const messageIds = options?.persistedPromptMessageIds ?? [];
         const startedAt = Date.now();
         turns.createRunning({
@@ -105,7 +106,10 @@ export function createPersistedQueueFixture(
           startedAt,
           executionKind: 'ordinary',
           ...(options?.liveCompanion ? { queueCompletionPolicy: 'explicit_source' as const } : {}),
-          causal: { triggerMessageId: messageId, ...(messageIds.length ? { coveredMessageIds: [...messageIds] } : {}) },
+          causal: {
+            ...(messageId ? { triggerMessageId: messageId } : {}),
+            ...(messageIds.length ? { coveredMessageIds: [...messageIds] } : {}),
+          },
         });
         const lifecycle = await options?.onLifecycleInvocationStarted?.({
           threadId,

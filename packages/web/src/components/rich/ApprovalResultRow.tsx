@@ -129,6 +129,7 @@ export function ApprovalResultRow({
             id={id}
             data-testid={`${testIdPrefix}-details`}
             className="mt-3 min-w-0 space-y-3 rounded-xl border p-3"
+            data-chat-background-surface="paper"
             style={{ borderColor: 'var(--shell-hairline)', background: 'var(--shell-paper)' }}
           >
             {history.details}

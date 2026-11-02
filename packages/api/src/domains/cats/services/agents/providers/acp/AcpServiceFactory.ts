@@ -11,6 +11,8 @@ import { AccountStoreVerdictError } from '../../../../../../config/account-store
 import { resolveBoundAccountRefForCat } from '../../../../../../config/cat-account-binding.js';
 import type { AcpVariantConfig } from '../../../../../../config/cat-config-loader.js';
 import { resolveContextCapacity } from '../../../../../../config/context-capacity.js';
+import { inspectDshNativeLaunch } from '../../../../../../config/native-accounts/dsh-installation.js';
+import { inspectKimiNativeLaunch } from '../../../../../../config/native-accounts/kimi-installation.js';
 import { resolveEffectiveOpenCodeModel } from '../../../../../../config/opencode-model.js';
 import { saveSpan } from '../../../../../../utils/member-save-diagnostics.js';
 import type { AgentRegistrationFailure } from '../../registry/AgentServiceUnavailableError.js';
@@ -362,7 +364,23 @@ export async function createAcpServiceForConfig(
     { ...process.env, ...spawn.env },
   );
   const originalArgs = bootstrap.args;
+  const nativeDsh = inspectDshNativeLaunch({
+    command: bootstrap.command,
+    args: originalArgs,
+    env: spawn.env ?? {},
+    projectRoot: bootstrap.projectRoot,
+  });
   bootstrap.args = await prepareDshSecretPatch(bootstrap.command, originalArgs, bootstrap.projectRoot);
+  const nativeKimi =
+    config.clientId === 'kimi' && accountContext.account?.id && acpConfig.transport !== 'httpstream'
+      ? inspectKimiNativeLaunch({
+          command: bootstrap.command,
+          args: originalArgs,
+          env: {},
+          projectRoot: bootstrap.projectRoot,
+          accountRef: accountContext.account.id,
+        })
+      : null;
   const root = input.bootstrapRoot ?? acpConfig.bootstrapRoot;
   const verified = verifyAcpBootstrap(bootstrap, profileId, root, spawn.env, acpConfig.bootstrapRoot !== undefined);
   if (bootstrap.args !== originalArgs) {
@@ -380,6 +398,8 @@ export async function createAcpServiceForConfig(
   // AcpAgentService so capability toggles take effect without registry rebuild.
   return bindAcpServicePoolLease(
     new AcpAgentService({
+      ...(nativeDsh ? { nativeDsh } : {}),
+      ...(nativeKimi ? { nativeKimi } : {}),
       ...(spawn.antigravity ? { antigravity: spawn.antigravity, agentBusyRetryDelaysMs: [] } : {}),
       catId,
       pool,

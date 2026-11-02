@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 
 const origin = process.env.F311_DUCK_DEMO_ORIGIN ?? 'http://127.0.0.1:5187';
 const evidence = process.env.F311_DUCK_DEMO_EVIDENCE ?? '/tmp/cat-cafe-evidence/f311-duck-demo';

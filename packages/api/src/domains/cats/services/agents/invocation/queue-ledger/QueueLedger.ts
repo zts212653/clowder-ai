@@ -182,6 +182,7 @@ export interface QueueLedgerStore {
     bindTargetCatId?: string,
     steerRequestedAt?: number,
   ): Promise<QueueLedgerClaimResult>;
+  /** retiredTargetIds scopes processing OR withdrawal to this claim's recipients, preserving all siblings atomically. */
   commit(
     threadId: string,
     entryId: string,

@@ -25,7 +25,7 @@ test(
         'Caches',
         'ms-playwright',
       );
-    const { chromium } = await import('../../../ppt-forge/node_modules/playwright/index.mjs');
+    const { chromium } = await import('playwright');
     const f = await collectiveArtifactOwnerFixture(t, {
       verifyAgent: async (agent) => agent.catId === 'codex-sol' && agent.sessionRef === 'browser-agent-invocation',
     });

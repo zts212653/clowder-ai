@@ -251,7 +251,7 @@ describe('1398 canonical sender identity across Queue and reply surfaces', () =>
         index={0}
         imageCount={0}
         ownerName="lang"
-        deliveredTargetIds={[]}
+        deliveryLabels={{}}
         resolveCatName={(id) => id}
         resolveCatAvatar={() => undefined}
         onRemove={() => {}}
@@ -336,7 +336,7 @@ describe('1398 canonical sender identity across Queue and reply surfaces', () =>
         index={0}
         imageCount={0}
         ownerName="lang"
-        deliveredTargetIds={[]}
+        deliveryLabels={{}}
         resolveCatName={(id) => id}
         resolveCatAvatar={() => undefined}
         onRemove={() => {}}

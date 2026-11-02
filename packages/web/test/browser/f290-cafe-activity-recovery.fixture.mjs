@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { chromium } from 'playwright';
 import { CollectiveServiceStore, startCollectiveServer } from '../../../collective-service/dist/index.js';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import {
   defaultHumanAuthProvider,
   openNativeOwnerClient,

@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { createChatProofHarness } from './f322-chat-proof-harness.mjs';
 import { buildChatProof } from './fixtures/f322-chat-real-page-build.mjs';
 import { DRAFT } from './fixtures/f322-chat-real-page-data.mjs';

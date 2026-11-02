@@ -7,8 +7,8 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { CLIENT_REQUEST_DIAGNOSTIC_HEADER } from '@cat-cafe/shared';
+import { chromium } from 'playwright';
 import sharp from 'sharp';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 await import('tsx/esm');

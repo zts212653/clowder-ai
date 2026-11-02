@@ -323,9 +323,9 @@ for (const completed of [true, false]) {
       assert.equal(source.lifecycle.dispatchRefs[0].appendAcceptance, 'accepted');
     } else {
       assert.deepEqual(row.payload, f.admission.entry.payload);
-      assert.equal(row.delivery.appendRecoveryByTarget.opus.acceptance, 'incomplete');
-      assert.equal(source.lifecycle.dispatchRefs.length, 0);
-      assert.deepEqual(row.delivery.routingHeldTargetIds ?? [], []);
+      assert.equal(row.delivery.appendRecoveryByTarget.opus.acceptance, 'unknown');
+      assert.equal(source.lifecycle.dispatchRefs[0].inputRead.status, 'read');
+      assert.deepEqual(row.delivery.routingHeldTargetIds, ['opus']);
     }
     assert.equal(await client.ttl('msg:' + source.id), -1);
   });

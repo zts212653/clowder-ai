@@ -121,6 +121,7 @@ export function SelectionAnnotationAction({
     return renderSelectionSurface(
       <button
         ref={actionSurfaceRef}
+        data-chat-background-layer="opaque"
         type="button"
         data-testid={actionTestId}
         data-context-annotation-ui
@@ -173,6 +174,7 @@ export function SelectionAnnotationAction({
   return renderSelectionSurface(
     <section
       ref={actionSurfaceRef}
+      data-chat-background-layer="opaque"
       data-testid="context-annotation-editor"
       data-context-annotation-ui
       onKeyDown={(event) => {

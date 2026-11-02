@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, QueueEntry } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
-import { deliveredTargetIdsFromHistory } from '../QueueEntryRow';
+import { queueTargetLabelsFromHistory } from '../QueueEntryRow';
 import { QueuePanel } from '../QueuePanel';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn(async () => ({ ok: true, json: async () => ({}) })) }));
@@ -101,13 +101,86 @@ describe('pending Queue and exact History ownership', () => {
     useChatStore.setState({ messages: [source(), response(status)], queue: [] });
     render();
     expect(container.innerHTML).toBe('');
-    expect(deliveredTargetIdsFromHistory('m-q1', [source(), response(status)])).toEqual(['opus']);
+    expect(queueTargetLabelsFromHistory('m-q1', [source(), response(status)])).toEqual({ opus: '已投递' });
   });
   it('mixed-target pending work keeps its already delivered sibling visible as delivered', () => {
     useChatStore.setState({ queue: [entry('q1', ['opus', 'codex'])], messages: [source(), response()] });
     render();
     expect(container.querySelector('[data-queue-target-row="opus"]')?.textContent).toContain('已投递');
     expect(container.querySelector('[data-queue-target-row="codex"]')?.textContent).not.toContain('已投递');
+  });
+  it('a late accepted receipt supersedes a retained uncertain failure in shared-source Queue display', () => {
+    const message = source();
+    if (!message.lifecycle || message.lifecycle.kind !== 'input') throw new Error('fixture');
+    message.lifecycle = {
+      ...message.lifecycle,
+      dispatchRefs: [
+        {
+          targetId: 'opus',
+          statusMessageId: 'response',
+          phase: 'dispatched',
+          dispatchedAt: 2,
+          appendAcceptance: 'accepted',
+          inputRead: { status: 'read', at: 3 },
+        },
+      ],
+      appendFailures: [
+        {
+          targetId: 'opus',
+          invocationId: 'child',
+          responseMessageId: 'response',
+          acceptance: 'unknown',
+          reason: 'provider_rejected',
+          at: 4,
+        },
+      ],
+    };
+    useChatStore.setState({ queue: [entry('q1', ['codex'])], messages: [message, response('completed')] });
+    render();
+    expect(container.querySelector('[data-queue-target-row="opus"]')?.textContent).toContain('已投递');
+    expect(container.querySelector('[data-queue-target-row="opus"]')?.textContent).not.toContain('未确认');
+  });
+  it.each([
+    ['written', false, 'processing', '已写入，等待后续轮'],
+    ['written', true, 'processing', '本轮已读，等待完成'],
+    ['written', true, 'failed', '已读，结果未确认'],
+    ['pending', false, 'processing', '正在确认投递'],
+    ['pending', false, 'failed', '投递结果未确认'],
+  ] as const)('shows the actual Native receipt stage: %s / read=%s / %s', (acceptance, read, status, label) => {
+    const message = source();
+    if (!message.lifecycle || message.lifecycle.kind !== 'input') throw new Error('fixture');
+    message.lifecycle = {
+      ...message.lifecycle,
+      dispatchRefs: [
+        {
+          targetId: 'opus',
+          statusMessageId: 'response',
+          phase: 'dispatched',
+          dispatchedAt: 2,
+          appendAcceptance: acceptance,
+          inputRead: read ? { status: 'read', at: 3 } : { status: 'pending' },
+        },
+      ],
+      ...(status === 'failed'
+        ? {
+            appendFailures: [
+              {
+                targetId: 'opus',
+                invocationId: 'child',
+                responseMessageId: 'response',
+                acceptance: 'unknown',
+                reason: 'provider_rejected',
+                at: 4,
+              },
+            ],
+          }
+        : {}),
+    };
+    useChatStore.setState({ queue: [entry()], messages: [message, response(status)] });
+    render();
+    expect(container.querySelector('[data-queue-target-row="opus"]')?.textContent).toContain(label);
+    expect(container.querySelector('[data-queue-target-row="opus"]')?.textContent).not.toContain('已投递');
+    expect(container.querySelector('[data-testid="steer-q1"]')).not.toBeNull();
   });
   it.each([
     'foreign-target',
@@ -121,8 +194,8 @@ describe('pending Queue and exact History ownership', () => {
       ...(kind === 'foreign-target' ? { targetId: 'codex' } : {}),
       ...(kind === 'foreign-source' ? { inputMessageIds: ['other'] } : {}),
     };
-    expect(deliveredTargetIdsFromHistory('m-q1', [source(), r, ...(kind === 'duplicate-response' ? [r] : [])])).toEqual(
-      [],
+    expect(queueTargetLabelsFromHistory('m-q1', [source(), r, ...(kind === 'duplicate-response' ? [r] : [])])).toEqual(
+      {},
     );
   });
   it('does not borrow the current thread Queue for an unknown thread', () => {

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { captureChatPathDesign } from './chat-path-design.journey.mjs';
 import { verifyPathLifecycle } from './chat-path-lifecycle.journey.mjs';
 import { createChatPathFixture } from './chat-path-links.fixture.mjs';

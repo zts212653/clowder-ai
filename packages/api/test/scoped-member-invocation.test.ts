@@ -10,6 +10,8 @@ import {
   type InvocationParams,
   invokeSingleCat,
 } from '../src/domains/cats/services/agents/invocation/invoke-single-cat.js';
+import { ContextEpochOwner } from '../src/domains/cats/services/session/context/ContextEpochOwner.js';
+import { InMemoryContextEpochStore } from '../src/domains/cats/services/stores/ports/ContextEpochStore.js';
 import type { AgentServiceOptions } from '../src/domains/cats/services/types.js';
 
 async function fixture(t: TestContext) {
@@ -19,6 +21,7 @@ async function fixture(t: TestContext) {
   const config = catRegistry.tryGet(catId)?.config;
   assert.ok(config);
   const captured: { prompt: string; options?: AgentServiceOptions }[] = [];
+  const epochStore = new InMemoryContextEpochStore();
   let pendingDecisionReads = 0;
   let currentChecks = 0,
     revoked = false,
@@ -53,6 +56,7 @@ async function fixture(t: TestContext) {
     },
     threadStore: { get: async () => thread },
     apiUrl: 'http://127.0.0.1:3102',
+    contextEpochOwner: new ContextEpochOwner(epochStore),
     routingContextPromptProjection: { resolve: async () => 'PRIVATE_HOME_ROUTING_HINT' },
     runtimeInteractionPort: {
       pendingConversationDecisionPrompt: async () => {
@@ -104,6 +108,7 @@ async function fixture(t: TestContext) {
     native,
     run,
     captured,
+    epochStore,
     checks: () => currentChecks,
     pendingDecisionReads: () => pendingDecisionReads,
     revoke: () => {
@@ -125,6 +130,31 @@ test('a scoped member reaches the existing invocation kernel with only its appro
   assert.equal(f.captured[0]?.prompt, 'APPROVED_MEMORY_AND_LOCAL_EVENT');
   assert.equal(f.captured[0]?.options?.pluginNativeLaunch?.sandbox.kind, 'scoped-member');
   assert.ok(f.checks() >= 2, 'currentness is checked before admission and immediately before provider execution');
+});
+
+test('a scoped Codex continuity handshake retains the canonical epoch owner before provider admission', async (t) => {
+  const f = await fixture(t);
+  const events = await f.run({
+    ...f.params,
+    service: {
+      ...f.params.service,
+      contextCapability: () => ({
+        provider: 'openai',
+        carrier: 'exec_json',
+        reportsRuntimeWindow: true,
+        authoritativeUsage: true,
+        usageTelemetry: 'available',
+        nativeWindowControl: true,
+        nativeCompressionControl: true,
+        observesCompression: false,
+        reason: 'same native continuity contract as the real scoped Codex carrier',
+      }),
+    },
+  });
+  assert.equal(f.captured.length, 1, JSON.stringify(events.filter((event) => event.type === 'error')));
+  assert.equal(f.epochStore.get('owner::codex::game-thread')?.contextEpoch, 1);
+  assert.equal(f.captured[0]?.prompt, 'APPROVED_MEMORY_AND_LOCAL_EVENT');
+  assert.equal(f.pendingDecisionReads(), 0);
 });
 
 test('even an authenticated owner turn does not read unrelated pending engineering decisions', async (t) => {

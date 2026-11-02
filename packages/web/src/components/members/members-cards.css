@@ -33,6 +33,7 @@
     border: 1px solid var(--shell-hairline);
     border-radius: 12px;
     background: var(--shell-paper);
+    --chat-background-role: paper;
   }
   .member-table td {
     display: flex;

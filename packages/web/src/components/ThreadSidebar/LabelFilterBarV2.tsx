@@ -51,6 +51,7 @@ export function LabelFilterBarV2({
     <div
       ref={rootRef}
       className="flex min-w-0 items-center rounded-lg"
+      data-chat-background-surface={selectedFilter ? 'selected' : undefined}
       style={{ background: selectedFilter ? 'var(--shell-selected)' : undefined }}
     >
       <AppTooltip

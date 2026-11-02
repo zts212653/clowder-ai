@@ -60,11 +60,12 @@ import { migrateStartupCodexMcpConfig, regenerateStartupCliConfigs } from './con
 import { resolveBoundAccountRefForCat, usesNativeToolConfiguration } from './config/cat-account-binding.js';
 import {
   bootstrapDefaultCatCatalog,
-  getAcpConfig,
   getCoCreatorConfig,
   getConfigSessionStrategy,
   getDefaultCatId,
+  getRegisteredAcpConfig,
   isCatAvailable,
+  resolveRuntimeCatTemplatePath,
   toAllCatConfigs,
 } from './config/cat-config-loader.js';
 import { getCatModel } from './config/cat-models.js';
@@ -1791,6 +1792,7 @@ async function main(): Promise<void> {
   });
   const schedulerDeliver = createDeliverFn({ messageStore, socketManager, persistedQueueDelivery });
   const { WorktreeNoticeService } = await import('./infrastructure/worktrees/WorktreeNoticeService.js');
+  const { WorktreeNoticeStartGuard } = await import('./infrastructure/worktrees/WorktreeNoticeStartGuard.js');
   const worktreeNotices = new WorktreeNoticeService({
     repoRoot,
     scriptRoot: runtimeEntrypointRoot,
@@ -1833,10 +1835,11 @@ async function main(): Promise<void> {
   // F255 startup reconciliation resolves every persisted cat-life projection immediately,
   // so registry population must precede auto-dream bootstrap as well as AgentRouter construction.
   try {
-    const catConfig = bootstrapDefaultCatCatalog();
+    const templatePath = resolveRuntimeCatTemplatePath();
+    const catConfig = bootstrapDefaultCatCatalog(templatePath);
     const allConfigs = toAllCatConfigs(catConfig);
     for (const [id, config] of Object.entries(allConfigs)) {
-      catRegistry.register(id, config);
+      catRegistry.register(id, config, { configurationTemplatePath: templatePath });
     }
     app.log.info(`[api] CatRegistry initialized: ${catRegistry.getAllIds().join(', ')}`);
   } catch (err) {
@@ -2090,7 +2093,7 @@ async function main(): Promise<void> {
               resolveMemberSessionRef(
                 config.agentProvider,
                 sessionContractSettings.bindings.get(id),
-                config.carrier === 'acp' ? getAcpConfig(id, projectRoot)?.agentProvider : undefined,
+                config.carrier === 'acp' ? getRegisteredAcpConfig(id, projectRoot)?.agentProvider : undefined,
               ),
               async (sessionRef) => {
                 activeAcpProfileIds.add(id);
@@ -2125,7 +2128,7 @@ async function main(): Promise<void> {
                 // ── F161: Generic ACP transport path (provider-agnostic) ──
                 // Carrier selection is resolved once by cat-config-loader. The ACP block
                 // below contains only launch details; its mere presence is not routing truth.
-                const acpConfig = config.carrier === 'acp' ? getAcpConfig(id, projectRoot) : undefined;
+                const acpConfig = config.carrier === 'acp' ? getRegisteredAcpConfig(id, projectRoot) : undefined;
                 if (config.carrier === 'acp') {
                   if (!acpConfig) {
                     app.log.warn(
@@ -2759,6 +2762,10 @@ async function main(): Promise<void> {
     },
   });
   const { createRootMemberSessions } = await import('./domains/plugin/member-sessions/root.js');
+  const readMessageTargets = async (threadId: string, messageId: string): Promise<readonly string[]> => {
+    const rows = await invocationQueue.getDurableEntriesForMessages(threadId, [messageId]);
+    return [...new Set((rows.get(messageId) ?? []).flatMap((row) => row.targets))];
+  };
   const rootMemberSessions = redis
     ? createRootMemberSessions({
         redis,
@@ -2767,6 +2774,7 @@ async function main(): Promise<void> {
         agents: agentRegistry,
         threads: threadStore,
         messages: messageStore,
+        readMessageTargets,
         turns: turnExecutionStore,
         profiles: profileRepository,
         pluginRuntime: () => pluginRuntime,
@@ -2885,6 +2893,12 @@ async function main(): Promise<void> {
       liveCompanionSessions,
       invocationTracker,
       deploymentWaitStartGuard,
+      worktreeNoticeStartGuard: new WorktreeNoticeStartGuard({
+        repoRoot,
+        scriptRoot: runtimeEntrypointRoot,
+        messageStore,
+        getThread: async (id) => threadStore.get(id),
+      }),
       invocationRecordStore: invocationRecordStore as unknown as InvocationRecordStoreLike,
       router: router as unknown as RouterLike,
       socketManager,
@@ -5308,10 +5322,7 @@ async function main(): Promise<void> {
     },
     messageStore,
     lifecyclePresentation: (threadId, catId) => deliveryPresentation(threadId, { kind: 'cat', id: catId }),
-    readMessageTargets: async (threadId, messageId) => {
-      const rows = await invocationQueue.getDurableEntriesForMessages(threadId, [messageId]);
-      return [...new Set((rows.get(messageId) ?? []).flatMap((row) => row.targets))];
-    },
+    readMessageTargets,
     // P1.3: a v2 subscription's started names the message the invocation answers (origin, else A2A).
     lifecycleTriggerMessageId: async (invocationId) => {
       const record = await registry.getRecord(invocationId);
@@ -5527,6 +5538,7 @@ async function main(): Promise<void> {
       asset: pluginManagerRuntime.assets,
       documentation: pluginManagerRuntime.assets,
       callbackRegistry: registry,
+      threadStore,
     });
   });
   await app.register(pluginManagerUploadRoutes, { manager: pluginManagerRuntime.manager });
