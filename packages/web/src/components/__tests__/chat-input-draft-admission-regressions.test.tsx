@@ -193,6 +193,45 @@ it('keeps local File attachments when a save is rejected', async () => {
   expect(container.querySelector('[data-files]')?.textContent).toBe('1');
 });
 
+it('restores newly discovered conflict images before confirming the merged draft', async () => {
+  await render();
+  const imageUrl = '/api/media/conflict.png';
+  const fetchDraft = vi.mocked(apiFetch).getMockImplementation();
+  if (!fetchDraft) throw new Error('Missing draft fixture');
+  vi.mocked(apiFetch).mockImplementation(async (url, init) =>
+    String(url) === imageUrl
+      ? ({ ...response({}), blob: async () => new Blob(['remote image'], { type: 'image/png' }) } as Response)
+      : fetchDraft(url, init),
+  );
+  const save = write;
+  let conflict = true;
+  write = (body, method) => {
+    if (conflict) {
+      conflict = false;
+      const remote = { text: 'remote draft', contentBlocks: [{ type: 'image', url: imageUrl }] };
+      owner = remote;
+      revision += 1;
+      return response({ code: 'DRAFT_REVISION_MISMATCH' }, 409);
+    }
+    return save(body, method);
+  };
+  act(() => typeText('local draft'));
+  act(() => beginAndClear());
+  expect(await admissionResult()).toBeInstanceOf(Error);
+  act(() => finish(false));
+  await settle();
+  expect(container.querySelector('[data-files]')?.textContent).toBe('1');
+  act(() => beginAndClear());
+  const retry = await admissionResult();
+  expect((retry as Error).name).toBe('ComposerDraftConfirmationRequiredError');
+  act(() => finish(false));
+  expect(container.querySelector('textarea')?.value).toBe('remote draft\n\nlocal draft');
+  expect(container.querySelector('[data-files]')?.textContent).toBe('1');
+  act(() => beginAndClear());
+  expect(await admissionResult()).toEqual({ threadId: THREAD, expectedRevision: 7 });
+  act(() => finish(true));
+});
+
 it('does not mistake completion of its own in-flight autosave for foreign recovery', async () => {
   await render();
   write = (body, method) => {
@@ -476,7 +515,10 @@ it('preserves context and reply selected while the merged recovery snapshot is b
   expect.soft(useChatStore.getState().replyToMessage?.id).toBe('new-reply');
 });
 
-it('restores the confirmed attempted edit when its confirming retry meets another 409', async () => {
+it.each([
+  'confirming send',
+  'autosave',
+])('requires fresh confirmation when %s meets another 409', async (conflictSource) => {
   await render();
   act(() => typeText('local attempted message'));
   let count = 0;
@@ -500,10 +542,30 @@ it('restores the confirmed attempted edit when its confirming retry meets anothe
   act(() => finish(false));
   expect(container.querySelector('textarea')?.value).toContain('first unseen remote draft');
   act(() => typeText('edited confirmed draft to send'));
+  if (conflictSource === 'autosave') {
+    await act(async () => vi.advanceTimersByTimeAsync(450));
+  } else {
+    act(() => beginAndClear());
+    expect(await admissionResult()).toBeInstanceOf(Error);
+    act(() => finish(false));
+  }
+  expect(container.querySelector('textarea')?.value).toBe('edited confirmed draft to send');
+  expect(owner?.text).toBe('newer unseen remote draft');
+  await act(async () => vi.advanceTimersByTimeAsync(450));
+  expect(writes).toHaveLength(3);
+
   act(() => beginAndClear());
-  expect(await admissionResult()).toBeInstanceOf(Error);
+  const retry = await admissionResult();
+  expect(retry).toBeInstanceOf(Error);
+  expect((retry as Error).name).toBe('ComposerDraftConfirmationRequiredError');
+  expect(owner?.text).toBe('newer unseen remote draft\n\nedited confirmed draft to send');
+  expect(writes.at(-1)?.expectedRevision).toBe(8);
   act(() => finish(false));
-  expect(container.querySelector('textarea')?.value).toContain('edited confirmed draft to send');
+  expect(container.querySelector('textarea')?.value).toBe(owner?.text);
+
+  act(() => beginAndClear());
+  expect(await admissionResult()).toEqual({ threadId: THREAD, expectedRevision: 9 });
+  act(() => finish(true));
 });
 
 it.each([

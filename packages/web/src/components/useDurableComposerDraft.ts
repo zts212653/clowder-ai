@@ -78,7 +78,6 @@ export function useDurableComposerDraft({
     revision: number;
     source: 'hydration' | 'conflict';
   } | null>(null);
-  const recoveredDraftAwaitingConfirmationRef = useRef(false);
   const clearFallbackRef = useRef<(ComposerAdmissionSnapshot & { imageUrls: string[] }) | null>(null);
   const pendingSelectionRef = useRef<PendingComposerSelection | null>(null);
   const [admissionEpoch, setAdmissionEpoch] = useState(0);
@@ -139,7 +138,6 @@ export function useDurableComposerDraft({
     revisionRef.current = 0; // Reset revision for new owner
     lastSavedSignatureRef.current = ''; // Reset signature for new owner
     resetImageRecovery();
-    recoveredDraftAwaitingConfirmationRef.current = false;
     const hydration = waitForComposerDraftSaves(threadId)
       .then(() => loadOwnerComposerDraft(threadId))
       .then(async ({ draft, revision }) => {
@@ -236,6 +234,7 @@ export function useDurableComposerDraft({
         draft.draft?.replyTo,
       );
       lastSavedSignatureRef.current = conflictSignature;
+      void restoreDraftImages(currentImages, threadId ?? '', false);
       if (!shouldClear) {
         // Mark as pending recovery - not yet displayed
         if (canonicalDraftRef.current) {
@@ -249,7 +248,6 @@ export function useDurableComposerDraft({
       }
       setInput((localText) => mergeHydratedDraft(draft.draft?.text ?? '', localText));
       setContextAttachments((local) => mergeContextAttachments(currentContextAttachments, local));
-      void restoreDraftImages(currentImages, threadId ?? '', false);
       if (draft.draft?.replyTo && !useChatStore.getState().replyToMessage) {
         const store = useChatStore.getState();
         const parent = store.messages.find((message) => message.id === draft.draft?.replyTo);
@@ -416,7 +414,6 @@ export function useDurableComposerDraft({
       canonicalDraftRef,
       pendingRecoveryRef,
       admissionImagesReady,
-      recoveredDraftAwaitingConfirmationRef,
       revisionRef,
       captureCurrentDraft,
       persistDraftSnapshot,
@@ -428,6 +425,7 @@ export function useDurableComposerDraft({
   const beginAdmission = useCallback(
     (snapshot: ComposerAdmissionSnapshot) => {
       const ownerId = ownerIdRef.current; // P1-2 R8: Use stable owner ID, not hydration generation
+      const hydrationGeneration = hydrationGenerationRef.current;
       const durableSnapshot = { ...snapshot, imageUrls: [...imageUrlsRef.current] };
       const admittedDraft = durableDraftForAdmission(
         durableSnapshot,
@@ -443,11 +441,9 @@ export function useDurableComposerDraft({
       const pendingAdmission: PendingComposerAdmissionDraft = {
         snapshot: admittedDraft,
         files: [...durableSnapshot.images],
-        confirmsRecoveredDraft: recoveredDraftAwaitingConfirmationRef.current,
         generation: ownerId, // P1-2 R8: Store ownerId, not hydration generation
         threadId: threadId ?? null,
       };
-      recoveredDraftAwaitingConfirmationRef.current = false;
       pendingAdmissionDraftRef.current = pendingAdmission;
       admissionsPendingRef.current += 1;
       return (accepted: boolean | undefined) => {
@@ -465,7 +461,7 @@ export function useDurableComposerDraft({
             const merged = pendingAdmission.reconciliationResult.merged;
             setInput((curr) => mergeHydratedDraft(curr, merged.text));
             setContextAttachments((curr) => mergeContextAttachments(curr, merged.contextAttachments));
-            void restoreDraftImages(merged.imageUrls, threadId ?? '', false);
+            restoreFallbackImages(durableSnapshot.images, merged.imageUrls);
             // Preserve current reply if user set one during save, otherwise use merged
             if (!useChatStore.getState().replyToMessage && merged.replyTo) {
               const store = useChatStore.getState();
@@ -488,21 +484,12 @@ export function useDurableComposerDraft({
           }
         } else {
           clearFallbackRef.current = durableSnapshot;
-          persistSettledDraft(hydrationGenerationRef.current); // P1-2 R8: Use current hydration generation
+          persistSettledDraft(hydrationGeneration);
         }
         setAdmissionEpoch((current) => current + 1);
       };
     },
-    [
-      imageUrlsRef,
-      persistSettledDraft,
-      restoreDraftImages,
-      restoreFallbackImages,
-      setContextAttachments,
-      setInput,
-      setReplyTo,
-      threadId,
-    ],
+    [imageUrlsRef, persistSettledDraft, restoreFallbackImages, setContextAttachments, setInput, setReplyTo, threadId],
   );
 
   const markOptimisticallyCleared = useCallback(() => {

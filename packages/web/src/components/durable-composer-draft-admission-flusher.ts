@@ -9,7 +9,6 @@ interface ValueRef<T> {
 export interface PendingComposerAdmissionDraft {
   snapshot: DurableDraftSnapshot;
   files: File[];
-  confirmsRecoveredDraft: boolean;
   reconciliationResult?: { merged: DurableDraftSnapshot; recoveryRevision: number } | null;
   generation: number;
   threadId: string | null;
@@ -27,7 +26,6 @@ interface RegisterAdmissionFlusherOptions {
     source: 'hydration' | 'conflict';
   } | null>;
   admissionImagesReady: (pendingFiles: readonly File[], requiredUrls: readonly string[]) => boolean;
-  recoveredDraftAwaitingConfirmationRef: ValueRef<boolean>;
   revisionRef: ValueRef<number>;
   captureCurrentDraft: () => DurableDraftSnapshot;
   persistDraftSnapshot: (
@@ -83,24 +81,24 @@ async function flushAdmission(state: RegisterAdmissionFlusherOptions) {
   const pending = state.pendingAdmissionDraftRef.current;
   if (!pending) return flushResult(state, null, false);
 
-  // Use attempted snapshot's images only, not canonical's stale images
-  const requiredImageUrls = [...new Set(pending.snapshot.imageUrls)];
+  const pendingRecovery = state.pendingRecoveryRef.current;
+  // Include newly recovered images while respecting images the user already removed.
+  const requiredImageUrls = [
+    ...new Set([...pending.snapshot.imageUrls, ...(pendingRecovery?.snapshot.imageUrls ?? [])]),
+  ];
   if (!state.admissionImagesReady(pending.files, requiredImageUrls)) {
     return flushResult(state, pending.snapshot, false, false, true);
   }
 
-  // P1-1: Check pendingRecoveryRef for unseen recovery, not signature comparison
-  const pendingRecovery = state.pendingRecoveryRef.current;
-  const shouldReconcile = !pending.confirmsRecoveredDraft && pendingRecovery !== null;
+  // A new recovery must be reconciled even after the user confirmed an earlier one.
 
-  const reconciliation = shouldReconcile
+  const reconciliation = pendingRecovery
     ? reconcileComposerAdmission(pending.snapshot, pendingRecovery.snapshot)
     : { snapshot: pending.snapshot, requiresConfirmation: false };
 
   const persisted = await persist(state, reconciliation.snapshot, true);
 
   if (reconciliation.requiresConfirmation && persisted) {
-    state.recoveredDraftAwaitingConfirmationRef.current = true;
     // P1-4: Save reconciliation result to pending admission for cleanup
     if (state.pendingAdmissionDraftRef.current === pending && pendingRecovery) {
       pending.reconciliationResult = {
@@ -110,8 +108,6 @@ async function flushAdmission(state: RegisterAdmissionFlusherOptions) {
     }
     // Consume pending recovery after reconciliation
     state.pendingRecoveryRef.current = null;
-  } else if (pending.confirmsRecoveredDraft && !persisted) {
-    state.recoveredDraftAwaitingConfirmationRef.current = true;
   }
 
   return flushResult(state, reconciliation.snapshot, persisted, reconciliation.requiresConfirmation);
