@@ -31,6 +31,7 @@ import { buildUnixSupervisedSpawnPlan } from '../../../../../../utils/cli-superv
 import {
   type AcpCapacitySignal,
   type AcpClientConfig,
+  type AcpPermissionHandler,
   AcpProtocolError,
   AcpSessionCancelledError,
   AcpStreamIdleError,
@@ -38,10 +39,10 @@ import {
   buildAcpSpawnLogFields,
 } from './AcpClient.js';
 import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
-import { resolveAcpPermissionDecision } from './acp-permission-policy.js';
 import { type AcpPromptInput, toAcpPromptContent } from './acp-prompt-content.js';
 import { AcpSessionBindingError, ActiveSessionCache } from './active-session-cache.js';
 import { shutdownAcpChild } from './lifecycle/acp-child-shutdown.js';
+import { respondToAcpPermission } from './permissions/acp-permission-response.js';
 import type {
   AcpAgentRequest,
   AcpInitializeResult,
@@ -84,6 +85,7 @@ interface AgentResponseOptions {
 
 export class AcpHttpStreamClient {
   private readonly liveSessions = new ActiveSessionCache();
+  private readonly sessionPermissionHandlers = new Map<string, AcpPermissionHandler>();
   private child: ChildProcess | null = null;
   private closed = false;
   private closing?: Promise<void>;
@@ -105,10 +107,16 @@ export class AcpHttpStreamClient {
     this.cwdIdentityTracker = new AcpCwdIdentityTracker(this.config.cwd);
   }
 
+  setSessionPermissionHandler(sessionId: string, handler?: AcpPermissionHandler): void {
+    if (handler) this.sessionPermissionHandlers.set(sessionId, handler);
+    else this.sessionPermissionHandlers.delete(sessionId);
+  }
+
   // ── Lifecycle ────────────────────────────────────────────────
 
   async initialize(): Promise<AcpInitializeResult> {
     this.liveSessions.clear();
+    this.sessionPermissionHandlers.clear();
     // Phase 1: spawn the process
     const doSpawn = this.config.spawnFn ?? nodeSpawn;
     const selectedSpawn = this.config.preparedSpawn ?? {
@@ -639,6 +647,7 @@ export class AcpHttpStreamClient {
 
   private async closeOwnedProcess(): Promise<void> {
     this.liveSessions.clear();
+    this.sessionPermissionHandlers.clear();
     this.closed = true;
     if (this.child?.pid !== undefined && !this.exited) await shutdownAcpChild(this.child, KILL_GRACE_MS, false);
   }
@@ -789,38 +798,14 @@ export class AcpHttpStreamClient {
     };
 
     if (req.method === ACP_METHODS.requestPermission) {
-      const respond = (result: { optionId: string } | { cancelled: true }) => {
-        const acpResult = {
-          outcome:
-            'cancelled' in result
-              ? { outcome: 'cancelled' as const }
-              : { outcome: 'selected' as const, optionId: result.optionId },
-        };
-        return this.sendAgentResponse({ jsonrpc: '2.0', id: req.id, result: acpResult }, responseOptions);
-      };
-
-      if (this.config.permissionHandler) {
-        let responsePromise: Promise<void> | null = null;
-        try {
-          await this.config.permissionHandler(req, (result) => {
-            responsePromise = respond(result);
-          });
-        } catch (err) {
-          log.error('HTTP permissionHandler threw: %s', (err as Error).message);
-          await this.sendAgentResponse(
-            {
-              jsonrpc: '2.0',
-              id: req.id,
-              error: { code: -32603, message: `Permission handler error: ${(err as Error).message}` },
-            },
-            responseOptions,
-          );
-          return;
-        }
-        if (responsePromise) await responsePromise;
-      } else {
-        await respond(resolveAcpPermissionDecision(req.params, this.config.defaultPermissionDecision));
-      }
+      const sessionId = typeof req.params.sessionId === 'string' ? req.params.sessionId : '';
+      await respondToAcpPermission({
+        request: req,
+        handler: this.sessionPermissionHandlers.get(sessionId) ?? this.config.permissionHandler,
+        defaultDecision: this.config.defaultPermissionDecision,
+        signal: options.signal,
+        write: (response) => this.sendAgentResponse(response, responseOptions),
+      });
       return;
     }
 

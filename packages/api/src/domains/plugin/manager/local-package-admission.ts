@@ -20,6 +20,7 @@ import {
   type PluginPackageRecord,
 } from '../host-inventory/types.js';
 import { MAX_PLUGIN_PACKAGE_BYTES, publishPluginPackageArchive } from '../official-package-archive.js';
+import { readPackageCapabilityRejection } from '../read-package-capabilities.js';
 import { confirmArchiveReplacement } from './local-archive-replacement.js';
 import { prepareLocalDirectoryDistribution } from './local-directory-distribution.js';
 import type { LocalDirectoryOperation } from './local-directory-operation.js';
@@ -422,15 +423,8 @@ export class LocalPluginPackageAdmission {
       throw failure;
     }
     try {
-      if (
-        located.manifest.runtime !== undefined &&
-        !['stdio', 'builtin'].includes(located.manifest.runtime.transport)
-      ) {
-        throw new LocalPluginPackageAdmissionError(
-          'UNSUPPORTED_TRANSPORT',
-          'local plugin package does not declare a Host-supported runtime',
-        );
-      }
+      const rejection = await readPackageCapabilityRejection(located.manifest, located.rootDir);
+      if (rejection) throw new LocalPluginPackageAdmissionError('UNSUPPORTED_TRANSPORT', rejection);
       const signalSchemas = await readSignalSchemas(located.rootDir, located.manifest);
       const packageMetadata = await readPackageMetadata(located.rootDir);
       if (

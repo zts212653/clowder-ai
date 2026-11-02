@@ -181,17 +181,11 @@ for (const raw of [
   '{',
   ' '.repeat(65537),
 ])
-  test(`activation rejects invalid/oversized declaration ${typeof raw === 'string' ? raw.length : JSON.stringify(raw)}`, async (t) => {
-    const h = await lifecycle(t, raw);
-    await assert.rejects(
-      h.runtime.activate(h.admission, () => {}),
-      /invalid_declaration|transport_not_allowed|JSON|64 KiB/,
-    );
-    assert.equal(h.registry.has(ref), false);
-    assert.equal(h.logs.length, 1);
-    assertLifecycleLog(h.logs[0], 'rejected', 40, typeof raw === 'string' ? 'unknown' : 'agent');
-    assert.match(h.logs[0].reason, /invalid_declaration|transport_not_allowed|JSON|64 KiB/);
+  test(`admission rejects invalid/oversized declaration ${typeof raw === 'string' ? raw.length : JSON.stringify(raw)}`, async (t) => {
+    // All archive sources now validate declared capabilities before creating an instance.
+    await assert.rejects(lifecycle(t, raw), (error) => error.code === 'UNSUPPORTED_TRANSPORT');
   });
+
 for (const mode of [undefined, 'plugin'])
   test(`enabled mode ${mode ?? 'default'} accepts a package without agent-provider.json`, async (t) => {
     const h = await lifecycle(t, null, mode);

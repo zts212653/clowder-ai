@@ -80,6 +80,8 @@ export interface CatConfig {
   /** Canonical, config-resolved member access mode. */
   readonly carrier: CatCarrier;
   readonly defaultModel: string;
+  /** Host-owned ACP confirmation mode. Omitted retains automatic approval. */
+  readonly executionApproval?: 'auto' | 'ask_user';
   readonly mcpSupport: boolean;
   readonly cli?: CliConfig;
   readonly agyProfile?: AgyProfileConfig;

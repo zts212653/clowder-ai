@@ -35,12 +35,7 @@ export async function resolveAgentClientLibrary(input: {
     if (!result.ok) throw new Error(`ACP 客户端配置无效，请在插件配置中修复：${result.reason}`);
     if (typeof stored !== 'string' && result.declaration.acp.permissionPolicy === 'auto_allow')
       throw new Error('ACP 权限自动允许需要 owner 显式保存选择，不能来自插件默认配置');
-    return [
-      {
-        ...result.declaration,
-        acp: { ...result.declaration.acp, permissionPolicy: result.declaration.acp.permissionPolicy ?? 'deny' },
-      },
-    ];
+    return [result.declaration];
   }
   const result = parseAgentClientProfiles(stored ?? field.default ?? '[]', { packageRoot: input.packageRoot });
   if (!result.ok) throw new Error(`ACP 客户端配置无效，请在插件配置中修复：${result.reason}`);

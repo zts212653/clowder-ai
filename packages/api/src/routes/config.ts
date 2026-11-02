@@ -117,6 +117,7 @@ const timeZonePatchSchema = z
 
 const coCreatorPatchSchema = z.object({
   name: z.string().trim().min(1),
+  nickname: z.string().trim().min(1).max(64).nullable().optional(),
   aliases: z.array(z.string().trim().min(1)).optional(),
   mentionPatterns: z.array(coCreatorMentionInputSchema).min(1),
   timeZone: timeZonePatchSchema.optional(),
@@ -304,6 +305,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
     try {
       updateRuntimeCoCreator(projectRoot, {
         name: parsed.data.name,
+        ...(parsed.data.nickname !== undefined ? { nickname: parsed.data.nickname } : {}),
         aliases: parsed.data.aliases,
         mentionPatterns: parsed.data.mentionPatterns,
         ...(parsed.data.timeZone !== undefined ? { timeZone: parsed.data.timeZone } : {}),
@@ -323,6 +325,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
           target: 'coCreator',
           operator,
           name: next.coCreator.name,
+          ...(parsed.data.nickname !== undefined ? { nickname: parsed.data.nickname } : {}),
           mentionPatterns: next.coCreator.mentionPatterns,
           timeZone: next.coCreator.timeZone,
         },

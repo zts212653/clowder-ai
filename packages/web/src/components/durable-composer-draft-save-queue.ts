@@ -1,8 +1,6 @@
-type ComposerDraftSave = () => Promise<boolean>;
+const saveTails = new Map<string, Promise<unknown>>();
 
-const saveTails = new Map<string, Promise<boolean>>();
-
-export function enqueueComposerDraftSave(threadId: string, save: ComposerDraftSave): Promise<boolean> {
+export function enqueueComposerDraftSave<T>(threadId: string, save: () => Promise<T>): Promise<T> {
   const previous = saveTails.get(threadId) ?? Promise.resolve(true);
   const next = previous.catch(() => false).then(save);
   saveTails.set(threadId, next);

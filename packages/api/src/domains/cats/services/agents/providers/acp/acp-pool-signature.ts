@@ -33,7 +33,7 @@ export function createAcpPoolSpawnSignature(input: AcpPoolSpawnSignatureInput): 
     transport: input.transport ?? 'stdio',
     supportsMultiplexing: input.supportsMultiplexing === true,
     protocolAdapter: input.protocolAdapter ?? null,
-    permissionPolicy: input.permissionPolicy ?? null,
+    ...(input.permissionPolicy ? { permissionPolicy: input.permissionPolicy } : {}),
     ...(input.sessionPolicy ? { sessionPolicy: input.sessionPolicy } : {}),
   });
 }

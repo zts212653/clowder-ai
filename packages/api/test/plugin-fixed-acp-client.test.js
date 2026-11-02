@@ -30,7 +30,7 @@ test('a fixed ACP client registers from an empty default and shares one stable d
   assert.equal(profiles[0].id, 'codeagent');
   assert.equal(profiles[0].acp.command, 'codeagent');
   const withoutPolicy = { ...declared, acp: { command: 'codeagent', startupArgs: ['--acp'] } };
-  assert.equal((await resolveAgentClientLibrary(input(withoutPolicy)))[0].acp.permissionPolicy, 'deny');
+  assert.equal((await resolveAgentClientLibrary(input(withoutPolicy)))[0].acp.permissionPolicy, undefined);
 });
 
 test('fixed connection overrides preserve argv boundaries without changing identity or allowing package code', async () => {

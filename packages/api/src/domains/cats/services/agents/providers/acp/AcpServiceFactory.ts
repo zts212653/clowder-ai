@@ -491,6 +491,9 @@ export async function createAcpServiceForConfig(
     // The factory rejects iCode members without it, so this is always defined.
     sessionModel: acpConfig.protocolAdapter === 'icode' ? icodeModelProfileId : spawn.sessionModel,
     protocolAdapter: acpConfig.protocolAdapter,
+    executionApproval: config.executionApproval ?? 'auto',
+    defaultPermissionDecision:
+      acpConfig.protocolAdapter === 'icode' || acpConfig.permissionPolicy === 'deny' ? 'reject' : 'allow',
     contextBinding: {
       model: effectiveModel,
       ...((config.clientId === 'opencode' || config.clientId === 'kimi') && spawn.contextPolicy?.windowTokens
