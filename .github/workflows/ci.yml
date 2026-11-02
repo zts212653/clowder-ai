@@ -96,6 +96,7 @@ jobs:
           --test --test-concurrency=2
           test/plugin-member-runtime.test.ts
           test/scoped-member-invocation.test.ts
+          test/native-member-frozen-l0.test.js
           test/claude-scoped-native.test.ts
           test/claude-sdk-scoped-native.test.ts
           test/kimi-scoped-native.test.ts
