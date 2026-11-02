@@ -432,7 +432,11 @@ function isExactReplayableQueueRecord(
 }
 
 export interface RouterLike {
-  resolveExplicitTargets(requestedCatIds: readonly string[], threadId: string): Promise<string[]>;
+  resolveExplicitTargets(
+    requestedCatIds: readonly string[],
+    threadId: string,
+    options?: { bound?: boolean },
+  ): Promise<string[]>;
   resolveConversationTargetsAtAdmission(
     requestedCatIds: readonly string[],
     threadId: string,
@@ -4174,7 +4178,7 @@ export class QueueProcessor {
         ? { kind: 'settled', attempt: QueueProcessor.terminalizedEntryAttempt(terminalized) }
         : { kind: 'unresolved' };
     }
-    const targets = await this.deps.router.resolveExplicitTargets(requestedTargets, threadId);
+    const targets = await this.deps.router.resolveExplicitTargets(requestedTargets, threadId, { bound: true });
     if (targets.length > 0) return { kind: 'resolved', targets };
     if (entry.delivery.routingHeldTargetIds?.length) return { kind: 'unresolved' };
     const terminalized =
@@ -4357,7 +4361,9 @@ export class QueueProcessor {
         resolvedTargets: [...resolvedTargetCats],
       };
     } else {
-      resolvedTargetCats = await this.deps.router.resolveExplicitTargets(queueEntryTargetCats(nextEntry), threadId);
+      resolvedTargetCats = await this.deps.router.resolveExplicitTargets(queueEntryTargetCats(nextEntry), threadId, {
+        bound: true,
+      });
       if (resolvedTargetCats.length === 0) {
         const terminalized =
           nextEntry.kind === 'private_input'
@@ -4545,8 +4551,13 @@ export class QueueProcessor {
       throw new Error(`private pre-admission terminalization lost claimed Queue entry: ${claimed.id}`);
     }
     const hooks = this.entryCompleteHooks.get(claimed.id) ?? [];
-    this.entryCompleteHooks.delete(claimed.id);
-    for (const { hook } of hooks) {
+    const completed = hooks.filter(
+      (registration) => !registration.targetCatId || claimed.targets.includes(registration.targetCatId),
+    );
+    const retained = hooks.filter((registration) => !completed.includes(registration));
+    if (retained.length) this.entryCompleteHooks.set(claimed.id, retained);
+    else this.entryCompleteHooks.delete(claimed.id);
+    for (const { hook } of completed) {
       try {
         hook(claimed.id, 'failed', '');
       } catch {

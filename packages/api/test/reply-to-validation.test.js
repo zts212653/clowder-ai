@@ -60,6 +60,7 @@ describe('POST /api/messages — replyTo validation', () => {
         previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
         resolveTargetsAndIntent: mock.fn(async () => ({
           targetCats: ['opus'],
+          routing_warnings: [],
           intent: { intent: 'execute' },
         })),
         routeExecution: mock.fn(async function* () {

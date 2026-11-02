@@ -833,10 +833,14 @@ export class AgentRouter {
   async resolveExplicitTargets(
     requestedCatIds: readonly string[],
     threadId: string,
-    options?: { persist?: boolean },
+    options?: { persist?: boolean; bound?: boolean },
   ): Promise<CatId[]> {
-    const resolved = this.resolveAdmissionTargets(requestedCatIds);
-    if (resolved.length !== requestedCatIds.length) return [];
+    // First admission validates the whole explicit request. A bound Queue row
+    // instead settles each recipient, so an invalid sibling cannot cancel healthy work.
+    const resolved = options?.bound
+      ? requestedCatIds.flatMap((id) => this.resolveAdmissionTargets([id]))
+      : this.resolveAdmissionTargets(requestedCatIds);
+    if (!options?.bound && resolved.length !== requestedCatIds.length) return [];
     if (options?.persist && this.threadStore) {
       await this.threadStore.addParticipants(threadId, resolved);
     }
@@ -858,7 +862,7 @@ export class AgentRouter {
     threadId: string,
     content = '',
   ): Promise<CatId[]> {
-    if (requestedCatIds.length > 0) return this.resolveAdmissionTargets(requestedCatIds, true);
+    if (requestedCatIds.length > 0) return requestedCatIds.flatMap((id) => this.resolveAdmissionTargets([id], true));
     const explicit = await this.parseAllMentions(content, threadId, { allowGroupFallback: false });
     if (explicit.mentions.length > 0 || explicit.routing_warnings.length > 0) return explicit.mentions;
     return (await this.resolveImplicitTargetPreview(content, threadId)).targetCats;
