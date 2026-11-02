@@ -1,7 +1,7 @@
 /**
  * Resolves MCP server configs for ACP sessions.
  *
- * Built-in cat-cafe* servers: auto-generated from projectRoot (zero config).
+ * Built-in cat-cafe* servers: resolved from the loaded MCP package (zero config).
  * External servers (pencil, etc.): read from capabilities.json (#712).
  * User project servers: merged from userProjectRoot/.mcp.json (F145 Phase E).
  *
@@ -9,8 +9,9 @@
  * F145 Phase E: community users' own project MCP servers auto-merge into ACP sessions.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { CapabilitiesConfig, CapabilityEntry } from '@cat-cafe/shared';
 import {
   CAT_CAFE_SPLIT_ENTRYPOINTS,
@@ -29,6 +30,7 @@ import {
   assertMappedCapabilitySource,
   resolveDeclaredCapabilityRoot,
 } from '../../../../../../config/capabilities/invoke-capability-root.js';
+import { readInvocationMcpFile } from '../../../../../../config/capabilities/invoke-mcp-config.js';
 import {
   isRetiredGithubMcpCapability,
   isRetiredGithubMcpConfigEntry,
@@ -40,7 +42,6 @@ const log = createModuleLogger('acp-mcp-resolver');
 
 // ─── Built-in Clowder AI MCP auto-provision ────────────────────────
 
-const MCP_SERVER_DIST = 'packages/mcp-server/dist';
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^(?:[A-Za-z]:[\\/]|\\\\)/;
 
 function isAbsoluteMcpPath(value: string): boolean {
@@ -90,13 +91,13 @@ function builtinEntrypoint(name: string): string | null {
  * Auto-generate an AcpMcpServerStdio for a built-in cat-cafe server.
  * Returns null for non-builtin names.
  */
-export function resolveBuiltinCatCafeServer(projectRoot: string, name: string): AcpMcpServerStdio | null {
+export function resolveBuiltinCatCafeServer(_projectRoot: string, name: string): AcpMcpServerStdio | null {
   const entry = builtinEntrypoint(name);
   if (!entry) return null;
   return {
     name,
     command: resolveCatCafeNodeCommand(),
-    args: [resolve(resolveBinaryRoot(projectRoot), MCP_SERVER_DIST, entry)],
+    args: [fileURLToPath(import.meta.resolve(`@cat-cafe/mcp-server/dist/${entry}`))],
     env: [],
   };
 }
@@ -105,7 +106,7 @@ export function resolveBuiltinCatCafeServer(projectRoot: string, name: string): 
 
 function readCapabilitiesConfigSync(projectRoot: string): CapabilitiesConfig | null {
   try {
-    const raw = readFileSync(join(projectRoot, '.cat-cafe', 'capabilities.json'), 'utf-8');
+    const raw = readInvocationMcpFile(join(projectRoot, '.cat-cafe', 'capabilities.json'));
     const data = JSON.parse(raw) as CapabilitiesConfig;
     if ((data.version !== 1 && data.version !== 2) || !Array.isArray(data.capabilities)) return null;
     return data;
@@ -188,7 +189,7 @@ function toAcpMcpServer(name: string, entry: McpJsonEntry): AcpMcpServer | null 
 function readMcpJson(mcpJsonPath: string): Record<string, McpJsonEntry> {
   let raw: { mcpServers?: Record<string, McpJsonEntry> };
   try {
-    raw = JSON.parse(readFileSync(mcpJsonPath, 'utf-8')) as typeof raw;
+    raw = JSON.parse(readInvocationMcpFile(mcpJsonPath)) as typeof raw;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       log.warn({ path: mcpJsonPath }, '.mcp.json not found — external MCP servers will be unavailable');
@@ -313,7 +314,7 @@ export async function resolveAcpMcpServers(
   const servers: AcpMcpServer[] = [];
   const externalNames: string[] = [];
 
-  // Phase 1: resolve builtins from projectRoot (no .mcp.json needed)
+  // Phase 1: resolve builtins from the loaded MCP package (no .mcp.json needed)
   for (const name of expanded) {
     if (retiredCapabilityIds.has(name)) {
       log.info({ name }, 'Skipping retired GitHub MCP server (capabilities.json)');

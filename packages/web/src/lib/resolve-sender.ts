@@ -21,7 +21,7 @@ import {
 } from '@cat-cafe/shared';
 import type { CoCreatorConfig } from '@/components/config-viewer-types';
 import type { CatData } from '@/hooks/useCatData';
-import { formatCatDisplayName } from '@/lib/cat-display-name';
+import { formatCatNameplateName } from '@/lib/cat-display-name';
 import { catColorVar, catSlug } from '@/lib/cat-slug';
 import { CO_CREATOR_COLOR, UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 
@@ -147,7 +147,7 @@ export function resolveSender(
   const cat = getCatById(senderCatId);
   if (cat) {
     return {
-      label: formatCatDisplayName(cat),
+      label: formatCatNameplateName(cat),
       color: cat.color.primary,
       textColor: options.nameRole ? catColorVar(cat.id, 'text') : cat.color.primary,
       isCoCreator: false,

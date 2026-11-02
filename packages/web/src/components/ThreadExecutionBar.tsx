@@ -2,9 +2,10 @@
 
 import type { ActiveExecutionProjection } from '@cat-cafe/shared';
 import { useEffect, useMemo, useState } from 'react';
-import { formatCatName, useCatData } from '@/hooks/useCatData';
+import { useCatData } from '@/hooks/useCatData';
 import { useExecutionRecoveryVerification } from '@/hooks/useExecutionRecoveryVerification';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
+import { formatCatNameplateName } from '@/lib/cat-display-name';
 import { catColorVar } from '@/lib/cat-slug';
 import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import type { AppServerLifecycleSnapshot, AppServerLifecycleStage } from '@/stores/chat-types';
@@ -40,7 +41,7 @@ interface ThreadExecutionBarProps {
 }
 
 /** F122B AC-B8+B9: Per-cat execution status bar with stop controls.
- *  B8/B9 polish: cat names use formatCatName() — "品种（variant）" format, colors from cat-config. */
+ *  Cat names use the configured nickname, colors from cat-config. */
 export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
   const currentThreadId = useChatStore((s) => s.currentThreadId);
   const effectiveThreadId = threadId ?? currentThreadId;
@@ -70,7 +71,7 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
       const cat = getCatById(catId);
       if (cat) {
         map.set(catId, {
-          label: formatCatName(cat),
+          label: formatCatNameplateName(cat),
           color: catColorVar(cat.id, 'primary'),
         });
       } else {

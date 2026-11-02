@@ -44,7 +44,6 @@ export function piMcpExtension(id: string, servers: unknown): { directory?: stri
       command: server.command,
       args: server.args,
       env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])),
-      exposure: 'direct',
     },
   ]);
   if (!registrations.length) return { args: [] };

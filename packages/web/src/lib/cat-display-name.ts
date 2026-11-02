@@ -11,12 +11,15 @@ export function resolveCatDisplayName(catId: string, getCatById: GetCatDisplayNa
   return cat ? formatCatDisplayName(cat) : catId;
 }
 
-/** Read the configured nameplate nickname and model from the same runtime member. */
+/** Chat names use the configured nickname; full display names remain available separately. */
+export function formatCatNameplateName(cat: CatDisplayNameData): string {
+  return cat.nickname?.trim() || formatCatDisplayName(cat);
+}
+
+/** Resolve the same chat name for reply receipts and execution status. */
 export function resolveCatNameplateName(catId: string, getCatById: GetCatDisplayNameData): string {
   const cat = getCatById(catId);
-  if (!cat) return catId;
-  const name = cat.nickname?.trim() || cat.displayName;
-  return cat.variantLabel ? `${name} · ${cat.variantLabel}` : name;
+  return cat ? formatCatNameplateName(cat) : catId;
 }
 
 /** Keep the stable id visible as secondary provenance on diagnostic/observability surfaces. */

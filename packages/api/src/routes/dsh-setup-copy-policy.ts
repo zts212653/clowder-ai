@@ -108,7 +108,7 @@ const provider = z
     retryPolicy: retry.optional(),
   })
   .strict();
-const llm = z.object({ providers: z.record(provider) }).strict();
+const llm = z.object({ providers: z.record(provider).optional() }).strict();
 const acp = z
   .object({ provider: z.string().optional(), model: z.string().optional(), sessionListPageSize: number.optional() })
   .strict();
@@ -119,4 +119,31 @@ export function assertDshCopyPolicy(llmConfig: unknown, acpConfig: unknown): voi
     // Do not return Zod issues: they can include private field names or values.
     throw Error('dsh_config_manual');
   }
+}
+
+const native = z
+  .object({
+    apiKeyEnv: provider.shape.apiKeyEnv,
+    baseURL: endpoint.optional(),
+    models: z
+      .array(
+        z
+          .object({
+            id: z.string(),
+            name: z.string().optional(),
+            description: z.string().optional(),
+            contextWindow: number.optional(),
+            maxTokens: number.optional(),
+            inputModalities: z.array(z.enum(['text', 'image'])).optional(),
+            systemPromptUpdate: z.string().optional(),
+            toolUpdate: z.string().optional(),
+          })
+          .strict(),
+      )
+      .optional(),
+  })
+  .strict();
+
+export function assertDshNativeCopyPolicy(value: unknown): void {
+  if (!native.safeParse(value).success) throw Error('dsh_config_manual');
 }

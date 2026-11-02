@@ -484,6 +484,28 @@ describe('server-backed composer routing preview', () => {
     expect(onChange).toHaveBeenCalledWith(['opus', 'codex', 'gemini']);
   });
 
+  it('keeps full-name autocomplete search while displaying nicknames and actual aliases', async () => {
+    api.mockResolvedValue({
+      ok: true,
+      json: async () => ({ targetCats: ['opus'], reason: { kind: 'preferred_cat' } }),
+    });
+    await act(async () =>
+      root.render(
+        <ChatInput presentation="v2" threadId="thread-a" composerContext={<span>Project</span>} onSend={vi.fn()} />,
+      ),
+    );
+    const textarea = host.querySelector('textarea') as HTMLTextAreaElement;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(textarea, '@布偶猫');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const option = Array.from(host.querySelectorAll('button')).find((row) => row.textContent?.includes('@opus'));
+    expect(option).toBeDefined();
+    expect(option?.textContent).toContain('宪宪');
+    act(() => option?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    expect(textarea.value).toBe('@opus ');
+  });
+
   it('wires the preview into ChatInput, prepends visible @ text and saves preferredCats only from +', async () => {
     useChatStore.setState((state) => ({
       threads: state.threads.map((thread) =>

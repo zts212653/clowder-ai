@@ -222,6 +222,34 @@ describe('ThreadItem actions', () => {
     expect(container.querySelector('[data-testid="thread-settings-panel"]')).not.toBeNull();
   });
 
+  it.each([false, true])('copies the exact thread ID without switching threads (active=%s)', async (isActive) => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const onSelect = vi.fn();
+    renderThread({ id: 'thread-owned-exact-id', onSelect, isActive });
+    act(() => buttonByTitle('更多操作')?.click());
+    const copy = container.querySelector<HTMLButtonElement>('[role="menuitem"][aria-label="复制 Thread ID"]');
+    expect(copy).not.toBeNull();
+    await act(async () => copy?.click());
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('thread-owned-exact-id');
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('已复制');
+  });
+
+  it('reports a clipboard rejection and lets the user retry copying the thread ID', async () => {
+    const writeText = vi.fn().mockRejectedValueOnce(new Error('denied')).mockResolvedValueOnce(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    renderThread();
+    act(() => buttonByTitle('更多操作')?.click());
+    const copy = container.querySelector<HTMLButtonElement>('[role="menuitem"][aria-label="复制 Thread ID"]');
+    expect(copy).not.toBeNull();
+    await act(async () => copy?.click());
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('复制失败，重试');
+    await act(async () => copy?.click());
+    expect(writeText).toHaveBeenNthCalledWith(2, 'thread-1');
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('已复制');
+  });
+
   it('does not select the thread when using controls inside the portaled settings surface', () => {
     const onSelect = vi.fn();
     renderThread({ onSelect });

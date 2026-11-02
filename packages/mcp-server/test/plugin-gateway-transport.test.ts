@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import test from 'node:test';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
 import { createMemberGatewayHandler, type MemberGatewayDeps } from '../src/member-gateway.js';
 
 test('the existing gateway transports only the request-owned package server and closes it', async () => {
@@ -33,7 +34,11 @@ test('the existing gateway transports only the request-owned package server and 
     createMcpServer: async () => {
       opened++;
       const server = new McpServer({ name: 'package-owned', version: '1' });
-      server.tool('package_tool', {}, async () => ({ content: [{ type: 'text', text: 'package response' }] }));
+      server.tool(
+        'package_tool',
+        { contentRef: z.string().startsWith('collective-attachment:').max(240) },
+        async () => ({ content: [{ type: 'text', text: 'package response' }] }),
+      );
       const close = server.close.bind(server);
       server.close = async () => {
         closed++;
@@ -70,6 +75,10 @@ test('the existing gateway transports only the request-owned package server and 
       body.result?.tools?.map((t: { name: string }) => t.name),
       ['package_tool'],
     );
+    const contentRef = body.result.tools[0].inputSchema.properties.contentRef;
+    assert.doesNotThrow(() => new RegExp(contentRef.pattern, 'u'));
+    assert.equal(new RegExp(contentRef.pattern, 'u').test('collective-attachment:example'), true);
+    assert.equal(contentRef.maxLength, 240);
     assert.equal(opened, 1);
     assert.equal(closed, 1);
   } finally {

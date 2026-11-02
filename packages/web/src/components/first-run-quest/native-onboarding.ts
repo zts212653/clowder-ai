@@ -34,8 +34,15 @@ export const newNativeRequestKey = () =>
  * still the strongest non-invasive signal available.
  */
 export function nativeRuntimeSelectable(runtime: RuntimeChoice, form?: HubCatEditorFormState): boolean {
-  if (!runtime.installed || (runtime.clientId === 'acp' && !runtime.acp)) return false;
-  if (form && !usesDetectedRuntimeConfiguration(form, runtime)) return true;
+  if (!runtime.installed) return false;
+  if (
+    form &&
+    ((runtime.clientId === 'acp' && form.defaultModel.trim()) || !usesDetectedRuntimeConfiguration(form, runtime))
+  )
+    return runtime.clientId !== 'acp' || !!form.acpCommand.trim();
+  if (runtime.clientId === 'acp' && !runtime.acp) return false;
+  if (runtime.configurationError || runtime.readiness?.status === 'configuration_required') return false;
+  if (runtime.agyCarrier && !(form?.defaultModel || runtime.configuredModel)) return false;
   if (['openai', 'anthropic'].includes(runtime.clientId) && runtime.readiness) {
     return runtime.readiness.status === 'configured';
   }

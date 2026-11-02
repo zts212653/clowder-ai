@@ -70,9 +70,9 @@ describe('AC-C-4: cloud cat tag in @ mention picker', () => {
     expect(cloud?.providerLabel).toBe('via ChatGPT Pro');
   });
 
-  it('cloud cat label includes variant in @ format', () => {
+  it('cloud cat without a nickname retains the full display name and variant', () => {
     const options = buildCatOptions([CLOUD_CAT]);
     const cloudOpt = options.find((o) => o.id === 'gpt-pro');
-    expect(cloudOpt?.label).toBe('@缅因猫Pro（Pro Cloud (ChatGPT)）');
+    expect(cloudOpt?.label).toBe('缅因猫Pro（Pro Cloud (ChatGPT)）');
   });
 });

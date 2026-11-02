@@ -416,6 +416,7 @@ export function ChatInput({
     return catOptions.filter(
       (opt) =>
         opt.label.toLowerCase().includes(lower) ||
+        opt.searchText?.toLowerCase().includes(lower) ||
         opt.insert.toLowerCase().includes(lower) ||
         opt.id.toLowerCase().includes(lower),
     );

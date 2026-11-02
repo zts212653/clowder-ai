@@ -6,6 +6,7 @@ const FAKE_CATS: CatData[] = [
   {
     id: 'gemini',
     displayName: '暹罗猫',
+    nickname: '烁烁',
     color: { primary: '#5B9BD5', secondary: '#D6E9F8' },
     mentionPatterns: ['暹罗', '暹罗猫', 'gemini'],
     clientId: 'google',
@@ -54,11 +55,11 @@ const MIXED_CATS: CatData[] = [
 ];
 
 describe('chat input mention option labels', () => {
-  it('uses official 暹罗猫 label/insert for gemini option', () => {
+  it('shows the nickname while retaining the existing alias insertion', () => {
     const options = buildCatOptions(FAKE_CATS);
     const geminiOption = options.find((opt) => opt.id === 'gemini');
     expect(geminiOption).toBeDefined();
-    expect(geminiOption?.label).toBe('@暹罗猫');
+    expect(geminiOption?.label).toBe('烁烁');
     expect(geminiOption?.insert).toBe('@暹罗 ');
   });
 });
@@ -93,7 +94,7 @@ describe('buildCatOptions vs buildWhisperOptions split', () => {
     expect(options).toHaveLength(2);
     const fast = options.find((o) => o.id === 'opus-fast');
     expect(fast).toBeDefined();
-    expect(fast?.label).toBe('@布偶猫（快）');
+    expect(fast?.label).toBe('布偶猫（快）');
     expect(fast?.insert).toBe(''); // no mentionPatterns → empty insert
     expect(options.map((option) => option.id)).not.toContain('spark');
   });

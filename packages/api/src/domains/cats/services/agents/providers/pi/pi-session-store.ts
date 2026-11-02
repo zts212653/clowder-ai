@@ -26,6 +26,11 @@ export interface PiSessionSlot {
   runtimeBinding?: string;
   file?: string;
 }
+export class PiSessionBindingChangedError extends Error {
+  constructor(readonly slot: PiSessionSlot) {
+    super('Pi 会话的工作目录或 MCP 绑定已改变；原历史已保留，需要新的上下文分段。');
+  }
+}
 const ID = /^clowder-pi-v1-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const piDigest = (value: string): string => createHash('sha256').update(value).digest('hex');
 
@@ -124,17 +129,25 @@ export class PiSessionStore {
     regularFile(metadata);
     if (lstatSync(metadata).size > 8192) throw new Error('Invalid Pi session binding');
     const value = JSON.parse(readFileSync(metadata, 'utf8')) as Record<string, unknown>;
-    if (value.v !== 1 || value.id !== id || typeof value.cwd !== 'string' || typeof value.binding !== 'string')
+    if (
+      value.v !== 1 ||
+      value.id !== id ||
+      typeof value.cwd !== 'string' ||
+      !isAbsolute(value.cwd) ||
+      typeof value.binding !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(value.binding)
+    )
       throw new Error('Invalid Pi session binding');
     const slot: PiSessionSlot = { id, directory: path, cwd: value.cwd, binding: value.binding };
-    this.assertBinding(slot, cwd, servers);
-    slot.runtimeBinding = runtimeBinding(slot.cwd, servers);
     const files = readdirSync(path).filter((name) => name.endsWith('.jsonl'));
     if (files.length !== 1) throw new Error('Pi 原生会话历史缺失或存在多个候选；不会自动新建会话。');
     slot.file = join(path, files[0] as string);
     const first = header(slot.file);
     if (first.type !== 'session' || first.version !== 3 || first.id !== id || first.cwd !== slot.cwd)
       throw new Error('Pi history identity, working directory or format does not match; history preserved');
+    if (slot.cwd !== piCanonicalCwd(cwd) || slot.binding !== binding(slot.cwd, servers))
+      throw new PiSessionBindingChangedError(slot);
+    slot.runtimeBinding = runtimeBinding(slot.cwd, servers);
     return slot;
   }
 }

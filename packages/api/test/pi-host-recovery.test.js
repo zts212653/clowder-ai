@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -45,6 +46,35 @@ const serviceFor = (client, root) =>
       },
     },
   });
+
+test('Pi MCP binding changes reach Host sealing without replacing or rewriting native history', () =>
+  fixture(async ({ root, make }) => {
+    const first = make();
+    await first.initialize();
+    const id = (
+      await first.newSession(root, [{ name: 'fixture', command: process.execPath, args: ['old-entry'], env: [] }])
+    ).sessionId;
+    await first.promptCollect(id, 'preserve old native history');
+    await first.close();
+    const old = new PiSessionStore({ root, scope: 'd'.repeat(64) }).load(id, root, [
+      { name: 'fixture', command: process.execPath, args: ['old-entry'], env: [] },
+    ]);
+    const hash = () => createHash('sha256').update(readFileSync(old.file)).digest('hex');
+    const before = hash();
+    const next = make();
+    await next.initialize();
+    const messages = await collect(serviceFor(next, root), 'must wait for Host sealing', {
+      workingDirectory: root,
+      sessionId: id,
+    });
+    assert.equal(messages.find((message) => message.type === 'error')?.errorCode, 'native_session_binding_changed');
+    assert.equal(
+      messages.some((message) => message.type === 'session_init'),
+      false,
+    );
+    assert.equal(hash(), before, 'native history is not rewritten or rebound');
+    assert.match(JSON.parse(readFileSync(join(root, 'seen-history.json'), 'utf8')).previous, /^$/);
+  }));
 
 test('real ACP Host preserves a Pi load failure instead of silently starting a replacement', () =>
   fixture(async ({ root, make }) => {

@@ -10,6 +10,7 @@ import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 import { dshLauncherProfileState } from './native-dsh-profile.js';
 import { discoverNativeRuntimes } from './native-runtimes.js';
+import { nativeConfigurationRevision } from './native-tool-defaults.js';
 import { type CatalogTarget, probeRuntimeCatalog } from './runtime-catalog-probe.js';
 import type { RuntimeModelCatalog } from './runtime-model-catalog.js';
 
@@ -38,14 +39,27 @@ export function createCatalogCache(probe: typeof probeRuntimeCatalog = probeRunt
         if (value.status === 'live') {
           if (values.size >= 64) values.delete(values.keys().next().value!);
           values.set(key, { at: now(), value });
-        }
+        } else values.delete(key);
         return value;
       })
-      .catch(() =>
-        previous
-          ? { ...previous.value, status: 'configured' as const, message: 'refresh_failed' }
-          : { status: 'unavailable' as const, models: [], message: 'discovery_failed' },
-      )
+      .catch(() => {
+        values.delete(key);
+        return previous
+          ? {
+              ...previous.value,
+              status: 'configured' as const,
+              message: 'refresh_failed',
+              ...(previous.value.defaultModelStatus === undefined
+                ? {}
+                : {
+                    defaultModel: undefined,
+                    defaultModelLabel: undefined,
+                    selectedModel: undefined,
+                    defaultModelStatus: 'unreported' as const,
+                  }),
+            }
+          : { status: 'unavailable' as const, models: [], message: 'discovery_failed' };
+      })
       .finally(() => inflight.delete(key));
     inflight.set(key, promise);
     return promise;
@@ -132,6 +146,9 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
       codex,
       claude,
       process.env.DSH_HOME,
+      nativeConfigurationRevision(root),
+      'configurationRevision' in runtime ? runtime.configurationRevision : undefined,
+      modified(target.command),
       modified(join(codex, 'config.toml')),
       modified(join(codex, 'auth.json')),
       modified(join(claude, 'settings.json')),
@@ -148,7 +165,7 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
           }
         : {}),
       ...result,
-      models: result.models.length ? result.models : fallback.models,
+      models: result.models,
     };
   });
 }

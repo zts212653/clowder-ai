@@ -1,26 +1,17 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { catRegistry } from '@cat-cafe/shared';
-import { parse } from 'smol-toml';
 import { getAcpConfig } from '../config/cat-config-loader.js';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
 import { discoverAdditionalRuntimes } from './native-additional-runtimes.js';
 import { discoverDshRuntime } from './native-dsh-discovery.js';
 import { dshLauncherProfileState } from './native-dsh-profile.js';
 import { nativeRuntimeReadiness } from './native-runtime-readiness.js';
+import { nativeClaudeDefaults, nativeCodexDefaults } from './native-tool-defaults.js';
 
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-function metadata(path: string, toml = false): Record<string, unknown> {
-  try {
-    const source = readFileSync(path, 'utf8');
-    const parsed: unknown = toml ? parse(source) : JSON.parse(source);
-    return parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
 }
 /** Startup descriptors containing credentials or service URLs stay in the existing editor. */
 export function safeNativeStartup(command: string, startupArgs: readonly string[]): boolean {
@@ -31,8 +22,8 @@ export function safeNativeStartup(command: string, startupArgs: readonly string[
 /** Discovery is read-only. No auth files, full agent launches, prompts or login probes. */
 export function discoverNativeRuntimes(projectRoot: string, commandFor = resolveCliCommand) {
   const home = homedir();
-  const codex = metadata(join(process.env.CODEX_HOME || join(home, '.codex'), 'config.toml'), true);
-  const claude = metadata(join(process.env.CLAUDE_CONFIG_DIR || join(home, '.claude'), 'settings.json'));
+  const codex = nativeCodexDefaults(process.env.CODEX_HOME || join(home, '.codex'), projectRoot);
+  const claude = nativeClaudeDefaults(process.env.CLAUDE_CONFIG_DIR || join(home, '.claude'), projectRoot);
   const builtins = (
     [
       ['codex', 'Codex', 'openai'],
@@ -44,9 +35,6 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
     const configuredEffort = text(id === 'codex' ? codex.model_reasoning_effort : claude.effortLevel);
     const models = new Set<string>();
     if (configuredModel) models.add(configuredModel);
-    for (const entry of Object.values(catRegistry.getAllConfigs())) {
-      if (entry.clientId === clientId && entry.defaultModel) models.add(entry.defaultModel);
-    }
     return {
       id,
       label,
@@ -96,12 +84,7 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
       },
     ];
   });
-  const dsh = acp.some((runtime) => runtime.label === 'DSH' && runtime.installed && runtime.acp)
-    ? []
-    : [discoverDshRuntime()];
-  const agyModels = Object.values(catRegistry.getAllConfigs())
-    .filter((cat) => cat.clientId === 'google' && cat.agyProfile?.enabled)
-    .flatMap((cat) => (cat.agyProfile?.model ? [cat.agyProfile.model] : []));
+  const dsh = [discoverDshRuntime({ resolveCommand: commandFor })];
   const agy = (
     [
       ['agy-native', 'AGY Native', 'agy', 'native'],
@@ -118,13 +101,13 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
       agyCarrier,
       command: command ?? undefined,
       installed: Boolean(command),
-      models: [...new Set(agyModels)],
+      models: [] as string[],
       defaultsStatus: 'configured_only',
       ...(agyCarrier === 'acp' ? { acp: { command: executable, startupArgs: [], transport: 'stdio' as const } } : {}),
     };
   });
   return {
-    runtimes: [...builtins, ...acp, ...dsh, ...agy, ...discoverAdditionalRuntimes(home, commandFor)],
+    runtimes: [...builtins, ...dsh, ...agy, ...discoverAdditionalRuntimes(home, commandFor), ...acp],
     authenticationStatus: 'not_checked',
   };
 }

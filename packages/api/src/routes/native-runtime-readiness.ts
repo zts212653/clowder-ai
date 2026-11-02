@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { dshNativeCredentialMissing } from '../config/dsh-native-configuration.js';
 import { buildChildEnv } from '../utils/cli-spawn.js';
 import { resolveWindowsSpawnPlan } from '../utils/cli-spawn-win.js';
 import { hasNativeClaudeApiConfig } from './native-claude-api-config.js';
@@ -6,12 +7,17 @@ import { nativeKimiLoginCommand } from './native-kimi-login.js';
 import { probeCodexLogin } from './runtime-codex-discovery.js';
 
 export type NativeReadiness = {
-  status: 'login_required' | 'configured' | 'unknown' | 'not_installed';
+  status: 'login_required' | 'configuration_required' | 'configured' | 'unknown' | 'not_installed';
   checkedAt: number;
   loginCommand?: string;
   loginShell?: 'powershell' | 'sh';
 };
-type Target = { id: string; installed: boolean; command?: string };
+type Target = {
+  id: string;
+  installed: boolean;
+  command?: string;
+  acp?: { command: string; startupArgs: readonly string[] };
+};
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as RecordValue) : {};
@@ -77,6 +83,20 @@ const cache = new Map<string, { at: number; value: NativeReadiness }>();
 const pending = new Map<string, Promise<NativeReadiness>>();
 export async function nativeRuntimeReadiness(target: Target, cwd: string, refresh = false): Promise<NativeReadiness> {
   if (!target.installed) return { status: 'not_installed', checkedAt: Date.now() };
+  if (target.id === 'dsh') {
+    try {
+      if (
+        dshNativeCredentialMissing(
+          undefined,
+          cwd,
+          target.acp ? { command: target.acp.command, args: target.acp.startupArgs } : undefined,
+        )
+      )
+        return { status: 'configuration_required', checkedAt: Date.now() };
+    } catch {
+      return { status: 'unknown', checkedAt: Date.now() };
+    }
+  }
   // Kimi 2.2 exposes login, provider config and doctor, but no read-only auth status.
   // Local config/credential existence cannot establish that a copied grant remains valid.
   if (target.id === 'kimi' && target.command)

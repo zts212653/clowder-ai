@@ -22,6 +22,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv-provider.js';
+import { portableToolList } from './portable-tool-schema.js';
 import { SERVER_INSTRUCTIONS } from './server-instructions.js';
 import {
   registerAudioToolset,
@@ -305,6 +306,10 @@ export function createMemberGatewayHandler(
         sessionIdGenerator: undefined,
         enableJsonResponse: true,
       });
+      if (body?.method === 'tools/list') {
+        const send = transport.send.bind(transport);
+        transport.send = (message, options) => send(portableToolList(message), options);
+      }
 
       try {
         // Registration runs inside the scope: principal/schema resolution at

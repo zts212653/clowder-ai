@@ -194,6 +194,33 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     expect(container.textContent).toBe('');
   });
 
+  it('uses the configured nickname in the processing row', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        cats: [
+          {
+            id: 'opus',
+            displayName: '布偶猫',
+            nickname: '宪宪',
+            color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
+            mentionPatterns: ['@opus'],
+            clientId: 'anthropic',
+            carrier: 'cli',
+            defaultModel: 'claude',
+            avatar: '/avatars/opus.png',
+            roleDescription: 'test',
+            personality: 'test',
+          },
+        ],
+      }),
+    } as Response);
+    seedExecutions([liveExecution({ executionId: 'nick-turn', catId: 'opus' })]);
+    await act(async () => root.render(React.createElement(ThreadExecutionBar)));
+    expect(container.textContent).toContain('宪宪');
+    expect(container.textContent).not.toContain('布偶猫');
+  });
+
   it('presents a server-verified execution without requiring a second chat cache', () => {
     useActiveExecutionStore.setState({
       anchorThreadId: 'thread-1',

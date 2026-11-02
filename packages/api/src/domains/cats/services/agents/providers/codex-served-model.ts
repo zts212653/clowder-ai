@@ -344,7 +344,8 @@ export function buildCodexServedModelMismatchEvent(input: {
   eventType?: CodexServedModelObservation['eventType'];
   carrier?: 'exec' | 'app_server';
 }): ProviderWarningSemanticEvent | undefined {
-  if (servedModelMatchesRequest(input.requestedModel, input.servedModel)) return undefined;
+  if (!input.requestedModel.trim() || servedModelMatchesRequest(input.requestedModel, input.servedModel))
+    return undefined;
   return {
     v: 1,
     id: `served-model:codex:${input.catId}:${input.servedResponseId}`,

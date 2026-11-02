@@ -39,14 +39,20 @@ export function materializeSessionMcpServers(
   baseServers: AcpMcpServer[],
   callbackEnv?: Record<string, string>,
   _credentialFileOnly = false,
+  httpSupported = true,
 ): AcpMcpServer[] {
+  // Keep authenticated stdio for clients that do not advertise HTTP MCP.
+  const callback =
+    callbackEnv?.CAT_CAFE_MCP_TRANSPORT === 'shared' && !httpSupported
+      ? { ...callbackEnv, CAT_CAFE_MCP_TRANSPORT: 'stdio' }
+      : callbackEnv;
   const resolved = baseServers.map((server) => {
     if (!('command' in server)) return server;
     const registered = Object.fromEntries((server.env ?? []).map((e) => [e.name, e.value]));
     const nativeActionServer = server.hostSource === 'plugin' && Boolean(registered.CLOWDER_PLUGIN_ACTION_TOKEN);
     const env = pluginMcpEnvironment(
       { source: nativeActionServer ? 'plugin' : undefined, env: registered },
-      callbackEnv ?? {},
+      callback ?? {},
     );
     const entries = Object.entries(env ?? {}).map(([name, value]) => ({ name, value }));
     // Only the installed-entrypoint binder below may add callback authority.
@@ -76,10 +82,10 @@ export function materializeSessionMcpServers(
               headers: Object.fromEntries(server.headers.map(({ name, value }) => [name, value])),
               transport: server.type,
             };
-      return [server.name, bindManagedMcpStdioConfig(record, callbackEnv)];
+      return [server.name, bindManagedMcpStdioConfig(record, callback)];
     }),
   );
-  const native = materializeNativeMcpHttp(records, callbackEnv ?? {});
+  const native = materializeNativeMcpHttp(records, callback ?? {});
   return Object.entries(native).map(([name, record]): AcpMcpServer => {
     if (typeof record.command !== 'string')
       return {

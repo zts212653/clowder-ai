@@ -1,6 +1,7 @@
 import type { AcpMcpServer, AcpNewSessionResult } from './types.js';
 
 export class AcpSessionBindingError extends Error {}
+export class AcpSessionBindingChangedError extends AcpSessionBindingError {}
 
 export function acpSessionBindingSignature(cwd: string, servers: AcpMcpServer[]) {
   const normalized = servers.map((server) => {

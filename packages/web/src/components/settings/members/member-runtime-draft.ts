@@ -15,6 +15,8 @@ export interface RuntimeChoice {
   discoveryStatus?: 'configured' | 'acp_profile_missing' | 'acp_profile_invalid' | 'adapter_missing' | 'not_installed';
   models: string[];
   configuredModel?: string;
+  configurationError?: string;
+  sourceProfile?: string;
   modelSource?: 'tool_config' | 'tool_recent';
   defaultsStatus?: 'configured_only' | 'unconfigured' | 'session_only';
   configuredEffort?: string;
@@ -103,7 +105,7 @@ export function runtimeDefaults(next: RuntimeChoice): RuntimeFields {
     clientId: next.clientId,
     configurationSource: 'native_tool',
     accountRef: '',
-    defaultModel: '',
+    defaultModel: next.agyCarrier ? (next.configuredModel ?? '') : '',
     cliEffort: '',
     cliConfigArgs: [],
     commandArgs: '',

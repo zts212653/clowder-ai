@@ -271,6 +271,12 @@ const ENV_VARS_TO_STRIP: ReadonlySet<string> = new Set([
   CLI_EXECUTION_ID_ENV,
 ]);
 
+function shouldStripChildEnvKey(key: string): boolean {
+  // Host lookup references are resolved before a specific MCP receives its
+  // scoped ACTION_TOKEN/PATH. They are not model process configuration.
+  return ENV_VARS_TO_STRIP.has(key) || /^CLOWDER_PLUGIN_[A-F0-9]{64}_ACTION_(TOKEN|PATH)$/.test(key);
+}
+
 export interface CliPlainTextResult {
   __cliPlainText: true;
   stdout: string;
@@ -329,13 +335,13 @@ export function buildChildEnv(
   const merged: NodeJS.ProcessEnv = {};
   if (options.inheritParentEnv !== false) {
     for (const [key, value] of Object.entries(process.env)) {
-      if (ENV_VARS_TO_STRIP.has(key)) continue;
+      if (shouldStripChildEnvKey(key)) continue;
       merged[key] = value;
     }
   }
   if (overrides) {
     for (const [key, value] of Object.entries(overrides)) {
-      if (ENV_VARS_TO_STRIP.has(key)) {
+      if (shouldStripChildEnvKey(key)) {
         delete merged[key];
         if (key === CLI_EXECUTION_ID_ENV && options.bindExecutionOwner === true && value !== null) {
           merged[key] = value;

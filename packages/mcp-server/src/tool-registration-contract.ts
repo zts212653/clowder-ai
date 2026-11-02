@@ -18,7 +18,8 @@ function buildRegistrationContract(tool: FamilyToolDefinition, principal: PostMe
       : z.object(schema as z.ZodRawShape);
   if ((isPostMessage && principal === 'invocation') || agentContract || tool.name === 'cat_cafe_get_recall_metrics')
     inputSchema = (inputSchema as z.ZodObject<z.ZodRawShape>).strict();
-  return { description: agentContract?.description ?? tool.description, inputSchema };
+  // Clients may truncate names after adding a namespace. Keep an exact discovery alias in metadata.
+  return { description: `MCP tool: ${tool.name}. ${agentContract?.description ?? tool.description}`, inputSchema };
 }
 
 // Only immutable schema derivations are shared. Canonical definition identity

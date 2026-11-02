@@ -67,15 +67,17 @@ export function NativePartnerCard({
             {runtime.label} ·{' '}
             {created
               ? '已添加'
-              : profileLabel
-                ? profileLabel
-                : available && defaultIdentity && runtime.readiness?.status === 'login_required'
-                  ? '已安装 · 登录校验未通过'
-                  : available
-                    ? '已安装'
-                    : runtime.discoveryStatus === 'adapter_missing'
-                      ? '已安装 · 待接入适配器'
-                      : '未检测到'}
+              : runtime.configurationError
+                ? '已安装 · 配置待确认'
+                : profileLabel
+                  ? profileLabel
+                  : available && defaultIdentity && runtime.readiness?.status === 'login_required'
+                    ? '已安装 · 登录校验未通过'
+                    : available
+                      ? '已安装'
+                      : runtime.discoveryStatus === 'adapter_missing'
+                        ? '已安装 · 待接入适配器'
+                        : '未检测到'}
           </p>
         </div>
         {runtime.installed && (
@@ -97,14 +99,16 @@ export function NativePartnerCard({
         <p className={`${compact ? '' : 'ml-8'} mt-2 text-sm text-cafe-muted`}>性格：{form.personality}</p>
       )}
       <p className={`${compact ? '' : 'ml-8'} mt-3 text-sm text-cafe-muted`}>
-        {profileMessage ||
-          (available
-            ? `模型：${model || '由工具决定（未读取）'}${form.defaultModel ? ' · 角色自选' : runtime.modelSource === 'tool_recent' && detectedConfiguration ? ' · 跟随最近选择' : ' · 跟随工具'}${effort ? ` · 强度：${effort}` : ''}`
-            : runtime.discoveryStatus === 'adapter_missing'
-              ? '已发现 Pi。需要 ACP 适配器后才能通过此入口接入。'
-              : runtime.label === 'DSH'
-                ? '安装 DSH 后重新检测；首次连接时由 DSH 准备 ACP。'
-                : `安装并登录 ${runtime.label} 后，重新检测即可加入。`)}
+        {runtime.configurationError
+          ? 'DSH 原生默认配置无法唯一确认，请检查当前配置或选择已有连接；不会自动改用其他供应商。'
+          : profileMessage ||
+            (available
+              ? `模型：${model || '由工具决定（未读取）'}${form.defaultModel ? ' · 角色自选' : runtime.modelSource === 'tool_recent' && detectedConfiguration ? ' · 跟随最近选择' : ' · 跟随工具'}${effort ? ` · 强度：${effort}` : ''}`
+              : runtime.discoveryStatus === 'adapter_missing'
+                ? '已发现 Pi。需要 ACP 适配器后才能通过此入口接入。'
+                : runtime.label === 'DSH'
+                  ? '安装 DSH 后重新检测；首次连接时由 DSH 准备 ACP。'
+                  : `安装并登录 ${runtime.label} 后，重新检测即可加入。`)}
       </p>
       {!available && <NativeInstallHelp runtime={runtime} />}
       {partner.missingExisting && !created && (
@@ -143,6 +147,15 @@ export function NativePartnerCard({
       )}
       {available && defaultIdentity && runtime.readiness?.status === 'configured' && (
         <p className="mt-3 text-sm text-cafe-secondary">已检测登录 · 实际连接待验证</p>
+      )}
+      {available && detectedConfiguration && runtime.readiness?.status === 'unknown' && (
+        <p className="mt-3 text-sm text-cafe-secondary">已检测工具配置 · 登录与实际调用尚未验证</p>
+      )}
+      {detectedConfiguration && runtime.readiness?.status === 'configuration_required' && (
+        <p className="mt-3 text-sm text-conn-amber-text">原生默认供应商缺少所引用的凭证，请在工具中补齐后重新检测。</p>
+      )}
+      {runtime.agyCarrier && !form.defaultModel && !runtime.configuredModel && (
+        <p className="mt-3 text-sm text-cafe-secondary">需要先选择 AGY 的实际模型并配置隔离登录，才能添加此伙伴。</p>
       )}
       {available && !defaultIdentity && (
         <p className="mt-3 text-sm text-cafe-secondary">此连接的登录状态尚未检查 · 实际连接待验证</p>

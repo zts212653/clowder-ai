@@ -17,6 +17,13 @@ const mockGetCatById = (id: string): CatData | undefined => {
 };
 
 describe('resolveSender', () => {
+  it('uses a configured nickname for reply names while retaining member identity', () => {
+    const cat = { ...mockGetCatById('opus')!, displayName: '布偶猫', nickname: ' 宪宪 ' };
+    const result = resolveSender('opus', () => cat, mockCoCreator);
+    expect(result.label).toBe('宪宪');
+    expect(result.color).toBe(cat.color.primary);
+    expect(cat.displayName).toBe('布偶猫');
+  });
   it('resolves co-creator when senderCatId is null', () => {
     const result = resolveSender(null, mockGetCatById, mockCoCreator);
     expect(result.label).toBe('始皇帝');

@@ -3,10 +3,23 @@ import { StringDecoder } from 'node:string_decoder';
 import { pathToFileURL } from 'node:url';
 import { resolveCatCafeDataRoot } from '../../../../../../utils/cli-process-ownership.js';
 import { PiAcpSession } from './pi-acp-session.js';
-import { encodePiAcpRecord, PI_BRIDGE_NAME, PI_SESSION_BINDING_ERROR } from './pi-bridge-contract.js';
+import {
+  encodePiAcpRecord,
+  PI_BRIDGE_NAME,
+  PI_SESSION_BINDING_CHANGED,
+  PI_SESSION_BINDING_ERROR,
+} from './pi-bridge-contract.js';
 import { piErrorExcerpt } from './pi-rpc-diagnostics.js';
 import { type PiRecord, record } from './pi-rpc-process.js';
-import { type PiSessionSlot, type PiSessionStorage, PiSessionStore, piDigest } from './pi-session-store.js';
+import { assertPiHistoryIntegrity } from './pi-session-integrity.js';
+import { acquirePiWriterLease } from './pi-session-lease.js';
+import {
+  PiSessionBindingChangedError,
+  type PiSessionSlot,
+  type PiSessionStorage,
+  PiSessionStore,
+  piDigest,
+} from './pi-session-store.js';
 
 /** A small ACP adapter around an already installed Pi. It never installs a package or logs credentials. */
 export class PiAcpBridge {
@@ -85,7 +98,12 @@ export class PiAcpBridge {
           jsonrpc: '2.0',
           id: request.id,
           error: {
-            code: request.method === 'session/load' ? PI_SESSION_BINDING_ERROR : -32603,
+            code:
+              error instanceof PiSessionBindingChangedError
+                ? PI_SESSION_BINDING_CHANGED
+                : request.method === 'session/load'
+                  ? PI_SESSION_BINDING_ERROR
+                  : -32603,
             message: error instanceof Error ? piErrorExcerpt(error.message, 1500) : 'Pi bridge request failed',
           },
         });
@@ -114,7 +132,21 @@ export class PiAcpBridge {
       await active.close();
       this.sessions.delete(active.id);
     }
-    return this.startSession(this.store.load(params.sessionId, params.cwd, params.mcpServers), params.mcpServers);
+    let slot: PiSessionSlot;
+    try {
+      slot = this.store.load(params.sessionId, params.cwd, params.mcpServers);
+    } catch (error) {
+      if (error instanceof PiSessionBindingChangedError) {
+        const lease = acquirePiWriterLease(error.slot);
+        try {
+          await assertPiHistoryIntegrity(error.slot);
+        } finally {
+          lease.close();
+        }
+      }
+      throw error;
+    }
+    return this.startSession(slot, params.mcpServers);
   }
   private async startSession(slot: PiSessionSlot, servers: unknown): Promise<PiRecord> {
     const pending = this.opening.get(slot.id);

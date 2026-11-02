@@ -10,7 +10,7 @@ import { type CSSProperties, memo, type ReactNode } from 'react';
 import { formatVisibleSystemInfo } from '@/hooks/system-info-visible';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
-import { resolveCatDisplayName } from '@/lib/cat-display-name';
+import { resolveCatDisplayName, resolveCatNameplateName } from '@/lib/cat-display-name';
 import { catColorVar, catSlug } from '@/lib/cat-slug';
 import { CO_CREATOR_COLOR } from '@/lib/color-defaults';
 import { hexToOklch } from '@/lib/color-utils';
@@ -271,10 +271,7 @@ function ChatMessageContent({
       activeRuns={activeRuns ?? []}
       queue={queue}
       inline
-      getCatLabel={(catId) => {
-        const cat = getCatById(catId);
-        return cat ? formatCatName(cat) : catId;
-      }}
+      getCatLabel={(catId) => resolveCatNameplateName(catId, getCatById)}
     />
   );
   const globalBubbleDefaults = useChatStore((s) => s.globalBubbleDefaults);
@@ -780,11 +777,11 @@ function ChatMessageContent({
           <>
             <MediaMessageRequestStatus
               message={message}
-              resolveCatName={(catId) => resolveCatDisplayName(catId, getCatById)}
+              resolveCatName={(catId) => resolveCatNameplateName(catId, getCatById)}
             />
             <TextMessageRequestStatus
               message={message}
-              resolveCatName={(catId) => resolveCatDisplayName(catId, getCatById)}
+              resolveCatName={(catId) => resolveCatNameplateName(catId, getCatById)}
             />
           </>
         )}

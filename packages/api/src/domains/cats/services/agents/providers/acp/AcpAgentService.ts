@@ -19,7 +19,7 @@ import { isInvocationBoundMcpLaunch } from '../session-credential-file.js';
  *   - System prompt: prepended to prompt text (ACP agents have no system prompt flag)
  */
 
-import { type CatId, catRegistry } from '@cat-cafe/shared';
+import { type CatId, type ClientId, catRegistry } from '@cat-cafe/shared';
 import { resolveBinaryRoot } from '../../../../../../config/capabilities/capability-orchestrator.js';
 import {
   assertMappedCapabilitySource,
@@ -37,6 +37,7 @@ import type {
   MessageMetadata,
   PreparedProviderRequestV1,
 } from '../../../types.js';
+import { agentServiceGeneration } from '../../registry/AgentRegistry.js';
 import {
   type AcpCapacitySignal,
   type AcpPermissionHandler,
@@ -61,12 +62,12 @@ import {
   materializeIcodeSessionMcpServers,
   materializeSessionMcpServers,
 } from './acp-session-env.js';
-import { AcpSessionBindingError } from './active-session-cache.js';
+import { AcpSessionBindingChangedError, AcpSessionBindingError } from './active-session-cache.js';
 import { createAgyAcpPermissionHandler } from './agy/agy-acp-permission.js';
 import { type AgyAcpConfig, prepareAgyAcpSession, selectAgyAcpModel } from './agy/agy-acp-session.js';
 import { type AcpRequestInputBridge, createAcpRequestInputBridge } from './icode/runtime-interaction-adapter.js';
 import { captureNativeDefaults, defaultsForNativeResume } from './native-session-defaults.js';
-import { applySessionConfiguration } from './session-configuration.js';
+import { applySessionConfiguration, reportedSessionModel } from './session-configuration.js';
 import type {
   AcpInitializeResult,
   AcpMcpServer,
@@ -148,18 +149,22 @@ export interface AcpAgentServiceConfig {
   projectRoot: string;
   /**
    * MCP whitelist from ACP variant config. When set, MCP servers are resolved
-   * at invoke time from capabilities.json (not frozen at construction time).
-   * This ensures capability toggles take effect without registry rebuild.
+   * at invocation admission from capabilities.json, before the lease wait.
+   * Capability toggles affect the next invocation without a registry rebuild.
    */
   mcpWhitelist?: string[];
-  /** @deprecated Pre-resolved MCP servers. Prefer mcpWhitelist for invoke-time resolution. */
+  /** @deprecated Pre-resolved MCP servers. Prefer mcpWhitelist for per-invocation capture. */
   mcpServers?: AcpMcpServer[];
+  /** Factory-owned construction identity; display labels do not establish the execution client. */
+  clientId?: ClientId;
   /** Provider name for metadata (e.g. 'google', 'opencode'). Defaults to 'acp'. */
   providerName?: string;
   /** Model name for metadata. Defaults to 'acp'. */
   modelName?: string;
   /** ACP session model override sent via session/set_config_option when the agent exposes model selection. */
   sessionModel?: string;
+  /** Tool-owned effort captured with this process generation; explicit member choices win. */
+  nativeDefaultEffort?: string;
   /**
    * Protocol adapter selection. 'icode' switches the service onto iCode's ACP
    * dialect: model selection via standard session/set_model (fail-loud), no
@@ -191,16 +196,18 @@ export interface AcpAgentServiceConfig {
 export type GeminiAcpAdapterConfig = AcpAgentServiceConfig;
 
 export class AcpAgentService implements AgentService {
+  readonly cancellationMode = 'drain' as const;
   private readonly antigravity?: AgyAcpConfig;
   readonly catId: CatId;
   private readonly pool: AcpProcessPool;
   private readonly poolKey: PoolKey;
   private readonly projectRoot: string;
-  /** Invoke-time whitelist — when non-null, MCP servers are resolved fresh each invoke. */
+  /** Admission whitelist — when non-null, MCP servers are captured fresh for each invocation. */
   private readonly mcpWhitelist: string[] | null;
   /** Pre-resolved servers (legacy/test path). Used only when mcpWhitelist is null. */
   private readonly mcpServers: AcpMcpServer[];
   private readonly providerName: string;
+  private readonly clientId?: ClientId;
   /**
    * ACP native tools may omit a configured model from the member record.  The
    * first session then reports its actual model through configOptions; keep
@@ -209,6 +216,7 @@ export class AcpAgentService implements AgentService {
    */
   private modelName: string;
   private readonly sessionModel?: string;
+  private readonly nativeDefaultEffort?: string;
   readonly protocolAdapter: 'icode' | undefined;
   private readonly appliedContextBinding?: import('../../../types.js').AgentContextBinding;
   private readonly mcpSupportEnabled: boolean;
@@ -230,6 +238,7 @@ export class AcpAgentService implements AgentService {
   constructor(config: AcpAgentServiceConfig) {
     this.antigravity = config.antigravity;
     this.catId = config.catId;
+    this.clientId = config.clientId;
     this.pool = config.pool;
     this.poolKey = config.poolKey;
     this.projectRoot = config.projectRoot;
@@ -238,11 +247,57 @@ export class AcpAgentService implements AgentService {
     this.providerName = config.providerName ?? 'acp';
     this.modelName = config.modelName ?? config.sessionModel ?? 'acp';
     this.sessionModel = config.sessionModel?.trim() || undefined;
+    this.nativeDefaultEffort = config.nativeDefaultEffort;
     this.protocolAdapter = config.protocolAdapter;
     this.appliedContextBinding = config.contextBinding;
     this.mcpSupportEnabled = config.mcpSupport !== false;
     this.idleTtlMs = config.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS;
     this.agentBusyRetryDelaysMs = config.agentBusyRetryDelaysMs ?? DEFAULT_AGENT_BUSY_RETRY_DELAYS_MS;
+  }
+
+  implementationSnapshot() {
+    return Object.freeze({
+      key: 'builtin:acp',
+      generation: agentServiceGeneration(this),
+      ...(this.clientId ? { clientId: this.clientId } : {}),
+    });
+  }
+
+  /** Resolve the same existing MCP sources before admission can wait for a process. */
+  async captureInvocationOptions(input: Parameters<NonNullable<AgentService['captureInvocationOptions']>>[0]) {
+    const userProjectRoot = input.workingDirectory;
+    const mcpSupport = input.mcpSupport ?? this.mcpSupportEnabled;
+    let baseMcpServers: AcpMcpServer[];
+    if (!mcpSupport) {
+      baseMcpServers = [];
+    } else if (this.mcpWhitelist !== null) {
+      const binaryRoot = resolveBinaryRoot(this.projectRoot);
+      const capabilitiesRoot = await resolveInvokeCapabilityRoot(binaryRoot);
+      const {
+        config: capConfig,
+        configSourceRoot,
+        accessScope,
+      } = readInvocationMcpConfig(capabilitiesRoot, userProjectRoot);
+      assertMappedCapabilitySource(capConfig !== null, binaryRoot, capabilitiesRoot);
+      const disabled = resolveDisabledServerIds(this.projectRoot, this.catId as string, capConfig, { accessScope });
+      baseMcpServers = await resolveAcpMcpServers(this.projectRoot, this.mcpWhitelist, undefined, {
+        mcpSupport,
+        disabledServerIds: disabled,
+        catId: this.catId as string,
+        capabilitiesConfig: capConfig,
+        configSourceRoot,
+        accessScope,
+      });
+    } else {
+      baseMcpServers = this.mcpServers;
+    }
+    let invokeServers = baseMcpServers;
+    if (mcpSupport && userProjectRoot && userProjectRoot !== this.projectRoot) {
+      const baseNames = new Set(baseMcpServers.map((s) => s.name));
+      const userServers = resolveUserProjectMcpServers(userProjectRoot, baseNames);
+      if (userServers.length > 0) invokeServers = [...baseMcpServers, ...userServers];
+    }
+    return { frozenAcpMcpServers: structuredClone(invokeServers) };
   }
 
   /**
@@ -335,6 +390,7 @@ export class AcpAgentService implements AgentService {
       beforeAttempt?: (attempt: number) => Promise<void>;
       onAttemptStart?: () => void;
       onBackoff?: (attempt: number, delayMs: number) => void;
+      onAbandoned?: () => void;
     },
   ): AsyncGenerator<AcpSessionUpdate> {
     const delays = this.agentBusyRetryDelaysMs;
@@ -344,6 +400,7 @@ export class AcpAgentService implements AgentService {
       hooks?.onAttemptStart?.();
       try {
         const stream = client.promptStream(sessionId, prompt, opts);
+        let yielding = false;
         try {
           while (true) {
             const next = await stream.next();
@@ -355,9 +412,12 @@ export class AcpAgentService implements AgentService {
               break;
             }
             yieldedEvents++;
+            yielding = true;
             yield next.value;
+            yielding = false;
           }
         } finally {
+          if (yielding) hooks?.onAbandoned?.();
           await stream.return(undefined);
         }
         return;
@@ -418,17 +478,39 @@ export class AcpAgentService implements AgentService {
       return;
     }
 
+    // Direct internal callers admit here; the Host path supplies its earlier frozen choices.
+    const nativeTool = options?.executionPreferences
+      ? options.executionPreferences.configurationSource === 'native_tool'
+      : catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool';
+    const requestedModel = nativeTool
+      ? (options?.executionPreferences?.model ?? getCatModel(this.catId)) || undefined
+      : undefined;
+    const preferences = {
+      model: requestedModel,
+      effort: nativeTool
+        ? (options?.reasoningEffortOverride ?? options?.executionPreferences?.effort ?? getCatEffort(this.catId)) ||
+          (requestedModel ? undefined : this.nativeDefaultEffort)
+        : undefined,
+    };
     let lease: AcpLease | null = null;
+    let invokeServers: AcpMcpServer[];
+    let preparingMcp = true;
     try {
+      invokeServers =
+        options?.frozenAcpMcpServers ??
+        (await this.captureInvocationOptions({ workingDirectory: options?.workingDirectory })).frozenAcpMcpServers;
+      options?.signal?.throwIfAborted();
+      preparingMcp = false;
       lease = await this.pool.acquire(this.poolKey, { sessionId: options?.sessionId });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      log.error({ ...ctx, err: errMsg }, 'ACP init failure');
+      const errorCode = options?.signal?.aborted ? 'prompt_failure' : preparingMcp ? 'mcp_pollution' : 'init_failure';
+      log.error({ ...ctx, err: errMsg, errorCode }, 'ACP preparation failure');
       yield {
         type: 'error',
         catId: this.catId,
-        error: `init_failure: ${errMsg}`,
-        errorCode: 'init_failure',
+        error: `${errorCode}: ${errMsg}`,
+        errorCode,
         metadata,
         timestamp: Date.now(),
       };
@@ -552,46 +634,6 @@ export class AcpAgentService implements AgentService {
         options?.uploadDir,
         options?.resolveTrustedImagePath,
       );
-      // #712 P1-1: resolve MCP servers at invoke time from capabilities.json
-      // so capability toggles take effect immediately without registry rebuild.
-      // P1-2: check project-local capabilities.json first, fall back to runtime root.
-      const userProjectRoot = options?.workingDirectory;
-      let baseMcpServers: AcpMcpServer[];
-      if (!this.mcpSupportEnabled) {
-        baseMcpServers = [];
-      } else if (this.mcpWhitelist !== null) {
-        const binaryRoot = resolveBinaryRoot(this.projectRoot);
-        const capabilitiesRoot = await resolveInvokeCapabilityRoot(binaryRoot);
-        const {
-          config: capConfig,
-          configSourceRoot,
-          accessScope,
-        } = readInvocationMcpConfig(capabilitiesRoot, userProjectRoot);
-        if (this.mcpSupportEnabled) assertMappedCapabilitySource(capConfig !== null, binaryRoot, capabilitiesRoot);
-        const disabled = resolveDisabledServerIds(this.projectRoot, this.catId as string, capConfig, { accessScope });
-        baseMcpServers = await resolveAcpMcpServers(this.projectRoot, this.mcpWhitelist, undefined, {
-          mcpSupport: this.mcpSupportEnabled,
-          disabledServerIds: disabled,
-          catId: this.catId as string,
-          capabilitiesConfig: capConfig,
-          configSourceRoot,
-          accessScope,
-        });
-      } else {
-        baseMcpServers = this.mcpServers;
-      }
-
-      // F145 Phase E: merge user project .mcp.json servers per-invoke
-      // F161 gate: when mcpSupport is disabled, skip ALL MCP
-      let invokeServers = baseMcpServers;
-      if (this.mcpSupportEnabled && userProjectRoot && userProjectRoot !== this.projectRoot) {
-        const baseNames = new Set(baseMcpServers.map((s) => s.name));
-        const userServers = resolveUserProjectMcpServers(userProjectRoot, baseNames);
-        if (userServers.length > 0) {
-          invokeServers = [...baseMcpServers, ...userServers];
-        }
-      }
-
       // Per-invocation: merge callbackEnv into cat-cafe* MCP servers so callback tools
       // (multi_mention, post_message, etc.) get CAT_CAFE_API_URL / token / invocationId.
       // #1099 review P1: the credential refresh file is SESSION-scoped — the nonce path
@@ -630,7 +672,12 @@ export class AcpAgentService implements AgentService {
           };
         }
         return {
-          mcpServers: materializeSessionMcpServers(invokeServers, sessionCallbackEnv, Boolean(agy)),
+          mcpServers: materializeSessionMcpServers(
+            invokeServers,
+            sessionCallbackEnv,
+            Boolean(agy),
+            client.agentCapabilities?.mcpCapabilities?.http === true,
+          ),
           envDiag: callbackEnvDiagnostic(sessionCallbackEnv),
         };
       };
@@ -664,11 +711,6 @@ export class AcpAgentService implements AgentService {
         { type: 'done', catId: this.catId, metadata, timestamp: Date.now() },
       ];
 
-      const nativeTool = catRegistry.tryGet(this.catId)?.config.configurationSource === 'native_tool';
-      const preferences = {
-        model: nativeTool ? getCatModel(this.catId) || undefined : undefined,
-        effort: nativeTool ? (options?.reasoningEffortOverride ?? (getCatEffort(this.catId) || undefined)) : undefined,
-      };
       let nativeDefaults: { model?: string; effort?: string } = {};
       if (nativeTool && resumeSessionId) {
         nativeDefaults = await defaultsForNativeResume(client, cwd, preferences, () => client.newSession(cwd, []));
@@ -676,10 +718,11 @@ export class AcpAgentService implements AgentService {
       const configureNative = async (session: AcpNewSessionResult, fresh = false) => {
         if (!nativeTool) return;
         if (fresh) nativeDefaults = await captureNativeDefaults(client, session, cwd, preferences.model);
-        await applySessionConfiguration(client, session, {
+        const configured = await applySessionConfiguration(client, session, {
           model: preferences.model || nativeDefaults.model,
           effort: preferences.effort || nativeDefaults.effort,
         });
+        adoptObservedNativeModel(reportedSessionModel(configured));
       };
       let resumedSession: AcpNewSessionResult | undefined;
       if (resumeSessionId) {
@@ -750,7 +793,6 @@ export class AcpAgentService implements AgentService {
       // Configuration rejection is not a load failure: preserve the resumed history.
       if (resumedSession) {
         await configureNative(resumedSession);
-        adoptObservedNativeModel(nativeDefaults.model);
       }
 
       if (resumeDisposition !== 'resumed') {
@@ -766,7 +808,6 @@ export class AcpAgentService implements AgentService {
         );
         const session = await client.newSession(cwd, sessionMcpServers, agy?.meta);
         await configureNative(session, true);
-        adoptObservedNativeModel(nativeDefaults.model);
         sessionId = session.sessionId;
         if (agy) await selectAgyAcpModel(client, session, sessionId, this.modelName);
         this.pool.rememberSession?.(this.poolKey, sessionId, lease);
@@ -925,6 +966,9 @@ export class AcpAgentService implements AgentService {
         onBackoff: () => {
           promptPhase = 'busy_backoff';
         },
+        onAbandoned: () => {
+          if (sessionId) cancelActivePromptSession(sessionId);
+        },
       };
       log.info({ ...ctx, sessionId, promptDigest, idleTtlMs: this.idleTtlMs }, 'ACP promptStream starting');
       eventCount = 0;
@@ -1041,7 +1085,6 @@ export class AcpAgentService implements AgentService {
           const retryConfig = buildSessionConfig(retryCreds);
           const freshSession = await client.newSession(cwd, retryConfig.mcpServers);
           await configureNative(freshSession, true);
-          adoptObservedNativeModel(nativeDefaults.model);
           const freshSessionId = freshSession.sessionId;
           this.pool.rememberSession?.(this.poolKey, freshSessionId, lease);
           // Replacement retry is a NEW ACP session, so it must get a fresh
@@ -1251,6 +1294,7 @@ export class AcpAgentService implements AgentService {
       };
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } finally {
+      if (sessionId) cancelActivePromptSession(sessionId);
       agyActive = false;
       if (this.antigravity && sessionId) client.setSessionPermissionHandler(sessionId);
       if (this.antigravity && requiresProviderShutdown()) await client.close?.();
@@ -1308,7 +1352,7 @@ export class AcpAgentService implements AgentService {
         if (onAbort && options?.signal) {
           options.signal.removeEventListener('abort', onAbort);
         }
-        lease.release();
+        await lease.release();
       }
     }
   }
@@ -1396,6 +1440,8 @@ function classifyError(
   capacitySignal: AcpCapacitySignal | null | undefined,
   clientRecentSignal?: AcpCapacitySignal | null,
 ): { errorCode: string; errorMsg: string } {
+  if (err instanceof AcpSessionBindingChangedError)
+    return { errorCode: 'native_session_binding_changed', errorMsg: err.message };
   if (err instanceof AcpEmptyResponseError) return { errorCode: 'empty_response', errorMsg: err.message };
   if (err instanceof AcpImageInputError) return { errorCode: err.code, errorMsg: err.message };
   if (err instanceof AcpProtocolError) {

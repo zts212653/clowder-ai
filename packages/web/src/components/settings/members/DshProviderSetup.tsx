@@ -100,9 +100,17 @@ export function DshProviderSetup({
         setInspection(data);
         setProfiles(data.profiles);
         setReceipt('');
-        const route = data.source.providers.find((p) => p.id === data.active.provider) ?? data.source.providers[0];
+        const route =
+          data.source.providers.find((p) => p.id === data.source.provider) ??
+          data.source.providers.find((p) => p.id === data.active.provider) ??
+          data.source.providers[0];
         setProvider(route?.id ?? '');
-        setModel(route?.models.find((m) => m.id === data.active.model)?.id ?? route?.models[0]?.id ?? '');
+        setModel(
+          route?.models.find((m) => m.id === data.source.model)?.id ??
+            route?.models.find((m) => m.id === data.active.model)?.id ??
+            route?.models[0]?.id ??
+            '',
+        );
       } else if (action === 'prepare' && inspection) {
         const data: { id: string; command: string; startupArgs: string[] } = await request(action, {
           runtimeId,

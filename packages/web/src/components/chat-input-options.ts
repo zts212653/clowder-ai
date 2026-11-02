@@ -1,11 +1,13 @@
 import type { CatData } from '@/hooks/useCatData';
-import { formatCatDisplayName } from '@/lib/cat-display-name';
+import { formatCatDisplayName, formatCatNameplateName } from '@/lib/cat-display-name';
 import { catColorVar } from '@/lib/cat-slug';
 import { GROUP_MENTION_COLOR } from '@/lib/color-defaults';
 
 export interface CatOption {
   id: string;
   label: string;
+  /** Retain full-name autocomplete matching when the visible label is a nickname. */
+  searchText?: string;
   desc: string;
   insert: string;
   color: string; // CSS color (var or hex) for inline style
@@ -73,9 +75,9 @@ function buildBreedGroupOptions(cats: CatData[]): CatOption[] {
 
 /** Build @mention autocomplete options from dynamic cat data.
  *  Filters out cats with no mentionPatterns (not routable via @mention). */
-/** Format display label with optional variant disambiguation */
+/** Candidate names and alias insertion are separate display/routing values. */
 function formatCatLabel(cat: CatData): string {
-  return `@${formatCatDisplayName(cat)}`;
+  return formatCatNameplateName(cat);
 }
 
 function isAvailable(cat: CatData): boolean {
@@ -109,6 +111,7 @@ export function buildCatOptions(cats: CatData[]): CatOption[] {
       return {
         id: cat.id,
         label: formatCatLabel(cat),
+        searchText: formatCatDisplayName(cat),
         desc: cat.roleDescription,
         insert: `@${cat.mentionPatterns[0].replace(/^@/, '')} `,
         color: catColorVar(cat.id, 'primary'),

@@ -12,9 +12,9 @@ export function usesDetectedRuntimeConfiguration(form: HubCatEditorFormState, ru
   );
 }
 
-/** Pi uses an opaque provider/model pair on the wire; this changes its label only. */
+/** DSH and Pi use opaque provider/model pairs; this changes their labels only. */
 export function nativeModelLabel(runtime: RuntimeChoice, value: string | undefined): string | undefined {
-  if (!value || runtime.id !== 'pi') return value;
+  if (!value || !['pi', 'dsh'].includes(runtime.id)) return value;
   try {
     const pair: unknown = JSON.parse(value);
     return Array.isArray(pair) && pair.length === 2 && pair.every((item) => typeof item === 'string')

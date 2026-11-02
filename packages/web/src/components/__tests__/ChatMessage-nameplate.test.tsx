@@ -103,7 +103,7 @@ describe('F322 B segment 1 — cat nameplate, no outer bubble', () => {
   const bubble = () => container.querySelector('[data-testid="message-bubble"]') as HTMLElement;
   const wrapper = () => container.querySelector('[data-message-id]') as HTMLElement;
 
-  describe('classic presentation is untouched', () => {
+  describe('classic layout with the configured nickname', () => {
     it('still draws the bubble with the cat surface, the 32px avatar column and the small name', () => {
       render(catMessage());
 
@@ -114,9 +114,31 @@ describe('F322 B segment 1 — cat nameplate, no outer bubble', () => {
       expect(wrapper().querySelector('[data-sender-avatar="message"]')?.className).toContain('w-8 h-8');
       expect(wrapper().querySelector('[data-sender-avatar="message"] img')?.className).toContain('w-full h-full');
       const name = container.querySelector('[data-testid="message-header"] span.truncate') as HTMLElement;
-      expect(name.textContent).toContain('布偶猫');
+      expect(name.textContent).toContain('宪宪');
       expect(name.style.opacity).toBe('0.8');
     });
+  });
+
+  it('uses the same nickname on the input dispatch receipt', () => {
+    render(
+      catMessage({
+        id: 'input-1',
+        type: 'user',
+        catId: undefined,
+        from: { kind: 'user', userId: 'default-user' },
+        content: '@opus hello',
+        lifecycle: {
+          kind: 'input',
+          orderKey: '1',
+          dispatchRefs: [
+            { targetId: 'opus', phase: 'dispatched', statusMessageId: 'reply-1', dispatchedAt: Date.now() },
+          ],
+        },
+      }),
+    );
+    const receipt = container.querySelector('[data-testid="message-dispatch-avatars"]');
+    expect(receipt?.textContent).toContain('宪宪');
+    expect(receipt?.textContent).not.toContain('布偶猫');
   });
 
   describe('v2 presentation', () => {
@@ -137,7 +159,7 @@ describe('F322 B segment 1 — cat nameplate, no outer bubble', () => {
       expect(frame.style.backgroundColor).toBe('var(--shell-work)');
       expect(avatars[0]?.className).toContain('w-full h-full');
       expect(frame.parentElement?.style.boxShadow).toBe('');
-      expect(p?.textContent).toContain('布偶猫');
+      expect(p?.textContent).toContain('宪宪');
       // The plate is inside the header, which stays where code and tests find it.
       expect(container.querySelector('[data-testid="message-header"]')?.contains(p)).toBe(true);
     });
@@ -145,7 +167,7 @@ describe('F322 B segment 1 — cat nameplate, no outer bubble', () => {
     it('keeps a trusted legacy user record with catId on the same assistant nameplate path', () => {
       render(catMessage({ type: 'user' }));
 
-      expect(plate()?.textContent).toContain('布偶猫');
+      expect(plate()?.textContent).toContain('宪宪');
       expect(container.querySelector('[data-testid="reply-layers"]')).not.toBeNull();
     });
 
@@ -161,7 +183,7 @@ describe('F322 B segment 1 — cat nameplate, no outer bubble', () => {
       const name = plate()?.querySelector('[data-testid="cat-nameplate-name"]') as HTMLElement;
 
       expect(name.style.color).toBe('var(--color-opus-text)');
-      expect(name.textContent).toBe('布偶猫');
+      expect(name.textContent).toBe('宪宪');
       expect(name.textContent).not.toContain('@');
       expect(name.style.opacity).toBe('');
     });

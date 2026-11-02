@@ -16,6 +16,7 @@ import { PawIcon } from '../icons/PawIcon';
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellPresentation } from '../shell/shell-presentation';
 import { ThreadCatStatus } from '../ThreadCatStatus';
+import { CopyThreadIdMenuItem } from './CopyThreadIdMenuItem';
 import { useSidebarDraftDecoration } from './sidebar-draft-decoration';
 import { ThreadPinV2 } from './ThreadPinV2';
 import { ThreadRowSignals } from './ThreadRowSignals';
@@ -401,6 +402,7 @@ function ThreadItemComponent({
                     </ThreadActionMenuItem>
                   )}
                   <ExportButton threadId={id} variant="thread-menu" onSelect={() => setIsMoreOpen(false)} />
+                  <CopyThreadIdMenuItem threadId={id} />
                   {onReplay && (
                     <ThreadActionMenuItem icon={<ReplayIcon />} onClick={startReplay}>
                       回放剧场

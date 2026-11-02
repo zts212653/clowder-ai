@@ -91,6 +91,14 @@ export function ChatInputMenus({
                         {opt.providerLabel}
                       </span>
                     )}
+                    {!opt.isGroup && opt.insert && (
+                      <span
+                        className="ml-auto shrink-0 max-w-[60%] truncate text-xs text-cafe-muted"
+                        title={opt.insert.trim()}
+                      >
+                        {opt.insert.trim()}
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-cafe-muted">{opt.desc}</div>
                 </div>

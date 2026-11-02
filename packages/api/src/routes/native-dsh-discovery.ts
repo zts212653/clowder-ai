@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { readDshNativeConfiguration } from '../config/dsh-native-configuration.js';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
 import { findSystemNode } from '../utils/cli-spawn-win.js';
 import { dshProfileState } from './native-dsh-profile.js';
@@ -49,7 +50,17 @@ export function discoverDshRuntime(options: DiscoveryOptions = {}) {
   const entry = command ? undefined : cachedEntry(caches);
   const executable = command ?? (entry ? (findSystemNode() ?? undefined) : undefined);
   const profileState = dshProfileState(options.dshHome);
-  const available = Boolean(executable && profileState !== 'acp_profile_invalid');
+  let configuration: ReturnType<typeof readDshNativeConfiguration>;
+  let configurationError: string | undefined;
+  try {
+    configuration = readDshNativeConfiguration(
+      options.dshHome,
+      executable ? { command: executable, args: entry ? [entry] : [] } : undefined,
+    );
+  } catch (error) {
+    configurationError = error instanceof Error ? error.message : 'dsh_config_invalid';
+  }
+  const available = Boolean(executable && profileState !== 'acp_profile_invalid' && !configurationError);
   const startupArgs = [...(entry ? [entry] : []), '--profile', 'acp'];
   return {
     id: 'dsh',
@@ -58,7 +69,12 @@ export function discoverDshRuntime(options: DiscoveryOptions = {}) {
     installed: Boolean(executable),
     command: executable,
     ...(available && executable ? { acp: { command: executable, startupArgs, transport: 'stdio' as const } } : {}),
-    models: [] as string[],
+    models: configuration?.models ?? [],
+    configuredModel: configuration?.model,
+    configuredEffort: configuration?.effort,
+    configurationError,
+    sourceProfile: configuration?.profile,
+    configurationRevision: configuration?.revision,
     defaultsStatus: 'session_only',
     transport: 'acp',
     discoveryStatus: executable ? profileState : 'not_installed',
