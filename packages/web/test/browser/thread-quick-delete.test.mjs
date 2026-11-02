@@ -163,11 +163,11 @@ test(
     });
     const first = page.locator(`[data-thread-id="${threads[0].id}"]`);
     await first.hover();
-    await page.waitForFunction(() => {
-      const row = document.querySelector('[data-thread-id]');
+    await page.waitForFunction((id) => {
+      const row = document.querySelector(`[data-thread-id="${id}"]`);
       const more = row?.querySelector('[aria-label="更多操作"]');
       return more && getComputedStyle(more).opacity === '1';
-    });
+    }, threads[0].id);
     await page.screenshot({ path: path.join(evidence, '00-quick-delete-row.png') });
     await first.getByTestId('thread-quick-delete').click();
     const dialog = page.getByRole('dialog', { name: '确认删除对话' });
