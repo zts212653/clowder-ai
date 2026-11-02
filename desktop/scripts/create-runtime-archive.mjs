@@ -10,7 +10,7 @@ export async function createRuntimeArchive(source, file) {
   if (fs.existsSync(file) || fs.existsSync(file + '.json')) throw new Error('Archive output must be new');
   const tar = createRequire(resolveNpmCli())('tar');
   const started = Date.now();
-  await tar.c({ file, cwd: source, portable: true, gzip: { level: 1 }, jobs: 4, follow: false }, ['.']);
+  await tar.c({ file, cwd: source, portable: true, gzip: { level: 9 }, jobs: 4, follow: false }, ['.']);
   let entries = 0;
   await tar.t({ file, strict: true, onReadEntry: () => entries++ });
   const sha256 = createHash('sha256');

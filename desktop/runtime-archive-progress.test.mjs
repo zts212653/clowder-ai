@@ -107,3 +107,28 @@ test('installer failure prevents later setup actions and cannot report success',
   assert.match(failure, /procedure CancelButtonClick[\s\S]*Confirm := False/);
   assert.match(failure, /RuntimeFailure :=[\s\S]*WizardForm.Close/);
 });
+
+test('runtime archives reduce repetitive payload size while preserving extracted bytes', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-compression-'));
+  try {
+    const input = path.join(root, 'input');
+    fs.mkdirSync(input);
+    const content = Buffer.from('runtime payload with repeated modules and source map content\n'.repeat(32768));
+    fs.writeFileSync(path.join(input, 'payload.txt'), content);
+    const baseline = path.join(root, 'baseline.tar.gz');
+    const candidate = path.join(root, 'candidate.tar.gz');
+    await tar.c({ file: baseline, cwd: input, portable: true, gzip: { level: 1 }, follow: false }, ['.']);
+    const receipt = await createRuntimeArchive(input, candidate);
+    assert.ok(
+      receipt.bytes < fs.statSync(baseline).size * 0.7,
+      'release compression must improve this representative repetitive payload',
+    );
+    const extracted = path.join(root, 'extracted');
+    fs.mkdirSync(extracted);
+    await tar.x({ file: candidate, cwd: extracted });
+    assert.deepEqual(fs.readFileSync(path.join(extracted, 'payload.txt')), content);
+    assert.equal(JSON.parse(fs.readFileSync(candidate + '.json')).bytes, fs.statSync(candidate).size);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { nativeRuntimeAssetFilter } from './native-runtime-assets.mjs';
 import { selectRuntimeDependencies } from './runtime-dependency-selection.mjs';
 import { stageBuiltWeb } from './stage-built-web.mjs';
 import { workspaceRuntimeModules } from './workspace-runtime-modules.mjs';
@@ -10,9 +11,9 @@ const hash = (file) => createHash('sha256').update(fs.readFileSync(file)).digest
 
 /** Materialize only links inside the frozen workspace; reject external/cyclic inputs. */
 export function materialize(from, to, workspace, ancestors = new Set(), include = () => true) {
-  if (!include(from)) return;
   const real = !ancestors.size || fs.lstatSync(from).isSymbolicLink() ? fs.realpathSync(from) : path.resolve(from);
   if (!inside(workspace, real)) throw new Error(`External packaging link: ${from}`);
+  if (!include(from)) return;
   const stat = fs.statSync(real);
   if (!stat.isDirectory()) {
     fs.copyFileSync(real, to);
@@ -39,9 +40,16 @@ export function exportFrozenRuntime(
   out,
   packages,
   lockFile,
-  { sharedDependencies = false, builtWebSource, pruneWebBuildDependencies = false, expectedWebBuildCommit } = {},
+  {
+    sharedDependencies = false,
+    builtWebSource,
+    pruneWebBuildDependencies = false,
+    expectedWebBuildCommit,
+    targetPlatform = `${process.platform}-${process.arch}`,
+  } = {},
 ) {
   workspace = fs.realpathSync(workspace);
+  const includeNativeAsset = nativeRuntimeAssetFilter(workspace, targetPlatform);
   const lockHash = hash(lockFile);
   if (hash(path.join(workspace, 'pnpm-lock.yaml')) !== lockHash) throw new Error('Frozen workspace lock changed');
   if (fs.existsSync(out)) throw new Error(`Output must be new: ${out}`);
@@ -72,12 +80,19 @@ export function exportFrozenRuntime(
       shared,
       workspace,
       new Set(),
-      (file) => workspaceModules.include(file) && (!webSelection || webSelection.include(file)),
+      (file) =>
+        workspaceModules.include(file) && (!webSelection || webSelection.include(file)) && includeNativeAsset(file),
     );
     for (const [name, source] of workspaceModules.hoisted) {
       const target = path.join(shared, name);
       fs.mkdirSync(path.dirname(target), { recursive: true });
-      materialize(source, target, workspace, new Set(), workspaceModules.include);
+      materialize(
+        source,
+        target,
+        workspace,
+        new Set(),
+        (file) => workspaceModules.include(file) && includeNativeAsset(file),
+      );
     }
     fs.writeFileSync(path.join(shared, '.runtime-lock.json'), JSON.stringify({ lockHash, node: process.version }));
   }
@@ -94,10 +109,11 @@ export function exportFrozenRuntime(
         workspace,
         new Set(),
         (file) =>
-          !sharedDependencies ||
-          name !== 'api' ||
-          !file.startsWith(path.join(source, 'dist') + path.sep) ||
-          !/\.d\.[cm]?ts(?:\.map)?$/.test(file),
+          includeNativeAsset(file) &&
+          (!sharedDependencies ||
+            name !== 'api' ||
+            !file.startsWith(path.join(source, 'dist') + path.sep) ||
+            !/\.d\.[cm]?ts(?:\.map)?$/.test(file)),
       );
     }
     // Retained packages keep their complete private peers and contents. Optional
@@ -107,8 +123,15 @@ export function exportFrozenRuntime(
     const modules = path.join(destination, 'node_modules');
     if (sharedDependencies) {
       fs.mkdirSync(modules);
-      if (fs.existsSync(ownModules)) materialize(ownModules, modules, workspace, new Set(), workspaceModules.include);
-    } else exportModules(path.join(workspace, 'node_modules'), ownModules, modules, workspace);
+      if (fs.existsSync(ownModules))
+        materialize(
+          ownModules,
+          modules,
+          workspace,
+          new Set(),
+          (file) => workspaceModules.include(file) && includeNativeAsset(file),
+        );
+    } else exportModules(path.join(workspace, 'node_modules'), ownModules, modules, workspace, includeNativeAsset);
     fs.writeFileSync(path.join(destination, '.runtime-lock.json'), JSON.stringify({ lockHash, node: process.version }));
     if (name === 'web' && builtWebSource) stageBuiltWeb(builtWebSource, destination);
   }
@@ -122,7 +145,7 @@ export function exportFrozenRuntime(
 }
 
 /** A package override replaces the entire module, never overlays old private peers. */
-export function exportModules(rootModules, ownModules, destination, workspace) {
+export function exportModules(rootModules, ownModules, destination, workspace, include = () => true) {
   fs.mkdirSync(destination, { recursive: true });
   for (const name of fs.readdirSync(rootModules)) {
     if (name.startsWith('.')) continue;
@@ -131,11 +154,11 @@ export function exportModules(rootModules, ownModules, destination, workspace) {
       fs.mkdirSync(path.join(destination, name), { recursive: true });
       for (const child of fs.readdirSync(source)) {
         if (fs.existsSync(path.join(ownModules, name, child))) continue;
-        materialize(path.join(source, child), path.join(destination, name, child), workspace);
+        materialize(path.join(source, child), path.join(destination, name, child), workspace, new Set(), include);
       }
     } else if (!fs.existsSync(path.join(ownModules, name))) {
-      materialize(source, path.join(destination, name), workspace);
+      materialize(source, path.join(destination, name), workspace, new Set(), include);
     }
   }
-  if (fs.existsSync(ownModules)) materialize(ownModules, destination, workspace);
+  if (fs.existsSync(ownModules)) materialize(ownModules, destination, workspace, new Set(), include);
 }
