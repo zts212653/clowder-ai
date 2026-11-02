@@ -16,7 +16,7 @@ import { LocalPluginPackageAdmission } from '../src/domains/plugin/manager/local
 import { bundledManifestDigest } from '../src/domains/plugin/official-catalog.js';
 import { registerAgentClientLibraryRoutes } from '../src/routes/agent-client-library-routes.js';
 
-async function fixture(t: TestContext, { count = 1, files = 0, declaration = false } = {}) {
+async function fixture(t: TestContext, { count = 1, files = 0, declaration = false, fixed = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'agent-catalog-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const source = join(root, 'source');
@@ -26,8 +26,20 @@ async function fixture(t: TestContext, { count = 1, files = 0, declaration = fal
       writeFile(join(source, `package/file-${i}.txt`), Buffer.alloc(16 * 1024, 'x')),
     ),
   );
-  if (declaration)
-    await writeFile(join(source, 'package/agent-provider.json'), JSON.stringify({ configurationKey: 'clients' }));
+  if (declaration || fixed)
+    await writeFile(
+      join(source, 'package/agent-provider.json'),
+      JSON.stringify(
+        fixed
+          ? {
+              id: 'codeagent',
+              transport: 'acp',
+              configurationKey: 'clients',
+              acp: { command: 'codeagent', startupArgs: [] },
+            }
+          : { configurationKey: 'clients' },
+      ),
+    );
   const packages = new FilesystemVerifiedPluginPackageLocator(join(root, 'cache'));
   const store = new MemoryPluginInventoryStore();
   const admission = new LocalPluginPackageAdmission({
@@ -41,8 +53,12 @@ async function fixture(t: TestContext, { count = 1, files = 0, declaration = fal
       contractVersion: '0.1.0',
       name: `Catalog ${i}`,
       features: [{ id: 'agent', name: 'Agent', resources: [], capabilities: [] }],
-      ...(declaration
-        ? { configuration: [{ key: 'clients', label: 'Clients', kind: 'string', required: false, default: '[]' }] }
+      ...(declaration || fixed
+        ? {
+            configuration: [
+              { key: 'clients', label: 'Clients', kind: 'string', required: false, default: fixed ? '{}' : '[]' },
+            ],
+          }
         : {}),
     };
     await writeFile(join(source, 'package/manifest.json'), JSON.stringify(manifest));
@@ -65,7 +81,7 @@ async function fixture(t: TestContext, { count = 1, files = 0, declaration = fal
   registerAgentClientLibraryRoutes(app, {
     inventory: store,
     registry,
-    configuration: { readConfig: async () => JSON.stringify(clients) },
+    configuration: { readConfig: async () => JSON.stringify(fixed ? { permissionPolicy: 'deny' } : clients) },
   });
   t.after(() => app.close());
   const read = () =>
@@ -113,6 +129,22 @@ test('a declared library reads metadata and fresh configuration without archive 
   h.setClients([{ id: 'second', name: 'Changed', command: 'node', startupArgs: [] }]);
   assert.equal((await h.read()).json().libraries[0]?.clients[0]?.id, 'second');
   assert.equal(staged.mock.callCount(), 0, 'a declared library list must not repeat execution admission');
+});
+
+test('a fixed connection keeps its identity and ordinary config editor without reading its archive', async (t) => {
+  const h = await fixture(t, { fixed: true });
+  const staged = t.mock.method(FilesystemVerifiedPluginPackageLocator.prototype, 'resolveInstalledPackage');
+  const scanned = t.mock.method(FilesystemVerifiedPluginPackageLocator.prototype, 'readInstalledStaticFile');
+  for (const _read of [0, 1]) {
+    const library = (await h.read()).json().libraries[0];
+    assert.equal(library.configurationKey, null, JSON.stringify(library));
+    assert.deepEqual(library.clients, [
+      { id: 'codeagent', name: 'codeagent', ref: 'plugin:local.catalog-0/codeagent', available: false },
+    ]);
+    assert.equal(library.error, undefined);
+  }
+  assert.equal(staged.mock.callCount(), 0);
+  assert.equal(scanned.mock.callCount(), 0);
 });
 
 test('a corrupt archive cannot become trusted legacy metadata during restart recovery', async (t) => {

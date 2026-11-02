@@ -3498,6 +3498,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         mentionPatterns: ['@acp-deepseek'],
         roleDescription: 'ACP agent',
         clientId: 'acp',
+        executionApproval: 'ask_user',
         accountRef: acpProfile.id,
         defaultModel: 'deepseek-chat',
         acp: acpConfig,
@@ -3520,6 +3521,26 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const listed = listBody.cats.find((cat) => cat.id === 'acp-deepseek');
     assert.equal(listed.mcpSupport, true, 'GET /api/cats should preserve MCP support implied by the ACP whitelist');
     assert.deepEqual(listed.acp, acpConfig, 'GET /api/cats should include ACP config for Hub editing');
+    assert.equal(body.cat.executionApproval, 'ask_user');
+    assert.equal(listed.executionApproval, 'ask_user');
+    const invalidApproval = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/acp-deepseek',
+      headers: { 'x-cat-cafe-user': 'codex' },
+      payload: { executionApproval: 'arbitrary' },
+    });
+    assert.equal(invalidApproval.statusCode, 400);
+    const autoApproval = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/acp-deepseek',
+      headers: { 'x-cat-cafe-user': 'codex' },
+      payload: { executionApproval: 'auto' },
+    });
+    assert.equal(autoApproval.statusCode, 200, autoApproval.body);
+    assert.equal(autoApproval.json().cat.executionApproval, 'auto');
+    assert.deepEqual(autoApproval.json().cat.acp, acpConfig);
+    const reloaded = (await app.inject({ method: 'GET', url: '/api/cats' })).json();
+    assert.equal(reloaded.cats.find((cat) => cat.id === 'acp-deepseek').executionApproval, 'auto');
   });
 
   it('GET/PATCH /api/cats resolves ACP config from active project root, not CAT_TEMPLATE_PATH', async () => {

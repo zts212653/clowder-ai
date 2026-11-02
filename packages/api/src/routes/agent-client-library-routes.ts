@@ -46,16 +46,18 @@ export function registerAgentClientLibraryRoutes(
         if ('error' in metadata) throw new Error(metadata.error);
         const { catalog } = metadata;
         configurationKey = catalog.configurationKey;
-        const profiles =
-          configurationKey === null
-            ? catalog.clients
-            : readAgentClientProfileList(
-                await readAgentClientLibraryConfiguration({
-                  declaration: { configurationKey },
-                  admission: { instance, packageRecord: { ...record, manifest: record.manifest } },
-                  configuration: input.configuration,
-                }),
-              );
+        let profiles = catalog.clients;
+        if (configurationKey !== null) {
+          const { value, ownerSaved } = await readAgentClientLibraryConfiguration({
+            declaration: { configurationKey },
+            admission: { instance, packageRecord: { ...record, manifest: record.manifest } },
+            configuration: input.configuration,
+          });
+          const configured = readAgentClientProfileList(value);
+          if (!ownerSaved && configured.some((profile) => profile.permissionPolicy === 'auto_allow'))
+            throw new Error('ACP 权限自动允许需要 owner 显式保存选择，不能来自插件默认配置');
+          profiles = configured;
+        }
         libraries.push({
           pluginId: instance.pluginId,
           presets: catalog.presets,

@@ -8,11 +8,11 @@ import type { PluginAgentClientMetadata } from '../host-inventory/agent-client-m
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import { LEGACY_BUNDLED_MANIFESTS } from '../legacy-bundled-manifests.js';
 import { bundledManifestDigest } from '../official-catalog.js';
-import { readDeclaration } from './declared-agent-session-providers.js';
 import { resolvePackageFile } from './declared-resource-paths.js';
+import { readDeclaration } from './read-agent-provider-declaration.js';
 
-/** Installation already holds this verified tree. Invalid optional declarations
- * remain visible as metadata errors; they grant no registration or launch rights. */
+/** Installation already holds this verified tree after capability admission.
+ * Legacy declaration errors remain visible without granting launch rights. */
 export async function readAgentClientMetadata(located: VerifiedPluginPackage): Promise<PluginAgentClientMetadata> {
   await located.verifyIntegrity();
   let raw: unknown;
@@ -30,9 +30,9 @@ export async function readAgentClientMetadata(located: VerifiedPluginPackage): P
   const declaration = result.declaration;
   return {
     catalog:
-      'configurationKey' in declaration
-        ? { configurationKey: declaration.configurationKey, presets: declaration.presets ?? [], clients: [] }
-        : { configurationKey: null, presets: [], clients: [{ id: declaration.id }] },
+      'id' in declaration
+        ? { configurationKey: null, presets: [], clients: [{ id: declaration.id }] }
+        : { configurationKey: declaration.configurationKey, presets: declaration.presets ?? [], clients: [] },
   };
 }
 

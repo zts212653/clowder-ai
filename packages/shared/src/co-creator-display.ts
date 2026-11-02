@@ -13,12 +13,25 @@ export function coCreatorContractMention(mention: string): string | undefined {
   return literal.length <= 128 ? literal : undefined;
 }
 
+/**
+ * The old template prefilled this value before it was used for presentation.
+ * Without a recorded choice its origin is ambiguous, not proof of user intent.
+ * Retain the raw value for editing, but require an explicit choice to activate it.
+ * Other existing custom nicknames retain their behavior.
+ */
+export function coCreatorNickname(config: Pick<CoCreatorConfig, 'nickname' | 'nicknameSource'>) {
+  return config.nickname === '大当家' && config.nicknameSource !== 'user' ? undefined : config.nickname;
+}
+
 /** Familiar/role defaults preserve existing installations that predate nickname. */
-export function coCreatorDisplay(config: Pick<CoCreatorConfig, 'name' | 'nickname' | 'mentionPatterns'>) {
+export function coCreatorDisplay(
+  config: Pick<CoCreatorConfig, 'name' | 'nickname' | 'nicknameSource' | 'mentionPatterns'>,
+) {
+  const nickname = coCreatorNickname(config);
   return {
     name: config.name,
-    nickname: config.nickname ?? 'co-creator',
-    role: config.nickname ?? 'operator',
+    nickname: nickname ?? 'co-creator',
+    role: nickname ?? 'operator',
     mention: config.mentionPatterns[0] ?? '@co-creator',
   };
 }
