@@ -7,6 +7,7 @@
  * - handoff: per-invocation summaries (meeting-minutes style)
  */
 
+import { sliceUnicodeSafe } from '../../../../utils/unicode-safe-slice.js';
 import type { TranscriptEvent } from './TranscriptReader.js';
 
 export interface ChatMessage {
@@ -99,7 +100,7 @@ export function formatEventsHandoff(events: TranscriptEvent[]): HandoffInvocatio
       if ((evtType === 'text' || evtType === 'assistant') && keyMessages.length < MAX_KEY_MESSAGES) {
         const text = extractTextContent(evtData);
         if (text) {
-          keyMessages.push(text.slice(0, MAX_KEY_MESSAGE_LEN));
+          keyMessages.push(sliceUnicodeSafe(text, 0, MAX_KEY_MESSAGE_LEN));
         }
       }
     }

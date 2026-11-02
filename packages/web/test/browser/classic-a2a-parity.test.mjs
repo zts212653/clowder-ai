@@ -5,11 +5,9 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 
-// Home uses the same installed driver as the other Vite journeys. Public proofs
-// can supply their own installed module through the existing explicit override.
-const playwrightModule =
-  process.env.CLASSIC_A2A_PLAYWRIGHT_MODULE ??
-  new URL('../../../ppt-forge/node_modules/playwright/index.mjs', import.meta.url);
+// Use this package's declared browser driver. Controlled proofs retain the
+// existing explicit module override.
+const playwrightModule = process.env.CLASSIC_A2A_PLAYWRIGHT_MODULE ?? 'playwright';
 const { chromium } = await import(playwrightModule);
 
 // Deterministic frontend rendering proof; no native provider or backend lifecycle claim.

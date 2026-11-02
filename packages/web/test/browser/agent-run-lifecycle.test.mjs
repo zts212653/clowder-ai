@@ -5,8 +5,8 @@ import { createServer } from 'node:http';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 test(

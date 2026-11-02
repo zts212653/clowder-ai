@@ -8,12 +8,19 @@ import { resolveProjectTemplatePath } from './project-template-path.js';
  */
 export function reconcileCatRegistry(projectRoot: string, managedIdsBefore: ReadonlySet<string>) {
   return saveSpan('catalog.reconcile', () => {
-    const runtimeCats = toAllCatConfigs(loadResolvedCatConfig(resolveProjectTemplatePath(projectRoot)));
-    const extraCats = catRegistry.getAllConfigs();
+    const templatePath = resolveProjectTemplatePath(projectRoot);
+    const runtimeCats = toAllCatConfigs(loadResolvedCatConfig(templatePath));
+    const extraCats = catRegistry.getAllIds().map((id) => [id, catRegistry.getOrThrow(id)] as const);
     catRegistry.reset();
-    for (const [id, config] of Object.entries(runtimeCats)) catRegistry.register(id, config);
-    for (const [id, config] of Object.entries(extraCats)) {
-      if (!runtimeCats[id] && !managedIdsBefore.has(id)) catRegistry.register(id, config);
+    for (const [id, config] of Object.entries(runtimeCats))
+      catRegistry.register(id, config, { configurationTemplatePath: templatePath });
+    for (const [id, entry] of extraCats) {
+      if (!runtimeCats[id] && !managedIdsBefore.has(id))
+        catRegistry.register(
+          id,
+          entry.config,
+          entry.configurationTemplatePath ? { configurationTemplatePath: entry.configurationTemplatePath } : undefined,
+        );
     }
     return catRegistry.getAllConfigs();
   });

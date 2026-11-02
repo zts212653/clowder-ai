@@ -12,6 +12,8 @@ import { createCatId } from '../types/ids.js';
 
 export interface CatRegistryEntry {
   readonly config: CatConfig;
+  /** Host provenance for provider launch details; not part of the member DTO. */
+  readonly configurationTemplatePath?: string;
 }
 
 export class CatRegistry {
@@ -21,11 +23,14 @@ export class CatRegistry {
   /**
    * Register a cat. Throws on duplicate ID.
    */
-  register(catId: string, config: CatConfig): void {
+  register(catId: string, config: CatConfig, source?: { readonly configurationTemplatePath: string }): void {
     if (this.entries.has(catId)) {
       throw new Error(`Cat "${catId}" is already registered`);
     }
-    this.entries.set(catId, { config });
+    this.entries.set(catId, {
+      config,
+      ...(source ? { configurationTemplatePath: source.configurationTemplatePath } : {}),
+    });
     this.revision += 1;
   }
 

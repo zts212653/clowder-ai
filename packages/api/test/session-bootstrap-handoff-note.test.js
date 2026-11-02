@@ -46,6 +46,14 @@ describe('SessionBootstrap catHandoffNote injection (F225 B2/B4)', () => {
     assert.match(ctx.text, /requestSeal accepted is irreversible/);
   });
 
+  it('handoff field caps preserve well-formed Unicode at unit 600', async () => {
+    setupPrev('cat_initiated_handoff', { ...NOTE, done: `${'a'.repeat(599)}😼tail` });
+    const ctx = await buildSessionBootstrap({ sessionChainStore: chainStore, transcriptReader }, 'opus-45', 't1');
+    assert.ok(ctx);
+    assert.ok(ctx.text.isWellFormed(), 'handoff field truncation must not poison the next session prompt');
+    assert.ok(ctx.text.includes('a'.repeat(599)));
+  });
+
   it('B4: stale note left by a THRESHOLD seal is NOT injected', async () => {
     setupPrev('threshold', NOTE); // note present but seal was NOT cat-initiated
     const ctx = await buildSessionBootstrap({ sessionChainStore: chainStore, transcriptReader }, 'opus-45', 't1');

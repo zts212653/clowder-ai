@@ -166,7 +166,11 @@ export function MailboxHandledHistory({
   };
   return (
     <section data-testid="mailbox-handled-history" className="flex min-h-0 flex-1 flex-col px-[22px] pb-4">
-      <nav className="mb-3 flex rounded-lg p-1 text-sm" style={{ background: 'var(--shell-frame)' }}>
+      <nav
+        className="mb-3 flex rounded-lg p-1 text-sm"
+        data-chat-background-surface="frame"
+        style={{ background: 'var(--shell-frame)' }}
+      >
         {(['all', 'decisions', 'mentions', 'ignored'] as const).map((key) => (
           <button
             key={key}
@@ -174,6 +178,7 @@ export function MailboxHandledHistory({
             type="button"
             className="shell-focusable flex-1 rounded-md px-2 py-1.5"
             aria-current={currentTab === key ? 'page' : undefined}
+            data-chat-background-surface={currentTab === key ? 'paper' : undefined}
             style={{ background: currentTab === key ? 'var(--shell-paper)' : undefined }}
             onClick={() => changeTab(key)}
           >

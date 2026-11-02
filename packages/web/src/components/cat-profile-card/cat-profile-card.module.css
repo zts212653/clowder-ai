@@ -12,6 +12,7 @@
   border: 1px solid var(--shell-hairline);
   border-radius: 14px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   color: var(--shell-body);
   box-shadow: 0 12px 34px rgb(43 38 34 / 0.18);
 }
@@ -36,6 +37,7 @@
   padding-top: 72px;
   align-items: flex-start;
   background: var(--shell-paper);
+  --chat-background-role: paper;
 }
 .header[data-has-banner="true"] .identity {
   padding-top: 40px;
@@ -60,6 +62,7 @@
   border: 3px solid var(--shell-paper);
   border-radius: 50%;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   box-shadow: 0 4px 12px rgb(43 38 34 / 0.14);
   cursor: zoom-in;
 }
@@ -145,6 +148,7 @@
   border-top: 1px solid var(--shell-hairline);
   padding: 10px 12px;
   background: var(--shell-work);
+  --chat-background-role: work;
 }
 .actions button {
   display: inline-flex;
@@ -157,6 +161,7 @@
   border-radius: 8px;
   padding: 0 10px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   color: var(--shell-ink);
   font-size: 13px;
   white-space: nowrap;

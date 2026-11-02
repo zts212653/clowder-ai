@@ -41,6 +41,7 @@
   display: flex;
   flex-direction: column;
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   border-radius: 12px;
   overflow: hidden;
 }
@@ -54,6 +55,7 @@
   margin: 0 auto;
   border-radius: 20px;
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   color: var(--cafe-text);
 }
 .owner [data-testid="workspace-content-review-surface"] {

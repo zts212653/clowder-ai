@@ -115,7 +115,7 @@ local function removeMessageIndex(rowToRemove)
   redis.call('HDEL', KEYS[3], messageId)
 end
 
-if mode == 'processing' then
+if mode == 'processing' or (mode == 'withdrawn' and retiredTargetIdsRaw and retiredTargetIdsRaw ~= '') then
   if row.status ~= 'claimed' or row.claimId ~= claimId or type(row.claimedTargetIds) ~= 'table' or #row.claimedTargetIds == 0 then
     return {0, raw}
   end
@@ -142,13 +142,19 @@ if mode == 'processing' then
     retired[targetId] = true
   end
   attempted.targets = retiredTargetIds
-  attempted.status = 'processing'
-  attempted.processingStartedAt = at
+  if mode == 'withdrawn' then
+    attempted.status = 'terminal'
+    attempted.terminalAt = at
+    attempted.processingStartedAt = nil
+  else
+    attempted.status = 'processing'
+    attempted.processingStartedAt = at
+    attempted.terminalAt = nil
+  end
   attempted.claimId = nil
   attempted.claimedAt = nil
   attempted.claimedTargetIds = nil
   attempted.claimedFromTargetless = nil
-  attempted.terminalAt = nil
 
   local remainingTargets = {}
   for i = 1, #row.targets do

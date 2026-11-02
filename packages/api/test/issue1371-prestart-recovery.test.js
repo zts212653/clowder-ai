@@ -129,29 +129,63 @@ test('#1371: explicit Steer consumes one target and preserves the busy sibling',
 });
 
 for (const entryPoint of ['manual', 'automatic']) {
-  test(`#1371: ${entryPoint} drain keeps the exact target set queued while one sibling is busy`, async (t) => {
+  test(`#1371: ${entryPoint} drain delivers the idle target and later resumes its busy sibling exactly once`, async (t) => {
     const h = await harness();
-    t.after(() => h.app.close());
+    t.after(async () => {
+      h.releaseCreate();
+      await h.app.close();
+    });
     const busy = h.tracker.start('thread-1', 'opus', 'user-1', ['opus'], 'independent-work');
+    const drain = () =>
+      entryPoint === 'manual' ? h.processor.processNext('thread-1', 'user-1') : h.processor.requestDrain('thread-1');
 
-    if (entryPoint === 'manual') {
-      await h.processor.processNext('thread-1', 'user-1');
-    } else {
-      await h.processor.requestDrain('thread-1');
-    }
-
-    assert.equal(h.records.create.mock.calls.length, 0);
-    assert.equal(h.routeExecution.mock.calls.length, 0);
-    assert.deepEqual(h.queue.getEntrySnapshot('thread-1', 'user-1', h.entry.id).targets, ['opus', 'codex']);
-
-    h.tracker.completeAll('thread-1', ['opus'], busy);
-    await h.processor.processNext('thread-1', 'user-1');
+    await drain();
     await waitFor(() => h.records.create.mock.calls.length === 1);
+    assert.deepEqual(h.records.create.mock.calls[0].arguments[0].targetCats, ['codex']);
+    // The record gate still prevents provider delivery before durable admission.
+    assert.equal(h.routeExecution.mock.calls.length, 0);
+    const claimed = await h.queue.getDurableEntry('thread-1', h.entry.id);
+    assert.deepEqual(claimed.targets, ['opus', 'codex']);
+    assert.deepEqual(claimed.claimedTargetIds, ['codex']);
+
     h.releaseCreate();
-    await waitFor(() => h.queue.list('thread-1', 'user-1').length === 0);
+    await waitFor(
+      () => h.routeExecution.mock.calls.length === 1 && !h.processor.hasProcessingSlotReservation('thread-1', 'codex'),
+    );
+    const remaining = await h.queue.getDurableEntry('thread-1', h.entry.id);
+    assert.equal(remaining.id, h.entry.id);
+    assert.equal(remaining.payload.messageId, h.source.id);
+    assert.equal(remaining.status, 'queued');
+    assert.deepEqual(remaining.targets, ['opus']);
+    assert.equal(busy.signal.aborted, false);
+    assert.equal(h.tracker.getExecutionId('thread-1', 'opus'), 'independent-work');
+    assert.deepEqual(
+      h.store.getById(h.source.id).lifecycle.dispatchRefs.map((ref) => ref.targetId),
+      ['codex'],
+    );
+
+    await drain();
+    assert.equal(h.records.create.mock.calls.length, 1, 'a busy sibling cannot redeliver the completed target');
     assert.deepEqual(
       h.routeExecution.mock.calls.map((call) => call.arguments[4]),
-      [['opus', 'codex']],
+      [['codex']],
+    );
+    assert.equal(busy.signal.aborted, false);
+
+    h.tracker.completeAll('thread-1', ['opus'], busy);
+    await drain();
+    await waitFor(
+      () =>
+        h.queue.list('thread-1', 'user-1').length === 0 &&
+        !h.processor.hasProcessingSlotReservation('thread-1', 'opus'),
+    );
+    assert.equal(h.records.create.mock.calls.length, 2);
+    assert.deepEqual(
+      h.routeExecution.mock.calls.map((call) => [call.arguments[3], call.arguments[4]]),
+      [
+        [h.source.id, ['codex']],
+        [h.source.id, ['opus']],
+      ],
     );
     assert.deepEqual(
       h.store
@@ -163,6 +197,17 @@ for (const entryPoint of ['manual', 'automatic']) {
         ['opus', 'settled'],
       ],
     );
+    assert.deepEqual(
+      h.store
+        .getByThread('thread-1')
+        .filter((message) => message.from.kind === 'user')
+        .map((message) => message.id),
+      [h.source.id],
+    );
+    await drain();
+    assert.equal(h.records.create.mock.calls.length, 2);
+    assert.equal(h.routeExecution.mock.calls.length, 2);
+    assert.equal(await h.queue.getDurableEntry('thread-1', h.entry.id), null);
   });
 }
 

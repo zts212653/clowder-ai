@@ -39,6 +39,7 @@
 }
 .exploration-canvas-tools button:hover {
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
 }
 .exploration-canvas-tools output {
   font-size: var(--console-font-label);
@@ -64,6 +65,7 @@
 }
 .exploration-more-tools > summary:hover {
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
 }
 .exploration-more-tools-panel {
   position: absolute;
@@ -80,6 +82,7 @@
   border: 1px solid var(--cafe-border);
   border-radius: 8px;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
   box-shadow: var(--shadow-elevation-2);
 }
 .exploration-canvas {
@@ -91,6 +94,7 @@
   -webkit-user-select: none;
   margin-top: 8px;
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   border-radius: 8px;
   cursor: grab;
 }
@@ -124,6 +128,7 @@
   height: 100%;
   padding: 10px 12px;
   background: var(--console-card-bg);
+  --chat-background-role: console-card;
   border: 1px solid var(--cafe-border);
   border-radius: 8px;
   text-align: left;
@@ -202,6 +207,7 @@
 .exploration-node[aria-pressed="true"] {
   border-color: var(--evolution-focus);
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
   box-shadow: 0 0 0 1px var(--evolution-focus);
 }
 .exploration-node[aria-pressed="true"] .exploration-node-title {
@@ -219,6 +225,7 @@
   border-radius: 6px;
   border: 1px solid var(--cafe-border);
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   font-size: var(--console-font-xs);
 }
 .exploration-lineage > .exploration-caption {
@@ -308,6 +315,7 @@
   max-width: 170px;
   font-size: var(--console-font-xs);
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   color: var(--cafe-text);
   padding: 2px 4px;
   border-radius: 4px;

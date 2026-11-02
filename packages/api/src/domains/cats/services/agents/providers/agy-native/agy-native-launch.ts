@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import type { AgyProfileConfig, CatId, NativeSessionBinding } from '@cat-cafe/shared';
 import { resolveCliCommand } from '../../../../../../utils/cli-resolve.js';
@@ -7,21 +7,20 @@ import { findMonorepoRoot } from '../../../../../../utils/monorepo-root.js';
 import type { AgentServiceOptions, PreparedProviderRequestV1 } from '../../../types.js';
 import { preflightAgyProfile, resolveAgyProfile, resolveAgySpawnCwd } from '../agy-profile-manager.js';
 import { encodeAgyStreamJsonUserMessage } from '../agy-stream-json-parser.js';
-import { resolveProviderMcpConfig } from '../provider-mcp-config.js';
 import { materializeAgyNativeAgentFile } from './agy-native-agent-file.js';
-import { prepareAgyNativeCredentialFile } from './agy-native-credential-file.js';
 import { materializeAgyNativeEffectGuard } from './agy-native-effect-guard.js';
 import { AgyNativeResumeMismatchError } from './agy-native-errors.js';
 import { prepareAgyNativeInput } from './agy-native-input.js';
 import { prepareAgyNativeKeychain } from './agy-native-keychain.js';
-import { executionOwnerEnv, isolatedOAuthEnv } from './agy-native-launch-env.js';
-import { materializeAgyNativeMcpConfig, validateAgyNativeAccountMcp } from './agy-native-mcp-config.js';
+import { validateAgyNativeAccountMcp } from './agy-native-mcp-config.js';
 import { type AgyNativePermissionMode, buildAgyNativePolicy } from './agy-native-policy.js';
 import { waitForAgyNativeProfileTurn } from './agy-native-profile-turn.js';
 import { createAgyNativeRunProfile } from './agy-native-run-profile.js';
 import { materializeAgyNativeSettings } from './agy-native-settings.js';
 import { materializeAgyNativeSkills, retireAgyNativeLegacySkillAlias } from './agy-native-skills.js';
 import { AGY_NATIVE_MCP_TOOLS } from './agy-native-tools.js';
+import { executionOwnerEnv, isolatedOAuthEnv } from './launch/agy-native-launch-env.js';
+import { materializeAgyLaunchMcp } from './launch/agy-native-launch-mcp.js';
 import { acquireAgyNativeProfileTurnAsync } from './profile-turn/async.js';
 
 export interface AgyNativeLaunchInput {
@@ -73,46 +72,15 @@ function assertOperatorTrustedWorkspace(config: AgyProfileConfig, workspaceRoot:
   if (!trusted) throw new Error('AGY native workspace is outside the operator trusted workspace list');
 }
 
-async function materializeTaskMcp(
-  home: string,
-  input: AgyNativeLaunchInput,
-  callbackEnv?: Readonly<Record<string, string>>,
-): Promise<(() => void) | undefined> {
-  const ordinary = input.options?.toolExecutionPolicy?.mode !== 'read_only';
-  const credential = ordinary && callbackEnv ? prepareAgyNativeCredentialFile(home, callbackEnv ?? {}) : undefined;
-  try {
-    const runtimeRoot = findMonorepoRoot(process.cwd());
-    const resolvedServers =
-      ordinary && credential
-        ? await resolveProviderMcpConfig({
-            callbackEnv: { ...callbackEnv, CAT_CAFE_CAT_ID: input.catId },
-            workingDirectory: input.workspace,
-            mcpServerPath: join(runtimeRoot, 'packages/mcp-server/dist/index.js'),
-            credentialFile: credential.path,
-            provider: 'google',
-          })
-        : undefined;
-    materializeAgyNativeMcpConfig({
-      profileHome: home,
-      runtimeRoot,
-      serverNames: resolvedServers ? Object.keys(resolvedServers) : [],
-      ...(resolvedServers ? { resolvedServers } : {}),
-      ...(credential ? { callback: { apiUrl: credential.apiUrl, credentialFile: credential.path } } : {}),
-    });
-    return credential?.dispose;
-  } catch (error) {
-    credential?.dispose();
-    throw error;
-  }
-}
-
 /** Prepare the ordinary native tool surface with canonical MCP identity and resume provenance. */
 export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promise<AgyNativeLaunchPlan> {
   const options = input.options;
+  const member = options?.pluginNativeLaunch;
   const policy = buildAgyNativePolicy({
     workspaceRoot: input.workspace,
     autoApprove: input.profileConfig.autoApprove,
     readOnly: options?.toolExecutionPolicy?.mode === 'read_only',
+    ...(member ? { pluginServerName: member.server.name } : {}),
   });
   // A per-turn restriction narrows tools; it does not revoke the operator's workspace admission.
   if (input.profileConfig.autoApprove !== true)
@@ -163,16 +131,23 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
     if (!options?.spawnCliOverride) await prepareAgyNativeKeychain({ profileHome: home });
     // Shared settings are an account baseline, never the current turn's policy.
     // CLI flags, the selected agent and this run's hook/MCP config own each turn.
-    materializeAgyNativeSettings({
-      profileHome: home,
-      model: input.model,
-      policy: buildAgyNativePolicy({ workspaceRoot: input.workspace }),
-      retainTrustedWorkspaces: true,
-    });
-    retireAgyNativeLegacySkillAlias(home);
+    if (!member) {
+      materializeAgyNativeSettings({
+        profileHome: home,
+        model: input.model,
+        policy: buildAgyNativePolicy({ workspaceRoot: input.workspace }),
+        retainTrustedWorkspaces: true,
+      });
+      retireAgyNativeLegacySkillAlias(home);
+    }
     await releaseProfile();
     runProfile = createAgyNativeRunProfile(home);
     const configHome = runProfile.home;
+    let memberSettingsPath: string | undefined;
+    if (member) {
+      mkdirSync(join(configHome, '.gemini/antigravity-cli'), { mode: 0o700 });
+      memberSettingsPath = materializeAgyNativeSettings({ profileHome: configHome, model: input.model, policy });
+    }
     const agent = materializeAgyNativeAgentFile({
       profileHome: configHome,
       catId: input.catId,
@@ -186,13 +161,17 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       runtimeRoot: findMonorepoRoot(process.cwd()),
       workspaceRoot: policy.workspaceRoot,
       readOnly: options?.toolExecutionPolicy?.mode === 'read_only',
+      ...(member ? { pluginServerName: member.server.name } : {}),
     });
     const command = input.command ?? resolveCliCommand('agy');
     if (!command) throw new Error('AGY native CLI binary was not found');
-    const profilePreflight = preflightAgyProfile(profile, {
-      agyCommand: command,
-      workingDirectory: policy.workspaceRoot,
-    });
+    const profilePreflight = preflightAgyProfile(
+      memberSettingsPath ? { ...profile, settingsPath: memberSettingsPath } : profile,
+      {
+        agyCommand: command,
+        workingDirectory: policy.workspaceRoot,
+      },
+    );
     if (!profilePreflight.ok) throw new Error(profilePreflight.message);
     const prior = options?.nativeSessionBinding;
     const resume =
@@ -231,20 +210,23 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       policy.workspaceRoot,
       options?.uploadDir,
     );
-    const skillDirectories = await materializeAgyNativeSkills({
-      profileHome: configHome,
-      workspace: policy.workspaceRoot,
-      runtimeRoot: findMonorepoRoot(process.cwd()),
-      canonicalOnly: true,
-    });
+    if (member) mkdirSync(join(configHome, '.gemini/config/skills'), { mode: 0o700 });
+    const skillDirectories = member
+      ? []
+      : await materializeAgyNativeSkills({
+          profileHome: configHome,
+          workspace: policy.workspaceRoot,
+          runtimeRoot: findMonorepoRoot(process.cwd()),
+          canonicalOnly: true,
+        });
     const args = [
       `--gemini_dir=${runProfile.geminiDir}`,
       `--app_data_dir=${runProfile.appDataDir}`,
-      '--add-dir',
-      policy.workspaceRoot,
-      ...nativeInput.accessDirectories.flatMap((directory) => ['--add-dir', directory]),
+      ...(!member ? ['--add-dir', policy.workspaceRoot] : []),
+      ...(!member ? nativeInput.accessDirectories.flatMap((directory) => ['--add-dir', directory]) : []),
       ...skillDirectories.flatMap((directory) => ['--add-dir', directory]),
       ...policy.cliArgs,
+      ...(memberSettingsPath ? ['--disable-slash-commands', '--new-project', '--settings', memberSettingsPath] : []),
       '--agent',
       agent.agentName,
       '--model',
@@ -288,7 +270,7 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       ...(options?.parentSpan ? { parentSpan: options.parentSpan } : {}),
       ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
     };
-    disposeCredentials = await materializeTaskMcp(configHome, input, options?.callbackEnv);
+    disposeCredentials = await materializeAgyLaunchMcp(configHome, input, options?.callbackEnv);
     // CLI 1.3.5 treats a concurrent index-open lock error as corruption and
     // recreates the shared database. Fence startup until verified init, never
     // model work. Acquire after the conversation lease so a same-session
@@ -303,7 +285,8 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
       permissionMode: policy.permissionMode,
       agentTools: [
         ...policy.agentTools,
-        ...(input.options?.toolExecutionPolicy?.mode !== 'read_only' ? AGY_NATIVE_MCP_TOOLS : []),
+        ...(member ? ['call_mcp_tool'] : []),
+        ...(!member && input.options?.toolExecutionPolicy?.mode !== 'read_only' ? AGY_NATIVE_MCP_TOOLS : []),
       ],
       binding: {
         v: 1,

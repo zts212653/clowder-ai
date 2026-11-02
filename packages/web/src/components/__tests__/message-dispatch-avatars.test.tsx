@@ -379,7 +379,7 @@ describe('MessageDispatchAvatars', () => {
     render();
     expect(container.textContent).toContain('已送出，没确认收到');
     expect(container.textContent).toContain('再发一次');
-    expect(container.textContent).toContain('如果它其实收到了，会再回一遍');
+    expect(container.textContent).toContain('会作为新消息再次发送，可能重复执行');
     expect(container.textContent).not.toContain('收到，正在回');
     expect(container.textContent).not.toContain('没送到');
     expect(container.textContent).not.toContain('Agent Client');

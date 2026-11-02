@@ -23,6 +23,7 @@ export function ArtworkPreviewMedia({
   return (
     <div
       ref={root}
+      data-chat-background-layer="opaque"
       className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden"
       {...viewport.handlers}
     >

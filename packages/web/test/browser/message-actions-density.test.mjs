@@ -31,7 +31,7 @@ import { createServer } from 'node:net';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');

@@ -55,6 +55,7 @@ export function MessageBundlePaperCard({
           role="note"
           aria-label={t.note}
           className="ml-auto max-w-[80%] whitespace-pre-wrap break-words rounded-xl px-3.5 py-2 text-sm"
+          data-chat-background-surface="human"
           style={{ background: 'var(--color-cocreator-surface)', color: 'var(--color-cocreator-text)' }}
         >
           {data.note}

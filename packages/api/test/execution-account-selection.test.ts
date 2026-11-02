@@ -94,3 +94,43 @@ test('a previously frozen choice requires the same account revision on the next 
   f.save();
   assert.throws(() => freezeExecutionAccountBinding({ ...f.input, accountSelection: selection }));
 });
+
+test('Kimi native source metadata tags its unchanged Host account and ordinary execution stays unchanged', (t) => {
+  const f = fixture(t);
+  f.cat.clientId = 'kimi';
+  f.cat.defaultModel = 'kimi-code/k3.1-pro';
+  f.accounts.subscription.clientId = 'kimi';
+  f.save();
+  const original = freezeExecutionAccountBinding(f.input);
+  assert.ok(original.resolvedAccount);
+  const nativeAccount = { ...original.resolvedAccount, nativeSourceRevision: 'a'.repeat(64) };
+  const projected = freezeExecutionAccountBinding({ ...f.input, nativeAccount });
+  assert.notEqual(projected.executionAccount?.accountRevision, original.executionAccount?.accountRevision);
+  assert.equal(projected.executionAccount?.accountRef, original.executionAccount?.accountRef);
+  assert.deepEqual(freezeExecutionAccountBinding(f.input).executionAccount, original.executionAccount);
+  for (const delta of [
+    { id: 'foreign' },
+    { authType: 'api_key' as const, apiKey: 'EXAMPLE' },
+    { baseUrl: 'https://changed.example.test' },
+    { nativeSourceRevision: 'invalid' },
+  ]) {
+    assert.throws(
+      () => freezeExecutionAccountBinding({ ...f.input, nativeAccount: { ...nativeAccount, ...delta } }),
+      /native account carrier mismatch/,
+    );
+  }
+});
+
+test('a Kimi source annotation cannot replace another builtin carrier account path', (t) => {
+  const f = fixture(t),
+    original = freezeExecutionAccountBinding(f.input);
+  assert.ok(original.resolvedAccount);
+  assert.throws(
+    () =>
+      freezeExecutionAccountBinding({
+        ...f.input,
+        nativeAccount: { ...original.resolvedAccount, nativeSourceRevision: 'a'.repeat(64) },
+      }),
+    /native account carrier mismatch/,
+  );
+});

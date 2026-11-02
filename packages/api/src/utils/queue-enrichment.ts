@@ -135,7 +135,9 @@ async function buildMessageEnrichment(
     if (!msg) continue;
     if (entry?.status === 'queued') {
       for (const targetCatId of entry.delivery.routingHeldTargetIds ?? []) {
-        const repeat = isOwnerRepeatableAppendTarget(entry, msg, targetCatId);
+        const native = entry.delivery.appendPendingByTarget?.[targetCatId];
+        const response = native?.requiresCompletion ? await messageStore.getById(native.responseMessageId) : undefined;
+        const repeat = isOwnerRepeatableAppendTarget(entry, msg, targetCatId, response);
         if (!repeat && !isOwnerRecoverableRoutingTarget(entry, msg, targetCatId)) continue;
         const failure = entry.delivery.appendRecoveryByTarget?.[targetCatId];
         if (

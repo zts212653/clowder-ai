@@ -1,6 +1,9 @@
 @import "./chat-background-surfaces.css";
 
 /* Text stays above the image; floating panels retain their native opaque paint. */
+html[data-shell="v2"][data-chat-background="image"] {
+  --cafe-text-muted: var(--shell-muted);
+}
 html[data-shell="v2"][data-chat-background="image"] .console-shell {
   position: relative;
   isolation: isolate;
@@ -73,6 +76,7 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
   border-radius: 12px;
   padding: 18px 20px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
 }
 .you-settings-card-heading {
   display: flex;
@@ -148,6 +152,7 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
   border-radius: 8px;
   padding: 4px 10px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   color: var(--shell-ink);
 }
 .you-profile-field p {
@@ -200,6 +205,7 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
   display: block;
   height: 100%;
   background: var(--shell-work);
+  --chat-background-role: work;
 }
 .chat-background-upload {
   display: flex;
@@ -237,6 +243,7 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
 }
 .chat-background-placement button[aria-pressed="true"] {
   background: var(--shell-selected);
+  --chat-background-role: selected;
   color: var(--shell-ink);
 }
 .chat-background-separate {
@@ -258,6 +265,7 @@ html[data-shell="v2"][data-chat-background="image"] .console-shell [data-testid=
   border: 1px solid var(--shell-hairline-strong);
   border-radius: 12px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   color: var(--shell-body);
   box-shadow: 0 8px 24px rgb(43 38 34 / 0.12);
 }

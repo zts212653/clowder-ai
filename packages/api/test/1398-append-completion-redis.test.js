@@ -51,7 +51,7 @@ for (const operation of ['hydrate', 'reconcile']) {
     await restarted.reconcileAppendDeliveries('thread');
     assert.equal(
       (await f.ledger.get('thread', f.admission.entry.id)).delivery.appendRecoveryByTarget.opus.acceptance,
-      'incomplete',
+      'unknown',
     );
     assert.equal(await f.client.ttl('msg:' + f.admission.message.id), -1);
   });
@@ -78,7 +78,7 @@ for (const operation of ['entry', 'message']) {
   });
 }
 
-test('Redis read racing incomplete native compensation cannot retire custody or retain response membership', async () => {
+test('Redis read racing incomplete native compensation preserves exact membership and uncertain custody', async () => {
   const f = await fixture();
   await f.append();
   const evaluate = f.client.eval.bind(f.client);
@@ -94,11 +94,14 @@ test('Redis read racing incomplete native compensation cannot retire custody or 
   await f.processor.requestDrain('thread');
   await f.processor.reconcileAppendDeliveries('thread');
   assert.equal(injected, true);
-  assert.equal((await f.messageStore.getById(f.response.id)).lifecycle.inputMessageIds.length, 0);
-  assert.equal((await f.messageStore.getById(f.admission.message.id)).lifecycle.dispatchRefs.length, 0);
+  assert.equal((await f.messageStore.getById(f.response.id)).lifecycle.inputMessageIds.length, 1);
+  assert.equal(
+    (await f.messageStore.getById(f.admission.message.id)).lifecycle.dispatchRefs[0].inputRead.status,
+    'read',
+  );
   assert.equal(
     (await f.ledger.get('thread', f.admission.entry.id)).delivery.appendRecoveryByTarget.opus.acceptance,
-    'incomplete',
+    'unknown',
   );
 });
 
@@ -120,6 +123,6 @@ test('Redis uncertain native write and late read preserve the completion fence a
   await restarted.reconcileAppendDeliveries('thread');
   assert.equal(
     (await f.ledger.get('thread', f.admission.entry.id)).delivery.appendRecoveryByTarget.opus.acceptance,
-    'incomplete',
+    'unknown',
   );
 });

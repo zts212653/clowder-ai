@@ -111,6 +111,7 @@ export function PersonMemoryApprovalCard({
     <article
       data-testid={`approval-item-${proposalId}`}
       className="space-y-3 rounded-xl border-l-4 p-3 text-sm"
+      data-chat-background-surface="paper"
       style={{ color: 'var(--shell-ink)', background: 'var(--shell-paper)', borderColor: 'var(--shell-primary)' }}
     >
       <header className="flex flex-wrap items-center gap-2 text-xs text-[var(--shell-muted)]">

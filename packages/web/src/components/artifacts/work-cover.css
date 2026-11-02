@@ -30,6 +30,7 @@
   border: 1px solid var(--shell-hairline);
   border-radius: 6px 6px 0 0;
   background: var(--shell-paper);
+  --chat-background-role: paper;
 }
 .work-cover-paper-back {
   inset: 11% 18% -12px;

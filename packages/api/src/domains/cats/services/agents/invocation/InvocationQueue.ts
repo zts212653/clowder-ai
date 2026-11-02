@@ -568,31 +568,32 @@ export class InvocationQueue {
     threadId: string,
     entryIds: readonly string[],
     messageStore: Pick<IMessageStore, 'getById'>,
+    expectedAttempts?: readonly QueueEntry[],
   ): Promise<boolean> {
     let converged = true;
     for (const entryId of entryIds) {
       const row = await this.ledgerStore.get(threadId, entryId);
+      const expected = expectedAttempts?.find((attempt) => attempt.id === entryId);
+      // A delayed recovery belongs to its original claim, not whichever sibling now owns the row.
+      if (expectedAttempts && row?.status === 'claimed' && row.claimId !== expected?.claimId) continue;
       if (!row) {
         this.ledgerClaimIds.delete(entryId);
         this.removeCachedEntry(threadId, entryId);
-        this.forgetAdmittedEntries(threadId, entryId);
         continue;
       }
       if (row.status !== 'claimed' || !row.claimId) {
         this.ledgerClaimIds.delete(entryId);
         this.removeCachedEntry(threadId, entryId);
-        this.forgetAdmittedEntries(threadId, entryId);
         if (row.status === 'queued') this.cacheLedgerEntries([row]);
         else converged = false;
         continue;
       }
       const remaining = await this.reconcileClaimedLedgerEntry(row, messageStore);
-      this.ledgerClaimIds.delete(entryId);
+      if (this.ledgerClaimIds.get(entryId) === row.claimId) this.ledgerClaimIds.delete(entryId);
       this.removeCachedEntry(threadId, entryId);
-      this.forgetAdmittedEntries(threadId, entryId);
       this.cacheLedgerEntries(remaining);
       const durable = await this.ledgerStore.get(threadId, entryId);
-      if (durable?.status === 'claimed') converged = false;
+      if (durable?.status === 'claimed' && durable.claimId === row.claimId) converged = false;
     }
     return converged;
   }
@@ -1110,6 +1111,21 @@ export class InvocationQueue {
     return removed.map((entry) => structuredClone(entry));
   }
 
+  /** A completed execution releases only its local attempts; pending or live siblings keep theirs. */
+  forgetAdmittedTargets(threadId: string, entryId: string, targetCatIds: readonly string[]): void {
+    const entries = this.admittedEntries.get(entryId);
+    if (!entries) return;
+    const completed = new Set(targetCatIds);
+    const remaining = entries.filter((entry) => {
+      if (entry.threadId !== threadId) return true;
+      entry.targets = entry.targets.filter((target) => !completed.has(target));
+      for (const target of completed) this.admittedAttemptEvidence.get(entry)?.delete(target);
+      return entry.targets.length > 0;
+    });
+    if (remaining.length === 0) this.admittedEntries.delete(entryId);
+    else this.admittedEntries.set(entryId, remaining);
+  }
+
   private cacheLedgerClaim(entries: readonly QueueLedgerEntry[], claimId: string): QueueEntry[] {
     const projected = this.cacheLedgerEntries(entries);
     for (const entry of projected) {
@@ -1300,7 +1316,7 @@ export class InvocationQueue {
     }
     if (result.kind === 'applied' || result.kind === 'replayed') {
       if (result.entry.status !== 'claimed') this.ledgerClaimIds.delete(result.entry.id);
-      this.forgetAdmittedEntries(result.entry.threadId, result.entry.id);
+      this.forgetAdmittedTargets(result.entry.threadId, result.entry.id, [input.failure.targetId]);
       this.cacheLedgerEntries([result.entry]);
     }
     return result;
@@ -1399,6 +1415,25 @@ export class InvocationQueue {
     if (committed.outcome !== 'updated') return null;
     this.ledgerClaimIds.delete(entryId);
     return this.removeCachedEntry(threadId, entryId);
+  }
+
+  /** Retire one private recipient through the existing target CAS, preserving sibling claims. */
+  async withdrawQueuedPrivateTarget(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    catId: string,
+  ): Promise<QueueEntry | null> {
+    const entry = await this.ledgerStore.get(threadId, entryId);
+    if (entry?.kind !== 'private_input' || queueEntryOwnerId(entry) !== userId || !entry.targets.includes(catId))
+      return null;
+    // Private inputs cannot Append. Target reconciliation atomically refuses
+    // an already claimed recipient while allowing a different sibling to run.
+    const result = await this.ledgerStore.reconcileTargets(threadId, entryId, [], [catId], {});
+    if (result.outcome === 'state_changed') return null;
+    this.removeCachedEntry(threadId, entryId);
+    if ('entry' in result && result.entry) this.cacheLedgerEntries([result.entry]);
+    return result.outcome === 'updated' ? { ...entry, targets: [catId] } : null;
   }
 
   /** Persist explicit ordering through the same claim/commit CAS as dequeue. */
@@ -1941,24 +1976,45 @@ export class InvocationQueue {
     terminalOutcome: QueueAttemptSettlementOutcome = 'handled',
     failureReason?: QueueTargetAttemptTerminalReason,
     terminalAt = Date.now(),
+    expectedAttempt?: QueueEntry,
   ): Promise<QueueEntry | null> {
-    const admitted = this.forgetAdmittedEntries(threadId, entryId);
-    if (admitted[0]) return admitted[0];
-    const snapshot = this.findEntryAcrossUsers(threadId, entryId);
-    if (!snapshot || snapshot.status !== 'claimed') return null;
-    const claimId = this.ledgerClaimIds.get(entryId);
-    if (!claimId) return null;
-    const committed = await this.ledgerStore.commit(threadId, entryId, claimId, 'withdrawn', terminalAt);
+    const snapshot = expectedAttempt ?? this.findEntryAcrossUsers(threadId, entryId);
+    if (!snapshot || snapshot.status !== 'claimed') {
+      if (expectedAttempt) {
+        const admitted = this.findAdmittedEntry(threadId, entryId, expectedAttempt.targets[0]);
+        const removed = admitted ? structuredClone(admitted) : null;
+        this.forgetAdmittedTargets(threadId, entryId, expectedAttempt.targets);
+        return removed;
+      }
+      return this.forgetAdmittedEntries(threadId, entryId)[0] ?? null;
+    }
+    // The attempt carries its original claim. Never borrow a newer sibling's token from the cache.
+    const claimId = snapshot.claimId;
+    const claimedTargetIds = snapshot.claimedTargetIds;
+    if (!claimId || !claimedTargetIds || (claimedTargetIds.length === 0 && snapshot.targets.length > 0)) return null;
+    const committed = await this.ledgerStore.commit(
+      threadId,
+      entryId,
+      claimId,
+      'withdrawn',
+      terminalAt,
+      undefined,
+      // A targetless admission failure retires the empty row under the same claim token.
+      claimedTargetIds.length > 0 ? claimedTargetIds : undefined,
+    );
     if (committed.outcome !== 'updated') return null;
-    this.ledgerClaimIds.delete(entryId);
-    return this.removeCachedEntry(threadId, entryId);
+    if (this.ledgerClaimIds.get(entryId) === claimId) this.ledgerClaimIds.delete(entryId);
+    this.removeCachedEntry(threadId, entryId);
+    const remaining = await this.ledgerStore.get(threadId, entryId);
+    if (remaining) this.cacheLedgerEntries([remaining]);
+    return committed.entry;
   }
 
   async removeProcessedDurable(threadId: string, userId: string, entryId: string): Promise<QueueEntry | null> {
     const snapshot =
       this.getEntrySnapshot(threadId, userId, entryId) ?? this.findAdmittedEntry(threadId, entryId, undefined, userId);
     if (!snapshot) return null;
-    return this.removeProcessedAcrossUsersDurable(threadId, entryId);
+    return this.removeProcessedAcrossUsersDurable(threadId, entryId, 'handled', undefined, Date.now(), snapshot);
   }
 
   /** Terminalize one exact row without manufacturing a rollback path. */
@@ -2238,6 +2294,15 @@ export class InvocationQueue {
       for (const e of q) if (e.status === 'queued') queued.push(e);
     }
     return queued.sort(InvocationQueue.compareEntries).map((entry) => ({ ...entry }));
+  }
+
+  /** Short claims still own their remaining recipients' positions until durable handoff or restoration. */
+  listPendingAcrossUsers(threadId: string): QueueEntry[] {
+    return [...this.queues.values()]
+      .filter((entries) => this.queueMatchesThread(entries, threadId))
+      .flatMap((entries) => entries.filter((entry) => entry.status === 'queued' || entry.status === 'claimed'))
+      .sort(InvocationQueue.compareEntries)
+      .map((entry) => structuredClone(entry));
   }
 
   /** One entry of the thread by id, whichever user owns it. */

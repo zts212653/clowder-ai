@@ -106,6 +106,7 @@ export function MessageDispositionDefaultSettings() {
               className={`flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm ${
                 pending ? 'cursor-wait opacity-70' : 'cursor-pointer'
               }`}
+              data-chat-background-surface={displayed === value ? 'selected' : 'paper'}
               style={{
                 background: displayed === value ? 'var(--shell-selected)' : 'var(--shell-paper)',
                 border: '1px solid var(--shell-hairline)',

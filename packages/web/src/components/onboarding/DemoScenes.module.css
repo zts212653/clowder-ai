@@ -48,6 +48,7 @@
 
 .controlButton {
   background: #fff;
+  --chat-background-role: white;
   border: 1px solid #d7c9bf;
   border-radius: 6px;
   padding: 6px 12px;
@@ -81,6 +82,7 @@
 
 .stage {
   background: #fff;
+  --chat-background-role: white;
   border: 1px solid #e4d9d0;
   border-radius: 12px;
   padding: 24px;
@@ -158,6 +160,7 @@
   line-height: 1.5;
   resize: none;
   background: #fff;
+  --chat-background-role: white;
 }
 
 .systemMsg {

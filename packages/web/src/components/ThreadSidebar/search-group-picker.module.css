@@ -2,6 +2,7 @@
   border: 1px solid var(--shell-hairline-strong);
   border-radius: 10px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   box-shadow: 0 6px 18px color-mix(in srgb, var(--shell-ink) 8%, transparent);
   overflow: hidden;
 }
@@ -42,6 +43,7 @@
 .list button:hover,
 .list button[aria-selected="true"] {
   background: var(--shell-work);
+  --chat-background-role: work;
 }
 .list button:focus-visible {
   outline: 2px solid var(--shell-primary);
@@ -95,6 +97,7 @@
   border-radius: 12px;
   border: 1px solid var(--shell-hairline);
   background: var(--shell-paper);
+  --chat-background-role: paper;
   color: var(--shell-body);
   box-shadow: var(--console-shadow-soft);
 }
@@ -126,5 +129,6 @@
 .header label input {
   color: var(--shell-ink);
   background: var(--shell-work);
+  --chat-background-role: work;
   border-color: var(--shell-hairline);
 }

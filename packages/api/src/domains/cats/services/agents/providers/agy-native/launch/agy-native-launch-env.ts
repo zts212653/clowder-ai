@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentServiceOptions } from '../../../types.js';
+import type { AgentServiceOptions } from '../../../../types.js';
 
 export function isolatedOAuthEnv(home: string): Record<string, string | null> {
   // Tools share the operator's ordinary environment; provider identity and host

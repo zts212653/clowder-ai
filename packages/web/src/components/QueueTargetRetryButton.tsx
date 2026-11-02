@@ -47,7 +47,7 @@ export function QueueTargetRetryButton({
     }
   };
   return (
-    <span className="inline-flex flex-wrap items-center gap-1">
+    <span className="inline-flex max-w-full flex-wrap items-center gap-1">
       <button
         type="button"
         disabled={busy || submitted}
@@ -57,7 +57,7 @@ export function QueueTargetRetryButton({
       >
         {submitted ? (repeat ? '已再次发送' : '已提交重试') : busy ? '发送中…' : repeat ? '再发一次' : label}
       </button>
-      {repeat ? <span>如果它其实收到了，会再回一遍</span> : null}
+      {repeat ? <span className="text-xs text-cafe-muted">会作为新消息再次发送，可能重复执行</span> : null}
       {error ? (
         <span role="alert" className="text-xs text-conn-red-text">
           {error}

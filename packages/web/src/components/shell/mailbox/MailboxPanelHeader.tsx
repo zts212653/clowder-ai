@@ -43,6 +43,7 @@ export function MailboxPanelHeader({
         <nav
           aria-label={t.sections}
           className="mt-3 flex items-center gap-1 rounded-lg p-1"
+          data-chat-background-surface="frame"
           style={{ background: 'var(--shell-frame)' }}
         >
           <button
@@ -51,6 +52,7 @@ export function MailboxPanelHeader({
             onClick={onBack}
             id="mailbox-tab-needs-me"
             className="shell-focusable flex min-w-0 flex-1 items-center justify-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium"
+            data-chat-background-surface="selected"
             style={{
               background: 'var(--shell-selected)',
               borderColor: 'var(--shell-hairline-strong)',

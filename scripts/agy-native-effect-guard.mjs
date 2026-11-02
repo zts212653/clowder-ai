@@ -102,6 +102,15 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
   const { name, args } = payload.toolCall;
   if (typeof name !== 'string' || !args || typeof args !== 'object' || Array.isArray(args))
     return deny('invalid AGY tool arguments');
+  if (options.pluginServerName !== undefined) {
+    return /^[A-Za-z0-9_.-]+$/.test(options.pluginServerName) &&
+      name === 'call_mcp_tool' &&
+      args.ServerName === options.pluginServerName &&
+      typeof args.ToolName === 'string' &&
+      args.ToolName.length > 0
+      ? { decision: 'allow' }
+      : deny('member invocation permits only its issued MCP server');
+  }
   const pinDirectory = COMMANDS.has(name) && options.workspaceRoot !== undefined;
   // A terminal may have changed cwd after launch; model-supplied Cwd is not
   // evidence of its current execution coordinate. This carrier has no binding.
@@ -194,6 +203,7 @@ async function main() {
       toolHome,
       ...(process.argv[5] !== undefined ? { workspaceRoot: process.argv[5] } : {}),
       readOnly: process.argv[3] === 'read-only',
+      ...(process.argv[3] === 'plugin-native' ? { pluginServerName: process.argv[6] ?? '' } : {}),
       selfHost: () => readSelfHostFacet({ ...(hostHome ? { homeDir: hostHome } : {}) }),
       onTargetDecision: (payload, verdict) =>
         appendNativeDenial(

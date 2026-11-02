@@ -78,6 +78,7 @@ export function ThreadTitleResetMenu({ threadId }: { threadId: string }) {
               role="menu"
               data-testid="thread-title-menu"
               className="absolute left-0 top-full z-20 mt-1 min-w-[9rem] rounded-lg border p-1 shadow-lg"
+              data-chat-background-surface="cafe"
               style={{ background: 'var(--cafe-surface)', borderColor: 'var(--cafe-border, currentColor)' }}
             >
               <button

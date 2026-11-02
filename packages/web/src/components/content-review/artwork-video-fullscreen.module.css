@@ -9,6 +9,7 @@
   overflow: hidden;
   border-radius: 0;
   background: var(--cafe-surface-canvas);
+  --chat-background-role: cafe-canvas;
   color: var(--cafe-text);
 }
 .player:fullscreen > :not([data-artwork-video-viewport]):not([data-testid="artwork-video-timeline"]) {

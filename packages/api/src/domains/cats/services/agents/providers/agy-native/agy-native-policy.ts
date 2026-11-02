@@ -5,15 +5,21 @@ import { AGY_NATIVE_READ_TOOLS, AGY_NATIVE_TOOLS } from './agy-native-tools.js';
 export type AgyNativePermissionMode = 'request-review' | 'always-proceed';
 
 /** Translate the operator permission choice; task custody and callback authority remain canonical. */
-export function buildAgyNativePolicy(input: { workspaceRoot: string; autoApprove?: boolean; readOnly?: boolean }) {
+export function buildAgyNativePolicy(input: {
+  workspaceRoot: string;
+  autoApprove?: boolean;
+  readOnly?: boolean;
+  pluginServerName?: string;
+}) {
   const root = realpathSync(input.workspaceRoot);
   if (!lstatSync(root).isDirectory()) throw new Error('AGY workspace root must be a directory');
-  const autoApprove = input.autoApprove === true && !input.readOnly;
+  const member = input.pluginServerName !== undefined;
+  const autoApprove = input.autoApprove === true && !input.readOnly && !member;
   const permissionMode: AgyNativePermissionMode = autoApprove ? 'always-proceed' : 'request-review';
   return {
     workspaceRoot: root,
     permissionMode,
-    agentTools: input.readOnly ? AGY_NATIVE_READ_TOOLS : AGY_NATIVE_TOOLS,
+    agentTools: member ? [] : input.readOnly ? AGY_NATIVE_READ_TOOLS : AGY_NATIVE_TOOLS,
     cliArgs: autoApprove ? ['--dangerously-skip-permissions'] : ['--sandbox'],
     settings: {
       enableTerminalSandbox: !autoApprove,
@@ -23,7 +29,11 @@ export function buildAgyNativePolicy(input: { workspaceRoot: string; autoApprove
         allow: input.readOnly
           ? []
           : [...(autoApprove ? ['write_file(*)', 'command(*)', 'unsandboxed(*)'] : []), 'mcp(*)'],
-        deny: input.readOnly ? ['command(*)', 'unsandboxed(*)', 'write_file(*)', 'mcp(*)'] : [],
+        deny: input.readOnly
+          ? ['command(*)', 'unsandboxed(*)', 'write_file(*)', 'mcp(*)']
+          : member
+            ? ['command(*)', 'unsandboxed(*)', 'write_file(*)']
+            : [],
       },
     },
   };

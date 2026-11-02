@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { availablePort, stopChild, waitForHttp } from './f290-runtime-journey.harness.mjs';
 import { createInboxOriginalApprovalFixture } from './f322-inbox-original-approval.fixture.mjs';
 import { captureOriginalResultDesign } from './f322-original-approval-design.journey.mjs';

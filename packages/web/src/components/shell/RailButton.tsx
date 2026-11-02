@@ -62,6 +62,7 @@ export const RailButton = forwardRef<HTMLButtonElement, RailButtonProps>(functio
         data-testid={testId}
         data-guide-id={guideId}
         className="shell-rail-item shell-focusable relative flex h-9 w-9 flex-none items-center justify-center rounded-[9px] text-[var(--shell-muted)]"
+        data-chat-background-surface={selected ? 'selected' : undefined}
         style={selected ? { background: 'var(--shell-selected)', color: 'var(--shell-ink)' } : undefined}
       >
         {dimmed ? (
