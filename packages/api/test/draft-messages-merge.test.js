@@ -25,6 +25,7 @@ import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 // Minimal mock router that satisfies the type contract
 function makeStubRouter() {
   return {
+    previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
     resolveTargetsAndIntent: async () => ({
       targetCats: ['opus'],
       intent: { intent: 'execute', promptTags: [], targets: ['opus'] },

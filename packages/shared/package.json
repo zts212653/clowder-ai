@@ -6,6 +6,14 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./l0-input-capture": {
+      "import": "./dist/l0-input-capture.js",
+      "types": "./dist/l0-input-capture.d.ts"
+    },
+    "./l0-input": {
+      "import": "./dist/l0-input.js",
+      "types": "./dist/l0-input.d.ts"
+    },
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"

@@ -13,7 +13,7 @@ created: 2026-11-03
 
 ## 基线与采用判断
 
-- 基线 `upstream/next@917120d55bb5bf618a3cc49c0749d5f5172ace46`；upstream 为 zts212653/clowder-ai。
+- 初始基线 `upstream/next@917120d55bb5bf618a3cc49c0749d5f5172ace46`；upstream 为 zts212653/clowder-ai。
 - 旧 PR OPEN、base=main、HEAD=4acc3ef82671e99619d43dc955ab7573e6cfd3c1；37 提交、22 文件。
 - 当前认证用户与旧 PR 作者均为 whutzefengxie-ops；本轮是获授权的作者修复，不是正式批准。
 - 旧工位有 CURRENT_STATUS.md 和未提交审查文档，不变基、不清理、不改写其分支。
@@ -111,3 +111,12 @@ Windows 检测仅在缺少明确环境例外时增加一次有界只读探测；
 含 hostname 的系统规则整体保留原环境；已有显式环境 NO_PROXY 继续保持其权威。
 来源：[微软 WinINet 例外说明](https://learn.microsoft.com/en-us/windows/win32/wininet/enabling-internet-functionality#listing-the-proxy-bypass)、
 [reqwest NoProxy 规则](https://docs.rs/reqwest/latest/reqwest/struct.NoProxy.html#method.from_string)。
+
+### next 在收尾时前进：1016aa7a
+
+初版 CI 与独立批准完成后，next 合入 #1762，当前基线更新为
+1016aa7a316566893cacef84d49792a8ced0f0c8。452 文件的上游增量涉及 role/client、账号与 MCP。
+未搬入上游之外的新功能；合并最新 next，保留本轮全部历史，未改写旧工位或旧 PR。
+冲突只有 CI、Windows Smoke 的相邻新增步骤及 CodexAgentService 的相邻 import，均同时保留。
+其余代码自动合并后再核最终环境边界；上游未覆盖 NO_PROXY 派生、direct/host 禁二次继承。
+Direct/host/buildChildEnv 的相关基线源码未变，原 RED 仍适用；新基线的类型、回归、CI与独立 review 必须重新绑定最终 HEAD。

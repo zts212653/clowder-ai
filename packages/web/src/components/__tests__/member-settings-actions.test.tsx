@@ -30,6 +30,7 @@ const cat = {
   defaultModel: '',
   mentionPatterns: ['@fixture'],
   color: { primary: '#123456', secondary: '#abcdef' },
+  configurationRevision: '1'.repeat(64),
 } as CatData;
 let host: HTMLDivElement, root: Root;
 const close = vi.fn(),
@@ -128,5 +129,7 @@ it.each([
     outcome === 'cancel' ? 0 : 1,
   );
   expect(push).toHaveBeenCalledTimes(outcome === 'success' ? 1 : 0);
+  const deletion = vi.mocked(apiFetch).mock.calls.find(([, init]) => init?.method === 'DELETE');
+  if (deletion) expect(JSON.parse(String(deletion[1]?.body)).expectedRevision).toBe(cat.configurationRevision);
   if (outcome.endsWith('failure')) expect(host.querySelector('[role=alert]')?.textContent).toContain('删除失败');
 });

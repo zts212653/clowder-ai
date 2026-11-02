@@ -82,3 +82,9 @@ direct 的 Node 子进程和只读 PowerShell 查询随测试退出；Unix 实�
 新回归先 RED；修复后 hostname 系统例外整体进入 unsupported，不新增匹配管理层。
 P2 修复后定向 56 项：54 通过、2 Unix 专属跳过。
 原 HEAD 19adf9b1 的证据仍属历史，最终提交、CI、复审结果在 PR 和台账绑定。
+
+## 基线前进后的续验
+
+原 fd01acbe 在 next@917120d5 的 19 SUCCESS/1 SKIPPED 与独立批准属于历史证据。
+收尾 fetch 发现 next@1016aa7a 合入 #1762，故继续合并新基线并重新验证，不能沿用旧 CI 作为最新结论。
+最新代码、CI、复审状态以 PR 正文和任务 verification.json 回执为准；真实 provider 验收缺口不变。

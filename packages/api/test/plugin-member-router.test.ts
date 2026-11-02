@@ -6,6 +6,7 @@ import test, { type TestContext } from 'node:test';
 import { catRegistry, createCatId } from '@cat-cafe/shared';
 import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationDeps } from '../src/domains/cats/services/agents/invocation/invoke-single-cat.js';
+import { captureInvocationL0Input } from '../src/domains/cats/services/agents/providers/l0-input-capture.js';
 import { InMemoryTurnExecutionStore } from '../src/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import type { AgentMessage, AgentServiceOptions } from '../src/domains/cats/services/types.js';
@@ -103,6 +104,13 @@ async function fixture(t: TestContext) {
       runtime: row.runtime,
       binding: {
         catConfig: { ...config, mcpSupport: false },
+        sharedMcpLaunch: { transport: 'stdio' },
+        frozenL0Input: captureInvocationL0Input({
+          catId: row.catId,
+          catConfig: config,
+          model: row.runtime.model,
+          projection: 'scoped-member',
+        }),
         projectRoot: directory,
         resolvedAccount: null,
         workspace: { workingDirectory: directory, workingProjectRoot: directory, usesDefaultWorkspace: false },

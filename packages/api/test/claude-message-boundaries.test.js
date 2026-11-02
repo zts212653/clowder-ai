@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
 import './helpers/setup-cat-registry.js';
 import { transcriptEntriesToAgentMessages } from '../dist/domains/cats/services/agents/providers/BgTranscriptEventConsumer.js';
 import { ClaudeBgCarrierService } from '../dist/domains/cats/services/agents/providers/ClaudeBgCarrierService.js';
@@ -150,6 +151,7 @@ test('id-less legacy events do not invent a boundary from stale known identity',
 
 test('SDK invoke preserves the handoff boundary and resets identity between invocations', async () => {
   const service = new ClaudeSdkAgentService({
+    runtimeResolver: claudeSdkRuntimeFixture,
     catId: 'opus',
     model: 'claude-test',
     l0CompilerFn: async () => 'test L0',

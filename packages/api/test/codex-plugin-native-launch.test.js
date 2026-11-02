@@ -142,6 +142,8 @@ async function fixture(t, serviceOverrides = {}) {
     cliCommand: process.execPath,
     spawnFn,
     l0CompilerFn: async (input) => {
+      assert.equal(input.frozenInput.projection, 'public');
+      assert.equal(input.requireFrozenInput, true);
       projections.push(input.projection);
       await duringL0();
       return '# Public fixture identity\n';
@@ -468,10 +470,21 @@ test('a scoped member has the same hard tool fence with its own identity project
   const f = await fixture(t, {
     l0CompilerFn: async (input) => {
       compiled.push(input);
-      return 'Identity constant: @codex model=gpt-5.3-codex';
+      const { compileL0ViaSubprocess } = await import('../dist/domains/cats/services/agents/providers/l0-compiler.js');
+      return compileL0ViaSubprocess(input);
     },
   });
   f.options.pluginNativeLaunch.sandbox.kind = 'scoped-member';
+  const { catRegistry } = await import('@cat-cafe/shared');
+  const { captureInvocationL0Input } = await import(
+    '../dist/domains/cats/services/agents/providers/l0-input-capture.js'
+  );
+  f.options.frozenL0Input = captureInvocationL0Input({
+    catId: 'codex',
+    catConfig: { ...catRegistry.getOrThrow('codex').config, roleDescription: 'admission frozen role' },
+    model: 'gpt-5.3-codex',
+    projection: 'scoped-member',
+  });
   const messages = await collect(f.service.invoke('Only the admitted member tools are available.', f.options));
   assert.equal(
     messages.some((message) => message.type === 'error'),
@@ -479,7 +492,11 @@ test('a scoped member has the same hard tool fence with its own identity project
   );
   assert.equal(f.calls.length, 1);
   assert.equal(compiled[0].projection, 'scoped-member');
-  assert.equal(compiled[0].runtimeModel, 'gpt-5.3-codex');
+  assert.equal(compiled[0].frozenInput, f.options.frozenL0Input);
+  assert.match(compiled[0].frozenInput.variables.MEMBER_IDENTITY, /admission frozen role/);
+  assert.equal(compiled[0].frozenInput.projection, 'scoped-member');
+  assert.match(compiled[0].frozenInput.variables.MEMBER_IDENTITY, /model=gpt-5.3-codex/);
+  assert.equal(compiled[0].requireFrozenInput, true);
   assert.ok(f.calls[0].args.includes('--ephemeral'));
   assert.equal(f.calls[0].spec.command, process.execPath);
   assert.equal(f.calls[0].spec.default_tools_approval_mode, 'approve');

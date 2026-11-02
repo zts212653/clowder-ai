@@ -10,6 +10,7 @@ import { ClaudeInteractivePtyCarrierService } from '../src/domains/cats/services
 import { CarrierHealthStore } from '../src/domains/cats/services/agents/providers/carrier-health.js';
 import { FallbackCarrierWrapper } from '../src/domains/cats/services/agents/providers/claude-carrier-factory.js';
 import { prepareClaudeSdkLaunch } from '../src/domains/cats/services/agents/providers/claude-sdk-launch.js';
+import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
 const savedModel = process.env.CAT_OPUS_MODEL;
@@ -150,6 +151,7 @@ test('SDK checks exactly the sources it passes, including its empty read-only so
   writeFileSync(join(root, 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_OAUTH_TOKEN: 'other' } }));
   const prepare = (readOnly: boolean) =>
     prepareClaudeSdkLaunch({
+      runtime: claudeSdkRuntimeFixture(),
       catId: createCatId('opus'),
       model: 'claude-opus-4-6',
       prompt: 'fixture',

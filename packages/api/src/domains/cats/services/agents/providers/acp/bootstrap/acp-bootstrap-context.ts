@@ -40,10 +40,11 @@ export function verifyAcpBootstrap(
   bootstrapRoot?: string,
   env?: Record<string, string>,
   strictRoot = false,
+  launch: { readonly command: string; readonly args: readonly string[] } = base,
 ): VerifiedAcpBootstrapContext {
   const isolation = auditedWindowsAcpStartup(
-    base.command,
-    base.args,
+    launch.command,
+    [...launch.args],
     buildChildEnv(env, { workingDirectory: base.projectRoot }),
   );
   // An owner-selected root is always strict, even for an audited launch chain.
@@ -61,8 +62,8 @@ export function verifyAcpBootstrap(
     options,
   );
   const verifyCwd = (
-    command = base.command,
-    args = base.args,
+    command = launch.command,
+    args = [...launch.args],
     childEnv = buildChildEnv(env, { workingDirectory: cwd }),
   ) => {
     if (isolation && auditedWindowsAcpStartup(command, args, childEnv) !== isolation) {

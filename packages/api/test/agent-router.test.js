@@ -1931,7 +1931,7 @@ describe('AgentRouter', () => {
       'static provider/identity line MUST be in user-message prompt for non-native-L0 provider',
     );
     assert.ok(
-      opusReceivedPrompt.includes('## 协作\n'),
+      opusReceivedPrompt.replaceAll('\r\n', '\n').includes('## 协作\n'),
       'static A2A collaboration section MUST be present for non-native-L0 provider',
     );
     assert.ok(

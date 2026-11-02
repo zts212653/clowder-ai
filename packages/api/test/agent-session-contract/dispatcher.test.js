@@ -212,6 +212,7 @@ test('slow input-read receipt cannot block output or Stop; late rejection only w
   assert.equal(reads, 1);
   const next = f.iterator.next();
   controller.abort();
+  f.provider.inbox.push(turn('done', { outcome: 'cancelled' }));
   assert.equal((await next).value.errorCode, 'cancelled');
   assert.equal((await f.iterator.next()).done, true);
   pending.reject(new Error('late receipt persistence failure'));

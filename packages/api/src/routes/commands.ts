@@ -88,6 +88,7 @@ export const commandsRoutes: FastifyPluginAsync<CommandsRoutesOptions> = async (
 
     // Extract tasks using LLM
     const result = await extractTasks(messages, opts.opusService, {
+      catId: 'opus',
       threadId,
       userId,
       maxMessages: messageCount ?? 50,

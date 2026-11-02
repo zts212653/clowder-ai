@@ -150,14 +150,15 @@ test('[39] a plain done maps to completed without an errorCode', async () => {
   assert.equal(done[0].errorCode, undefined);
 });
 
-test('[39] a stream that ends without done gets exactly one completed done', async () => {
+test('[39] a stream that ends without done fails instead of reporting success', async () => {
   const { provider } = providerFor([agentMessage('text', { content: 'only text' })]);
 
   const events = await runTurn(provider);
   const done = events.filter((event) => event.type === 'done');
 
   assert.equal(done.length, 1);
-  assert.equal(done[0].outcome, 'completed');
+  assert.equal(done[0].outcome, 'failed');
+  assert.equal(done[0].errorCode, 'provider_stream_ended_without_done');
   assert.equal(events.at(-1).type, 'done');
 });
 

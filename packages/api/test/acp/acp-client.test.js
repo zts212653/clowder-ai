@@ -621,7 +621,7 @@ describe('AcpClient', () => {
       args: [],
       cwd: '/tmp',
       spawnFn: () => child,
-      // No permissionHandler → auto-approve path
+      defaultPermissionDecision: 'allow', // This test verifies an explicit policy's wire envelope.
     });
 
     await client.initialize();

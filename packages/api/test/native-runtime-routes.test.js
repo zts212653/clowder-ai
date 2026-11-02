@@ -1,3 +1,4 @@
+import { readMemberRequestRevision } from './helpers/member-request-revision.js';
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -67,7 +68,10 @@ test('native role create, independent override and reset round-trip without acco
         method: 'PATCH',
         url: `/api/cats/${id}`,
         headers,
-        payload: { cli: { effort: 'low' } },
+        payload: {
+          expectedRevision: await readMemberRequestRevision(app, `/api/cats/${id}`, headers),
+          cli: { effort: 'low' },
+        },
       });
       assert.equal(patch.statusCode, 200, patch.body);
       assert.equal(patch.json().cat.defaultModel, '');
@@ -78,6 +82,7 @@ test('native role create, independent override and reset round-trip without acco
         url: `/api/cats/${id}`,
         headers,
         payload: {
+          expectedRevision: await readMemberRequestRevision(app, `/api/cats/${id}`, headers),
           cli: { effort: nativeLevel },
           defaultModel: clientId === 'acp' ? '["deepseek-official","deepseek-v4-pro"]' : 'native-advertised-model',
         },
@@ -88,7 +93,11 @@ test('native role create, independent override and reset round-trip without acco
         method: 'PATCH',
         url: `/api/cats/${id}`,
         headers,
-        payload: { defaultModel: '', cli: { effort: null } },
+        payload: {
+          expectedRevision: await readMemberRequestRevision(app, `/api/cats/${id}`, headers),
+          defaultModel: '',
+          cli: { effort: null },
+        },
       });
       assert.equal(reset.statusCode, 200, reset.body);
       assert.equal(reset.json().cat.cli.effort, undefined);

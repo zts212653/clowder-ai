@@ -59,3 +59,15 @@ export function getCodexServedModelObservation(env: NodeJS.ProcessEnv = process.
     DEFAULT_CODEX_SERVED_MODEL_OBSERVATION,
   );
 }
+
+/** One admitted launch uses one global policy, even if Settings changes while it waits. */
+export function captureCodexLaunchPolicy(env: NodeJS.ProcessEnv = process.env) {
+  return Object.freeze({
+    sandboxMode: getCodexSandboxMode(env),
+    approvalPolicy: getCodexApprovalPolicy(env),
+    oauthTransport: getCodexOAuthTransport(env),
+    servedModelObservation: getCodexServedModelObservation(env),
+  });
+}
+
+export type CodexLaunchPolicy = ReturnType<typeof captureCodexLaunchPolicy>;

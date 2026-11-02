@@ -1,0 +1,43 @@
+{
+  "keyVersion": 1,
+  "created": "2026-10-30",
+  "files": [
+    {
+      "path": "Q02-A/TASK.md",
+      "sha256": "c5ddb2107af45e6b53500267a9ab0ab4671dc6334f535cbf5b9dabdefac947d8"
+    },
+    {
+      "path": "Q02-A/before/src/documents.mjs",
+      "sha256": "1f0c02a0747c3ef17f77230fa029a362ce26784c859870563e21d5446ed7334f"
+    },
+    {
+      "path": "Q02-A/after/src/documents.mjs",
+      "sha256": "ae1031522213dd2f0f8d97176d414fc92bd3be4c965071881e88845d71d93562"
+    },
+    {
+      "path": "Q02-B/TASK.md",
+      "sha256": "6c9e70064b2294a5750ff65983bf356ad341946d221b32f62e0c363b8036efa1"
+    },
+    {
+      "path": "Q02-B/before/src/reserve.mjs",
+      "sha256": "c677a6777afe71b62c1543b65f03c9b1f6773ce62a191d2cc1c9577b38fb9b4c"
+    },
+    {
+      "path": "Q02-B/after/src/reserve.mjs",
+      "sha256": "1a96c0999d89e0c31dc66d2c6c3f950673b3ad3170d67969ea887e901bf44a68"
+    },
+    {
+      "path": "Q02-C/TASK.md",
+      "sha256": "607cee7d5ad1646a9ada89451580586bf0165245a0cc828ba529b99017b8081c"
+    },
+    {
+      "path": "Q02-C/before/src/tags.mjs",
+      "sha256": "b029f09d44e4ae3acb6fdb5f35d7862e39bea1315e557363c065612fab67a3c3"
+    },
+    {
+      "path": "Q02-C/after/src/tags.mjs",
+      "sha256": "4703bc303a8dbc326c2565cb80be70b7d1847adee6f071350306fdd09903e808"
+    }
+  ],
+  "calibrationSha256": "1d6585ad7da71c3aacf06ac1905e2aa44b0473dba250cd233caaacbc33663f4c"
+}
