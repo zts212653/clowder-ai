@@ -6,6 +6,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { PluginArchiveReplacementConfirmation } from '@cat-cafe/shared';
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
+import { readAgentClientMetadata } from '../declared/agent-client-metadata.js';
 import type { ExternalPluginLifecycleService } from '../external-plugin-lifecycle.js';
 import { FilesystemVerifiedPluginPackageLocator } from '../external-runtime/filesystem-package-locator.js';
 import type { PluginManifestValidator } from '../external-runtime/package-staging.js';
@@ -448,6 +449,7 @@ export class LocalPluginPackageAdmission {
         expectedPackageDigest: digest,
         packagePluginId: located.manifest.pluginId,
         signalSchemas,
+        agentClientMetadata: await readAgentClientMetadata(located),
         provenance: admittedProvenance,
       };
       const confirmedReplacement = confirmArchiveReplacement(

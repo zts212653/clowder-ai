@@ -5517,7 +5517,6 @@ async function main(): Promise<void> {
   const { registerAgentClientLibraryRoutes } = await import('./routes/agent-client-library-routes.js');
   registerAgentClientLibraryRoutes(app, {
     inventory: pluginRuntime.inventoryStore,
-    packages: pluginRuntime.packages,
     registry: sessionImplementations,
     configuration: {
       readConfig: async (instanceId, key) => {
