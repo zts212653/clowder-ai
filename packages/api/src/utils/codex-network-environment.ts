@@ -48,7 +48,11 @@ export async function prepareCodexEnvironment(
   overrides: Record<string, string | null>,
   options: { workingDirectory?: string; inheritParentEnv?: boolean; bindExecutionOwner?: boolean } = {},
 ): Promise<Record<string, string>> {
-  const base = buildChildEnv(overrides, options);
+  const base = buildChildEnv(overrides, {
+    workingDirectory: options.workingDirectory,
+    inheritParentEnv: options.inheritParentEnv,
+    bindExecutionOwner: options.bindExecutionOwner,
+  });
   // Plugin-native minimal environments do not acquire host system policy.
   if (options.inheritParentEnv === false)
     return Object.fromEntries(
