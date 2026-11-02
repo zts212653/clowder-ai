@@ -7,21 +7,20 @@ import {
 } from '@/stores/sidebarProjectionStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { useShellCopy } from '../shell/shell-copy';
 import { threadDeletionCopy } from './thread-deletion.shell-copy';
 
 export function useThreadDeletion({
   currentThreadId,
   navigateToThread,
-  loadThreads,
   showTrash,
   loadTrash,
 }: {
   currentThreadId: string | null;
   navigateToThread: (id: string) => void;
-  loadThreads: () => Promise<void>;
   showTrash: boolean;
-  loadTrash: () => Promise<void>;
+  loadTrash: (afterCurrentGet?: boolean) => Promise<void>;
 }) {
   const copy = useShellCopy(threadDeletionCopy);
   const preference = useThreadDeletePreference();
@@ -48,8 +47,8 @@ export function useThreadDeletion({
           }
           const saved = !remember || isSystem || preference.setConfirmBeforeDelete(false);
           if (thread.id === currentConversation.current) navigateToThread('default');
-          await loadThreads();
-          if (showTrash) await loadTrash();
+          await invalidateSidebarProjection();
+          if (showTrash) await loadTrash(true);
           useToastStore.getState().addToast({
             type: saved ? 'success' : 'info',
             title: copy.deletedTitle,
@@ -61,14 +60,14 @@ export function useThreadDeletion({
           useToastStore
             .getState()
             .addToast({ type: 'error', title: copy.failedTitle, message: copy.uncertainMessage, duration: 5000 });
-          void loadThreads();
+          void invalidateSidebarProjection();
         })
         .finally(() => {
           pending.current.delete(thread.id);
           setDeletingIds(new Set(pending.current));
         });
     },
-    [copy, loadThreads, loadTrash, navigateToThread, preference.setConfirmBeforeDelete, showTrash],
+    [copy, loadTrash, navigateToThread, preference.setConfirmBeforeDelete, showTrash],
   );
 
   const requestDelete = useCallback(

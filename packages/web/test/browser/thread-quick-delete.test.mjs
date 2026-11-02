@@ -21,6 +21,8 @@ Object.assign(process.env, {
 });
 mkdirSync(evidence, { recursive: true });
 let app, browser, built, threads, store, messages;
+let delayedSidebar;
+let delayedTrash;
 const requests = [],
   errors = [];
 
@@ -36,8 +38,8 @@ before(
       ]);
     store = new ThreadStore();
     messages = new MessageStore();
-    threads = ['问题反馈分析', '待清理测试对话', '正在执行的会话', '系统会话'].map((title) =>
-      store.create(owner, title),
+    threads = ['问题反馈分析', '待清理测试对话', '正在执行的会话', '系统会话', '连续清理测试', '回收站刷新测试'].map(
+      (title) => store.create(owner, title),
     );
     store.updateSystemKind(threads[3].id, 'eval_domain');
     messages.append(
@@ -127,6 +129,18 @@ async function openPage(context, routePath = '/') {
         headers: request.headers(),
         ...(request.postData() ? { payload: request.postData() } : {}),
       });
+      if (url.pathname === '/api/threads' && url.searchParams.get('view') === 'sidebar' && delayedSidebar) {
+        const delay = delayedSidebar;
+        delayedSidebar = undefined;
+        delay.captured();
+        await delay.released;
+      }
+      if (url.pathname === '/api/threads' && url.searchParams.get('deleted') === 'true' && delayedTrash) {
+        const delay = delayedTrash;
+        delayedTrash = undefined;
+        delay.captured();
+        await delay.released;
+      }
       return route.fulfill({
         status: response.statusCode,
         headers: { 'content-type': 'application/json' },
@@ -192,9 +206,23 @@ test(
     assert.ok(store.get(threads[0].id).deletedAt);
     await page.reload();
     const second = page.locator(`[data-thread-id="${threads[1].id}"]`);
+    const third = page.locator(`[data-thread-id="${threads[4].id}"]`);
+    const captured = Promise.withResolvers();
+    const deliver = Promise.withResolvers();
+    delayedSidebar = { captured: captured.resolve, released: deliver.promise };
     await second.hover();
     await second.getByTestId('thread-quick-delete').click();
+    await captured.promise;
+    await Promise.all([
+      page.waitForResponse(
+        (response) => response.request().method() === 'DELETE' && response.url().endsWith(threads[4].id),
+      ),
+      third.getByTestId('thread-quick-delete').click(),
+    ]);
+    assert.ok(store.get(threads[4].id).deletedAt);
+    deliver.resolve();
     await second.waitFor({ state: 'detached' });
+    await third.waitFor({ state: 'detached' });
     assert.equal(await page.getByRole('dialog').count(), 0);
     assert.ok(store.get(threads[1].id).deletedAt);
     const busy = page.locator(`[data-thread-id="${threads[2].id}"]`);
@@ -202,7 +230,22 @@ test(
     await busy.getByTestId('thread-quick-delete').click();
     await page.getByText('猫猫正在工作中，请等待当前任务完成后再删除对话。', { exact: true }).waitFor();
     assert.equal(Boolean(store.get(threads[2].id).deletedAt), false);
+    const capturedTrash = Promise.withResolvers();
+    const deliverTrash = Promise.withResolvers();
+    delayedTrash = { captured: capturedTrash.resolve, released: deliverTrash.promise };
     await page.getByTestId('trash-bin-toggle').click();
+    await capturedTrash.promise;
+    const trashRefreshTarget = page.locator(`[data-thread-id="${threads[5].id}"]`);
+    await Promise.all([
+      page.waitForResponse(
+        (response) => response.request().method() === 'DELETE' && response.url().endsWith(threads[5].id),
+      ),
+      trashRefreshTarget.getByTestId('thread-quick-delete').click(),
+    ]);
+    await trashRefreshTarget.waitFor({ state: 'detached' });
+    deliverTrash.resolve();
+    const trash = page.getByTestId('trash-bin-toggle').locator('..');
+    await trash.getByText(threads[5].title, { exact: true }).waitFor();
     const trashItem = page
       .locator('[data-testid="trash-bin-toggle"]')
       .locator('..')

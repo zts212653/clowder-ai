@@ -367,10 +367,10 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
   );
 
   // F095 Phase D: Load trashed threads
-  const loadTrash = useCallback(async () => {
+  const loadTrash = useCallback(async (afterCurrentGet = false) => {
     setIsLoadingTrash(true);
     try {
-      const res = await apiFetch('/api/threads?deleted=true');
+      const res = await apiFetch('/api/threads?deleted=true', undefined, { afterCurrentGet });
       if (!res.ok) return;
       const data = await res.json();
       setTrashedThreads(data.threads ?? []);
@@ -394,13 +394,13 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
       try {
         const res = await apiFetch(`/api/threads/${threadId}/restore`, { method: 'POST' });
         if (!res.ok) return;
-        await loadThreads();
-        await loadTrash();
+        await invalidateSidebarProjection();
+        await loadTrash(true);
       } catch {
         // Silently ignore
       }
     },
-    [loadThreads, loadTrash],
+    [loadTrash],
   );
 
   const {
@@ -413,7 +413,6 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
   } = useThreadDeletion({
     currentThreadId: currentConversationId,
     navigateToThread,
-    loadThreads,
     showTrash,
     loadTrash,
   });
