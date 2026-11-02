@@ -87,6 +87,7 @@ export default defineConfig({
       'src/__tests__/plugin-manager-contract.test.ts',
       'test/message-bundle-schema.test.ts',
       'test/markdown-readable-text.test.ts',
+      'src/__tests__/html-inline-event-handlers.test.ts',
       'src/__tests__/profile-contract.test.ts',
       'src/__tests__/timeline-message-kind.test.ts',
       'src/__tests__/lifecycle-metadata-coercion.test.ts',

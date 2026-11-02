@@ -70,6 +70,7 @@ import { formatSuggestedCrossPostActionLines } from './cross-post-suggestion-for
 import { withDegradation } from './degradation.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { appendHintToSuccess, htmlWidgetInlineHandlerHint } from './html-widget-publish-hint.js';
 import {
   getInvocationAuthSignal,
   hasInvocationCredentialScope,
@@ -1939,6 +1940,7 @@ export async function handleCreateRichBlock(input: {
     return errorResult('Invalid rich block: block does not match required fields for its kind');
   }
   const block = parsed;
+  const inlineHandlerHint = htmlWidgetInlineHandlerHint(block);
   const hasInvocationCreds = getInvocationAuthSignal().hasFullCredentials;
   const hasAgentKeyCreds = hasUsableAgentKeyCredentials(process.env);
 
@@ -1946,7 +1948,7 @@ export async function handleCreateRichBlock(input: {
     if (!hasInvocationCreds) {
       return errorResult('awaitResponseV1 requires the current authenticated invocation; no text fallback is allowed.');
     }
-    return callbackPost(
+    const result = await callbackPost(
       '/api/callbacks/create-rich-block',
       {
         block,
@@ -1955,6 +1957,7 @@ export async function handleCreateRichBlock(input: {
       },
       { enableOutbox: true, agentKeyCatId: input.agentKeyCatId },
     );
+    return appendHintToSuccess(result, inlineHandlerHint);
   }
 
   const ccRichText = `\`\`\`cc_rich\n${JSON.stringify({ v: 1, blocks: [block] })}\n\`\`\``;
@@ -1996,7 +1999,7 @@ export async function handleCreateRichBlock(input: {
     if (!input.threadId) {
       return errorResult('threadId is required for create_rich_block when using agent-key auth.');
     }
-    return runRouteB({ route: 'B_agent_key', degraded: false });
+    return appendHintToSuccess(await runRouteB({ route: 'B_agent_key', degraded: false }), inlineHandlerHint);
   }
 
   // Phase E: framework handles primary call + auth-degradable fallback.
@@ -2004,7 +2007,7 @@ export async function handleCreateRichBlock(input: {
   // returned error text and route to Route B explicitly — preserves the
   // existing behavior without widening the framework's degradable set
   // (AC-E3: framework triggers only on 401-degradable reasons).
-  return withDegradation({
+  const published = await withDegradation({
     toolName: 'create_rich_block',
     primary: async () => {
       const result = await callbackPost(
@@ -2024,6 +2027,7 @@ export async function handleCreateRichBlock(input: {
     },
     policy: { kind: 'custom', degrade: async () => runRouteB({ route: 'B_fallback', degraded: true }) },
   });
+  return appendHintToSuccess(published, inlineHandlerHint);
 }
 
 /** F088 Phase J2: Generate a document (PDF/DOCX/MD) from Markdown content */
