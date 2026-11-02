@@ -199,7 +199,10 @@ Review every PR against these four criteria:
    conversations are resolved. Recheck approval after new commits; stale approvals are dismissed.
 5. The change does not require additional senior approval under the sensitive-change rules below.
 
-The trusted maintainer accounts are `zts212653` (repository owner), `mindfn`, and `whutzefengxie-ops`.
+The authorized maintainer accounts are `zts212653` (repository owner), `mindfn`, `whutzefengxie-ops`,
+`EdgarR1170`, `YukinaXSer`, `bkkzz`, `zlzfun`, `liu-zhengdong`, and `LeslieKuo`.
+New invitees must accept the repository invitation and have current Write access before their
+approval can satisfy the code-owner requirement. A pending invitation does not grant that authority.
 [CODEOWNERS](CODEOWNERS) is the authoritative path-to-reviewer list. `next` requires one eligible
 non-author code-owner approval. Other contributors may provide feedback, but their approval does
 not replace this requirement. Any current maintainer with Write or higher access may then merge,
@@ -497,7 +500,10 @@ PR 必须对应一个 **accepted issue**。"accepted" 的条件：
    新提交会撤销过时批准，合入前须重新核对。
 5. 没有下列需要额外高级审查的敏感变更。
 
-当前受信任维护者账号为 `zts212653`（仓库所有者）、`mindfn`、`whutzefengxie-ops`。
+已授权的维护者账号为 `zts212653`（仓库所有者）、`mindfn`、`whutzefengxie-ops`、
+`EdgarR1170`、`YukinaXSer`、`bkkzz`、`zlzfun`、`liu-zhengdong`、`LeslieKuo`。
+新成员须先接受仓库邀请、取得当前有效的 Write 权限，才能用其批准满足代码负责人门禁；
+待接受邀请本身不授予这项资格。
 具体路径对应的审查者以 [CODEOWNERS](CODEOWNERS) 为准；`next` 要求至少一位非作者的代码负责人批准。
 其他贡献者可以提意见，但其批准不能替代这道要求。条件满足后，当前有 Write 或以上权限的维护者即可合入，
 也包括已经取得独立批准的作者本人。Write 权限不绕过 review 和 CI。
