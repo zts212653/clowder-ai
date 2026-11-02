@@ -22,7 +22,7 @@ const PATTERNS: Pattern[] = [
 
 const CODE_FENCE_RE = /^\s{0,3}[`~]{3,}/;
 const PLACEHOLDER_RE = /EXAMPLE|PLACEHOLDER|YOUR[_-]|REPLACE|CHANGEME|xxx/i;
-const CREDENTIAL_NAME_RE = /key|token|secret|password|credential|auth/i;
+const CREDENTIAL_NAME_RE = /(?:key|token|secret|password|credential|auth)$/i;
 const DECLARATION_MODIFIERS = new Set([
   'export',
   'const',
@@ -49,6 +49,7 @@ function hasCredentialAssignment(line: string): boolean {
   const tokens =
     /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:\[[\w.]+\])?\$(?:\{[\w:.-]+\}|[\w:.-]+)|[\w.-]+:[\w.-]+(?=\s*=)|[\w.-]+|[^\s]/g;
   const valueAtOperator = /\s*["']?([A-Za-z0-9_\-/.+=]{32,})/y;
+  const assignmentRhs = /\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\\.|[^\s;"',{}|])+/y;
   let target = '';
   let validPrefix = true;
   let declaration = false;
@@ -68,7 +69,7 @@ function hasCredentialAssignment(line: string): boolean {
       const value = valueAtOperator.exec(text)?.[1];
       if (
         assignment.validPrefix &&
-        CREDENTIAL_NAME_RE.test(assignment.target) &&
+        CREDENTIAL_NAME_RE.test(assignment.target.replace(/["'}]$/, '')) &&
         value &&
         !PLACEHOLDER_RE.test(value) &&
         shannonEntropy(value) > 3.5
@@ -77,9 +78,10 @@ function hasCredentialAssignment(line: string): boolean {
       if (word === ':' && valueStart === tokens.lastIndex) {
         annotation ??= assignment;
       } else {
-        // Skip this RHS as one lexical value. A following shell assignment can have its own target.
-        tokens.lastIndex = valueStart;
-        if (!tokens.exec(text)) return false;
+        // Consume the complete shell RHS, including paths, quoted spans and escaped spaces.
+        assignmentRhs.lastIndex = valueStart;
+        if (!assignmentRhs.exec(text)) return false;
+        tokens.lastIndex = assignmentRhs.lastIndex;
         target = '';
         validPrefix = true;
         declaration = false;

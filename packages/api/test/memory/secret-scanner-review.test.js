@@ -8,6 +8,9 @@ import { SecretScanner } from '../../dist/domains/memory/SecretScanner.js';
 const value = 'Kj8sLq2mNp9Rt4vWx7YzAbCdEfGhIjKlMnOpQrSt';
 const assignments = [
   `FOO="hello world" API_TOKEN="${value}"`,
+  ...['/tmp/path', 'abc/def', 'https://example.com', 'hello\\ world'].map(
+    (prefix) => `FOO=${prefix} API_TOKEN="${value}"`,
+  ),
   `private readonly apiToken = "${value}"`,
   `API_TOKEN: string & Brand = "${value}"`,
   `const API_TOKEN: string = "${value}"`,
@@ -41,6 +44,17 @@ it('does not borrow a value from another assignment or a URL', () => {
     `api_key: https://example.com/docs/credentials?description=${value}`,
   ]) {
     assert.deepEqual(SecretScanner.scan(line, 'fixture.md'), []);
+  }
+});
+
+it('preserves the credential-name suffix boundary without a field whitelist', () => {
+  for (const line of [
+    'author: AdaLovelace/GraceHopper/BarbaraLiskov',
+    'authors = "AdaLovelace/GraceHopper/BarbaraLiskov"',
+    'authentication_method: publicKey/password/passphrase/keychain',
+    'key_paths: docs/harness-feedback/eval-domains/publish',
+  ]) {
+    assert.deepEqual(SecretScanner.scan(line, 'ordinary.md'), []);
   }
 });
 

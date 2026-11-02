@@ -24,9 +24,10 @@ it('indexes the unedited F236 prose, then blocks and purges real credentials bef
     join(root, 'doc.md'),
     '# Original\n\n（correlation key = messageId/taskId/sourceTool/previewEventId）；',
   );
+  writeFileSync(join(root, 'authors.md'), '# Authors\n\nauthor: AdaLovelace/GraceHopper/BarbaraLiskov');
   const clean = await builder.rebuild();
   assert.equal(clean.blocked, false);
-  assert.equal(clean.indexed, 1);
+  assert.equal(clean.indexed, 2);
   assert.ok(await store.getByAnchor('probe:doc/doc'));
   writeFileSync(join(root, 'leaked.md'), 'password = "CorrectHorse/BatteryStaple/PurpleCloud/Sunshine"');
   const blocked = await builder.rebuild();
