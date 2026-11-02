@@ -103,6 +103,7 @@ export function collectConfigSnapshot(projectRoot?: string): ConfigSnapshot {
     coCreator: {
       name: coCreator.name,
       ...(coCreator.nickname ? { nickname: coCreator.nickname } : {}),
+      ...(coCreator.nicknameSource ? { nicknameSource: coCreator.nicknameSource } : {}),
       aliases: [...coCreator.aliases],
       mentionPatterns: [...coCreator.mentionPatterns],
       ...(coCreator.timeZone ? { timeZone: coCreator.timeZone } : {}),

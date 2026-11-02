@@ -64,22 +64,21 @@ export function registerAgentClientLibraryRoutes(
         await located.verifyIntegrity();
         const parsed = parseAgentProviderDeclaration(raw, { packageRoot: located.rootDir });
         if (!parsed.ok) throw new Error(parsed.reason);
-        configurationKey = 'configurationKey' in parsed.declaration ? parsed.declaration.configurationKey : null;
-        const profiles =
-          'configurationKey' in parsed.declaration
-            ? await resolveAgentClientLibrary({
-                declaration: parsed.declaration,
-                admission: {
-                  instance,
-                  packageRecord: { ...record, manifest: record.manifest },
-                },
-                packageRoot: located.rootDir,
-                configuration: input.configuration,
-              })
-            : [parsed.declaration];
+        // This key selects the existing multi-client editor. Fixed clients keep
+        // their manifest-declared connection field in the ordinary config form.
+        configurationKey = 'id' in parsed.declaration ? null : parsed.declaration.configurationKey;
+        const profiles = await resolveAgentClientLibrary({
+          declaration: parsed.declaration,
+          admission: {
+            instance,
+            packageRecord: { ...record, manifest: record.manifest },
+          },
+          packageRoot: located.rootDir,
+          configuration: input.configuration,
+        });
         libraries.push({
           pluginId: instance.pluginId,
-          presets: 'configurationKey' in parsed.declaration ? (parsed.declaration.presets ?? []) : [],
+          presets: 'id' in parsed.declaration ? [] : (parsed.declaration.presets ?? []),
           configurationKey,
           clients: profiles.map((profile) => ({
             id: profile.id,

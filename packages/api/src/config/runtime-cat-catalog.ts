@@ -101,6 +101,7 @@ export interface RuntimeCatInput {
   clientId: ClientId;
   carrier: CatCarrier;
   defaultModel: string;
+  executionApproval?: 'auto' | 'ask_user';
   mcpSupport: boolean;
   /** F247 KD-17: cloud-only cats (Remote MCP) omit cli to skip local dispatch.
    * When cli is absent, mention routing queues the mention without spawning a CLI. */
@@ -141,6 +142,7 @@ export interface RuntimeCatUpdate {
   clientId?: ClientId;
   carrier?: CatCarrier;
   defaultModel?: string;
+  executionApproval?: 'auto' | 'ask_user';
   mcpSupport?: boolean;
   /** F247 KD-17: cli null to remove (cloud-only mode), CliConfig to update, undefined to skip. */
   cli?: CliConfig | null;
@@ -159,6 +161,7 @@ export interface RuntimeCatUpdate {
 
 export interface RuntimeCoCreatorUpdate {
   name?: string;
+  nickname?: string | null;
   aliases?: string[];
   mentionPatterns?: string[];
   timeZone?: string;
@@ -344,6 +347,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
           ? { variantLabel: input.variantLabel.trim() }
           : {}),
         defaultModel: input.defaultModel,
+        ...(input.executionApproval ? { executionApproval: input.executionApproval } : {}),
         mcpSupport: input.mcpSupport,
         // F247 KD-17: omit cli for cloud-only cats (Remote MCP, no local dispatch).
         ...(input.cli ? { cli: input.cli } : {}),
@@ -667,6 +671,7 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
     if (variant.cli && typeof variant.cli === 'object') delete variant.cli.carrier;
   }
   if (patch.defaultModel !== undefined) variant.defaultModel = patch.defaultModel;
+  if (patch.executionApproval !== undefined) variant.executionApproval = patch.executionApproval;
   if (patch.mcpSupport !== undefined) variant.mcpSupport = patch.mcpSupport;
   // F247 KD-17: patch.cli === null means remove (cloud-only mode); object means update.
   if (patch.cli !== undefined) {
@@ -863,6 +868,12 @@ export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCrea
       : {}),
   };
 
+  if (patch.nickname !== undefined) {
+    if (patch.nickname?.trim()) nextOwner.nickname = patch.nickname.trim();
+    else delete nextOwner.nickname;
+    nextOwner.nicknameSource = 'user';
+  }
+
   if (patch.timeZone !== undefined) {
     nextOwner.timeZone = patch.timeZone.trim();
   }
@@ -886,6 +897,7 @@ export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCrea
   const normalizedOwner: CoCreatorConfig = {
     name: String(nextOwner.name ?? currentOwner.name),
     ...(typeof nextOwner.nickname === 'string' ? { nickname: nextOwner.nickname } : {}),
+    ...(nextOwner.nicknameSource === 'user' ? { nicknameSource: 'user' as const } : {}),
     aliases: Array.isArray(nextOwner.aliases) ? (nextOwner.aliases as string[]) : [...currentOwner.aliases],
     mentionPatterns: Array.isArray(nextOwner.mentionPatterns)
       ? (nextOwner.mentionPatterns as string[])

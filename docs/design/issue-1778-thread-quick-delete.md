@@ -12,7 +12,7 @@ tips_exempt: 行尾入口、确认复选框和个人设置开关均在原操作�
 
 状态：用户已接受设计并授权实现；这表示需求方确认，不代表维护者已正式接纳。产品实现与初轮验证已完成，维护者随后要求修复确认草稿跨身份延续的 P1，本次补充修复及回归；正式复审、triage 与合入结论以 [PR #1780](https://github.com/zts212653/clowder-ai/pull/1780) 为准，目标为 `next`，尚未合入或发布。早期原型与产品验证分别记录。
 
-源码基线：`zts212653/clowder-ai` 的远端 `next`，`b926134a02dec551d857d378fc0519ebe66dc090`。实施分支 `feat/issue-1778-quick-delete`，复用原设计工位。runtime 仍保持原检出与构建。
+设计与实施起始基线：`zts212653/clowder-ai` 的远端 `next@b926134a02dec551d857d378fc0519ebe66dc090`。维护者 P1 修复后同步了 `next@917120d55bb5bf618a3cc49c0749d5f5172ace46`。实施分支 `feat/issue-1778-quick-delete`，复用原设计工位。runtime 仍保持原检出与构建。
 
 ## 1. 设计判断与复用依据
 

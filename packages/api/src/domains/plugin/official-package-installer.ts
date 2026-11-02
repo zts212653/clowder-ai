@@ -39,6 +39,7 @@ import {
   verifyPluginPackageDigest,
 } from './official-package-archive.js';
 import { OfficialPluginInstallError, throwDataDirectoryConflict } from './official-package-errors.js';
+import { readPackageCapabilityRejection } from './read-package-capabilities.js';
 
 export interface OfficialPluginPackageInstallerOptions {
   readonly inventory: HostInventoryControlPlane;
@@ -356,12 +357,6 @@ export class OfficialPluginPackageInstaller {
       });
     }
     try {
-      if (entry.distribution === 'bundled' && located.manifest.runtime?.transport !== 'builtin') {
-        throw new OfficialPluginInstallError(
-          'UNSUPPORTED_TRANSPORT',
-          'bundled archive must retain its builtin runtime',
-        );
-      }
       if (located.manifest.pluginId !== entry.pluginId) {
         throw new OfficialPluginInstallError('PACKAGE_ID_MISMATCH', 'package manifest identity differs from catalog');
       }
@@ -377,13 +372,8 @@ export class OfficialPluginPackageInstaller {
           'package presentation metadata differs from the official catalog',
         );
       }
-      if (
-        located.manifest.runtime !== undefined &&
-        located.manifest.runtime?.transport !== 'stdio' &&
-        located.manifest.runtime?.transport !== 'builtin'
-      ) {
-        throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', 'official package has no supported Host runtime');
-      }
+      const rejection = await readPackageCapabilityRejection(located.manifest, located.rootDir);
+      if (rejection) throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', rejection);
       const staticEditors = staticEditorContributions(located.manifest);
       const declaresStaticEditor =
         located.manifest.contributions?.some((item) => item.type === 'content-editor-provider') === true ||

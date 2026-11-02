@@ -37,6 +37,7 @@ import {
   uninstallSchema,
 } from './plugin-manager-route-contract.js';
 import { installPluginUpload, PluginManagerUploadError, readPluginUpload } from './plugin-manager-upload.js';
+import { warnPluginPackageFailure } from './plugin-package-diagnostics.js';
 
 type PluginManagerRouteService = Pick<
   PluginManagerService,
@@ -179,6 +180,15 @@ export function registerPluginManagerRoutes(app: FastifyInstance, options: Plugi
       const result = await options.manager.install(installRequest);
       return reply.status(201).send(result);
     } catch (error) {
+      warnPluginPackageFailure(
+        request,
+        {
+          operation: 'install',
+          sourceKind: installRequest.source.kind,
+          ...(installRequest.source.kind === 'catalog' ? { catalogId: installRequest.source.catalogId } : {}),
+        },
+        error,
+      );
       return sendManagerError(reply, error);
     }
   });
@@ -207,6 +217,7 @@ export function registerPluginManagerRoutes(app: FastifyInstance, options: Plugi
     try {
       return await options.manager.update(parsedId.data, parsed.data);
     } catch (error) {
+      warnPluginPackageFailure(request, { operation: 'update', pluginId: parsedId.data }, error);
       return sendManagerError(reply, error);
     }
   });
@@ -308,6 +319,7 @@ export const pluginManagerUploadRoutes: FastifyPluginAsync<PluginManagerRouteOpt
       );
       return reply.status(201).send(installed);
     } catch (error) {
+      warnPluginPackageFailure(request, { operation: 'install', sourceKind: 'local-archive' }, error);
       if (error instanceof PluginManagerUploadError) {
         return reply.status(error.status).send({ error: error.message, code: error.code });
       }
