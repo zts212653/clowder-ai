@@ -14,8 +14,12 @@ export const clients = [
 ];
 
 export async function bundledAcpFixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'bundled-acp-admission-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  const workspace = await mkdtemp(join(tmpdir(), 'bundled-acp-admission-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  // CLI guards resolve the runtime root above packages/api; keep their writes
+  // inside this owned fixture on Unix as well as Windows.
+  const root = join(workspace, 'packages/api');
+  await mkdir(root, { recursive: true });
   const api = fileURLToPath(new URL('../../', import.meta.url));
   await cp(join(api, 'dist'), join(root, 'dist'), {
     recursive: true,
@@ -29,13 +33,13 @@ export async function bundledAcpFixture(t) {
   const { imports } = JSON.parse(await readFile(join(api, 'package.json'), 'utf8'));
   await writeFile(join(root, 'package.json'), JSON.stringify({ type: 'module', imports }));
   await cp(join(api, 'runtime'), join(root, 'runtime'), { recursive: true });
-  await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages: []\n');
-  await mkdir(join(root, 'assets'));
+  await writeFile(join(workspace, 'pnpm-workspace.yaml'), 'packages: []\n');
+  await mkdir(join(workspace, 'assets'));
   await cp(
     join(api, '../../assets/agy-native-tool-vocabulary.json'),
-    join(root, 'assets/agy-native-tool-vocabulary.json'),
+    join(workspace, 'assets/agy-native-tool-vocabulary.json'),
   );
-  await cp(join(api, '../../cat-template.json'), join(root, 'cat-template.json'));
+  await cp(join(api, '../../cat-template.json'), join(workspace, 'cat-template.json'));
   const packages = join(root, 'dist/domains/plugin/bundled-packages');
   const original = JSON.parse(await readFile(join(packages, 'index.json'), 'utf8'));
   return {
@@ -89,7 +93,12 @@ export async function bundledAcpFixture(t) {
     async run(entry, action = 'install') {
       await writeFile(join(root, 'case.json'), JSON.stringify({ entry, action }));
       const result = spawnSync(process.execPath, [fileURLToPath(new URL('./bundled-acp-probe.mjs', import.meta.url))], {
-        env: { ...process.env, BUNDLED_ACP_TEST_ROOT: root, CAT_TEMPLATE_PATH: join(root, 'cat-template.json') },
+        env: {
+          ...process.env,
+          BUNDLED_ACP_TEST_ROOT: root,
+          BUNDLED_ACP_TEST_WORKSPACE_ROOT: workspace,
+          CAT_TEMPLATE_PATH: join(workspace, 'cat-template.json'),
+        },
         encoding: 'utf8',
         windowsHide: true,
         timeout: 120000,

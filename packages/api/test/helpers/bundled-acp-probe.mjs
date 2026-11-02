@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -34,6 +34,14 @@ const { OfficialPluginInstallError } = await load('domains/plugin/official-packa
 const { registerPluginManagerRoutes, pluginManagerUploadRoutes } = await load('routes/plugin-manager-routes.js');
 const { registerAgentClientLibraryRoutes } = await load('routes/agent-client-library-routes.js');
 const { readPluginConfig } = await load('domains/plugin/plugin-config-store.js');
+if (action === 'execute' && process.platform !== 'win32') {
+  const { buildChildEnv } = await load('utils/cli-spawn.js');
+  assert.equal(
+    buildChildEnv().CAT_CAFE_VERDICT_GH_GUARD_ROOT,
+    await realpath(process.env.BUNDLED_ACP_TEST_WORKSPACE_ROOT),
+    'the real CLI guard must own its files inside the isolated runtime root',
+  );
+}
 const projectRoot = join(root, action === 'local' || action === 'execute' ? `project-${action}` : 'project');
 await mkdir(projectRoot, { recursive: true });
 const registry = new SessionImplementationRegistry();

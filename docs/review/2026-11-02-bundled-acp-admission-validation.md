@@ -67,6 +67,16 @@ CodeAgent 0.1.0 和 RelayAgent 1.0.0 的声明形状来自 Issue；执行阶段�
 
 集成者按[操作指南](../ops/bundled-acp-plugins.md)保留实际归档版本/SRI，吸收 Host 增量后验证 catalog 安装和更新；已有用户只在必要时修正原连接字段，不清 inventory、配置、认证或历史，不重建角色。
 
+## CI 跟进：Linux 测试布局修正
+
+`be4e0693b31acba03116fe21e0c614d508bf64c6` 的 CI 中，Lint、Build、Windows（含 installed layout）、macOS 及其他公共测试分片通过；distributable-5 的两项新增执行测试失败，Test (Public) 随之聚合失败。
+
+日志中的首个原因是 `guarded-zsh-directory` 创建目录时 EACCES：测试把 API 编译产物放在 `/tmp/<fixture>/dist/utils`，而实际 CLI guard 按 `packages/api/dist/utils` 层级向上解析 runtime 根。前者得到 `/`，因此触发 `/.cat-cafe/tmp/guarded-zsh` 写入拒绝。此处还没有启动 CodeAgent/RelayAgent；不是包校验、模型认证或原生客户端返回的失败。
+
+修正仅涉及测试布局：复刻 `<fixture>/packages/api`，把 workspace marker、模板和词表放在 fixture 根；Unix 执行时再用真实 `buildChildEnv` 检查 guard 根确实位于自有 fixture，比较规范路径以兼容临时目录别名。原安装、成员隔离、权限拒绝、更新/重试及停用/启用断言均保留，不跳过 Linux、不改生产 guard、不增加权限或 CI 例外。
+
+布局修正后，本机 Windows 同一套集成测试 9/9 通过，Biome 和 diff 检查通过。已注册的 WSL 发行版因 VHDX 路径缺失无法启动，未修改或修复该系统环境。Linux 修正后的通过结果须由更新提交的 CI 给出，不用 Windows 结果替代。CI 日志与复验日志位于 `artifacts/pr1776-ci-followup-20261102`（聚合工作区的仓库外目录）。
+
 ## 环境与收尾
 
 - 工位：`G:/AIwork/clowder-ai/worktrees/fix-issue178-bundled-acp-20261102`；负责人 codex，关联 Issue #178。保留用于 PR 修改，2026-11-09 复查。
