@@ -1,6 +1,7 @@
 import { reconcileComposerAdmission } from './composer-draft-admission';
 import { registerComposerDraftFlusher } from './composer-draft-flush-registry';
 import type { DurableDraftSnapshot } from './durable-composer-draft-helpers';
+import type { enqueueComposerDraftSave } from './durable-composer-draft-save-queue';
 
 interface ValueRef<T> {
   current: T;
@@ -34,7 +35,7 @@ interface RegisterAdmissionFlusherOptions {
     boundOwnerId?: number,
     boundThreadId?: string | null,
   ) => Promise<boolean>;
-  enqueueSave: (threadId: string, save: () => Promise<boolean>) => Promise<boolean>;
+  enqueueSave: typeof enqueueComposerDraftSave;
 }
 
 function flushResult(
@@ -60,20 +61,13 @@ function flushResult(
   };
 }
 
-async function persist(
-  state: RegisterAdmissionFlusherOptions,
-  snapshot: DurableDraftSnapshot,
-  admission: boolean,
-): Promise<boolean> {
-  // P1-1 R8: Capture owner identity before enqueue
-  const ownerId = state.ownerIdRef.current;
-  const threadId = state.threadId;
-  return state.enqueueSave(state.threadId, () => state.persistDraftSnapshot(snapshot, admission, ownerId, threadId));
-}
-
 async function flushOrdinary(state: RegisterAdmissionFlusherOptions) {
   const snapshot = state.captureCurrentDraft();
-  return flushResult(state, snapshot, await persist(state, snapshot, false));
+  const ownerId = state.ownerIdRef.current;
+  const persisted = await state.enqueueSave(state.threadId, () =>
+    state.persistDraftSnapshot(snapshot, false, ownerId, state.threadId),
+  );
+  return flushResult(state, snapshot, persisted);
 }
 
 async function flushAdmission(state: RegisterAdmissionFlusherOptions) {
@@ -81,36 +75,41 @@ async function flushAdmission(state: RegisterAdmissionFlusherOptions) {
   const pending = state.pendingAdmissionDraftRef.current;
   if (!pending) return flushResult(state, null, false);
 
-  const pendingRecovery = state.pendingRecoveryRef.current;
-  // Include newly recovered images while respecting images the user already removed.
-  const requiredImageUrls = [
-    ...new Set([...pending.snapshot.imageUrls, ...(pendingRecovery?.snapshot.imageUrls ?? [])]),
-  ];
-  if (!state.admissionImagesReady(pending.files, requiredImageUrls)) {
-    return flushResult(state, pending.snapshot, false, false, true);
-  }
+  return state.enqueueSave(state.threadId, async () => {
+    if (state.pendingAdmissionDraftRef.current !== pending) return flushResult(state, null, false);
 
-  // A new recovery must be reconciled even after the user confirmed an earlier one.
-
-  const reconciliation = pendingRecovery
-    ? reconcileComposerAdmission(pending.snapshot, pendingRecovery.snapshot)
-    : { snapshot: pending.snapshot, requiresConfirmation: false };
-
-  const persisted = await persist(state, reconciliation.snapshot, true);
-
-  if (reconciliation.requiresConfirmation && persisted) {
-    // P1-4: Save reconciliation result to pending admission for cleanup
-    if (state.pendingAdmissionDraftRef.current === pending && pendingRecovery) {
-      pending.reconciliationResult = {
-        merged: reconciliation.snapshot,
-        recoveryRevision: pendingRecovery.revision,
-      };
+    // Earlier queued saves can discover a recovery, so inspect it only when this task executes.
+    const pendingRecovery = state.pendingRecoveryRef.current;
+    const requiredImageUrls = [
+      ...new Set([...pending.snapshot.imageUrls, ...(pendingRecovery?.snapshot.imageUrls ?? [])]),
+    ];
+    if (!state.admissionImagesReady(pending.files, requiredImageUrls)) {
+      return flushResult(state, pending.snapshot, false, false, true);
     }
-    // Consume pending recovery after reconciliation
-    state.pendingRecoveryRef.current = null;
-  }
 
-  return flushResult(state, reconciliation.snapshot, persisted, reconciliation.requiresConfirmation);
+    const reconciliation = pendingRecovery
+      ? reconcileComposerAdmission(pending.snapshot, pendingRecovery.snapshot)
+      : { snapshot: pending.snapshot, requiresConfirmation: false };
+
+    const persisted = await state.persistDraftSnapshot(
+      reconciliation.snapshot,
+      true,
+      pending.generation,
+      state.threadId,
+    );
+
+    if (reconciliation.requiresConfirmation && persisted) {
+      if (state.pendingAdmissionDraftRef.current === pending && pendingRecovery) {
+        pending.reconciliationResult = {
+          merged: reconciliation.snapshot,
+          recoveryRevision: pendingRecovery.revision,
+        };
+      }
+      state.pendingRecoveryRef.current = null;
+    }
+
+    return flushResult(state, reconciliation.snapshot, persisted, reconciliation.requiresConfirmation);
+  });
 }
 
 export function registerDurableComposerDraftAdmissionFlusher(state: RegisterAdmissionFlusherOptions): () => void {

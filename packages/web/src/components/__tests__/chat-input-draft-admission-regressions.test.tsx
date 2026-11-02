@@ -232,15 +232,25 @@ it('restores newly discovered conflict images before confirming the merged draft
   act(() => finish(true));
 });
 
-it('does not mistake completion of its own in-flight autosave for foreign recovery', async () => {
+it.each([
+  'success',
+  'conflict',
+])('rechecks recovery when its queued admission follows an autosave %s', async (outcome) => {
   await render();
   write = (body, method) => {
+    expect(body.expectedRevision).toBe(revision);
     if (body.text === 'please inspect current PR') {
       return new Promise<Response>((resolve) => {
         resolvePendingWrite = () => {
-          owner = { text: body.text ?? '' };
+          owner = {
+            text: outcome === 'conflict' ? 'unseen remote draft from delayed autosave conflict' : (body.text ?? ''),
+          };
           revision = 6;
-          resolve(response({ draft: owner, revision }));
+          resolve(
+            outcome === 'conflict'
+              ? response({ code: 'DRAFT_REVISION_MISMATCH' }, 409)
+              : response({ draft: owner, revision }),
+          );
           resolvePendingWrite = null;
         };
       });
@@ -253,13 +263,41 @@ it('does not mistake completion of its own in-flight autosave for foreign recove
   await act(async () => vi.advanceTimersByTimeAsync(400));
   expect(resolvePendingWrite).not.toBeNull();
   act(() => typeText('please revise current PR'));
-  act(() => beginAndClear());
-  resolvePendingWrite?.();
-  await settle(); // The real send caller also has async mirror/intent work before preparation.
-  const result = await admissionResult();
-  act(() => finish(result instanceof Error ? false : true));
-  expect(result).not.toBeInstanceOf(Error);
-  expect(writes.findLast((body) => body.text)?.text).toBe('please revise current PR');
+  let prepared = false;
+  let preparingAdmission: Promise<unknown>;
+  act(() => {
+    beginAndClear();
+    preparingAdmission = prepareComposerDraftAdmission(THREAD)
+      .catch((error) => error)
+      .then((result) => {
+        prepared = true;
+        return result;
+      });
+  });
+  // Let prepare enqueue behind the pending autosave before it resolves or discovers a conflict.
+  await settle();
+  expect(prepared).toBe(false);
+  expect(writes).toHaveLength(1);
+  let result: unknown;
+  await act(async () => {
+    resolvePendingWrite?.();
+    result = await preparingAdmission;
+  });
+  if (outcome === 'conflict') {
+    const merged = 'unseen remote draft from delayed autosave conflict\n\nplease revise current PR';
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).name).toBe('ComposerDraftConfirmationRequiredError');
+    expect(owner?.text).toBe(merged);
+    expect(writes.at(-1)).toMatchObject({ expectedRevision: 6, text: merged });
+    act(() => finish(false));
+    expect(container.querySelector('textarea')?.value).toBe(merged);
+    act(() => beginAndClear());
+    expect(await admissionResult()).toEqual({ threadId: THREAD, expectedRevision: 7 });
+  } else {
+    expect(result).toEqual({ threadId: THREAD, expectedRevision: 7 });
+    expect(owner?.text).toBe('please revise current PR');
+  }
+  act(() => finish(true));
 });
 
 it('still requires confirmation and displays both drafts when hydration arrives after the click', async () => {
