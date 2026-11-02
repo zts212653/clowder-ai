@@ -4,7 +4,8 @@
 # See MAINTAINERS.md section 4.3 for semantic risks beyond these path boundaries.
 
 # Ordinary changes: trusted maintainers may review each other's PRs.
-*                                           @zts212653 @mindfn @whutzefengxie-ops
+# New invitees become eligible only after accepting repository Write access.
+*                                           @zts212653 @mindfn @whutzefengxie-ops @EdgarR1170 @YukinaXSer @bkkzz @zlzfun @liu-zhengdong @LeslieKuo
 
 # Governance, security policy, CI, release and sync tooling.
 /CODEOWNERS                                 @zts212653
