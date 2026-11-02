@@ -49,6 +49,14 @@ export function registerAgentClientLibraryRoutes(
       let located: Awaited<ReturnType<VerifiedPluginPackageLocator['resolveInstalledPackage']>> | undefined;
       let configurationKey: string | null = null;
       try {
+        if (input.packages.readInstalledStaticFile) {
+          const file = await input.packages.readInstalledStaticFile(
+            record.packageDigest,
+            () => AGENT_PROVIDER_DECLARATION_FILE,
+          );
+          if (!isDeepStrictEqual(file.manifest, record.manifest)) throw new Error('ACP 插件包权威不一致');
+          if (file.bytes === undefined) continue;
+        }
         located = await input.packages.resolveInstalledPackage(record.packageDigest);
         if (!isDeepStrictEqual(located.manifest, record.manifest)) throw new Error('ACP 插件包权威不一致');
         await located.verifyIntegrity();

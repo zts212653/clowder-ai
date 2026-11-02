@@ -61,6 +61,10 @@ jobs:
           --script test:onboarding:production-contracts
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: ACP catalog static discovery and cancelled editor requests
+        run: |
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs node --import tsx --test --test-timeout=60000 test/agent-client-catalog-static-read.test.ts test/plugin-icon-static-read.test.ts
+          pnpm --filter @cat-cafe/web exec vitest run src/hooks/__tests__/useAgentClientLibraries-lifecycle.test.tsx src/utils/__tests__/api-client-get-coordination.test.ts src/utils/__tests__/api-client-timeout.test.ts
       - name: Managed Codex layout link diagnostic
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs

@@ -48,7 +48,7 @@ export interface VerifiedPluginPackage {
 
 export interface VerifiedPluginPackageLocator {
   resolveInstalledPackage(packageDigest: string): Promise<VerifiedPluginPackage>;
-  /** Read inert presentation bytes from the admitted archive without preparing an executable tree. */
+  /** Read inert static bytes from the admitted archive without granting executable tree authority. */
   readInstalledStaticFile?(
     packageDigest: string,
     selectFile: (manifest: PluginManifest) => string,

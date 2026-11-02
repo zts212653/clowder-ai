@@ -157,3 +157,37 @@ test('manual creation remains available from the automatic configuration path', 
     await state.context.close();
   }
 });
+
+test(
+  'leaving a pending ACP catalog for five-partner creation has no late connection notice',
+  { timeout: 30000 },
+  async () => {
+    const state = await setup();
+    try {
+      await state.page.clock.install();
+      await state.context.route('**/api/agent-providers', () => {});
+      const started = state.page.waitForRequest(
+        (request) => new URL(request.url()).pathname === '/api/agent-providers',
+      );
+      await state.page.getByRole('button', { name: '手动创建单个伙伴', exact: true }).click();
+      await started;
+      await state.page.getByTestId('member-detail-page').waitFor();
+      const cancelled = state.page.waitForEvent('requestfailed', {
+        predicate: (request) => new URL(request.url()).pathname === '/api/agent-providers',
+      });
+      await state.page.getByRole('button', { name: '‹ 成员', exact: true }).click();
+      await cancelled;
+      await state.page.getByTestId('member-detect-empty-roster').click();
+      await state.panel.waitFor();
+      await create(state.page).click();
+      await state.panel.waitFor({ state: 'hidden' });
+      assert.equal(state.created.length, 5);
+      await state.page.clock.runFor(30_001);
+      assert.equal(await state.page.getByText('后端连接异常', { exact: true }).count(), 0);
+      assert.deepEqual(state.errors, []);
+      await state.page.screenshot({ path: path.join(evidence, 'cancelled-catalog-five-members.png'), fullPage: true });
+    } finally {
+      await state.context.close();
+    }
+  },
+);
