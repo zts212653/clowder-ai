@@ -73,3 +73,19 @@ Fastify 配置路由与临时 catalog 走通：打开旧配置 → 不改称呼�
 风险：行为与持久化兼容为主要风险；沿用现有配置写入权限与审计，API 增加可选字段，
 无身份/路由迁移、无历史消息改写。Architecture cell 为现有 config / co-creator presentation；
 Map delta: none，无新增存储、队列或路由系统。
+
+## 2026-11-02：迁移到 next
+
+按当前 `CONTRIBUTING.md` 的集成分支约定，从 `next` 的
+`74b5bfd4d59c3722c76140d9df36e332b72a0acd` 重新承载 #1744 的两个修复提交。
+只迁移 `423fe0f32` 与 `f33b05911`，不携带 develop 的 #1732、#1745、#1748；
+那三项独立功能由 #1762 迁移。原分支保留，未改写其提交历史。
+
+`git range-diff` 确认两个补丁内容相同，只有 cherry-pick 来源注记增加，沿用原独立审查
+作为实现证据；新 PR 仍需代码负责人在新 HEAD 上正式审核，旧本地审查不替代平台批准。
+
+在此 next 基线上重新验证：API 源码 9/9、已构建配置路由 6/6、Web 两个资料入口 5/5、
+MCP 2/2；shared/MCP/API 完整构建及 Web TypeScript 均通过。隔离浏览器再次走通两个
+入口的设置、清空、同名重选和重载，16 次请求全部 200、无页面异常，结束后服务退出并清理
+临时 catalog。`check-dir-size.sh` exit 0，已有目录警告保留；develop 上的到期豁免失败
+没有在当前 next 基线上重现。新 PR 的 CI 和维护者审查以其 GitHub 状态为准。
