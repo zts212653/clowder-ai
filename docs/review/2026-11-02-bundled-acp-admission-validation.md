@@ -7,6 +7,38 @@ created: 2026-11-02
 
 # 内置 ACP 插件准入：实施与验证记录
 
+
+## 复审修订验证（2026-11-02）
+
+本节是当前实现的验收结论；后面的初版记录属于 `cddfc25179c6eda69fd98f64ba1c6540c28ca3dd` 及以前提交，不能当作本轮批准。mindfn、YukinaXSer 和 zts 的意见及用户选择的默认 auto 已回填到[修订契约](../plans/2026-11-02-pr1776-review-revision.md)。维护者对新 HEAD 的复审尚待回复，PR 保持不合并。
+
+| 约定 | 实物与证据 |
+| --- | --- |
+| 发行来源不决定 runtime | 删除 bundled 专属例外，构建/所有归档入口共用能力校验；同字节 ACP、stdio、静态包经 catalog/upload 的判断一致；存在但非法的声明、不支持 runtime 一致拒绝 |
+| 保留 builtin 实际能力 | 未删除 Dot、模块、静态资源或 stdio carrier；现有图标、包定位、更新和资源边界套件通过；Dot 0.1.2 与修订前 producer 的 tgz 逐字节相等，SHA-256 `eee081361b5f10b14dbb0e78a7adce84cec26e90c48ea1144f3f0d2eac77863d` |
+| 未设置权限不因接入形态分叉 | 固定与目录解析结果对 unspecified/deny/auto_allow 相同；仅删除固定客户端注入的缺省 deny。保留显式声明/已存策略、owner 对 auto_allow 的确认及 pool 策略隔离 |
+| 成员 auto / ask user | 使用原成员高级接入入口，`executionApproval` 保存于原成员目录并回读；默认 auto；原生 ACP、固定插件与目录共用 factory/service；不新建授权表、存储或消息 API |
+| 真实确认链 | 两种编译 transport → RuntimeInteractionService → MessageStore 卡片/发布 → 原用户响应路由 → 原 ACP 请求 id/选项；分别覆盖同意、拒绝、取消、中止、过期、跨 owner 和重复/迟到回复 |
+| 旧限制保留 | 显式 deny、iCode 默认拒绝和 AGY guard 先于用户确认；ask user 不能提高原有权限；确认服务不可用返回协议错误 |
+| 安装/更新/恢复 | CodeAgent/RelayAgent 隔离发行布局经真实 index/tgz、Manager、inventory、声明注册、ACP factory/pool、NDJSON fixture；一个成员 auto，另一个成员 ask user，经真实回复路由确认；成员隔离、续聊、停用再启用、临时下载重试与坏更新保旧通过 |
+
+验证输出集中在工作区外 `artifacts/pr1776-ci-followup-20261102`：
+
+- 完整 API build（含 shared/MCP 构建和 producer）通过；Web TypeScript 检查通过；Biome、frontmatter delta、approval producer registry、diff 检查通过。
+- `permission-green3.log`：交互/成员持久化/固定连接 17/17；`acp-permission-transports.test.js`：两 transport 决策矩阵 12/12。
+- `admission-regression.log`：52 项通过，2 个新增对照的状态断言读错 inventory 字段；修正为读取 Manager projection 后，`source-parity-green.log` 2/2。该组最终 54 项均已验证。
+- `client-regression.log`：178 项通过，4 项原先等待 activation 拒绝坏声明的断言因拒绝前移到 admission 而失败；相应测试改为断言 admission 的 UNSUPPORTED_TRANSPORT 后，在 `lifecycle-build-regression.log` 的 93/93 中通过。保留原始失败日志，不把这 4 项说成未修前通过。
+- `member-routes-regression.log`：成员 CRUD 路由 69 项通过，含 POST/GET/PATCH/reload 确认策略与拒绝非法枚举；目录组有 1 项被本次组合命令错误预加载的 CAT_TEMPLATE_PATH 干扰。用修改前两个目录模块作 loader 对照，同一预加载方式复现；正确独立入口的 `catalog-standalone-green.log` 为 44/44。不改产品代码绕过该测试。
+- `web-regression.log`：20/20；新增三个 UI 测试覆盖原生/固定插件/目录的同一控件、无关连接参数不变与保存 payload。
+- `member-approval-browser.json` / `.png`：当前 worktree 的真实 MemberAdvancedFields 在隔离 headless Chromium 中切换 auto → ask user → auto，无 page error。该证据是组件交互检查，使用简单页面样式，不冒充安装版完整页面/模型验收；浏览器已关闭，没有新建 Host 服务。
+
+各组包含重叠测试，不累加为不重复覆盖量。HTTP 的问题仅证明明确拒绝被 experimental transport 忽略，未认定发生了真实 CodeAgent 越权事故。
+
+RED 证据包括修订前真实 transport 12 项矩阵中 7 项失败（HTTP 忽略 reject、缺少 session handler/响应围栏等）及固定/目录默认策略与 bundled stdio/static 对照。原始日志保留；新增 ask-user 确认端到端使用真实 Host 交互服务和协议 fixture，不伪称现场原生验收。
+
+本次未修改用户配置、历史、认证或系统盘/祖先 ACL。没有运行真实企业模型，不重复旧模型调用，不安装测试 EXE；测试 child/server 均限自有临时环境并在退出时关闭。仍需内网验证实际企业 tgz、原生 CodeAgent/RelayAgent、认证、模型/MCP/角色协作和包升级；不关闭插件 Issue #178。
+
+
 ## 目标与边界
 
 来源：[插件仓 Issue #178](https://github.com/zts212653/clowder-ai-plugins/issues/178)；[已批准方案](../plans/2026-11-02-issue178-bundled-acp-admission.md)。PR 目标为 `next@74b5bfd4d59c3722c76140d9df36e332b72a0acd`，本轮不合并，不打包 EXE。

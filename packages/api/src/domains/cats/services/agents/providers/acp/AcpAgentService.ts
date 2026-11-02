@@ -1,5 +1,6 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
 import { isInvocationBoundMcpLaunch } from '../session-credential-file.js';
+import { createAcpPermissionHandler } from './acp-permission-interaction.js';
 /**
  * AcpAgentService — Generic AgentService implementation backed by ACP protocol.
  *
@@ -146,6 +147,8 @@ type PromptPhase =
   | 'busy_backoff';
 
 export interface AcpAgentServiceConfig {
+  executionApproval?: 'auto' | 'ask_user';
+  defaultPermissionDecision?: 'allow' | 'reject';
   /** Factory-verified installed native DSH, separate from ordinary pooled sessions. */
   nativeDsh?: DshNativeLaunch;
   nativeKimi?: KimiNativeLaunch;
@@ -221,6 +224,8 @@ export class AcpAgentService implements AgentService {
   private modelName: string;
   private readonly sessionModel?: string;
   readonly protocolAdapter: 'icode' | undefined;
+  private readonly executionApproval: 'auto' | 'ask_user';
+  private readonly defaultPermissionDecision?: 'allow' | 'reject';
   private readonly appliedContextBinding?: import('../../../types.js').AgentContextBinding;
   private readonly mcpSupportEnabled: boolean;
   /**
@@ -252,6 +257,8 @@ export class AcpAgentService implements AgentService {
     this.modelName = config.modelName ?? config.sessionModel ?? 'acp';
     this.sessionModel = config.sessionModel?.trim() || undefined;
     this.protocolAdapter = config.protocolAdapter;
+    this.executionApproval = config.executionApproval ?? 'auto';
+    this.defaultPermissionDecision = config.defaultPermissionDecision;
     this.appliedContextBinding = config.contextBinding;
     this.mcpSupportEnabled = config.mcpSupport !== false;
     this.idleTtlMs = config.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS;
@@ -530,6 +537,8 @@ export class AcpAgentService implements AgentService {
     /** F306 Phase C: iCode ask-user bridge active for this turn. */
     let requestInputBridge: AcpRequestInputBridge | null = null;
     let agyActive = true;
+    const permissionLifetime = new AbortController();
+    let permissionHandler: AcpPermissionHandler | undefined;
     const requiresProviderShutdown = () => promptPhase === 'locally_terminated_unacknowledged';
 
     const sealActivePromptSession = (activeSessionId: string): boolean => {
@@ -853,23 +862,48 @@ export class AcpAgentService implements AgentService {
       // At this point sessionId is always defined (resume or newSession path).
       // TS control-flow can't prove it across the if/else — assert for downstream usage.
       if (!sessionId) throw new Error('ACP invariant: sessionId must be set after session setup');
-      if (agy)
-        client.setSessionPermissionHandler(
-          sessionId,
-          createAgyAcpPermissionHandler({
-            sessionId,
-            workspace: agy.binding.workspaceRoot,
-            profileHome: agy.binding.profileHome,
-            autoApprove: this.antigravity?.profile.autoApprove === true,
-            readOnly: agy.readOnly,
-            mcpServers: sessionMcpServers.map((server) => server.name),
-            isActive: () => agyActive && promptPhase === 'active_unacknowledged' && !options?.signal?.aborted,
-          }),
-        );
+      const bindPermission = (providerSessionId: string) => {
+        const guard = agy
+          ? createAgyAcpPermissionHandler({
+              sessionId: providerSessionId,
+              workspace: agy.binding.workspaceRoot,
+              profileHome: agy.binding.profileHome,
+              autoApprove: this.antigravity?.profile.autoApprove === true,
+              readOnly: agy.readOnly,
+              mcpServers: sessionMcpServers.map((server) => server.name),
+              isActive: () => agyActive && promptPhase === 'active_unacknowledged' && !options?.signal?.aborted,
+            })
+          : undefined;
+        if (this.executionApproval === 'ask_user') {
+          const audit = options?.auditContext;
+          permissionHandler = createAcpPermissionHandler({
+            mode: 'ask_user',
+            sessionId: providerSessionId,
+            guard,
+            defaultDecision: this.defaultPermissionDecision,
+            ...(audit
+              ? {
+                  owner: {
+                    userId: audit.userId,
+                    threadId: audit.threadId,
+                    catId: audit.catId,
+                    invocationId: audit.invocationId,
+                  },
+                }
+              : {}),
+            port: options?.runtimeInteractionPort,
+            signal: options?.signal
+              ? AbortSignal.any([options.signal, permissionLifetime.signal])
+              : permissionLifetime.signal,
+            isActive: () => agyActive && promptPhase === 'active_unacknowledged',
+          });
+          client.setSessionPermissionHandler(providerSessionId, permissionHandler);
+        } else if (guard) client.setSessionPermissionHandler(providerSessionId, guard);
+        // Reset the previous turn's cancelled handler if this member changed back to auto.
+        else client.setSessionPermissionHandler?.(providerSessionId);
+      };
+      bindPermission(sessionId);
 
-      // F306 Phase C: iCode's native ask-user requests (`_chrys/request_input`)
-      // become canonical question cards through the shared interaction port.
-      // Registered per turn so the card carries THIS invocation's owner identity.
       const runtimeInteractionPort = options?.runtimeInteractionPort;
       const auditContext = options?.auditContext;
       if (this.protocolAdapter === 'icode' && runtimeInteractionPort && auditContext) {
@@ -1105,6 +1139,10 @@ export class AcpAgentService implements AgentService {
           // session's handler (a late request must never reach a finished
           // invocation), and close the replaced live instance so the next
           // turn's session/load can re-inject the per-turn overlay.
+          if (permissionHandler) {
+            client.setSessionPermissionHandler(replacedSessionId, (_request, respond) => respond({ cancelled: true }));
+            bindPermission(freshSessionId);
+          }
           if (requestInputBridge) {
             const bridge = requestInputBridge;
             client.setSessionRequestHandler(replacedSessionId, undefined);
@@ -1299,6 +1337,9 @@ export class AcpAgentService implements AgentService {
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } finally {
       agyActive = false;
+      permissionLifetime.abort('provider_cancelled');
+      if (permissionHandler && sessionId)
+        client.setSessionPermissionHandler(sessionId, (_request, respond) => respond({ cancelled: true }));
       if (this.antigravity && sessionId) client.setSessionPermissionHandler(sessionId);
       if (this.antigravity && requiresProviderShutdown()) await client.close?.();
       if (requestInputBridge) {

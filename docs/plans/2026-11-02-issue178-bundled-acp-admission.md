@@ -37,18 +37,19 @@ Architecture cell：现有 Plugin Manager → 包准入 → carrier → ACP prov
 
 公共修复不默认将这两个客户端加入公共预置列表。发行版是否预置、预置哪些插件，继续由其已有定义决定；Host 支持同类声明，与插件名称无关。公共 PR 目标为用户指定的 next，不顺带合并 #1762 的其他内容。
 
-next 缺少固定客户端 configurationKey/permissionPolicy 支持，实施时必须同时接通解析、owner 覆盖、声明注册、目录投影、权限传递/进程池隔离及既有 root-only 恢复；否则只修门禁仍无法启用现场声明。这部分复用 #1745 的最小逻辑，保持 next 原生客户端默认策略，不迁入模型探测、角色重构或新 UI。
+next 缺少固定客户端 configurationKey/permissionPolicy 支持，实施时必须同时接通解析、owner 覆盖、声明注册、目录投影、权限传递/进程池隔离及既有 root-only 恢复；否则只修门禁仍无法启用现场声明。这部分复用 #1745 的最小逻辑，保持 next 原生客户端默认策略，不迁入模型探测或角色重构。后续用户已选定的统一 auto/ask user 增量见[复审修订契约](2026-11-02-pr1776-review-revision.md)，以其权限与用户交互约定为准。
 
 ## 3. 准入规则
 
 前提：沿用 Host 注册表、固定归档摘要、体积/解包预算、路径/链接限制和 manifest schema 校验。不得通过将 distribution 改成 registry 或注入未注册归档来绕过 bundled 注册校验。
 
-| staged manifest | agent-provider.json | 预期 |
+| staged manifest | agent-provider.json | 预期（按 2026-11-02 复审修订） |
 | --- | --- | --- |
-| runtime.transport 为 builtin | 无需新增声明 | 保持现有流程、desktop 资源验证与 carrier 检查 |
-| runtime 不存在 | 存在且通过现有 ACP 声明解析 | 允许继续既有身份/版本/呈现、inventory 准入；安装时不启动客户端 |
-| runtime 不存在 | 缺失、不可读、非法 JSON/schema、非法 transport 或既有解析器拒绝的包内启动路径 | 拒绝；不创建实例、不发布 provider |
-| runtime 存在且不是 builtin | 即使同时有合法 ACP 声明 | 仍拒绝；不能借声明绕过对模块类型的限制 |
+| runtime 为 builtin 或 stdio | 可以缺省；存在时必须合法 | 按能力进入已有 module/static/stdio carrier；发行来源不决定承载 |
+| runtime 不存在 | 存在且通过 ACP 解析 | 注册声明能力；安装时不启动客户端 |
+| runtime 不存在 | 缺失 | 合法静态包可安装；不产生 ACP provider |
+| 任意支持的 runtime | 存在但不可读、非法 JSON/schema/transport/包内命令 | 各归档来源一致拒绝 |
+| 不支持的 runtime | 任意 | 各归档来源一致拒绝 |
 
 复用 `parseAgentProviderDeclaration(raw, { packageRoot })` 的既有规则，同时兼容其已支持的固定客户端和可配置客户端目录声明，不新造宽松 parser。按声明解析成功放行，不按文件名存在或 `transport: acp` 一项放行。
 
@@ -56,11 +57,11 @@ next 缺少固定客户端 configurationKey/permissionPolicy 支持，实施时�
 
 ## 4. Host 的具体改动
 
-### H1：复用声明读取，集中 bundled 类型规则
+### H1：复用声明读取，集中与来源无关的能力规则
 
 - 从 `declared/declared-agent-session-providers.ts` 中提取可复用的“有界读取并解析声明”逻辑到 `declared/read-agent-provider-declaration.ts`（拟新增）。原有 provider 激活调用它，保留既有前后完整性验证与注册/退役顺序。
-- 在 `domains/plugin/bundled-archive-admission.ts`（拟新增）封装第 3 节判定；安装器与构建入口共同使用。该模块不依赖 official-catalog、构建索引或 inventory，避免先构建索引才能验证索引输入的循环。
-- `official-package-installer.ts` 仅替换现有 bundled runtime 门禁，保持其余身份、版本、呈现、摘要和发布流程；不能删掉整段限制。类型不支持、声明缺失或内容无效仍为 UNSUPPORTED_TRANSPORT / 422，并区分提示，不回显声明内容；注册、摘要和解包错误保留原错误码，意外内部 I/O 错误不伪装成声明缺失。
+- 在 `domains/plugin/package-capability-admission.ts`封装第 3 节判定；安装器与构建入口共同使用。该模块不依赖 official-catalog、构建索引或 inventory，避免先构建索引才能验证索引输入的循环。
+- `official-package-installer.ts` 与 `manager/local-package-admission.ts` 共用有界声明读取/能力校验。bundled 仅保留注册身份与固定发布字节校验；不支持的 runtime、存在但不合法的声明仍拒绝。缺失声明不再误拒合法静态包；保持其余身份、版本、呈现、摘要、归档及发布流程，意外 I/O 错误不伪装为缺失。
 - `install`、`update`、`preflightUpdate` 已共用 withVerifiedPackage，同一规则覆盖三条路径；不复制三个实现。
 
 结果与验证：先用正式注册的 bundled ACP 归档复现当前 UNSUPPORTED_TRANSPORT，再使安装及预检成功；负例与现有 builtin 对照继续通过。不得以 registry fixture 的成功充当此项 GREEN。
@@ -102,7 +103,9 @@ next 尚无 develop 的 codeagent-main-acp-plugin 指南，新增 `docs/ops/bund
 | 已从本地装过同 pluginId | 不自动重装或改来源；显式替换按现有版本/摘要/确认规则执行，不能覆盖同版本不同字节 |
 | 停用/重启/再启用 | 沿既有注销、退役和恢复逻辑；配置、角色、历史回读不变 |
 
-本次没有新增持久状态或迁移。无需增加后台轮询、进程、代理或环境变量。新增成本仅为内置纯声明包安装/预检的一次有界读取；换取构建和安装规则一致，避免正常用户安装必定失败。
+复审增量只在原成员配置中新增可选 executionApproval，没有新增存储类型或数据迁移。无需增加后台轮询、进程、代理或环境变量。能力校验成本为各归档安装/预检的一次有界声明读取；换取构建和安装规则一致，避免正常用户安装必定失败。
+
+最终评审修订与新增权限交互验收以[复审修订实施契约](2026-11-02-pr1776-review-revision.md)为准；以下顺序保留原安装修复的责任拆分。
 
 ## 6. 工作顺序与验证矩阵
 

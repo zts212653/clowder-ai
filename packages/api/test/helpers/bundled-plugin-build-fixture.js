@@ -30,7 +30,7 @@ export async function bundledBuildFixture(t, description, fromSource = false) {
   );
   const mode = fromSource ? 'src' : 'dist';
   const extension = fromSource ? 'ts' : 'js';
-  for (const name of ['bundled-plugin-definitions', 'bundled-archive-admission']) {
+  for (const name of ['bundled-plugin-definitions', 'package-capability-admission']) {
     await cp(
       join(api, mode, 'domains/plugin', `${name}.${extension}`),
       join(root, mode, 'domains/plugin', `${name}.${extension}`),

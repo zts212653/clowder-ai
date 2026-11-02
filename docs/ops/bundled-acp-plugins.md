@@ -22,8 +22,7 @@ ACP 插件是启动配置声明；Host 负责校验包、托管生命周期并�
 ```json
 {
   "command": "D:/Tools/CodeAgent/codeagent.exe",
-  "startupArgs": ["--acp"],
-  "permissionPolicy": "deny"
+  "startupArgs": ["--acp"]
 }
 ```
 
@@ -31,7 +30,18 @@ RelayAgent 选择正确的 Python 环境，例如 command 为该环境的 python
 
 保存一次后，后续使用和重启沿用已保存的配置。连接变更不重建工具 ID；例如 CodeAgent 引用保持 `plugin:official.codeagent/codeagent`。已有本地安装、角色及历史不自动迁移到内置来源。
 
-本次固定客户端接入的 ACP 权限请求默认拒绝。需要 auto_allow 时，由 owner 在已有连接配置中明确保存；插件声明或默认配置不能自行授予该权限。旧多客户端目录未指定 permissionPolicy 时仍沿用原有策略。CodeAgent 原生 bypass 参数是另一个独立设置，本修复不自动开启。
+## ACP 执行确认
+
+在「成员 → 对应成员 → 高级接入 → ACP 执行确认」选择：
+
+- **自动（默认）**：沿用现有自动响应行为；只选择客户端确实提供的 allow 选项。未设置成员字段时也使用此行为，无需环境变量。
+- **询问用户**：客户端发出 `session/request_permission` 时，在正在执行的会话中显示原有确认卡片；所属用户选择允许、拒绝或取消后，结果回到原 ACP 请求。取消、过期、调用结束、失效卡片不会转成允许；确认服务不可用时如实报错。客户端没有发出权限请求时，不额外审批每次工具调用。
+
+此设置属于 Host 成员，保存一次长期生效；原生 ACP、固定客户端插件、客户端目录共用同一路径。它不能改变客户端自身的 sandbox/bypass、登录、原生拒绝或 AGY 路径限制。
+
+兼容已有连接：显式 `permissionPolicy: "deny"` / `"auto_allow"` 继续保留原语义；不再仅因是固定插件而给未设置策略的连接注入 deny。若企业旧包明确声明 deny 且用户需要允许操作，owner 仍需在原 connection JSON 中明确保存 `"permissionPolicy": "auto_allow"`；只切换 Host 确认模式不能绕过 deny。插件声明/默认配置不能自行授予 auto_allow，已保存的选择不会被升级覆盖。选择「询问用户」会在这个既有允许范围内再要求人确认。
+
+CodeAgent 原生 bypass 参数是另一个独立设置，本修复不自动开启。配置和权限更改仍经现有 owner/本机管理接口；没有新增远程管理权限或审计例外。
 
 ## 失败和重试
 
@@ -50,4 +60,4 @@ Windows 引导目录及审计继续使用当前 Host 部署策略。本修复不
 
 使用实际归档验证内置 catalog 安装、启用、失败重试和更新；升级已有环境时核对同一实例、连接配置、角色引用和历史。安装源码的协议 fixture 验证不能代替企业 CodeAgent/RelayAgent 的真实模型、MCP、角色协作和重启续接验收。
 
-方案与边界见[Issue #178 实施方案](../plans/2026-11-02-issue178-bundled-acp-admission.md)。
+方案与边界见[Issue #178 实施方案](../plans/2026-11-02-issue178-bundled-acp-admission.md)及[评审修订契约](../plans/2026-11-02-pr1776-review-revision.md)。

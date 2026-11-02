@@ -16,10 +16,10 @@ const { BUNDLED_PLUGIN_DEFINITIONS: definitions } = await import(
     ? '../src/domains/plugin/bundled-plugin-definitions.ts'
     : '../dist/domains/plugin/bundled-plugin-definitions.js'
 );
-const { bundledArchiveRejection } = await import(
+const { packageCapabilityRejection } = await import(
   process.argv.includes('--source')
-    ? '../src/domains/plugin/bundled-archive-admission.ts'
-    : '../dist/domains/plugin/bundled-archive-admission.js'
+    ? '../src/domains/plugin/package-capability-admission.ts'
+    : '../dist/domains/plugin/package-capability-admission.js'
 );
 for (const { catalogId, manifest, agentProvider } of definitions) {
   assert.equal(validateManifest(manifest).valid, true, `invalid ${catalogId} manifest`);
@@ -31,7 +31,7 @@ for (const { catalogId, manifest, agentProvider } of definitions) {
       Buffer.byteLength(`${JSON.stringify(agentProvider, null, 2)}\n`) <= 65536,
       'Agent provider declaration exceeds 64 KiB',
     );
-  const rejection = bundledArchiveRejection(manifest, agentProvider, packageRoot);
+  const rejection = packageCapabilityRejection(manifest, agentProvider, packageRoot);
   assert.equal(rejection, undefined, rejection);
 }
 await generateBundledPluginArtifacts(new URL('../dist/domains/plugin/', import.meta.url), definitions, {

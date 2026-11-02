@@ -229,6 +229,7 @@ const baseCatSchema = z.object({
   caution: z.string().nullable().optional(),
   strengths: z.array(z.string().min(1)).optional(),
   sessionChain: z.boolean().optional(),
+  executionApproval: z.enum(['auto', 'ask_user']).optional(),
   carrier: catCarrierSchema.optional(),
   voiceConfig: voiceConfigSchema.optional(),
 });
@@ -308,6 +309,7 @@ const updateCatSchema = z.object({
   sessionChain: z.boolean().optional(),
   available: z.boolean().optional(),
   clientId: clientSchema.optional(),
+  executionApproval: z.enum(['auto', 'ask_user']).optional(),
   carrier: catCarrierSchema.optional(),
   defaultModel: modelSchema.optional(),
   mcpSupport: z.boolean().optional(),
@@ -847,6 +849,7 @@ async function toCatResponse(
         variantLabel: cat.variantLabel ?? undefined,
         isDefaultVariant: cat.isDefaultVariant ?? undefined,
         breedDisplayName: cat.breedDisplayName ?? undefined,
+        executionApproval: cat.executionApproval,
         mcpSupport: cat.mcpSupport,
         ...(acpConfig ? { acp: acpConfig } : {}),
         ...(cat.agyProfile ? { agyProfile: publicAgyProfile(cat.agyProfile) } : {}),
@@ -1212,6 +1215,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           teamStrengths: body.teamStrengths,
           caution: body.caution,
           strengths: body.strengths,
+          ...(body.executionApproval ? { executionApproval: body.executionApproval } : {}),
           clientId: 'acp',
           carrier: 'acp',
           defaultModel: body.defaultModel,
@@ -1273,6 +1277,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           teamStrengths: body.teamStrengths,
           caution: body.caution,
           strengths: body.strengths,
+          ...(body.executionApproval ? { executionApproval: body.executionApproval } : {}),
           clientId: body.clientId,
           carrier: requestedCarrier,
           defaultModel: body.defaultModel,
@@ -1688,6 +1693,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         ...(body.teamStrengths !== undefined ? { teamStrengths: body.teamStrengths } : {}),
         ...(body.caution !== undefined ? { caution: body.caution } : {}),
         ...(body.strengths !== undefined ? { strengths: body.strengths } : {}),
+        ...(body.executionApproval !== undefined ? { executionApproval: body.executionApproval } : {}),
         ...(body.clientId !== undefined ? { clientId: body.clientId } : {}),
         // Always write the resolved value so any legacy transport/cli.carrier
         // selection converges to the canonical field on the next edit.

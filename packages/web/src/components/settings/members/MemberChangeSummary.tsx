@@ -36,6 +36,7 @@ const labels: Record<keyof HubCatEditorFormState, [string, string]> = {
   codexSpeed: ['Codex 速度', 'Codex speed'],
   carrier: ['接入方式', 'Carrier'],
   provider: ['供应商', 'Provider'],
+  executionApproval: ['ACP 执行确认', 'ACP execution approval'],
   mcpSupport: ['MCP 工具', 'MCP tools'],
   acpTransport: ['ACP 传输', 'ACP transport'],
   acpAgentProvider: ['插件 ACP client', 'Connection'],
@@ -58,6 +59,7 @@ function display(key: keyof HubCatEditorFormState, value: unknown, t: MemberText
   if (key === 'clientId')
     return ({ openai: 'Codex', anthropic: 'Claude Code' } as Record<string, string>)[String(value)] ?? String(value);
   if (key === 'carrier' && value === 'app_server') return 'App Server';
+  if (key === 'executionApproval') return value === 'ask_user' ? t('询问用户', 'Ask user') : t('自动', 'Auto');
   if (key === 'configurationSource')
     return value === 'native_tool' ? t('工具配置', 'Tool settings') : t('已有连接配置', 'Existing connection');
   if (typeof value === 'boolean') return value ? t('开启', 'On') : t('关闭', 'Off');

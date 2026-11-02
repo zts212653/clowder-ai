@@ -68,7 +68,7 @@ test('a package cannot grant itself permission approval through declaration or d
   await assert.rejects(resolve(declaration, '{"permissionPolicy":"auto_allow"}'), /owner/);
   const { configurationKey: _unused, ...staticDeclaration } = declaration;
   const { permissionPolicy: _unusedPolicy, ...acp } = declaration.acp;
-  assert.equal((await resolve({ ...staticDeclaration, acp }))[0].acp.permissionPolicy, 'deny');
+  assert.equal((await resolve({ ...staticDeclaration, acp }))[0].acp.permissionPolicy, undefined);
 });
 
 test('permission changes cannot reuse a pool selected under the previous policy', () => {
@@ -121,3 +121,23 @@ test(
     assert.ok(inspected.includes('D:/NewACP'));
   },
 );
+
+test('fixed and directory clients retain the same unspecified or explicit permission policy', async () => {
+  for (const policy of [undefined, 'deny', 'auto_allow']) {
+    const acp = { command: 'codeagent', startupArgs: ['--acp'], ...(policy ? { permissionPolicy: policy } : {}) };
+    const run = (decl, value) =>
+      resolveAgentClientLibrary({
+        declaration: decl,
+        admission,
+        packageRoot,
+        configuration: { readConfig: async () => value },
+      });
+    const fixed = await run({ ...declaration, acp }, JSON.stringify(acp));
+    const library = await run(
+      { configurationKey: 'connection' },
+      JSON.stringify([{ id: 'codeagent', name: 'CodeAgent', ...acp }]),
+    );
+    assert.deepEqual(fixed[0].acp, library[0].acp);
+    assert.equal(fixed[0].acp.permissionPolicy, policy);
+  }
+});

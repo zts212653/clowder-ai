@@ -34,6 +34,14 @@ const { OfficialPluginInstallError } = await load('domains/plugin/official-packa
 const { registerPluginManagerRoutes, pluginManagerUploadRoutes } = await load('routes/plugin-manager-routes.js');
 const { registerAgentClientLibraryRoutes } = await load('routes/agent-client-library-routes.js');
 const { readPluginConfig } = await load('domains/plugin/plugin-config-store.js');
+const { RuntimeInteractionService } = await load('domains/runtime-interaction/RuntimeInteractionService.js');
+const { InMemoryRuntimeInteractionStore } = await load(
+  'domains/runtime-interaction/stores/InMemoryRuntimeInteractionStore.js',
+);
+const { MessageRuntimeInteractionCardPublisher } = await load(
+  'domains/runtime-interaction/RuntimeInteractionCardPublisher.js',
+);
+const { runtimeInteractionRoutes } = await load('routes/runtime-interaction-routes.js');
 if (action === 'execute' && process.platform !== 'win32') {
   const { buildChildEnv } = await load('utils/cli-spawn.js');
   assert.equal(
@@ -42,7 +50,7 @@ if (action === 'execute' && process.platform !== 'win32') {
     'the real CLI guard must own its files inside the isolated runtime root',
   );
 }
-const projectRoot = join(root, action === 'local' || action === 'execute' ? `project-${action}` : 'project');
+const projectRoot = join(root, action.startsWith('local') || action === 'execute' ? `project-${action}` : 'project');
 await mkdir(projectRoot, { recursive: true });
 const registry = new SessionImplementationRegistry();
 const services = new Map(
@@ -84,6 +92,7 @@ const runtime = createDormantPluginRuntimeComposition({
                 configurationSource: 'native_tool',
                 defaultModel: '',
                 mcpSupport: false,
+                executionApproval: catId === 'opus' ? 'ask_user' : 'auto',
               },
               effectiveModel: '',
               acpConfig: declaration.acp,
@@ -114,6 +123,40 @@ const owner = process.env.DEFAULT_OWNER_USER_ID ?? 'fixture-owner';
 app.addHook('preHandler', async (request) => {
   request.sessionUserId = owner;
 });
+const interactionStore = new InMemoryRuntimeInteractionStore();
+const answers = [];
+const messages = new MessageStore();
+const interactions = new RuntimeInteractionService({
+  store: interactionStore,
+  hostEpoch: 'fixture-host',
+  cardPublisher: new MessageRuntimeInteractionCardPublisher({
+    messageStore: messages,
+    socketManager: { broadcastToRoom() {} },
+  }),
+  onRecordUpdated: (record) => {
+    if (record.status !== 'pending') return;
+    answers.push(
+      app
+        .inject({
+          method: 'POST',
+          url: `/api/runtime-interactions/${record.request.interactionId}/respond`,
+          headers: { 'x-cat-cafe-user': owner },
+          payload: {
+            cardRef: record.cardRef,
+            response: {
+              kind: 'decision',
+              decisionId: record.request.decisions.find((decision) => decision.outcome === 'accept').id,
+            },
+          },
+        })
+        .then((response) => {
+          assert.equal(response.statusCode, 200, response.payload);
+          return record.request;
+        }),
+    );
+  },
+});
+await app.register(runtimeInteractionRoutes, { service: interactions });
 const audit = [];
 const routes = {
   manager,
@@ -157,7 +200,7 @@ try {
   const retained = join(projectRoot, 'retained-history.ndjson');
   if (action === 'seed') await writeFile(retained, '{"sessionId":"original","text":"KEEP HISTORY"}\n');
   let response;
-  if (action === 'local') {
+  if (action.startsWith('local')) {
     const boundary = '----same-bundled-acp-bytes';
     const bytes = await readFile(join(root, 'dist/domains/plugin/bundled-packages', entry.archivePath));
     response = await app.inject({
@@ -184,7 +227,11 @@ try {
     });
   } else response = await install();
   const result = { status: response.statusCode, body: response.json(), failed, logs, auditCount: audit.length };
-  if (response.statusCode < 300) {
+  if (response.statusCode < 300 && action.endsWith('-admission')) {
+    result.snapshot = await runtime.inventoryStore.snapshot();
+    result.initialIntent = (await manager.getLocal(entry.pluginId)).plugin.intent;
+    result.registered = registry.has({ pluginId: entry.pluginId, contributionId: entry.catalogId });
+  } else if (response.statusCode < 300) {
     let detail = (await manager.getLocal(entry.pluginId)).plugin;
     result.instanceId = detail.pluginInstanceId;
     result.initialIntent = detail.intent;
@@ -201,7 +248,7 @@ try {
                   ? [fileURLToPath(new URL('../fixtures/bundled-acp-agent.mjs', import.meta.url))]
                   : ['--acp-fixture'],
               ...(action === 'execute' ? { bootstrapRoot: join(projectRoot, 'bootstrap') } : {}),
-              permissionPolicy: 'deny',
+              permissionPolicy: action === 'execute' ? 'auto_allow' : 'deny',
             }),
           },
         ],
@@ -228,9 +275,13 @@ try {
       ]) {
         process.stderr.write(`fixture: invoking ${text}\n`);
         const messages = await Array.fromAsync(
-          services
-            .get(catId)
-            .invoke(text, { hostSessionId: `host-${catId}`, invocationId: `inv-${text}`, cwd: projectRoot }),
+          services.get(catId).invoke(text, {
+            hostSessionId: `host-${catId}`,
+            invocationId: `inv-${text}`,
+            cwd: projectRoot,
+            runtimeInteractionPort: interactions,
+            auditContext: { userId: owner, threadId: 'fixture-thread', catId, invocationId: `inv-${text}` },
+          }),
         );
         assert.equal(messages.at(-1).errorCode, undefined, JSON.stringify(messages));
         result.turns.push(
@@ -261,12 +312,14 @@ try {
       );
       process.stderr.write('fixture: re-enabled turn completed\n');
       assert.equal(messages.at(-1).errorCode, undefined, JSON.stringify(messages));
-      result.reenabled = messages.some((message) => message.content?.includes('after-reenable:permission=reject'));
+      result.reenabled = messages.some((message) => message.content?.includes('after-reenable:permission=allow'));
       await manager.setEnabled(entry.pluginId, {
         enabled: false,
         expectedRevision: (await manager.getLocal(entry.pluginId)).plugin.lifecycleRevision,
       });
     }
+    result.approvals = await Promise.all(answers);
+    result.pendingApprovals = (await interactionStore.listPendingByUser(owner)).length;
     result.snapshot = await runtime.inventoryStore.snapshot();
   } else result.snapshot = await runtime.inventoryStore.snapshot();
   if (action.startsWith('update')) {

@@ -132,6 +132,7 @@ const catVariantSchema = z
     acp: z.unknown().optional(),
 
     defaultModel: z.string(), // OAuth/subscription CLIs have built-in defaults; api_key validated at route level
+    executionApproval: z.enum(['auto', 'ask_user']).optional(),
     mcpSupport: z.boolean(),
     cli: cliConfigSchema.optional(),
     agyProfile: agyProfileSchema,
@@ -785,6 +786,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         clientId: variant.clientId as ClientId, // #252: Zod now accepts any string; downstream switch/case has default branches
         carrier: resolveCatCarrier(variant as CarrierCompatInput),
         defaultModel: variant.defaultModel,
+        ...(variant.executionApproval ? { executionApproval: variant.executionApproval } : {}),
         mcpSupport: variant.mcpSupport,
         ...(variant.agyProfile != null ? { agyProfile: variant.agyProfile } : {}),
         ...(projectedCommandArgs != null ? { commandArgs: projectedCommandArgs } : {}),

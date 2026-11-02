@@ -61,6 +61,9 @@ export async function bundledAcpFixture(t) {
         acp: { command: client.command, startupArgs: client.startupArgs, permissionPolicy: 'deny' },
       };
       const files = [
+        ...(runtime?.entrypoint
+          ? [{ name: `package/${runtime.entrypoint}`, bytes: Buffer.from('process.stdin.resume();') }]
+          : []),
         { name: 'package/plugin.yaml', bytes: Buffer.from(JSON.stringify(manifest)) },
         {
           name: 'package/package.json',

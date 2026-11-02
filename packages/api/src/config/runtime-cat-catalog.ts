@@ -101,6 +101,7 @@ export interface RuntimeCatInput {
   clientId: ClientId;
   carrier: CatCarrier;
   defaultModel: string;
+  executionApproval?: 'auto' | 'ask_user';
   mcpSupport: boolean;
   /** F247 KD-17: cloud-only cats (Remote MCP) omit cli to skip local dispatch.
    * When cli is absent, mention routing queues the mention without spawning a CLI. */
@@ -141,6 +142,7 @@ export interface RuntimeCatUpdate {
   clientId?: ClientId;
   carrier?: CatCarrier;
   defaultModel?: string;
+  executionApproval?: 'auto' | 'ask_user';
   mcpSupport?: boolean;
   /** F247 KD-17: cli null to remove (cloud-only mode), CliConfig to update, undefined to skip. */
   cli?: CliConfig | null;
@@ -344,6 +346,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
           ? { variantLabel: input.variantLabel.trim() }
           : {}),
         defaultModel: input.defaultModel,
+        ...(input.executionApproval ? { executionApproval: input.executionApproval } : {}),
         mcpSupport: input.mcpSupport,
         // F247 KD-17: omit cli for cloud-only cats (Remote MCP, no local dispatch).
         ...(input.cli ? { cli: input.cli } : {}),
@@ -667,6 +670,7 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
     if (variant.cli && typeof variant.cli === 'object') delete variant.cli.carrier;
   }
   if (patch.defaultModel !== undefined) variant.defaultModel = patch.defaultModel;
+  if (patch.executionApproval !== undefined) variant.executionApproval = patch.executionApproval;
   if (patch.mcpSupport !== undefined) variant.mcpSupport = patch.mcpSupport;
   // F247 KD-17: patch.cli === null means remove (cloud-only mode); object means update.
   if (patch.cli !== undefined) {
