@@ -1,7 +1,7 @@
 // F186 Phase B: Level 0 scanner — indexes any markdown directory without structure assumptions
 
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
-import { basename, join, relative } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { RepoScanner, ScannedEvidence } from './interfaces.js';
 
 const SKIP_DIRS = new Set([
@@ -50,6 +50,13 @@ export class FlatScanner implements RepoScanner {
   }
 
   parseSingle(filePath: string, root: string): ScannedEvidence | null {
+    const boundRoot = resolve(root);
+    const file = resolve(filePath);
+    const rel = relative(boundRoot, file);
+    if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
+    for (let dir = dirname(file); relative(boundRoot, dir) !== ''; dir = dirname(dir)) {
+      if (isGitRepositoryRoot(dir)) return null;
+    }
     return this.parseFile(filePath, root);
   }
 

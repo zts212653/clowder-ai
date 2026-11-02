@@ -34,6 +34,10 @@ it('keeps ordinary documents but stops at real nested repos and linked worktrees
     assert.deepEqual(titles, ['Ordinary', 'Root']);
     assert.equal(new Scanner('child').discover(repo).length, 1, 'direct binding keeps repository docs');
     assert.equal(new Scanner('child').discover(worktree).length, 1, 'direct binding keeps worktree docs');
+    assert.equal(new Scanner('probe').parseSingle(join(repo, 'doc.md'), root), null);
+    assert.equal(new Scanner('probe').parseSingle(join(worktree, 'doc.md'), root), null);
+    assert.ok(new Scanner('child').parseSingle(join(repo, 'doc.md'), repo));
+    assert.ok(new Scanner('child').parseSingle(join(worktree, 'doc.md'), worktree));
   }
   writeFileSync(join(repo, 'doc.md'), 'token = ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij');
   for (const [boundRoot, blocked, indexed] of [
@@ -45,9 +49,14 @@ it('keeps ordinary documents but stops at real nested repos and linked worktrees
     await store.initialize();
     t.after(() => store.close());
     const manifest = { id: 'probe', root: boundRoot, reviewPolicy: { authorityCeiling: 'validated' } };
-    const result = await new CollectionIndexBuilder(store, manifest, new FlatScanner('probe')).rebuild();
+    const builder = new CollectionIndexBuilder(store, manifest, new FlatScanner('probe'));
+    const result = await builder.rebuild();
     assert.equal(result.blocked, blocked);
     assert.equal(result.indexed, indexed);
+    if (boundRoot === root) {
+      await builder.incrementalUpdate([join(repo, 'doc.md'), join(worktree, 'doc.md')]);
+      assert.equal(store.getDb().prepare('SELECT count(*) AS n FROM evidence_docs').get().n, 2);
+    }
   }
 });
 
