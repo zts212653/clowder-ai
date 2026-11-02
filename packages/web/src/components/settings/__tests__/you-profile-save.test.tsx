@@ -41,13 +41,17 @@ it('omits hidden aliases and publishes the canonical save response instead of it
   }
 });
 
-it('shows the saved nickname in You settings and allows changing and clearing it', async () => {
+it('does not activate an untouched old nickname in You settings and allows explicit selection and clearing', async () => {
   vi.clearAllMocks();
   writeShellLanguage('zh');
   const opened = { name: 'co-creator', nickname: '大当家', aliases: [], mentionPatterns: ['@co-creator'] };
   vi.mocked(apiFetch).mockImplementation(async (_url, init) => {
     const patch = JSON.parse(String(init?.body));
-    return Response.json({ config: { coCreator: { ...opened, ...patch } } });
+    return Response.json({
+      config: {
+        coCreator: { ...opened, ...patch, ...(Object.hasOwn(patch, 'nickname') ? { nicknameSource: 'user' } : {}) },
+      },
+    });
   });
   const host = document.createElement('div');
   document.body.append(host);
@@ -58,7 +62,7 @@ it('shows the saved nickname in You settings and allows changing and clearing it
     );
     const input = host.querySelector<HTMLInputElement>('#you-nickname');
     expect(input).not.toBeNull();
-    expect(input?.value).toBe('大当家');
+    expect(input?.value).toBe('');
     const save = async () => {
       await act(async () => {
         host.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
@@ -66,7 +70,7 @@ it('shows the saved nickname in You settings and allows changing and clearing it
       return JSON.parse(String(vi.mocked(apiFetch).mock.calls.at(-1)?.[1]?.body));
     };
     expect(await save()).not.toHaveProperty('nickname');
-    for (const value of ['co-creator', '']) {
+    for (const value of ['大当家', '']) {
       await act(async () => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value);
         input?.dispatchEvent(new Event('input', { bubbles: true }));

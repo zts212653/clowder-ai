@@ -867,6 +867,7 @@ export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCrea
   if (patch.nickname !== undefined) {
     if (patch.nickname?.trim()) nextOwner.nickname = patch.nickname.trim();
     else delete nextOwner.nickname;
+    nextOwner.nicknameSource = 'user';
   }
 
   if (patch.timeZone !== undefined) {
@@ -892,6 +893,7 @@ export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCrea
   const normalizedOwner: CoCreatorConfig = {
     name: String(nextOwner.name ?? currentOwner.name),
     ...(typeof nextOwner.nickname === 'string' ? { nickname: nextOwner.nickname } : {}),
+    ...(nextOwner.nicknameSource === 'user' ? { nicknameSource: 'user' as const } : {}),
     aliases: Array.isArray(nextOwner.aliases) ? (nextOwner.aliases as string[]) : [...currentOwner.aliases],
     mentionPatterns: Array.isArray(nextOwner.mentionPatterns)
       ? (nextOwner.mentionPatterns as string[])

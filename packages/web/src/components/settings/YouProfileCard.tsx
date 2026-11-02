@@ -1,5 +1,6 @@
 'use client';
 
+import { coCreatorNickname } from '@cat-cafe/shared';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
 import { CO_CREATOR_COLOR } from '@/lib/color-defaults';
@@ -36,7 +37,7 @@ export function YouProfileCard({
   useEffect(() => {
     if (!coCreator) return;
     setName(coCreator.name);
-    setNickname(coCreator.nickname ?? '');
+    setNickname(coCreatorNickname(coCreator) ?? '');
     setNicknameEdited(false);
     setMentions(coCreator.mentionPatterns.join('  '));
     setAvatar(coCreator.avatar ?? '');
@@ -167,6 +168,9 @@ export function YouProfileCard({
               }}
             />
             <p>{copy.nicknameUsage}</p>
+            {coCreator?.nickname && coCreatorNickname(coCreator) === undefined && !nicknameEdited ? (
+              <p>{copy.nicknameUnconfirmed}</p>
+            ) : null}
           </div>
         </div>
         <div className="you-profile-field">
