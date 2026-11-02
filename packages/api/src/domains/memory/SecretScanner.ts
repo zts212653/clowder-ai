@@ -22,7 +22,94 @@ const PATTERNS: Pattern[] = [
 
 const CODE_FENCE_RE = /^\s{0,3}[`~]{3,}/;
 const PLACEHOLDER_RE = /EXAMPLE|PLACEHOLDER|YOUR[_-]|REPLACE|CHANGEME|xxx/i;
-const KEY_CONTEXT_RE = /(?:key|token|secret|password|credential|auth)\s*[:=]/i;
+const CREDENTIAL_NAME_RE = /key|token|secret|password|credential|auth/i;
+const DECLARATION_MODIFIERS = new Set([
+  'export',
+  'const',
+  'let',
+  'var',
+  'readonly',
+  'declare',
+  'typeset',
+  'local',
+  'set',
+  'env',
+  'private',
+  'protected',
+  'public',
+  'static',
+]);
+
+/** Consume targets, operators and values in order; never restart a regex inside a long name.
+ * Quoted shell values stay one token, and a type annotation belongs to its preceding target.
+ * Prose such as "correlation key = ..." has two targets without a declaration/assignment.
+ */
+function hasCredentialAssignment(line: string): boolean {
+  const text = line.replace(/^[\s>*+\-•#|]*(?:\d+[.)]\s+|\[[ xX]\]\s+)*/, '');
+  const tokens =
+    /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:\[[\w.]+\])?\$(?:\{[\w:.-]+\}|[\w:.-]+)|[\w.-]+:[\w.-]+(?=\s*=)|[\w.-]+|[^\s]/g;
+  const valueAtOperator = /\s*["']?([A-Za-z0-9_\-/.+=]{32,})/y;
+  let target = '';
+  let validPrefix = true;
+  let declaration = false;
+  let annotation: { target: string; validPrefix: boolean } | undefined;
+
+  for (let token = tokens.exec(text); token; token = tokens.exec(text)) {
+    const word = token[0];
+    if (word === ':' || word === '=') {
+      if (annotation && word === ':') {
+        annotation.validPrefix = false;
+        continue;
+      }
+      const assignment = annotation ?? { target, validPrefix };
+      // := is a single operator, not a type annotation followed by another assignment.
+      const valueStart = tokens.lastIndex + (word === ':' && text[tokens.lastIndex] === '=' ? 1 : 0);
+      valueAtOperator.lastIndex = valueStart;
+      const value = valueAtOperator.exec(text)?.[1];
+      if (
+        assignment.validPrefix &&
+        CREDENTIAL_NAME_RE.test(assignment.target) &&
+        value &&
+        !PLACEHOLDER_RE.test(value) &&
+        shannonEntropy(value) > 3.5
+      )
+        return true;
+      if (word === ':' && valueStart === tokens.lastIndex) {
+        annotation ??= assignment;
+      } else {
+        // Skip this RHS as one lexical value. A following shell assignment can have its own target.
+        tokens.lastIndex = valueStart;
+        if (!tokens.exec(text)) return false;
+        target = '';
+        validPrefix = true;
+        declaration = false;
+        annotation = undefined;
+      }
+      continue;
+    }
+    if (word === ';' || word === ',' || word === '{' || word === '|') {
+      if (annotation && word === '|') continue;
+      target = '';
+      validPrefix = true;
+      declaration = false;
+      annotation = undefined;
+      continue;
+    }
+    if (annotation) {
+      // A URL/path is not a TS type and must not borrow a later '=' value.
+      if (!/^[\w$<>&|.,?[\]]+$/.test(word)) annotation.validPrefix = false;
+      continue;
+    }
+    if (DECLARATION_MODIFIERS.has(word) || (declaration && /^--?[A-Za-z][\w-]*$/.test(word))) {
+      if (target) validPrefix = false;
+      declaration = true;
+      continue;
+    }
+    if (target) validPrefix = false;
+    target = word;
+  }
+  return false;
+}
 
 export class SecretScanner {
   static scan(content: string, filePath: string): SecretFinding[] {
@@ -53,16 +140,13 @@ export class SecretScanner {
         }
       }
 
-      if (!found && KEY_CONTEXT_RE.test(line)) {
-        const valueMatch = line.match(/[:=]\s*["']?([A-Za-z0-9_\-/.+=]{32,})["']?/);
-        if (valueMatch && !PLACEHOLDER_RE.test(valueMatch[1]) && shannonEntropy(valueMatch[1]) > 3.5) {
-          findings.push({
-            type: 'high-entropy-secret',
-            file: filePath,
-            line: i + 1,
-            snippet: maskSecret(line.trim()),
-          });
-        }
+      if (!found && hasCredentialAssignment(line)) {
+        findings.push({
+          type: 'high-entropy-secret',
+          file: filePath,
+          line: i + 1,
+          snippet: maskSecret(line.trim()),
+        });
       }
     }
     return findings;
