@@ -193,6 +193,14 @@ jobs:
         env:
           CAT_CAFE_ONBOARDING_E2E_EVIDENCE: ${{ github.workspace }}/.tmp/native-team-setup-ci
         run: pnpm --filter @cat-cafe/web test:onboarding:production-contracts
+      - name: Plugin document direct-navigation origin isolation
+        env:
+          PLUGIN_ORIGIN_ARTIFACTS: ${{ github.workspace }}/.tmp/plugin-document-origin-ci
+        run: >-
+          pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 --env DEFAULT_OWNER_USER_ID=owner
+          --env FEEDBACK_PLAYWRIGHT_MODULE=${{ github.workspace }}/packages/web/node_modules/playwright
+          node --import tsx test/plugin-html-origin.journey.mts
       - name: Preserve first-run browser evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -201,6 +209,7 @@ jobs:
           path: |
             .tmp/first-run-entry-ci
             .tmp/native-team-setup-ci
+            .tmp/plugin-document-origin-ci
           if-no-files-found: ignore
           retention-days: 7
 

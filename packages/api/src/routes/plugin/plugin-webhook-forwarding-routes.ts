@@ -264,10 +264,10 @@ function authorizeRequest(
 function sendPluginResponse(reply: FastifyReply, response: PluginWebhookResponse): unknown {
   reply.status(response.status);
   for (const [name, value] of Object.entries(response.headers)) reply.header(name, value);
-  // A directly navigated package page must not execute with the Host's origin.
+  // Any directly navigated package document must not execute with the Host's origin,
+  // regardless of its media type (including XHTML and SVG).
   // Resource fetch -> opaque srcdoc keeps the panel's own stricter CSP.
-  if (response.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() === 'text/html')
-    reply.header('content-security-policy', 'sandbox allow-scripts');
+  reply.header('content-security-policy', 'sandbox allow-scripts');
   return reply.send(response.body);
 }
 
