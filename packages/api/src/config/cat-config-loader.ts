@@ -312,6 +312,7 @@ const reviewPolicySchema = z.object({
 const coCreatorConfigSchema = z.object({
   name: z.string().min(1),
   nickname: z.string().min(1).optional(),
+  nicknameSource: z.literal('user').optional(),
   aliases: z.array(z.string().min(1)),
   mentionPatterns: z.array(mentionPatternSchema).min(1),
   timeZone: timeZoneSchema.optional(),
