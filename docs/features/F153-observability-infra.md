@@ -108,6 +108,8 @@ Phase E 只回答"发生了什么"（traces、metrics、健康状态），不做
 6. **burn-rate 告警** — SLO-based alerting（error rate / p95 latency / active invocations），WebSocket 推送
 7. **产品级 instruments** — `invocation.completed`、`thread.duration`、`session.rounds`、`cat.invocation.count`、`cat.response.duration`
 
+调用 outcome 的 `status` 为 `ok | error | canceled`。明确的 `user_cancel / cancel_all / preempted` owner 控制记 canceled（INFO、span 不标 ERROR，结束审计用 `cat_responded` + `status=canceled`）；未知 generator return、超时、协议失败和已发生的错误继续记 error。取消不等于 provider 已静止，不改变 ACP 的 seal/retire。BurnRateMonitor、health 和 Hub 错误率仍以 `error / (ok + error)` 计算，排除 canceled；Hub 单列取消数。
+
 > **Review P1/P2 修复**（PR #546 review）：
 > - P1: `findP95Latency` histogram bucket 语义错误（cumulative count ≠ seconds）→ 只用 `quantile="0.95"`
 > - P1: `LocalTraceStore.query()` 改为 newest-first 遍历

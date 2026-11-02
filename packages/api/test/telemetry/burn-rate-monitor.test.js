@@ -204,3 +204,21 @@ test('BurnRateMonitor: does not re-fire alert while already active', async () =>
   await monitor.check();
   assert.equal(alertCount, 1, 'Alert should only fire once until cleared');
 });
+
+test('#1672: canceled calls neither trip nor dilute the provider error rate', async () => {
+  let text = 'cat_cafe_invocation_completed{status="canceled"} 100';
+  const alerts = [];
+  const monitor = new BurnRateMonitor({
+    getMetricsText: async () => text,
+    onAlert: (value) => alerts.push(value),
+    onClear: () => {},
+    debounceCount: 1,
+    thresholds: { errorRate: 0.3 },
+  });
+  await monitor.check();
+  assert.equal(alerts.length, 0);
+  text += '\ncat_cafe_invocation_completed{status="ok"} 2\ncat_cafe_invocation_completed{status="error"} 1';
+  await monitor.check();
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0][0].currentValue, 1 / 3);
+});
