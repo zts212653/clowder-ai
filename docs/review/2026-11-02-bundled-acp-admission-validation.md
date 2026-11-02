@@ -36,12 +36,18 @@ Architecture cell：`plugin`，复用既有包准入、carrier、配置存储和
 
 | 检查 | 结果及含义 |
 | --- | --- |
-| `bundled-acp-admission.test.js` | 首轮 9/9；补充成员投影/再启用后的最终复验执行中。两客户端真实 catalog 路由及同字节上传、启用/停用、瞬时下载失败重试、失败更新后合法更新、坏摘要隔离、非法声明负例、不同名称客户端 |
+| `bundled-acp-admission.test.js` | 最终 9/9（含成员投影、再启用）。两客户端真实 catalog 路由及同字节上传、启用/停用、瞬时下载失败重试、失败更新后合法更新、坏摘要隔离、非法声明负例、不同名称客户端 |
 | 构建/准入/路由/权限/恢复组合回归 | 121/121。包括 source/compiled producer、check 只读、坏输入保留旧输出、canonical gzip/闭包、固定连接与 root-only 恢复、CRLF、旧 builtin/身份/摘要/资源、日志脱敏 |
 | 声明/目录/生命周期/绑定组 | 81/81，测试进程使用已有 trusted-host 模式；未改部署默认值或系统盘/祖先 ACL |
 | 临时目录收尾后的恢复套件复验 | 29/29，属于上述 121 项的子集，不重复累计；仅清理 helper 当次记录的自有 fixture 根 |
 | `pnpm --filter @cat-cafe/api run build` | 通过，包含 shared、MCP、API TypeScript、bundled 产物和 recorder census |
 | Biome / frontmatter / capability tips | 修改的 TS/JS 无错误；3 份 Markdown frontmatter 通过；tips 检查通过，既有复杂度及失效文档 anchor 告警保留 |
+
+三组主回归共 211 项通过；29 项收尾复验不重复累计。CodeAgent 和 RelayAgent 的同一客户端连续会话与不同成员隔离、权限拒绝、停用后再启用均有实际 ACP 管道输出。最终构建后未再修改产品代码。
+
+公共测试：原有 Windows planner CLI 在 `spawnSync('pnpm')` 无法执行 pnpm.ps1 时返回 `could not resolve pnpm version: undefined`。未将这项报绿或顺带改 CI；改用同一 resolver/planner/validator API，并通过 PowerShell 实测 pnpm 9.15.4、记录真实 tree/lockfile/toolchain，得到 2968 个入选测试，新增 5 份测试分别进入 distributable 分片。记录为 `public-test-selection.log` / `public-test-plan-manual.json`，不冒充全套公共测试执行结果。
+
+Fallback scanner 已按 next 基线执行并提示净增 25。核对：修复的是“发行来源被当成 runtime”这一错误分类，没有增加安装失败降级；scanner 把测试协议/动作分派的布尔条件也计为 fallback。生产连接读取的优先级是“owner 已存值 → manifest 默认 → 空覆盖”，用于保留已有配置；权限缺省固定为 deny。JSON 边界拒绝和已知 I/O 分类保留原错误语义，不通过另一执行器或不受校验路径重试。
 
 固定连接成员投影使用普通 connection 字段，避免误选多客户端目录编辑器；执行 fixture 同时覆盖停用后重新启用。新增该调用时曾漏传 invocationId，Host 正确拒绝，已补齐测试输入，未放宽生产校验。
 
@@ -65,6 +71,7 @@ CodeAgent 0.1.0 和 RelayAgent 1.0.0 的声明形状来自 Issue；执行阶段�
 - 原始日志集中在仓库外 `G:/AIwork/clowder-ai/artifacts/issue178-codeagent-install-analysis-20261102`，包括 RED、各组回归、原始严格模式失败与兼容模式复验。
 - 没有安装测试 EXE、创建快捷方式、后台交互服务或监听端口；新增集成测试的 finally/shutdown 关闭 fixture 进程，测试退出移除自己的临时目录；恢复 helper 也只清理它当次记录的 fixture 根，不按名称批量清理旧目录。
 - 没有改用户运行环境、系统盘根/祖先 ACL、.env、认证、角色、会话、Redis/SQLite 或历史；现有引导逻辑仅维护自己创建的临时私有目录。回退仅回退代码。PR 不合并。
+- 最终测试退出后，已核对没有遗留 `bundled-acp-agent.mjs` / `bundled-acp-probe.mjs` 进程；没有停止其他任务的服务。既有、无法核实归属的旧临时目录未按名称批量删除。
 
 ## 回归命令
 
