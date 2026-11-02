@@ -125,6 +125,7 @@ jobs:
         run: >-
           pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs
           pnpm exec vitest run src/components/plugins/__tests__/plugin-ui.test.tsx
+          src/components/plugins/__tests__/plugin-panel-http.test.ts
       - name: Provider EOF and plugin UI stop preserve lifecycle fences
         run: >-
           pnpm --filter @cat-cafe/api exec node scripts/with-test-home.mjs

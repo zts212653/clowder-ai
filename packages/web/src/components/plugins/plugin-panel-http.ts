@@ -21,6 +21,7 @@ export async function requestPluginHttp(
   if (!target.pathname.startsWith(prefix) || target.hash) throw new Error('插件 HTTP 路径超出范围');
   const response = await apiFetch(`${target.pathname}${target.search}`, {
     method: input.method,
+    redirect: 'error',
     headers: {
       'content-type': 'application/json',
       'x-clowder-plugin-ui-instance': entry.instanceId,
