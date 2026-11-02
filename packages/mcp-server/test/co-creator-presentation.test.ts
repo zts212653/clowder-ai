@@ -17,13 +17,7 @@ function withoutDescriptions(value: unknown): unknown {
 
 for (const principal of ['invocation', 'agent-key'] as const) {
   test(`${principal}: tools/list reads the current coCreator and refreshes in one persistent session`, async (t) => {
-    let coCreator: {
-      name: string;
-      nickname: string;
-      nicknameSource?: 'user';
-      aliases: string[];
-      mentionPatterns: string[];
-    } = { name: 'Mina', nickname: 'Captain', aliases: [], mentionPatterns: ['@m.(a+b)'] };
+    let coCreator = { name: 'Mina', nickname: 'Captain', aliases: [], mentionPatterns: ['@m.(a+b)'] };
     let reads = 0;
     let unavailable = false;
     const api = createHttpServer((request, response) => {
@@ -106,11 +100,7 @@ for (const principal of ['invocation', 'agent-key'] as const) {
       unavailable = false;
       coCreator = { name: 'Mina', nickname: '大当家', aliases: [], mentionPatterns: ['@mina'] };
       const legacyHold = (await client.listTools()).tools.find((tool) => tool.name === 'cat_cafe_hold_ball');
-      assert.ok(legacyHold?.description?.includes('co-creator'));
-      assert.ok(!legacyHold?.description?.includes('大当家'));
-      coCreator.nicknameSource = 'user';
-      const chosenHold = (await client.listTools()).tools.find((tool) => tool.name === 'cat_cafe_hold_ball');
-      assert.ok(chosenHold?.description?.includes('大当家'));
+      assert.ok(legacyHold?.description?.includes('大当家'));
       coCreator = { name: 'Nora', nickname: 'Owner', aliases: [], mentionPatterns: ['@nora'] };
       await assertHoldGuard('@nora'); // A call must also refresh without requiring a relist.
       const second = (await client.listTools()).tools;

@@ -2,90 +2,77 @@
 topics: [co-creator, nickname, upgrade-compatibility, issue-1713]
 doc_kind: bug-report
 created: 2026-10-30
-tips_exempt: 称呼字段直接显示在已有个人资料编辑器中，并内联说明留空行为；不另加随机提示。
+tips_exempt: 称呼直接显示在两个现有资料编辑入口中，并内联说明与名称的区别及留空行为。
 ---
 
-# #1713 默认称呼与显式昵称
+# #1713 预填 co-creator，称呼可编辑
 
-来源：[Issue #1713](https://github.com/zts212653/clowder-ai/issues/1713)。
-用户要求默认去除“大当家”（此前实际没有使用），保留后续手动修改。
+来源：[Issue #1713](https://github.com/zts212653/clowder-ai/issues/1713)，候选修复
+[PR #1775](https://github.com/zts212653/clowder-ai/pull/1775)，目标分支 `next`。
 
-## 行为与兼容边界
+## 当前范围（2026-11-02 修订）
 
-旧模板预填了 nickname，后续版本开始在上下文中使用它，字段存在并不能证明用户选择。
-新模板不再预填；共享显示规则把缺少选择记录的旧“大当家”保留为待确认原值，默认显示
-`co-creator`，角色使用 `operator`。编辑其他资料不会激活该原值。
+用户明确要求：保留预填，初始称呼为 `co-creator`，允许后续手动修改。
+维护者的 [P2 审查](https://github.com/zts212653/clowder-ai/pull/1775#issuecomment-6573334253)
+指出，不能按昵称的字面值或缺少新来源标记推断历史用户意图。本轮据此撤去按值停用旧昵称及
+`nicknameSource` 标记方案。模板默认字面值改成 `co-creator`，仍需维护者审查这一默认值调整。
 
-新版“设置 → 你”和聊天个人资料编辑器均增加可选“称呼”字段，留空恢复默认。手动提交称呼时记录
-`nicknameSource: "user"`，允许主动选择“大当家”；保存、清空及重载遵循同一规则。
-配置响应保留原值与来源，Web、API 历史/导航和 MCP 展示使用同一共享解析。
-稳定身份、@ 标签和已存消息内容不变。
+- 新安装的模板和 runtime catalog 都预填 `nickname: "co-creator"`；初始化 owner 的说明也使用 `co-creator`。
+- 已有昵称保持其当前行为，包括历史上等于旧模板值的昵称；修改其他资料不会覆盖它。
+- “设置 → 你”和聊天资料编辑器都显示实际昵称，允许修改、清空，并解释“名称”用于个人资料、
+  “称呼”用于猫收到的对话署名与回复。
+- 称呼字段未编辑时不提交该字段；编辑后提交去除首尾空白的值，清空提交 `null`。
+  服务端删除清空后的字段，重载仍回到 `co-creator`；原有的无昵称 catalog 不重新继承模板昵称。
+- 保存后使用服务端返回的配置刷新 Web 显示；API、上下文与 MCP 保持现有共享解析规则。
+  稳定身份、@ 路由与已存储消息正文不变。
 
-| 配置历史 | 显示结果 |
+| 配置 / 操作 | 结果 |
 | --- | --- |
-| 没有 nickname | co-creator |
-| 历史“大当家”，没有来源记录 | co-creator；原值保留，编辑器提示可重新设置 |
-| 已有其他自定义昵称 | 保持原昵称 |
-| 用户通过编辑器主动选择“大当家” | 大当家，来源记录随配置持久化 |
-| 用户清空称呼 | co-creator，重载仍保持 |
+| 新安装，尚未编辑称呼 | 预填并使用 co-creator |
+| 旧 catalog 没有 nickname | 继续使用 co-creator，不注入模板字段 |
+| 已有任意昵称（含旧模板同名值） | 继续使用已有值，并在编辑器中显示 |
+| 将已有昵称改成 co-creator | 保存及重载后使用 co-creator |
+| 设置自定义昵称 | 保存及重载后使用自定义昵称 |
+| 清空称呼 | 保存及重载后使用 co-creator |
+| 只改名称、头像或其他资料 | 保持当前昵称 |
 
-历史数据无法区分“旧模板带入的大当家”和“曾手工填写了相同值的大当家”。本补丁不宣称能
-还原这段意图，也不删除原值；**没有来源记录的同名历史选择需要重新确认一次**。这是候选
-PR 的显式兼容取舍，需要维护者审查，不能把新增来源标记冒充历史来源证据。
+## 升级兼容边界
+
+历史数据不足以区分“旧模板预填值”和“用户手工选择的同名值”。本轮不进行猜测式迁移，
+也不以新来源标记为条件停用历史配置。已有安装希望去掉旧称呼时，可以通过可见的称呼字段
+改为 `co-creator` 或清空。本 PR 不宣称已经自动恢复所有旧版本升级前的上下文署名；
+如需无交互迁移，仍须可验证的版本或迁移状态，不能仅靠昵称值作判断。
 
 ## 验证
 
-隔离工作树：`cat-cafe-co-creator-nickname`，基线 `4ef8e7404a0f17a5750fdaba974f229647300281`。
-测试只使用临时 catalog；未修改正在运行的用户配置或重启 Host。
+隔离工作树 `cat-cafe-co-creator-nickname`，基于
+`next@74b5bfd4d59c3722c76140d9df36e332b72a0acd`。只使用临时 catalog 和测试数据；
+未修改运行实例配置或部署本补丁。
 
-- RED：新增 API 回归先观察到 4 项行为失败；Web 回归先观察到缺少称呼输入框。
-- API 源码回归：`node scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test test/co-creator-nickname.test.ts test/co-creator-presentation.test.ts`，9/9。
-- 已构建 API 编辑路由：同 wrapper 下 `node --test test/config-co-creator-route.test.js`，6/6。
-- Web：`pnpm exec vitest run src/components/__tests__/hub-co-creator-editor.test.tsx src/components/settings/__tests__/you-profile-save.test.tsx`，5/5；新版入口新增测试先因缺少字段失败，再转绿。
-- MCP：`node --import tsx --test test/co-creator-presentation.test.ts`，2/2，覆盖 invocation 与 agent-key 展示刷新。
-- shared、API、MCP 构建及 Web TypeScript 通过；修改文件 Biome 无错误，保留既有警告。
-- `pnpm check:capability-tips` 通过，既有 10 条无关 anchor/path 警告保留。
-- `pnpm check:architecture-ownership` 在此仓库不存在（exit 254），不记作通过。
-- fallback 扫描触发两处数量提示：测试中的四个 `??` 是清空后的预期值；编辑器中的两个
-  `?? ''` 分别初始化/重新打开表单，`trim() || null` 把清空编码为 API 的明确删除操作。
-  它们是显示值和写入值的边界转换，不是失败后叠加的数据源，不合并成隐藏语义的兜底层。
-- hotfix 检查识别 `fix` 提交并以 exit 2 要求非作者审查；按该要求交独立 reviewer，不自合并。
+- 本轮 RED：API 观察到模板缺少预填、历史值被停用；Web 两个入口观察到已有昵称被隐藏。
+- API 源码昵称 / 展示回归：9/9。
+- 已构建配置路由与 catalog 初始化回归：50/50。
+- Web 两个资料入口：5/5。
+- MCP invocation / agent-key 展示刷新：2/2，包括已有同名昵称仍生效。
+- shared、MCP、API 构建及 Web 类型检查通过。
+- 隔离浏览器在两个实际编辑组件与 Fastify 配置路由间走通预填、修改、清空、重载及旧值编辑；
+  桌面与 390px 手机视口均已查看，18 次请求全部 200，无页面异常。验证使用临时 catalog，
+  并非整套 Hub 安装升级验收。
+- 修改文件 Biome 检查无错误；既有警告保留。`check:capability-tips` 通过。
 
-## 浏览器验证及其范围
+源码回归命令（packages/api）：
+`node scripts/with-test-home.mjs --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 node --import tsx --test test/co-creator-nickname.test.ts test/co-creator-presentation.test.ts`。
+已构建回归使用同 wrapper 执行 `node --test test/config-co-creator-route.test.js test/cat-catalog-store.test.js`。
+Web 使用 `pnpm exec vitest run` 执行两个资料编辑器的测试文件；MCP 使用隔离 callback outbox wrapper。
 
-在本工作树 `http://localhost:3155`，用真实 `HubCoCreatorEditor`、共享显示 hook、实际
-Fastify 配置路由与临时 catalog 走通：打开旧配置 → 不改称呼保存 → 设置“小明” → 重载 →
-清空 → 重载 → 主动设置“大当家” → 重载 → 手机宽度清空。每步同时核对 API 历史署名
-`getSenderName(null)`。全部请求 200，无页面异常；桌面和手机下字段可编辑、保存可达。
+已知验证限制：既有 `co-creator-presentation.test.ts` 的三个 URL.pathname 用例存在 Windows
+路径兼容问题，本轮未在 Windows 执行；不能用 macOS 的通过结果覆盖该限制。
 
-独立审查发现 V2 的“设置 → 你”实际使用 `YouProfileCard`，首版漏掉此入口，已当轮补齐。
-在同一隔离服务器 `/you` 对真实资料卡验证设置“小明”、清空、主动选择“大当家”，每步
-重载并核对显示及历史署名。桌面与 390px 手机宽度的截图已检查，字段和保存按钮正常可用。
+Architecture cell：现有 config / co-creator presentation。Map delta: none。
+未新增存储、路由、队列或鉴权边界。PR 仍须非作者独立审查；测试通过不替代批准与合入。
 
-这是实际编辑器/资料卡与路由的隔离浏览器验证，不是整套 Hub 的安装升级验收。
-入口接线另核对 `SettingsContent → YouSettingsPage → YouProfileCard`、经典成员页与
-`ThreadChatSurface → HubCoCreatorEditor`。浏览器脚本在编辑器配置填入后操作输入框。
+## 来源与历史
 
-本地证据位于工作树 `.cat-cafe/evidence/issue1713/`（日志、浏览器结果、截图）。
-托管预览 `origin=launchd`；Hub 投递结果 `unconfirmed/no_matching_client`，不宣称用户已看见。
-当前运行实例仍需安装维护者合入后的版本，不能把隔离验证写成生产已生效。
-
-风险：行为与持久化兼容为主要风险；沿用现有配置写入权限与审计，API 增加可选字段，
-无身份/路由迁移、无历史消息改写。Architecture cell 为现有 config / co-creator presentation；
-Map delta: none，无新增存储、队列或路由系统。
-
-## 2026-11-02：迁移到 next
-
-按当前 `CONTRIBUTING.md` 的集成分支约定，从 `next` 的
-`74b5bfd4d59c3722c76140d9df36e332b72a0acd` 重新承载 #1744 的两个修复提交。
-只迁移 `423fe0f32` 与 `f33b05911`，不携带 develop 的 #1732、#1745、#1748；
-那三项独立功能由 #1762 迁移。原分支保留，未改写其提交历史。
-
-`git range-diff` 确认两个补丁内容相同，只有 cherry-pick 来源注记增加，沿用原独立审查
-作为实现证据；新 PR 仍需代码负责人在新 HEAD 上正式审核，旧本地审查不替代平台批准。
-
-在此 next 基线上重新验证：API 源码 9/9、已构建配置路由 6/6、Web 两个资料入口 5/5、
-MCP 2/2；shared/MCP/API 完整构建及 Web TypeScript 均通过。隔离浏览器再次走通两个
-入口的设置、清空、同名重选和重载，16 次请求全部 200、无页面异常，结束后服务退出并清理
-临时 catalog。`check-dir-size.sh` exit 0，已有目录警告保留；develop 上的到期豁免失败
-没有在当前 next 基线上重现。新 PR 的 CI 和维护者审查以其 GitHub 状态为准。
+最初候选为 #1744，后按贡献约定迁移至 next 上的 #1775。旧版删除模板昵称、对历史同名值
+要求再确认的策略已被本轮取代；此前的审查与 CI 不能替代对修订后 HEAD 的独立审查。
+本地证据在 `.cat-cafe/evidence/issue1713/`，包括本轮 RED、构建与浏览器结果。

@@ -1,6 +1,5 @@
 'use client';
 
-import { coCreatorNickname } from '@cat-cafe/shared';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
 import { CO_CREATOR_COLOR } from '@/lib/color-defaults';
@@ -37,7 +36,7 @@ export function YouProfileCard({
   useEffect(() => {
     if (!coCreator) return;
     setName(coCreator.name);
-    setNickname(coCreatorNickname(coCreator) ?? '');
+    setNickname(coCreator.nickname ?? '');
     setNicknameEdited(false);
     setMentions(coCreator.mentionPatterns.join('  '));
     setAvatar(coCreator.avatar ?? '');
@@ -77,7 +76,7 @@ export function YouProfileCard({
     setError(null);
     setSaved(false);
     try {
-      // Preserve hidden aliases and only confirm a nickname when its field was edited.
+      // Preserve hidden aliases and an untouched nickname through the canonical writer.
       const response = await apiFetch('/api/config/co-creator', {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
@@ -167,9 +166,7 @@ export function YouProfileCard({
                 setNicknameEdited(true);
               }}
             />
-            {coCreator?.nickname && coCreatorNickname(coCreator) === undefined && !nicknameEdited ? (
-              <p>{copy.nicknameUnconfirmed}</p>
-            ) : null}
+            <p>{copy.nicknameUsage}</p>
           </div>
         </div>
         <div className="you-profile-field">

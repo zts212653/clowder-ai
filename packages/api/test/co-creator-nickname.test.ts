@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
 import Fastify from 'fastify';
+import { bootstrapCatCatalog } from '../src/config/cat-catalog-store.js';
 import { _resetCachedConfig, getCoCreatorConfig, loadResolvedCatConfig } from '../src/config/cat-config-loader.js';
 import { updateRuntimeCoCreator } from '../src/config/runtime-cat-catalog.js';
 import { getSenderName } from '../src/domains/cats/services/context/ContextAssembler.js';
@@ -46,26 +47,36 @@ function fixture(owner: Record<string, unknown>) {
   return { root, template, display, raw };
 }
 
-test('new installations do not prefill a familiar address', () => {
-  const template = JSON.parse(readFileSync(new URL('../../../cat-template.json', import.meta.url), 'utf8'));
-  assert.equal(template.coCreator.nickname, undefined);
+test('new installations prefill co-creator in the template and runtime catalog', () => {
+  const root = mkdtempSync(join(tmpdir(), 'co-creator-default-'));
+  roots.push(root);
+  const templatePath = join(root, 'cat-template.json');
+  copyFileSync(new URL('../../../cat-template.json', import.meta.url), templatePath);
+  const template = JSON.parse(readFileSync(templatePath, 'utf8'));
+  assert.equal(template.coCreator.nickname, 'co-creator');
+  const catalog = JSON.parse(readFileSync(bootstrapCatCatalog(root, templatePath), 'utf8'));
+  assert.equal(catalog.coCreator.nickname, 'co-creator');
+  assert.equal(catalog.roster.owner.evaluation, 'co-creator');
+  getCoCreatorConfig(loadResolvedCatConfig(templatePath));
+  assert.equal(getSenderName(null), 'co-creator');
 });
 
-test('legacy template-shaped nickname is retained without silently changing history labels', () => {
+test('an existing same-as-old-template nickname remains active and survives unrelated edits', () => {
   const f = fixture({ nickname: '大当家' });
-  assert.equal(f.display(), 'co-creator');
+  assert.equal(f.display(), '大当家');
   assert.equal(f.raw().nickname, '大当家');
   updateRuntimeCoCreator(f.root, { name: 'Mina' });
-  assert.equal(f.display(), 'co-creator');
+  assert.equal(f.display(), '大当家');
   assert.equal(f.raw().nickname, '大当家');
   assert.equal(f.raw().nicknameSource, undefined);
 });
 
-test('no nickname, existing custom nickname and explicit same-as-template choice stay distinct', () => {
+test('missing nickname and existing custom nicknames preserve their configured behavior', () => {
   for (const [owner, expected] of [
     [{}, 'co-creator'],
     [{ nickname: '小明' }, '小明'],
-    [{ nickname: '大当家', nicknameSource: 'user' }, '大当家'],
+    [{ nickname: '大当家' }, '大当家'],
+    [{ nickname: 'co-creator' }, 'co-creator'],
   ] as const)
     assert.equal(fixture(owner).display(), expected);
 });
@@ -76,7 +87,7 @@ test('manual nickname save, clear and reselect survive reload without changing r
     updateRuntimeCoCreator(f.root, { nickname });
     assert.equal(f.display(), nickname ?? 'co-creator');
     assert.equal(f.raw().nickname, nickname ?? undefined);
-    assert.equal(f.raw().nicknameSource, 'user');
+    assert.equal(f.raw().nicknameSource, undefined);
     assert.deepEqual(f.raw().mentionPatterns, ['@co-creator']);
   }
 });

@@ -41,7 +41,7 @@ it('omits hidden aliases and publishes the canonical save response instead of it
   }
 });
 
-it('allows the current You settings to select and clear a nickname without confirming an untouched legacy value', async () => {
+it('shows the saved nickname in You settings and allows changing and clearing it', async () => {
   vi.clearAllMocks();
   writeShellLanguage('zh');
   const opened = { name: 'co-creator', nickname: '大当家', aliases: [], mentionPatterns: ['@co-creator'] };
@@ -58,7 +58,7 @@ it('allows the current You settings to select and clear a nickname without confi
     );
     const input = host.querySelector<HTMLInputElement>('#you-nickname');
     expect(input).not.toBeNull();
-    expect(input?.value).toBe('');
+    expect(input?.value).toBe('大当家');
     const save = async () => {
       await act(async () => {
         host.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
@@ -66,7 +66,7 @@ it('allows the current You settings to select and clear a nickname without confi
       return JSON.parse(String(vi.mocked(apiFetch).mock.calls.at(-1)?.[1]?.body));
     };
     expect(await save()).not.toHaveProperty('nickname');
-    for (const value of ['大当家', '']) {
+    for (const value of ['co-creator', '']) {
       await act(async () => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value);
         input?.dispatchEvent(new Event('input', { bubbles: true }));

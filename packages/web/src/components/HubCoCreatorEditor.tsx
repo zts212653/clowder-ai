@@ -1,6 +1,5 @@
 'use client';
 
-import { coCreatorNickname } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
@@ -39,7 +38,7 @@ interface HubCoCreatorEditorProps {
 export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoCreatorEditorProps) {
   const current = coCreator ?? DEFAULT_CO_CREATOR;
   const [name, setName] = useState(current.name);
-  const [nickname, setNickname] = useState(coCreatorNickname(current) ?? '');
+  const [nickname, setNickname] = useState(current.nickname ?? '');
   const [nicknameEdited, setNicknameEdited] = useState(false);
   const [avatar, setAvatar] = useState(current.avatar ?? '');
   const [colorPrimary, setColorPrimary] = useState(current.color?.primary ?? DEFAULT_CO_CREATOR.color!.primary);
@@ -55,7 +54,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
     if (!open) return;
     const next = coCreator ?? DEFAULT_CO_CREATOR;
     setName(next.name);
-    setNickname(coCreatorNickname(next) ?? '');
+    setNickname(next.nickname ?? '');
     setNicknameEdited(false);
     setAvatar(next.avatar ?? '');
     setColorPrimary(next.color?.primary ?? DEFAULT_CO_CREATOR.color!.primary);
@@ -166,9 +165,9 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
               }}
               placeholder="留空使用 co-creator"
             />
-            {current.nickname && coCreatorNickname(current) === undefined && !nicknameEdited ? (
-              <p className="text-xs text-cafe-secondary">历史称呼“{current.nickname}”未启用，可在此重新设置。</p>
-            ) : null}
+            <p className="text-xs text-cafe-secondary">
+              名称用于个人资料；称呼用于猫收到的对话署名和回复，留空使用 co-creator。
+            </p>
 
             <div className="flex items-center gap-3">
               <span className="w-[150px] shrink-0 text-xs font-bold text-cafe-secondary">Avatar</span>

@@ -135,6 +135,7 @@
   },
   "coCreator": {
     "name": "co-creator",
+    "nickname": "co-creator",
     "avatar": "/avatars/keeper.png",
     "timeZone": "America/Los_Angeles",
     "aliases": ["You", "Owner"],

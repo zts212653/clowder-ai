@@ -139,7 +139,7 @@ describe('HubCoCreatorEditor', () => {
     expect(container.querySelector('output')?.textContent).toBe('小明');
   });
 
-  it('starts without an unconfirmed legacy address and permits explicit selection and clearing', async () => {
+  it('shows the existing nickname and permits changing and clearing it', async () => {
     const coCreator = { name: 'co-creator', nickname: '大当家', aliases: [], mentionPatterns: ['@co-creator'] };
     mockApiFetch.mockImplementation(async (_url, init) => {
       const patch = JSON.parse(String(init?.body));
@@ -148,9 +148,7 @@ describe('HubCoCreatorEditor', () => {
           coCreator: {
             ...coCreator,
             ...patch,
-            ...(Object.hasOwn(patch, 'nickname')
-              ? { nickname: patch.nickname ?? undefined, nicknameSource: 'user' }
-              : {}),
+            ...(Object.hasOwn(patch, 'nickname') ? { nickname: patch.nickname ?? undefined } : {}),
           },
         },
       });
@@ -160,12 +158,12 @@ describe('HubCoCreatorEditor', () => {
     });
     const input = document.body.querySelector<HTMLInputElement>('input[aria-label="Owner Nickname"]');
     expect(input).not.toBeNull();
-    expect(input!.value).toBe('');
-    // Saving another field must not interpret an untouched old value as consent.
+    expect(input!.value).toBe('大当家');
+    // An unrelated save preserves the current nickname through the canonical writer.
     await act(async () => queryButton(container, '保存').click());
     expect(JSON.parse(String(mockApiFetch.mock.calls.at(-1)?.[1]?.body))).not.toHaveProperty('nickname');
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
-    for (const value of ['大当家', '']) {
+    for (const value of ['co-creator', '']) {
       await act(async () => {
         setValue.call(input, value);
         input!.dispatchEvent(new Event('input', { bubbles: true }));
