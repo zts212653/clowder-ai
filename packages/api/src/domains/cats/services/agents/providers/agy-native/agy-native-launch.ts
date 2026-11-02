@@ -12,8 +12,6 @@ import { materializeAgyNativeEffectGuard } from './agy-native-effect-guard.js';
 import { AgyNativeResumeMismatchError } from './agy-native-errors.js';
 import { prepareAgyNativeInput } from './agy-native-input.js';
 import { prepareAgyNativeKeychain } from './agy-native-keychain.js';
-import { executionOwnerEnv, isolatedOAuthEnv } from './agy-native-launch-env.js';
-import { materializeAgyLaunchMcp } from './agy-native-launch-mcp.js';
 import { validateAgyNativeAccountMcp } from './agy-native-mcp-config.js';
 import { type AgyNativePermissionMode, buildAgyNativePolicy } from './agy-native-policy.js';
 import { waitForAgyNativeProfileTurn } from './agy-native-profile-turn.js';
@@ -21,6 +19,8 @@ import { createAgyNativeRunProfile } from './agy-native-run-profile.js';
 import { materializeAgyNativeSettings } from './agy-native-settings.js';
 import { materializeAgyNativeSkills, retireAgyNativeLegacySkillAlias } from './agy-native-skills.js';
 import { AGY_NATIVE_MCP_TOOLS } from './agy-native-tools.js';
+import { executionOwnerEnv, isolatedOAuthEnv } from './launch/agy-native-launch-env.js';
+import { materializeAgyLaunchMcp } from './launch/agy-native-launch-mcp.js';
 import { acquireAgyNativeProfileTurnAsync } from './profile-turn/async.js';
 
 export interface AgyNativeLaunchInput {

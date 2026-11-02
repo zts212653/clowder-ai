@@ -298,13 +298,19 @@ describe('acp bootstrap cwd', () => {
       indexSource.includes('resolveActiveProjectRoot'),
       'REGRESSION: index.ts must be able to resolve the active runtime project root during registry sync.',
     );
-    assert.ok(
-      indexSource.includes('getAcpConfig(id, projectRoot)'),
-      'REGRESSION: syncAgentRegistry must pass the active project root to getAcpConfig().',
-    );
-    assert.ok(
-      !indexSource.includes('const acpConfig = getAcpConfig(id);'),
-      'REGRESSION: syncAgentRegistry must not read ACP config from the default template root.',
+    const registeredCalls = [...indexSource.matchAll(/\bgetRegisteredAcpConfig\(([^)]*)\)/g)];
+    assert.ok(registeredCalls.length > 0, 'registry sync must read ACP config through the registered source');
+    for (const call of registeredCalls) {
+      assert.equal(
+        call[1].replace(/\s/g, ''),
+        'id,projectRoot',
+        'REGRESSION: every registered ACP lookup must receive the active project root.',
+      );
+    }
+    assert.doesNotMatch(
+      indexSource,
+      /\bgetAcpConfig\(/,
+      'REGRESSION: startup must not bypass the registered configuration template source.',
     );
   });
 

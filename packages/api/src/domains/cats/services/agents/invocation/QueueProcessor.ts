@@ -4138,7 +4138,22 @@ export class QueueProcessor {
     const requestedTargets = queueEntryTargetCats(entry);
     if (entry.kind === 'conversation_input') {
       const routingClass = requestedTargets.length === 0 ? 'targetless' : 'explicit';
-      if (routingClass === 'targetless' && this.deps.invocationTracker.has(threadId)) return { kind: 'barrier' };
+      if (routingClass === 'targetless') {
+        const failure = await this.deps.messageStore.getByIdempotencyKey(
+          'system',
+          threadId,
+          preAdmissionFailureIdempotencyKey(entry.id),
+        );
+        // History may have committed before Queue retirement failed. Later availability
+        // cannot reopen that terminal input; finish its original transaction first.
+        if (failure?.lifecycle?.kind === 'delivery_failure' && failure.lifecycle.reason === 'no_available_target') {
+          const terminalized = await this.terminalizeUnavailableConversationEntry(entry, routingClass);
+          return terminalized
+            ? { kind: 'settled', attempt: QueueProcessor.terminalizedEntryAttempt(terminalized) }
+            : { kind: 'unresolved' };
+        }
+        if (this.deps.invocationTracker.has(threadId)) return { kind: 'barrier' };
+      }
       const targets = await this.resolveQueuedConversationTargets(entry);
       if (targets.length > 0) {
         return {
@@ -4492,7 +4507,9 @@ export class QueueProcessor {
     } catch (error) {
       // A lost durable acknowledgement is unknown, not permission to re-admit Live.
       if (claimed.execution.liveSessionId) throw error;
-      await this.deps.queue.rollbackProcessingDurable(claimed.threadId, claimed.id);
+      await this.deps.queue.reconcileClaimedLifecycleTargets(claimed.threadId, [claimed.id], this.deps.messageStore, [
+        claimed,
+      ]);
       throw error;
     }
   }

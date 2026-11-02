@@ -1990,7 +1990,8 @@ export class InvocationQueue {
     }
     // The attempt carries its original claim. Never borrow a newer sibling's token from the cache.
     const claimId = snapshot.claimId;
-    if (!claimId || !snapshot.claimedTargetIds?.length) return null;
+    const claimedTargetIds = snapshot.claimedTargetIds;
+    if (!claimId || !claimedTargetIds || (claimedTargetIds.length === 0 && snapshot.targets.length > 0)) return null;
     const committed = await this.ledgerStore.commit(
       threadId,
       entryId,
@@ -1998,7 +1999,8 @@ export class InvocationQueue {
       'withdrawn',
       terminalAt,
       undefined,
-      snapshot.claimedTargetIds,
+      // A targetless admission failure retires the empty row under the same claim token.
+      claimedTargetIds.length > 0 ? claimedTargetIds : undefined,
     );
     if (committed.outcome !== 'updated') return null;
     if (this.ledgerClaimIds.get(entryId) === claimId) this.ledgerClaimIds.delete(entryId);
