@@ -11,6 +11,10 @@ const assignments = [
   ...['/tmp/path', 'abc/def', 'https://example.com', 'hello\\ world'].map(
     (prefix) => `FOO=${prefix} API_TOKEN="${value}"`,
   ),
+  `const config = {apiToken: "${value}"}`,
+  `FOO= API_TOKEN="${value}"`,
+  `const foo = apiToken = "${value}"`,
+  `FOO=$(cat path) API_TOKEN="${value}"`,
   `private readonly apiToken = "${value}"`,
   `API_TOKEN: string & Brand = "${value}"`,
   `const API_TOKEN: string = "${value}"`,

@@ -47,16 +47,34 @@ const DECLARATION_MODIFIERS = new Set([
 function hasCredentialAssignment(line: string): boolean {
   const text = line.replace(/^[\s>*+\-•#|]*(?:\d+[.)]\s+|\[[ xX]\]\s+)*/, '');
   const tokens =
-    /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:\[[\w.]+\])?\$(?:\{[\w:.-]+\}|[\w:.-]+)|[\w.-]+:[\w.-]+(?=\s*=)|[\w.-]+|[^\s]/g;
+    /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\\.|(?:\[[\w.]+\])?\$(?:\{[\w:.-]+\}|[\w:.-]+)|[\w.-]+:[\w.-]+(?=\s*=)|[\w.-]+|[^\s]/g;
   const valueAtOperator = /\s*["']?([A-Za-z0-9_\-/.+=]{32,})/y;
-  const assignmentRhs = /\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\\.|[^\s;"',{}|])+/y;
   let target = '';
   let validPrefix = true;
   let declaration = false;
   let annotation: { target: string; validPrefix: boolean } | undefined;
+  let inValue = false;
+  let valueStarted = false;
+  let valueDepth = 0;
+  let previousEnd = 0;
 
   for (let token = tokens.exec(text); token; token = tokens.exec(text)) {
     const word = token[0];
+    // A completed RHS followed by whitespace permits the next shell assignment.
+    // Keep operators visible for chained JS assignments; do not skip arbitrary RHS spans.
+    if (inValue && valueStarted && valueDepth === 0 && token.index > previousEnd && word !== ':' && word !== '=') {
+      target = '';
+      validPrefix = true;
+      declaration = false;
+      annotation = undefined;
+      inValue = false;
+    }
+    previousEnd = tokens.lastIndex;
+    if (inValue) {
+      if (word === '(' || word === '[') valueDepth++;
+      if (word === ')' || word === ']') valueDepth = Math.max(0, valueDepth - 1);
+      valueStarted = true;
+    }
     if (word === ':' || word === '=') {
       if (annotation && word === ':') {
         annotation.validPrefix = false;
@@ -78,23 +96,26 @@ function hasCredentialAssignment(line: string): boolean {
       if (word === ':' && valueStart === tokens.lastIndex) {
         annotation ??= assignment;
       } else {
-        // Consume the complete shell RHS, including paths, quoted spans and escaped spaces.
-        assignmentRhs.lastIndex = valueStart;
-        if (!assignmentRhs.exec(text)) return false;
-        tokens.lastIndex = assignmentRhs.lastIndex;
+        tokens.lastIndex = valueStart;
         target = '';
         validPrefix = true;
         declaration = false;
         annotation = undefined;
+        inValue = true;
+        valueStarted = false;
       }
       continue;
     }
-    if (word === ';' || word === ',' || word === '{' || word === '|') {
+    if (word === ';' || word === ',' || word === '{' || word === '}' || word === '|' || word === '(' || word === ')') {
       if (annotation && word === '|') continue;
       target = '';
       validPrefix = true;
       declaration = false;
       annotation = undefined;
+      if (word !== '(' && word !== ')') {
+        inValue = false;
+        valueDepth = 0;
+      }
       continue;
     }
     if (annotation) {
