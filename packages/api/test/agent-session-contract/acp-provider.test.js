@@ -123,6 +123,21 @@ test('adapter reports missing terminal on EOF; errors/outcomes/metadata/status m
   assert.equal(messages[4].content, 'capacity retry warning');
   assert.equal(messages[5].errorCode, 'provider_error');
   assert.equal(messages.at(-1).errorCode, 'provider_stream_ended_without_done');
+  assert.equal(messages.at(-1).providerTeardown, 'unconfirmed');
+});
+
+test('adapter retains its busy turn after EOF or an explicitly unconfirmed terminal', async () => {
+  for (const terminal of [undefined, message('done', { providerTeardown: 'unconfirmed' })]) {
+    const { provider, bridge } = harness({
+      async *invoke() {
+        if (terminal) yield terminal;
+      },
+    });
+    const messages = await collect(bridge.invoke('x', options()));
+    assert.equal(messages.at(-1).providerTeardown, 'unconfirmed');
+    const next = await collect(bridge.invoke('must wait', options({ invocationId: 'next' })));
+    assert.equal(next.at(-1).errorCode, 'busy');
+  }
 });
 test('release reports errors; native id absence strips stale Host sessionId', async () => {
   let received;

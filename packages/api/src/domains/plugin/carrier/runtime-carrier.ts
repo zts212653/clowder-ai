@@ -148,7 +148,8 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
       // External and legacy carriers may not publish a separate Host-ready state.
       // Joining the same promise preserves one admission and its original rollback boundary.
       await admitContributions();
-      this.ui.activate(admission);
+      // stop/stopAll invalidate this admission even after carrier readiness.
+      if (this.nativeActions.generation(pluginInstanceId) === generation) this.ui.activate(admission);
       return result;
     } catch (error) {
       if (!admitted) throw error;
@@ -211,6 +212,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
   }
 
   async stopAll(reason = 'host_shutdown'): Promise<void> {
+    this.ui.deactivateAll();
     this.#nativeMcpLaunches.deactivateAll();
     this.nativeActions.deactivateAll();
     if (this.beforeStop) {

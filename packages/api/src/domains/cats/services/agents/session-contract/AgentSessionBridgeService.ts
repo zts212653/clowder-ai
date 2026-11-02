@@ -307,7 +307,10 @@ export class AgentSessionBridgeService implements Service.AgentService {
       }
     }
     // A synthetic terminal uses the final session context; a provider terminal keeps its own usage fact.
-    terminal ??= this.message('done', metadata, { errorCode: 'provider_stream_ended_without_done' });
+    terminal ??= this.message('done', metadata, {
+      errorCode: 'provider_stream_ended_without_done',
+      providerTeardown: 'unconfirmed',
+    });
     if (signal.aborted && !terminal.errorCode) terminal.errorCode = 'cancelled';
     yield terminal;
   }

@@ -195,6 +195,7 @@ export class AcpSessionProvider implements Contract.AgentSessionProvider {
           ...base,
           type: 'done',
           errorCode: message.errorCode,
+          providerTeardown: message.providerTeardown,
           outcome: session.active?.controller.signal.aborted ? 'cancelled' : message.errorCode ? 'failed' : 'completed',
         };
       case 'system_info':
@@ -227,7 +228,7 @@ export class AcpSessionProvider implements Contract.AgentSessionProvider {
     let metadata: Pick<MessageMetadata, 'model'> | undefined;
     let seq = 0;
     let iterator: AsyncIterator<AgentMessage> | undefined;
-    let terminal: Contract.AgentSessionEvent | undefined;
+    let terminal: Extract<Contract.AgentSessionEvent, { type: 'done' }> | undefined;
     let sourceReadCompleted = false;
     try {
       iterator = source[Symbol.asyncIterator]();
@@ -244,7 +245,7 @@ export class AcpSessionProvider implements Contract.AgentSessionProvider {
         const event = this.project(next.value, sessionId, session, active.ref);
         if (event) {
           const projected = { ...event, messageUsage: structuredClone(current?.usage), seq: ++seq };
-          if (event.type === 'done') {
+          if (projected.type === 'done') {
             terminal = projected;
             break;
           }
@@ -259,6 +260,7 @@ export class AcpSessionProvider implements Contract.AgentSessionProvider {
         type: 'done',
         outcome: 'failed',
         errorCode: 'provider_stream_ended_without_done',
+        providerTeardown: 'unconfirmed',
       };
     } finally {
       // A provider may emit done before its finally releases the execution
@@ -266,7 +268,8 @@ export class AcpSessionProvider implements Contract.AgentSessionProvider {
       await iterator?.return?.();
       // A return on a generator already closed by a failed next is a no-op,
       // not evidence that its failing finally released the execution lease.
-      if (sourceReadCompleted) {
+      // EOF or an explicitly unconfirmed terminal does not prove native stop.
+      if (sourceReadCompleted && terminal?.providerTeardown !== 'unconfirmed') {
         active.done = true;
         cleanup();
       }

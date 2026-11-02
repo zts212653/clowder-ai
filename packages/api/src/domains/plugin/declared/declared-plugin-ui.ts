@@ -43,6 +43,9 @@ export class DeclaredPluginUi {
     this.#active.get(id)?.lifetime.abort();
     this.#active.delete(id);
   }
+  deactivateAll(): void {
+    for (const id of this.#active.keys()) this.deactivate(id);
+  }
   list(): PluginUiEntry[] {
     return [...this.#active]
       .flatMap(([instanceId, active]) =>
