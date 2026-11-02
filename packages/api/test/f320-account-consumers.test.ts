@@ -75,7 +75,11 @@ for (const explicit of [false, true])
             createSocketDirectory: () => join(root, 'socket'),
             removeSocketDirectory: async () => {},
             spawnHost: async (launch) => {
-              assertSelectedApiAccount(buildChildEnv(launch.env), account.apiKey, selectedRouting);
+              assertSelectedApiAccount(
+                buildChildEnv(launch.env, { inheritParentEnv: launch.inheritParentEnv }),
+                account.apiKey,
+                selectedRouting,
+              );
               assertSelectedApiProvider(launch, baseUrl);
               const home = launch.env?.CODEX_HOME;
               assert.equal(typeof home, 'string');
@@ -124,7 +128,11 @@ for (const explicit of [false, true])
             ...(account.baseUrl ? { OPENAI_BASE_URL: account.baseUrl } : {}),
           },
           agentCarrierSessionFactory: async (options) => {
-            assertSelectedApiAccount(buildChildEnv(options.env), account.apiKey, selectedRouting);
+            assertSelectedApiAccount(
+              buildChildEnv(options.env, { inheritParentEnv: options.inheritParentEnv }),
+              account.apiKey,
+              selectedRouting,
+            );
             assertSelectedApiProvider(options, baseUrl);
             homes.push(options.env!.CODEX_HOME!);
             return new F320AccountWire({});

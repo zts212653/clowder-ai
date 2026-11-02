@@ -23,8 +23,12 @@ export interface DirectAgentCarrierSessionDeps {
   finalEnvironment?: Readonly<NodeJS.ProcessEnv>;
 }
 
-function normalizeEnv(input: Record<string, string | null> | undefined, workingDirectory: string): NodeJS.ProcessEnv {
-  return buildChildEnv(input, { workingDirectory });
+function normalizeEnv(
+  input: Record<string, string | null> | undefined,
+  workingDirectory: string,
+  inheritParentEnv?: boolean,
+): NodeJS.ProcessEnv {
+  return buildChildEnv(input, { workingDirectory, inheritParentEnv });
 }
 
 class DirectAgentCarrierSession implements AgentCarrierSession {
@@ -53,7 +57,9 @@ class DirectAgentCarrierSession implements AgentCarrierSession {
       throw new Error('direct_carrier_owner_mismatch');
     }
     const childCwd = options.cwd ?? process.cwd();
-    const env = deps.finalEnvironment ? { ...deps.finalEnvironment } : normalizeEnv(options.env, childCwd);
+    const env = deps.finalEnvironment
+      ? { ...deps.finalEnvironment }
+      : normalizeEnv(options.env, childCwd, options.inheritParentEnv);
     const launch =
       process.platform === 'win32'
         ? { ...(deps.windowsSpawnPlan ?? resolveWindowsSpawnPlan)(options.command, options.args), env }

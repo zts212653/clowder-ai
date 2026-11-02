@@ -205,7 +205,8 @@ test('F320 actual capability entry uses the selected account home rather than am
     /fixture_spawn_boundary/,
   );
   assert.equal(launch.env.CODEX_HOME, chosenHome);
-  assert.equal(launch.env.CODEX_API_KEY, null);
+  assert.equal(launch.env.CODEX_API_KEY, undefined);
+  assert.equal(launch.inheritParentEnv, false);
 });
 
 /**

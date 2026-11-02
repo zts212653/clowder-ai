@@ -61,6 +61,15 @@ jobs:
           --script test:onboarding:production-contracts
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Codex final environment and account consumers
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --import tsx --import ./test/helpers/setup-cat-registry.js
+          --test --test-concurrency=1 --test-timeout=60000
+          test/f320-account-consumers.test.ts
+          test/f320-api-auth-consumers.test.ts
+          test/issue-1654-native-codex-launch.test.ts
       - name: Managed Codex layout link diagnostic
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs

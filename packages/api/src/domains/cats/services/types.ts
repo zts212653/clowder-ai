@@ -513,6 +513,8 @@ export interface AgentCarrierSessionOptions {
   args: readonly string[];
   cwd?: string;
   env?: Record<string, string | null>;
+  /** False when env is a complete, sanitized launch snapshot. */
+  inheritParentEnv?: boolean;
   signal?: AbortSignal;
   invocationId: string;
   /** Existing provider session id used for warm-host affinity. */
