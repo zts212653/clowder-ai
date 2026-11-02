@@ -66,5 +66,6 @@ export function scopedMemberInvocationDeps(deps: InvocationDeps): InvocationDeps
     ...(deps.transcriptWriter ? { transcriptWriter: deps.transcriptWriter } : {}),
     ...(deps.runtimeInteractionPort ? { runtimeInteractionPort: deps.runtimeInteractionPort } : {}),
     ...(deps.freshnessStateStore ? { freshnessStateStore: deps.freshnessStateStore } : {}),
+    ...(deps.contextEpochOwner ? { contextEpochOwner: deps.contextEpochOwner } : {}),
   };
 }

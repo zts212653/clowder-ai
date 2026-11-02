@@ -59,13 +59,16 @@ describe('F255 production bootstrap wiring', () => {
   });
 
   it('populates CatRegistry before F255 restores persisted cat-life projections', () => {
-    const catalogBootstrap = source.indexOf('const catConfig = bootstrapDefaultCatCatalog();');
-    const registryPopulation = source.indexOf('registerCatalogSnapshot(toAllCatConfigs(catConfig), () =>');
+    const templateResolution = source.indexOf('const templatePath = resolveRuntimeCatTemplatePath();');
+    const catalogBootstrap = source.indexOf('const catConfig = bootstrapDefaultCatCatalog(templatePath);');
+    const registryPopulation = source.indexOf('registerCatalogSnapshot(');
     const autoDreamBootstrap = source.indexOf('await bootstrapAutoDream({');
 
-    assert.notEqual(catalogBootstrap, -1, 'production startup must bootstrap the cat catalog');
+    assert.notEqual(templateResolution, -1, 'production startup must resolve its runtime template source');
+    assert.notEqual(catalogBootstrap, -1, 'production startup must bootstrap the catalog from that template');
     assert.notEqual(registryPopulation, -1, 'production startup must populate CatRegistry');
     assert.notEqual(autoDreamBootstrap, -1, 'F255 bootstrap must remain discoverable');
+    assert.ok(templateResolution < catalogBootstrap, 'runtime template resolution must precede catalog bootstrap');
     assert.ok(catalogBootstrap < registryPopulation, 'catalog bootstrap must precede CatRegistry population');
     assert.ok(
       registryPopulation < autoDreamBootstrap,

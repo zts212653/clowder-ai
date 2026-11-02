@@ -3,8 +3,8 @@ import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { visibleAttentionFixture } from './f322-visible-attention.fixture.mjs';
 
 // Real rail, mailbox, tooltip, settings shell, preference/pin stores and navigation hooks.

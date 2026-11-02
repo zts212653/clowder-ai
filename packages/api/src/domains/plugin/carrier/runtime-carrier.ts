@@ -37,6 +37,7 @@ import {
   reportedPluginInvocation,
   settlePluginInvocation,
 } from './host-invocation.js';
+import type { PluginCallContext } from './plugin-call-context.js';
 
 /**
  * F202 Train C1 — the Host's single runtime-carrier boundary.
@@ -99,6 +100,7 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
         packages: resources?.packages ?? unsupportedPackageLocator,
         configuration: resources?.configuration ?? unsupportedConfiguration,
       },
+      (id) => this.#admission(id),
     );
   }
 
@@ -364,8 +366,9 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
     contributionId: string,
     toolName: string,
     args: Readonly<Record<string, unknown>>,
+    caller?: PluginCallContext,
   ): Promise<unknown> {
-    const direct = await this.#runtimeContributions.callPluginTool(pluginId, contributionId, toolName, args);
+    const direct = await this.#runtimeContributions.callPluginTool(pluginId, contributionId, toolName, args, caller);
     if (direct.handled) return direct.value;
     throw new ExternalPluginRuntimeError('DELIVERY_REJECTED', `${pluginId} is not active`);
   }

@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { tsImport } from 'tsx/esm/api';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
 
 // API source uses emitted .js specifiers; native Node type stripping does not resolve them to .ts.

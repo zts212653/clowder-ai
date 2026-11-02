@@ -44,6 +44,7 @@ import {
 } from '../domains/cats/services/agents/invocation/lifecycle-append-projection.js';
 import { emitLifecycleMessageUpdated } from '../domains/cats/services/agents/invocation/lifecycle-message-update.js';
 import type { NativeControlReceiptPort } from '../domains/cats/services/agents/invocation/NativeControlReceipt.js';
+import { capturePendingPrivateTargets } from '../domains/cats/services/agents/invocation/PendingPrivateInputStop.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import { queueEntryId } from '../domains/cats/services/agents/invocation/queue-ledger/QueueLedger.js';
 import { settleResponseFromDraft } from '../domains/cats/services/agents/invocation/response-draft-settlement.js';
@@ -479,6 +480,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     if (!messageStore || !opts.invocationRecordStore) {
       throw new Error('durable execution failure stores are unavailable');
     }
+    const retirePending = snapshotPendingPrivateStop(input.threadId, input.userId, [input.catId]);
     const hasReplacementProducer = () =>
       queueProcessor.hasProcessingSlotReservation(input.threadId, input.catId) &&
       !queueProcessor.hasProcessingSlotReservation(input.threadId, input.catId, input.executionId);
@@ -575,6 +577,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       if (!updated) throw new Error('control-plane failure parent terminalization lost its running fence');
     }
 
+    await retirePending();
     // Durable repair may await while another invocation owns this cat's local
     // settlement. Never retire that producer's locks or reservation for this orphan.
     if (!hasReplacementProducer()) {
@@ -604,6 +607,23 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     return { reconciled: true };
   };
 
+  // Tracker-owned executions capture their Stop synchronously from the abort
+  // signal. These controls also cover process-only and already-orphaned owners.
+  const snapshotPendingPrivateStop = (threadId: string, userId: string, catIds?: readonly string[]) => {
+    const pending = capturePendingPrivateTargets(invocationQueue.list(threadId, userId), catIds);
+    return async () => {
+      try {
+        for (const [catId, entryIds] of pending)
+          await queueProcessor.retirePendingPrivateInputs(threadId, userId, catId, entryIds);
+      } catch (cause) {
+        throw Object.assign(new Error('后台通知的停止状态未能保存，请重试停止', { cause }), {
+          statusCode: 503,
+          code: 'PRIVATE_STOP_RETIREMENT_FAILED',
+        });
+      }
+    };
+  };
+
   const cancelProcessOwnedInvocation = async (input: {
     threadId: string;
     userId: string;
@@ -620,6 +640,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       catId: input.catId,
       userId: input.ownerUserId ?? input.userId,
     };
+    const retirePending = snapshotPendingPrivateStop(input.threadId, executionOwner.userId, [input.catId]);
     let processResult = await opts.cliExecutionOwnerService?.terminateExact(executionOwner);
     for (
       let attempt = 1;
@@ -638,6 +659,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         return { cancelled: false, controlPlaneUnavailable: true };
       }
     }
+    await retirePending();
     // The request already resolved this exact live owner. A zero-signal result
     // means it exited in the snapshot-to-signal race; cancellation is
     // idempotently complete and its durable child truth still needs closing.
@@ -720,6 +742,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       };
     }
 
+    const retirePending = snapshotPendingPrivateStop(input.threadId, input.userId, [input.catId]);
     const processSnapshot = await retryProcessOwnerSnapshot(input.request, opts.cliExecutionOwnerService);
     if (!processSnapshot.complete) {
       try {
@@ -785,6 +808,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         code: 'EXECUTION_OWNER_CHANGED',
       };
     }
+    await retirePending();
     if (inflight) {
       const retirement = await queueProcessor.retirePrestartProcessingGroup(input.threadId, input.catId, input.userId);
       if (retirement === 'terminalization_failed') {
@@ -1985,6 +2009,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       if (!guard) return;
 
       if (!invocationTracker.has(threadId, catId)) {
+        const retirePending = snapshotPendingPrivateStop(threadId, guard.userId, [catId]);
         // F-invocation-stale-recovery: 404 short-circuit blocked orphan cleanup (Thread 1 bug).
         // When the in-memory tracker has no slot, the invocation may still have a persistent
         // running InvocationRecord (e.g., CLI exited before record was marked done, or process
@@ -2007,6 +2032,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
               return { error: '该猫当前未在执行', code: 'CAT_NOT_ACTIVE' };
             }
 
+            await snapshotPendingPrivateStop(threadId, guard.userId, orphanRecord.targetCats)();
             await opts.invocationRecordStore.update(orphanRecord.id, { status: 'canceled' });
             // P2-1 + P2 (codex 第4轮 a5e8eea2): the WHOLE record is being canceled, so broadcast
             // done + release slot for EVERY targetCat — not just the requested one.
@@ -2036,6 +2062,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           (lockRelease.releasedHolders > 0 || lockRelease.rejectedWaiters > 0) &&
           queueProcessor.canReleaseSlotForUser(threadId, catId, guard.userId)
         ) {
+          await retirePending();
           for (const m of buildCancelMessages({ cancelled: true, catIds: [catId] })) {
             socketManager.broadcastAgentMessage(m, threadId);
           }
@@ -2081,6 +2108,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
     if (!guard) return;
 
+    const retirePending = snapshotPendingPrivateStop(threadId, guard.userId);
     // 1. Abort all active InvocationTracker slots (controllers + slot deletion).
     //    This clears the primary busy source (invocationTracker.has) that hasActiveExecution checks.
     //    cancelAll aborts in-flight requests and removes active slots atomically.
@@ -2110,6 +2138,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       reply.status(409);
       return { error: '启动中的队列状态已变化，请重试', code: 'PRESTART_STATE_CHANGED' };
     }
+    await retirePending();
     if (prestartRetirement.retiredCatIds.length > 0) {
       await emitQueueUpdated(
         socketManager,

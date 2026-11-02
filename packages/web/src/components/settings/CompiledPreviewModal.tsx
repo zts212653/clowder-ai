@@ -228,6 +228,7 @@ export function CompiledPreviewModal({ catId, catName, onClose }: CompiledPrevie
           {/* Annotation legend — separators are display-only, not injected */}
           <div
             className="mb-3 flex items-center gap-2 rounded-lg px-3 py-2"
+            data-chat-background-surface="console-elevated"
             style={{ backgroundColor: 'var(--console-elevated-bg)', opacity: 0.85 }}
           >
             <span className="shrink-0 text-xs">ℹ</span>

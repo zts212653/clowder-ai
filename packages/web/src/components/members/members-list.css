@@ -11,6 +11,7 @@
 }
 .member-defaults {
   background: var(--shell-paper);
+  --chat-background-role: paper;
   border: 1px solid var(--shell-hairline);
   border-radius: 12px;
   margin: 20px 0 12px;
@@ -34,6 +35,7 @@
 }
 .members-v2 select {
   background: var(--shell-work);
+  --chat-background-role: work;
   border: 1px solid var(--shell-hairline);
   border-radius: 8px;
   font-size: var(--console-font-xs);
@@ -54,10 +56,12 @@
 }
 .member-filters .member-button[aria-pressed="true"] {
   background: var(--shell-paper);
+  --chat-background-role: paper;
   box-shadow: 0 0 0 1px var(--shell-hairline);
 }
 .member-table-scroll {
   background: var(--shell-paper);
+  --chat-background-role: paper;
   border: 1px solid var(--shell-hairline);
   border-radius: 12px;
   overflow-x: auto;
@@ -85,6 +89,7 @@
 }
 .member-table tr:hover td {
   background: var(--shell-selected);
+  --chat-background-role: selected;
 }
 .member-table th:first-child,
 .member-table td:first-child {
@@ -224,6 +229,7 @@
 }
 .member-switch > span {
   background: var(--shell-paper);
+  --chat-background-role: paper;
   border-radius: 50%;
   display: block;
   height: 14px;

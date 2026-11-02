@@ -46,6 +46,7 @@
 }
 .menuBody > *:hover {
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
 }
 .tools {
   position: absolute;

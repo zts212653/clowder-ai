@@ -4,8 +4,8 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import './reply-navigation-owner.cases.mjs';
 
 test(
@@ -211,7 +211,7 @@ test(
       await receipts.getByRole('button', { name: '再发一次', exact: true }).waitFor();
       assert.match(await receipts.innerText(), /已送出，没确认收到/);
       assert.doesNotMatch(await receipts.innerText(), /Agent Client|收到，正在回|没送到/);
-      assert.match(await receipts.innerText(), /如果它其实收到了，会再回一遍/);
+      assert.match(await receipts.innerText(), /会作为新消息再次发送，可能重复执行/);
       assert.match(await page.locator('[data-appended-input-id="supported"]').innerText(), /已送出，没确认收到/);
       for (const width of [1100, 360]) {
         await page.setViewportSize({ width, height: 650 });

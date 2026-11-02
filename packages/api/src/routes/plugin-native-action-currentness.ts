@@ -12,7 +12,10 @@ export function captureNativeCallbackCurrentness(
   record: InvocationRecord,
   callbackToken: string,
   target: PluginNativeActionTarget | undefined,
-  options: PluginNativeActionRouteOptions,
+  options: Pick<PluginNativeActionRouteOptions, 'threadStore' | 'assertMemberSessionCurrent'> & {
+    readonly registry: Pick<PluginNativeActionRouteOptions['registry'], 'verifyLatest'>;
+  },
+  policyTool = 'POST /api/plugin-runtime/action',
 ) {
   const expired = () => new NativePluginActionError(409, 'Invocation is no longer current');
   const captured = record;
@@ -58,7 +61,7 @@ export function captureNativeCallbackCurrentness(
       if (await getDeletedCallbackThreadGuard(options.threadStore, identity.threadId))
         throw new NativePluginActionError(410, 'Thread is deleted');
       const current = await verifyIdentityCurrent();
-      if (toolExecutionPolicyDenial(current.toolExecutionPolicy, 'POST /api/plugin-runtime/action', target))
+      if (toolExecutionPolicyDenial(current.toolExecutionPolicy, policyTool, target))
         throw new NativePluginActionError(403, 'Invocation policy denies plugin action');
       if (toolExecutionPolicy?.mode === 'plugin_native' && toolExecutionPolicy.memberSession) {
         if (!options.assertMemberSessionCurrent)

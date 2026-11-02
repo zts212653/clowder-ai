@@ -16,6 +16,7 @@ import { apiFetch } from '@/utils/api-client';
 import type { PlatformActionDef } from '../../HubConfigIcons';
 import type { ActionRendererProps } from './ActionRenderer';
 import { type ActionApiResult, actionCallFailure, actionRequest, rowActionRequest } from './ActionRendererState';
+import { ActionResultLink } from './ActionResultLink';
 import {
   awaitingOwnerMessage,
   confirmedActionRequest,
@@ -57,6 +58,7 @@ export function OperationRowsRenderer({
   const [listing, setListing] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ text: string; rowKey?: string } | null>(null);
+  const [actionResult, setActionResult] = useState<{ result: ActionApiResult; rowKey?: string } | null>(null);
   const [awaitingOwner, setAwaitingOwner] = useState(false);
   const [busyKeys, setBusyKeys] = useState<ReadonlySet<string>>(() => new Set());
   // Row keys are plugin data; a Map keeps keys such as `__proto__` or `toString` ordinary.
@@ -116,6 +118,7 @@ export function OperationRowsRenderer({
     operationEpoch.current += 1;
     setRows(undefined);
     setActionMessage(null);
+    setActionResult(null);
     setBusyKeys(new Set());
     setRowErrors(new Map());
     void list(false);
@@ -134,6 +137,7 @@ export function OperationRowsRenderer({
     setListing(false);
     setListError(null);
     setActionMessage(null);
+    setActionResult(null);
     setBusyKeys(new Set());
     setRowErrors(new Map());
   }, [configKey]);
@@ -146,8 +150,10 @@ export function OperationRowsRenderer({
 
   const refresh = useCallback(async () => {
     const epoch = operationEpoch.current;
-    if ((await confirmAction(listAction.label, listAction.confirm)) && epoch === operationEpoch.current)
+    if ((await confirmAction(listAction.label, listAction.confirm)) && epoch === operationEpoch.current) {
+      setActionResult(null);
       await list(true);
+    }
   }, [confirmAction, list, listAction.confirm, listAction.label]);
 
   const settle = useCallback(
@@ -170,6 +176,7 @@ export function OperationRowsRenderer({
       if (!(await confirmAction(label, declared.confirm, rowAction.confirm)) || epoch !== operationEpoch.current)
         return;
       setBusyKeys((current) => new Set(current).add(row.key));
+      setActionResult(null);
       setRowErrors((current) => withoutError(current, row.key));
       const request = rowActionRequest(stableTarget, operation.name, declared.id, rowAction.input);
       const result = await send(rowAction.confirm ?? declared.confirm, request, true);
@@ -177,13 +184,17 @@ export function OperationRowsRenderer({
       const failure = await settle(result, label, declared.next);
       if (epoch !== operationEpoch.current) return;
       if (failure !== null) setRowErrors((current) => new Map(current).set(row.key, failure));
-      else
+      else {
         setActionMessage(
-          result?.label ? { text: result.label, rowKey: declared.next === listAction.id ? undefined : row.key } : null,
+          result?.label && result.render !== 'url'
+            ? { text: result.label, rowKey: declared.next === listAction.id ? undefined : row.key }
+            : null,
         );
+        if (result) setActionResult({ result, ...(declared.next === listAction.id ? {} : { rowKey: row.key }) });
+      }
       setBusyKeys((current) => withoutKey(current, row.key));
     },
-    [confirmAction, operation.name, operation.rowActions, send, settle, stableTarget],
+    [confirmAction, operation.name, operation.rowActions, send, settle, stableTarget, listAction.id],
   );
 
   const runButton = useCallback(
@@ -191,12 +202,16 @@ export function OperationRowsRenderer({
       const epoch = operationEpoch.current;
       if (!(await confirmAction(action.label, action.confirm)) || epoch !== operationEpoch.current) return;
       setListError(null);
+      setActionResult(null);
       const result = await send(action.confirm, actionRequest(stableTarget, operation.name, action.id), true);
       if (epoch !== operationEpoch.current) return;
       const failure = await settle(result, action.label, action.next);
       if (epoch !== operationEpoch.current) return;
       if (failure !== null) setListError(failure);
-      else setActionMessage(result?.label ? { text: result.label } : null);
+      else {
+        setActionMessage(result?.label && result.render !== 'url' ? { text: result.label } : null);
+        if (result) setActionResult({ result });
+      }
     },
     [confirmAction, operation.name, send, settle, stableTarget],
   );
@@ -243,6 +258,9 @@ export function OperationRowsRenderer({
           {awaitingOwnerMessage(listAction.label)}
         </p>
       )}
+      {actionResult && actionResult.rowKey === undefined && (
+        <ActionResultLink result={actionResult.result} testId={`${target.id}-result-link`} />
+      )}
       {rows && rows.rows.length === 0 && (
         <p className="text-sm text-cafe-muted" data-testid={`${target.id}-rows-empty`}>
           {rows.empty ?? 'Nothing to show yet.'}
@@ -280,6 +298,9 @@ export function OperationRowsRenderer({
                 <p role="status" className="mt-1 text-xs text-cafe-secondary">
                   {actionMessage.text}
                 </p>
+              )}
+              {actionResult?.rowKey === row.key && (
+                <ActionResultLink result={actionResult.result} testId={`${target.id}-row-${row.key}-result-link`} />
               )}
               {rowErrors.has(row.key) && (
                 <p

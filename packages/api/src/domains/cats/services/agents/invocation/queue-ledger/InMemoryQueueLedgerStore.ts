@@ -36,7 +36,11 @@ export class InMemoryQueueLedgerStore implements QueueLedgerStore {
     if (existingEntries.length === entries.length) {
       return existingEntries.every((entry, index) => {
         const input = entries[index];
-        return input !== undefined && queueLedgerAdmissionsMatch(entry, input);
+        if (!input) return false;
+        const verdict = this.privateAdmissions.verdict(threadId, input);
+        // Pending targets shrink as members start or stop; the original
+        // immutable receipt still owns private-input admission identity.
+        return verdict === 'unseen' ? queueLedgerAdmissionsMatch(entry, input) : verdict === 'replay';
       })
         ? { outcome: 'replayed', entries: existingEntries.map(cloneQueueLedgerEntry) }
         : { outcome: 'conflict', entries: [] };
@@ -44,9 +48,12 @@ export class InMemoryQueueLedgerStore implements QueueLedgerStore {
     // Settled means "this identity already won admission": a live row, or a retired private row
     // whose receipt outlived it. A replay of either must never become a second execution — but a
     // different envelope reusing a settled key is a conflict, never a silent admission.
-    const verdicts = entries.map((entry, index) =>
-      existing[index] !== undefined ? 'replay' : this.privateAdmissions.verdict(threadId, entry),
-    );
+    const verdicts = entries.map((entry, index) => {
+      const receipt = this.privateAdmissions.verdict(threadId, entry);
+      if (receipt !== 'unseen') return receipt;
+      const live = existing[index];
+      return live ? (queueLedgerAdmissionsMatch(live, entry) ? 'replay' : 'conflict') : 'unseen';
+    });
     if (verdicts.includes('conflict')) return { outcome: 'conflict', entries: [] };
     const settled = verdicts.map((verdict) => verdict !== 'unseen');
     if (settled.every(Boolean)) {

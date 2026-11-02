@@ -3,6 +3,7 @@ import type { SharedInvocationContext } from '@cat-cafe/mcp-server/dist/shared-i
 import {
   type CatConfig,
   type CliEffortPreset,
+  type ClientId,
   type CodexSpeedValue,
   type ExecutionAccountSnapshot,
   type ExecutionProfile,
@@ -110,6 +111,18 @@ export function deepFreeze<T>(value: T): T {
   return value;
 }
 
+export function providerProfileAccountSnapshot(
+  provider: ClientId,
+  account: RuntimeProviderProfile,
+): ExecutionAccountSnapshot {
+  return Object.freeze({
+    accountRef: account.id,
+    displayName: account.displayName ?? account.id,
+    authType: account.authType,
+    accountRevision: createHash('sha256').update(JSON.stringify({ provider, account })).digest('hex'),
+  });
+}
+
 /** In-memory carrier only: never persist credentials in Queue/TurnExecution provenance. */
 export function freezeExecutionAccountBinding(input: {
   catId: string;
@@ -118,6 +131,8 @@ export function freezeExecutionAccountBinding(input: {
   workspace: FrozenExecutionWorkspace;
   accountSelection?: ExecutionAccountSelection;
   providerOptions?: FrozenExecutionBinding['providerOptions'];
+  /** Trusted native source. Qualified Kimi only annotates the unchanged Host account; generic ACP owns its account. */
+  nativeAccount?: RuntimeProviderProfile | null;
 }): FrozenExecutionBinding {
   const selection = input.accountSelection ? { ...input.accountSelection } : undefined;
   if (
@@ -143,11 +158,31 @@ export function freezeExecutionAccountBinding(input: {
   const effectiveAccountRef = resolveBoundAccountRefForCat(projectRoot, input.catId, catConfig);
   let account: RuntimeProviderProfile | null = null;
   try {
-    account = client
+    if (
+      input.nativeAccount &&
+      (!provider ||
+        input.nativeAccount.syntheticNative ||
+        (!client && input.nativeAccount.persistedClientId !== provider))
+    )
+      throw new Error('native account carrier mismatch');
+    const hostAccount = client
       ? resolveCatRuntimeAccount(projectRoot, input.catId, client, catConfig)
-      : provider === 'acp' && effectiveAccountRef
+      : provider === 'acp' && effectiveAccountRef && !input.nativeAccount
         ? resolveByAccountRef(projectRoot, effectiveAccountRef)
         : null;
+    if (input.nativeAccount && client) {
+      const { nativeSourceRevision, ...original } = input.nativeAccount;
+      if (
+        provider !== 'kimi' ||
+        !hostAccount ||
+        !/^[a-f0-9]{64}$/.test(nativeSourceRevision ?? '') ||
+        JSON.stringify(original) !== JSON.stringify(hostAccount)
+      )
+        throw new Error('native account carrier mismatch');
+      account = { ...hostAccount, nativeSourceRevision };
+    } else account = input.nativeAccount ?? hostAccount;
+    if (input.nativeAccount && effectiveAccountRef && effectiveAccountRef !== input.nativeAccount.id)
+      throw new Error('selected native account is unavailable');
     if (effectiveAccountRef && (client || provider === 'acp') && !account)
       throw new Error(`bound account "${effectiveAccountRef}" not found`);
     const error =
@@ -158,6 +193,7 @@ export function freezeExecutionAccountBinding(input: {
   } catch (error) {
     if (
       error instanceof AccountStoreVerdictError ||
+      input.nativeAccount ||
       effectiveAccountRef ||
       (error instanceof Error && /bound provider profile|model ".+" is not available/.test(error.message))
     )
@@ -188,14 +224,7 @@ export function freezeExecutionAccountBinding(input: {
       : provider === 'anthropic' && resolvedAccount?.claude
         ? claudeExecutionAccountSnapshot(resolvedAccount)
         : resolvedAccount
-          ? Object.freeze({
-              accountRef: resolvedAccount.id,
-              displayName: resolvedAccount.displayName ?? resolvedAccount.id,
-              authType: resolvedAccount.authType,
-              accountRevision: createHash('sha256')
-                .update(JSON.stringify({ provider, account: resolvedAccount }))
-                .digest('hex'),
-            })
+          ? providerProfileAccountSnapshot(provider!, resolvedAccount)
           : undefined;
   if (selection?.expectedRevision !== undefined && selection.expectedRevision !== executionAccount?.accountRevision)
     throw new Error('selected execution account revision changed');

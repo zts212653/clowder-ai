@@ -50,6 +50,7 @@ export function EventCard({
       className={`group block w-full text-left rounded-xl border border-cafe-subtle shadow-sm transition-colors hover:border-cafe-accent ${
         isHero ? 'p-3.5' : 'p-3'
       }`}
+      data-chat-background-surface={isHero ? 'accent-soft' : 'cafe-elevated'}
       style={{ background: isHero ? 'var(--accent-50)' : 'var(--cafe-surface-elevated)' }}
     >
       <div className="flex items-center gap-1.5 mb-1.5">

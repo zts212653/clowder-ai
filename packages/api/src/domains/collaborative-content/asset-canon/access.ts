@@ -70,6 +70,14 @@ export class CanonAssetAccess {
       throw error;
     }
   }
+  /** Check selected bytes without constructing a full asset-library item. */
+  async availability(record: AssetCanonRecord, principal: WorkPrincipal): Promise<AssetFileState> {
+    await this.authorize(record, principal);
+    const fileState = await this.state(record, principal);
+    if (fileState === 'access_denied') throw new MediaOwnerError('access_denied');
+    await this.authorize(record, principal);
+    return fileState;
+  }
   async item(
     record: AssetCanonRecord,
     principal: WorkPrincipal,

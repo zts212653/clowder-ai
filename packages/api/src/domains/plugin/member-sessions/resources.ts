@@ -1,5 +1,5 @@
 import { type AccountConfig, builtinAccountIdForClient, type CatConfig, type ClientId } from '@cat-cafe/shared';
-import { resolveBuiltinClientForProvider } from '../../../config/account-resolver.js';
+import { type RuntimeProviderProfile, resolveBuiltinClientForProvider } from '../../../config/account-resolver.js';
 import { readAccountStoreSnapshot } from '../../../config/account-store-snapshot.js';
 import { resolveBoundAccountRefForCat } from '../../../config/cat-account-binding.js';
 import { freezeExecutionAccountBinding } from '../../cats/services/agents/invocation/execution-account-binding.js';
@@ -41,6 +41,7 @@ function accountOption(
   frame: Discovery,
   ref: string,
   metadata: AccountConfig | undefined,
+  nativeAccount?: RuntimeProviderProfile,
 ): Account | undefined {
   if (!frame.supported) return unavailable(ref, metadata, 'member_native_carrier_unavailable');
   try {
@@ -53,6 +54,7 @@ function accountOption(
         workingProjectRoot: deps.projectRoot,
         usesDefaultWorkspace: false,
       },
+      ...(nativeAccount ? { nativeAccount } : {}),
       ...(ref === frame.defaultAccountRef
         ? {}
         : { accountSelection: { accountRef: ref, authType: metadata?.authType ?? 'oauth' } }),
@@ -81,23 +83,53 @@ function accountOption(
     return unavailable(ref, metadata, 'member_account_unavailable');
   }
 }
-function accountOptions(deps: ResourceServices, frame: Discovery): readonly Account[] {
+async function accountOptions(deps: ResourceServices, frame: Discovery): Promise<readonly Account[]> {
   const family = resolveBuiltinClientForProvider(frame.config.clientId);
-  if (!family) return [];
+  if (!family) {
+    if (!frame.supported) return [];
+    try {
+      const native = await frame.service.resolveScopedNativeAccount?.({ workingDirectory: deps.projectRoot });
+      if (!native) return [];
+      const option = accountOption(
+        deps,
+        { ...frame, defaultAccountRef: frame.defaultAccountRef ?? native.id },
+        native.id,
+        { clientId: frame.config.clientId, authType: native.authType, displayName: native.displayName },
+        native,
+      );
+      return option ? [option] : [];
+    } catch {
+      return [];
+    }
+  }
   const catalog = (deps.readAccounts ?? readAccountStoreSnapshot)(deps.projectRoot);
   const refs = new Set([...(frame.defaultAccountRef ? [frame.defaultAccountRef] : []), ...catalog.refs]);
-  return [...refs].flatMap((ref) => {
-    const inspected = catalog.inspect(ref);
-    if (inspected.state === 'rejected') return [];
-    const metadata = inspected.entry.account;
-    if (
-      (metadata?.clientId && resolveBuiltinClientForProvider(metadata.clientId as ClientId) !== family) ||
-      (!metadata && ref !== frame.defaultAccountRef)
-    )
-      return [];
-    const option = accountOption(deps, frame, ref, metadata);
-    return option ? [option] : [];
-  });
+  const options = await Promise.all(
+    [...refs].map(async (ref) => {
+      const inspected = catalog.inspect(ref);
+      if (inspected.state === 'rejected') return [];
+      const metadata = inspected.entry.account;
+      if (
+        (metadata?.clientId && resolveBuiltinClientForProvider(metadata.clientId as ClientId) !== family) ||
+        (!metadata && ref !== frame.defaultAccountRef)
+      )
+        return [];
+      try {
+        const native = frame.supported
+          ? await frame.service.resolveScopedNativeAccount?.({
+              workingDirectory: deps.projectRoot,
+              accountRef: ref,
+            })
+          : undefined;
+        const option = accountOption(deps, frame, ref, metadata, native ?? undefined);
+        return option ? [option] : [];
+      } catch {
+        const option = unavailable(ref, metadata, 'member_account_unavailable');
+        return option ? [option] : [];
+      }
+    }),
+  );
+  return options.flat();
 }
 
 /** Owner discovery is descriptive: no thread, grant, login, child or model is created. */
@@ -118,12 +150,15 @@ export function createMemberResourceDescription(
       },
     };
     const supported = service.supportsToolExecutionPolicy?.(policy) === true;
-    const carrier = service.freshnessCarrierCapability?.().carrier ?? service.contextCapability?.().carrier;
+    const contextCarrier = service.contextCapability?.().carrier;
+    const carrier =
+      contextCarrier === 'acp' ? 'acp' : (service.freshnessCarrierCapability?.().carrier ?? contextCarrier);
     const family = resolveBuiltinClientForProvider(config.clientId);
-    const defaultAccountRef =
+    let defaultAccountRef =
       (deps.defaultAccount ?? resolveBoundAccountRefForCat)(deps.projectRoot, catId, config) ??
       (family ? builtinAccountIdForClient(family) : undefined);
-    const accounts = accountOptions(deps, { catId, config, service, supported, defaultAccountRef });
+    const accounts = await accountOptions(deps, { catId, config, service, supported, defaultAccountRef });
+    if (!family && !defaultAccountRef) defaultAccountRef = accounts.find((account) => account.available)?.accountRef;
     const memory = (await deps.memory(catId, scope)).map(({ sourceRef, revision, bytes }) => ({
       sourceRef,
       revision,

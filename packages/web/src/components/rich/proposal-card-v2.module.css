@@ -5,6 +5,7 @@
   border-radius: 12px;
   overflow: hidden;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   color: var(--shell-body);
   font-size: 13.5px;
 }
@@ -65,6 +66,7 @@
   border: 1px solid var(--shell-hairline-strong);
   border-radius: 8px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   color: var(--shell-ink);
   font-size: 13px;
 }
@@ -79,6 +81,7 @@
   border: 1px solid var(--shell-hairline);
   border-radius: 8px;
   background: var(--shell-work);
+  --chat-background-role: work;
   font-size: 13px;
   overflow-wrap: anywhere;
 }
@@ -104,6 +107,7 @@
   padding: 10px 16px;
   border-top: 1px solid var(--shell-hairline);
   background: var(--shell-work);
+  --chat-background-role: work;
 }
 .footer button,
 .ask button {
@@ -143,6 +147,7 @@
   border: 1px solid var(--shell-hairline-strong);
   border-radius: 8px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   font-size: 13px;
 }
 .card :is(input, select, button, [tabindex]):focus-visible {
@@ -165,6 +170,7 @@
   border: 1px solid var(--shell-muted);
   border-radius: 8px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   vertical-align: middle;
 }
 .switch::before {
@@ -191,6 +197,7 @@
   border-radius: 10px;
   overflow: hidden;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   box-shadow: var(--console-shadow-soft);
 }
 .groupList input {
@@ -216,6 +223,7 @@
 .groupList button[aria-selected="true"],
 .groupList button:hover {
   background: var(--shell-work);
+  --chat-background-role: work;
 }
 .groupList button span {
   width: 16px;

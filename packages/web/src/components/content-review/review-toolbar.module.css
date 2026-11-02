@@ -18,6 +18,7 @@
   border: 1px solid var(--cafe-border-subtle);
   border-radius: 99px;
   background: var(--cafe-surface-canvas);
+  --chat-background-role: cafe-canvas;
   box-shadow: var(--shadow-elevation-2);
 }
 .focusActions {
@@ -37,6 +38,7 @@
 }
 .focusButton:hover {
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
 }
 .focusButton:disabled {
   opacity: 0.4;
@@ -69,6 +71,7 @@
 .modeButton:hover,
 .iconButton:hover {
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
 }
 .modeButton:disabled,
 .iconButton:disabled {
@@ -128,6 +131,7 @@
   border: 1px solid var(--cafe-border-subtle);
   border-radius: 16px;
   background: var(--cafe-surface-canvas);
+  --chat-background-role: cafe-canvas;
   box-shadow: var(--shadow-elevation-3);
 }
 .menuLabel {
@@ -159,6 +163,7 @@
 .menuChoice:hover,
 .menuChoice[aria-pressed="true"] {
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   color: var(--cafe-accent);
 }
 .imageMenu {

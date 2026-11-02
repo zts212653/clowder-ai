@@ -16,7 +16,7 @@ test(
         'Caches',
         'ms-playwright',
       );
-    const { chromium } = await import('../../../ppt-forge/node_modules/playwright/index.mjs');
+    const { chromium } = await import('playwright');
     const f = await custodyHttpFixture(t);
     const spareIntent = await f.store.createPairingIntent({
       sessionToken: f.member.sessionToken,

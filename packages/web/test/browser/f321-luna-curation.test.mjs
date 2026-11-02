@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 
 const ORIGIN = process.env.F321_LUNA_PREVIEW_ORIGIN ?? 'http://localhost:5182';
 const API = process.env.F321_LUNA_PREVIEW_API ?? 'http://127.0.0.1:3012';

@@ -7,6 +7,7 @@
   min-width: 0;
   color: var(--cafe-text);
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
   font-size: var(--console-font-base);
 }
 /* Dark elevation roles deliberately reverse brightness; keep replay below live chat. */
@@ -34,6 +35,7 @@
 }
 .thread-replay-v2 button[aria-pressed="true"] {
   background: var(--cafe-surface-elevated);
+  --chat-background-role: cafe-elevated;
   border-color: var(--cafe-border);
 }
 .thread-replay-v2 button:disabled,
@@ -76,6 +78,7 @@
   padding: 10px 14px;
   border-radius: 12px;
   background: var(--color-cocreator-surface);
+  --chat-background-role: human;
   overflow-wrap: anywhere;
 }
 .replay-v2-system,
@@ -100,6 +103,7 @@
   border: 1px solid var(--cafe-border);
   border-radius: 16px;
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   margin: 8px;
   padding: 8px 12px;
   min-width: 0;
@@ -196,6 +200,7 @@
   overflow: auto;
   border: 1px solid var(--cafe-border);
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   border-radius: 8px;
   padding: 8px;
   z-index: 2;

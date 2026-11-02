@@ -61,6 +61,7 @@ import { bootstrapCatCatalog } from '../config/cat-catalog-store.js';
 import {
   getAcpConfig,
   getDefaultCatId,
+  getRegisteredAcpConfig,
   getRoster,
   loadCatConfig,
   loadResolvedCatConfig,
@@ -776,7 +777,7 @@ async function toCatResponse(
   return saveSpan(
     'response.member',
     async () => {
-      const acpConfig = getAcpConfig(cat.id as string, projectRoot);
+      const acpConfig = getRegisteredAcpConfig(cat.id as string, projectRoot);
       const contextSnapshot = resolveContextCapacitySnapshot?.(cat.id);
       const contextCapability = contextSnapshot?.capability;
       const effectiveAccountRef = await resolveEffectiveAccountRef(cat);

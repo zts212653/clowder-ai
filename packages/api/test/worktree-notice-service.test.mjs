@@ -12,6 +12,110 @@ import { InMemoryQueueLedgerStore } from '../src/domains/cats/services/agents/in
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.ts';
 import { createDeliverFn } from '../src/infrastructure/scheduler/delivery.ts';
 import { WorktreeNoticeService } from '../src/infrastructure/worktrees/WorktreeNoticeService.ts';
+import { WorktreeNoticeStartGuard } from '../src/infrastructure/worktrees/WorktreeNoticeStartGuard.ts';
+import { createPersistedQueueFixture } from './helpers/persisted-queue-fixture.ts';
+
+test('queued retention uses fresh Git truth; renewal cancels old work and a later expiry still dispatches', async () => {
+  const f = fixture();
+  let runtime;
+  try {
+    const p = expired(f);
+    const priorRetention = JSON.parse(git(p, 'config', '--worktree', '--get', 'catcafe.lifecycle.retention'));
+    priorRetention.until = new Date(Date.now() + 86400000).toISOString();
+    priorRetention.recordedAt = new Date(Date.now() - 60000).toISOString();
+    git(p, 'config', '--worktree', 'catcafe.lifecycle.retention', JSON.stringify(priorRetention));
+    git(p, 'commit', '--allow-empty', '-qm', 'work advanced after the retained revision');
+    runtime = createPersistedQueueFixture(undefined, {
+      autoDrain: false,
+      worktreeNoticeStartGuard: { check: (...args) => guard.check(...args) },
+    });
+    const messages = runtime.messages;
+    const getThread = async () => ({ createdBy: 'owner-user' });
+    const guard = new WorktreeNoticeStartGuard({
+      repoRoot: f.repo,
+      scriptRoot: resolve('../..'),
+      messageStore: messages,
+      getThread,
+    });
+    const queue = runtime.queue;
+    const send = createDeliverFn({
+      messageStore: messages,
+      persistedQueueDelivery: new PersistedQueueDelivery({
+        messages,
+        queue,
+        progress: async () => 'owned_deferred_busy',
+      }),
+      socketManager: { broadcastToRoom() {}, emitToUser() {} },
+    });
+    const envelopes = [];
+    const deliver = async (input) => {
+      envelopes.push(input);
+      return send(input);
+    };
+    const service = new WorktreeNoticeService({
+      repoRoot: f.repo,
+      scriptRoot: resolve('../..'),
+      queryEnv: queryEnv(f),
+      getThread,
+      isOwnerAvailable: () => true,
+      deliver,
+      warn() {},
+    });
+    await service.sweep();
+    const old = queue.list('thread_original', 'owner-user')[0];
+    assert.equal(
+      messages.getByThread('thread_original', 100, 'owner-user')[0].source.meta.worktreeNotice.kind,
+      'retention-head-changed',
+    );
+    assert.deepEqual(await guard.check(old, 'codex61-sol'), { ok: true });
+    const retention = JSON.parse(git(p, 'config', '--worktree', '--get', 'catcafe.lifecycle.retention'));
+    retention.head = git(p, 'rev-parse', 'HEAD').trim();
+    retention.until = new Date(Date.now() + 86400000).toISOString();
+    retention.recordedAt = new Date().toISOString();
+    git(p, 'config', '--worktree', 'catcafe.lifecycle.retention', JSON.stringify(retention));
+    assert.deepEqual(await guard.check(old, 'codex61-sol'), { ok: false, reason: 'notice_stale' });
+    await service.sweep();
+    assert.equal(queue.list('thread_original', 'owner-user').length, 1, 'valid renewal does not create more work');
+    await runtime.processor.processNext('thread_original', 'owner-user');
+    const retiredDeadline = Date.now() + 3000;
+    while (queue.getEntrySnapshot('thread_original', 'owner-user', old.id) && Date.now() < retiredDeadline)
+      await new Promise((r) => setTimeout(r, 5));
+    assert.equal(runtime.starts.length, 0, 'real Queue must not launch an owner for already-renewed retention');
+    assert.equal(await queue.getDurableEntry('thread_original', old.id), null);
+    assert.equal(
+      messages.getByThread('thread_original', 100, 'owner-user').length,
+      1,
+      'no fake completion or response',
+    );
+    assert.equal(existsSync(p), true, 'freshness does not remove the checkout');
+    await send(envelopes[0]);
+    assert.equal(
+      queue.list('thread_original', 'owner-user').length,
+      0,
+      'replay cannot recreate a retired private input',
+    );
+    retention.until = '2026-01-02T00:00:00Z';
+    retention.recordedAt = '2026-01-01T00:00:00Z';
+    git(p, 'config', '--worktree', 'catcafe.lifecycle.retention', JSON.stringify(retention));
+    await service.sweep();
+    const current = queue.list('thread_original', 'owner-user').find((row) => row.id !== old.id);
+    assert.ok(current, 'expiry of a different retained intent remains its own actionable event');
+    assert.deepEqual(await guard.check(current, 'codex61-sol'), { ok: true });
+    assert.deepEqual(await guard.check(old, 'codex61-sol'), { ok: false, reason: 'notice_stale' });
+    await runtime.processor.processNext('thread_original', 'owner-user');
+    const deadline = Date.now() + 3000;
+    while (!runtime.starts.length && Date.now() < deadline) await new Promise((r) => setTimeout(r, 5));
+    assert.equal(runtime.starts.length, 1, 'a later real expiry still starts original-owner work');
+    assert.equal(runtime.starts[0].threadId, 'thread_original');
+    assert.equal(runtime.starts[0].userId, 'owner-user');
+    const wrongUser = { ...current, owner: { kind: 'user', userId: 'foreign-user' } };
+    assert.deepEqual(await guard.check(wrongUser, 'codex61-sol'), { ok: false, reason: 'evidence_unavailable' });
+    assert.deepEqual(await guard.check(current, 'opus'), { ok: false, reason: 'evidence_unavailable' });
+  } finally {
+    await runtime?.close();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
 
 function queryEnv(f, head = null) {
   const bin = join(f.root, 'bin');

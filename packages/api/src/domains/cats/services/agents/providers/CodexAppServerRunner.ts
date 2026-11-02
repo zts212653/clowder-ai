@@ -1,5 +1,6 @@
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { codexAppServerRecovery } from '../../../../../infrastructure/telemetry/instruments.js';
+import { sliceUnicodeSafe } from '../../../../../utils/unicode-safe-slice.js';
 import {
   buildCodexActiveWriterDiagnostics,
   type CodexActiveWriterDetection,
@@ -82,7 +83,8 @@ const MAX_RECOVERY_STEP_CHARS = 160;
 const log = createModuleLogger('codex-app-server-runner');
 
 function buildModelCapacityRecoveryInstruction(checkpoint: CodexCapacityRecoveryCheckpoint): string {
-  const step = checkpoint.nextIncompleteStep()?.step.slice(0, MAX_RECOVERY_STEP_CHARS);
+  const recordedStep = checkpoint.nextIncompleteStep()?.step;
+  const step = recordedStep ? sliceUnicodeSafe(recordedStep, 0, MAX_RECOVERY_STEP_CHARS) : undefined;
   return [
     'Continue only the interrupted turn.',
     ...(step ? [`Resume this recorded step: ${step}.`] : []),

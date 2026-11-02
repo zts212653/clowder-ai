@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { chromium } from 'playwright';
 import sharp from 'sharp';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
 
 await import('tsx/esm');

@@ -53,6 +53,10 @@ export function createMemberRuntime(deps: {
         catConfig: config,
         model: config.defaultModel,
         workspace,
+        nativeAccount: await service.resolveScopedNativeAccount?.({
+          workingDirectory: workspace.workingDirectory,
+          accountRef: stored?.account.accountRef ?? input.accountSelection?.accountRef,
+        }),
         accountSelection: stored
           ? {
               accountRef: stored.account.accountRef,
@@ -64,10 +68,12 @@ export function createMemberRuntime(deps: {
       const account = binding.executionAccount;
       if (account) service.assertScopedMemberAccount?.(account);
       const capability = service.freshnessCarrierCapability?.();
-      if (!account || !capability?.carrier || !config.clientId || !config.defaultModel)
+      const carrier = service.contextCapability?.().carrier === 'acp' ? 'acp' : capability?.carrier;
+      if (!account || !carrier || !config.clientId || !config.defaultModel)
         throw new Error('member_runtime_snapshot_unavailable');
+      const executionCarrier = capability?.carrier ?? carrier;
       const providerOptions =
-        capability.carrier === 'claude_agent_sdk'
+        executionCarrier === 'claude_agent_sdk'
           ? await service.captureInvocationOptions?.({
               toolExecutionPolicy: policy,
               workingDirectory: workspace.workingDirectory,
@@ -77,7 +83,7 @@ export function createMemberRuntime(deps: {
             })
           : undefined;
       const implementation = service.implementationSnapshot?.() ?? {
-        key: `builtin:${config.clientId}/${capability.carrier}`,
+        key: `builtin:${config.clientId}/${executionCarrier}`,
         generation: agentServiceGeneration(service),
       };
       const captured = {
@@ -94,13 +100,13 @@ export function createMemberRuntime(deps: {
       };
       const prepared = Object.freeze({
         ...captured,
-        hostExecutionBoundary: captureHostExecutionBoundary(captured, capability.carrier),
+        hostExecutionBoundary: captureHostExecutionBoundary(captured, executionCarrier),
       });
       await scope.assertCurrent();
       const runtime: MemberRuntimeSnapshot = Object.freeze({
         clientId: config.clientId,
         model: config.defaultModel,
-        carrier: capability.carrier,
+        carrier,
         account: Object.freeze({
           accountRef: account.accountRef,
           authType: account.authType,

@@ -24,7 +24,7 @@ test(
         'Caches',
         'ms-playwright',
       );
-    const { chromium } = await import('../../../ppt-forge/node_modules/playwright/index.mjs');
+    const { chromium } = await import('playwright');
     const browser = await chromium.launch({ headless: true });
     t.after(() => browser.close());
     const hostOrigin = 'http://127.0.0.1:4313';

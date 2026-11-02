@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { buildChatProof, webRoot } from './fixtures/f322-chat-real-page-build.mjs';
 import { CURRENT_THREAD, DRAFT } from './fixtures/f322-chat-real-page-data.mjs';
 import { data, openJourneyPage, payloadSha256 } from './fixtures/f322-journey6-api.mjs';

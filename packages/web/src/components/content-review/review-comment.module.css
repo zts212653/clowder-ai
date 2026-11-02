@@ -9,6 +9,7 @@
   border: 1px solid var(--cafe-border-subtle);
   border-radius: 24px;
   background: var(--cafe-surface-canvas);
+  --chat-background-role: cafe-canvas;
   box-shadow: var(--shadow-elevation-2);
   color: var(--cafe-accent);
 }
@@ -47,6 +48,7 @@
 }
 .send:disabled {
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
   color: var(--cafe-text-muted);
   cursor: not-allowed;
 }
@@ -85,6 +87,7 @@
   border: 1px solid var(--cafe-border-subtle);
   border-radius: 8px;
   background: var(--cafe-surface-canvas);
+  --chat-background-role: cafe-canvas;
   box-shadow: var(--shadow-elevation-2);
 }
 .secondarySave {
@@ -114,6 +117,7 @@
   border: 1px solid var(--cafe-border-subtle);
   border-radius: 16px;
   background: var(--cafe-surface-canvas);
+  --chat-background-role: cafe-canvas;
   box-shadow: var(--shadow-elevation-3);
 }
 .popover .composer {

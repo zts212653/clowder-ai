@@ -676,6 +676,13 @@ export function loadResolvedCatConfig(templatePath?: string, options: CatCatalog
   return captureMemberIdentitySources(config, merged?.catalog ?? null);
 }
 
+/** The startup registry and its provider details must use the same source. */
+export function resolveRuntimeCatTemplatePath(): string {
+  const configured = process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
+  if (!configured.trim()) throw new Error('runtime_cat_template_unavailable');
+  return resolve(configured);
+}
+
 /**
  * Load and validate the resolved cat config source.
  * Explicit filePath reads that file directly.
@@ -1207,10 +1214,30 @@ export interface AcpVariantConfig {
  */
 export function getAcpConfig(catId: string, projectRoot?: string): AcpVariantConfig | undefined {
   try {
-    const templatePath = projectRoot
-      ? resolveProjectTemplatePath(projectRoot)
-      : (process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH);
-    const raw = mergeTemplateWithCatalog(templatePath)?.raw ?? readTemplate(templatePath);
+    return readAcpConfigFromTemplate(
+      catId,
+      projectRoot ? resolveProjectTemplatePath(projectRoot) : resolveRuntimeCatTemplatePath(),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+/** Runtime identity provenance is independent of capability/data/workspace roots. */
+export function getRegisteredAcpConfig(catId: string, projectRoot: string): AcpVariantConfig | undefined {
+  const source = catRegistry.tryGet(catId)?.configurationTemplatePath;
+  return source === undefined
+    ? getAcpConfig(catId, projectRoot)
+    : readAcpConfigFromTemplate(catId, source, { persistMigrations: false });
+}
+
+function readAcpConfigFromTemplate(
+  catId: string,
+  templatePath: string,
+  options: CatCatalogReadOptions = {},
+): AcpVariantConfig | undefined {
+  try {
+    const raw = mergeTemplateWithCatalog(templatePath, options)?.raw ?? readTemplate(templatePath);
     const json = JSON.parse(raw) as {
       breeds?: Array<{ catId?: string; variants?: Array<{ catId?: string; acp?: AcpVariantConfig | null }> }>;
     };

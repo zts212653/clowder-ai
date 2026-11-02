@@ -55,6 +55,10 @@ export class RegisteredSessionAgentService implements AgentService {
     const service = this.hostService();
     return service?.assertScopedMemberAccount?.bind(service);
   }
+  get resolveScopedNativeAccount(): AgentService['resolveScopedNativeAccount'] {
+    const service = this.hostService();
+    return service?.resolveScopedNativeAccount?.bind(service);
+  }
   get freshnessCarrierCapability(): AgentService['freshnessCarrierCapability'] {
     const service = this.hostService();
     return service?.freshnessCarrierCapability?.bind(service);
@@ -123,6 +127,7 @@ export class RegisteredSessionAgentService implements AgentService {
       captureInvocationOptions: service?.captureInvocationOptions?.bind(service),
       supportsToolExecutionPolicy: service?.supportsToolExecutionPolicy?.bind(service),
       assertScopedMemberAccount: service?.assertScopedMemberAccount?.bind(service),
+      resolveScopedNativeAccount: service?.resolveScopedNativeAccount?.bind(service),
       freshnessCarrierCapability: service?.freshnessCarrierCapability?.bind(service),
       contextCapability: service?.contextCapability?.bind(service),
       contextBinding: service?.contextBinding?.bind(service),

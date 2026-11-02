@@ -71,6 +71,7 @@ export function OklchTuner({ onClose }: { onClose: () => void }) {
   return (
     <div
       className="fixed z-[9999] w-[420px] max-h-[85vh] overflow-y-auto rounded-xl bg-cafe-surface-sunken text-cafe shadow-2xl border border-[var(--console-border-soft)] text-xs font-mono"
+      data-chat-background-layer="opaque"
       style={{ left: pos.x, top: pos.y, backdropFilter: 'blur(12px)' }}
     >
       {/* Header — drag handle */}

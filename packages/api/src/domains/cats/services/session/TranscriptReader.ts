@@ -12,6 +12,7 @@ import { createReadStream } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { sliceUnicodeSafe } from '../../../../utils/unicode-safe-slice.js';
 import { normalizeTranscriptEvent } from './TranscriptEventEnvelope.js';
 import { formatEventsHandoff, type HandoffInvocationSummary } from './TranscriptFormatter.js';
 import { TranscriptInvocationReader } from './transcript-index/TranscriptInvocationReader.js';
@@ -535,10 +536,10 @@ export class TranscriptReader {
   private extractSnippet(text: string, query: string, maxLen = 200): string {
     const lower = text.toLowerCase();
     const idx = lower.indexOf(query.toLowerCase());
-    if (idx < 0) return text.slice(0, maxLen);
+    if (idx < 0) return sliceUnicodeSafe(text, 0, maxLen);
     const start = Math.max(0, idx - 40);
     const end = Math.min(text.length, idx + query.length + 160);
-    const snippet = text.slice(start, end);
+    const snippet = sliceUnicodeSafe(text, start, end);
     return (start > 0 ? '...' : '') + snippet + (end < text.length ? '...' : '');
   }
 }

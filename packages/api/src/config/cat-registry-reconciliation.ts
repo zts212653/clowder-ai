@@ -8,11 +8,15 @@ import { resolveProjectTemplatePath } from './project-template-path.js';
 const publicationChecks = new WeakMap<CatConfig, () => boolean>();
 
 /** Startup and reconciliation publish the same proof with their original resolved source. */
-export function registerCatalogSnapshot(runtimeCats: Record<string, CatConfig>, readCurrent: () => CatCafeConfig) {
+export function registerCatalogSnapshot(
+  runtimeCats: Record<string, CatConfig>,
+  readCurrent: () => CatCafeConfig,
+  configurationTemplatePath?: string,
+) {
   const published = structuredClone(runtimeCats);
   const isCurrent = () => isDeepStrictEqual(published, toAllCatConfigs(readCurrent()));
   for (const [id, member] of Object.entries(runtimeCats)) {
-    catRegistry.register(id, member);
+    catRegistry.register(id, member, configurationTemplatePath ? { configurationTemplatePath } : undefined);
     publicationChecks.set(member, isCurrent);
   }
 }
@@ -29,11 +33,20 @@ export function reconcileCatRegistry(projectRoot: string, managedIdsBefore: Read
   return saveSpan('catalog.reconcile', () => {
     const templatePath = resolveProjectTemplatePath(projectRoot);
     const runtimeCats = toAllCatConfigs(loadResolvedCatConfig(templatePath));
-    const extraCats = catRegistry.getAllConfigs();
+    const extraCats = catRegistry.getAllIds().map((id) => [id, catRegistry.getOrThrow(id)] as const);
     catRegistry.reset();
-    registerCatalogSnapshot(runtimeCats, () => loadResolvedCatConfig(templatePath, { persistMigrations: false }));
-    for (const [id, config] of Object.entries(extraCats)) {
-      if (!runtimeCats[id] && !managedIdsBefore.has(id)) catRegistry.register(id, config);
+    registerCatalogSnapshot(
+      runtimeCats,
+      () => loadResolvedCatConfig(templatePath, { persistMigrations: false }),
+      templatePath,
+    );
+    for (const [id, entry] of extraCats) {
+      if (!runtimeCats[id] && !managedIdsBefore.has(id))
+        catRegistry.register(
+          id,
+          entry.config,
+          entry.configurationTemplatePath ? { configurationTemplatePath: entry.configurationTemplatePath } : undefined,
+        );
     }
     return catRegistry.getAllConfigs();
   });

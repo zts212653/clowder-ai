@@ -1,3 +1,4 @@
+import { sliceUnicodeSafe } from '../../utils/unicode-safe-slice.js';
 import { buildSearchableMessageContent, type SearchableMessageContent } from './message-search-content.js';
 
 type ThreadSummaryMessage = SearchableMessageContent & { id: string; catId?: string };
@@ -16,7 +17,7 @@ export function projectThreadMessageSummary(
     const turn = `[${message.catId ?? 'user'}] ${content}`;
     summary += summary ? `\n${turn}` : turn;
     // At exactly 3000, a later nonempty turn still decides whether an ellipsis is required.
-    if (summary.length > SUMMARY_LIMIT) return `${summary.slice(0, SUMMARY_LIMIT - 3)}...`;
+    if (summary.length > SUMMARY_LIMIT) return `${sliceUnicodeSafe(summary, 0, SUMMARY_LIMIT - 3)}...`;
   }
   return summary;
 }

@@ -26,6 +26,7 @@
   border: 1px solid var(--cafe-border-subtle);
   border-radius: 6px;
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
 }
 .open {
   display: flex;
@@ -71,6 +72,7 @@
 }
 .remove:hover {
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
 }
 .thumbnail {
   position: relative;
@@ -81,6 +83,7 @@
   overflow: hidden;
   border-radius: 3px;
   background: var(--cafe-surface-sunken);
+  --chat-background-role: cafe-sunken;
 }
 .pixels {
   display: block;

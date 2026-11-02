@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { registerDefaultEntryJourney } from './default-entry-journey.harness.mjs';
 import { availablePort, stopChild, waitForHttp } from './f290-runtime-journey.harness.mjs';
 import { CALENDAR_THREAD, createCalendarFixture } from './f310-work-calendar.fixture.mjs';

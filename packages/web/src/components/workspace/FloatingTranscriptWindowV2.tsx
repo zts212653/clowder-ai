@@ -282,6 +282,7 @@ export function FloatingTranscriptWindowV2({
     >
       <div
         tabIndex={-1}
+        data-chat-background-layer="opaque"
         className="flex h-full flex-col rounded-lg border border-cafe-border bg-cafe-surface-primary shadow-2xl backdrop-blur-md"
       >
         {/* Header — drag handle */}

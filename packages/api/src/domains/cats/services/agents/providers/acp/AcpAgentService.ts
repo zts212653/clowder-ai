@@ -28,6 +28,10 @@ import {
 import { readInvocationMcpConfig } from '../../../../../../config/capabilities/invoke-mcp-config.js';
 import { getCatEffort } from '../../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../../config/cat-models.js';
+import { readDshNativeAccount } from '../../../../../../config/native-accounts/dsh-account.js';
+import type { DshNativeLaunch } from '../../../../../../config/native-accounts/dsh-installation.js';
+import { readKimiNativeAccount } from '../../../../../../config/native-accounts/kimi-account.js';
+import type { KimiNativeLaunch } from '../../../../../../config/native-accounts/kimi-installation.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { createPromptDigest } from '../../../context/prompt-digest.js';
 import type {
@@ -65,7 +69,9 @@ import {
 import { AcpSessionBindingError } from './active-session-cache.js';
 import { createAgyAcpPermissionHandler } from './agy/agy-acp-permission.js';
 import { type AgyAcpConfig, prepareAgyAcpSession, selectAgyAcpModel } from './agy/agy-acp-session.js';
+import { invokeDshMember } from './dsh/dsh-member-invocation.js';
 import { type AcpRequestInputBridge, createAcpRequestInputBridge } from './icode/runtime-interaction-adapter.js';
+import { invokeKimiMember } from './kimi/kimi-member-invocation.js';
 import { captureNativeDefaults, defaultsForNativeResume } from './native-session-defaults.js';
 import { applySessionConfiguration, reportedSessionModel } from './session-configuration.js';
 import type {
@@ -141,6 +147,9 @@ type PromptPhase =
   | 'busy_backoff';
 
 export interface AcpAgentServiceConfig {
+  /** Factory-verified installed native DSH, separate from ordinary pooled sessions. */
+  nativeDsh?: DshNativeLaunch;
+  nativeKimi?: KimiNativeLaunch;
   antigravity?: AgyAcpConfig;
   catId: CatId;
   pool: AcpProcessPool;
@@ -195,6 +204,8 @@ export type GeminiAcpAdapterConfig = AcpAgentServiceConfig;
 
 export class AcpAgentService implements AgentService {
   readonly cancellationMode = 'drain' as const;
+  private readonly nativeDsh?: DshNativeLaunch;
+  private readonly nativeKimi?: KimiNativeLaunch;
   private readonly antigravity?: AgyAcpConfig;
   readonly catId: CatId;
   private readonly pool: AcpProcessPool;
@@ -233,6 +244,8 @@ export class AcpAgentService implements AgentService {
   }
 
   constructor(config: AcpAgentServiceConfig) {
+    this.nativeDsh = config.nativeDsh;
+    this.nativeKimi = config.nativeKimi;
     this.antigravity = config.antigravity;
     this.catId = config.catId;
     this.clientId = config.clientId;
@@ -322,7 +335,21 @@ export class AcpAgentService implements AgentService {
   }
 
   supportsToolExecutionPolicy(policy: import('../../../types.js').ToolExecutionPolicy): boolean {
+    if (this.nativeDsh || this.nativeKimi) return policy.mode === 'plugin_native' && Boolean(policy.memberSession);
     return Boolean(this.antigravity) && policy.mode === 'read_only';
+  }
+
+  assertScopedMemberAccount(account: import('@cat-cafe/shared').ExecutionAccountSnapshot): void {
+    if (this.nativeKimi && account.authType !== 'oauth') throw new Error('kimi_scoped_native_account_unavailable');
+  }
+
+  async resolveScopedNativeAccount(input: { readonly workingDirectory: string; readonly accountRef?: string }) {
+    if (this.nativeKimi)
+      return (await readKimiNativeAccount(this.nativeKimi, this.sessionModel ?? this.modelName, input.accountRef))
+        .profile;
+    if (!this.nativeDsh) return null;
+    return (await readDshNativeAccount(this.nativeDsh, this.sessionModel ?? this.modelName, input.workingDirectory))
+      .profile;
   }
 
   freshnessCarrierCapability(): import('../../../types.js').AgentFreshnessCarrierCapability {
@@ -432,6 +459,26 @@ export class AcpAgentService implements AgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    if (this.nativeKimi && (options?.pluginNativeLaunch || options?.toolExecutionPolicy?.mode === 'plugin_native')) {
+      yield* invokeKimiMember({
+        catId: this.catId,
+        modelSelection: this.sessionModel ?? this.modelName,
+        native: this.nativeKimi,
+        prompt,
+        options,
+      });
+      return;
+    }
+    if (this.nativeDsh && (options?.pluginNativeLaunch || options?.toolExecutionPolicy?.mode === 'plugin_native')) {
+      yield* invokeDshMember({
+        catId: this.catId,
+        modelSelection: this.sessionModel ?? this.modelName,
+        native: this.nativeDsh,
+        prompt,
+        options,
+      });
+      return;
+    }
     if (!this.antigravity) {
       yield* this.invokeTurn(prompt, options);
       return;

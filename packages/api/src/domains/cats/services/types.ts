@@ -1388,6 +1388,11 @@ export interface AgentService {
   supportsToolExecutionPolicy?(policy: ToolExecutionPolicy): boolean;
   /** Reject unsupported scoped-native authentication before any Queue/model admission. */
   assertScopedMemberAccount?(account: import('@cat-cafe/shared').ExecutionAccountSnapshot): void;
+  /** An inspected native credential, resolved by its carrier without catalog/login copies. */
+  resolveScopedNativeAccount?(input: {
+    readonly workingDirectory: string;
+    readonly accountRef?: string;
+  }): Promise<import('../../../config/account-resolver.js').RuntimeProviderProfile | null>;
 
   /** F254 D2: effective carrier capability for this concrete service instance. */
   freshnessCarrierCapability?(
