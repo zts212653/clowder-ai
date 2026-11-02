@@ -107,7 +107,7 @@
     "memoryFallback": false,
     "ownedServicesStopped": true,
     "offlineFirstInstall": "not tested",
-    "ci": "Build-source f4 CI running; Windows failure in unchanged restricted fixture setup (status=null near30s), not declared flaky",
+    "ci": "Build-source f4 terminal:18success1failure1skip, none pending. Windows failed in unchanged restricted-fixture setup (status=null near30s); packaging checks passed; not declared flaky.",
     "pwaProductionTests": 2,
     "supportedUpgrade": "not tested",
     "publicBinaryDownload": "missing",

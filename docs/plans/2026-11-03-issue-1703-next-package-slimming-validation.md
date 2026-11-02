@@ -54,7 +54,7 @@ Node24.16.0/ABI137、pnpm9.15.4、zlib1.3.1-e00f703、Electron35.7.5、Inno7.1.0
 - 当前SDK wrapper importQuery通过，基线规定的native平台包不存在。没有把第一轮包内CLI版本检查沿用至本轮；外部Claude程序的离线部署及真实调用未在本片重新验收，无模型请求。
 - 候选ASAR中的真实ServiceManager在自有HOME/data/端口运行Redis/API/Web，memoryFallback=false；5路由+33资源哈希+2视频MIME/Range共40检查通过。API24132、Web4180、Redis30212均停止，63401/63402/63403释放，有台账与回读。
 - 当前pnpm lint仍失败：两个与最新next相同的chat-background CJS文件有7个no-require-imports错误；未修这些文件、未宣称全仓lint通过。
-- 实包源码f4的CI单独回读：Windows出现未改RedirectionGuard夹具创建失败（约30s、status=null，243/244通过），本片归档/导出检查通过。未证明纯环境抖动，不调超时或权限；CI其它状态见PR及本地ci快照，不继承旧e1结果。
+- 实包源码f4的CI终态为18成功、1失败、1规划跳过，无待完成；Linux/macOS检查通过。Windows出现未改RedirectionGuard夹具创建失败（约30s、status=null，243/244通过），本片归档/导出检查通过。未证明纯环境抖动，不调超时或权限；原始CI快照绑定f4，不继承旧e1结果；后续文档HEAD检查另列。
 
 归档helper单次elapsed合计69.013→116.138秒（+47.125秒），候选全链构建712.929秒，组件ready46.545秒。缓存、I/O、并发及基线运行代码已变化，既不把这些数字当稳定预算，也不把与旧轮的ready差归因于本片。归档提取/HTTPready不能代替冷安装或完整首启。
 
