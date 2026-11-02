@@ -2,19 +2,8 @@ export const pluginPanelChannel = 'clowder-plugin-ui/v1';
 const csp =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'";
 export function sandboxedPanelHtml(value: unknown): string {
-  if (
-    !value ||
-    typeof value !== 'object' ||
-    !('kind' in value) ||
-    value.kind !== 'plugin-panel' ||
-    !('version' in value) ||
-    value.version !== 1 ||
-    !('html' in value) ||
-    typeof value.html !== 'string' ||
-    value.html.length > 2_000_000
-  )
-    throw new Error('插件面板内容无效');
-  return `<meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer">${value.html}`;
+  if (typeof value !== 'string' || value.length > 2_000_000) throw new Error('插件面板内容无效');
+  return `<meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="referrer" content="no-referrer">${value}`;
 }
 export async function copyPanelImage(value: unknown): Promise<void> {
   if (typeof value !== 'string' || value.length > 10_700_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value))

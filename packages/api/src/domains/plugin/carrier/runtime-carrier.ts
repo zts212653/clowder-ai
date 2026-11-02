@@ -81,7 +81,7 @@ export interface PluginRuntimeCarrier {
 }
 
 export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
-  readonly ui = new DeclaredPluginUi((id, method, input) => this.invoke(id, method, input));
+  readonly ui = new DeclaredPluginUi();
   readonly nativeActions = new NativePluginActions((id) => this.#admission(id));
   readonly #nativeMcpLaunches = new NativeMcpLaunches((id) => this.#admission(id), this.nativeActions);
   readonly #carriers: PluginRuntimeCarrier[] = [];

@@ -187,7 +187,7 @@ export async function startInstalledFeedbackFixture() {
   };
   const activation = await module.default.create(manifest).start(host);
   const invocation = createModuleHostInvocation({ runtime: { actions: () => activation.actions } });
-  const ui = new DeclaredPluginUi((id, method, input) => invocation.invoke(id, method, input));
+  const ui = new DeclaredPluginUi();
   const admission = {
     instance: { pluginInstanceId: 'fixture' },
     packageRecord: { pluginId: manifest.pluginId, manifest },

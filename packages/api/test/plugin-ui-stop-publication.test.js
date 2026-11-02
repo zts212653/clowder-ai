@@ -13,6 +13,7 @@ function fixture() {
     runtime: { transport: 'builtin' },
     contributions: [
       { type: 'ui', id: 'open', kind: 'command', action: { method: 'panel' } },
+      { type: 'webhook', id: 'page', path: 'panel', methods: ['GET'], action: { method: 'panel' } },
       { type: 'ui', id: 'entry', kind: 'slot-item', label: 'Fixture', command: 'open', group: 'activity-bar.bottom' },
     ],
   };
@@ -87,9 +88,9 @@ test('stopAll removes published UI and rejects its old panel generation even aft
   await router.stopAll();
   assert.equal((await inventory.snapshot()).instances[0].runtimeState, 'stopped');
   assert.deepEqual(router.ui.list(), []);
-  await assert.rejects(router.ui.call(entry.instanceId, entry.commandId, entry.generation, {}), /no longer active/);
+  assert.equal(router.ui.activation(entry.pluginId, entry.instanceId, entry.generation), undefined);
   await router.start('owned-instance');
   assert.notEqual(router.ui.list()[0].generation, entry.generation);
-  await assert.rejects(router.ui.call(entry.instanceId, entry.commandId, entry.generation, {}), /no longer active/);
+  assert.equal(router.ui.activation(entry.pluginId, entry.instanceId, entry.generation), undefined);
   await router.stopAll();
 });

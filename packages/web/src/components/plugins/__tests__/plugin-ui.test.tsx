@@ -17,26 +17,24 @@ describe('plugin sidebar panel isolation', () => {
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: vi.fn() });
     Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: vi.fn() });
     apiFetch.mockReset();
-    apiFetch.mockImplementation(
-      async (path: string) =>
-        new Response(
-          JSON.stringify(
-            path === '/api/plugin-ui'
-              ? {
-                  entries: [
-                    {
-                      pluginId: 'dev.fixture',
-                      instanceId: 'fixture',
-                      commandId: 'open',
-                      generation: 'activation',
-                      label: '问题反馈',
-                    },
-                  ],
-                }
-              : { result: { kind: 'plugin-panel', version: 1, html: '<p>isolated package UI</p>' } },
-          ),
-        ),
-    );
+    apiFetch.mockImplementation(async (path: string) => {
+      if (path === '/api/plugin-ui')
+        return Response.json({
+          entries: [
+            {
+              pluginId: 'dev.fixture',
+              instanceId: 'fixture',
+              commandId: 'open',
+              resourcePath: 'panel',
+              generation: 'activation',
+              label: '问题反馈',
+            },
+          ],
+        });
+      if (path === '/api/plugins/dev.fixture/panel')
+        return new Response('<p>isolated package UI</p>', { headers: { 'content-type': 'text/html; charset=utf-8' } });
+      return Response.json({ ok: true });
+    });
   });
   afterEach(() => {
     act(() => root.unmount());
@@ -54,17 +52,16 @@ describe('plugin sidebar panel isolation', () => {
     expect(frame!.getAttribute('srcdoc')).toContain("connect-src 'none'");
     expect(frame!.getAttribute('srcdoc')).toContain("default-src 'none'");
     expect(frame!.getAttribute('referrerpolicy')).toBe('no-referrer');
-    expect(apiFetch.mock.calls[1][0]).toBe('/api/plugin-ui/fixture/open');
+    expect(apiFetch.mock.calls[1][0]).toBe('/api/plugins/dev.fixture/panel');
+    expect(apiFetch.mock.calls[1][1].method).toBe('GET');
   });
   it('rejects oversized or malformed panels before executing package bytes', () => {
-    expect(() => sandboxedPanelHtml({ html: 'x'.repeat(2_000_001) })).toThrow();
+    expect(() => sandboxedPanelHtml('x'.repeat(2_000_001))).toThrow();
     expect(() => sandboxedPanelHtml({ html: null })).toThrow();
     expect(
-      sandboxedPanelHtml({
-        kind: 'plugin-panel',
-        version: 1,
-        html: '<meta http-equiv="Content-Security-Policy" content="default-src *">',
-      }).startsWith('<meta http-equiv="Content-Security-Policy" content="default-src \'none\''),
+      sandboxedPanelHtml('<meta http-equiv="Content-Security-Policy" content="default-src *">').startsWith(
+        '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'',
+      ),
     ).toBe(true);
   });
   it('forwards sandbox HTTP requests through the existing declared plugin route and refuses an escaping path', async () => {

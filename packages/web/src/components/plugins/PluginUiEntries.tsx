@@ -12,24 +12,10 @@ interface Entry {
   pluginId: string;
   instanceId: string;
   commandId: string;
+  resourcePath: string;
   label: string;
   generation: string;
   icon?: PluginIconSpec;
-}
-async function mount(entry: Entry, signal?: AbortSignal): Promise<unknown> {
-  const response = await apiFetch(
-    `/api/plugin-ui/${encodeURIComponent(entry.instanceId)}/${encodeURIComponent(entry.commandId)}`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ generation: entry.generation }),
-      signal,
-    },
-    { mutationTimeoutMs: 185_000 },
-  );
-  const value = await response.json();
-  if (!response.ok) throw new Error(typeof value.error === 'string' ? value.error : '插件操作未完成');
-  return value.result;
 }
 /** Package UI runs in an opaque sandbox, never as scripts in the Host origin. */
 export function PluginUiEntries() {
@@ -144,7 +130,18 @@ export function PluginUiEntries() {
     setHtml('');
     setActive(entry);
     try {
-      setHtml(sandboxedPanelHtml(await mount(entry, lifetime.current.signal)));
+      const resource = await requestPluginHttp(
+        entry,
+        { method: 'GET', path: entry.resourcePath },
+        lifetime.current.signal,
+      );
+      if (
+        resource.status < 200 ||
+        resource.status >= 300 ||
+        resource.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() !== 'text/html'
+      )
+        throw new Error('插件页面加载失败，请检查插件状态');
+      setHtml(sandboxedPanelHtml(resource.body));
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '面板打开失败');
     }

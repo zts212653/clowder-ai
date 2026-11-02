@@ -91,6 +91,7 @@ test('UI entries publish only after the carrier completes startup', async () => 
       manifest({
         contributions: [
           { type: 'ui', id: 'open', kind: 'command', action: { method: 'panel' } },
+          { type: 'webhook', id: 'page', path: 'panel', methods: ['GET'], action: { method: 'panel' } },
           {
             type: 'ui',
             id: 'entry',

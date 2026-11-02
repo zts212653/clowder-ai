@@ -120,7 +120,7 @@ jobs:
           node --import tsx --import ./test/helpers/setup-cat-registry.js --test --test-concurrency=2
           test/f322-import-route.test.ts
           test/f322-recent-sessions.test.ts
-          test/plugin-ui-http-dispatch.test.ts
+          test/plugin-ui-resource.test.ts
       - name: Sandboxed panels use declared HTTP business routing
         run: >-
           pnpm --filter @cat-cafe/web exec node scripts/run-with-node-env-test.mjs

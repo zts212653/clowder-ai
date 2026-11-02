@@ -9,7 +9,9 @@ import { invokeSingleCat } from '../dist/domains/cats/services/agents/invocation
 import { SessionSealer } from '../dist/domains/cats/services/session/SessionSealer.js';
 import { SessionChainStore } from '../dist/domains/cats/services/stores/ports/SessionChainStore.js';
 import { DeclaredPluginUi } from '../dist/domains/plugin/declared/declared-plugin-ui.js';
+import { DeclaredRuntimeContributions } from '../dist/domains/plugin/declared/declared-runtime-contributions.js';
 import { pluginUiRoutes } from '../dist/routes/plugin/plugin-ui-routes.js';
+import { pluginWebhookForwardingRoutes } from '../dist/routes/plugin/plugin-webhook-forwarding-routes.js';
 import { sessionChainRoutes } from '../dist/routes/session-chain.js';
 import { isolateAccountAuthEnvironment } from './helpers/account-auth-environment.js';
 import { routingJourneyDeps } from './helpers/routing-journey-deps.js';
@@ -168,16 +170,20 @@ test('successful public native import must allow the next task to reach the prov
 
 test('UI dispatch must preserve the declared action params', async (t) => {
   let received;
-  const ui = new DeclaredPluginUi(async (_id, _method, input) => {
-    received = input;
-    return { kind: 'plugin-panel', version: 1, html: '<p>test</p>' };
-  });
-  ui.activate({
+  const ui = new DeclaredPluginUi();
+  const admission = {
     instance: { pluginInstanceId: 'test' },
     packageRecord: {
       pluginId: 'dev.review',
       manifest: {
         contributions: [
+          {
+            type: 'webhook',
+            id: 'page',
+            path: 'panel',
+            methods: ['GET'],
+            action: { method: 'panel', params: { pane: 'diagnostics' } },
+          },
           {
             type: 'ui',
             id: 'open',
@@ -196,18 +202,36 @@ test('UI dispatch must preserve the declared action params', async (t) => {
         ],
       },
     },
+  };
+  ui.activate(admission);
+  const contributions = new DeclaredRuntimeContributions({
+    packages: {
+      resolveInstalledPackage: async () => {
+        throw new Error('no executable package needed');
+      },
+    },
+    configuration: { readConfig: async () => undefined, readSecret: async () => undefined },
   });
+  await contributions.activate(admission, async (_id, _method, input) => {
+    received = input;
+    return { status: 200, headers: { 'content-type': 'text/html' }, body: '<p>test</p>' };
+  });
+  t.after(() => contributions.deactivateAll());
   const app = Fastify();
   t.after(() => app.close());
   app.addHook('onRequest', async (request) => {
     request.sessionUserId = 'owner';
   });
   await app.register(pluginUiRoutes, { ui });
+  await app.register(pluginWebhookForwardingRoutes, { ui, webhooks: contributions });
   const response = await app.inject({
-    method: 'POST',
-    url: '/api/plugin-ui/test/open',
-    headers: { origin: 'http://localhost:5173' },
-    payload: { generation: ui.list()[0].generation, input: { op: 'open' } },
+    method: 'GET',
+    url: '/api/plugins/dev.review/panel',
+    headers: {
+      origin: 'http://localhost:5173',
+      'x-clowder-plugin-ui-instance': 'test',
+      'x-clowder-plugin-ui-generation': ui.list()[0].generation,
+    },
   });
   assert.equal(response.statusCode, 200, response.body);
   console.log('PARAMS_EVIDENCE', JSON.stringify(received));
