@@ -1,0 +1,127 @@
+{
+  "date": "2026-11-03",
+  "status": "draft-with-explicit-validation-gaps",
+  "baseSha": "917120d55bb5bf618a3cc49c0749d5f5172ace46",
+  "buildSourceSha": "57a0b37a5a7a260a148abcfa5e0a3c3282dded59",
+  "lockSha256": "d7f094037413ecdbe2045458befc39c193f71e2ef6834ba3bdeb116fa69e2eab",
+  "platform": "win32-x64",
+  "tools": {
+    "electron": "35.7.5",
+    "zlib": "1.3.1-e00f703",
+    "node": "v24.16.0",
+    "pnpm": "9.15.4",
+    "inno": "7.1.0"
+  },
+  "method": "Actual candidate installer compared with actual gzip1 baseline compiled from the identical new application/resource build. Baseline restores only omitted foreign node-pty prebuilds and the two compiler caches from this same isolated frozen workspace/Web build. No installation is performed.",
+  "baseline": {
+    "bytes": 743498079,
+    "sha256": "712331430cdd142987102ba76dbc381015a6ccb5958730178a65d9a1b80344ef"
+  },
+  "candidate": {
+    "bytes": 683028905,
+    "sha256": "95d2020a5121762b663690541aab9ff6e67b32835a0e6c8b8151ee8db76859e6"
+  },
+  "savedDownloadBytes": 60469174,
+  "savedDownloadPercent": 8.133063918783844,
+  "removedRegularFiles": 14,
+  "removedLogicalBytes": 16419138,
+  "foreignNodePtyBytes": 12289688,
+  "compilerCacheBytes": 4129450,
+  "retainedInventory": {
+    "changes": 0,
+    "unexpectedRemovals": 0,
+    "typesAndModesAndLinkTargetsCompared": true,
+    "additions": 0,
+    "status": true
+  },
+  "archives": [
+    {
+      "archive": "deploy-api.tar.gz",
+      "baselineBytes": 38466085,
+      "candidateBytes": 31184163,
+      "baselineSha256": "8e6b76a429588a6f4f00aae35c94dcc8463afbf145ec17d7e028805042cc6ca6",
+      "candidateSha256": "53a875f6bece7e834cfe76a00ed5f6c965efab67f4cf9c08ecb3199feb2757c1",
+      "baselineElapsedMs": 3287,
+      "candidateElapsedMs": 10024
+    },
+    {
+      "archive": "deploy-dependencies.tar.gz",
+      "baselineBytes": 288094449,
+      "candidateBytes": 252931560,
+      "baselineSha256": "3f5f44a6dbddf87d653247f1eb8d30ab1966f0c9eefb995ecbfc8eac1b7e2183",
+      "candidateSha256": "83f8c128bd52d71b8db46f9b85ead1dbee96347c13f6ff569bd4f07d18eaa87d",
+      "baselineElapsedMs": 64814,
+      "candidateElapsedMs": 113303
+    },
+    {
+      "archive": "deploy-mcp-server.tar.gz",
+      "baselineBytes": 2442778,
+      "candidateBytes": 1937606,
+      "baselineSha256": "347c7707d6499d3d6d700347aed6c56cab1d9f3a55c3ab754f1ae1d52f3d0d67",
+      "candidateSha256": "565dcca2fbf19da21e25025fd55e8b8ed2ccc6212697b585c59481c12ed4c81b",
+      "baselineElapsedMs": 464,
+      "candidateElapsedMs": 1415
+    },
+    {
+      "archive": "deploy-web.tar.gz",
+      "baselineBytes": 165979503,
+      "candidateBytes": 159460059,
+      "baselineSha256": "bd0fb00803a247f6d9dfc7ec15e8a5bdd0ac14ecc6d9ee90575717519fc50309",
+      "candidateSha256": "fda67c46ab08115ab69b8a17ed7cc27401ae78c69f4c21755aa1b710e50e43ff",
+      "baselineElapsedMs": 4917,
+      "candidateElapsedMs": 8527
+    },
+    {
+      "archive": "electron.tar.gz",
+      "baselineBytes": 138911277,
+      "candidateBytes": 127911538,
+      "baselineSha256": "82fe0f66ab4bfff0957cd57d3a057bdb67c4cc9da245ece8db998c8857bd1596",
+      "candidateSha256": "f9099429ecb3c5715492997dae02b2dc3ac377b732366c5752a99574ed2392dc",
+      "baselineElapsedMs": 4294,
+      "candidateElapsedMs": 11370
+    },
+    {
+      "archive": "node.tar.gz",
+      "baselineBytes": 37544941,
+      "candidateBytes": 37544941,
+      "baselineSha256": "14a01e0bd7e8e1712764880b484adf71abd8bc61ffef036539a9431f3a3d32ee",
+      "candidateSha256": "14a01e0bd7e8e1712764880b484adf71abd8bc61ffef036539a9431f3a3d32ee",
+      "baselineElapsedMs": null,
+      "candidateElapsedMs": null
+    }
+  ],
+  "timing": {
+    "candidateFullBuildSeconds": 1172.294101,
+    "componentReadyMs": 118526,
+    "baselineArchiveMs": 77776,
+    "candidateArchiveMs": 144639,
+    "controlledPerformanceConclusion": false
+  },
+  "validation": {
+    "ownedServicesStopped": true,
+    "pwaProductionTests": 2,
+    "failureRecovery": "not tested",
+    "nativeSmoke": "passed; two ConPTY rounds, SQLite/sharp and SDK",
+    "offlineFirstInstall": "not tested",
+    "biome": "0 errors; 3 existing warnings/6 infos",
+    "runtimeChecks": 40,
+    "lint": "failed: 7 pre-existing no-require-imports errors in unchanged CJS files",
+    "targetedTests": 58,
+    "ci": "no check runs reported for buildSourceSha",
+    "fullElectronUIAndMic": "not tested",
+    "installerContractTests": 32,
+    "supportedUpgrade": "not tested",
+    "memoryFallback": false,
+    "publicArtifact": "missing; fork artifact-only dispatch rejected with HTTP 422"
+  },
+  "localEvidence": "G:\\AIwork\\clowder-ai\\artifacts\\issue-1703-next-20261103",
+  "originalImplementation": {
+    "sourceSha": "c482cbef6dcb82eae032bbb6fd5ad1b8e96ecc69",
+    "author": "whutzefengxie-ops"
+  },
+  "failuresRetained": [
+    "lint.log",
+    "installer-contracts.log (PWA prerequisite absent before build)",
+    "comparison-build.initial.log (Windows path separator; corrected outside product source)"
+  ]
+}

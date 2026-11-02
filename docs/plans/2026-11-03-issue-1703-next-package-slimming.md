@@ -50,7 +50,7 @@ Architecture cell: desktop distribution；Map delta: none；Why: 只改变既有
 
 1. **方案自查后再写实现**：核对三项仍存在、原实现归属、旁支重叠及操作成本。保存本方案提交，再运行 RED。
 2. **精准 RED → GREEN**：先只迁入原三份行为检查，在 next 原实现上确认因压缩收益、foreign prebuild 和 cache 保留/排除不满足而失败；记录完整日志。再整合原实现，跑同组检查，失败原因不得是语法或缺依赖。
-3. **源码检查**：从当前 package.json/CI 确认 `pnpm lint` 为递归类型检查，`pnpm check` 为 sources/installed/artifacts，全仓自动修复为 `pnpm check:fix`，本次不运行全仓修复。定向格式命令为 `pnpm exec biome check <本片七个代码/测试文件>`；需要修格式时仅这些文件用 `pnpm exec biome format --write <files>`。
+3. **源码检查**：从当前 package.json/CI 确认 `pnpm lint` 为递归检查（API/shared 等为 `tsc --noEmit`，Web 为 `next lint`），`pnpm check` 为 sources/installed/artifacts，全仓自动修复为 `pnpm check:fix`，本次不运行全仓修复。定向格式命令为 `pnpm exec biome check <本片七个代码/测试文件>`；需要修格式时仅这些文件用 `pnpm exec biome format --write <files>`。
 4. **定向回归**：`node --test --test-concurrency=1 desktop/built-web-assets.test.mjs desktop/frozen-runtime-export.test.mjs desktop/runtime-archive-progress.test.mjs desktop/extract-runtime-archive.test.cjs desktop/verify-runtime-archives.test.mjs desktop/runtime-dependency-selection.test.mjs desktop/workspace-runtime-modules.test.mjs desktop/api-startup-read-ahead.test.mjs desktop/runtime-package-bundle.test.mjs desktop/api-bundle.test.mjs desktop/api-dependency-bundle.test.mjs`。补跑 PWA production cache policy 和相关 installer failure checks；不把 fixture recovery 当实际升级恢复。
 5. **实际构建**：提交干净源码后执行 `powershell -NoProfile -ExecutionPolicy Bypass -File desktop/scripts/build-desktop.ps1 -SkipPortableZip`。保留 guard、锁文件、API/Web 身份与失败日志，记录 node/pnpm/Electron/Inno 版本和 lock SHA。
 6. **同输入对照**：候选与基线共用本轮 API/Web/MCP/Electron/Node/Redis/直接资源。从本轮 frozen workspace/Web 恢复且仅恢复五类异平台 prebuilds 与两项 cache，用原 helper gzip 1 重出五归档，共用同一 Node 归档、Inno 编译器及其余内容，生成两份实际 EXE。不是 base 全量重构建，也不是正式回退包。
@@ -82,3 +82,5 @@ Architecture cell: desktop distribution；Map delta: none；Why: 只改变既有
 **值得继续这三项**：三处差异都仍在 next，现有入口和精准检查可复用，无架构迁移或运行期常驻成本；压缩多付构建 CPU/等待，换取相同内容的较小下载，真实收益以本轮对照决定。
 不预设 MB 或秒数门槛，不扩大删除清单。已查到 Hyper-V 无现有 VM；完整首装/升级/恢复目前缺环境，只能交付带缺项的 Draft，不能宣称安装验收完成。
 优先复用原 PR：在最新 next 的任务分支整合旧 head，保留原历史，确认最终 diff 只含本片后，快进推送原 fork 分支并将 PR base 改 next；若远端 head 被他人更新，停止覆盖并重新对账。
+
+本轮实测、失败与缺项见 [验证记录](2026-11-03-issue-1703-next-package-slimming-validation.md) 和 [机器摘要](evidence/2026-11-03-issue-1703-next-package-slimming.json)。本方案正文中实施前判断不代替最终验收结论。
