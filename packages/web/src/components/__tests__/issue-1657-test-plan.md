@@ -8,10 +8,10 @@
 
 **Test Cases**:
 - Text replacement: "review" → "inspect"
-- Text deletion: "review PR and CI" → "review PR"  
+- Text deletion: "review PR and CI" → "review PR"
 - Text insertion: "review current PR" → "review the current PR"
 
-**Expected**: 
+**Expected**:
 - First send succeeds without confirmation prompt
 - Saved draft equals edited text
 - Final payload equals edited text

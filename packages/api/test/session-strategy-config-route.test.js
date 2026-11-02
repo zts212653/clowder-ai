@@ -33,6 +33,16 @@ async function createApp(resolveContextCapability = () => AVAILABLE_CAPABILITY) 
 
 const USER_HEADER = { 'x-cat-cafe-user': 'test-user' };
 
+async function injectCurrent(app, request) {
+  if (request.method === 'PATCH' || request.method === 'DELETE') {
+    const current = await app.inject({ method: 'GET', url: '/api/config/session-strategy' });
+    const catId = request.url.split('/').at(-1);
+    const expectedRevision = current.json().cats.find((cat) => cat.catId === catId)?.overrideRevision;
+    return app.inject({ ...request, payload: { ...request.payload, expectedRevision } });
+  }
+  return app.inject(request);
+}
+
 describe('session-strategy-config routes', () => {
   let overridesModule;
 
@@ -50,7 +60,7 @@ describe('session-strategy-config routes', () => {
   describe('GET /api/config/session-strategy', () => {
     test('returns list of cats with strategy info', async () => {
       const app = await createApp(() => ({ ...AVAILABLE_CAPABILITY, observesCompression: false }));
-      const res = await app.inject({
+      const res = await injectCurrent(app, {
         method: 'GET',
         url: '/api/config/session-strategy',
       });
@@ -80,7 +90,7 @@ describe('session-strategy-config routes', () => {
   describe('PATCH /api/config/session-strategy/:catId', () => {
     test('P1-2: returns 400 without X-Cat-Cafe-User header', async () => {
       const app = await createApp();
-      const res = await app.inject({
+      const res = await injectCurrent(app, {
         method: 'PATCH',
         url: '/api/config/session-strategy/opus',
         payload: { strategy: 'compress' },
@@ -92,7 +102,7 @@ describe('session-strategy-config routes', () => {
 
     test('returns 404 for unknown catId', async () => {
       const app = await createApp();
-      const res = await app.inject({
+      const res = await injectCurrent(app, {
         method: 'PATCH',
         url: '/api/config/session-strategy/nonexistent-cat',
         headers: USER_HEADER,
@@ -103,7 +113,7 @@ describe('session-strategy-config routes', () => {
 
     test('returns 400 for invalid body (bad thresholds)', async () => {
       const app = await createApp();
-      const res = await app.inject({
+      const res = await injectCurrent(app, {
         method: 'PATCH',
         url: '/api/config/session-strategy/opus',
         headers: USER_HEADER,
@@ -114,7 +124,7 @@ describe('session-strategy-config routes', () => {
 
     test('#1329 accepts hybrid intent even when execution will be degraded', async () => {
       const app = await createApp(() => ({ ...AVAILABLE_CAPABILITY, observesCompression: false }));
-      const res = await app.inject({
+      const res = await injectCurrent(app, {
         method: 'PATCH',
         url: '/api/config/session-strategy/codex',
         headers: USER_HEADER,
@@ -130,7 +140,7 @@ describe('session-strategy-config routes', () => {
 
     test('#1329 accepts handoff intent while reporting unavailable conditional usage', async () => {
       const app = await createApp(() => ({ ...AVAILABLE_CAPABILITY, usageTelemetry: 'conditional' }));
-      const res = await app.inject({
+      const res = await injectCurrent(app, {
         method: 'PATCH',
         url: '/api/config/session-strategy/codex',
         headers: USER_HEADER,
@@ -144,7 +154,7 @@ describe('session-strategy-config routes', () => {
 
     test('#1329 treats a reported runtime window as preview carrier-binding evidence', async () => {
       const app = await createApp(() => AVAILABLE_CAPABILITY);
-      const res = await app.inject({
+      const res = await injectCurrent(app, {
         method: 'PATCH',
         url: '/api/config/session-strategy/opus',
         headers: USER_HEADER,
@@ -157,7 +167,7 @@ describe('session-strategy-config routes', () => {
 
     test('rejects legacy sessionChain writes instead of silently stripping them', async () => {
       const app = await createApp();
-      const res = await app.inject({
+      const res = await injectCurrent(app, {
         method: 'PATCH',
         url: '/api/config/session-strategy/opus',
         headers: USER_HEADER,
@@ -170,7 +180,7 @@ describe('session-strategy-config routes', () => {
 
     test('200 success sets override and returns effective config', async () => {
       const app = await createApp();
-      const res = await app.inject({
+      const res = await injectCurrent(app, {
         method: 'PATCH',
         url: '/api/config/session-strategy/opus',
         headers: USER_HEADER,
@@ -199,7 +209,7 @@ describe('session-strategy-config routes', () => {
   describe('DELETE /api/config/session-strategy/:catId', () => {
     test('P1-2: returns 400 without X-Cat-Cafe-User header', async () => {
       const app = await createApp();
-      const res = await app.inject({
+      const res = await injectCurrent(app, {
         method: 'DELETE',
         url: '/api/config/session-strategy/opus',
         // No identity header
@@ -210,7 +220,7 @@ describe('session-strategy-config routes', () => {
 
     test('returns 404 for unknown catId', async () => {
       const app = await createApp();
-      const res = await app.inject({
+      const res = await injectCurrent(app, {
         method: 'DELETE',
         url: '/api/config/session-strategy/nonexistent-cat',
         headers: USER_HEADER,
@@ -220,7 +230,7 @@ describe('session-strategy-config routes', () => {
 
     test('returns 404 when no override exists', async () => {
       const app = await createApp();
-      const res = await app.inject({
+      const res = await injectCurrent(app, {
         method: 'DELETE',
         url: '/api/config/session-strategy/opus',
         headers: USER_HEADER,
@@ -234,7 +244,7 @@ describe('session-strategy-config routes', () => {
       await overridesModule.setRuntimeOverride('opus', { strategy: 'compress' });
 
       const app = await createApp();
-      const res = await app.inject({
+      const res = await injectCurrent(app, {
         method: 'DELETE',
         url: '/api/config/session-strategy/opus',
         headers: USER_HEADER,

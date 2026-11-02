@@ -17,6 +17,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   type CatId,
   catRegistry,
+  formatRosterLabel,
   isCloudBridgeRecoveryV1,
   isCrossThreadProvenance,
   type MessageContent,
@@ -308,6 +309,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     let messageDisposition: MessageWorkDisposition | undefined;
     let explicitMentionTargetCats: readonly CatId[] | undefined;
+    let exactPublicTargets = false;
 
     // #699: Reply-to (quote) reference
     let replyTo: string | undefined;
@@ -331,7 +333,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         whisperRecipients = parsed.whisperTo as CatId[];
       }
       messageDisposition = parsed.messageDisposition;
-      explicitMentionTargetCats = parsed.mentions?.length ? (parsed.mentions as CatId[]) : undefined;
+      exactPublicTargets = parsed.confirmedTargetCats !== undefined;
+      explicitMentionTargetCats = (parsed.confirmedTargetCats ??
+        (parsed.mentions?.length ? parsed.mentions : undefined)) as CatId[] | undefined;
       // #699: Extract replyTo from multipart
       if (parsed.replyTo) {
         replyTo = parsed.replyTo;
@@ -349,9 +353,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         contentBlocks = buildMessageContentBlocks(content, parseResult.data.contextAttachments);
       }
       messageDisposition = parseResult.data.messageDisposition;
-      explicitMentionTargetCats = parseResult.data.mentions?.length
-        ? (parseResult.data.mentions as CatId[])
-        : undefined;
+      exactPublicTargets = parseResult.data.confirmedTargetCats !== undefined;
+      explicitMentionTargetCats = (parseResult.data.confirmedTargetCats ??
+        (parseResult.data.mentions?.length ? parseResult.data.mentions : undefined)) as CatId[] | undefined;
       // F35: Extract whisper fields from parsed body
       if (parseResult.data.visibility === 'whisper') {
         whisperVisibility = 'whisper';
@@ -380,6 +384,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         ownerAuthProvenance !== 'strict' ||
         messageBundleRequest ||
         whisperVisibility ||
+        exactPublicTargets ||
         messageDisposition === 'continue_current')
     )
       return reply.code(400).send({ error: 'Invalid Live admission', code: 'INVALID_LIVE_ADMISSION' });
@@ -535,6 +540,28 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       reply.status(400);
       return { error: 'One or more selected member identities are invalid', code: 'INVALID_EXPLICIT_TARGETS' };
     }
+    let publicMentionTargetCats: CatId[] | undefined;
+    if (!liveSessionId && !whisperVisibility && !admittedMessageBundle && !replayedSource) {
+      const preview = await router.previewTargets(content, {
+        threadId: resolvedThreadId,
+        ...(explicitRoutingTargetCats ? { explicitTargetCats: explicitRoutingTargetCats } : {}),
+      });
+      if (preview.requiresConfirmation) {
+        const present = (catId: CatId) => ({
+          catId,
+          displayName: formatRosterLabel(catRegistry.getOrThrow(catId).config),
+        });
+        return reply.code(409).send({
+          code: 'ROUTING_CONFIRMATION_REQUIRED',
+          error: '指定角色当前不可用，请确认实际接收者后再发送。',
+          unavailable: (preview.unavailableTargets ?? []).map(present),
+          targets: preview.targetCats.map(present),
+        });
+      }
+      if (preview.reason.kind === 'current_message_mentions' && preview.targetCats.length > 0) {
+        publicMentionTargetCats = preview.targetCats;
+      }
+    }
     // Legacy sources lack routing provenance; retain their serial replay snapshot.
     // New sources freeze prose expansion at the store's actual winning commit,
     // including races after this preflight. Exact recipient checks stay unchanged.
@@ -547,7 +574,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         : undefined;
     const fixedTargetCats = admittedMessageBundle
       ? bundleRoutingTargetCats
-      : (explicitRoutingTargetCats ?? replayedProseTargets);
+      : (explicitRoutingTargetCats ?? publicMentionTargetCats ?? replayedProseTargets);
     const routingResult: Awaited<ReturnType<AgentRouter['resolveTargetsAndIntent']>> = fixedTargetCats
       ? {
           targetCats: [...fixedTargetCats],
@@ -652,6 +679,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         reply.raw,
         async (trace) => {
           const queueInput = {
+            ...(exactPublicTargets ? { exactTargets: true } : {}),
+            ...(publicMentionTargetCats ? { allowConversationFallback: false as const } : {}),
             ...(liveSessionId ? { liveSessionId } : {}),
             from: { kind: 'user' as const, userId },
             threadId: resolvedThreadId,

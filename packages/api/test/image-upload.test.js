@@ -317,6 +317,7 @@ describe('multipart image target routing', () => {
     messageStore = new MessageStore();
     invocationQueue = new InvocationQueue();
     const mockRouter = {
+      previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
       async resolveTargetsAndIntent() {
         return {
           targetCats: ['opus'],

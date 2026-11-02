@@ -108,6 +108,7 @@ export class LunaThreadLibrarian {
         directoryBatches.slice(index, index + 4).map(async (batch) => {
           const prompt = `完整可读目录的一个容量批次（覆盖：${JSON.stringify(directory.coverage)}）：\n${batch.map(directoryRow).join('\n')}\n\n首条 owner 开场（材料）：\n${input.opening}\n\n哪些旧线程可能有用？最多六条，说明为什么；空集合合法。输出 {"related":[{"threadId":"...","reason":"..."}]}`;
           const run = await runLunaNative({
+            userId: input.ownerUserId,
             provider: this.deps.resolveProvider(),
             prompt,
             instructions: RULES,
@@ -130,6 +131,7 @@ export class LunaThreadLibrarian {
     if (selected.size > 6) {
       const candidates = [...selected].map(([threadId, reason]) => ({ threadId, reason }));
       const run = await runLunaNative({
+        userId: input.ownerUserId,
         provider: this.deps.resolveProvider(),
         prompt: `全部容量批次的候选：${JSON.stringify(candidates)}\n开场：${input.opening}\n综合判断最有用的最多六条；只输出 {"related":[{"threadId":"...","reason":"..."}]}。`,
         instructions: RULES,
@@ -156,6 +158,7 @@ export class LunaThreadLibrarian {
       signal.throwIfAborted();
       const prompt = `选中的完整概况（派生线索，来源已验证可读）：\n${JSON.stringify(batch)}\n\n首条 owner 开场：\n${input.opening}\n这些容量片段覆盖选中概况的完整材料，不遗漏尾部。同一线程只输出一条。只提取对此想法有用的背景、约定、教训或偏好。每条不超过500字，sourceIds 只填该条线程提供的 messageId，不含 thread 前缀；不跨线程引用。未知不猜，工作进度须提醒核最新 Task/PR。输出 {"backgrounds":[{"threadId":"...","background":"...","sourceIds":["..."]}]}`;
       const run = await runLunaNative({
+        userId: input.ownerUserId,
         provider: this.deps.resolveProvider(),
         prompt,
         instructions: RULES,
@@ -190,6 +193,7 @@ export class LunaThreadLibrarian {
     if (new Set(backgrounds.map((item) => item.overview.threadId)).size === backgrounds.length) return backgrounds;
     // Oversized complete overviews (or repeated model rows) need model synthesis, not code truncation.
     const synthesis = await runLunaNative({
+      userId: input.ownerUserId,
       provider: this.deps.resolveProvider(),
       prompt: `全部容量片段提取结果：${JSON.stringify(backgrounds.map(({ overview, ...item }) => ({ ...item, threadId: overview.threadId })))}\n开场：${input.opening}\n同一线程合并为一条不超过500字的背景，引用输入中该线程有效的 sourceIds。只输出 {"backgrounds":[{"threadId":"...","background":"...","sourceIds":["..."]}]}。`,
       instructions: RULES,

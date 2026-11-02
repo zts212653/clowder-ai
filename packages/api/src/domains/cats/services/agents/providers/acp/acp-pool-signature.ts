@@ -4,6 +4,8 @@ export interface AcpPoolSpawnSignatureInput {
   cwd: string;
   bootstrapIsolation?: string;
   env?: Record<string, string> | null;
+  environmentFingerprint?: string;
+  shell?: true | string;
   openCodeRuntimeConfig?: unknown;
   contextPolicy?: unknown;
   maxLiveProcesses: number;
@@ -19,9 +21,11 @@ export function createAcpPoolSpawnSignature(input: AcpPoolSpawnSignatureInput): 
   return JSON.stringify({
     cmd: input.command,
     args: input.args,
+    ...(input.shell !== undefined ? { shell: input.shell } : {}),
     cwd: input.cwd,
     bootstrapIsolation: input.bootstrapIsolation ?? null,
     env: input.env ?? null,
+    ...(input.environmentFingerprint ? { environmentFingerprint: input.environmentFingerprint } : {}),
     openCodeRuntimeConfig: input.openCodeRuntimeConfig ?? null,
     contextPolicy: input.contextPolicy ?? null,
     maxLiveProcesses: input.maxLiveProcesses,

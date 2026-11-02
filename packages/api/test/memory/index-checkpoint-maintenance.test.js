@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { channel } from 'node:diagnostics_channel';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -84,6 +84,48 @@ test('online message batches leave WAL backfill to maintenance before releasing 
   assert.ok(pids.length > 0 && pids.every((pid) => pid !== process.pid));
   assert.equal(db.pragma('wal_autocheckpoint', { simple: true }), automatic);
   assert.equal(db.pragma('synchronous', { simple: true }), sync);
+});
+
+test('small documents share bounded checkpoint batches while retaining separate atomic replacements', async (t) => {
+  const { docs, store, db } = await fixture(t);
+  const count = 64;
+  for (let i = 0; i < count; i++) {
+    const id = `F${String(i + 1).padStart(3, '0')}`;
+    writeFileSync(
+      join(docs, 'features', `${id}-small.md`),
+      `---\nfeature_ids: [${id}]\n---\n# Small document\n\nBody ${i}`,
+    );
+  }
+  const builder = new IndexBuilder(store, docs);
+  let observing = false;
+  let transactions = 0;
+  const maintenance = [];
+  const transaction = db.transaction.bind(db);
+  t.mock.method(db, 'transaction', (fn) => {
+    const tx = transaction(fn);
+    return (...args) => {
+      if (observing) transactions++;
+      return tx(...args);
+    };
+  });
+  const events = channel('cat-cafe.entity-mention-checkpoint');
+  const listener = (event) => {
+    if (observing) maintenance.push(event);
+  };
+  events.subscribe(listener);
+  t.after(() => events.unsubscribe(listener));
+  await builder.rebuild({
+    deferThreadIndexing: true,
+    deferDocumentEmbedding: true,
+    onProgress: (phase, percent) => {
+      observing = phase === 'indexing' && percent === 40;
+    },
+  });
+  assert.equal(db.prepare('SELECT count(*) AS n FROM evidence_docs WHERE source_hash IS NOT NULL').get().n, count);
+  assert.ok(transactions >= count, 'documents must retain independent transactions');
+  assert.ok(maintenance.length > 1, 'a corpus must release the writer between bounded groups');
+  assert.ok(maintenance.length < count / 2, `small documents must not each checkpoint: ${maintenance.length}`);
+  assert.ok(maintenance.every((result) => result.busy === 0 && result.log === result.checkpointed));
 });
 
 for (const automatic of [0, 37]) {

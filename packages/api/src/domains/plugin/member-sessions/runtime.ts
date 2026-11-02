@@ -4,7 +4,10 @@ import {
   freezeExecutionAccountBinding,
 } from '../../cats/services/agents/invocation/execution-account-binding.js';
 import type { FrozenExecutionWorkspace } from '../../cats/services/agents/invocation/execution-workspace.js';
+import { captureHostExecutionBoundary } from '../../cats/services/agents/invocation/host-execution-boundary.js';
 import { InvocationServiceScope } from '../../cats/services/agents/invocation/invocation-service-scope.js';
+import { captureInvocationL0Input } from '../../cats/services/agents/providers/l0-input-capture.js';
+import { agentServiceGeneration } from '../../cats/services/agents/registry/AgentRegistry.js';
 import type { AgentService } from '../../cats/services/types.js';
 import type { MemberRuntimeSnapshot, MemberSessionGrant, MemberSessionScope, PrepareMemberSession } from './types.js';
 
@@ -68,6 +71,37 @@ export function createMemberRuntime(deps: {
       const carrier = service.contextCapability?.().carrier === 'acp' ? 'acp' : capability?.carrier;
       if (!account || !carrier || !config.clientId || !config.defaultModel)
         throw new Error('member_runtime_snapshot_unavailable');
+      const executionCarrier = capability?.carrier ?? carrier;
+      const providerOptions =
+        executionCarrier === 'claude_agent_sdk'
+          ? await service.captureInvocationOptions?.({
+              toolExecutionPolicy: policy,
+              workingDirectory: workspace.workingDirectory,
+              accountEnv: binding.accountEnv,
+              accountRef: binding.resolvedAccount?.id,
+              mcpSupport: false,
+            })
+          : undefined;
+      const implementation = service.implementationSnapshot?.() ?? {
+        key: `builtin:${config.clientId}/${executionCarrier}`,
+        generation: agentServiceGeneration(service),
+      };
+      const captured = {
+        ...binding,
+        ...(providerOptions ? { providerOptions: Object.freeze(providerOptions) } : {}),
+        implementation: Object.freeze({ ...implementation }),
+        sharedMcpLaunch: Object.freeze({ transport: 'stdio' }),
+        frozenL0Input: captureInvocationL0Input({
+          catId: input.catId,
+          catConfig: config,
+          model: (config.clientId === 'kimi' && binding.accountEnv?.KIMI_MODEL_NAME) || config.defaultModel,
+          projection: 'scoped-member',
+        }),
+      };
+      const prepared = Object.freeze({
+        ...captured,
+        hostExecutionBoundary: captureHostExecutionBoundary(captured, executionCarrier),
+      });
       await scope.assertCurrent();
       const runtime: MemberRuntimeSnapshot = Object.freeze({
         clientId: config.clientId,
@@ -79,7 +113,7 @@ export function createMemberRuntime(deps: {
           accountRevision: account.accountRevision,
         }),
       });
-      return { service, binding, runtime, release: () => services.dispose() };
+      return { service, binding: prepared, runtime, release: () => services.dispose() };
     } catch (error) {
       try {
         await services.dispose();

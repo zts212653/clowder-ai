@@ -183,6 +183,10 @@ export class FallbackCarrierWrapper implements AgentService {
     return this.carrier.injectsL0Natively?.() ?? false;
   }
 
+  get captureInvocationOptions(): AgentService['captureInvocationOptions'] {
+    return this.carrier.captureInvocationOptions?.bind(this.carrier);
+  }
+
   supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
     return this.carrier.supportsToolExecutionPolicy?.(policy) ?? false;
   }

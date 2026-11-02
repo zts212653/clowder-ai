@@ -3,8 +3,29 @@ import assert from 'node:assert/strict';
 import { readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { AcpAgentService } from '../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js';
 import { assertInheritedHostAuthorityCleared, directMcpContract } from './helpers/direct-mcp-contract.js';
 import { capabilityFile, fixture, managed, memberIds, providers, putConfig } from './helpers/invoke-mcp-workspace.js';
+
+test('ACP capture preserves explicit project authorization before any provider lease', async (t) => {
+  const f = fixture(t);
+  putConfig(f.main, [managed({ globalEnabled: false, blockedCats: [] })]);
+  putConfig(f.project, [managed({ globalEnabled: false, blockedCats: [] })]);
+  const service = new AcpAgentService({
+    catId: 'codex',
+    projectRoot: f.runtime,
+    mcpSupport: true,
+    mcpWhitelist: ['cat-cafe-collab'],
+    pool: {},
+    poolKey: { projectPath: f.runtime, providerProfile: 'codex' },
+  });
+  const capture = async (workingDirectory) =>
+    (await service.captureInvocationOptions({ workingDirectory })).frozenAcpMcpServers.map((server) => server.name);
+  assert.deepEqual(await capture(f.main), []);
+  assert.deepEqual(await capture(f.project), ['cat-cafe-collab']);
+  putConfig(f.project, [managed({ globalEnabled: false, blockedCats: ['codex'] })]);
+  assert.deepEqual(await capture(f.project), []);
+});
 
 function transport(provider, server, _name) {
   // Codex's fixture already checks the relay in upstreamMcpServersFromArgs.

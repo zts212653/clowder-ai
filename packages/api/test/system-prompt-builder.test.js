@@ -31,11 +31,11 @@ describe('SystemPromptBuilder', () => {
   }
 
   async function withFreshRuntimeRegistry(run) {
-    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const { loadResolvedCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
     const originalConfigs = catRegistry.getAllConfigs();
     catRegistry.reset();
     try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
+      const runtimeConfigs = toAllCatConfigs(loadResolvedCatConfig(process.env.CAT_TEMPLATE_PATH));
       for (const [id, config] of Object.entries(runtimeConfigs)) {
         catRegistry.register(id, config);
       }

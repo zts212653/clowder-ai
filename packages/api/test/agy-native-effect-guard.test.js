@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { decideAgyNativeHookPayload } from '../../../scripts/agy-native-effect-guard.mjs';
 import { decideNativeHookPayload } from '../../../scripts/native-effect-target-guard.mjs';
 import { nativeHookTestEnv } from './helpers/native-hook-programs.js';
@@ -22,7 +23,7 @@ test('official ACP tokens, settings and trust decisions remain protected under t
       name,
     );
     assert.equal(
-      decideAgyNativeHookPayload(payload('run_command', { CommandLine: `echo changed > ${path}` }), {
+      decideAgyNativeHookPayload(payload('run_command', { CommandLine: `echo changed > '${path}'` }), {
         ...options,
         profileHome,
       }).decision,
@@ -140,7 +141,7 @@ test('the official CLI settings and mounted skill view are host control data, in
         path,
       );
     }
-    const command = `echo overwrite > ${profileHome}/.gemini/antigravity-cli/settings.json`;
+    const command = `echo overwrite > '${profileHome}/.gemini/antigravity-cli/settings.json'`;
     assert.equal(
       decideAgyNativeHookPayload(payload('run_command', { CommandLine: command }), { ...options, profileHome })
         .decision,
@@ -160,7 +161,7 @@ test('the official CLI settings and mounted skill view are host control data, in
 test('bad hook input always prints a concrete deny instead of AGY empty-output allow', () => {
   const script = new URL('../../../scripts/agy-native-effect-guard.mjs', import.meta.url);
   for (const input of ['not json', '{}', '{"toolCall":{"name":"run_command","args":{}}}']) {
-    const stdout = execFileSync(process.execPath, [script.pathname], {
+    const stdout = execFileSync(process.execPath, [fileURLToPath(script)], {
       input,
       encoding: 'utf8',
       env: nativeHookTestEnv(),
@@ -202,10 +203,10 @@ test('AGY control targets follow shell directories, normalized paths and quoted 
       'cd .agents && dd if=../notes.txt of=hooks.json',
       "printf 'cd .agents && printf x > hooks.json' | sh",
       'rm -rf .agents',
-      `rm -rf ${profileHome}/.gemini`,
-      `printf x > ${profileHome}/.cat-cafe-native-turn.sqlite`,
-      `rm -rf ${profileHome}/.cat-cafe-native-runs`,
-      `printf x > ${profileHome}/.cat-cafe-native-runs/run-other/.gemini/config/hooks.json`,
+      `rm -rf '${profileHome}/.gemini'`,
+      `printf x > '${profileHome}/.cat-cafe-native-turn.sqlite'`,
+      `rm -rf '${profileHome}/.cat-cafe-native-runs'`,
+      `printf x > '${profileHome}/.cat-cafe-native-runs/run-other/.gemini/config/hooks.json'`,
     ]) {
       assert.equal(
         decideAgyNativeHookPayload(payload('run_command', { CommandLine: command, Cwd: root }), {

@@ -1,8 +1,21 @@
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { resolveProviderMcpConfig } from './provider-mcp-config.js';
+import { observeInvocationMcpSource } from '../../../../../config/capabilities/invoke-mcp-config.js';
+import {
+  captureProviderMcpConfig,
+  materializeProviderMcpConfig,
+  type ProviderMcpConfigPlan,
+} from './provider-mcp-config.js';
 
 type Server = Record<string, unknown>;
+
+export interface KimiMcpConfigPlan {
+  readonly nativeDirectory: string;
+  /** Missing only when the existing explicit injection-disabled mode applies. */
+  readonly mcpConfig?: ProviderMcpConfigPlan;
+  readonly projectRoot?: string;
+  readonly denialLayers: ReadonlyArray<{ path: string; cwd: string }>;
+}
 
 async function optionalText(path: string): Promise<string | undefined> {
   try {
@@ -34,8 +47,7 @@ async function kimiProjectRoot(cwd: string): Promise<string> {
   }
 }
 
-async function readServers(path: string): Promise<Record<string, Server>> {
-  const raw = await optionalText(path);
+function parseServers(raw: string | undefined): Record<string, Server> {
   if (!raw?.trim()) return {};
   const parsed: unknown = JSON.parse(raw);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid native MCP config');
@@ -75,29 +87,31 @@ async function denyUnapprovedNativeServers(
   layers: ReadonlyArray<{ path: string; cwd: string }>,
 ): Promise<void> {
   for (const layer of layers) {
-    for (const [name, entry] of Object.entries(await readServers(layer.path))) {
+    const raw = await optionalText(layer.path);
+    observeInvocationMcpSource(layer.path, raw ?? null);
+    for (const [name, entry] of Object.entries(parseServers(raw))) {
       if (!Object.hasOwn(servers, name) || servers[name]?.enabled === false) {
-        servers[name] = disabledServer(entry, layer.cwd);
+        Object.defineProperty(servers, name, {
+          value: disabledServer(entry, layer.cwd),
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
       }
     }
   }
 }
 
 /** Highest-priority project entries close every lower native layer over the host-approved surface. */
-export async function resolveKimiMcpSurface(input: {
+export async function captureKimiMcpSurface(input: {
   callbackEnv: Record<string, string>;
   workingDirectory: string;
   mcpServerPath: string;
   nativeDirectory: string;
   mcpSupport?: boolean;
   credentialFile?: string;
-}): Promise<Record<string, Server>> {
+}): Promise<KimiMcpConfigPlan> {
   const projectRoot = await kimiProjectRoot(input.workingDirectory);
-  const servers = Object.create(null) as Record<string, Server>;
-  // A member-wide denial takes precedence over host, project and native sources.
-  if (input.mcpSupport !== false) {
-    Object.assign(servers, await resolveProviderMcpConfig({ ...input, provider: 'kimi', projectMcpRoot: projectRoot }));
-  }
   const layers = [
     { path: join(input.nativeDirectory, 'mcp.json'), cwd: input.workingDirectory },
     { path: join(projectRoot, '.mcp.json'), cwd: projectRoot },
@@ -105,6 +119,26 @@ export async function resolveKimiMcpSurface(input: {
       ? [{ path: join(input.workingDirectory, '.mcp.json'), cwd: input.workingDirectory }]
       : []),
   ];
-  await denyUnapprovedNativeServers(servers, layers);
-  return servers;
+  // A member-wide denial takes precedence over host, project and native sources.
+  const mcpConfig: ProviderMcpConfigPlan =
+    input.mcpSupport === false
+      ? { servers: {}, source: 'capabilities.json', pluginMcpServerNames: [], catCafeMcpServerNames: [] }
+      : await captureProviderMcpConfig({ ...input, provider: 'kimi', projectMcpRoot: projectRoot });
+  await denyUnapprovedNativeServers(mcpConfig.servers, layers);
+  return structuredClone({ nativeDirectory: input.nativeDirectory, mcpConfig, projectRoot, denialLayers: layers });
+}
+
+/** Native auto-discovery cannot be disabled: fresh lower layers may only add denials, never permissions. */
+export async function resolveKimiMcpSurface(
+  input: Parameters<typeof captureKimiMcpSurface>[0] & {
+    frozenKimiMcpConfig?: KimiMcpConfigPlan;
+  },
+): Promise<Record<string, Server>> {
+  const plan = input.frozenKimiMcpConfig ?? (await captureKimiMcpSurface(input));
+  if (!plan.mcpConfig) return {};
+  if ((await kimiProjectRoot(input.workingDirectory)) !== plan.projectRoot)
+    throw new Error('Kimi native project root changed since admission; retry this invocation.');
+  const servers = structuredClone(plan.mcpConfig.servers);
+  await denyUnapprovedNativeServers(servers, plan.denialLayers);
+  return materializeProviderMcpConfig({ ...plan.mcpConfig, servers }, input).servers;
 }

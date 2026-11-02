@@ -1,9 +1,63 @@
 import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
-import { PluginAgentClientsField } from '../PluginAgentClientsField';
+import { agentClientConfigurationError, PluginAgentClientsField } from '../PluginAgentClientsField';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
+
+const fixedClient = { id: 'codeagent', name: 'CodeAgent', command: 'codeagent', startupArgs: ['--acp'] };
+
+it('edits a standalone connection without adding clients or changing its contribution ID', () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  function Harness() {
+    const [value, onChange] = useState('{}');
+    return (
+      <>
+        <PluginAgentClientsField value={value} fixedClient={fixedClient} onChange={onChange} />
+        <output>{value}</output>
+      </>
+    );
+  }
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    act(() => root.render(<Harness />));
+    expect(container.querySelector<HTMLInputElement>('[aria-label="客户端 1 命令"]')?.value).toBe('codeagent');
+    expect(
+      [...container.querySelectorAll('button')].some((button) => /添加|移除此客户端/.test(button.textContent!)),
+    ).toBe(false);
+    const field = container.querySelector<HTMLInputElement>('[aria-label="客户端 1 命令"]')!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'D:/Agents/codeagent.exe');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(JSON.parse(container.querySelector('output')!.textContent!)).toEqual({ command: 'D:/Agents/codeagent.exe' });
+    const permission = container.querySelector<HTMLSelectElement>('[aria-label="客户端 1 权限请求"]')!;
+    act(() => {
+      permission.value = 'auto_allow';
+      permission.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const saved = container.querySelector('output')!.textContent!;
+    expect(JSON.parse(saved)).toEqual({ command: 'D:/Agents/codeagent.exe', permissionPolicy: 'auto_allow' });
+    act(() => root.render(<PluginAgentClientsField value={saved} fixedClient={fixedClient} onChange={vi.fn()} />));
+    expect(container.querySelector<HTMLInputElement>('[aria-label="客户端 1 ID"]')?.value).toBe('codeagent');
+    expect(container.querySelector<HTMLInputElement>('[aria-label="客户端 1 命令"]')?.value).toBe(
+      'D:/Agents/codeagent.exe',
+    );
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+  }
+});
+
+it('validates standalone overrides without interpreting them as a client list', () => {
+  expect(agentClientConfigurationError('{}', fixedClient)).toBeUndefined();
+  expect(agentClientConfigurationError('{"command":"D:/Agents/codeagent.exe"}', fixedClient)).toBeUndefined();
+  expect(agentClientConfigurationError('{"id":"other"}', fixedClient)).toBeTruthy();
+  expect(agentClientConfigurationError('{"permissionPolicy":"unknown"}', fixedClient)).toBeTruthy();
+});
 
 it('creates fixed unique IDs without asking for one, and retains old IDs and launch options on rename', () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);

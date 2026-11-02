@@ -45,11 +45,12 @@ describe('PATCH /api/config (F4 hot-reload)', () => {
   }
 
   async function patchConfig(payload, headers = {}) {
+    const current = await app.inject({ method: 'GET', url: '/api/config' });
     return app.inject({
       method: 'PATCH',
       url: '/api/config',
       headers: { 'x-cat-cafe-user': 'config-admin', ...headers },
-      payload,
+      payload: { ...payload, expectedRevision: current.json().revisions[payload.key] },
     });
   }
 

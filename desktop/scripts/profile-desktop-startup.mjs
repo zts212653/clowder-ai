@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isStartupProgramPath } from '../api-startup-read-ahead.mjs';
@@ -66,7 +67,8 @@ export async function profileDesktopStartup(sourceRoot, frozenRoot, { profileRoo
     throw new Error('Invalid profile deadline');
   sourceRoot = fs.realpathSync(sourceRoot);
   frozenRoot = fs.realpathSync(frozenRoot);
-  profileRoot ??= path.join(path.dirname(frozenRoot), `.startup-profile-${randomUUID()}`);
+  // A fresh installed project must not inherit the surrounding source Git repo.
+  profileRoot ??= path.join(os.tmpdir(), `clowder-startup-profile-${randomUUID()}`);
   profileRoot = path.resolve(profileRoot);
   if (fs.existsSync(profileRoot)) throw new Error('Preserve previous startup profile evidence');
   fs.mkdirSync(profileRoot);

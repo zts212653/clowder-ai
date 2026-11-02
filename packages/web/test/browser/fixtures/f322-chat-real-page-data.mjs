@@ -112,6 +112,7 @@ export function createChatProofApi(now = Date.now(), crowded = false, surface = 
     requests.push({ method, path: url.pathname, search: url.search, body });
     if (url.pathname === '/api/session') return reply({ userId: 'owner-proof', csrfToken: 'fixture-only' });
     if (url.pathname === '/api/config/chat-background' && method === 'GET') return reply({ threads: {} });
+    if (url.pathname === '/api/plugin-ui' && method === 'GET') return reply({ entries: [] });
     if (url.pathname === '/api/config/process-talk' && method === 'GET')
       return reply({ ownerUserId: 'owner-proof', mode: 'whole' });
     if (url.pathname === '/api/plugins/official.collective-connector/connections' && method === 'GET')

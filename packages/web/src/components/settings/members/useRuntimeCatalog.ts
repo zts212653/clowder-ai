@@ -7,6 +7,8 @@ export interface MemberCatalog {
   models: Array<MemberChoice & { efforts?: MemberChoice[] }>;
   defaultModel?: string;
   defaultModelLabel?: string;
+  defaultModelStatus?: 'reported' | 'unreported' | 'unavailable';
+  contextDelivery?: 'prompt_compatibility';
   defaultEffort?: string;
   selectedModel?: string;
   effortOptions?: MemberChoice[];
@@ -23,7 +25,9 @@ export function useRuntimeCatalog(
   const lastRefresh = useRef(refresh);
   const [result, setResult] = useState<{ key: string; context: string; data: MemberCatalog } | null>(null),
     [loading, setLoading] = useState(false);
-  const requestedModel = runtimeId === 'dsh' || runtimeId === 'pi' || runtimeId?.startsWith('acp:') ? model : '';
+  const plugin = runtimeId?.startsWith('plugin:');
+  const requestedModel =
+    runtimeId === 'dsh' || runtimeId === 'pi' || runtimeId?.startsWith('acp:') || plugin ? model : '';
   const key = JSON.stringify([runtimeId, catId, accountRef, requestedModel, customStartup]);
   const context = JSON.stringify([runtimeId, catId, accountRef, customStartup]);
   useEffect(() => {
@@ -35,13 +39,12 @@ export function useRuntimeCatalog(
     setLoading(true);
     const force = refresh !== lastRefresh.current;
     lastRefresh.current = refresh;
-    apiFetch('/api/cats/runtime-models', {
+    apiFetch(plugin ? '/api/agent-providers/models' : '/api/cats/runtime-models', {
       method: 'POST',
       signal: controller.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        runtimeId,
-        catId,
+        ...(plugin ? { ref: runtimeId } : { runtimeId, catId }),
         accountRef: accountRef || undefined,
         model: requestedModel || undefined,
         customStartup,
@@ -75,6 +78,14 @@ export function useRuntimeCatalog(
                     status: 'configured',
                     effortOptions: previous.key === key ? previous.data.effortOptions : undefined,
                     message: 'refresh_failed',
+                    ...(previous.data.defaultModelStatus === undefined
+                      ? {}
+                      : {
+                          defaultModel: undefined,
+                          defaultModelLabel: undefined,
+                          selectedModel: undefined,
+                          defaultModelStatus: 'unreported' as const,
+                        }),
                   }
                 : { status: 'unavailable', models: [], message: 'discovery_failed' },
           }));
@@ -83,7 +94,7 @@ export function useRuntimeCatalog(
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [key, context, refresh, runtimeId, catId, accountRef, requestedModel, customStartup]);
+  }, [key, context, refresh, runtimeId, catId, accountRef, requestedModel, customStartup, plugin]);
   return {
     catalog:
       result?.key === key

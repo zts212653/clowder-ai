@@ -824,7 +824,7 @@ describe('writeOpenCodeRuntimeConfig', () => {
         hasBaseUrl: true,
       });
 
-      assert.match(configPath, /\.cat-cafe\/oc-config-opencode-maas-inv-123\/opencode\.json$/);
+      assert.match(configPath.replaceAll('\\', '/'), /\.cat-cafe\/oc-config-opencode-maas-inv-123\/opencode\.json$/);
       assert.ok(existsSync(configPath), 'opencode.json must exist at returned config path');
       const content = JSON.parse(readFileSync(configPath, 'utf-8'));
       assert.equal(content.model, 'maas/glm-5');

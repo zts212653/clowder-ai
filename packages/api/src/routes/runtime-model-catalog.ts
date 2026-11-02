@@ -1,3 +1,5 @@
+import { reportedSessionModel } from '../domains/cats/services/agents/providers/acp/session-configuration.js';
+
 /** Only advertised capabilities are selectable; configured values are a separate fallback. */
 export interface CatalogOption {
   value: string;
@@ -13,6 +15,7 @@ export interface RuntimeModelCatalog {
   models: CatalogModel[];
   defaultModel?: string;
   defaultModelLabel?: string;
+  defaultModelStatus?: 'reported' | 'unreported' | 'unavailable';
   defaultEffort?: string;
   selectedModel?: string;
   effortOptions?: CatalogOption[];
@@ -41,12 +44,22 @@ export function acpOption(session: unknown, category: string) {
     (item) => item.category === category || item.id === (category === 'thought_level' ? 'reasoning_effort' : category),
   );
 }
-export function parseAcpCatalog(session: unknown, defaults: unknown, requested?: string): RuntimeModelCatalog {
+export function parseAcpCatalog(session: unknown, defaults: unknown, _requested?: string): RuntimeModelCatalog {
   const model = acpOption(session, 'model');
   const effort = acpOption(session, 'thought_level');
   const legacy = record(record(session).models);
-  const defaultModel =
-    text(acpOption(defaults, 'model')?.currentValue) ?? text(record(record(defaults).models).currentModelId);
+  const reportedDefault = reportedSessionModel(record(defaults));
+  const defaultChoices = acpOption(defaults, 'model')
+    ? acpChoices(acpOption(defaults, 'model')?.options).map((item) => item.value)
+    : rows(record(record(defaults).models).availableModels).flatMap((item) =>
+        typeof item.id === 'string' ? [item.id] : [],
+      );
+  const defaultModelStatus = !reportedDefault
+    ? 'unreported'
+    : defaultChoices.length && !defaultChoices.includes(reportedDefault)
+      ? 'unavailable'
+      : 'reported';
+  const defaultModel = defaultModelStatus === 'reported' ? reportedDefault : undefined;
   const defaultModelLabel = acpChoices(acpOption(defaults, 'model')?.options).find(
     (item) => item.value === defaultModel,
   )?.label;
@@ -59,9 +72,10 @@ export function parseAcpCatalog(session: unknown, defaults: unknown, requested?:
     status: models.length ? 'live' : 'unavailable',
     models,
     defaultModel,
+    defaultModelStatus,
     defaultModelLabel,
     defaultEffort: text(acpOption(defaults, 'thought_level')?.currentValue),
-    selectedModel: requested || text(model?.currentValue) || text(legacy.currentModelId),
+    selectedModel: reportedSessionModel(record(session)),
     ...(model ? { effortOptions: effort ? acpChoices(effort.options) : [] } : {}),
   };
 }

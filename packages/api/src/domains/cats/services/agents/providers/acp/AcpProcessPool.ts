@@ -47,7 +47,8 @@ export interface AcpLease {
   readonly canResumeRequestedSession?: boolean;
   /** End only this turn's MCP instances; retire an exclusive carrier without session/close. */
   closeTurn(sessionId: string): Promise<void>;
-  release(): void;
+  /** Resolve only after any retirement caused by this lease has actually completed. */
+  release(): Promise<void>;
 }
 
 export interface AcpAcquireOptions {
@@ -485,11 +486,11 @@ export class AcpProcessPool {
         }
       },
       release: () => {
-        if (released) return;
+        if (released) return this.retirements.wait(serializeKey(poolKey));
         released = true;
         // Stale lease guard: generation mismatch means this lease was force-released
         // and a new lease has been issued on the same entry. The old release is a no-op.
-        if (entry.leaseGeneration !== creationGeneration) return;
+        if (entry.leaseGeneration !== creationGeneration) return this.retirements.wait(serializeKey(poolKey));
         // Persist session-scoped poison before either returning a multiplexed
         // carrier to the pool or retiring a single-flight carrier.
         this.sealUnsafeSessionsForEntry(entry, poolKey);
@@ -499,7 +500,7 @@ export class AcpProcessPool {
         // while the lease is still counted active, then let the next acquire spawn.
         if (!this.supportsMultiplexing && entry.client.isSafeForSingleFlightReuse === false) {
           this.retireEntry(entry, poolKey, 'cancelled prompt still unquiesced');
-          return;
+          return this.retirements.wait(serializeKey(poolKey));
         }
         entry.leaseCount--;
         this._metrics.activeLeaseCount--;
@@ -512,6 +513,7 @@ export class AcpProcessPool {
             this.startIdleTimer(entry, poolKey);
           }
         }
+        return this.retirements.wait(serializeKey(poolKey));
       },
     };
   }

@@ -66,6 +66,8 @@ export async function prepareAgyAcpSession(input: {
   if (!profile.autoApprove && !profile.trustedWorkspaces?.some((path) => realpathSync(path) === workspaceRoot))
     throw new Error('AGY ACP workspace requires operator admission');
   const body = await l0CompilerFn({
+    frozenInput: options?.frozenL0Input,
+    requireFrozenInput: true,
     catId: input.catId,
     userId: options?.callbackEnv?.CAT_CAFE_USER_ID ?? options?.auditContext?.userId,
     projection: 'owner',

@@ -184,10 +184,15 @@ test('the carrier stays frozen across a later account switch and cannot consume 
   );
   const carrier = freezeExecutionAccountBinding({
     catId: 'first',
-    catConfig: f.configs.first,
+    catConfig: { ...f.configs.first, mcpSupport: false },
     workspace: { usesDefaultWorkspace: false, workingProjectRoot: f.root },
   });
   assert.equal(carrier.resolvedAccount.id, 'main-private-ref');
+  // This account-only fixture models an admitted Host with MCP disabled.
+  const executionBinding = Object.freeze({
+    ...carrier,
+    sharedMcpLaunch: Object.freeze({ transport: 'shared' }),
+  });
   assert.ok(Object.isFrozen(carrier.resolvedAccount.codex.identity));
   assert.equal(carrier.executionAccount.accountRevision, carrier.codexAccountLaunch.accountRevision);
   const a = await f.source.load({
@@ -239,7 +244,7 @@ test('the carrier stays frozen across a later account switch and cannot consume 
       prompt: 'Controlled frozen carrier regression',
       service,
       isLastCat: true,
-      executionBinding: carrier,
+      executionBinding,
     },
   )) {
     /* actual provider boundary */

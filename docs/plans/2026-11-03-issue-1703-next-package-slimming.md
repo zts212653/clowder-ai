@@ -13,9 +13,8 @@ status: draft-validation
 在保留 Next、现有功能及离线内容的前提下，只优化现行归档压缩、真实 node-pty 的已知异平台 prebuilds 和两项构建缓存。
 依据：[原 Issue](https://github.com/zts212653/clowder-ai/issues/1703)、[维护者范围确认](https://github.com/zts212653/clowder-ai/issues/1703#issuecomment-6344242927)、[原 Draft PR #1722](https://github.com/zts212653/clowder-ai/pull/1722) 及本次用户指令。
 
-2026-11-03 通过远端查询冻结 `next@917120d55bb5bf618a3cc49c0749d5f5172ace46`。
-PR #1722 当前为 Draft，作者及认证账号均为 `whutzefengxie-ops`，有 push 权限，head 为 `224da1e1d81afaa43ad0b09a1f6900f9a4533c40`，base 仍为 main。
-远端 conversation/review 当前为空；旧文档记录的本地独立审查只属于旧源码，不能用作新 HEAD 的批准。
+2026-11-03 最新基线为 `next@1016aa7a316566893cacef84d49792a8ced0f0c8`。等待第一轮 CI 期间 #1762 合入，原 `917120d5` 上的60.47 MB已撤回当前收益口径，详见不可变 [第一轮记录](https://github.com/whutzefengxie-ops/clowder-ai/blob/e1db9ad24b1095085a82938a601d1fc18f7ae98d/docs/plans/2026-11-03-issue-1703-next-package-slimming-validation.md)。
+PR #1722 保持 Draft，作者及认证账号均为 `whutzefengxie-ops`，有 push 权限，base 已为 next。第一轮独立 review 与CI只绑定旧HEAD `e1db9ad24b1095085a82938a601d1fc18f7ae98d`，不继承至新整合HEAD。
 原实现来自 `550ad037b18667f3c6e20f32a1c4069dd62f850f`，公共代码提交为 `c482cbef6dcb82eae032bbb6fd5ad1b8e96ecc69`。
 旧约 60 MB 是旧输入实测，当前收益从零开始测量。
 
@@ -30,8 +29,8 @@ PR #1722 当前为 Draft，作者及认证账号均为 `whutzefengxie-ops`，有
 
 最新 next 的 helper 仍为 gzip 1；仅排除 webpack cache；未有 native-runtime-assets 过滤，三项均未覆盖。
 Next trace、共享依赖选择、ASAR 已在现行链中，不再算新增收益。
-#1748 已入 develop，相关 SDK/启动归档增量尚未进入当前 next；#1762 仍开放且碰到归档/export 文件。
-本轮不搬 #1748/#1762 的 SDK 外置或角色架构；若集成基线移动，重新检查本片重叠，不能叠加两个不同输入的收益。
+#1762 现已将 #1748 等集成带入 next：materialize 已排除已知 Claude native 平台包，archive helper 新增旧部署 native 包拒绝。两项是既有基线行为，本片保留原样，不能把其字节减少算作本片收益。
+本片相对最新 next 仍只改变三项优化，不新增 SDK 外置或角色架构；保留上游新 guard 和导出排除，新增 `claude-runtime-packaging.test.mjs` 作为回归消费，不修改它。
 #1553/#1452/#1702 涉及相邻安装/构建链，不整体引入。
 
 ## 最小文件范围与复用
@@ -55,7 +54,7 @@ Architecture cell: desktop distribution；Map delta: none；Why: 只改变既有
 5. **实际构建**：提交干净源码后执行 `powershell -NoProfile -ExecutionPolicy Bypass -File desktop/scripts/build-desktop.ps1 -SkipPortableZip`。保留 guard、锁文件、API/Web 身份与失败日志，记录 node/pnpm/Electron/Inno 版本和 lock SHA。
 6. **同输入对照**：候选与基线共用本轮 API/Web/MCP/Electron/Node/Redis/直接资源。从本轮 frozen workspace/Web 恢复且仅恢复五类异平台 prebuilds 与两项 cache，用原 helper gzip 1 重出五归档，共用同一 Node 归档、Inno 编译器及其余内容，生成两份实际 EXE。不是 base 全量重构建，也不是正式回退包。
 7. **逐文件保真**：解开/遍历六个真实归档，比较普通文件相对路径、长度、SHA-256；symlink 等非普通 entry 也核对类型和目标。只允许确认过的两类内容消失；保留内容零改写、零新增、零意外删除。核对原生目标、PDB/maps、public/PWA/ONNX/VAD/WASM/音视频和离线文档。
-8. **生产解包与原生**：以实际随包 Node + 生产解包器核对完整性及失败拒绝，再做 SQLite 内存查询、sharp 编解码、node-pty/ConPTY 中文输入/连续输出/resize/退出/重开、SDK import/版本。只用自建 HOME/状态，不连接用户 DB 或原生历史。
+8. **生产解包与原生**：以实际随包 Node + 生产解包器核对完整性及失败拒绝，再做 SQLite 内存查询、sharp 编解码、node-pty/ConPTY 中文输入/连续输出/resize调用/退出/重开、SDK wrapper import。最新基线已外置 native CLI，不把包内缺少该程序视为本片删能力，也不继承第一轮CLI版本检查。只用自建 HOME/状态，不连接用户 DB 或原生历史。
 9. **既有运行能力**：若本轮可安全复用既有隔离 harness，使用实际包的 ServiceManager、自有 HOME/data/端口运行 Redis/API/Web，检查路由、媒体 MIME/Range 和离线资源哈希，及时受控停止并核对端口。HTTP ready 只计组件 smoke。
 10. **完整安装验收**：需要现有、可恢复的隔离 Windows VM/专机，以新程序/数据目录断公网首装；从明确受支持旧版升级合成历史；故障注入验证中断/损坏包后数据不丢、拒绝误报成功并可恢复。真实安装 UI、首启、媒体/离线首次使用分别留证。不创建快捷方式/开机项，不使用当前用户安装环境。若无可用环境，明确三项缺失，保持 Draft，不申请新权限或购买资源。
 11. **自检与独立 review**：核对最终 diff、范围、收益和缺项，提交给非作者独立 reviewer，锚定 exact HEAD；作者不提交 Approval。远端 CI、工件及结论都绑定实际源码，文档 HEAD 与构建 SHA 不同则明确说明。
@@ -73,7 +72,7 @@ Architecture cell: desktop distribution；Map delta: none；Why: 只改变既有
 源码可通过撤销本片恢复旧 gzip/filter，不改安装器、数据格式或配置，不对业务执行自动重放。
 若保真或 native/资源检查失败，停止该候选，不以小包抵消回归；恢复被排除路径重打包复验。
 现有用户安装、runtime、HOME、认证、角色、会话、Redis/AOF/RDB、SQLite、上传、旧回退包永久保护。
-本轮所有 EXE/日志集中 `G:/AIwork/clowder-ai/artifacts/issue-1703-next-20261103/`，实例台账记录 owner、source SHA、包版本/SHA、程序/data、端口/PID/用途及保留理由。
+新基线所有 EXE/日志集中 `G:/AIwork/clowder-ai/artifacts/issue-1703-next-20261103/latest-next-1016aa7a/`，实例台账记录 owner、source SHA、包版本/SHA、程序/data、端口/PID/用途及保留理由。父目录仅为第一轮历史证据，不能混用；其重复程序副本因自动审批拒绝删除而登记保留至2026-11-17。
 本轮默认保留候选包与一份同输入对照（只供比较，不冒称可用回退）、当前构建工位和必要证据；不清理其他任务产物。自有服务结束即停，不按通用进程名结束进程。
 工位具名保留供 Draft 验收与 review；验收完后核对身份/持久数据/reparse 边界再按归属收尾。
 
