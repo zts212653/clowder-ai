@@ -553,7 +553,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         });
         return reply.code(409).send({
           code: 'ROUTING_CONFIRMATION_REQUIRED',
-          error: '指定角色当前不可用，请确认实际接收者后再发送。',
+          error: preview.targetCats.length
+            ? '指定角色当前不可用，请确认实际接收者后再发送。'
+            : '指定角色当前不可用，且没有有效接替成员，请选择可用角色后再发送。',
+          ...(preview.routingWarnings ? { routingWarnings: preview.routingWarnings } : {}),
           unavailable: (preview.unavailableTargets ?? []).map(present),
           targets: preview.targetCats.map(present),
         });

@@ -838,7 +838,7 @@ export class AgentRouter {
     // First admission validates the whole explicit request. A bound Queue row
     // instead settles each recipient, so an invalid sibling cannot cancel healthy work.
     const resolved = options?.bound
-      ? requestedCatIds.flatMap((id) => this.resolveAdmissionTargets([id]))
+      ? requestedCatIds.flatMap((id) => this.resolveAdmissionTargets([id])).filter((id) => this.isRoutableCat(id))
       : this.resolveAdmissionTargets(requestedCatIds);
     if (!options?.bound && resolved.length !== requestedCatIds.length) return [];
     if (options?.persist && this.threadStore) {
@@ -862,7 +862,10 @@ export class AgentRouter {
     threadId: string,
     content = '',
   ): Promise<CatId[]> {
-    if (requestedCatIds.length > 0) return requestedCatIds.flatMap((id) => this.resolveAdmissionTargets([id], true));
+    if (requestedCatIds.length > 0)
+      return requestedCatIds
+        .flatMap((id) => this.resolveAdmissionTargets([id], true))
+        .filter((id) => this.isRoutableCat(id));
     const explicit = await this.parseAllMentions(content, threadId, { allowGroupFallback: false });
     if (explicit.mentions.length > 0 || explicit.routing_warnings.length > 0) return explicit.mentions;
     return (await this.resolveImplicitTargetPreview(content, threadId)).targetCats;
@@ -1231,8 +1234,16 @@ export class AgentRouter {
             ...routing_warnings.flatMap((warning) => (warning.kind === 'cat_disabled' ? [warning.catId] : [])),
           ]
         : [];
+      // A disabled explicit identity may propose its configured successor, but
+      // public admission still requires confirmation before either identity is written.
+      const suggestions = options?.publicConversation
+        ? this.filterRoutableCats(
+            routing_warnings.flatMap((warning) => (warning.kind === 'cat_disabled' ? [warning.catId] : [])),
+          )
+        : [];
       return {
-        targetCats: targets,
+        targetCats: [...new Set([...targets, ...suggestions])],
+        ...(routing_warnings.length ? { routingWarnings: routing_warnings } : {}),
         reason: { kind: 'current_message_mentions' },
         ...(unavailableTargets.length ? { unavailableTargets, requiresConfirmation: true } : {}),
       };

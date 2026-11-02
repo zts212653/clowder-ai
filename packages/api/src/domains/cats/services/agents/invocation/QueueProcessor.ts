@@ -4108,11 +4108,9 @@ export class QueueProcessor {
   private async resolveQueuedConversationTargets(entry: QueueEntry): Promise<string[]> {
     const sources = await Promise.all(queueEntryMessageIds(entry).map((id) => this.deps.messageStore.getById(id)));
     const requestedTargets = queueEntryTargetCats(entry);
-    const targets = await this.deps.router.resolveConversationTargetsAtAdmission(
-      requestedTargets,
-      entry.threadId,
-      entry.payload.content,
-    );
+    const targets = requestedTargets.length
+      ? await this.deps.router.resolveExplicitTargets(requestedTargets, entry.threadId, { bound: true })
+      : await this.deps.router.resolveConversationTargetsAtAdmission([], entry.threadId, entry.payload.content);
     // Intake may choose a fallback; a persisted Queue recipient is already bound.
     // If it disappears, settle its failure instead of asking claimPrefix to acquire
     // a different recipient (which correctly refuses and would leave the row stuck).

@@ -10,14 +10,14 @@ created: 2026-11-03
 来源：[Issue #1292](https://github.com/zts212653/clowder-ai/issues/1292)、
 [接受决定](https://github.com/zts212653/clowder-ai/issues/1292#issuecomment-5176620388)、
 [旧 PR 正式审查](https://github.com/zts212653/clowder-ai/pull/1283#pullrequestreview-4845590194)。
-基线：`upstream/next@917120d55bb5bf618a3cc49c0749d5f5172ace46`。
+基线：`upstream/next@1016aa7a316566893cacef84d49792a8ced0f0c8`。
 替代旧 #1283 的有效契约，不整体移植其 65 文件；旧分支和未提交现场不改动。
 
 ## 已实现与缺失
 
 | 边界 | next 当前状态 | 本次处置 |
 | --- | --- | --- |
-| 显式 mention | F293 保留 catalog 身份，但 parser 不再产出 disabled warning；普通 send 可能 fallback | 恢复结构化 warning，禁用显式目标不改投 |
+| 显式 mention | F293 保留 catalog 身份，#1762 已要求改发确认；disabled warning 与 successor 投影仍缺失 | 恢复结构化 warning，禁用显式目标不改投 |
 | 隐式目标 | preferred、历史 mention、最近回复、policy 只过滤 available，没有 successor | 复用中央解析，一跳规范化消费，不改历史记录 |
 | default | runtime/env 无效时回落其他默认，空配置可能选第一个注册成员或 sentinel | 配置选中的目标无有效 successor 即 no-target |
 | 系统输入 | podcast 仍请求 opus；enqueueDurable 直接持久化目标 | 首次持久化前使用相同解析，拒绝空/假身份 |
@@ -29,7 +29,7 @@ created: 2026-11-03
 
 ## 当前调用链与复用点
 
-1. 用户 send：`messages.ts → AgentRouter.resolveTargetsAndIntent / resolveExplicitTargets
+1. 用户 send：`messages.ts → previewTargets / confirmedTargetCats → AgentRouter.resolveTargetsAndIntent / resolveExplicitTargets
    → InvocationQueue.send → resolveSendTargets → MessageStore + QueueLedger` 原子写。
 2. 隐式 preview/send：`resolveImplicitTargetPreview → preferred / previous mentions /
    participants → applyThreadRoutingPolicy → configured default`。
@@ -51,7 +51,7 @@ pre-resolved 校验，覆盖 async、notice 与内存同步 admission。不会�
 - `__none__` 仅保留旧 default API 的兼容返回；解析为无目标，不能 admission 或执行。
 - 显式 mention 返回 cat_disabled，canonical successor 是首项建议；用户确认后的新目标才可执行。
 - 用户指定、whisper、message_wake、scope、action fence、wait continuation、cloud provenance、
-  live session 的身份约束保持 exact，不能因为 successor 扩展权限。
+  live session、allowConversationFallback:false 的身份约束保持 exact，不能因为 successor 扩展权限。
 - 无上述身份约束的系统 conversation_input / private_input，在首次 admission 前规范化预解析目标。
 - 公共历史/preferred/policy 在读取时投影 successor；不写回历史或用户成员配置。
 - 已落 Queue 的 targets 是收件人与投递/claim/CAS 的权威。重放保持赢家；配置变化使其失效时
@@ -119,7 +119,7 @@ receipt 的方法。唯一 successor 算法位于 config loader，所有隐式�
 
 | 契约 | 作者验证 |
 | --- | --- |
-| 显式禁用 mention | HTTP → Queue → drain；cat_disabled + canonical 建议，未执行/未新增参与者 |
+| 显式禁用 mention | HTTP 409 + 零写入；cat_disabled + canonical 建议，确认后仅执行新目标 |
 | 混合 mention / 选中成员 | 可用 mention 保留；明确选中的禁用身份在写入前拒绝 |
 | 隐式 default / runtime override | 唯一有效一跳 successor；override 仍保持其优先权 |
 | 无效关系 | missing、unknown、self、disabled intermediate、sentinel、未注册目标均 no-target |
@@ -135,10 +135,10 @@ receipt 的方法。唯一 successor 算法位于 config loader，所有隐式�
 | sentinel / 假身份 | admission、直接 execution、注册 alias 三条边界均拒绝 |
 | catalog / lead | runtime-owned successor、lead、launch metadata 保持权威；不继承 lead |
 
-作者最终验证：相关 23 文件 **559/559**，独立 Redis 两文件 **23/23**；
-API build（含 shared/MCP 与 TypeScript）exit 0；29 个代码/测试文件 Biome exit 0；
-git diff --check exit 0。4 个新增 `.test.js` 均由 public resolver 选中，CI 的 next PR
-触发条件已确认；Redis 测试在 CI 使用已有的 owned portless fixture，实际执行而非 skip。
+更新基线前作者验证：相关 56 文件 **698/698**，独立 Redis 两文件 **23/23**；
+API build（含 shared/MCP 与 TypeScript）、Biome 与 diff check 通过。
+更新至 #1762 后增加确认交叉回归，并以最终 HEAD 的重新验证结果为准；新增 `.test.js` 均由
+public resolver 选中。Redis 测试在 CI 使用已有的 owned portless fixture，实际执行而非 skip。
 所有新增文件 ≤350 行；既有大型文件仅修改上述边界，未扩成无关拆分。
 
 旧 agent-router 测试中两条“任意 fallback”断言按已接受契约更新；同文件的协作标题断言
@@ -146,10 +146,11 @@ git diff --check exit 0。4 个新增 `.test.js` 均由 public resolver 选中�
 Windows 分隔符。仅给实际失败的旧 HTTP router 替身补齐既有 routing_warnings 字段，
 没有在生产逻辑中为不完整替身增加防御分支。
 
-在飞重叠已核对到文件/patch：#1762 涉及 Queue.send 的 explicit confirmation；#1702 增加
+重叠已核对到文件/patch：#1762 已合入当前基线，提供 explicit confirmation、收件人冻结
+和 runtime service 引用更新；本单保留其全部 11 项确认测试。#1702 增加
 display alias；#1432 增加 terminal producer capability；#1157 是旧 Queue 内存幂等逻辑。
-它们没有提供本次一跳 successor admission；本 PR 不搬运其未合入内容。后续合并时应保留
-这些各自契约，尤其 #1762 的确认状态不可被 successor 解释为用户已同意改发。
+它们没有提供本次一跳 successor admission；本 PR 不搬运其未合入内容。
+#1762 的确认状态不可被 successor 解释为用户已同意改发。
 
 验证边界：上述是隔离 HTTP、真实生产类、内存/Redis ledger 的集成检查，模型服务为假服务；
 不声称已通过真实模型、生产 Redis、TTS 音色或部署验收。podcast 的 TTS speaker 标签属于
@@ -169,7 +170,17 @@ display alias；#1432 增加 terminal producer capability；#1157 是旧 Queue �
 | Steer | reconcile/target expansion 绕过首次 admission；新增目标复用 exact validator，参与者只消费已提交 target | 真实 Queue targets HTTP API 不落入 ghost / sentinel |
 | 普通 scheduler | 只覆盖 privateContent；无 authority fence 的普通系统输入也应在首次 admission 解析 | createDeliverFn → PersistedQueueDelivery → Queue 的普通/私有分支一致 |
 
-CI 的额外失败还揭示：catalog 可用但 provider 不可用的显式 mention 必须保留原身份并报告
-不可用原因；preview、HTTP 和 plugin 现保持一致。没有为了通过测试重新引入任意 fallback。
+第二轮独立审查指出 mixed bound targets 的一个失效成员会拖累健康成员：首次 admission
+仍整组验证，消费已绑定行时逐项结算。Queue 的 private/public/message_wake 三类真实入口均
+验证健康 codex / 已在原组中的 successor 各执行一次、坏目标单独失败、行最终退休；
+失败 hook 仅通知对应收件人。已绑定 conversation 直接复用 bound exact resolver，避免把
+旧目标投影到同组 successor 后重复消费。
+
+新基线 #1762 的 named provider 不可用时，公开 HTTP 必须先 409，不能直接写入旧身份或
+建议目标。禁用 mention 的唯一有效 successor 只作为确认建议；confirmedTargetCats 优先于
+原正文，allowConversationFallback:false 阻止系统目标在首次 admission 被解释为隐式。
 这一轮新增消费了既有 immutable receipt，没有增加持久字段、缓存、迁移或第二套路由。
+更新基线后的交叉回归先观察到 warning 丢失、冻结标记被改投、不可用服务消费和重放
+再次校验当前配置等失败，再最小修复。public source 重放探测只构造原身份，不进行
+首次 admission 校验；实际匹配仍消费存储返回的赢家与原 producer envelope。
 所有 code findings 待非作者对后续精确 HEAD 复审，作者不自行 Approval。

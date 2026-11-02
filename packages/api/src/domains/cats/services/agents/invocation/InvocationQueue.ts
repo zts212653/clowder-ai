@@ -411,6 +411,7 @@ export class InvocationQueue {
       input.from.kind === 'system' &&
       (input.kind === 'private_input' || input.kind === 'conversation_input') &&
       !input.exactTargets &&
+      input.allowConversationFallback !== false &&
       !input.executionScope &&
       !input.actionSuccessorFence &&
       !input.waitContinuationCarrier &&
@@ -879,6 +880,7 @@ export class InvocationQueue {
           replayEntries,
           reuseResolvedTargets,
           reuseProse ? (replay?.payload.requestedTargetCats ?? replaySource.mentions) : requestedTargetCats,
+          !replaySource,
         );
       },
       this.ledgerStore,
