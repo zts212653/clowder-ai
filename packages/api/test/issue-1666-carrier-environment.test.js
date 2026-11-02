@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import {
+  createCodexSocketDirectory,
   prepareCodexHostLaunch,
+  removeCodexSocketDirectory,
   spawnCodexAppServerHost,
 } from '../dist/domains/cats/services/agents/providers/CodexUnixWebSocketSession.js';
 import { createDirectAgentCarrierSession } from '../dist/domains/cats/services/agents/providers/DirectAgentCarrierSession.js';
@@ -104,8 +106,8 @@ test(
   'actual Unix host spawn uses its prepared environment after the parent changes',
   { skip: process.platform === 'win32' },
   async (t) => {
-    const root = await mkdtemp(join(tmpdir(), 'issue1666-spawn-'));
-    t.after(() => rm(root, { recursive: true, force: true }));
+    const root = createCodexSocketDirectory();
+    t.after(() => removeCodexSocketDirectory(root));
     const path = join(root, 'env.json');
     const socketPath = join(root, 'host.sock');
     ambient(t, 'HTTP_PROXY', 'http://first.fixture.invalid:3128');
