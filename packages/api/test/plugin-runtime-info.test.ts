@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rmdir } from 'node:fs/promises';
+import { mkdtemp, realpath, rmdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -80,7 +80,7 @@ test('runtime-info returns only current instance facts under an owner request', 
 });
 
 test('ordinary thread projectRef validates directories and preserves parent semantics', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'plugin-project-test-'));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'plugin-project-test-')));
   const store = new ThreadStore();
   const host = createPluginThreadHost({
     pluginId: 'dev.fixture',

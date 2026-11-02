@@ -118,6 +118,7 @@ jobs:
           test/agent-session-contract/unconfirmed-prior-admission.test.js
           test/plugin-ui-stop-publication.test.js
           test/f202-c1-carrier-neutral-lifecycle.test.js
+          test/plugin-runtime-info.test.ts
       - name: Managed Codex layout link diagnostic
         run: >-
           pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
