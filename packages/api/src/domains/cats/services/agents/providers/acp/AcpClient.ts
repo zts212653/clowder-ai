@@ -23,10 +23,10 @@ import { resolveWindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.j
 import { buildUnixSupervisedSpawnPlan } from '../../../../../../utils/cli-supervised-process.js';
 import { PI_BRIDGE_NAME, PI_SESSION_BINDING_ERROR } from '../pi/pi-bridge-contract.js';
 import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
-import { respondToAcpPermission } from './acp-permission-response.js';
 import { type AcpPromptInput, toAcpPromptContent } from './acp-prompt-content.js';
 import { AcpSessionBindingError, ActiveSessionCache } from './active-session-cache.js';
 import { shutdownAcpChild } from './lifecycle/acp-child-shutdown.js';
+import { respondToAcpPermission } from './permissions/acp-permission-response.js';
 import type {
   AcpAgentRequest,
   AcpContentBlock,

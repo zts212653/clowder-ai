@@ -1,5 +1,5 @@
-import type { AcpPermissionHandler } from './AcpClient.js';
-import type { AcpAgentRequest, AcpPermissionRequest, AcpResponse } from './types.js';
+import type { AcpPermissionHandler } from '../AcpClient.js';
+import type { AcpAgentRequest, AcpPermissionRequest, AcpResponse } from '../types.js';
 
 export type AcpPermissionResult = { optionId: string } | { cancelled: true };
 

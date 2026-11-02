@@ -48,6 +48,8 @@ RED 证据包括修订前真实 transport 12 项矩阵中 7 项失败（HTTP 忽
 
 Fallback scanner 按 next 基线的最新报告触发增长提示；新增条件用于缺省配置、原生 guard 分流及取消生命周期，没有增加安装失败后的另一种低信任执行路径。来源和能力由错误的 bundled/builtin 绑定改为共同判定；异常仍报错或取消，未降级为自动允许。最终 scanner 输出保存在同一 artifacts 目录。
 
+新提交 `2e3b717b4` 的首次 CI 暴露 Directory Size Guard：ACP 根目录 26 个文件超过 25 上限。仅将本次新增的两个权限模块归入 permissions 子目录并更新内部引用，根目录降为 24；不新增目录例外、不修改门禁阈值。后续回归和新 CI 以包含该布局修正的 HEAD 为准。
+
 本次未修改用户配置、历史、认证或系统盘/祖先 ACL。没有运行真实企业模型，不重复旧模型调用，不安装测试 EXE；测试 child/server 均限自有临时环境并在退出时关闭。仍需内网验证实际企业 tgz、原生 CodeAgent/RelayAgent、认证、模型/MCP/角色协作和包升级；不关闭插件 Issue #178。
 
 

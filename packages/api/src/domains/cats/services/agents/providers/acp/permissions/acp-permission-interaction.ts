@@ -1,10 +1,10 @@
 import type { RuntimeInteractionOwner } from '@cat-cafe/shared';
 import { z } from 'zod';
-import type { RuntimeInteractionPort } from '../../../../../runtime-interaction/ports/RuntimeInteractionPort.js';
-import { RuntimeInteractionError } from '../../../../../runtime-interaction/RuntimeInteractionError.js';
-import type { AcpPermissionHandler } from './AcpClient.js';
+import type { RuntimeInteractionPort } from '../../../../../../runtime-interaction/ports/RuntimeInteractionPort.js';
+import { RuntimeInteractionError } from '../../../../../../runtime-interaction/RuntimeInteractionError.js';
+import type { AcpPermissionHandler } from '../AcpClient.js';
+import { ACP_METHODS } from '../types.js';
 import { type AcpPermissionResult, defaultAcpPermissionResult } from './acp-permission-response.js';
-import { ACP_METHODS } from './types.js';
 
 const permissionSchema = z.object({
   sessionId: z.string().min(1),

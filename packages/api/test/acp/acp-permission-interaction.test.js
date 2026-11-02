@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import Fastify from 'fastify';
 import { AcpClient } from '../../dist/domains/cats/services/agents/providers/acp/AcpClient.js';
 import { AcpHttpStreamClient } from '../../dist/domains/cats/services/agents/providers/acp/AcpHttpStreamClient.js';
-import { createAcpPermissionHandler } from '../../dist/domains/cats/services/agents/providers/acp/acp-permission-interaction.js';
+import { createAcpPermissionHandler } from '../../dist/domains/cats/services/agents/providers/acp/permissions/acp-permission-interaction.js';
 import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { MessageRuntimeInteractionCardPublisher } from '../../dist/domains/runtime-interaction/RuntimeInteractionCardPublisher.js';
 import { RuntimeInteractionService } from '../../dist/domains/runtime-interaction/RuntimeInteractionService.js';

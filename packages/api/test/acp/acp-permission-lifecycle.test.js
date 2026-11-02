@@ -3,8 +3,8 @@ import { mock, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { AcpAgentService } from '../../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js';
 import { AcpHttpStreamClient } from '../../dist/domains/cats/services/agents/providers/acp/AcpHttpStreamClient.js';
-import { createAcpPermissionHandler } from '../../dist/domains/cats/services/agents/providers/acp/acp-permission-interaction.js';
 import { createAgyAcpPermissionHandler } from '../../dist/domains/cats/services/agents/providers/acp/agy/agy-acp-permission.js';
+import { createAcpPermissionHandler } from '../../dist/domains/cats/services/agents/providers/acp/permissions/acp-permission-interaction.js';
 import { RuntimeInteractionService } from '../../dist/domains/runtime-interaction/RuntimeInteractionService.js';
 import { InMemoryRuntimeInteractionStore } from '../../dist/domains/runtime-interaction/stores/InMemoryRuntimeInteractionStore.js';
 

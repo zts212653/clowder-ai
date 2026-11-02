@@ -1,6 +1,6 @@
 import { deploymentDefaults } from '@cat-cafe/shared';
 import { isInvocationBoundMcpLaunch } from '../session-credential-file.js';
-import { createAcpPermissionHandler } from './acp-permission-interaction.js';
+import { createAcpPermissionHandler } from './permissions/acp-permission-interaction.js';
 /**
  * AcpAgentService — Generic AgentService implementation backed by ACP protocol.
  *
