@@ -4,17 +4,7 @@ import { resolve } from 'node:path';
 import { writeTextAsset } from './vendor-asset-publication.mjs';
 
 // Cascade order is shared by publication and the document head.
-export const appGlobalCssFiles = [
-  'theme-tokens.css',
-  'cat-persona-tokens.css',
-  'cat-persona-derived.css',
-  'connector-tokens.css',
-  'theme-extras.css',
-  'console-tokens.css',
-  'console-shell.css',
-  'console-controls.css',
-  'shell-v2.css',
-];
+export const appGlobalCssFiles = JSON.parse(readFileSync(new URL('./app-global-styles.json', import.meta.url), 'utf8'));
 
 function stylesheet(contents, url) {
   const fingerprint = createHash('sha256').update(contents).digest('hex').slice(0, 16);

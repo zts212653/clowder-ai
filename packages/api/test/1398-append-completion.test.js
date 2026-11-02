@@ -29,11 +29,11 @@ for (const completed of [true, false]) {
     const source = await f.messageStore.getById(f.admission.message.id);
     if (completed) assert.equal(source.lifecycle.dispatchRefs[0].appendAcceptance, 'accepted');
     else {
-      assert.equal(source.lifecycle.dispatchRefs?.length ?? 0, 0);
+      assert.equal(source.lifecycle.dispatchRefs?.[0].inputRead.status, 'read');
       const entry = f.queue.list('thread', 'owner')[0];
-      assert.equal(entry.delivery.routingHeldTargetIds?.length ?? 0, 0);
-      assert.equal(entry.delivery.appendRecoveryByTarget.opus.acceptance, 'incomplete');
-      assert.equal((await f.messageStore.getById(f.response.id)).lifecycle.inputMessageIds.length, 0);
+      assert.deepEqual(entry.delivery.routingHeldTargetIds, ['opus']);
+      assert.equal(entry.delivery.appendRecoveryByTarget.opus.acceptance, 'unknown');
+      assert.equal((await f.messageStore.getById(f.response.id)).lifecycle.inputMessageIds.length, 1);
     }
   });
 }
@@ -55,8 +55,8 @@ test('restart recovers a completion-pending Append after its original run has en
   await restarted.reconcileAppendDeliveries('thread');
   const row = f.queue.list('thread', 'owner')[0];
   assert.ok(row, 'an unfinished internal turn must remain recoverable');
-  assert.equal(row.delivery.appendRecoveryByTarget.opus.acceptance, 'incomplete');
-  assert.equal(row.delivery.routingHeldTargetIds?.length ?? 0, 0);
+  assert.equal(row.delivery.appendRecoveryByTarget.opus.acceptance, 'unknown');
+  assert.deepEqual(row.delivery.routingHeldTargetIds, ['opus']);
 });
 
 test('dispatcher release during final-result persistence is not an ended invocation', async () => {
@@ -94,8 +94,8 @@ test('an unknown native write retains completion custody even after a late read'
   assert.ok(row, 'read proof cannot retire an unfinished internal turn after an uncertain write');
   assert.equal(row.delivery.appendPendingByTarget.opus.requiresCompletion, true);
   await input.onInputCompleted(false);
-  assert.equal(f.queue.list('thread', 'owner')[0].delivery.appendRecoveryByTarget.opus.acceptance, 'incomplete');
-  assert.equal((await f.messageStore.getById(f.response.id)).lifecycle.inputMessageIds.length, 0);
+  assert.equal(f.queue.list('thread', 'owner')[0].delivery.appendRecoveryByTarget.opus.acceptance, 'unknown');
+  assert.equal((await f.messageStore.getById(f.response.id)).lifecycle.inputMessageIds.length, 1);
 });
 
 for (const pauseWriteReceipt of [false, true]) {

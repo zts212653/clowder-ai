@@ -16,6 +16,8 @@ export async function appendRecoveryFixture(
     from = { kind: 'user', userId: 'owner' },
     content = 'one original input',
     inputCompletionReceipt = false,
+    invocationId = 'turn',
+    messageDisposition,
     routeExecution = async function* () {},
   } = {},
 ) {
@@ -55,6 +57,7 @@ export async function appendRecoveryFixture(
       intent: 'execute',
       autoExecute: true,
       sourceId: 'source',
+      ...(messageDisposition ? { messageDisposition } : {}),
     }),
   );
   const startedAt = Date.now();
@@ -67,8 +70,8 @@ export async function appendRecoveryFixture(
     timestamp: startedAt,
     lifecycle: {
       kind: 'response',
-      orderKey: `${startedAt}:turn`,
-      invocationId: 'turn',
+      orderKey: `${startedAt}:${invocationId}`,
+      invocationId,
       targetId: 'opus',
       inputEntryIds: [],
       inputMessageIds: [],
@@ -80,7 +83,7 @@ export async function appendRecoveryFixture(
     {
       threadId: 'thread',
       targetId: 'opus',
-      invocationId: 'turn',
+      invocationId,
       responseMessageId: response.id,
       inputEntryIds: [],
       inputMessageIds: [],
@@ -90,7 +93,7 @@ export async function appendRecoveryFixture(
     'parent',
   );
   invocationTracker.bindAgentClientActiveRunDispatcher('thread', 'opus', {
-    invocationId: 'turn',
+    invocationId,
     capabilities: {
       append: true,
       steer: true,
@@ -108,7 +111,7 @@ export async function appendRecoveryFixture(
       userId: 'owner',
       entryId: admission.entry.id,
       expectedQueueRevision: queue.snapshotRevision('thread', 'owner'),
-      expectedRuns: [{ targetId: 'opus', invocationId: 'turn', responseMessageId: response.id }],
+      expectedRuns: [{ targetId: 'opus', invocationId, responseMessageId: response.id }],
     });
   return { messageStore, invocationTracker, queue, processor, admission, response, append };
 }

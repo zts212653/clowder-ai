@@ -32,6 +32,7 @@ export function HistoryReadNotes({
         <div
           role="status"
           className="mb-3 rounded-lg p-2 text-xs"
+          data-chat-background-surface="frame"
           style={{ background: 'var(--shell-frame)', color: 'var(--semantic-warning)' }}
         >
           {hasRows && state.observedAt !== null

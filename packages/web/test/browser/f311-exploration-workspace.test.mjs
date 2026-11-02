@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 import { refIdentity } from '@cat-cafe/shared';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import {
   accessibleExplorationNode,
   chooseExplorationComparison as chooseComparison,

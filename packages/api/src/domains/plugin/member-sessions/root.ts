@@ -1,9 +1,6 @@
-import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
 import { catRegistry, createCatId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { getCatModel } from '../../../config/cat-models.js';
-import { freezeExecutionWorkspace } from '../../cats/services/agents/invocation/execution-workspace.js';
 import type { InvocationDeps } from '../../cats/services/agents/invocation/invoke-single-cat.js';
 import { CodexAgentService } from '../../cats/services/agents/providers/CodexAgentService.js';
 import type { AgentRegistry } from '../../cats/services/agents/registry/AgentRegistry.js';
@@ -15,6 +12,7 @@ import { RedisPluginPrivateStorage } from '../host-surface/plugin-private-storag
 import type { DormantPluginRuntimeComposition } from '../runtime-composition.js';
 import { createMemberSessionHost } from './host.js';
 import { createMemberSessionMessaging } from './messaging.js';
+import { createMemberOwnerDelegation } from './owner-delegation.js';
 import { createMemberProfileMemory } from './profile-memory.js';
 import { createMemberResourceDescription } from './resources.js';
 import { createMemberSessionRouter } from './router.js';
@@ -22,7 +20,7 @@ import { createMemberRuntime } from './runtime.js';
 import { createPluginMemberSessions } from './service.js';
 import { MemberSessionStore } from './store.js';
 import type { MemberSessionScope } from './types.js';
-import { digest } from './validation.js';
+import { createMemberWorkspaces } from './workspace.js';
 
 /** Production composition of existing account, Queue, profile and plugin ports.
  * No world/game rules or provider credentials cross the module surface. */
@@ -33,6 +31,7 @@ export function createRootMemberSessions(deps: {
   readonly agents: AgentRegistry;
   readonly threads: IThreadStore;
   readonly messages: IMessageStore;
+  readonly readMessageTargets: (threadId: string, messageId: string) => Promise<readonly string[]>;
   readonly turns: ITurnExecutionStore;
   readonly profiles: FileProfileRepository;
   pluginRuntime(): DormantPluginRuntimeComposition;
@@ -59,6 +58,12 @@ export function createRootMemberSessions(deps: {
     return { instance, pkg, manifest: pkg.manifest };
   };
   const profiles = createMemberProfileMemory(deps.profiles);
+  const workspaces = createMemberWorkspaces({
+    projectRoot: deps.projectRoot,
+    storage,
+    threads: deps.threads,
+    assertInstallation: installed,
+  });
   const runtimeServices = {
     config(catId: string) {
       const cat = catRegistry.tryGet(createCatId(catId));
@@ -74,13 +79,7 @@ export function createRootMemberSessions(deps: {
   };
   const runtime = createMemberRuntime({
     ...runtimeServices,
-    workspace: (input, scope, config) =>
-      freezeExecutionWorkspace({
-        threadStore: deps.threads,
-        threadId: input.threadId,
-        userId: scope.ownerUserId,
-        provider: config.clientId,
-      }),
+    workspace: (input, scope, config) => workspaces.freeze(input, scope, config.clientId),
   });
   const messaging = createMemberSessionMessaging(async (scope) => {
     const { instance, manifest } = await installed(scope);
@@ -91,11 +90,13 @@ export function createRootMemberSessions(deps: {
       manifest,
       threadStore: deps.threads,
       messageStore: deps.messages,
+      readMessageTargets: deps.readMessageTargets,
       messaging: deps.pluginRuntime().messaging,
     };
   });
   const sessions = createPluginMemberSessions({
     storage,
+    assertOwnerDelegation: createMemberOwnerDelegation({ messages: deps.messages, threads: deps.threads }),
     canonicalExecution: { turns: deps.turns, messages: deps.messages },
     messaging,
     resolveMemory: profiles.resolve,
@@ -118,18 +119,7 @@ export function createRootMemberSessions(deps: {
     },
     threadCreation: {
       store: deps.threads,
-      async workspace(scope, catId) {
-        await installed(scope);
-        const path = join(
-          deps.projectRoot,
-          '.cat-cafe',
-          'member-workspaces',
-          digest([scope.ownerUserId, scope.pluginInstanceId, catId]),
-        );
-        await mkdir(path, { recursive: true, mode: 0o700 });
-        await scope.assertCurrent();
-        return path;
-      },
+      workspace: workspaces.create,
     },
     async assertInstallation(scope, contributionId) {
       const { manifest } = await installed(scope);

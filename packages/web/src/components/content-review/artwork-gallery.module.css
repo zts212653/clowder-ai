@@ -8,6 +8,7 @@
   border-radius: 50%;
   border: 1px solid var(--cafe-border);
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   color: var(--cafe-text);
   font-size: 30px;
   line-height: 1;
@@ -40,6 +41,7 @@
   border-radius: 8px;
   overflow: hidden;
   background: var(--cafe-surface);
+  --chat-background-role: cafe;
   color: var(--cafe-text);
 }
 .thumbnails button[aria-current="true"] {

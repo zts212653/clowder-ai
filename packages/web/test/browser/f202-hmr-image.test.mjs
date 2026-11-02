@@ -12,9 +12,7 @@ import { sessionAuthPlugin, sessionRoute } from '../../../api/dist/infrastructur
 import { mediaRoutes } from '../../../api/dist/routes/media-routes.js';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const { chromium } = await import(
-  process.env.F202_PLAYWRIGHT_MODULE ?? '../../../ppt-forge/node_modules/playwright/index.mjs'
-);
+const { chromium } = await import(process.env.F202_PLAYWRIGHT_MODULE ?? 'playwright');
 const imageBytes = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="220" height="140"><rect width="220" height="140" fill="#7c3aed"/><circle cx="110" cy="70" r="44" fill="#facc15"/></svg>',
 );

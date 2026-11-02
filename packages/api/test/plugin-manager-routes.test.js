@@ -405,26 +405,25 @@ for (const source of [
 }
 
 function verifiedCallbackRegistry({ policy } = {}) {
-  return {
-    verify: async (invocationId, callbackToken) =>
-      invocationId === 'inv-plugin' && callbackToken === 'callback-secret'
-        ? {
-            ok: true,
-            record: {
-              invocationId,
-              callbackToken,
-              threadId: 'thread-plugin',
-              userId: ownerUserId,
-              catId: 'codex-sol',
-              clientMessageIds: new Set(),
-              createdAt: Date.now(),
-              expiresAt: null,
-              state: 'active',
-              ...(policy === undefined ? {} : { toolExecutionPolicy: policy }),
-            },
-          }
-        : { ok: false, reason: 'invalid_token' },
-  };
+  const verify = async (invocationId, callbackToken) =>
+    invocationId === 'inv-plugin' && callbackToken === 'callback-secret'
+      ? {
+          ok: true,
+          record: {
+            invocationId,
+            callbackToken,
+            threadId: 'thread-plugin',
+            userId: ownerUserId,
+            catId: 'codex-sol',
+            clientMessageIds: new Set(),
+            createdAt: Date.now(),
+            expiresAt: null,
+            state: 'active',
+            ...(policy === undefined ? {} : { toolExecutionPolicy: policy }),
+          },
+        }
+      : { ok: false, reason: 'invalid_token' };
+  return { verify, verifyLatest: verify };
 }
 
 test('exposes canonical Manager state/lifecycle operations and version update through one service', async () => {

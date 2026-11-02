@@ -1,3 +1,5 @@
+import { sliceUnicodeSafe } from '../../../../../utils/unicode-safe-slice.js';
+
 export interface CodexCapacityRecoveryAnchor {
   threadId: string;
   invocationId: string;
@@ -61,7 +63,7 @@ function boundedText(value: unknown, maxChars: number): string | undefined {
   if (typeof value !== 'string') return undefined;
   const text = value.trim().split(/\s+/u).join(' ');
   if (!text) return undefined;
-  return text.slice(0, maxChars);
+  return sliceUnicodeSafe(text, 0, maxChars);
 }
 
 function normalizePlanStatus(value: unknown): CodexCapacityPlanStatus | null {
@@ -112,7 +114,7 @@ function toolLabel(item: Record<string, unknown>): string {
   if (item.type === 'mcp_tool_call') {
     const server = boundedText(item.server, 80) ?? 'unknown';
     const tool = boundedText(item.tool, 120) ?? 'unknown';
-    return `${server}/${tool}`.slice(0, MAX_TOOL_LABEL_CHARS);
+    return sliceUnicodeSafe(`${server}/${tool}`, 0, MAX_TOOL_LABEL_CHARS);
   }
   if (item.type === 'dynamic_tool_call') {
     return boundedText(item.tool, MAX_TOOL_LABEL_CHARS) ?? 'dynamic tool call';

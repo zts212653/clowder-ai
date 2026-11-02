@@ -50,6 +50,10 @@ export function createMemberRuntime(deps: {
         catConfig: config,
         model: config.defaultModel,
         workspace,
+        nativeAccount: await service.resolveScopedNativeAccount?.({
+          workingDirectory: workspace.workingDirectory,
+          accountRef: stored?.account.accountRef ?? input.accountSelection?.accountRef,
+        }),
         accountSelection: stored
           ? {
               accountRef: stored.account.accountRef,
@@ -61,13 +65,14 @@ export function createMemberRuntime(deps: {
       const account = binding.executionAccount;
       if (account) service.assertScopedMemberAccount?.(account);
       const capability = service.freshnessCarrierCapability?.();
-      if (!account || !capability?.carrier || !config.clientId || !config.defaultModel)
+      const carrier = service.contextCapability?.().carrier === 'acp' ? 'acp' : capability?.carrier;
+      if (!account || !carrier || !config.clientId || !config.defaultModel)
         throw new Error('member_runtime_snapshot_unavailable');
       await scope.assertCurrent();
       const runtime: MemberRuntimeSnapshot = Object.freeze({
         clientId: config.clientId,
         model: config.defaultModel,
-        carrier: capability.carrier,
+        carrier,
         account: Object.freeze({
           accountRef: account.accountRef,
           authType: account.authType,

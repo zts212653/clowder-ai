@@ -7,6 +7,7 @@
   color: var(--shell-ink);
   border: 1px solid var(--shell-hairline);
   background: #fff;
+  --chat-background-role: white;
   text-decoration: none;
   font-family: var(--font-sans);
   font-weight: 400;
@@ -14,6 +15,7 @@
 }
 :global([data-theme="dark"]) .reference {
   background: var(--shell-paper);
+  --chat-background-role: paper;
 }
 .chip {
   display: inline-flex;

@@ -146,7 +146,7 @@ export function createPluginMemberSessions(deps: MemberSessionServices) {
     hostDescribeForInstance(inputScope: MemberSessionScope) {
       const scope = { ...inputScope };
       return async (value: { readonly catId: string }) => {
-        const owner = ownerRequest(scope, false);
+        const owner = ownerRequest(scope, false, deps.assertOwnerDelegation);
         if (
           !value ||
           typeof value !== 'object' ||
@@ -171,6 +171,7 @@ export function createPluginMemberSessions(deps: MemberSessionServices) {
         storage: deps.storage,
         threads: deps.threadCreation,
         assertInstallation: deps.assertInstallation,
+        assertOwnerDelegation: deps.assertOwnerDelegation,
       });
     },
     hostCreateForInstance(
@@ -182,6 +183,7 @@ export function createPluginMemberSessions(deps: MemberSessionServices) {
         storage: deps.storage,
         threads: deps.threadCreation,
         prepare: (input) => api.forInstance(scope).prepare(input),
+        assertOwnerDelegation: deps.assertOwnerDelegation,
       });
     },
     hostCallbackForInstance(scope: MemberSessionScope) {
@@ -217,7 +219,7 @@ export function createPluginMemberSessions(deps: MemberSessionServices) {
       const admit = createMemberAdmission({ store, scope, messaging: deps.messaging, current, required });
       return {
         async prepare(value) {
-          const owner = ownerRequest(scope),
+          const owner = ownerRequest(scope, true, deps.assertOwnerDelegation),
             input = prepareInput(value);
           await owner.assertCurrent();
           await scope.assertCurrent();
@@ -299,7 +301,7 @@ export function createPluginMemberSessions(deps: MemberSessionServices) {
           return structuredClone(result);
         },
         async revoke(id) {
-          const owner = ownerRequest(scope, false);
+          const owner = ownerRequest(scope, false, deps.assertOwnerDelegation);
           const result = await store.mutate(id, async (before) => {
             scoped(before, scope);
             await owner.assertCurrent();

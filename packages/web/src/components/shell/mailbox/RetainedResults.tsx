@@ -112,6 +112,7 @@ export function RetainedResult({ session, sessions }: { session: ApprovalSession
   return (
     <li
       data-testid="mailbox-retained-result"
+      data-chat-background-surface="paper"
       data-decision-key={JSON.stringify([session.address.sourceFeatureId, session.address.proposalId])}
       data-state={session.model.state.kind}
       className="flex flex-col gap-1.5 rounded-[14px] px-4 py-3 text-sm"

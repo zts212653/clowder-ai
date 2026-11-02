@@ -18,6 +18,7 @@ import { getDossierL0Pronouns, getDossierRosterSummary, hasDossierEntry } from '
 import { isCatAvailable } from '../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../config/cat-models.js';
 import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
+import { sliceUnicodeSafe } from '../../../../utils/unicode-safe-slice.js';
 // F167 Phase F P1 (cloud Codex): roster model cell must resolve via getCatModel
 // (env CAT_{CATID}_MODEL → registry → defaults), not from static config.defaultModel,
 // otherwise env overrides cause exactly the handle/model drift Phase F is killing.
@@ -296,7 +297,7 @@ function compactRosterModel(model: string): string {
 
 function compactRosterCell(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
-  return `${value.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+  return `${sliceUnicodeSafe(value, 0, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
 
 /** @internal F237 — exported for ContextAssembler bridge */

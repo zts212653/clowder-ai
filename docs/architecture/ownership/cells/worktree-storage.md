@@ -18,6 +18,7 @@ code_anchors:
   - scripts/lib/daily-cycle-workspace.mjs
   - scripts/lib/daily-cycle-materialize.mjs
   - packages/api/src/infrastructure/worktrees/WorktreeNoticeService.ts
+  - packages/api/src/infrastructure/worktrees/WorktreeNoticeStartGuard.ts
   - packages/shared/src/worktree-notice.ts
   - packages/web/src/components/worktrees/WorktreeNoticeBody.tsx
 doc_anchors:
@@ -67,6 +68,15 @@ weekly-subscription-scarce. An unavailable or scarce owner instead leaves one vi
 exception in the verified original thread; later availability can admit one distinct owner item. No substitute
 owner is inferred. Failed atomic Queue admission cannot publish a successful handoff. Queued means one pending
 input, not continuous monitoring or a completed disposition.
+
+Before a queued retention reminder starts an invocation, and again before routing its body, the
+consumer resolves its existing private source key to the atomically paired History notice and
+checks fresh native Git inventory for that exact condition/intent, owner, user and original thread.
+Renewed, removed or superseded retention work retires without an owner wake or a fabricated finish;
+unavailable evidence preserves the exact Queue input for the normal retry path. Later expiry stays
+a distinct event. Pending rows from older deployments use the same source identity without migration;
+no Queue schema, second truth store, scheduled monitor or deletion authority is added. Recovery notices
+remain governed by their release transaction, rather than being invalidated by a missing checkout.
 
 Without valid origin the scanner exposes exact paths in the existing inventory's `unroutable` result; it does
 not guess a user/thread or authorize removal. Those legacy cases require the existing repository maintenance

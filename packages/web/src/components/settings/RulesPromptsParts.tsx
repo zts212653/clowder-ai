@@ -82,6 +82,7 @@ export function ConsumptionLegend() {
   return (
     <div
       className="grid gap-3 md:grid-cols-4"
+      data-chat-background-surface="console-panel"
       style={{
         borderRadius: '0.75rem',
         backgroundColor: 'var(--console-panel-bg)',
@@ -207,6 +208,7 @@ export function L0PromptsSection({
   return (
     <div
       className="space-y-2 rounded-xl p-3"
+      data-chat-background-surface="console-card"
       style={{ backgroundColor: 'var(--console-card-bg)', boxShadow: '0 8px 22px rgba(43,33,26,0.04)' }}
     >
       <SettingsText as="h4" variant="sm" tone="default" className="font-semibold">
@@ -219,6 +221,7 @@ export function L0PromptsSection({
       <button
         type="button"
         className="flex w-full cursor-pointer items-start gap-3 rounded-lg px-3 py-2 text-left hover:opacity-80"
+        data-chat-background-surface="console-elevated"
         style={{
           backgroundColor: 'var(--console-elevated-bg)',
           boxShadow: '0 1px 4px rgba(43,33,26,0.08)',

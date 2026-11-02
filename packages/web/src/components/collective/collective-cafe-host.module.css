@@ -8,6 +8,7 @@
   padding: 12px 14px 6px;
   border-top: 1px solid var(--console-border-soft);
   background: var(--console-panel-bg);
+  --chat-background-role: console-panel;
   color: var(--cafe-text);
 }
 .activity h3 {
@@ -34,6 +35,7 @@
 .activity button:hover,
 .activity a:hover {
   background: var(--console-hover-bg);
+  --chat-background-role: console-hover;
 }
 .activity button > span,
 .activity a > span {

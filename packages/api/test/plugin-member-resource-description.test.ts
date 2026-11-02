@@ -98,6 +98,44 @@ test('the owner description exposes frozen nonsecret selections and approved ref
   assert.equal(f.queries(), 0);
 });
 
+test('a native ACP carrier exposes its inspected account without a synthetic builtin or credential export', async () => {
+  let queries = 0;
+  const config = { id: 'member', clientId: 'acp', defaultModel: '["deepseek-official","deepseek-flash"]' } as CatConfig;
+  const service: AgentService = {
+    async *invoke() {
+      queries++;
+      throw new Error('discovery must not prompt');
+    },
+    supportsToolExecutionPolicy: () => true,
+    resolveScopedNativeAccount: async () => ({
+      id: 'native-dsh-real-ref',
+      persistedClientId: 'acp',
+      authType: 'api_key',
+      apiKey: 'NATIVE_SECRET_SENTINEL',
+      accountOwnerRoot: '/private/native-home',
+    }),
+  };
+  const describe = createMemberResourceDescription({
+    projectRoot: '/private/host',
+    config: () => config,
+    service: () => service,
+    defaultAccount: () => null,
+    readAccounts: () => {
+      throw new Error('ACP has no builtin account catalog');
+    },
+    memory: async () => [],
+  });
+  const result = await describe('member', scope);
+  assert.equal(result.available, true);
+  assert.equal(result.defaultAccountRef, 'native-dsh-real-ref');
+  assert.equal(result.accounts.length, 1);
+  assert.equal(result.accounts[0]?.authType, 'api_key');
+  assert.equal(result.accounts[0]?.selection?.accountRef, 'native-dsh-real-ref');
+  assert.ok(!JSON.stringify(result).includes('NATIVE_SECRET_SENTINEL'));
+  assert.ok(!JSON.stringify(result).includes('/private/'));
+  assert.equal(queries, 0);
+});
+
 test('an unsupported actual carrier stays unavailable without freezing or invoking a different provider', async () => {
   const f = fixture({ supported: false });
   const result = await f.describe('member', scope);

@@ -62,6 +62,7 @@ type ThreadDeps = {
   readonly scope: MemberSessionScope;
   readonly storage: MemberSessionServices['storage'];
   readonly threads: MemberSessionServices['threadCreation'];
+  readonly assertOwnerDelegation?: MemberSessionServices['assertOwnerDelegation'];
 };
 
 async function protectedThread(
@@ -108,7 +109,7 @@ export function ensureOwnerMemberThread(
   },
 ): (value: EnsureMemberThread) => Promise<MemberThreadBinding> {
   return async (value) => {
-    const owner = ownerRequest(deps.scope);
+    const owner = ownerRequest(deps.scope, true, deps.assertOwnerDelegation);
     if (
       !value ||
       typeof value !== 'object' ||
@@ -141,10 +142,11 @@ export function createOwnerMemberThread(deps: {
   readonly storage: MemberSessionServices['storage'];
   readonly threads: MemberSessionServices['threadCreation'];
   readonly prepare: PluginMemberSessions['prepare'];
+  readonly assertOwnerDelegation?: MemberSessionServices['assertOwnerDelegation'];
 }): (input: CreateMemberSession) => Promise<MemberSessionSummary> {
   const { scope } = deps;
   return async (value) => {
-    const owner = ownerRequest(scope);
+    const owner = ownerRequest(scope, true, deps.assertOwnerDelegation);
     const { title, input } = creationInput(value);
     await owner.assertCurrent();
     await scope.assertCurrent();

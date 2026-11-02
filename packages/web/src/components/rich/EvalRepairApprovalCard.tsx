@@ -104,6 +104,7 @@ export function EvalRepairApprovalCard({
     <article
       data-testid={`approval-item-${item.proposalId}`}
       className="space-y-3 rounded-xl border-l-4 p-3 text-sm"
+      data-chat-background-surface="paper"
       style={{ color: 'var(--shell-ink)', background: 'var(--shell-paper)', borderColor: 'var(--semantic-warning)' }}
     >
       <header className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--shell-muted)]">

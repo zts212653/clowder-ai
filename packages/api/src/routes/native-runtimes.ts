@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { catRegistry } from '@cat-cafe/shared';
 import { parse } from 'smol-toml';
-import { getAcpConfig } from '../config/cat-config-loader.js';
+import { getRegisteredAcpConfig } from '../config/cat-config-loader.js';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
 import { discoverAdditionalRuntimes } from './native-additional-runtimes.js';
 import { discoverDshRuntime } from './native-dsh-discovery.js';
@@ -61,7 +61,7 @@ export function discoverNativeRuntimes(projectRoot: string, commandFor = resolve
     };
   });
   const acp = Object.values(catRegistry.getAllConfigs()).flatMap((cat) => {
-    const config = getAcpConfig(cat.id, projectRoot);
+    const config = getRegisteredAcpConfig(cat.id, projectRoot);
     if (!config || (cat.agentProvider !== undefined ? cat.agentProvider : config.agentProvider)) return [];
     const command = isAbsolute(config.command) ? config.command : commandFor(config.command);
     const agy = cat.clientId === 'google' && cat.agyProfile?.carrier === 'acp';

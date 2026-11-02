@@ -1,6 +1,7 @@
 import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../../cats/services/stores/ports/ThreadStore.js';
 import type { ITurnExecutionStore } from '../../cats/services/stores/ports/TurnExecutionStore.js';
+import type { PluginCallContext } from '../carrier/plugin-call-context.js';
 import type { PluginOwnerOperationContext } from '../carrier/plugin-owner-operation-context.js';
 import type { PluginPrivateStoragePort } from '../host-surface/plugin-private-storage.js';
 
@@ -130,6 +131,8 @@ export interface MemberSessionWake {
   readonly wake: { readonly catId: string; readonly exact: true };
 }
 export interface MemberSessionServices {
+  /** Canonical direct-human source verification. Native callers cannot provide this verifier. */
+  readonly assertOwnerDelegation?: (caller: PluginCallContext, scope: MemberSessionScope) => Promise<void>;
   readonly storage: Pick<PluginPrivateStoragePort, 'get' | 'compareAndSet'>;
   readonly canonicalExecution?: MemberCanonicalExecutionSources;
   readonly threadCreation?: {

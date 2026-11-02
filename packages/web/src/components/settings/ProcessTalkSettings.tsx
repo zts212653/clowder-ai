@@ -28,6 +28,7 @@ export function ProcessTalkSettings() {
           <label
             key={mode}
             className="flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm"
+            data-chat-background-surface={preference.mode === mode ? 'selected' : 'paper'}
             style={{
               color: 'var(--shell-ink)',
               border: '1px solid var(--shell-hairline)',

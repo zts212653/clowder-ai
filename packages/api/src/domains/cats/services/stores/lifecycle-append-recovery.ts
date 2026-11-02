@@ -37,9 +37,6 @@ export function prepareLifecycleAppendRecovery(
     (input.checked !== undefined && (!Number.isFinite(input.checked.at) || input.checked.at < failure.at))
   )
     return { kind: 'conflict', reason: 'invalid_outcome' };
-  const outcome = input.checked
-    ? { ...failure, acceptance: input.checked.acceptance, checkedAt: input.checked.at }
-    : failure;
   const { targetId, invocationId, responseMessageId } = failure;
   if (
     source.id !== admitted.payload.messageId ||
@@ -67,6 +64,19 @@ export function prepareLifecycleAppendRecovery(
     return { kind: 'conflict', reason: 'receiver_changed' };
   const ref = lifecycle.dispatchRefs?.find((candidate) => candidate.targetId === targetId);
   const pending = currentEntry?.delivery.appendPendingByTarget?.[targetId];
+  const observedFailure = input.checked
+    ? { ...failure, acceptance: input.checked.acceptance, checkedAt: input.checked.at }
+    : failure;
+  // The source may have been read through MCP or the native turn. Neither read proves completion,
+  // but either defeats the negative assumption required for automatic replay of unknown effects.
+  const readWithoutCompletion =
+    pending?.requiresCompletion &&
+    pending.invocationId === invocationId &&
+    ref?.statusMessageId === response.id &&
+    ref.inputRead?.status === 'read';
+  const outcome: LifecycleAppendFailure = readWithoutCompletion
+    ? { ...observedFailure, acceptance: 'unknown' }
+    : observedFailure;
   const incomplete = failure.acceptance === 'incomplete';
   if (
     ref?.statusMessageId === response.id &&
@@ -90,7 +100,7 @@ export function prepareLifecycleAppendRecovery(
     previous &&
     currentEntry?.delivery.appendRecoveryByTarget?.[targetId]?.invocationId === invocationId &&
     !input.checked &&
-    (failure.acceptance !== 'unknown' ? !ref : ref?.statusMessageId === response.id)
+    (outcome.acceptance !== 'unknown' ? !ref : ref?.statusMessageId === response.id)
   )
     return { kind: 'replayed', messages: [source, response], entry: currentEntry };
   if (incomplete && (!pending?.requiresCompletion || pending.invocationId !== invocationId))

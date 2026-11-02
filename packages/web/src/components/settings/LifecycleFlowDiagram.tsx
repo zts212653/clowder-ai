@@ -65,6 +65,7 @@ export function LifecycleFlowDiagram({ selectedStageId, onSelectStage, segmentCo
       {/* ── Session loop (outer) ── */}
       <div
         className="space-y-3 rounded-2xl p-3"
+        data-chat-background-surface="console-card"
         style={{ border: LOOP_BORDER, background: SECTION_BG, boxShadow: SECTION_SHADOW }}
       >
         <SettingsText as="span" variant="xs" tone="muted" className="block">
@@ -82,7 +83,11 @@ export function LifecycleFlowDiagram({ selectedStageId, onSelectStage, segmentCo
         </div>
 
         {/* ── Turn loop (inner, nested) ── */}
-        <div className="space-y-2 rounded-xl p-3" style={{ border: LOOP_BORDER, background: NESTED_BG }}>
+        <div
+          className="space-y-2 rounded-xl p-3"
+          data-chat-background-surface="console-panel"
+          style={{ border: LOOP_BORDER, background: NESTED_BG }}
+        >
           <SettingsText as="span" variant="xs" tone="muted" className="block">
             ↻ 回合循环 — 每次消息交互为一个回合
           </SettingsText>
@@ -108,6 +113,7 @@ export function LifecycleFlowDiagram({ selectedStageId, onSelectStage, segmentCo
       {EVENT_STAGES.length > 0 && (
         <div
           className="rounded-2xl p-3"
+          data-chat-background-surface="console-card"
           style={{ border: LOOP_BORDER, background: SECTION_BG, boxShadow: SECTION_SHADOW, opacity: 0.85 }}
         >
           <SettingsText as="span" variant="xs" tone="muted" className="mb-2 block">

@@ -463,6 +463,41 @@ describe('OperationRowsRenderer (F202 W2-3 h1)', () => {
     expect(sent('list')).toEqual([]);
   });
 
+  it('retains a URL on its row and clears it when the owner target changes or the next action fails', async () => {
+    let fail = false;
+    const op: PlatformOperationStatus = { ...operation, rowActions: [{ id: 'watch', label: '观看副本' }] };
+    mockApiFetch.mockImplementation(async (url) =>
+      String(url).endsWith('/list')
+        ? jsonResponse({
+            ok: true,
+            render: 'rows',
+            data: { rows: [{ ...row('a1'), actions: [{ action: 'watch', input: { view: 'current' } }] }] },
+          })
+        : fail
+          ? jsonResponse({ error: 'Viewer unavailable' }, 502)
+          : jsonResponse({
+              ok: true,
+              render: 'url',
+              data: { url: 'http://127.0.0.1:5189/watch#observer=fixture' },
+              label: '观看本场副本',
+            }),
+    );
+    await render(<ActionRenderer target={target} operation={op} />);
+    expect(container.querySelector('a')).toBeNull();
+    await click(byTestId('chatgpt-pro-row-a1-action-watch'));
+    const link = byTestId('chatgpt-pro-row-a1')?.querySelector('a');
+    expect(link?.textContent).toBe('观看本场副本');
+    expect(link?.getAttribute('href')).toBe('http://127.0.0.1:5189/watch#observer=fixture');
+    expect(link?.getAttribute('rel')).toContain('noreferrer');
+    await render(<ActionRenderer target={{ kind: 'plugin', id: 'another-plugin' }} operation={op} />);
+    expect(container.querySelector('a')).toBeNull();
+    await render(<ActionRenderer target={target} operation={op} />);
+    fail = true;
+    await click(byTestId('chatgpt-pro-row-a1-action-watch'));
+    expect(container.querySelector('a')).toBeNull();
+    expect(byTestId('chatgpt-pro-row-a1-error')?.textContent).toBe('Viewer unavailable');
+  });
+
   it('treats keys named after Object.prototype members as ordinary row keys', async () => {
     serve([row('toString'), row('__proto__')], { revokeError: 'Conversation not found' });
     await render(<ActionRenderer target={target} operation={operation} />);

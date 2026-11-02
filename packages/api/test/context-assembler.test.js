@@ -292,6 +292,26 @@ describe('assembleContext', () => {
 });
 
 describe('formatMessage — head+tail truncation (#91 regression)', () => {
+  test('head and tail cuts keep Unicode well formed within the content budget', async () => {
+    const { formatMessage } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
+    // 200 UTF-16 units; a 100-unit budget cuts through both emoji pairs.
+    const content = `${'H'.repeat(26)}😼${'M'.repeat(129)}🐾${'T'.repeat(41)}`;
+    assert.equal(content.length, 200);
+    const result = formatMessage(mockMsg({ content }), { truncate: 100 });
+    const body = result.slice(result.indexOf('] ') + 2);
+    assert.ok(body.isWellFormed(), 'head/tail boundaries must not produce lone surrogates');
+    assert.ok(body.startsWith('H'.repeat(26)));
+    assert.ok(body.endsWith('T'.repeat(41)));
+    assert.ok(body.length <= 100, 'safe cuts must stay inside the existing UTF-16 budget');
+    assert.ok(!body.includes('\uFFFD'), 'do not replace a split emoji with a replacement character');
+  });
+
+  test('tiny truncation budgets do not leave half an emoji', async () => {
+    const { formatMessage } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
+    const result = formatMessage(mockMsg({ content: '😼hello' }), { truncate: 1 });
+    assert.ok(result.isWellFormed(), 'the no-marker prefix path must also preserve Unicode');
+  });
+
   test('preserves conclusion at end of long message', async () => {
     const { formatMessage } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     // Simulate: long work log + conclusion at end (the exact bug scenario)
@@ -754,6 +774,21 @@ describe('F134: group chat sender name in LLM context', () => {
 });
 
 describe('#699: inline reply-to preview', () => {
+  test('reply previews preserve emoji at and across the 60-unit boundary', async () => {
+    const { formatMessage, buildMessageMap, assembleContext } = await import(
+      '../dist/domains/cats/services/context/ContextAssembler.js'
+    );
+    for (const prefixLength of [58, 59, 60]) {
+      const parent = mockMsg({ id: 'unicode-parent', content: `${'字'.repeat(prefixLength)}😼🐾！`, timestamp: 1000 });
+      const reply = mockMsg({ id: 'unicode-reply', content: '收到', replyTo: parent.id, timestamp: 2000 });
+      const result = formatMessage(reply, { messageMap: buildMessageMap([parent, reply]) });
+      assert.ok(result.isWellFormed(), `preview must be valid at offset ${prefixLength}`);
+      assert.ok(result.includes(`${'字'.repeat(Math.min(prefixLength, 60))}${prefixLength === 58 ? '😼' : ''}…]`));
+      assert.ok(!result.includes('\uFFFD'));
+      assert.ok(assembleContext([parent, reply]).contextText.isWellFormed(), 'the full assembled prompt must be valid');
+    }
+  });
+
   test('formatMessage includes reply preview when messageMap contains parent', async () => {
     const { formatMessage, buildMessageMap } = await import(
       '../dist/domains/cats/services/context/ContextAssembler.js'

@@ -5,7 +5,7 @@ import {
   pluginMcpExposureProject,
   projectLocalPluginMcpCapabilities,
 } from '../config/capabilities/plugin-mcp-exposure.js';
-import { getAcpConfig } from '../config/cat-config-loader.js';
+import { getRegisteredAcpConfig } from '../config/cat-config-loader.js';
 import type { InvocationRecord } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import {
   resolveAcpMcpServers,
@@ -55,7 +55,7 @@ export async function assertSharedPluginMcpAccess(
     throw deny();
   if (member.carrier === 'acp') {
     const memberRoot = resolveActiveProjectRoot();
-    const acp = getAcpConfig(record.catId, memberRoot);
+    const acp = getRegisteredAcpConfig(record.catId, memberRoot);
     if (!acp) throw deny();
     const servers = await resolveAcpMcpServers(memberRoot, acp.mcpWhitelist ?? [], undefined, {
       mcpSupport: true,

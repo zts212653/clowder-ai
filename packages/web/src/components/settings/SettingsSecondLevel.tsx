@@ -88,6 +88,7 @@ export function SettingsSecondLevel({
                 data-testid={`settings-tab-${sectionId}`}
                 className="shell-nav-row shell-focusable h-8 rounded-lg px-3 text-sm"
                 data-selected={current ? 'true' : undefined}
+                data-chat-background-surface={current ? 'selected' : undefined}
                 style={{
                   background: current ? 'var(--shell-selected)' : undefined,
                   color: current ? 'var(--shell-ink)' : 'var(--shell-body)',

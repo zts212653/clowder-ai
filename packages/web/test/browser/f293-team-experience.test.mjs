@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { TEAM_AVATAR, TEAM_CATS, TEAM_DOSSIER_REVISION, teamRoutingReadModel } from './f293-team-fixtures.mjs';
 import { realSurfaceApiResponse, THREAD_ID } from './f307-real-surface-fixtures.mjs';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';

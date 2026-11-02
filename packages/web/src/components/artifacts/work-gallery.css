@@ -9,6 +9,7 @@
   border-radius: 12px;
   color: var(--shell-ink);
   background: var(--shell-paper);
+  --chat-background-role: paper;
 }
 .work-gallery-open {
   display: flex;
@@ -32,6 +33,7 @@
   width: 100%;
   overflow: hidden;
   background: var(--shell-selected);
+  --chat-background-role: selected;
 }
 .work-gallery-visual > img {
   width: 100%;
@@ -101,6 +103,7 @@
   border-radius: 6px;
   color: var(--shell-ink);
   background: var(--shell-paper);
+  --chat-background-role: paper;
   font-size: 11px;
 }
 .chat-work-gallery {
@@ -159,6 +162,7 @@
 }
 .v2-works-scope > button[aria-pressed="true"] {
   background: var(--shell-selected);
+  --chat-background-role: selected;
   color: var(--shell-ink);
   font-weight: 600;
 }
@@ -179,6 +183,7 @@
   border: 1px solid var(--shell-hairline-strong);
   border-radius: 8px;
   background: var(--shell-paper);
+  --chat-background-role: paper;
   font-size: var(--console-font-xs);
 }
 .work-gallery-more {

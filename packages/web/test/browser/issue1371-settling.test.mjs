@@ -3,8 +3,8 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
 import { build } from 'vite';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 
 test(
   'real delivery UI keeps missing or replaced execution and its single failure on the original response',

@@ -92,6 +92,7 @@ export function ExecutionRecordDefaultSettings({
                   className={`flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm ${
                     pending ? 'cursor-wait opacity-70' : 'cursor-pointer'
                   }`}
+                  data-chat-background-surface={selected ? 'selected' : 'paper'}
                   style={{
                     background: selected ? 'var(--shell-selected)' : 'var(--shell-paper)',
                     border: '1px solid var(--shell-hairline)',

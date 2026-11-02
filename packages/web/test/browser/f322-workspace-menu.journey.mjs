@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { after, before, describe, test as nativeTest } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
 import { buildWorkspaceMenuPage, menuOrigin, routeWorkspaceMenuAssets } from './fixtures/f322-workspace-menu-build.mjs';
 
 const evidence = process.env.F322_MENU_EVIDENCE_DIR ?? '/tmp/cat-cafe-evidence/f322-workspace-menu';
